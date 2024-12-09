@@ -1,0 +1,18 @@
+Writing generated file: /Users/colinrozzi/work/experimenting/3/runtime_v2/target/debug/build/cranelift-codegen-4dd6b8ad3f2d42f2/out/settings.rs
+Writing generated file: /Users/colinrozzi/work/experimenting/3/runtime_v2/target/debug/build/cranelift-codegen-4dd6b8ad3f2d42f2/out/types.rs
+Writing generated file: /Users/colinrozzi/work/experimenting/3/runtime_v2/target/debug/build/cranelift-codegen-4dd6b8ad3f2d42f2/out/opcodes.rs
+Writing generated file: /Users/colinrozzi/work/experimenting/3/runtime_v2/target/debug/build/cranelift-codegen-4dd6b8ad3f2d42f2/out/clif_opt.isle
+Writing generated file: /Users/colinrozzi/work/experimenting/3/runtime_v2/target/debug/build/cranelift-codegen-4dd6b8ad3f2d42f2/out/clif_lower.isle
+Writing generated file: /Users/colinrozzi/work/experimenting/3/runtime_v2/target/debug/build/cranelift-codegen-4dd6b8ad3f2d42f2/out/inst_builder.rs
+Writing generated file: /Users/colinrozzi/work/experimenting/3/runtime_v2/target/debug/build/cranelift-codegen-4dd6b8ad3f2d42f2/out/settings-arm64.rs
+Rebuilding /Users/colinrozzi/work/experimenting/3/runtime_v2/target/debug/build/cranelift-codegen-4dd6b8ad3f2d42f2/out/isle_opt.rs
+Writing ISLE-generated Rust code to /Users/colinrozzi/work/experimenting/3/runtime_v2/target/debug/build/cranelift-codegen-4dd6b8ad3f2d42f2/out/isle_opt.rs
+Rebuilding /Users/colinrozzi/work/experimenting/3/runtime_v2/target/debug/build/cranelift-codegen-4dd6b8ad3f2d42f2/out/isle_x64.rs
+Writing ISLE-generated Rust code to /Users/colinrozzi/work/experimenting/3/runtime_v2/target/debug/build/cranelift-codegen-4dd6b8ad3f2d42f2/out/isle_x64.rs
+Rebuilding /Users/colinrozzi/work/experimenting/3/runtime_v2/target/debug/build/cranelift-codegen-4dd6b8ad3f2d42f2/out/isle_aarch64.rs
+Writing ISLE-generated Rust code to /Users/colinrozzi/work/experimenting/3/runtime_v2/target/debug/build/cranelift-codegen-4dd6b8ad3f2d42f2/out/isle_aarch64.rs
+Rebuilding /Users/colinrozzi/work/experimenting/3/runtime_v2/target/debug/build/cranelift-codegen-4dd6b8ad3f2d42f2/out/isle_s390x.rs
+Writing ISLE-generated Rust code to /Users/colinrozzi/work/experimenting/3/runtime_v2/target/debug/build/cranelift-codegen-4dd6b8ad3f2d42f2/out/isle_s390x.rs
+Rebuilding /Users/colinrozzi/work/experimenting/3/runtime_v2/target/debug/build/cranelift-codegen-4dd6b8ad3f2d42f2/out/isle_riscv64.rs
+Writing ISLE-generated Rust code to /Users/colinrozzi/work/experimenting/3/runtime_v2/target/debug/build/cranelift-codegen-4dd6b8ad3f2d42f2/out/isle_riscv64.rs
+fatal: not a git repository (or any of the parent directories): .git

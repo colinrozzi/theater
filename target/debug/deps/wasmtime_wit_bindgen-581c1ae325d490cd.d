@@ -1,0 +1,10 @@
+/Users/colinrozzi/work/experimenting/3/runtime_v2/target/debug/deps/libwasmtime_wit_bindgen-581c1ae325d490cd.rmeta: /Users/colinrozzi/.cargo/registry/src/index.crates.io-6f17d22bba15001f/wasmtime-wit-bindgen-15.0.1/src/lib.rs /Users/colinrozzi/.cargo/registry/src/index.crates.io-6f17d22bba15001f/wasmtime-wit-bindgen-15.0.1/src/rust.rs /Users/colinrozzi/.cargo/registry/src/index.crates.io-6f17d22bba15001f/wasmtime-wit-bindgen-15.0.1/src/source.rs /Users/colinrozzi/.cargo/registry/src/index.crates.io-6f17d22bba15001f/wasmtime-wit-bindgen-15.0.1/src/types.rs
+
+/Users/colinrozzi/work/experimenting/3/runtime_v2/target/debug/deps/libwasmtime_wit_bindgen-581c1ae325d490cd.rlib: /Users/colinrozzi/.cargo/registry/src/index.crates.io-6f17d22bba15001f/wasmtime-wit-bindgen-15.0.1/src/lib.rs /Users/colinrozzi/.cargo/registry/src/index.crates.io-6f17d22bba15001f/wasmtime-wit-bindgen-15.0.1/src/rust.rs /Users/colinrozzi/.cargo/registry/src/index.crates.io-6f17d22bba15001f/wasmtime-wit-bindgen-15.0.1/src/source.rs /Users/colinrozzi/.cargo/registry/src/index.crates.io-6f17d22bba15001f/wasmtime-wit-bindgen-15.0.1/src/types.rs
+
+/Users/colinrozzi/work/experimenting/3/runtime_v2/target/debug/deps/wasmtime_wit_bindgen-581c1ae325d490cd.d: /Users/colinrozzi/.cargo/registry/src/index.crates.io-6f17d22bba15001f/wasmtime-wit-bindgen-15.0.1/src/lib.rs /Users/colinrozzi/.cargo/registry/src/index.crates.io-6f17d22bba15001f/wasmtime-wit-bindgen-15.0.1/src/rust.rs /Users/colinrozzi/.cargo/registry/src/index.crates.io-6f17d22bba15001f/wasmtime-wit-bindgen-15.0.1/src/source.rs /Users/colinrozzi/.cargo/registry/src/index.crates.io-6f17d22bba15001f/wasmtime-wit-bindgen-15.0.1/src/types.rs
+
+/Users/colinrozzi/.cargo/registry/src/index.crates.io-6f17d22bba15001f/wasmtime-wit-bindgen-15.0.1/src/lib.rs:
+/Users/colinrozzi/.cargo/registry/src/index.crates.io-6f17d22bba15001f/wasmtime-wit-bindgen-15.0.1/src/rust.rs:
+/Users/colinrozzi/.cargo/registry/src/index.crates.io-6f17d22bba15001f/wasmtime-wit-bindgen-15.0.1/src/source.rs:
+/Users/colinrozzi/.cargo/registry/src/index.crates.io-6f17d22bba15001f/wasmtime-wit-bindgen-15.0.1/src/types.rs:
