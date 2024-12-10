@@ -1,7 +1,10 @@
 use anyhow::Result;
+use async_trait::async_trait;
 use serde_json::Value;
+use tokio::sync::{mpsc, oneshot};
 
 mod chain;
+mod http;
 mod wasm;
 
 pub use wasm::{WasmActor, WasmError};
@@ -36,6 +39,11 @@ pub enum ActorOutput {
     // Future output types go here
 }
 
+pub struct ActorMessage {
+    pub content: ActorInput,
+    pub response_channel: Option<oneshot::Sender<ActorOutput>>,
+}
+
 /// Core trait that all actors must implement
 pub trait Actor {
     /// Initialize the actor and return its initial state
@@ -48,65 +56,46 @@ pub trait Actor {
     fn verify_state(&self, state: &Value) -> bool;
 }
 
-/// The core runtime that manages state and the chain
-pub struct ActorRuntime<A: Actor> {
-    actor: A,
+/// The core actor process that handles messages
+pub struct ActorProcess {
+    mailbox_rx: mpsc::Receiver<ActorMessage>,
+    state: Value,
     chain: chain::HashChain,
-    current_state: Option<Value>,
+    actor: Box<dyn Actor>,
 }
 
-impl<A: Actor> ActorRuntime<A> {
-    pub fn new(actor: A) -> Result<Self> {
+impl ActorProcess {
+    pub fn new(actor: Box<dyn Actor>, mailbox_rx: mpsc::Receiver<ActorMessage>) -> Result<Self> {
         let mut chain = chain::HashChain::new();
         chain.add(Value::Null); // Initialize chain with null entry
 
+        let state = actor.init()?;
+        chain.add(state.clone());
+
         Ok(Self {
-            actor,
+            mailbox_rx,
+            state,
             chain,
-            current_state: None,
+            actor,
         })
     }
 
-    pub async fn init(&mut self) -> Result<()> {
-        let initial_state = self.actor.init()?;
-        self.current_state = Some(initial_state.clone());
-        self.chain.add(initial_state);
+    pub async fn run(&mut self) -> Result<()> {
+        while let Some(msg) = self.mailbox_rx.recv().await {
+            let (output, new_state) = self.actor.handle_input(msg.content, &self.state)?;
+
+            // Update state and chain
+            self.state = new_state.clone();
+            self.chain.add(new_state);
+
+            // Send response if channel exists
+            if let Some(response_tx) = msg.response_channel {
+                // Ignore error if receiver was dropped
+                let _ = response_tx.send(output);
+            }
+        }
+
         Ok(())
-    }
-
-    pub async fn handle_input(&mut self, input: ActorInput) -> Result<ActorOutput> {
-        // Record the input in the chain
-        let input_json = match &input {
-            ActorInput::Message(msg) => serde_json::json!({
-                "type": "message",
-                "data": msg,
-            }),
-            ActorInput::HttpRequest {
-                method,
-                uri,
-                headers,
-                body,
-            } => serde_json::json!({
-                "type": "http-request",
-                "data": {
-                    "method": method,
-                    "uri": uri,
-                    "headers": headers,
-                    "body": body.as_ref().map(|b| String::from_utf8_lossy(b).to_string()),
-                }
-            }),
-        };
-        self.chain.add(input_json);
-
-        // Handle the input
-        let current_state = self.current_state.as_ref().expect("State not initialized");
-        let (output, new_state) = self.actor.handle_input(input, current_state)?;
-
-        // Record the state change
-        self.current_state = Some(new_state.clone());
-        self.chain.add(new_state);
-
-        Ok(output)
     }
 
     pub fn get_chain(&self) -> &chain::HashChain {
@@ -115,17 +104,105 @@ impl<A: Actor> ActorRuntime<A> {
 }
 
 /// Trait for different ways of exposing actors to the world
-pub trait ActorInterface {
-    type Config;
-    type ActorType: Actor;
+#[async_trait]
+pub trait HostInterface: Send + Sync {
+    async fn start(&mut self, mailbox_tx: mpsc::Sender<ActorMessage>) -> Result<()>;
 
-    fn new(config: Self::Config) -> Result<Self>
-    where
-        Self: Sized;
-    fn start(&mut self, runtime: ActorRuntime<Self::ActorType>) -> Result<()>;
+    async fn stop(&mut self) -> Result<()>;
 }
 
-pub struct Runtime<A: Actor> {
-    core: ActorRuntime<A>,
-    interfaces: Vec<Box<dyn ActorInterface<Config = (), ActorType = A>>>,
+// Configuration options for host interfaces
+#[derive(Debug, Clone)]
+pub struct HttpConfig {
+    pub port: u16,
+}
+
+// Represents a host interface type in the manifest
+#[derive(Debug, Clone)]
+pub enum HostInterfaceType {
+    Http(HttpConfig),
+    // Add more interface types here
+}
+
+// Manifest configuration
+#[derive(Debug, Clone)]
+pub struct ActorConfig {
+    pub name: String,
+    pub component_path: String,
+    pub interfaces: Vec<HostInterfaceType>,
+}
+
+pub struct ActorRuntime {
+    actor: Box<dyn Actor>,
+    config: ActorConfig,
+}
+
+impl ActorRuntime {
+    pub fn from_file(manifest_path: &str) -> Result<Self> {
+        // Load actor from manifest
+        let actor = Box::new(WasmActor::from_file(manifest_path)?);
+
+        // Load config from manifest
+        let config = ActorConfig {
+            name: "Example Actor".to_string(),
+            component_path: "example.wasm".to_string(),
+            interfaces: vec![HostInterfaceType::Http(HttpConfig { port: 8080 })],
+        };
+
+        Ok(Self { actor, config })
+    }
+
+    pub async fn init(&mut self) -> Result<()> {
+        // Create channel for actor process
+        let (tx, rx) = mpsc::channel(32); // Buffer size of 32 messages
+
+        // Create and spawn actor process
+        let actor_process = ActorProcess::new(self.actor, rx)?;
+        let process_handle = tokio::spawn(async move {
+            if let Err(e) = actor_process.run().await {
+                eprintln!("Actor process error: {}", e);
+            }
+        });
+
+        // Initialize host interfaces based on config
+        let mut interfaces: Vec<Box<dyn HostInterface>> = Vec::new();
+
+        for interface_type in &self.config.interfaces {
+            match interface_type {
+                HostInterfaceType::Http(config) => {
+                    let http_host = http::HttpHost::new(config.port);
+                    interfaces.push(Box::new(http_host));
+                } // Add more interface types here as they're implemented
+            }
+        }
+
+        // Start all host interfaces
+        for interface in interfaces.iter_mut() {
+            interface.start(tx.clone()).await?;
+        }
+
+        // Store interfaces and process handle for cleanup
+        self.interfaces = interfaces;
+        self.process_handle = Some(process_handle);
+
+        Ok(())
+    }
+
+    pub async fn shutdown(&mut self) -> Result<()> {
+        // Stop all interfaces
+        for interface in self.interfaces.iter_mut() {
+            interface.stop().await?;
+        }
+
+        // Cancel actor process
+        if let Some(handle) = self.process_handle.take() {
+            handle.abort();
+        }
+
+        Ok(())
+    }
+
+    pub fn get_chain(&self) -> &chain::HashChain {
+        self.chain
+    }
 }

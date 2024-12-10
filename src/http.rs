@@ -1,13 +1,6 @@
 use anyhow::Result;
-use axum::{
-    extract::Json,
-    routing::{get, post},
-    Router,
-};
-use axum_macros::debug_handler;
-
-use hyper::StatusCode;
 use serde_json::Value;
+use tide::{Body, Request, Response, Server};
 use tokio::sync::{mpsc, oneshot};
 
 use crate::{ActorInput, ActorMessage, ActorOutput, HostInterface};
@@ -15,11 +8,6 @@ use crate::{ActorInput, ActorMessage, ActorOutput, HostInterface};
 pub struct HttpHost {
     port: u16,
     mailbox_tx: Option<mpsc::Sender<ActorMessage>>,
-}
-
-#[derive(serde::Serialize, serde::Deserialize)]
-struct Msg {
-    data: Value,
 }
 
 impl HttpHost {
@@ -30,11 +18,10 @@ impl HttpHost {
         }
     }
 
-    #[debug_handler]
-    async fn handle_request(
-        mailbox_tx: &mpsc::Sender<ActorMessage>,
-        Json(payload): Json<Value>,
-    ) -> Result<Json<Msg>, StatusCode> {
+    async fn handle_request(mut req: Request<mpsc::Sender<ActorMessage>>) -> tide::Result {
+        // Get JSON payload
+        let payload: Value = req.body_json().await?;
+
         // Create response channel
         let (tx, rx) = oneshot::channel();
 
@@ -44,20 +31,26 @@ impl HttpHost {
             response_channel: Some(tx),
         };
 
-        mailbox_tx
+        req.state()
             .send(msg)
             .await
-            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+            .map_err(|_| tide::Error::from_str(500, "Failed to send message"))?;
 
         // Wait for response with timeout
         let response = tokio::time::timeout(std::time::Duration::from_secs(30), rx)
             .await
-            .map_err(|_| StatusCode::REQUEST_TIMEOUT)?
-            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+            .map_err(|_| tide::Error::from_str(408, "Request timeout"))?
+            .map_err(|_| tide::Error::from_str(500, "Failed to receive response"))?;
 
         match response {
-            ActorOutput::Message(value) => Ok(Json(Msg { data: value })),
-            ActorOutput::HttpResponse { .. } => Err(StatusCode::INTERNAL_SERVER_ERROR),
+            ActorOutput::Message(value) => {
+                let mut res = Response::new(200);
+                res.set_body(Body::from_json(&value)?);
+                Ok(res)
+            }
+            ActorOutput::HttpResponse { .. } => {
+                Err(tide::Error::from_str(500, "Invalid response type"))
+            }
         }
     }
 }
@@ -66,22 +59,12 @@ impl HostInterface for HttpHost {
     async fn start(&mut self, mailbox_tx: mpsc::Sender<ActorMessage>) -> Result<()> {
         self.mailbox_tx = Some(mailbox_tx.clone());
 
-        // Build router
-        let app = Router::new().route(
-            "/",
-            post(HttpHost::handle_request).with_state(mailbox_tx.clone()),
-        );
+        let mut app = Server::with_state(mailbox_tx);
+        app.at("/").post(Self::handle_request);
 
-        // Run server
-        let addr = std::net::SocketAddr::from(([127, 0, 0, 1], self.port));
-        axum::serve(tokio::net::TcpListener::bind(addr).await?, app).await?;
+        let addr = format!("127.0.0.1:{}", self.port);
         println!("HTTP interface listening on http://{}", addr);
-
-        /*
-                axum::Server::bind(&addr)
-                    .serve(app.into_make_service())
-                    .await?;
-        */
+        app.listen(addr).await?;
 
         Ok(())
     }
@@ -91,41 +74,4 @@ impl HostInterface for HttpHost {
         Ok(())
     }
 }
-/*
-pub async fn serve(runtime: Runtime, addr: SocketAddr) -> anyhow::Result<()> {
-    let shared = SharedRuntime(Arc::new(Mutex::new(runtime)));
 
-    let app = Router::new()
-        .route("/", post(handle_message))
-        .route("/chain", get(handle_get_chain))
-        .with_state(shared);
-
-    println!("Starting server on {}", addr);
-    axum::serve(tokio::net::TcpListener::bind(addr).await?, app).await?;
-
-    Ok(())
-}
-
-async fn handle_message(
-    State(shared): State<SharedRuntime>,
-    Json(message): Json<Message>,
-) -> Result<Json<Response>, (StatusCode, String)> {
-    println!("Received message: {:?}", message);
-    let mut runtime = shared.0.lock().await;
-    match runtime.handle_message(message.data).await {
-        Ok((hash, state)) => Ok(Json(Response { hash, state })),
-        Err(e) => Err((StatusCode::BAD_REQUEST, e.to_string())),
-    }
-}
-
-async fn handle_get_chain(State(shared): State<SharedRuntime>) -> Json<ChainResponse> {
-    println!("Getting chain");
-    let runtime = shared.0.lock().await;
-    let chain = runtime.get_chain();
-
-    Json(ChainResponse {
-        head: chain.get_head().map(String::from),
-        entries: chain.get_full_chain(),
-    })
-}
-*/

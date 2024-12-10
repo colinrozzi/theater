@@ -1,7 +1,7 @@
 use anyhow::Result;
+use clap::Parser;
 use runtime_v2::{ActorRuntime, WasmActor};
 use std::path::PathBuf;
-use clap::Parser;
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -17,13 +17,13 @@ async fn main() -> Result<()> {
     let args = Args::parse();
 
     // Load the WASM actor from the manifest
-    println!("Loading actor from manifest: {:?}", args.manifest);
-    let actor = WasmActor::from_file(args.manifest)?;
+    //println!("Loading actor from manifest: {:?}", args.manifest);
+    //let actor = WasmActor::from_file(args.manifest)?;
 
     // Create and initialize the runtime
     println!("Creating actor runtime...");
-    let mut runtime = ActorRuntime::new(actor)?;
-    
+    let mut runtime = ActorRuntime::from_file(args.manifest)?;
+
     println!("Initializing actor...");
     runtime.init().await?;
 
@@ -31,11 +31,11 @@ async fn main() -> Result<()> {
     println!("Current chain head: {:?}", runtime.get_chain().get_head());
 
     // TODO: Set up HTTP server or message handler based on manifest configuration
-    
+
     // For now, just keep the program running
     println!("Actor is running. Press Ctrl+C to exit.");
     tokio::signal::ctrl_c().await?;
-    
+
     println!("Shutting down...");
     Ok(())
 }
