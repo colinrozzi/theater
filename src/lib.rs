@@ -10,9 +10,11 @@ mod capabilities;
 mod chain;
 mod config;
 mod http;
+mod store;
 mod wasm;
 
 pub use config::{HandlerConfig, HttpHandlerConfig, ManifestConfig};
+pub use store::Store;
 pub use wasm::{WasmActor, WasmError};
 
 // Core types that represent different kinds of actor interactions
@@ -130,11 +132,16 @@ impl ActorRuntime {
         // Load manifest config
         let config = ManifestConfig::from_file(&manifest_path)?;
 
-        // Create the WASM actor
-        let actor = Box::new(WasmActor::from_file(&manifest_path)?);
-
-        // Set up message channel
+        // Create store with HTTP host
         let (tx, rx) = mpsc::channel(32);
+        let store = if let Some(HandlerConfig::Http(http_config)) = config.handlers.first() {
+            Store::with_http(http_config.port, tx.clone())
+        } else {
+            Store::new()
+        };
+
+        // Create the WASM actor with the store
+        let actor = Box::new(wasm::WasmActor::new(manifest_path, store)?);
 
         // Create and spawn actor process
         let mut actor_process = ActorProcess::new(actor, rx)?;

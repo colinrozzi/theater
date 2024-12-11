@@ -4,11 +4,11 @@ use std::collections::HashMap;
 use std::path::Path;
 use thiserror::Error;
 use wasmtime::component::{Component, ComponentExportIndex, Instance, Linker};
-use wasmtime::{Engine, Store};
+use wasmtime::Engine;
 
 use crate::capabilities::{ActorCapability, BaseActorCapability, HttpCapability};
 use crate::config::ManifestConfig;
-use crate::{Actor, ActorInput, ActorOutput};
+use crate::{Actor, ActorInput, ActorOutput, Store};
 
 #[derive(Error, Debug)]
 pub enum WasmError {
@@ -26,13 +26,14 @@ pub enum WasmError {
 pub struct WasmActor {
     engine: Engine,
     component: Component,
-    linker: Linker<()>,
+    linker: Linker<Store>,
     capabilities: Vec<Box<dyn ActorCapability>>,
     exports: HashMap<String, ComponentExportIndex>,
+    store: Store,
 }
 
 impl WasmActor {
-    pub fn from_file<P: AsRef<Path>>(manifest_path: P) -> Result<Self> {
+    pub fn new<P: AsRef<Path>>(manifest_path: P, store: Store) -> Result<Self> {
         // Load and parse manifest
         let config = ManifestConfig::from_file(manifest_path)?;
 
@@ -48,6 +49,7 @@ impl WasmActor {
             linker,
             capabilities: Vec::new(),
             exports: HashMap::new(),
+            store,
         };
 
         if config.interface() == "ntwk:simple-actor/actor" {
@@ -81,7 +83,7 @@ impl WasmActor {
 
     fn call_func<T, U>(
         &self,
-        store: &mut Store<()>,
+        store: &mut wasmtime::Store<Store>,
         instance: &Instance,
         export_name: &str,
         args: T,
@@ -122,7 +124,7 @@ impl WasmActor {
 
 impl Actor for WasmActor {
     fn init(&self) -> Result<Value> {
-        let mut store = Store::new(&self.engine, ());
+        let mut store = wasmtime::Store::new(&self.engine, self.store.clone());
         let instance = self.linker.instantiate(&mut store, &self.component)?;
 
         let (result,) = self.call_func::<(), (Vec<u8>,)>(&mut store, &instance, "init", ())?;
@@ -132,7 +134,7 @@ impl Actor for WasmActor {
     }
 
     fn handle_input(&self, input: ActorInput, state: &Value) -> Result<(ActorOutput, Value)> {
-        let mut store = Store::new(&self.engine, ());
+        let mut store = wasmtime::Store::new(&self.engine, self.store.clone());
         let instance = self.linker.instantiate(&mut store, &self.component)?;
 
         let state_bytes = serde_json::to_vec(state)?;
@@ -208,7 +210,7 @@ impl Actor for WasmActor {
     }
 
     fn verify_state(&self, state: &Value) -> bool {
-        let mut store = Store::new(&self.engine, ());
+        let mut store = wasmtime::Store::new(&self.engine, self.store.clone());
         let instance = match self.linker.instantiate(&mut store, &self.component) {
             Ok(instance) => instance,
             Err(_) => return false,

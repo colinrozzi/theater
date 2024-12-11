@@ -1,10 +1,13 @@
 use anyhow::Result;
+use serde_json::Value;
 use wasmtime::component::{Component, ComponentExportIndex, Linker, LinkerInstance};
+
+use crate::store::Store;
 
 /// Represents a set of capabilities that a WASM component can implement
 pub trait ActorCapability: Send {
     /// Set up host functions in the linker
-    fn setup_host_functions(&self, linker: &mut Linker<()>) -> Result<()>;
+    fn setup_host_functions(&self, linker: &mut Linker<Store>) -> Result<()>;
 
     /// Get required export indices from component
     fn get_exports(&self, component: &Component) -> Result<Vec<(String, ComponentExportIndex)>>;
@@ -17,13 +20,13 @@ pub trait ActorCapability: Send {
 pub struct BaseActorCapability;
 
 impl ActorCapability for BaseActorCapability {
-    fn setup_host_functions(&self, linker: &mut Linker<()>) -> Result<()> {
+    fn setup_host_functions(&self, linker: &mut Linker<Store>) -> Result<()> {
         let mut runtime = linker.instance("ntwk:simple-actor/runtime")?;
 
         // Add log function
         runtime.func_wrap(
             "log",
-            |_: wasmtime::StoreContextMut<'_, ()>, (msg,): (String,)| {
+            |_: wasmtime::StoreContextMut<'_, Store>, (msg,): (String,)| {
                 println!("[WASM] {}", msg);
                 Ok(())
             },
@@ -32,8 +35,30 @@ impl ActorCapability for BaseActorCapability {
         // Add send function
         runtime.func_wrap(
             "send",
-            |_: wasmtime::StoreContextMut<'_, ()>, (actor_id, msg): (String, Vec<u8>)| {
-                println!("Message send requested to {}", actor_id);
+            |mut ctx: wasmtime::StoreContextMut<'_, Store>, (address, msg): (String, Vec<u8>)| {
+                // Convert message bytes to JSON Value
+                let msg_value: Value = serde_json::from_slice(&msg)
+                    .map_err(|e| {
+                        println!("Failed to parse message as JSON: {}", e);
+                        wasmtime::Error::msg("Invalid message format")
+                    })?;
+
+                // Get store reference
+                let store = ctx.data_mut();
+                
+                // If we have HTTP host, send the message
+                if let Some(http) = &store.http {
+                    // Spawn task to send message since we can't await in this context
+                    let http = http.clone();
+                    let address = address.clone();
+                    tokio::spawn(async move {
+                        if let Err(e) = http.send_message(address, msg_value).await {
+                            eprintln!("Failed to send message: {}", e);
+                        }
+                    });
+                } else {
+                    println!("Warning: No HTTP host available for sending messages");
+                }
 
                 Ok(())
             },
@@ -90,24 +115,42 @@ impl ActorCapability for BaseActorCapability {
 pub struct HttpCapability;
 
 impl ActorCapability for HttpCapability {
-    fn setup_host_functions(&self, linker: &mut Linker<()>) -> Result<()> {
+    fn setup_host_functions(&self, linker: &mut Linker<Store>) -> Result<()> {
         let mut runtime = linker.instance("ntwk:simple-http-actor/http-runtime")?;
 
         // Add log function
         runtime.func_wrap(
             "log",
-            |_: wasmtime::StoreContextMut<'_, ()>, (msg,): (String,)| {
+            |_: wasmtime::StoreContextMut<'_, Store>, (msg,): (String,)| {
                 println!("[WASM] {}", msg);
                 Ok(())
             },
         )?;
 
-        // Add send function
+        // Add send function - reuse same implementation as BaseActorCapability
         runtime.func_wrap(
             "send",
-            |_: wasmtime::StoreContextMut<'_, ()>, (actor_id, msg): (String, Vec<u8>)| {
-                println!("Message send requested to {}", actor_id);
-                // TODO: Implement actual message sending
+            |mut ctx: wasmtime::StoreContextMut<'_, Store>, (address, msg): (String, Vec<u8>)| {
+                let msg_value: Value = serde_json::from_slice(&msg)
+                    .map_err(|e| {
+                        println!("Failed to parse message as JSON: {}", e);
+                        wasmtime::Error::msg("Invalid message format")
+                    })?;
+
+                let store = ctx.data_mut();
+                
+                if let Some(http) = &store.http {
+                    let http = http.clone();
+                    let address = address.clone();
+                    tokio::spawn(async move {
+                        if let Err(e) = http.send_message(address, msg_value).await {
+                            eprintln!("Failed to send message: {}", e);
+                        }
+                    });
+                } else {
+                    println!("Warning: No HTTP host available for sending messages");
+                }
+
                 Ok(())
             },
         )?;
@@ -116,9 +159,6 @@ impl ActorCapability for HttpCapability {
     }
 
     fn get_exports(&self, component: &Component) -> Result<Vec<(String, ComponentExportIndex)>> {
-        // this is causing the issue, i should instantiate the component when i know what the
-        // interface is, and then go through the expotrts with that instance instead of
-        // instantiating in both places
         let (_, instance) = component
             .export_index(None, "ntwk:simple-http-actor/http-actor")
             .expect("Failed to get HTTP actor instance");

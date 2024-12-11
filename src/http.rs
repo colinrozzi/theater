@@ -9,6 +9,7 @@ use tokio::sync::mpsc;
 use crate::{ActorInput, ActorMessage, ActorOutput, HostHandler};
 
 // HTTP interface for actor-to-actor communication
+#[derive(Clone)]
 pub struct HttpHost {
     client: Client,
     port: u16,
