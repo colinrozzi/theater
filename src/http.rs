@@ -1,9 +1,11 @@
 use anyhow::Result;
 use serde_json::Value;
+use std::future::Future;
+use std::pin::Pin;
 use tide::{Body, Request, Response, Server};
 use tokio::sync::{mpsc, oneshot};
 
-use crate::{ActorInput, ActorMessage, ActorOutput, HostInterface};
+use crate::{ActorInput, ActorMessage, ActorOutput, HostHandler};
 
 pub struct HttpHost {
     port: u16,
@@ -55,23 +57,38 @@ impl HttpHost {
     }
 }
 
-impl HostInterface for HttpHost {
-    async fn start(&mut self, mailbox_tx: mpsc::Sender<ActorMessage>) -> Result<()> {
-        self.mailbox_tx = Some(mailbox_tx.clone());
-
-        let mut app = Server::with_state(mailbox_tx);
-        app.at("/").post(Self::handle_request);
-
-        let addr = format!("127.0.0.1:{}", self.port);
-        println!("HTTP interface listening on http://{}", addr);
-        app.listen(addr).await?;
-
-        Ok(())
-    }
-
-    async fn stop(&mut self) -> Result<()> {
-        // Server will stop when dropped
-        Ok(())
-    }
+pub struct HttpHandler {
+    port: u16,
 }
 
+impl HostHandler for HttpHandler {
+    fn name(&self) -> &str {
+        "http"
+    }
+
+    fn new(config: Value) -> Self {
+        let port = config.get("port").unwrap().as_u64().unwrap() as u16;
+        Self { port }
+    }
+
+    fn start(
+        &self,
+        mailbox: mpsc::Sender<ActorMessage>,
+    ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + '_>> {
+        Box::pin(async move {
+            let mut app = Server::with_state(mailbox);
+            //        app.at("/").post(handle_http_request);
+            // just for testing, return hello world
+            app.at("/").get(|_| async { Ok("Hello, world!") });
+            app.listen(format!("127.0.0.1:{}", self.port)).await?;
+            Ok(())
+        })
+    }
+
+    fn stop(&self) -> Pin<Box<dyn Future<Output = Result<()>> + Send>> {
+        Box::pin(async move {
+            // Shutdown logic
+            Ok(())
+        })
+    }
+}

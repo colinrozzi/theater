@@ -22,13 +22,13 @@ async fn main() -> Result<()> {
 
     // Create and initialize the runtime
     println!("Creating actor runtime...");
-    let mut runtime = ActorRuntime::from_file(args.manifest)?;
+    let mut runtime = ActorRuntime::from_file(args.manifest).await?;
 
     println!("Initializing actor...");
-    runtime.init().await?;
+    //runtime.init().await?;
 
     println!("Actor initialized successfully!");
-    println!("Current chain head: {:?}", runtime.get_chain().get_head());
+    //println!("Current chain head: {:?}", runtime.get_chain().get_head());
 
     // TODO: Set up HTTP server or message handler based on manifest configuration
 

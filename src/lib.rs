@@ -1,6 +1,9 @@
 use anyhow::Result;
-use async_trait::async_trait;
 use serde_json::Value;
+use std::future::Future;
+use std::path::PathBuf;
+use std::pin::Pin;
+
 use tokio::sync::{mpsc, oneshot};
 
 mod chain;
@@ -45,7 +48,7 @@ pub struct ActorMessage {
 }
 
 /// Core trait that all actors must implement
-pub trait Actor {
+pub trait Actor: Send {
     /// Initialize the actor and return its initial state
     fn init(&self) -> Result<Value>;
 
@@ -103,25 +106,22 @@ impl ActorProcess {
     }
 }
 
-/// Trait for different ways of exposing actors to the world
-#[async_trait]
-pub trait HostInterface: Send + Sync {
-    async fn start(&mut self, mailbox_tx: mpsc::Sender<ActorMessage>) -> Result<()>;
-
-    async fn stop(&mut self) -> Result<()>;
+pub trait HostHandler: Send + Sync {
+    fn name(&self) -> &str;
+    fn new(config: Value) -> Self
+    where
+        Self: Sized;
+    fn start(
+        &self,
+        mailbox_tx: mpsc::Sender<ActorMessage>,
+    ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + '_>>;
+    fn stop(&self) -> Pin<Box<dyn Future<Output = Result<()>> + Send>>;
 }
 
-// Configuration options for host interfaces
 #[derive(Debug, Clone)]
-pub struct HttpConfig {
-    pub port: u16,
-}
-
-// Represents a host interface type in the manifest
-#[derive(Debug, Clone)]
-pub enum HostInterfaceType {
-    Http(HttpConfig),
-    // Add more interface types here
+pub enum HostHandlerType {
+    Http(Value),
+    // Future handler types go here
 }
 
 // Manifest configuration
@@ -129,16 +129,17 @@ pub enum HostInterfaceType {
 pub struct ActorConfig {
     pub name: String,
     pub component_path: String,
-    pub interfaces: Vec<HostInterfaceType>,
+    pub handlers: Vec<HostHandlerType>,
 }
 
 pub struct ActorRuntime {
-    actor: Box<dyn Actor>,
     config: ActorConfig,
+    handlers: Vec<Box<dyn HostHandler>>,
+    process_handle: Option<tokio::task::JoinHandle<()>>,
 }
 
 impl ActorRuntime {
-    pub fn from_file(manifest_path: &str) -> Result<Self> {
+    pub async fn from_file(manifest_path: PathBuf) -> Result<Self> {
         // Load actor from manifest
         let actor = Box::new(WasmActor::from_file(manifest_path)?);
 
@@ -146,52 +147,50 @@ impl ActorRuntime {
         let config = ActorConfig {
             name: "Example Actor".to_string(),
             component_path: "example.wasm".to_string(),
-            interfaces: vec![HostInterfaceType::Http(HttpConfig { port: 8080 })],
+            handlers: vec![HostHandlerType::Http(serde_json::json!({ "port": 8080 }))],
+            //interfaces: vec![HostInterfaceType::Http(HttpConfig { port: 8080 })],
         };
 
-        Ok(Self { actor, config })
-    }
-
-    pub async fn init(&mut self) -> Result<()> {
-        // Create channel for actor process
         let (tx, rx) = mpsc::channel(32); // Buffer size of 32 messages
 
         // Create and spawn actor process
-        let actor_process = ActorProcess::new(self.actor, rx)?;
+        let mut actor_process = ActorProcess::new(actor, rx)?;
         let process_handle = tokio::spawn(async move {
             if let Err(e) = actor_process.run().await {
                 eprintln!("Actor process error: {}", e);
             }
         });
 
-        // Initialize host interfaces based on config
-        let mut interfaces: Vec<Box<dyn HostInterface>> = Vec::new();
+        // Create channel for actor process
 
-        for interface_type in &self.config.interfaces {
-            match interface_type {
-                HostInterfaceType::Http(config) => {
-                    let http_host = http::HttpHost::new(config.port);
-                    interfaces.push(Box::new(http_host));
+        // Initialize host interfaces based on config
+        let mut handlers: Vec<Box<dyn HostHandler>> = Vec::new();
+
+        for handler_type in &config.handlers {
+            match handler_type {
+                HostHandlerType::Http(config) => {
+                    let http_host = http::HttpHandler::new(config.clone());
+                    handlers.push(Box::new(http_host));
                 } // Add more interface types here as they're implemented
             }
         }
 
         // Start all host interfaces
-        for interface in interfaces.iter_mut() {
-            interface.start(tx.clone()).await?;
+        for handler in handlers.iter_mut() {
+            handler.start(tx.clone()).await?;
         }
 
-        // Store interfaces and process handle for cleanup
-        self.interfaces = interfaces;
-        self.process_handle = Some(process_handle);
-
-        Ok(())
+        Ok(Self {
+            config,
+            handlers,
+            process_handle: Some(process_handle),
+        })
     }
 
     pub async fn shutdown(&mut self) -> Result<()> {
         // Stop all interfaces
-        for interface in self.interfaces.iter_mut() {
-            interface.stop().await?;
+        for handler in self.handlers.iter_mut() {
+            handler.stop().await?;
         }
 
         // Cancel actor process
@@ -200,9 +199,5 @@ impl ActorRuntime {
         }
 
         Ok(())
-    }
-
-    pub fn get_chain(&self) -> &chain::HashChain {
-        self.chain
     }
 }
