@@ -27,6 +27,7 @@ impl HttpHost {
 
     // Send a message to another actor
     pub async fn send_message(&self, address: String, message: Value) -> Result<()> {
+        println!("Sending message to {}: {:?}", address, message);
         // Fire and forget POST request
         self.client
             .post(address)
@@ -44,6 +45,8 @@ impl HttpHost {
             tide::http::Method::Post => {
                 // Get JSON payload
                 let payload: Value = req.body_json().await?;
+
+                println!("Received message: {:?}", payload);
 
                 // Create message with no response channel
                 let msg = ActorMessage {
@@ -89,6 +92,7 @@ impl HostHandler for HttpHandler {
         &self,
         mailbox_tx: mpsc::Sender<ActorMessage>,
     ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + '_>> {
+        println!("Starting http actor mailbox on port {}", self.port);
         Box::pin(async move {
             let mut app = Server::with_state(mailbox_tx);
             app.at("/").post(HttpHost::handle_request);
