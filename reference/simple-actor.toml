@@ -12,3 +12,7 @@ requires = []
 type = "Http"
 config = { port = 8080 }
 
+[[handlers]]
+type = "Http-server"
+config = { port = 8081 }
+
