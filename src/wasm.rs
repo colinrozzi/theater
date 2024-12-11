@@ -35,7 +35,7 @@ impl WasmActor {
     pub fn from_file<P: AsRef<Path>>(manifest_path: P) -> Result<Self> {
         // Load and parse manifest
         let config = ManifestConfig::from_file(manifest_path)?;
-        
+
         // Load WASM component
         let engine = Engine::default();
         let wasm_bytes = std::fs::read(&config.component_path)?;
@@ -87,13 +87,15 @@ impl WasmActor {
         args: T,
     ) -> Result<U>
     where
-        T: wasmtime::component::Lower,
-        U: wasmtime::component::Lift,
+        T: wasmtime::component::Lower + wasmtime::component::ComponentNamedList,
+        U: wasmtime::component::Lift + wasmtime::component::ComponentNamedList,
     {
-        let index = self.get_export(export_name).ok_or_else(|| WasmError::WasmError {
-            context: "function lookup",
-            message: format!("Function {} not found", export_name),
-        })?;
+        let index = self
+            .get_export(export_name)
+            .ok_or_else(|| WasmError::WasmError {
+                context: "function lookup",
+                message: format!("Function {} not found", export_name),
+            })?;
 
         let func = instance
             .get_func(&mut *store, *index)
@@ -102,15 +104,19 @@ impl WasmActor {
                 message: format!("Failed to get function {}", export_name),
             })?;
 
-        let typed = func.typed::<T, U>(&mut *store).map_err(|e| WasmError::WasmError {
-            context: "function type",
-            message: e.to_string(),
-        })?;
+        let typed = func
+            .typed::<T, U>(&mut *store)
+            .map_err(|e| WasmError::WasmError {
+                context: "function type",
+                message: e.to_string(),
+            })?;
 
-        typed.call(&mut *store, args).map_err(|e| WasmError::WasmError {
-            context: "function call",
-            message: e.to_string(),
-        })?
+        Ok(typed
+            .call(&mut *store, args)
+            .map_err(|e| WasmError::WasmError {
+                context: "function call",
+                message: e.to_string(),
+            })?)
     }
 }
 
@@ -213,8 +219,14 @@ impl Actor for WasmActor {
             Err(_) => return false,
         };
 
-        self.call_func::<(Vec<u8>,), (bool,)>(&mut store, &instance, "state-contract", (state_bytes,))
-            .map(|(result,)| result)
-            .unwrap_or(false)
+        self.call_func::<(Vec<u8>,), (bool,)>(
+            &mut store,
+            &instance,
+            "state-contract",
+            (state_bytes,),
+        )
+        .map(|(result,)| result)
+        .unwrap_or(false)
     }
 }
+

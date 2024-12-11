@@ -36,6 +36,10 @@ impl ManifestConfig {
     }
 
     pub fn implements_interface(&self, interface_name: &str) -> bool {
-        self.interfaces.implements.iter().any(|i| i == interface_name)
+        self.interfaces
+            .implements
+            .iter()
+            .any(|i| i == interface_name)
     }
 }
+

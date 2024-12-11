@@ -5,10 +5,10 @@ use wasmtime::component::{Component, ComponentExportIndex, Linker};
 pub trait ActorCapability: Send {
     /// Set up host functions in the linker
     fn setup_host_functions(&self, linker: &mut Linker<()>) -> Result<()>;
-    
+
     /// Get required export indices from component
     fn get_exports(&self, component: &Component) -> Result<Vec<(String, ComponentExportIndex)>>;
-    
+
     /// Return interface name this capability implements
     fn interface_name(&self) -> &str;
 }
@@ -19,7 +19,7 @@ pub struct BaseActorCapability;
 impl ActorCapability for BaseActorCapability {
     fn setup_host_functions(&self, linker: &mut Linker<()>) -> Result<()> {
         let mut runtime = linker.instance("ntwk:simple-actor/runtime")?;
-        
+
         // Add log function
         runtime.func_wrap(
             "log",
@@ -43,21 +43,31 @@ impl ActorCapability for BaseActorCapability {
     }
 
     fn get_exports(&self, component: &Component) -> Result<Vec<(String, ComponentExportIndex)>> {
-        let (_, instance) = component.export_index(None, "ntwk:simple-actor/actor")?;
-        
+        let (_, instance) = component
+            .export_index(None, "ntwk:simple-actor/actor")
+            .expect("Failed to get actor instance");
+
         let mut exports = Vec::new();
-        
+
         // Get required function exports
-        let (_, init) = component.export_index(Some(&instance), "init")?;
+        let (_, init) = component
+            .export_index(Some(&instance), "init")
+            .expect("Failed to get init export");
         exports.push(("init".to_string(), init));
 
-        let (_, handle) = component.export_index(Some(&instance), "handle")?;
+        let (_, handle) = component
+            .export_index(Some(&instance), "handle")
+            .expect("Failed to get handle export");
         exports.push(("handle".to_string(), handle));
 
-        let (_, state_contract) = component.export_index(Some(&instance), "state-contract")?;
+        let (_, state_contract) = component
+            .export_index(Some(&instance), "state-contract")
+            .expect("Failed to get state contract export");
         exports.push(("state-contract".to_string(), state_contract));
 
-        let (_, message_contract) = component.export_index(Some(&instance), "message-contract")?;
+        let (_, message_contract) = component
+            .export_index(Some(&instance), "message-contract")
+            .expect("Failed to get message contract export");
         exports.push(("message-contract".to_string(), message_contract));
 
         Ok(exports)
@@ -78,14 +88,20 @@ impl ActorCapability for HttpCapability {
     }
 
     fn get_exports(&self, component: &Component) -> Result<Vec<(String, ComponentExportIndex)>> {
-        let (_, instance) = component.export_index(None, "ntwk:simple-http-actor/http-actor")?;
-        
+        let (_, instance) = component
+            .export_index(None, "ntwk:simple-http-actor/http-actor")
+            .expect("Failed to get HTTP actor instance");
+
         let mut exports = Vec::new();
-        
-        let (_, http_contract) = component.export_index(Some(&instance), "http-contract")?;
+
+        let (_, http_contract) = component
+            .export_index(Some(&instance), "http-contract")
+            .expect("Failed to get HTTP contract export");
         exports.push(("http-contract".to_string(), http_contract));
 
-        let (_, handle_http) = component.export_index(Some(&instance), "handle-http")?;
+        let (_, handle_http) = component
+            .export_index(Some(&instance), "handle-http")
+            .expect("Failed to get HTTP handler export");
         exports.push(("handle-http".to_string(), handle_http));
 
         Ok(exports)
@@ -95,3 +111,4 @@ impl ActorCapability for HttpCapability {
         "ntwk:simple-http-actor/http-actor"
     }
 }
+
