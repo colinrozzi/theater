@@ -2,7 +2,7 @@ name = ""
 version = "0.1.0"
 description = "Sample actor for testing http host system capabilities"
 
-component_path = "/Users/colinrozzi/work/experimenting/3/actors/frontend-actor/target/wasm32-unknown-unknown/release/frontend_actor.wasm"
+component_path = "/Users/colinrozzi/work/experimenting/3/actors/first-http-actor/target/wasm32-unknown-unknown/release/first_http_actor.wasm"
 
 [interfaces]
 implements = ["ntwk:simple-http-actor/http-actor"]
