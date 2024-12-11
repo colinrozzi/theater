@@ -229,4 +229,3 @@ impl Actor for WasmActor {
         .unwrap_or(false)
     }
 }
-

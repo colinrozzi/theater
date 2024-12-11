@@ -4,8 +4,8 @@ description = "Sample actor for testing manifest loading"
 
 component_path = "/Users/colinrozzi/work/experimenting/3/actors/actor4/target/wasm32-unknown-unknown/release/actor4.wasm"
 
-[interfaces]
-implements = ["ntwk:simple-actor/actor"]
+[interface]
+implements = "ntwk:simple-actor/actor"
 requires = []
 
 [capabilities.host]

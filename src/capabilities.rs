@@ -1,13 +1,17 @@
 use anyhow::Result;
-use wasmtime::component::{Component, ComponentExportIndex, Linker};
+use wasmtime::component::{Component, ComponentExportIndex, Linker, LinkerInstance};
 
 /// Represents a set of capabilities that a WASM component can implement
 pub trait ActorCapability: Send {
     /// Set up host functions in the linker
-    fn setup_host_functions(&self, linker: &mut Linker<()>) -> Result<()>;
+    fn setup_host_functions(&self, runtime: &mut LinkerInstance<()>) -> Result<()>;
 
     /// Get required export indices from component
-    fn get_exports(&self, component: &Component) -> Result<Vec<(String, ComponentExportIndex)>>;
+    fn get_exports(
+        &self,
+        component: &Component,
+        interface: &String,
+    ) -> Result<Vec<(String, ComponentExportIndex)>>;
 
     /// Return interface name this capability implements
     fn interface_name(&self) -> &str;
@@ -17,8 +21,8 @@ pub trait ActorCapability: Send {
 pub struct BaseActorCapability;
 
 impl ActorCapability for BaseActorCapability {
-    fn setup_host_functions(&self, linker: &mut Linker<()>) -> Result<()> {
-        let mut runtime = linker.instance("ntwk:simple-actor/runtime")?;
+    fn setup_host_functions(&self, runtime: &mut LinkerInstance<()>) -> Result<()> {
+        //let mut runtime = linker.instance("ntwk:simple-actor/runtime")?;
 
         // Add log function
         runtime.func_wrap(
@@ -42,12 +46,22 @@ impl ActorCapability for BaseActorCapability {
         Ok(())
     }
 
-    fn get_exports(&self, component: &Component) -> Result<Vec<(String, ComponentExportIndex)>> {
+    fn get_exports(
+        &self,
+        component: &Component,
+        interface: &String,
+    ) -> Result<Vec<(String, ComponentExportIndex)>> {
+        //let (_, instance) = component.export_index(None, "ntwk:simple-actor/actor").expect("Failed to get actor instance");
+        println!("Getting exports for interface: {}", interface);
         let (_, instance) = component
-            .export_index(None, "ntwk:simple-actor/actor")
-            .expect("Failed to get actor instance");
+            .export_index(None, interface)
+            .expect("Failed to get interface export");
+
+        println!("Got instance for interface: {}", interface);
 
         let mut exports = Vec::new();
+
+        println!("Getting init export");
 
         // Get required function exports
         let (_, init) = component
@@ -55,15 +69,21 @@ impl ActorCapability for BaseActorCapability {
             .expect("Failed to get init export");
         exports.push(("init".to_string(), init));
 
+        println!("Getting handle export");
+
         let (_, handle) = component
             .export_index(Some(&instance), "handle")
             .expect("Failed to get handle export");
         exports.push(("handle".to_string(), handle));
 
+        println!("Getting verify export");
+
         let (_, state_contract) = component
             .export_index(Some(&instance), "state-contract")
             .expect("Failed to get state contract export");
         exports.push(("state-contract".to_string(), state_contract));
+
+        println!("Getting message contract export");
 
         let (_, message_contract) = component
             .export_index(Some(&instance), "message-contract")
@@ -82,22 +102,37 @@ impl ActorCapability for BaseActorCapability {
 pub struct HttpCapability;
 
 impl ActorCapability for HttpCapability {
-    fn setup_host_functions(&self, linker: &mut Linker<()>) -> Result<()> {
+    fn setup_host_functions(&self, runtime: &mut LinkerInstance<()>) -> Result<()> {
         // Currently no host functions needed for HTTP
         Ok(())
     }
 
-    fn get_exports(&self, component: &Component) -> Result<Vec<(String, ComponentExportIndex)>> {
+    fn get_exports(
+        &self,
+        component: &Component,
+        interface: &String,
+    ) -> Result<Vec<(String, ComponentExportIndex)>> {
+        // this is causing the issue, i should instantiate the component when i know what the
+        // interface is, and then go through the expotrts with that instance instead of
+        // instantiating in both places
+        //let (_, instance) = component.export_index(None, "ntwk:simple-http-actor/http-actor").expect("Failed to get HTTP actor instance");
+        println!("Getting exports for interface: {}", interface);
         let (_, instance) = component
-            .export_index(None, "ntwk:simple-http-actor/http-actor")
-            .expect("Failed to get HTTP actor instance");
+            .export_index(None, interface)
+            .expect("Failed to get interface export");
+
+        println!("Got instance for interface: {}", interface);
 
         let mut exports = Vec::new();
+
+        println!("Getting HTTP contract export");
 
         let (_, http_contract) = component
             .export_index(Some(&instance), "http-contract")
             .expect("Failed to get HTTP contract export");
         exports.push(("http-contract".to_string(), http_contract));
+
+        println!("Getting HTTP handler export");
 
         let (_, handle_http) = component
             .export_index(Some(&instance), "handle-http")
@@ -111,4 +146,3 @@ impl ActorCapability for HttpCapability {
         "ntwk:simple-http-actor/http-actor"
     }
 }
-

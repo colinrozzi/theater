@@ -6,7 +6,7 @@ pub struct ManifestConfig {
     pub name: String,
     pub component_path: PathBuf,
     #[serde(default)]
-    pub interfaces: InterfacesConfig,
+    pub interface: InterfacesConfig,
     #[serde(default)]
     pub handlers: Vec<HandlerConfig>,
 }
@@ -14,7 +14,8 @@ pub struct ManifestConfig {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct InterfacesConfig {
     #[serde(default)]
-    pub implements: Vec<String>,
+    pub implements: String,
+    pub requires: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -36,10 +37,10 @@ impl ManifestConfig {
     }
 
     pub fn implements_interface(&self, interface_name: &str) -> bool {
-        self.interfaces
-            .implements
-            .iter()
-            .any(|i| i == interface_name)
+        self.interface.implements == interface_name
+    }
+
+    pub fn interface(&self) -> &str {
+        &self.interface.implements
     }
 }
-
