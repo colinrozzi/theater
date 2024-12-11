@@ -1,11 +1,13 @@
 use anyhow::Result;
 use serde_json::Value;
+use std::collections::HashMap;
 use std::path::Path;
 use thiserror::Error;
-use wasmtime::component::ComponentExportIndex;
-use wasmtime::component::{Component, Instance, Linker};
+use wasmtime::component::{Component, ComponentExportIndex, Instance, Linker};
 use wasmtime::{Engine, Store};
 
+use crate::capabilities::{ActorCapability, BaseActorCapability, HttpCapability};
+use crate::config::ManifestConfig;
 use crate::{Actor, ActorInput, ActorOutput};
 
 #[derive(Error, Debug)]
@@ -25,230 +27,90 @@ pub struct WasmActor {
     engine: Engine,
     component: Component,
     linker: Linker<()>,
-    init_index: ComponentExportIndex,
-    handle_index: ComponentExportIndex,
-    state_contract_index: ComponentExportIndex,
-    message_contract_index: ComponentExportIndex,
-    // Optional indices for HTTP support
-    http_contract_index: Option<ComponentExportIndex>,
-    handle_http_index: Option<ComponentExportIndex>,
+    capabilities: Vec<Box<dyn ActorCapability>>,
+    exports: HashMap<String, ComponentExportIndex>,
 }
 
 impl WasmActor {
     pub fn from_file<P: AsRef<Path>>(manifest_path: P) -> Result<Self> {
+        // Load and parse manifest
+        let config = ManifestConfig::from_file(manifest_path)?;
+        
+        // Load WASM component
         let engine = Engine::default();
+        let wasm_bytes = std::fs::read(&config.component_path)?;
+        let component = Component::new(&engine, &wasm_bytes)?;
+        let linker = Linker::new(&engine);
 
-        // Read and parse manifest
-        let manifest = std::fs::read_to_string(&manifest_path)
-            .map_err(|e| WasmError::ManifestError(e.to_string()))?;
-        let manifest: toml::Value =
-            toml::from_str(&manifest).map_err(|e| WasmError::ManifestError(e.to_string()))?;
-
-        // Get WASM file path
-        let wasm_path = manifest["component_path"]
-            .as_str()
-            .ok_or_else(|| WasmError::ManifestError("Missing component_path".into()))?;
-
-        // Read interfaces
-        let implements = manifest["interfaces"]["implements"]
-            .as_array()
-            .ok_or_else(|| WasmError::ManifestError("Missing interfaces.implements".into()))?;
-
-        // Check for required interfaces
-        let has_actor = implements.iter().any(|i| {
-            i.as_str()
-                .map(|s| s == "ntwk:simple-actor/actor")
-                .unwrap_or(false)
-        });
-        if !has_actor {
-            return Err(WasmError::ManifestError(
-                "Component must implement ntwk:simple-actor/actor".into(),
-            )
-            .into());
-        }
-
-        // Check for HTTP interface
-        let has_http = implements.iter().any(|i| {
-            i.as_str()
-                .map(|s| s == "ntwk:simple-http-actor/http-actor")
-                .unwrap_or(false)
-        });
-
-        // Load and instantiate component
-        let wasm_bytes = std::fs::read(wasm_path)
-            .map_err(|e| WasmError::ManifestError(format!("Failed to read WASM file: {}", e)))?;
-        let component = Component::new(&engine, &wasm_bytes).map_err(|e| WasmError::WasmError {
-            context: "component creation",
-            message: e.to_string(),
-        })?;
-
-        // Set up linker with runtime functions
-        let mut linker = Linker::new(&engine);
-        let mut runtime =
-            linker
-                .instance("ntwk:simple-actor/runtime")
-                .map_err(|e| WasmError::WasmError {
-                    context: "runtime setup",
-                    message: e.to_string(),
-                })?;
-
-        // Add log function
-        runtime.func_wrap(
-            "log",
-            |_: wasmtime::StoreContextMut<'_, ()>, (msg,): (String,)| {
-                println!("[WASM] {}", msg);
-                Ok(())
-            },
-        )?;
-
-        // Add send function
-        runtime.func_wrap(
-            "send",
-            |_: wasmtime::StoreContextMut<'_, ()>, (actor_id, msg): (String, Vec<u8>)| {
-                println!("Message send requested to {}", actor_id);
-                // TODO: Implement actual message sending
-                Ok(())
-            },
-        )?;
-
-        // Get export indices for required functions
-        let (_, actor_instance) = component
-            .export_index(None, "ntwk:simple-actor/actor")
-            .expect("Failed to get actor instance");
-
-        let (_, init_index) = component
-            .export_index(Some(&actor_instance), "init")
-            .expect("Failed to get init index");
-
-        let (_, handle_index) = component
-            .export_index(Some(&actor_instance), "handle")
-            .expect("Failed to get handle index");
-
-        let (_, state_contract_index) = component
-            .export_index(Some(&actor_instance), "state-contract")
-            .expect("Failed to get state-contract index");
-
-        let (_, message_contract_index) = component
-            .export_index(Some(&actor_instance), "message-contract")
-            .expect("Failed to get message-contract index");
-
-        // Get HTTP-specific exports if available
-        let (http_contract_index, handle_http_index) = if has_http {
-            let (_, http_instance) = component
-                .export_index(None, "ntwk:simple-http-actor/http-actor")
-                .expect("Failed to get http-actor instance");
-
-            let (_, http_contract) = component
-                .export_index(Some(&http_instance), "http-contract")
-                .expect("Failed to get http-contract index");
-
-            let (_, handle_http) = component
-                .export_index(Some(&http_instance), "handle-http")
-                .expect("Failed to get handle-http index");
-
-            (Some(http_contract), Some(handle_http))
-        } else {
-            (None, None)
-        };
-
-        Ok(WasmActor {
+        let mut actor = WasmActor {
             engine,
             component,
             linker,
-            init_index,
-            handle_index,
-            state_contract_index,
-            message_contract_index,
-            http_contract_index,
-            handle_http_index,
-        })
+            capabilities: Vec::new(),
+            exports: HashMap::new(),
+        };
+
+        // Always add base capability
+        actor.add_capability(Box::new(BaseActorCapability))?;
+
+        // Add HTTP if specified
+        if config.implements_interface("ntwk:simple-http-actor/http-actor") {
+            actor.add_capability(Box::new(HttpCapability))?;
+        }
+
+        Ok(actor)
     }
 
-    fn call_init(&self, store: &mut Store<()>, instance: &Instance) -> Result<Vec<u8>> {
-        let init_func = instance
-            .get_func(&mut *store, self.init_index)
-            .ok_or_else(|| WasmError::WasmError {
-                context: "init function",
-                message: "Function not found".into(),
-            })?;
+    fn add_capability(&mut self, capability: Box<dyn ActorCapability>) -> Result<()> {
+        // Setup host functions
+        capability.setup_host_functions(&mut self.linker)?;
 
-        let typed = init_func
-            .typed::<(), (Vec<u8>,)>(&mut *store)
-            .map_err(|e| WasmError::WasmError {
-                context: "init function type",
-                message: e.to_string(),
-            })?;
+        // Get and store exports
+        let exports = capability.get_exports(&self.component)?;
+        for (name, index) in exports {
+            self.exports.insert(name, index);
+        }
 
-        let (result,) = typed
-            .call(&mut *store, ())
-            .map_err(|e| WasmError::WasmError {
-                context: "init function call",
-                message: e.to_string(),
-            })?;
-
-        Ok(result)
+        self.capabilities.push(capability);
+        Ok(())
     }
 
-    fn call_handle(
+    fn get_export(&self, name: &str) -> Option<&ComponentExportIndex> {
+        self.exports.get(name)
+    }
+
+    fn call_func<T, U>(
         &self,
         store: &mut Store<()>,
         instance: &Instance,
-        msg: Vec<u8>,
-        state: Vec<u8>,
-    ) -> Result<Vec<u8>> {
-        let handle_func = instance
-            .get_func(&mut *store, self.handle_index)
-            .ok_or_else(|| WasmError::WasmError {
-                context: "handle function",
-                message: "Function not found".into(),
-            })?;
+        export_name: &str,
+        args: T,
+    ) -> Result<U>
+    where
+        T: wasmtime::component::Lower,
+        U: wasmtime::component::Lift,
+    {
+        let index = self.get_export(export_name).ok_or_else(|| WasmError::WasmError {
+            context: "function lookup",
+            message: format!("Function {} not found", export_name),
+        })?;
 
-        let typed = handle_func
-            .typed::<(Vec<u8>, Vec<u8>), (Vec<u8>,)>(&mut *store)
-            .map_err(|e| WasmError::WasmError {
-                context: "handle function type",
-                message: e.to_string(),
-            })?;
-
-        let (result,) =
-            typed
-                .call(&mut *store, (msg, state))
-                .map_err(|e| WasmError::WasmError {
-                    context: "handle function call",
-                    message: e.to_string(),
-                })?;
-
-        Ok(result)
-    }
-
-    fn verify_state_contract(
-        &self,
-        store: &mut Store<()>,
-        instance: &Instance,
-        state: Vec<u8>,
-    ) -> Result<bool> {
         let func = instance
-            .get_func(&mut *store, self.state_contract_index)
+            .get_func(&mut *store, *index)
             .ok_or_else(|| WasmError::WasmError {
-                context: "state-contract function",
-                message: "Function not found".into(),
+                context: "function access",
+                message: format!("Failed to get function {}", export_name),
             })?;
 
-        let typed = func
-            .typed::<(Vec<u8>,), (bool,)>(&mut *store)
-            .map_err(|e| WasmError::WasmError {
-                context: "state-contract function type",
-                message: e.to_string(),
-            })?;
+        let typed = func.typed::<T, U>(&mut *store).map_err(|e| WasmError::WasmError {
+            context: "function type",
+            message: e.to_string(),
+        })?;
 
-        let (result,) = typed
-            .call(&mut *store, (state,))
-            .map_err(|e| WasmError::WasmError {
-                context: "state-contract function call",
-                message: e.to_string(),
-            })?;
-
-        Ok(result)
+        typed.call(&mut *store, args).map_err(|e| WasmError::WasmError {
+            context: "function call",
+            message: e.to_string(),
+        })?
     }
 }
 
@@ -257,7 +119,7 @@ impl Actor for WasmActor {
         let mut store = Store::new(&self.engine, ());
         let instance = self.linker.instantiate(&mut store, &self.component)?;
 
-        let result = self.call_init(&mut store, &instance)?;
+        let (result,) = self.call_func::<(), (Vec<u8>,)>(&mut store, &instance, "init", ())?;
         let state: Value = serde_json::from_slice(&result)?;
 
         Ok(state)
@@ -272,7 +134,12 @@ impl Actor for WasmActor {
         match input {
             ActorInput::Message(msg) => {
                 let msg_bytes = serde_json::to_vec(&msg)?;
-                let result = self.call_handle(&mut store, &instance, msg_bytes, state_bytes)?;
+                let (result,) = self.call_func::<(Vec<u8>, Vec<u8>), (Vec<u8>,)>(
+                    &mut store,
+                    &instance,
+                    "handle",
+                    (msg_bytes, state_bytes),
+                )?;
                 let new_state: Value = serde_json::from_slice(&result)?;
                 Ok((ActorOutput::Message(msg), new_state))
             }
@@ -282,7 +149,7 @@ impl Actor for WasmActor {
                 headers,
                 body,
             } => {
-                if self.handle_http_index.is_none() {
+                if !self.exports.contains_key("handle-http") {
                     return Err(anyhow::anyhow!("Actor does not support HTTP"));
                 }
 
@@ -294,7 +161,12 @@ impl Actor for WasmActor {
                 });
 
                 let request_bytes = serde_json::to_vec(&request)?;
-                let result = self.call_handle(&mut store, &instance, request_bytes, state_bytes)?;
+                let (result,) = self.call_func::<(Vec<u8>, Vec<u8>), (Vec<u8>,)>(
+                    &mut store,
+                    &instance,
+                    "handle-http",
+                    (request_bytes, state_bytes),
+                )?;
 
                 let response: Value = serde_json::from_slice(&result)?;
                 let new_state = response["state"].clone();
@@ -341,7 +213,8 @@ impl Actor for WasmActor {
             Err(_) => return false,
         };
 
-        self.verify_state_contract(&mut store, &instance, state_bytes)
+        self.call_func::<(Vec<u8>,), (bool,)>(&mut store, &instance, "state-contract", (state_bytes,))
+            .map(|(result,)| result)
             .unwrap_or(false)
     }
 }

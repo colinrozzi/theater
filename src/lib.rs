@@ -6,10 +6,13 @@ use std::pin::Pin;
 
 use tokio::sync::{mpsc, oneshot};
 
+mod capabilities;
 mod chain;
+mod config;
 mod http;
 mod wasm;
 
+pub use config::{HandlerConfig, HttpHandlerConfig, ManifestConfig};
 pub use wasm::{WasmActor, WasmError};
 
 // Core types that represent different kinds of actor interactions
@@ -25,7 +28,6 @@ pub enum ActorInput {
         headers: Vec<(String, String)>,
         body: Option<Vec<u8>>,
     },
-    // Future input types go here
 }
 
 #[derive(Debug, Clone)]
@@ -39,7 +41,6 @@ pub enum ActorOutput {
         headers: Vec<(String, String)>,
         body: Option<Vec<u8>>,
     },
-    // Future output types go here
 }
 
 pub struct ActorMessage {
@@ -118,40 +119,22 @@ pub trait HostHandler: Send + Sync {
     fn stop(&self) -> Pin<Box<dyn Future<Output = Result<()>> + Send>>;
 }
 
-#[derive(Debug, Clone)]
-pub enum HostHandlerType {
-    Http(Value),
-    // Future handler types go here
-}
-
-// Manifest configuration
-#[derive(Debug, Clone)]
-pub struct ActorConfig {
-    pub name: String,
-    pub component_path: String,
-    pub handlers: Vec<HostHandlerType>,
-}
-
 pub struct ActorRuntime {
-    config: ActorConfig,
+    pub config: ManifestConfig,
     handlers: Vec<Box<dyn HostHandler>>,
     process_handle: Option<tokio::task::JoinHandle<()>>,
 }
 
 impl ActorRuntime {
     pub async fn from_file(manifest_path: PathBuf) -> Result<Self> {
-        // Load actor from manifest
-        let actor = Box::new(WasmActor::from_file(manifest_path)?);
+        // Load manifest config
+        let config = ManifestConfig::from_file(&manifest_path)?;
 
-        // Load config from manifest
-        let config = ActorConfig {
-            name: "Example Actor".to_string(),
-            component_path: "example.wasm".to_string(),
-            handlers: vec![HostHandlerType::Http(serde_json::json!({ "port": 8080 }))],
-            //interfaces: vec![HostInterfaceType::Http(HttpConfig { port: 8080 })],
-        };
+        // Create the WASM actor
+        let actor = Box::new(WasmActor::from_file(&manifest_path)?);
 
-        let (tx, rx) = mpsc::channel(32); // Buffer size of 32 messages
+        // Set up message channel
+        let (tx, rx) = mpsc::channel(32);
 
         // Create and spawn actor process
         let mut actor_process = ActorProcess::new(actor, rx)?;
@@ -161,21 +144,18 @@ impl ActorRuntime {
             }
         });
 
-        // Create channel for actor process
-
-        // Initialize host interfaces based on config
+        // Initialize handlers based on config
         let mut handlers: Vec<Box<dyn HostHandler>> = Vec::new();
-
-        for handler_type in &config.handlers {
-            match handler_type {
-                HostHandlerType::Http(config) => {
-                    let http_host = http::HttpHandler::new(config.clone());
-                    handlers.push(Box::new(http_host));
-                } // Add more interface types here as they're implemented
+        for handler_config in &config.handlers {
+            match handler_config {
+                HandlerConfig::Http(http_config) => {
+                    let handler = http::HttpHandler::new(serde_json::to_value(http_config)?);
+                    handlers.push(Box::new(handler));
+                }
             }
         }
 
-        // Start all host interfaces
+        // Start all handlers
         for handler in handlers.iter_mut() {
             handler.start(tx.clone()).await?;
         }
@@ -188,7 +168,7 @@ impl ActorRuntime {
     }
 
     pub async fn shutdown(&mut self) -> Result<()> {
-        // Stop all interfaces
+        // Stop all handlers
         for handler in self.handlers.iter_mut() {
             handler.stop().await?;
         }
