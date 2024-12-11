@@ -77,9 +77,10 @@ impl HostHandler for HttpHandler {
     ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + '_>> {
         Box::pin(async move {
             let mut app = Server::with_state(mailbox);
-            //        app.at("/").post(handle_http_request);
+            //app.at("/").post(handle_http_request);
             // just for testing, return hello world
-            app.at("/").get(|_| async { Ok("Hello, world!") });
+            //app.at("/").get(|_| async { Ok("Hello, world!") });
+            app.at("/").get(HttpHost::handle_request);
             app.listen(format!("127.0.0.1:{}", self.port)).await?;
             Ok(())
         })

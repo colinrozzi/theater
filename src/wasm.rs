@@ -50,10 +50,10 @@ impl WasmActor {
             exports: HashMap::new(),
         };
 
-        // Always add base capability
-        actor.add_capability(Box::new(BaseActorCapability))?;
+        if config.interface() == "ntwk:simple-actor/actor" {
+            actor.add_capability(Box::new(BaseActorCapability))?;
+        }
 
-        // Add HTTP if specified
         if config.implements_interface("ntwk:simple-http-actor/http-actor") {
             actor.add_capability(Box::new(HttpCapability))?;
         }

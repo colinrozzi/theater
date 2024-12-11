@@ -146,6 +146,8 @@ impl ActorRuntime {
 
         // Initialize handlers based on config
         let mut handlers: Vec<Box<dyn HostHandler>> = Vec::new();
+        println!("Initializing handlers...");
+        println!("{:?}", config.handlers);
         for handler_config in &config.handlers {
             match handler_config {
                 HandlerConfig::Http(http_config) => {
@@ -181,4 +183,3 @@ impl ActorRuntime {
         Ok(())
     }
 }
-

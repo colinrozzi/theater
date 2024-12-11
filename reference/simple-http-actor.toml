@@ -1,4 +1,4 @@
-name = ""
+name = "first http actor"
 version = "0.1.0"
 description = "Sample actor for testing http host system capabilities"
 
@@ -8,10 +8,7 @@ component_path = "/Users/colinrozzi/work/experimenting/3/actors/first-http-actor
 implements = "ntwk:simple-http-actor/http-actor"
 requires = []
 
-[capabilities.host]
-http = { addr = "127.0.0.1:8080" }
-
-[capabilities.actors]
-
-[config]
+[[handlers]]
+type = "Http"
+config = { port = 8080 }
 
