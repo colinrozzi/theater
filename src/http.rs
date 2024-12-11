@@ -1,64 +1,77 @@
-use anyhow::Result;
+use anyhow::{anyhow, Result};
+use reqwest::Client;
 use serde_json::Value;
 use std::future::Future;
 use std::pin::Pin;
 use tide::{Body, Request, Response, Server};
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::mpsc;
 
 use crate::{ActorInput, ActorMessage, ActorOutput, HostHandler};
 
+// HTTP interface for actor-to-actor communication
 pub struct HttpHost {
+    client: Client,
     port: u16,
-    mailbox_tx: Option<mpsc::Sender<ActorMessage>>,
+    mailbox_tx: mpsc::Sender<ActorMessage>,
 }
 
 impl HttpHost {
-    pub fn new(port: u16) -> Self {
+    pub fn new(port: u16, mailbox_tx: mpsc::Sender<ActorMessage>) -> Self {
         Self {
+            client: Client::new(),
             port,
-            mailbox_tx: None,
+            mailbox_tx,
         }
     }
 
+    // Send a message to another actor
+    pub async fn send_message(&self, address: String, message: Value) -> Result<()> {
+        // Fire and forget POST request
+        self.client
+            .post(address)
+            .json(&message)
+            .send()
+            .await
+            .map_err(|e| anyhow!("Failed to send message: {}", e))?;
+
+        Ok(())
+    }
+
+    // Handle incoming message
     async fn handle_request(mut req: Request<mpsc::Sender<ActorMessage>>) -> tide::Result {
-        // Get JSON payload
-        let payload: Value = req.body_json().await?;
+        match req.method() {
+            tide::http::Method::Post => {
+                // Get JSON payload
+                let payload: Value = req.body_json().await?;
 
-        // Create response channel
-        let (tx, rx) = oneshot::channel();
+                // Create message with no response channel
+                let msg = ActorMessage {
+                    content: ActorInput::Message(payload),
+                    response_channel: None, // One-way message
+                };
 
-        // Send message to actor
-        let msg = ActorMessage {
-            content: ActorInput::Message(payload),
-            response_channel: Some(tx),
-        };
+                // Send to actor
+                req.state()
+                    .send(msg)
+                    .await
+                    .map_err(|_| tide::Error::from_str(500, "Failed to forward message"))?;
 
-        req.state()
-            .send(msg)
-            .await
-            .map_err(|_| tide::Error::from_str(500, "Failed to send message"))?;
-
-        // Wait for response with timeout
-        let response = tokio::time::timeout(std::time::Duration::from_secs(30), rx)
-            .await
-            .map_err(|_| tide::Error::from_str(408, "Request timeout"))?
-            .map_err(|_| tide::Error::from_str(500, "Failed to receive response"))?;
-
-        match response {
-            ActorOutput::Message(value) => {
-                let mut res = Response::new(200);
-                res.set_body(Body::from_json(&value)?);
-                Ok(res)
+                // Simple OK response
+                Ok(Response::new(200))
             }
-            ActorOutput::HttpResponse { .. } => {
-                Err(tide::Error::from_str(500, "Invalid response type"))
-            }
+            _ => Ok(Response::new(405)), // Method Not Allowed
         }
     }
 }
 
 pub struct HttpHandler {
     port: u16,
+}
+
+impl HttpHandler {
+    pub fn new(port: u16) -> Self {
+        Self { port }
+    }
 }
 
 impl HostHandler for HttpHandler {
@@ -73,14 +86,11 @@ impl HostHandler for HttpHandler {
 
     fn start(
         &self,
-        mailbox: mpsc::Sender<ActorMessage>,
+        mailbox_tx: mpsc::Sender<ActorMessage>,
     ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + '_>> {
         Box::pin(async move {
-            let mut app = Server::with_state(mailbox);
-            //app.at("/").post(handle_http_request);
-            // just for testing, return hello world
-            //app.at("/").get(|_| async { Ok("Hello, world!") });
-            app.at("/").get(HttpHost::handle_request);
+            let mut app = Server::with_state(mailbox_tx);
+            app.at("/").post(HttpHost::handle_request);
             app.listen(format!("127.0.0.1:{}", self.port)).await?;
             Ok(())
         })
@@ -88,7 +98,7 @@ impl HostHandler for HttpHandler {
 
     fn stop(&self) -> Pin<Box<dyn Future<Output = Result<()>> + Send>> {
         Box::pin(async move {
-            // Shutdown logic
+            // Basic shutdown - the server will stop when dropped
             Ok(())
         })
     }

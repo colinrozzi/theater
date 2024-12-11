@@ -151,7 +151,7 @@ impl ActorRuntime {
         for handler_config in &config.handlers {
             match handler_config {
                 HandlerConfig::Http(http_config) => {
-                    let handler = http::HttpHandler::new(serde_json::to_value(http_config)?);
+                    let handler = http::HttpHandler::new(http_config.port);
                     handlers.push(Box::new(handler));
                 }
             }

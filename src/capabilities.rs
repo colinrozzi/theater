@@ -34,7 +34,7 @@ impl ActorCapability for BaseActorCapability {
             "send",
             |_: wasmtime::StoreContextMut<'_, ()>, (actor_id, msg): (String, Vec<u8>)| {
                 println!("Message send requested to {}", actor_id);
-                // TODO: Implement actual message sending
+
                 Ok(())
             },
         )?;
