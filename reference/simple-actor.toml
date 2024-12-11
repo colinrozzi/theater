@@ -8,8 +8,7 @@ component_path = "/Users/colinrozzi/work/experimenting/3/actors/actor4/target/wa
 implements = "ntwk:simple-actor/actor"
 requires = []
 
-[capabilities.host]
+[[handlers]]
+type = "Http"
+config = { port = 8080 }
 
-[capabilities.actors]
-
-[config]
