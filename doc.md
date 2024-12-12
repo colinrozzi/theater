@@ -1,4 +1,4 @@
-# Runtime V2
+# Theater
 
 ## Overview
 Runtime V2 is a redesigned actor system that enables state management, verification, and flexible interaction patterns for WebAssembly components. The system is built around a core concept: actors that maintain verifiable state and can interact with the outside world in various ways.

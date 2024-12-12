@@ -17,8 +17,8 @@ A WebAssembly actor system that enables state management, verification, and flex
 1. Install Rust and cargo
 2. Clone the repository:
 ```bash
-git clone https://github.com/colinrozzi/runtime_v2.git
-cd runtime_v2
+git clone https://github.com/colinrozzi/theater.git
+cd theater
 ```
 
 3. Build the project:
