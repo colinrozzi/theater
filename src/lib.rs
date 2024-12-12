@@ -124,8 +124,8 @@ pub trait HostHandler: Send + Sync {
 
 pub struct ActorRuntime {
     pub config: ManifestConfig,
-    handlers: Vec<Box<dyn HostHandler>>,
     process_handle: Option<tokio::task::JoinHandle<()>>,
+    handler_tasks: Vec<tokio::task::JoinHandle<()>>,
 }
 
 impl ActorRuntime {
@@ -167,69 +167,57 @@ impl ActorRuntime {
         });
 
         println!("Parsed config: {:#?}", config);
-        let mut handlers: Vec<Box<dyn HostHandler>> = Vec::new();
+        let mut handler_tasks = Vec::new();
         println!("Initializing handlers...");
         println!("{:?}", config.handlers);
         for handler_config in &config.handlers {
-            match handler_config {
-                HandlerConfig::Http(http_config) => {
-                    println!("[RUNTIME] Creating Http handler...");
-                    let handler = http::HttpHandler::new(http_config.port);
-                    handlers.push(Box::new(handler));
+            let tx = tx.clone();
+            let handler_config = handler_config.clone();
+            let task = tokio::spawn(async move {
+                let handler: Box<dyn HostHandler> = match handler_config {
+                    HandlerConfig::Http(http_config) => {
+                        println!("[RUNTIME] Creating Http handler...");
+                        Box::new(http::HttpHandler::new(http_config.port))
+                    }
+                    HandlerConfig::HttpServer(http_config) => {
+                        println!("[RUNTIME] Creating Http-server handler...");
+                        Box::new(http_server::HttpServerHandler::new(http_config.port))
+                    }
+                };
+
+                let handler_name = handler.name().to_string();
+                println!("[RUNTIME] Starting handler: {}", handler_name);
+
+                let start_future = handler.start(tx.clone());
+                match start_future.await {
+                    Ok(_) => {
+                        println!("[RUNTIME] Handler {} started successfully", handler_name);
+                    }
+                    Err(e) => {
+                        eprintln!("[RUNTIME] Handler {} failed to start: {}", handler_name, e);
+                    }
                 }
-                HandlerConfig::HttpServer(http_config) => {
-                    println!("[RUNTIME] Creating Http-server handler...");
-                    let handler = http_server::HttpServerHandler::new(http_config.port);
-                    handlers.push(Box::new(handler));
-                }
-            }
+            });
+
+            handler_tasks.push(task);
         }
 
-        // Start all handlers
-        println!("[RUNTIME] Starting {} handlers...", handlers.len());
-        println!(
-            "[RUNTIME] Handlers to start: {}",
-            handlers
-                .iter()
-                .map(|h| h.name())
-                .collect::<Vec<_>>()
-                .join(", ")
-        );
-        for (idx, handler) in handlers.iter_mut().enumerate() {
-            let handler_name = handler.name();
-            println!("[RUNTIME] Processing handler '{}'", handler_name);
-            //println!("[RUNTIME] Starting handler {} of {}", idx + 1, handlers.len());
-            match handler.start(tx.clone()).await {
-                Ok(_) => {
-                    println!("[RUNTIME] Successfully started '{}' handler", handler_name);
-                    println!("[RUNTIME] Moving to next handler...");
-                }
-                Err(e) => {
-                    println!("[RUNTIME] Error starting '{}' handler: {}", handler_name, e);
-                    return Err(anyhow::anyhow!(
-                        "Failed to start handler '{}': {}",
-                        handler_name,
-                        e
-                    ));
-                }
-            }
-        }
         println!(
             "[RUNTIME] All {} handlers started successfully",
-            handlers.len()
+            handler_tasks.len()
         );
 
         Ok(Self {
             config,
-            handlers,
             process_handle: Some(process_handle),
+            handler_tasks,
         })
     }
 
     pub async fn shutdown(&mut self) -> Result<()> {
         // Stop all handlers
-        for handler in self.handlers.iter_mut() {
-            handler.stop().await?;
+        for task in self.handler_tasks.drain(..) {
+            task.abort();
         }
 
         // Cancel actor process
