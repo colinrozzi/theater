@@ -69,10 +69,6 @@ The project uses:
 - tokio for async runtime
 - tide for HTTP
 
-## License
-
-[Add your license information here]
-
 ## Contributing
 
 Contributions are welcome! Please feel free to submit a Pull Request.
