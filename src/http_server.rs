@@ -2,6 +2,7 @@ use anyhow::{anyhow, Result};
 use serde_json::Value;
 use std::future::Future;
 use std::pin::Pin;
+use tide::listener::Listener;
 use tide::{Body, Request, Response, Server};
 use tokio::sync::{mpsc, oneshot};
 
@@ -28,17 +29,20 @@ impl HttpServerHost {
         // Create a channel for receiving the response
         let (response_tx, response_rx) = oneshot::channel();
 
-        // Serialize the HTTP request into the format expected by the actor
-        let request_json = serde_json::json!({
-            "method": req.method().to_string(),
-            "path": req.url().path(),
-            "headers": req.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect::<Vec<_>>(),
-            "body": String::from_utf8(req.body_bytes().await?.to_vec()).unwrap_or_default()
-        });
+        // Get the body bytes
+        let body_bytes = req.body_bytes().await?.to_vec();
 
         // Create actor message with response channel
         let msg = ActorMessage {
-            content: ActorInput::Message(request_json),
+            content: ActorInput::HttpRequest {
+                method: req.method().to_string(),
+                uri: req.url().path().to_string(),
+                headers: req
+                    .iter()
+                    .map(|(k, v)| (k.to_string(), v.to_string()))
+                    .collect(),
+                body: Some(body_bytes),
+            },
             response_channel: Some(response_tx),
         };
 
@@ -54,44 +58,32 @@ impl HttpServerHost {
             .await
             .map_err(|_| tide::Error::from_str(500, "Failed to receive response from actor"))?;
 
+        println!("[HTTP_SERVER] Received response from actor");
+        println!("[HTTP_SERVER] Actor response: {:?}", actor_response);
+
         // Parse actor response
         match actor_response {
-            ActorOutput::Message(value) => {
-                // The response should be a JSON object with "response" and "state" fields
-                let response_obj = value
-                    .get("response")
-                    .ok_or_else(|| tide::Error::from_str(500, "Invalid response format"))?;
-
-                // Extract HTTP response components
-                let status = response_obj
-                    .get("status")
-                    .and_then(|s| s.as_u64())
-                    .unwrap_or(200) as u16;
-
-                let headers = response_obj.get("headers").and_then(|h| h.as_object());
-
-                let body = response_obj
-                    .get("body")
-                    .and_then(|b| b.as_str())
-                    .unwrap_or_default();
-
-                // Build response
+            ActorOutput::HttpResponse {
+                status,
+                headers,
+                body,
+            } => {
                 let mut response = Response::new(status);
-                headers.map(|h| {
-                    for (key, value) in h {
-                        if let Some(value_str) = value.as_str() {
-                            response.insert_header(key.as_str(), value_str);
-                        }
-                    }
-                });
-                /*
-                                for (key, value) in headers {
-                                    if let Some(value_str) = value.as_str() {
-                                        response.insert_header(key, value_str);
-                                    }
-                                }
-                */
-                response.set_body(body);
+
+                println!("[HTTP_SERVER] Setting status code: {}", status);
+
+                println!("[HTTP_SERVER] Headers: {:?}", headers);
+                // Add headers
+                for (key, value) in headers {
+                    println!("[HTTP_SERVER] Adding header: {}: {}", key, value);
+                    response.append_header(key.as_str(), value.as_str());
+                }
+
+                // Set body if present
+                if let Some(body_bytes) = body {
+                    println!("[HTTP_SERVER] Setting body");
+                    response.set_body(Body::from_bytes(body_bytes));
+                }
 
                 Ok(response)
             }
@@ -138,36 +130,15 @@ impl HostHandler for HttpServerHandler {
             let state = HttpServerHost::new(self.port, mailbox_tx);
             let mut app = Server::with_state(state);
             app.at("/*").all(HttpServerHost::handle_request);
+            app.at("/").all(HttpServerHost::handle_request);
             println!("[HTTP_SERVER] Setting up routes on /*");
 
-            // Create a channel to signal when we're bound
-            let (tx, rx) = tokio::sync::oneshot::channel();
+            // First bind the server
+            let mut listener = app.bind(format!("127.0.0.1:{}", self.port)).await?;
+            println!("[HTTP_SERVER] Successfully bound to port {}", self.port);
 
-            // Spawn the server in a separate task
-            let server_port = self.port;
-            tokio::spawn(async move {
-                match app.listen(format!("127.0.0.1:{}", server_port)).await {
-                    Ok(_) => {
-                        println!("[HTTP_SERVER] Successfully bound to port {}", server_port);
-                        let _ = tx.send(Ok(()));
-                    }
-                    Err(e) => {
-                        println!(
-                            "[HTTP_SERVER] Failed to bind to port {}: {}",
-                            server_port, e
-                        );
-                        let _ = tx.send(Err(anyhow!("Failed to bind HTTP server: {}", e)));
-                    }
-                }
-            });
-
-            // Wait for server to bind
-            rx.await
-                .map_err(|e| anyhow!("Server startup failed: {}", e))?
-                .map_err(|e| e)?;
-
-            // Keep this task alive
-            std::future::pending::<()>().await;
+            // Then start accepting connections
+            listener.accept().await?;
 
             Ok(())
         })

@@ -179,29 +179,34 @@ impl Actor for WasmActor {
                 let response: Value = serde_json::from_slice(&result)?;
                 let new_state = response["state"].clone();
                 let http_response = response["response"].clone();
+                println!("HTTP Response: {}", http_response);
+
+                // HTTP Response: {"body":"<!DOCTYPE html>\n<html>\n<head>\n    <title>Simple Frontend</title>\n</head>\n<body>\n    <h1>Hello from the Frontend Actor!</h1>\n    <p>This is a simple HTML page served by our WebAssembly actor.</p>\n</body>\n</html>","headers":{"Content-Type":"text/html"},"status":200}
 
                 let status = http_response["status"].as_u64().unwrap_or(500) as u16;
-                let headers = http_response["headers"]["fields"]
-                    .as_array()
-                    .map(|arr| {
-                        arr.iter()
-                            .filter_map(|v| {
-                                let pair = v.as_array()?;
-                                Some((pair[0].as_str()?.to_string(), pair[1].as_str()?.to_string()))
-                            })
+                println!("HTTP Status: {}", status);
+
+                let headers = http_response["headers"]
+                    .as_object()
+                    .map(|obj| {
+                        obj.iter()
+                            .map(|(k, v)| (k.to_string(), v.as_str().unwrap_or("").to_string()))
                             .collect()
                     })
                     .unwrap_or_default();
+                println!("HTTP Headers: {:?}", headers);
 
                 let body = http_response["body"]
-                    .as_array()
-                    .map(|arr| arr.iter().map(|v| v.as_u64().unwrap_or(0) as u8).collect());
+                    .as_str()
+                    .map(|s| s.as_bytes().to_vec())
+                    .unwrap_or_default();
+                println!("HTTP Body: {:?}", body);
 
                 Ok((
                     ActorOutput::HttpResponse {
                         status,
                         headers,
-                        body,
+                        body: Some(body),
                     },
                     new_state,
                 ))
