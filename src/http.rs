@@ -10,6 +10,7 @@ use crate::{ActorInput, ActorMessage, HostHandler};
 
 // HTTP interface for actor-to-actor communication
 #[derive(Clone)]
+#[allow(dead_code)]
 pub struct HttpHost {
     client: Client,
     port: u16,

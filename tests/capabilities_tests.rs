@@ -7,7 +7,7 @@ use wasmtime::component::{Component, Linker};
 fn test_base_actor_capability() -> Result<()> {
     let engine = Engine::default();
     let mut linker = Linker::<theater::Store>::new(&engine);
-    let mut store = Store::new(&engine, theater::Store::new());
+    let store = Store::new(&engine, theater::Store::new());
     
     let capability = BaseActorCapability;
     capability.setup_host_functions(&mut linker)?;
@@ -43,9 +43,14 @@ fn test_log_host_function() -> Result<()> {
     // Create a simple component that calls log
     let component = Component::new(&engine, r#"
         (component
-            (import "ntwk:simple-actor/runtime" (func "log" (param "msg" string)))
-            (core func $log_test (call-import "log" "Test message"))
-            (export "log_test" (func $log_test))
+            (core module $m
+                (import "ntwk:simple-actor/runtime" "log" (func $log (param i32 i32)))
+                (func $log_test (export "log_test")
+                    (call $log (i32.const 0) (i32.const 0))
+                )
+            )
+            (core instance $i (instantiate $m))
+            (func (export "log_test") (call $i "log_test"))
         )
     "#.as_bytes())?;
     
@@ -71,10 +76,17 @@ fn test_send_host_function() -> Result<()> {
     // Create a component that calls send
     let component = Component::new(&engine, r#"
         (component
-            (import "ntwk:simple-actor/runtime" (func "send" (param "actor-id" string) (param "msg" (list u8))))
-            (core func $send_test
-                (call-import "send" "test-actor" (list u8 1 2 3)))
-            (export "send_test" (func $send_test))
+            (core module $m
+                (import "ntwk:simple-actor/runtime" "send" (func $send (param i32 i32) (param i32 i32)))
+                (func $send_test (export "send_test")
+                    (call $send
+                        (i32.const 0) (i32.const 0)  ;; actor-id
+                        (i32.const 0) (i32.const 0)  ;; msg
+                    )
+                )
+            )
+            (core instance $i (instantiate $m))
+            (func (export "send_test") (call $i "send_test"))
         )
     "#.as_bytes())?;
     
