@@ -116,7 +116,10 @@ impl HostHandler for HttpServerHandler {
     }
 
     fn new(config: Value) -> Self {
-        println!("[HTTP_SERVER] Creating new handler with config: {:?}", config);
+        println!(
+            "[HTTP_SERVER] Creating new handler with config: {:?}",
+            config
+        );
         let port = config.get("port").unwrap().as_u64().unwrap() as u16;
         println!("[HTTP_SERVER] Configured for port {}", port);
         Self { port }
@@ -136,17 +139,36 @@ impl HostHandler for HttpServerHandler {
             let mut app = Server::with_state(state);
             app.at("/*").all(HttpServerHost::handle_request);
             println!("[HTTP_SERVER] Setting up routes on /*");
-            match app.listen(format!("127.0.0.1:{}", self.port)).await {
-                Ok(_) => {
-                    println!("[HTTP_SERVER] Successfully bound to port {}", self.port);
-                    Ok(())
+
+            // Create a channel to signal when we're bound
+            let (tx, rx) = tokio::sync::oneshot::channel();
+
+            // Spawn the server in a separate task
+            let server_port = self.port;
+            tokio::spawn(async move {
+                match app.listen(format!("127.0.0.1:{}", server_port)).await {
+                    Ok(_) => {
+                        println!("[HTTP_SERVER] Successfully bound to port {}", server_port);
+                        let _ = tx.send(Ok(()));
+                    }
+                    Err(e) => {
+                        println!(
+                            "[HTTP_SERVER] Failed to bind to port {}: {}",
+                            server_port, e
+                        );
+                        let _ = tx.send(Err(anyhow!("Failed to bind HTTP server: {}", e)));
+                    }
                 }
-                Err(e) => {
-                    println!("[HTTP_SERVER] Failed to bind to port {}: {}", self.port, e);
-                    Err(anyhow!("Failed to bind HTTP server: {}", e))
-                }
-            }
-            .map_err(|e| anyhow!("Failed to start HTTP server: {}", e))?;
+            });
+
+            // Wait for server to bind
+            rx.await
+                .map_err(|e| anyhow!("Server startup failed: {}", e))?
+                .map_err(|e| e)?;
+
+            // Keep this task alive
+            std::future::pending::<()>().await;
+
             Ok(())
         })
     }
