@@ -1,6 +1,6 @@
 use anyhow::Result;
 use serde_json::Value;
-use wasmtime::component::{Component, ComponentExportIndex, Linker};
+use wasmtime::{Engine, component::{Component, ComponentExportIndex, Linker}};
 
 use crate::store::Store;
 
@@ -16,7 +16,8 @@ pub trait ActorCapability: Send {
     fn interface_name(&self) -> &str;
     
     #[cfg(test)]
-    fn create_test_component(engine: &Engine) -> Result<Component> {
+    fn create_test_component(engine: &Engine) -> Result<Component> 
+    where Self: Sized {
         Component::new(engine, r#"
             (component
                 (export "init" (func))
