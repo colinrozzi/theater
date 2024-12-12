@@ -19,13 +19,7 @@ impl Store {
     }
 
     pub fn with_http(port: u16, mailbox_tx: mpsc::Sender<crate::ActorMessage>) -> Self {
-        log_system_event(SystemEvent {
-            timestamp: Utc::now(),
-            event_type: SystemEventType::Store,
-            component: "Store".to_string(),
-            message: format!("Initializing store with HTTP on port {}", port),
-            related_hash: None,
-        });
+        info!("[STORE] Initializing store with HTTP on port {}", port);
         Self {
             http: Some(HttpHost::new(mailbox_tx)),
             http_server: None,
@@ -37,16 +31,10 @@ impl Store {
         http_server_port: u16,
         mailbox_tx: mpsc::Sender<crate::ActorMessage>,
     ) -> Self {
-        log_system_event(SystemEvent {
-            timestamp: Utc::now(),
-            event_type: SystemEventType::Store,
-            component: "Store".to_string(),
-            message: format!(
-                "Initializing store with HTTP on port {} and HTTP server on port {}",
-                http_port, http_server_port
-            ),
-            related_hash: None,
-        });
+        info!(
+            "[STORE] Initializing store with HTTP on port {} and HTTP server on port {}",
+            http_port, http_server_port
+        );
         Self {
             http: Some(HttpHost::new(mailbox_tx.clone())),
             http_server: Some(HttpHost::new(mailbox_tx)),

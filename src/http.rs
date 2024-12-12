@@ -30,13 +30,7 @@ impl HttpHost {
 
     // Send a message to another actor
     pub async fn send_message(&self, address: String, message: Value) -> Result<()> {
-        log_system_event(SystemEvent {
-            timestamp: Utc::now(),
-            event_type: SystemEventType::Http,
-            component: "HttpHost".to_string(),
-            message: format!("Sending message to {}", address),
-            related_hash: None,
-        });
+        info!("[HTTP] Sending message to {}", address);
         // Fire and forget POST request
         self.client
             .post(address)
@@ -55,13 +49,7 @@ impl HttpHost {
                 // Get JSON payload
                 let payload: Value = req.body_json().await?;
 
-                log_system_event(SystemEvent {
-                    timestamp: Utc::now(),
-                    event_type: SystemEventType::Http,
-                    component: "HttpHost".to_string(),
-                    message: "Received message".to_string(),
-                    related_hash: None,
-                });
+                info!("[HTTP] Received message");
 
                 // Create message with no response channel
                 let msg = ActorMessage {
@@ -116,33 +104,15 @@ impl HostHandler for HttpHandler {
             tokio::spawn(async move {
                 match app.listen(format!("127.0.0.1:{}", server_port)).await {
                     Ok(_) => {
-                        log_system_event(SystemEvent {
-                            timestamp: Utc::now(),
-                            event_type: SystemEventType::Http,
-                            component: "HttpHandler".to_string(),
-                            message: "HTTP server exited".to_string(),
-                            related_hash: None,
-                        });
+                        info!("[HTTP] HTTP server exited");
                     }
                     Err(e) => {
-                        log_system_event(SystemEvent {
-                            timestamp: Utc::now(),
-                            event_type: SystemEventType::Error,
-                            component: "HttpHandler".to_string(),
-                            message: format!("HTTP server failed: {}", e),
-                            related_hash: None,
-                        });
+                        error!("[HTTP] HTTP server failed: {}", e);
                     }
                 }
             });
 
-            log_system_event(SystemEvent {
-                timestamp: Utc::now(),
-                event_type: SystemEventType::Http,
-                component: "HttpHandler".to_string(),
-                message: "HTTP server started".to_string(),
-                related_hash: None,
-            });
+            info!("[HTTP] HTTP server started");
 
             // Keep this task alive
             std::future::pending::<()>().await;
