@@ -1,6 +1,6 @@
 use anyhow::Result;
 use clap::Parser;
-use runtime_v2::ActorRuntime;
+use theater::ActorRuntime;
 use std::path::PathBuf;
 
 #[derive(Parser)]
