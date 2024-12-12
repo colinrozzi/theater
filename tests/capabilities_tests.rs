@@ -15,6 +15,7 @@ fn test_base_actor_capability() -> Result<()> {
     // Test that required exports are present
     let exports = capability.get_exports(&Component::new(&engine, r#"
         (component
+            (import "runtime" (instance $rt))
             (core module $m
                 (func $init (export "init"))
                 (func $handle (export "handle"))
@@ -22,10 +23,12 @@ fn test_base_actor_capability() -> Result<()> {
                 (func $message_contract (export "message-contract"))
             )
             (core instance $i (instantiate $m))
-            (func (export "init") (canon lift (core func $i "init")))
-            (func (export "handle") (canon lift (core func $i "handle")))
-            (func (export "state-contract") (canon lift (core func $i "state-contract")))
-            (func (export "message-contract") (canon lift (core func $i "message-contract")))
+            (instance (export "actor")
+                (func (export "init") (canon lift (core func $i "init")))
+                (func (export "handle") (canon lift (core func $i "handle")))
+                (func (export "state-contract") (canon lift (core func $i "state-contract")))
+                (func (export "message-contract") (canon lift (core func $i "message-contract")))
+            )
         )
     "#.as_bytes())?)?;
     
@@ -50,7 +53,7 @@ fn test_log_host_function() -> Result<()> {
     // Create a simple component that calls log
     let component = Component::new(&engine, r#"
         (component
-            (import "ntwk:simple-actor/runtime" (instance $runtime
+            (import "runtime" (instance $rt
                 (export "log" (func (param "msg" string)))
             ))
             (core module $m
@@ -61,7 +64,7 @@ fn test_log_host_function() -> Result<()> {
             )
             (core instance $i (instantiate $m
                 (with "" (instance 
-                    (export "log" (func $runtime "log"))
+                    (export "log" (func $rt "log"))
                 ))
             ))
             (func (export "log_test") (canon lift (core func $i "log_test")))
@@ -90,8 +93,8 @@ fn test_send_host_function() -> Result<()> {
     // Create a component that calls send
     let component = Component::new(&engine, r#"
         (component
-            (import "ntwk:simple-actor/runtime" (instance $runtime
-                (export "send" (func (param "address" string) (param "msg" list u8)))
+            (import "runtime" (instance $rt
+                (export "send" (func (param "address" string) (param "msg" string)))
             ))
             (core module $m
                 (import "" "send" (func $send (param i32 i32) (param i32 i32)))
@@ -104,7 +107,7 @@ fn test_send_host_function() -> Result<()> {
             )
             (core instance $i (instantiate $m
                 (with "" (instance
-                    (export "send" (func $runtime "send"))
+                    (export "send" (func $rt "send"))
                 ))
             ))
             (func (export "send_test") (canon lift (core func $i "send_test")))
