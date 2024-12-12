@@ -1,7 +1,25 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::fmt;
-use tracing::{debug, info};
+use tracing::{debug, info, warn, error};
+
+// System event types beyond chain events
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum SystemEventType {
+    Runtime,
+    Http,
+    Actor,
+    Error,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SystemEvent {
+    pub timestamp: DateTime<Utc>,
+    pub event_type: SystemEventType,
+    pub component: String,
+    pub message: String,
+    pub related_hash: Option<String>,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChainEvent {
@@ -38,4 +56,22 @@ impl fmt::Display for ChainEvent {
 pub fn log_chain_event(event: &ChainEvent) {
     info!("\n{}", event);
     debug!("Chain event logged: #{}", event.hash);
+}
+
+pub fn log_system_event(event: SystemEvent) {
+    let prefix = match event.event_type {
+        SystemEventType::Runtime => "RUNTIME",
+        SystemEventType::Http => "HTTP",
+        SystemEventType::Actor => "ACTOR",
+        SystemEventType::Error => "ERROR",
+    };
+    
+    let hash_info = event.related_hash
+        .map(|h| format!(" (chain: #{})", h))
+        .unwrap_or_default();
+    
+    match event.event_type {
+        SystemEventType::Error => error!("[{}] {} - {}{}", prefix, event.component, event.message, hash_info),
+        _ => info!("[{}] {} - {}{}", prefix, event.component, event.message, hash_info)
+    }
 }

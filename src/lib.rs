@@ -137,7 +137,7 @@ impl ActorRuntime {
         let config = ManifestConfig::from_file(&manifest_path)?;
 
         // Initialize logging
-        let subscriber = FmtSubscriber::builder()
+        let _ = FmtSubscriber::builder()
             .with_env_filter(EnvFilter::new(
                 config.logging.level.clone()
             ))

@@ -17,7 +17,13 @@ async fn main() -> Result<()> {
     let args = Args::parse();
 
     // Create and initialize the runtime
-    println!("Creating actor runtime...");
+    log_system_event(SystemEvent {
+        timestamp: Utc::now(),
+        event_type: SystemEventType::Runtime,
+        component: "Init".to_string(),
+        message: "Creating actor runtime".to_string(),
+        related_hash: None,
+    });
     let mut runtime = ActorRuntime::from_file(args.manifest).await?;
 
     println!("Actor '{}' initialized successfully!", runtime.config.name);
