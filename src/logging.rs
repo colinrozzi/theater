@@ -1,7 +1,7 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::fmt;
-use tracing::{debug, info, warn, error};
+use tracing::{debug, info, error};
 
 // System event types beyond chain events
 #[derive(Debug, Clone, Serialize, Deserialize)]

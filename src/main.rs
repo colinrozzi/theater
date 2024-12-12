@@ -1,6 +1,8 @@
 use anyhow::Result;
+use chrono::Utc;
 use clap::Parser;
 use theater::ActorRuntime;
+use theater::logging::{SystemEvent, SystemEventType, log_system_event};
 use std::path::PathBuf;
 
 #[derive(Parser)]
