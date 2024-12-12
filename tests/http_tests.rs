@@ -2,7 +2,7 @@ use anyhow::Result;
 use pretty_assertions::assert_eq;
 use serde_json::json;
 use std::time::Duration;
-use theater::{ActorInput, ActorMessage};
+use theater::{ActorInput, ActorMessage, HostHandler};
 use theater::http::{HttpHandler, HttpHost};
 use theater::http_server::HttpServerHandler;
 use tokio::sync::{mpsc, oneshot};
@@ -13,7 +13,8 @@ async fn test_http_handler_creation() -> Result<()> {
         "port": 8080
     });
     
-    let handler = HttpHandler::new(config);
+    let port = config["port"].as_u64().unwrap() as u16;
+    let handler = HttpHandler::new(port);
     assert_eq!(handler.name(), "http");
     
     Ok(())
@@ -40,7 +41,8 @@ async fn test_http_server_handler_creation() -> Result<()> {
         "port": 8081
     });
     
-    let handler = HttpServerHandler::new(config);
+    let port = config["port"].as_u64().unwrap() as u16;
+    let handler = HttpServerHandler::new(port);
     assert_eq!(handler.name(), "Http-server");
     
     Ok(())
@@ -79,7 +81,8 @@ async fn test_http_server_request_handling() -> Result<()> {
 
 #[tokio::test]
 async fn test_http_handler_start_stop() -> Result<()> {
-    let handler = HttpHandler::new(json!({"port": 8082}));
+    let port = json!({"port": 8082})["port"].as_u64().unwrap() as u16;
+    let handler = HttpHandler::new(port);
     let (tx, _rx) = mpsc::channel(32);
     
     // Start handler
