@@ -7,7 +7,7 @@ use wasmtime::component::{Component, Linker};
 fn get_test_wasm_path() -> PathBuf {
     let mut path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     path.push("examples/actors/simple-actor-sample/target/wasm32-unknown-unknown/release");
-    path.push("simple-actor-sample.wasm");
+    path.push("simple_actor_sample.wasm");
     path
 }
 
