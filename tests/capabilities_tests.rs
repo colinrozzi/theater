@@ -22,10 +22,10 @@ fn test_base_actor_capability() -> Result<()> {
                 (func $message_contract (export "message-contract"))
             )
             (core instance $i (instantiate $m))
-            (func (export "init") (call $i "init"))
-            (func (export "handle") (call $i "handle"))
-            (func (export "state-contract") (call $i "state-contract"))
-            (func (export "message-contract") (call $i "message-contract"))
+            (func (export "init") (canon lift (core func $i "init")))
+            (func (export "handle") (canon lift (core func $i "handle")))
+            (func (export "state-contract") (canon lift (core func $i "state-contract")))
+            (func (export "message-contract") (canon lift (core func $i "message-contract")))
         )
     "#.as_bytes())?)?;
     
@@ -50,13 +50,20 @@ fn test_log_host_function() -> Result<()> {
     // Create a simple component that calls log
     let component = Component::new(&engine, r#"
         (component
+            (import "ntwk:simple-actor/runtime" (instance $runtime
+                (export "log" (func (param "msg" string)))
+            ))
             (core module $m
-                (import "ntwk:simple-actor/runtime" "log" (func $log (param i32 i32)))
+                (import "" "log" (func $log (param i32 i32)))
                 (func $log_test (export "log_test")
                     (call $log (i32.const 0) (i32.const 0))
                 )
             )
-            (core instance $i (instantiate $m))
+            (core instance $i (instantiate $m
+                (with "" (instance 
+                    (export "log" (func $runtime "log"))
+                ))
+            ))
             (func (export "log_test") (canon lift (core func $i "log_test")))
         )
     "#.as_bytes())?;
@@ -83,8 +90,11 @@ fn test_send_host_function() -> Result<()> {
     // Create a component that calls send
     let component = Component::new(&engine, r#"
         (component
+            (import "ntwk:simple-actor/runtime" (instance $runtime
+                (export "send" (func (param "address" string) (param "msg" list u8)))
+            ))
             (core module $m
-                (import "ntwk:simple-actor/runtime" "send" (func $send (param i32 i32) (param i32 i32)))
+                (import "" "send" (func $send (param i32 i32) (param i32 i32)))
                 (func $send_test (export "send_test")
                     (call $send
                         (i32.const 0) (i32.const 0)  ;; actor-id
@@ -92,7 +102,11 @@ fn test_send_host_function() -> Result<()> {
                     )
                 )
             )
-            (core instance $i (instantiate $m))
+            (core instance $i (instantiate $m
+                (with "" (instance
+                    (export "send" (func $runtime "send"))
+                ))
+            ))
             (func (export "send_test") (canon lift (core func $i "send_test")))
         )
     "#.as_bytes())?;
