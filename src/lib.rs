@@ -7,8 +7,8 @@ use std::pin::Pin;
 use tokio::sync::{mpsc, oneshot};
 
 mod capabilities;
-mod chain;
-mod config;
+pub mod chain;
+pub mod config;
 mod http;
 mod http_server;
 mod store;
