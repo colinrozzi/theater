@@ -68,7 +68,7 @@ impl ActorCapability for BaseActorCapability {
         runtime.func_wrap(
             "log",
             |_: wasmtime::StoreContextMut<'_, Store>, (msg,): (String,)| {
-                println!("[WASM-LOG] {}", msg);
+                info!("[WASM] {}", msg);
                 Ok(())
             },
         )?;
