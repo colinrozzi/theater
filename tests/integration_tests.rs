@@ -18,7 +18,7 @@ fn test_simple_actor_component() -> Result<()> {
 
     let engine = Engine::default();
     let mut linker = Linker::<theater::Store>::new(&engine);
-    let store = Store::new(&engine, theater::Store::new());
+    let _store = Store::new(&engine, theater::Store::new());
     
     let capability = BaseActorCapability;
     capability.setup_host_functions(&mut linker)?;
