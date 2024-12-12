@@ -121,7 +121,7 @@ impl HostHandler for HttpServerHandler {
             self.port
         );
         Box::pin(async move {
-            let state = HttpServerHost::new(self.port, mailbox_tx);
+            let state = HttpServerHost::new(mailbox_tx);
             let mut app = Server::with_state(state);
             app.at("/*").all(HttpServerHost::handle_request);
             app.at("/").all(HttpServerHost::handle_request);
