@@ -6,6 +6,12 @@ edition = "2021"
 [dependencies]
 anyhow = "1.0"
 axum = "0.7"
+tokio-test = "0.4"
+
+[dev-dependencies]
+test-log = "0.2"
+pretty_assertions = "1.4"
+tempfile = "3.8"
 futures = "0.3"
 hyper = { version = "0.14", features = ["full"] }
 md5 = "0.7.0"
