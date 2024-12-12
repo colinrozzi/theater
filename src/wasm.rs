@@ -8,6 +8,7 @@ use wasmtime::Engine;
 
 use crate::capabilities::{ActorCapability, BaseActorCapability, HttpCapability};
 use crate::config::ManifestConfig;
+use crate::logging::{log_system_event, SystemEvent, SystemEventType};
 use crate::{Actor, ActorInput, ActorOutput, Store};
 
 #[derive(Error, Debug)]
@@ -142,12 +143,26 @@ impl Actor for WasmActor {
         match input {
             ActorInput::Message(msg) => {
                 let msg_bytes = serde_json::to_vec(&msg)?;
+                log_system_event(SystemEvent {
+                    timestamp: chrono::Utc::now(),
+                    event_type: SystemEventType::Actor,
+                    component: "WasmActor".to_string(),
+                    message: format!("Received message: {}", msg),
+                    related_hash: None,
+                });
                 let (result,) = self.call_func::<(Vec<u8>, Vec<u8>), (Vec<u8>,)>(
                     &mut store,
                     &instance,
                     "handle",
                     (msg_bytes, state_bytes),
                 )?;
+                log_system_event(SystemEvent {
+                    timestamp: chrono::Utc::now(),
+                    event_type: SystemEventType::Actor,
+                    component: "WasmActor".to_string(),
+                    message: format!("Actor response: {}", result.len()),
+                    related_hash: None,
+                });
                 let new_state: Value = serde_json::from_slice(&result)?;
                 Ok((ActorOutput::Message(msg), new_state))
             }
@@ -168,6 +183,13 @@ impl Actor for WasmActor {
                     "body": body,
                 });
 
+                log_system_event(SystemEvent {
+                    timestamp: chrono::Utc::now(),
+                    event_type: SystemEventType::Http,
+                    component: "WasmActor".to_string(),
+                    message: format!("Received HTTP request: {} {}", method, uri),
+                    related_hash: None,
+                });
                 let request_bytes = serde_json::to_vec(&request)?;
                 let (result,) = self.call_func::<(Vec<u8>, Vec<u8>), (Vec<u8>,)>(
                     &mut store,
@@ -177,14 +199,19 @@ impl Actor for WasmActor {
                 )?;
 
                 let response: Value = serde_json::from_slice(&result)?;
+                log_system_event(SystemEvent {
+                    timestamp: chrono::Utc::now(),
+                    event_type: SystemEventType::Http,
+                    component: "WasmActor".to_string(),
+                    message: format!("HTTP response: {:?}", response),
+                    related_hash: None,
+                });
                 let new_state = response["state"].clone();
                 let http_response = response["response"].clone();
-                println!("HTTP Response: {}", http_response);
 
                 // HTTP Response: {"body":"<!DOCTYPE html>\n<html>\n<head>\n    <title>Simple Frontend</title>\n</head>\n<body>\n    <h1>Hello from the Frontend Actor!</h1>\n    <p>This is a simple HTML page served by our WebAssembly actor.</p>\n</body>\n</html>","headers":{"Content-Type":"text/html"},"status":200}
 
                 let status = http_response["status"].as_u64().unwrap_or(500) as u16;
-                println!("HTTP Status: {}", status);
 
                 let headers = http_response["headers"]
                     .as_object()
@@ -194,13 +221,11 @@ impl Actor for WasmActor {
                             .collect()
                     })
                     .unwrap_or_default();
-                println!("HTTP Headers: {:?}", headers);
 
                 let body = http_response["body"]
                     .as_str()
                     .map(|s| s.as_bytes().to_vec())
                     .unwrap_or_default();
-                println!("HTTP Body: {:?}", body);
 
                 Ok((
                     ActorOutput::HttpResponse {
