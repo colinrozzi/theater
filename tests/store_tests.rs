@@ -7,7 +7,7 @@ use tokio::sync::mpsc;
 
 #[test]
 fn test_store_creation() {
-    let store = Store::new();
+    let _store = Store::new();
     assert!(store.http_port().is_none());
     assert!(store.http_server_port().is_none());
 }

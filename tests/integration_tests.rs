@@ -75,7 +75,7 @@ async fn test_wasm_actor_lifecycle() -> Result<()> {
 
     // Test message handling
     let test_message = json!({"action": "increment"});
-    let (output, new_state) =
+    let (_output, new_state) =
         actor.handle_input(ActorInput::Message(test_message.clone()), &initial_state)?;
 
     // Verify new state
@@ -93,7 +93,7 @@ async fn test_wasm_actor_http_handling() -> Result<()> {
     let initial_state = actor.init()?;
 
     // Test HTTP request handling
-    let (output, new_state) = actor.handle_input(
+    let (_output, new_state) = actor.handle_input(
         ActorInput::HttpRequest {
             method: "GET".to_string(),
             uri: "/".to_string(),

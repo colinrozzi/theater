@@ -1,6 +1,6 @@
 use anyhow::Result;
 use serde_json::json;
-use theater::{Actor, ActorProcess, ActorInput, ActorOutput, Store};
+use theater::{Actor, ActorProcess, ActorInput, ActorOutput, ActorMessage};
 use tokio::sync::mpsc;
 
 struct TestActor;
