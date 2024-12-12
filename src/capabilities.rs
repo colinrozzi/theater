@@ -20,13 +20,27 @@ pub trait ActorCapability: Send {
     where Self: Sized {
         Component::new(engine, r#"
             (component
+                (import "ntwk:simple-actor/runtime" (instance $runtime
+                    (export "log" (func (param "msg" string)))
+                    (export "send" (func (param "address" string) (param "msg" list u8)))
+                ))
+                
                 (core module $m
+                    (import "" "log" (func $host_log (param i32 i32)))
+                    (import "" "send" (func $host_send (param i32 i32 i32 i32)))
                     (func $init (export "init"))
                     (func $handle (export "handle"))
                     (func $state_contract (export "state-contract"))
                     (func $message_contract (export "message-contract"))
                 )
-                (core instance $i (instantiate $m))
+                
+                (core instance $i (instantiate $m
+                    (with "" (instance
+                        (export "log" (func $runtime "log"))
+                        (export "send" (func $runtime "send"))
+                    ))
+                ))
+                
                 (func (export "init") (canon lift (core func $i "init")))
                 (func (export "handle") (canon lift (core func $i "handle")))
                 (func (export "state-contract") (canon lift (core func $i "state-contract")))
