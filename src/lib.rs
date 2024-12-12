@@ -6,7 +6,7 @@ use std::pin::Pin;
 
 use tokio::sync::{mpsc, oneshot};
 
-mod capabilities;
+pub mod capabilities;
 pub mod chain;
 pub mod config;
 mod http;

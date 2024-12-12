@@ -1,7 +1,6 @@
 use anyhow::Result;
-use serde_json::json;
 use theater::capabilities::{ActorCapability, BaseActorCapability};
-use wasmtime::{Engine, Linker, Store};
+use wasmtime::{component::Component, Engine, Linker, Store};
 
 #[test]
 fn test_base_actor_capability() -> Result<()> {
