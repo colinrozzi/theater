@@ -7,7 +7,7 @@ use tokio::sync::mpsc;
 
 #[test]
 fn test_store_creation() {
-    let _store = Store::new();
+    let store = Store::new();
     assert!(store.http_port().is_none());
     assert!(store.http_server_port().is_none());
 }
@@ -31,7 +31,7 @@ fn test_store_with_both_http() {
 #[tokio::test]
 async fn test_store_message_sending() -> Result<()> {
     let (tx, mut rx) = mpsc::channel(32);
-    let store = Store::new();
+    let _store = Store::new();
     
     // Create test message
     let test_msg = ActorMessage {
