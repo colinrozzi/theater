@@ -3,10 +3,10 @@ use reqwest::Client;
 use serde_json::Value;
 use std::future::Future;
 use std::pin::Pin;
-use tide::{Body, Request, Response, Server};
+use tide::{Request, Response, Server};
 use tokio::sync::mpsc;
 
-use crate::{ActorInput, ActorMessage, ActorOutput, HostHandler};
+use crate::{ActorInput, ActorMessage, HostHandler};
 
 // HTTP interface for actor-to-actor communication
 #[derive(Clone)]
