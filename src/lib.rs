@@ -9,8 +9,8 @@ use tokio::sync::{mpsc, oneshot};
 pub mod capabilities;
 pub mod chain;
 pub mod config;
-mod http;
-mod http_server;
+pub mod http;
+pub mod http_server;
 mod store;
 mod wasm;
 

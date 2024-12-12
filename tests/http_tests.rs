@@ -2,7 +2,7 @@ use anyhow::Result;
 use pretty_assertions::assert_eq;
 use serde_json::json;
 use std::time::Duration;
-use theater::{ActorInput, ActorMessage, Store};
+use theater::{ActorInput, ActorMessage};
 use theater::http::{HttpHandler, HttpHost};
 use theater::http_server::HttpServerHandler;
 use tokio::sync::{mpsc, oneshot};
