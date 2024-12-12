@@ -37,15 +37,14 @@ impl ActorCapability for BaseActorCapability {
             "send",
             |mut ctx: wasmtime::StoreContextMut<'_, Store>, (address, msg): (String, Vec<u8>)| {
                 // Convert message bytes to JSON Value
-                let msg_value: Value = serde_json::from_slice(&msg)
-                    .map_err(|e| {
-                        println!("Failed to parse message as JSON: {}", e);
-                        wasmtime::Error::msg("Invalid message format")
-                    })?;
+                let msg_value: Value = serde_json::from_slice(&msg).map_err(|e| {
+                    println!("Failed to parse message as JSON: {}", e);
+                    wasmtime::Error::msg("Invalid message format")
+                })?;
 
                 // Get store reference
                 let store = ctx.data_mut();
-                
+
                 // If we have HTTP host, send the message
                 if let Some(http) = &store.http {
                     // Spawn task to send message since we can't await in this context
@@ -131,14 +130,13 @@ impl ActorCapability for HttpCapability {
         runtime.func_wrap(
             "send",
             |mut ctx: wasmtime::StoreContextMut<'_, Store>, (address, msg): (String, Vec<u8>)| {
-                let msg_value: Value = serde_json::from_slice(&msg)
-                    .map_err(|e| {
-                        println!("Failed to parse message as JSON: {}", e);
-                        wasmtime::Error::msg("Invalid message format")
-                    })?;
+                let msg_value: Value = serde_json::from_slice(&msg).map_err(|e| {
+                    println!("Failed to parse message as JSON: {}", e);
+                    wasmtime::Error::msg("Invalid message format")
+                })?;
 
                 let store = ctx.data_mut();
-                
+
                 if let Some(http) = &store.http {
                     let http = http.clone();
                     let address = address.clone();

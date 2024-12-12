@@ -22,10 +22,17 @@ pub struct InterfacesConfig {
 #[serde(tag = "type", content = "config")]
 pub enum HandlerConfig {
     Http(HttpHandlerConfig),
+    #[serde(rename = "Http-server")]
+    HttpServer(HttpServerHandlerConfig),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HttpHandlerConfig {
+    pub port: u16,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HttpServerHandlerConfig {
     pub port: u16,
 }
 

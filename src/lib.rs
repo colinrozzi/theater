@@ -10,10 +10,11 @@ mod capabilities;
 mod chain;
 mod config;
 mod http;
+mod http_server;
 mod store;
 mod wasm;
 
-pub use config::{HandlerConfig, HttpHandlerConfig, ManifestConfig};
+pub use config::{HandlerConfig, HttpHandlerConfig, HttpServerHandlerConfig, ManifestConfig};
 pub use store::Store;
 pub use wasm::{WasmActor, WasmError};
 
@@ -159,6 +160,10 @@ impl ActorRuntime {
             match handler_config {
                 HandlerConfig::Http(http_config) => {
                     let handler = http::HttpHandler::new(http_config.port);
+                    handlers.push(Box::new(handler));
+                }
+                HandlerConfig::HttpServer(http_config) => {
+                    let handler = http_server::HttpServerHandler::new(http_config.port);
                     handlers.push(Box::new(handler));
                 }
             }
