@@ -1,6 +1,5 @@
 use anyhow::Result;
 use serde_json::Value;
-use wasmtime::Engine;
 use wasmtime::component::{Component, ComponentExportIndex, Linker};
 
 use crate::store::Store;
@@ -17,14 +16,21 @@ pub trait ActorCapability: Send {
     fn interface_name(&self) -> &str;
     
     #[cfg(test)]
-    fn create_test_component(engine: &Engine) -> Result<Component> 
+    fn create_test_component(engine: &wasmtime::Engine) -> Result<Component> 
     where Self: Sized {
         Component::new(engine, r#"
             (component
-                (export "init" (func))
-                (export "handle" (func))
-                (export "state-contract" (func))
-                (export "message-contract" (func))
+                (core module $m
+                    (func $init (export "init"))
+                    (func $handle (export "handle"))
+                    (func $state_contract (export "state-contract"))
+                    (func $message_contract (export "message-contract"))
+                )
+                (core instance $i (instantiate $m))
+                (func (export "init") (canon lift (core func $i "init")))
+                (func (export "handle") (canon lift (core func $i "handle")))
+                (func (export "state-contract") (canon lift (core func $i "state-contract")))
+                (func (export "message-contract") (canon lift (core func $i "message-contract")))
             )
         "#.as_bytes())
     }
