@@ -14,8 +14,8 @@ pub struct HttpServerHost {
 }
 
 impl HttpServerHost {
-    pub fn new(port: u16, mailbox_tx: mpsc::Sender<ActorMessage>) -> Self {
-        Self { port, mailbox_tx }
+    pub fn new(mailbox_tx: mpsc::Sender<ActorMessage>) -> Self {
+        Self { mailbox_tx }
     }
 
     // Handle incoming HTTP request from external clients

@@ -19,7 +19,7 @@ impl Store {
     pub fn with_http(port: u16, mailbox_tx: mpsc::Sender<crate::ActorMessage>) -> Self {
         println!("[STORE] Initializing store with HTTP on port {}", port);
         Self {
-            http: Some(HttpHost::new(port, mailbox_tx)),
+            http: Some(HttpHost::new(mailbox_tx)),
             http_server: None,
         }
     }
@@ -31,8 +31,8 @@ impl Store {
     ) -> Self {
         println!("[STORE] Initializing store with HTTP on port {} and HTTP server on port {}", http_port, http_server_port);
         Self {
-            http: Some(HttpHost::new(http_port, mailbox_tx.clone())),
-            http_server: Some(HttpHost::new(http_server_port, mailbox_tx)),
+            http: Some(HttpHost::new(mailbox_tx.clone())),
+            http_server: Some(HttpHost::new(mailbox_tx)),
         }
     }
 }

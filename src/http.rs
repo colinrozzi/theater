@@ -20,6 +20,8 @@ pub struct HttpHost {
 impl HttpHost {
     pub fn new(mailbox_tx: mpsc::Sender<ActorMessage>) -> Self {
         Self {
+            client: Client::new(),
+            port: 0, // Default port
             mailbox_tx,
         }
     }
