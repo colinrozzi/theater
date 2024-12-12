@@ -1,6 +1,6 @@
+use crate::logging::{log_system_event, SystemEvent, SystemEventType};
 use anyhow::{anyhow, Result};
 use chrono::Utc;
-use crate::logging::{SystemEvent, SystemEventType, log_system_event};
 use reqwest::Client;
 use serde_json::Value;
 use std::future::Future;
@@ -107,37 +107,42 @@ impl HostHandler for HttpHandler {
         &self,
         mailbox_tx: mpsc::Sender<ActorMessage>,
     ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + '_>> {
-        println!("Starting http actor mailbox on port {}", self.port);
-        println!("[HTTP] Attempting to bind to 127.0.0.1:{}", self.port);
         Box::pin(async move {
             let mut app = Server::with_state(mailbox_tx);
             app.at("/").post(HttpHost::handle_request);
-
-            // Create a channel to signal when we're bound
-            let (tx, rx) = tokio::sync::oneshot::channel();
-            println!("[HTTP] Setting up routes on /");
 
             // Spawn the server in a separate task
             let server_port = self.port;
             tokio::spawn(async move {
                 match app.listen(format!("127.0.0.1:{}", server_port)).await {
                     Ok(_) => {
-                        println!("[HTTP] Successfully bound to port {}", server_port);
-                        let _ = tx.send(Ok(()));
+                        log_system_event(SystemEvent {
+                            timestamp: Utc::now(),
+                            event_type: SystemEventType::Http,
+                            component: "HttpHandler".to_string(),
+                            message: "HTTP server exited".to_string(),
+                            related_hash: None,
+                        });
                     }
                     Err(e) => {
-                        println!("[HTTP] Failed to bind to port {}: {}", server_port, e);
-                        let _ = tx.send(Err(anyhow!("Failed to bind HTTP server: {}", e)));
+                        log_system_event(SystemEvent {
+                            timestamp: Utc::now(),
+                            event_type: SystemEventType::Error,
+                            component: "HttpHandler".to_string(),
+                            message: format!("HTTP server failed: {}", e),
+                            related_hash: None,
+                        });
                     }
                 }
             });
 
-            // Wait for server to bind
-            rx.await
-                .map_err(|e| anyhow!("Server startup failed: {}", e))?
-                .map_err(|e| e)?;
-
-            println!("[HTTP] Server started on port {}", self.port);
+            log_system_event(SystemEvent {
+                timestamp: Utc::now(),
+                event_type: SystemEventType::Http,
+                component: "HttpHandler".to_string(),
+                message: "HTTP server started".to_string(),
+                related_hash: None,
+            });
 
             // Keep this task alive
             std::future::pending::<()>().await;
