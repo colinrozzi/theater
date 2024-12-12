@@ -1,4 +1,6 @@
 use anyhow::{anyhow, Result};
+use chrono::Utc;
+use crate::logging::{SystemEvent, SystemEventType, log_system_event};
 use reqwest::Client;
 use serde_json::Value;
 use std::future::Future;
@@ -28,7 +30,13 @@ impl HttpHost {
 
     // Send a message to another actor
     pub async fn send_message(&self, address: String, message: Value) -> Result<()> {
-        println!("Sending message to {}: {:?}", address, message);
+        log_system_event(SystemEvent {
+            timestamp: Utc::now(),
+            event_type: SystemEventType::Http,
+            component: "HttpHost".to_string(),
+            message: format!("Sending message to {}", address),
+            related_hash: None,
+        });
         // Fire and forget POST request
         self.client
             .post(address)
@@ -47,7 +55,13 @@ impl HttpHost {
                 // Get JSON payload
                 let payload: Value = req.body_json().await?;
 
-                println!("Received message: {:?}", payload);
+                log_system_event(SystemEvent {
+                    timestamp: Utc::now(),
+                    event_type: SystemEventType::Http,
+                    component: "HttpHost".to_string(),
+                    message: "Received message".to_string(),
+                    related_hash: None,
+                });
 
                 // Create message with no response channel
                 let msg = ActorMessage {

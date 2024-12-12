@@ -107,7 +107,6 @@ impl ActorCapability for BaseActorCapability {
 
         let mut exports = Vec::new();
 
-        println!("Getting init export");
 
         // Get required function exports
         let (_, init) = component
@@ -115,21 +114,18 @@ impl ActorCapability for BaseActorCapability {
             .expect("Failed to get init export");
         exports.push(("init".to_string(), init));
 
-        println!("Getting handle export");
 
         let (_, handle) = component
             .export_index(Some(&instance), "handle")
             .expect("Failed to get handle export");
         exports.push(("handle".to_string(), handle));
 
-        println!("Getting verify export");
 
         let (_, state_contract) = component
             .export_index(Some(&instance), "state-contract")
             .expect("Failed to get state contract export");
         exports.push(("state-contract".to_string(), state_contract));
 
-        println!("Getting message contract export");
 
         let (_, message_contract) = component
             .export_index(Some(&instance), "message-contract")

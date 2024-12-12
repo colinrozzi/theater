@@ -1,4 +1,6 @@
 use anyhow::Result;
+use chrono::Utc;
+use crate::logging::{SystemEvent, SystemEventType, log_system_event};
 use serde_json::Value;
 use std::future::Future;
 use std::pin::Pin;
@@ -20,11 +22,13 @@ impl HttpServerHost {
 
     // Handle incoming HTTP request from external clients
     async fn handle_request(mut req: Request<HttpServerHost>) -> tide::Result {
-        println!(
-            "[HTTP_SERVER] Received {} request to {}",
-            req.method(),
-            req.url().path()
-        );
+        log_system_event(SystemEvent {
+            timestamp: Utc::now(),
+            event_type: SystemEventType::Http,
+            component: "HttpServer".to_string(),
+            message: format!("Received {} request to {}", req.method(), req.url().path()),
+            related_hash: None,
+        });
         // Create a channel for receiving the response
         let (response_tx, response_rx) = oneshot::channel();
 
