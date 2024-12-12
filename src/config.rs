@@ -9,6 +9,35 @@ pub struct ManifestConfig {
     pub interface: InterfacesConfig,
     #[serde(default)]
     pub handlers: Vec<HandlerConfig>,
+    #[serde(default)]
+    pub logging: LoggingConfig,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct LoggingConfig {
+    pub chain_events: bool,
+    pub level: String,
+    pub output: LogOutput,
+    pub file_path: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum LogOutput {
+    Stdout,
+    File,
+}
+
+impl Default for LoggingConfig {
+    fn default() -> Self {
+        Self {
+            chain_events: true,
+            level: "info".to_string(),
+            output: LogOutput::Stdout,
+            file_path: None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

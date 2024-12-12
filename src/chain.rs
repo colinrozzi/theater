@@ -1,7 +1,10 @@
+use chrono::Utc;
 use md5;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
+
+use crate::logging::{log_chain_event, ChainEvent, ChainEventType};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChainEntry {
@@ -26,12 +29,30 @@ impl HashChain {
     pub fn add(&mut self, data: Value) -> String {
         let entry = ChainEntry {
             parent: self.head.clone(),
-            data,
+            data: data.clone(),
         };
 
         // Calculate hash of entry
         let serialized = serde_json::to_string(&entry).expect("Failed to serialize entry");
         let hash = format!("{:x}", md5::compute(serialized));
+
+        // Create and log chain event
+        let event = ChainEvent {
+            hash: hash.clone(),
+            timestamp: Utc::now(),
+            actor_name: data.get("actor_name")
+                .and_then(|v| v.as_str())
+                .unwrap_or("unknown")
+                .to_string(),
+            event_type: if self.head.is_none() {
+                ChainEventType::Init
+            } else {
+                ChainEventType::StateTransition
+            },
+            data,
+            parent: self.head.clone(),
+        };
+        log_chain_event(&event);
 
         // Store entry and update head
         self.entries.insert(hash.clone(), entry);

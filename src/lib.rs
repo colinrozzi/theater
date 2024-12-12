@@ -11,8 +11,11 @@ pub mod chain;
 pub mod config;
 pub mod http;
 pub mod http_server;
+pub mod logging;
 mod store;
 mod wasm;
+
+use tracing_subscriber::{EnvFilter, FmtSubscriber};
 
 pub use config::{HandlerConfig, HttpHandlerConfig, HttpServerHandlerConfig, ManifestConfig};
 pub use store::Store;
@@ -132,6 +135,20 @@ impl ActorRuntime {
     pub async fn from_file(manifest_path: PathBuf) -> Result<Self> {
         // Load manifest config
         let config = ManifestConfig::from_file(&manifest_path)?;
+
+        // Initialize logging
+        let subscriber = FmtSubscriber::builder()
+            .with_env_filter(EnvFilter::new(
+                config.logging.level.clone()
+            ))
+            .with_target(false)
+            .with_thread_ids(true)
+            .with_file(true)
+            .with_line_number(true)
+            .with_thread_names(true)
+            .with_writer(std::io::stdout)
+            .compact()
+            .init();
 
         // Create store with HTTP handlers
         let (tx, rx) = mpsc::channel(32);
