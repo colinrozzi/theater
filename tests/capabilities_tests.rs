@@ -1,7 +1,15 @@
 use anyhow::Result;
+use std::path::PathBuf;
 use theater::capabilities::{ActorCapability, BaseActorCapability}; 
 use wasmtime::{Engine, Store};
 use wasmtime::component::{Component, Linker};
+
+fn get_test_component_path() -> PathBuf {
+    let mut path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    path.push("examples/actors/simple-actor-sample/target/wasm32-unknown-unknown/release");
+    path.push("simple_actor_sample.wasm");
+    path
+}
 
 #[test]
 fn test_base_actor_capability() -> Result<()> {
@@ -12,25 +20,12 @@ fn test_base_actor_capability() -> Result<()> {
     let capability = BaseActorCapability;
     capability.setup_host_functions(&mut linker)?;
     
+    let component_path = get_test_component_path();
+    assert!(component_path.exists(), "Test component not found at {:?}. Did you build it?", component_path);
+    
     // Test that required exports are present
-    let exports = capability.get_exports(&Component::new(&engine, r#"
-        (component
-            (import "runtime" (instance $rt))
-            (core module $m
-                (func $init (export "init"))
-                (func $handle (export "handle"))
-                (func $state_contract (export "state-contract"))
-                (func $message_contract (export "message-contract"))
-            )
-            (core instance $i (instantiate $m))
-            (instance (export "actor")
-                (func (export "init") (canon lift (core func $i "init")))
-                (func (export "handle") (canon lift (core func $i "handle")))
-                (func (export "state-contract") (canon lift (core func $i "state-contract")))
-                (func (export "message-contract") (canon lift (core func $i "message-contract")))
-            )
-        )
-    "#.as_bytes())?)?;
+    let component = Component::from_file(&engine, &component_path)?;
+    let exports = capability.get_exports(&component)?;
     
     assert_eq!(exports.len(), 4);
     assert!(exports.iter().any(|(name, _)| name == "init"));
@@ -50,26 +45,11 @@ fn test_log_host_function() -> Result<()> {
     let capability = BaseActorCapability;
     capability.setup_host_functions(&mut linker)?;
     
-    // Create a simple component that calls log
-    let component = Component::new(&engine, r#"
-        (component
-            (import "runtime" (instance $rt
-                (export "log" (func (param "msg" string)))
-            ))
-            (core module $m
-                (import "" "log" (func $log (param i32 i32)))
-                (func $log_test (export "log_test")
-                    (call $log (i32.const 0) (i32.const 0))
-                )
-            )
-            (core instance $i (instantiate $m
-                (with "" (instance 
-                    (export "log" (func $rt "log"))
-                ))
-            ))
-            (func (export "log_test") (canon lift (core func $i "log_test")))
-        )
-    "#.as_bytes())?;
+    let component_path = get_test_component_path();
+    assert!(component_path.exists(), "Test component not found at {:?}. Did you build it?", component_path);
+    
+    // Load the pre-built component that uses log
+    let component = Component::from_file(&engine, &component_path)?;
     
     let instance = linker.instantiate(&mut store, &component)?;
     
@@ -90,29 +70,11 @@ fn test_send_host_function() -> Result<()> {
     let capability = BaseActorCapability;
     capability.setup_host_functions(&mut linker)?;
     
-    // Create a component that calls send
-    let component = Component::new(&engine, r#"
-        (component
-            (import "runtime" (instance $rt
-                (export "send" (func (param "address" string) (param "msg" string)))
-            ))
-            (core module $m
-                (import "" "send" (func $send (param i32 i32) (param i32 i32)))
-                (func $send_test (export "send_test")
-                    (call $send
-                        (i32.const 0) (i32.const 0)  ;; actor-id
-                        (i32.const 0) (i32.const 0)  ;; msg
-                    )
-                )
-            )
-            (core instance $i (instantiate $m
-                (with "" (instance
-                    (export "send" (func $rt "send"))
-                ))
-            ))
-            (func (export "send_test") (canon lift (core func $i "send_test")))
-        )
-    "#.as_bytes())?;
+    let component_path = get_test_component_path();
+    assert!(component_path.exists(), "Test component not found at {:?}. Did you build it?", component_path);
+    
+    // Load the pre-built component that uses send
+    let component = Component::from_file(&engine, &component_path)?;
     
     let instance = linker.instantiate(&mut wasm_store, &component)?;
     
