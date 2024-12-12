@@ -1,6 +1,5 @@
 use crate::http::HttpHost;
-use crate::logging::{log_system_event, SystemEvent, SystemEventType};
-use chrono::Utc;
+use tracing::info;
 use tokio::sync::mpsc;
 
 /// Store type for sharing resources with WASM host functions

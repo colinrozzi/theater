@@ -1,6 +1,5 @@
-use crate::logging::{log_system_event, SystemEvent, SystemEventType};
 use anyhow::{anyhow, Result};
-use chrono::Utc;
+use tracing::{info, error};
 use reqwest::Client;
 use serde_json::Value;
 use std::future::Future;
