@@ -1,7 +1,7 @@
 use anyhow::Result;
-use theater::capabilities::{ActorCapability, BaseActorCapability};
-use wasmtime::{component::Linker, Engine, Store};
-use wasmtime::component::Component;
+use theater::capabilities::{ActorCapability, BaseActorCapability}; 
+use wasmtime::{Engine, Store};
+use wasmtime::component::{Component, Linker};
 
 #[test]
 fn test_base_actor_capability() -> Result<()> {
@@ -13,7 +13,7 @@ fn test_base_actor_capability() -> Result<()> {
     capability.setup_host_functions(&mut linker)?;
     
     // Test that required exports are present
-    let exports = capability.get_exports(&wasmtime::Component::new(&engine, r#"
+    let exports = capability.get_exports(&Component::new(&engine, r#"
         (component
             (export "init" (func))
             (export "handle" (func))
@@ -41,7 +41,7 @@ fn test_log_host_function() -> Result<()> {
     capability.setup_host_functions(&mut linker)?;
     
     // Create a simple component that calls log
-    let component = wasmtime::Component::new(&engine, r#"
+    let component = Component::new(&engine, r#"
         (component
             (import "ntwk:simple-actor/runtime" (func "log" (param "msg" string)))
             (core func $log_test (call-import "log" "Test message"))
@@ -69,7 +69,7 @@ fn test_send_host_function() -> Result<()> {
     capability.setup_host_functions(&mut linker)?;
     
     // Create a component that calls send
-    let component = wasmtime::Component::new(&engine, r#"
+    let component = Component::new(&engine, r#"
         (component
             (import "ntwk:simple-actor/runtime" (func "send" (param "actor-id" string) (param "msg" (list u8))))
             (core func $send_test
