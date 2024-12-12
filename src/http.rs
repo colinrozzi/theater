@@ -93,10 +93,20 @@ impl HostHandler for HttpHandler {
         mailbox_tx: mpsc::Sender<ActorMessage>,
     ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + '_>> {
         println!("Starting http actor mailbox on port {}", self.port);
+        println!("[HTTP] Attempting to bind to 127.0.0.1:{}", self.port);
         Box::pin(async move {
             let mut app = Server::with_state(mailbox_tx);
             app.at("/").post(HttpHost::handle_request);
-            app.listen(format!("127.0.0.1:{}", self.port)).await?;
+            match app.listen(format!("127.0.0.1:{}", self.port)).await {
+                Ok(_) => {
+                    println!("[HTTP] Successfully bound to port {}", self.port);
+                    Ok(())
+                }
+                Err(e) => {
+                    println!("[HTTP] Failed to bind to port {}: {}", self.port, e);
+                    Err(anyhow!("Failed to bind HTTP server: {}", e))
+                }
+            }?;
             Ok(())
         })
     }

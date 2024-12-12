@@ -133,12 +133,26 @@ impl ActorRuntime {
         // Load manifest config
         let config = ManifestConfig::from_file(&manifest_path)?;
 
-        // Create store with HTTP host
+        // Create store with HTTP handlers
         let (tx, rx) = mpsc::channel(32);
-        let store = if let Some(HandlerConfig::Http(http_config)) = config.handlers.first() {
-            Store::with_http(http_config.port, tx.clone())
-        } else {
-            Store::new()
+        let store = {
+            let mut http_port = None;
+            let mut http_server_port = None;
+
+            // Find both handler ports
+            for handler_config in &config.handlers {
+                match handler_config {
+                    HandlerConfig::Http(config) => http_port = Some(config.port),
+                    HandlerConfig::HttpServer(config) => http_server_port = Some(config.port),
+                }
+            }
+
+            // Initialize store based on which handlers we found
+            match (http_port, http_server_port) {
+                (Some(hp), Some(hsp)) => Store::with_both_http(hp, hsp, tx.clone()),
+                (Some(p), None) => Store::with_http(p, tx.clone()),
+                _ => Store::new()
+            }
         };
 
         // Create the WASM actor with the store
@@ -170,7 +184,9 @@ impl ActorRuntime {
         }
 
         // Start all handlers
+        println!("[RUNTIME] Starting {} handlers...", handlers.len());
         for handler in handlers.iter_mut() {
+            println!("[RUNTIME] Starting {} handler...", handler.name());
             handler.start(tx.clone()).await?;
         }
 

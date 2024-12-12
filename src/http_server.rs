@@ -20,6 +20,11 @@ impl HttpServerHost {
 
     // Handle incoming HTTP request from external clients
     async fn handle_request(mut req: Request<HttpServerHost>) -> tide::Result {
+        println!(
+            "[HTTP_SERVER] Received {} request to {}",
+            req.method(),
+            req.url().path()
+        );
         // Create a channel for receiving the response
         let (response_tx, response_rx) = oneshot::channel();
 
@@ -111,7 +116,9 @@ impl HostHandler for HttpServerHandler {
     }
 
     fn new(config: Value) -> Self {
+        println!("[HTTP_SERVER] Creating new handler with config: {:?}", config);
         let port = config.get("port").unwrap().as_u64().unwrap() as u16;
+        println!("[HTTP_SERVER] Configured for port {}", port);
         Self { port }
     }
 
@@ -120,13 +127,26 @@ impl HostHandler for HttpServerHandler {
         mailbox_tx: mpsc::Sender<ActorMessage>,
     ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + '_>> {
         println!("Starting http server on port {}", self.port);
+        println!(
+            "[HTTP_SERVER] Attempting to bind to 127.0.0.1:{}",
+            self.port
+        );
         Box::pin(async move {
             let state = HttpServerHost::new(self.port, mailbox_tx);
             let mut app = Server::with_state(state);
             app.at("/*").all(HttpServerHost::handle_request);
-            app.listen(format!("127.0.0.1:{}", self.port))
-                .await
-                .map_err(|e| anyhow!("Failed to start HTTP server: {}", e))?;
+            println!("[HTTP_SERVER] Setting up routes on /*");
+            match app.listen(format!("127.0.0.1:{}", self.port)).await {
+                Ok(_) => {
+                    println!("[HTTP_SERVER] Successfully bound to port {}", self.port);
+                    Ok(())
+                }
+                Err(e) => {
+                    println!("[HTTP_SERVER] Failed to bind to port {}: {}", self.port, e);
+                    Err(anyhow!("Failed to bind HTTP server: {}", e))
+                }
+            }
+            .map_err(|e| anyhow!("Failed to start HTTP server: {}", e))?;
             Ok(())
         })
     }
