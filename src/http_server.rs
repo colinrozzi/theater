@@ -58,8 +58,7 @@ impl HttpServerHost {
             .await
             .map_err(|_| tide::Error::from_str(500, "Failed to receive response from actor"))?;
 
-        println!("[HTTP_SERVER] Received response from actor");
-        println!("[HTTP_SERVER] Actor response: {:?}", actor_response);
+        // Process actor response
 
         // Parse actor response
         match actor_response {
@@ -70,18 +69,14 @@ impl HttpServerHost {
             } => {
                 let mut response = Response::new(status);
 
-                println!("[HTTP_SERVER] Setting status code: {}", status);
-
-                println!("[HTTP_SERVER] Headers: {:?}", headers);
                 // Add headers
-                for (key, value) in headers {
-                    println!("[HTTP_SERVER] Adding header: {}: {}", key, value);
+        for (key, value) in headers {
                     response.append_header(key.as_str(), value.as_str());
                 }
 
                 // Set body if present
                 if let Some(body_bytes) = body {
-                    println!("[HTTP_SERVER] Setting body");
+                    // Set response body
                     response.set_body(Body::from_bytes(body_bytes));
                 }
 
