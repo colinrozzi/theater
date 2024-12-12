@@ -166,17 +166,19 @@ impl ActorRuntime {
             }
         });
 
-        // Initialize handlers based on config
+        println!("Parsed config: {:#?}", config);
         let mut handlers: Vec<Box<dyn HostHandler>> = Vec::new();
         println!("Initializing handlers...");
         println!("{:?}", config.handlers);
         for handler_config in &config.handlers {
             match handler_config {
                 HandlerConfig::Http(http_config) => {
+                    println!("[RUNTIME] Creating Http handler...");
                     let handler = http::HttpHandler::new(http_config.port);
                     handlers.push(Box::new(handler));
                 }
                 HandlerConfig::HttpServer(http_config) => {
+                    println!("[RUNTIME] Creating Http-server handler...");
                     let handler = http_server::HttpServerHandler::new(http_config.port);
                     handlers.push(Box::new(handler));
                 }
@@ -187,7 +189,13 @@ impl ActorRuntime {
         println!("[RUNTIME] Starting {} handlers...", handlers.len());
         for handler in handlers.iter_mut() {
             println!("[RUNTIME] Starting {} handler...", handler.name());
-            handler.start(tx.clone()).await?;
+            match handler.start(tx.clone()).await {
+                Ok(_) => println!("[RUNTIME] Successfully started {} handler", handler.name()),
+                Err(e) => {
+                    println!("[RUNTIME] Error starting {} handler: {}", handler.name(), e);
+                    return Err(anyhow::anyhow!("Failed to start handler {}: {}", handler.name(), e));
+                }
+            }
         }
 
         Ok(Self {

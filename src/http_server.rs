@@ -112,7 +112,7 @@ impl HttpServerHandler {
 
 impl HostHandler for HttpServerHandler {
     fn name(&self) -> &str {
-        "http-server"
+        "Http-server"
     }
 
     fn new(config: Value) -> Self {
