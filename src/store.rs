@@ -35,5 +35,13 @@ impl Store {
             http_server: Some(HttpHost::new(mailbox_tx)),
         }
     }
+
+    pub fn http_port(&self) -> Option<u16> {
+        self.http.as_ref().map(|_| 8080)
+    }
+
+    pub fn http_server_port(&self) -> Option<u16> {
+        self.http_server.as_ref().map(|_| 8081)
+    }
 }
 
