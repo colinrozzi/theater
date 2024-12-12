@@ -37,7 +37,7 @@ impl Actor for TestActor {
 async fn test_actor_process() -> Result<()> {
     let (tx, rx) = mpsc::channel(32);
     let actor = Box::new(TestActor);
-    let mut process = ActorProcess::new(actor, rx)?;
+    let process = ActorProcess::new(actor, rx)?;
     
     // Verify initial state
     assert!(process.get_chain().get_head().is_some());
