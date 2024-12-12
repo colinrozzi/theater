@@ -1,0 +1,29 @@
+package ntwk:simple-actor;
+
+// Define a shared type for messages
+interface types {
+    /// Generic message type as bytes that can be serialized/deserialized
+    type message = list<u8>;
+}
+
+interface runtime {
+    use types.{message};
+    
+    log: func(msg: string) -> ();
+    send: func(actor-id: string, msg: message) -> ();
+}
+
+interface actor {
+    use types.{message};
+    type state = list<u8>;
+    
+    state-contract: func(state: state) -> bool;
+    message-contract: func(msg: message, state: state) -> bool;
+    handle: func(msg: message, state: state) -> state;
+    init: func() -> state;
+}
+
+world first-actor {
+    import runtime;
+    export actor;
+}

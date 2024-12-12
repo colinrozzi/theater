@@ -1,34 +1,136 @@
 # Theater
 
 ## Overview
-Runtime V2 is a redesigned actor system that enables state management, verification, and flexible interaction patterns for WebAssembly components. The system is built around a core concept: actors that maintain verifiable state and can interact with the outside world in various ways.
+Theater is a redesigned actor system that enables state management, verification, and flexible interaction patterns for WebAssembly components. The system is built around a core concept: actors that maintain verifiable state and can interact with the outside world in various ways.
 
-## Key Concepts
+## Why Theater Exists
 
-### Actors
-An actor in this system is a WebAssembly component that:
-- Maintains state
-- Responds to inputs by producing outputs and updating state
-- Participates in a verifiable hash chain of all state changes
-- Can interact with the outside world through various interfaces
+Theater is designed to solve several key challenges in distributed systems:
 
-### Hash Chain
-All actor state changes are recorded in a verifiable hash chain. This enables:
-- Complete history of how an actor reached its current state
-- Verification of state transitions
-- Ability to replay and audit state changes
-- Cross-actor state verification
+1. **State Verification**: In distributed systems, verifying the accuracy and authenticity of state changes is crucial. Theater provides a complete, auditable chain of all state transitions.
 
-### Flexible Interfaces
-The system is designed to support multiple ways for actors to interact with the outside world:
-- Message passing between actors
+2. **Reproducibility**: By tracking all inputs and state changes in a hash chain, any actor's current state can be independently verified and reproduced by replaying its history.
+
+3. **Flexible Interaction**: Modern systems need to interact in multiple ways - through direct messages, HTTP APIs, and other protocols. Theater provides a unified framework for handling these diverse interaction patterns while maintaining state verification.
+
+4. **Component Isolation**: Using WebAssembly components provides strong isolation and security guarantees while enabling actors to be written in any language that compiles to Wasm.
+
+## System Architecture
+
+```
+┌─────────────────┐         ┌─────────────────┐
+│   HTTP Server   │         │  WASM Component │
+│                 │◄────────│                 │
+└────────┬────────┘         └────────┬────────┘
+         │                           │
+         │         ┌─────────────────┤
+         │         │                 │
+    ┌────▼─────────▼────┐     ┌─────┴──────┐
+    │    Runtime Core   │◄────┤  Manifest   │
+    │                  │     │  Parser     │
+    └────────┬─────────┘     └────────────┘
+             │
+    ┌────────▼─────────┐
+    │    Hash Chain    │
+    │                 │
+    └────────┬─────────┘
+             │
+    ┌────────▼─────────┐
+    │  State Storage   │
+    │    (Memory)      │
+    └──────────────────┘
+```
+
+### Key Components
+
+1. **Runtime Core**: Manages actor lifecycle, state, and chain recording
+   - State management
+   - Chain recording
+   - Component lifecycle
+   - Message routing
+
+2. **Hash Chain**: Records and verifies all state changes
+   - Immutable history
+   - State verification
+   - Chain integrity
+   - Audit capability
+
+3. **WebAssembly Integration**: Manages component execution
+   - Component loading
+   - State isolation
+   - Message handling
+   - Contract verification
+
+4. **Network Interface**: Exposes actors to the world
+   - HTTP endpoints
+   - Message routing
+   - Chain access
+   - State queries
+
+## Features
+
+### Actor State Management
+- Complete state history
+- Verifiable transitions
+- Contract enforcement
+- State isolation
+
+### Hash Chain Verification
+- Immutable record
+- State verification
+- Chain integrity
+- Audit support
+
+### Multiple Interface Types
+- Actor-to-actor messaging
 - HTTP server capabilities
-- Future interfaces (filesystem, timers, etc.)
+- HTTP client capabilities
+- Extensible interface system
 
-## Core Architecture
+## Design Principles
 
-### ActorInput and ActorOutput
-These enums represent all possible ways data can flow into and out of an actor:
+1. **Explicit over Implicit**
+   - All possible interactions explicitly modeled
+   - Clear state transitions
+   - Defined contracts
+   - Transparent routing
+
+2. **Verifiable State**
+   - Every change recorded
+   - Chain verification
+   - Contract enforcement
+   - State validation
+
+3. **Extensible Interfaces**
+   - Multiple interaction patterns
+   - Easy to add new interfaces
+   - Protocol abstraction
+   - Clean separation
+
+4. **Clean Separation**
+   - Modular design
+   - Interface independence
+   - Clear boundaries
+   - Minimal coupling
+
+5. **Type Safety**
+   - Strong typing
+   - Contract verification
+   - Message validation
+   - State checking
+
+## Implementation Notes
+
+### State Management
+```rust
+pub trait Actor {
+    fn init(&self) -> Result<Value>;
+    fn handle_input(&self, input: ActorInput, state: &Value) -> Result<(ActorOutput, Value)>;
+    fn verify_state(&self, state: &Value) -> bool;
+}
+```
+
+### Message Processing
 ```rust
 pub enum ActorInput {
     Message(Value),
@@ -43,104 +145,64 @@ pub enum ActorOutput {
 }
 ```
 
-This design:
-- Makes all possible interactions explicit
-- Enables type-safe handling of different interaction patterns
-- Allows easy addition of new interaction types
-- Ensures consistent chain recording of all inputs
+## Quick Start
 
-### Actor Trait
-The core interface that all actors must implement:
-```rust
-pub trait Actor {
-    fn init(&self) -> Result<Value>;
-    fn handle_input(&self, input: ActorInput, state: &Value) -> Result<(ActorOutput, Value)>;
-    fn verify_state(&self, state: &Value) -> bool;
-}
+1. Install Rust and cargo
+```bash
+git clone https://github.com/colinrozzi/theater.git
+cd theater
+cargo build
 ```
 
-Key design decisions:
-- Use of serde_json::Value for state enables flexible state representation
-- Single handle_input method unifies all interaction types
-- Explicit state verification support
-- Clear initialization pattern
+2. Create an actor manifest (actor.toml):
+```toml
+name = "my-actor"
+component_path = "path/to/actor.wasm"
 
-### ActorRuntime
-Manages the core actor lifecycle:
-- State management
-- Chain recording
-- Input handling
-- State verification
+[interface]
+implements = "ntwk:simple-actor/actor"
+requires = []
 
-### Interfaces
-The ActorInterface trait enables multiple ways to expose actors:
-```rust
-pub trait ActorInterface {
-    type Config;
-    fn new(config: Self::Config) -> Result<Self> where Self: Sized;
-    fn start(self, runtime: ActorRuntime<impl Actor>) -> Result<()>;
-}
+[[handlers]]
+type = "Http"
+config = { port = 8080 }
 ```
 
-This allows:
-- Clean separation between core actor logic and exposure mechanisms
-- Multiple simultaneous interfaces per actor
-- Easy addition of new interface types
+3. Run an actor:
+```bash
+cargo run -- --manifest path/to/your/manifest.toml
+```
 
-## Roadmap
+## Development Status
 
-### Phase 1: Core Implementation
-1. Complete basic message-passing interface
-   - Implement MessageInterface
-   - Port existing actor-to-actor communication
-   - Add tests for basic messaging
+Current work focuses on:
+1. Manifest parsing and runtime initialization
+2. Actor-to-actor communication
+3. HTTP interface implementation
 
-2. Add WASM component integration
-   - Create WasmActor implementation
-   - Add manifest parsing
-   - Implement host functions
-   - Test with simple components
-
-### Phase 2: HTTP Support
-1. Implement HttpInterface
-   - HTTP server setup
-   - Request/response handling
-   - Chain recording for HTTP interactions
-
-2. Create HTTP actor examples
-   - Simple static file server
-   - REST API example
-   - WebSocket support investigation
-
-### Phase 3: Enhanced Features
-1. Add more interface types
-   - Filesystem access
-   - Timer/scheduling
-   - Database connections
-
-2. Improve chain verification
-   - Cross-actor verification
-   - Chain pruning strategies
-   - Performance optimizations
-
-3. Development tools
-   - Chain visualization
-   - Actor debugging tools
-   - State inspection utilities
+See [Building Actors](docs/building-actors.md) for detailed development documentation.
 
 ## Contributing
+
 When adding new features:
 1. Consider how they fit into the core abstractions
 2. Ensure all state changes are properly recorded
 3. Add appropriate tests
 4. Update documentation
 
-## Design Principles
-1. **Explicit over implicit**: All possible interactions should be explicitly modeled in the type system.
-2. **Verifiable state**: Every state change must be recorded and verifiable.
-3. **Extensible interfaces**: New ways of interacting with actors should be easy to add.
-4. **Clean separation**: Core actor logic should be separate from interface mechanisms.
-5. **Type safety**: Use the type system to prevent invalid interactions.
+## Next Steps
 
-## Development Setup
-[To be added: Development environment setup, build instructions, test running]
+### Phase 1: Core Implementation
+- Complete basic message-passing interface
+- Add WASM component integration
+- Implement manifest parsing
+
+### Phase 2: HTTP Support
+- Implement HTTP server interface
+- Create example HTTP actors
+- Add WebSocket support
+
+### Phase 3: Enhanced Features
+- Add more interface types (filesystem, timers, etc.)
+- Improve chain verification
+- Develop debugging and visualization tools

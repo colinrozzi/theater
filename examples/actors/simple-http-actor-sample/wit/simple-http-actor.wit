@@ -1,0 +1,56 @@
+package ntwk:simple-http-actor;
+
+// Define a shared type for messages
+interface types {
+    /// Generic message type as bytes that can be serialized/deserialized
+    type message = list<u8>;
+}
+
+interface http-types {
+    use types.{message};
+
+    /// HTTP specific types
+    record http-headers {
+        fields: list<tuple<string, string>>
+    }
+
+    type http-request = list<u8>;
+    type http-response = list<u8>;
+
+    /// Type alias to ensure HTTP actors can still handle regular messages
+    type actor-message = message;
+}
+
+interface http-runtime {
+    use types.{message};
+    use http-types.{http-request, http-response};
+    
+    /// Include all capabilities from simple-actor runtime
+    log: func(msg: string) -> ();
+    send: func(actor-id: string, msg: message) -> ();
+}
+
+interface http-actor {
+    use types.{message};
+    use http-types.{http-request, http-response, actor-message};
+    
+    /// Reuse state type from simple actor
+    type state = list<u8>;
+    
+    /// Keep all contracts from simple actor
+    state-contract: func(state: state) -> bool;
+    message-contract: func(msg: actor-message, state: state) -> bool;
+    handle: func(msg: actor-message, state: state) -> state;
+    
+    /// Add HTTP-specific contract and handler
+    http-contract: func(req: http-request, state: state) -> bool;
+    handle-http: func(req: http-request, state: state) -> list<u8>;
+    
+    /// Keep init function
+    init: func() -> state;
+}
+
+world simple-http-actor {
+    import http-runtime;
+    export http-actor;
+}
