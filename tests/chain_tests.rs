@@ -23,3 +23,33 @@ fn test_chain_basic_operations() {
     assert_eq!(full_chain[0].0, hash2);
     assert_eq!(full_chain[1].0, hash1);
 }
+
+#[test]
+fn test_empty_chain() {
+    let chain = HashChain::new();
+    assert_eq!(chain.get_head(), None);
+    assert!(chain.get_full_chain().is_empty());
+}
+
+#[test]
+fn test_chain_ordering() {
+    let mut chain = HashChain::new();
+    
+    // Add multiple entries and verify ordering
+    let hash1 = chain.add(json!({"step": 1}));
+    let hash2 = chain.add(json!({"step": 2}));
+    let hash3 = chain.add(json!({"step": 3}));
+    
+    let full_chain = chain.get_full_chain();
+    assert_eq!(full_chain.len(), 3);
+    
+    // Verify reverse chronological order
+    assert_eq!(full_chain[0].0, hash3);
+    assert_eq!(full_chain[1].0, hash2);
+    assert_eq!(full_chain[2].0, hash1);
+    
+    // Verify parent relationships
+    assert_eq!(full_chain[0].1.parent, Some(hash2));
+    assert_eq!(full_chain[1].1.parent, Some(hash1));
+    assert_eq!(full_chain[2].1.parent, None);
+}
