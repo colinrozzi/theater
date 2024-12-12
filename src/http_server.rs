@@ -10,7 +10,6 @@ use crate::{ActorInput, ActorMessage, ActorOutput, HostHandler};
 
 #[derive(Clone)]
 pub struct HttpServerHost {
-    port: u16,
     mailbox_tx: mpsc::Sender<ActorMessage>,
 }
 

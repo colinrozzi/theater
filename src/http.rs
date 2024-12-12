@@ -18,10 +18,8 @@ pub struct HttpHost {
 }
 
 impl HttpHost {
-    pub fn new(port: u16, mailbox_tx: mpsc::Sender<ActorMessage>) -> Self {
+    pub fn new(mailbox_tx: mpsc::Sender<ActorMessage>) -> Self {
         Self {
-            client: Client::new(),
-            port,
             mailbox_tx,
         }
     }

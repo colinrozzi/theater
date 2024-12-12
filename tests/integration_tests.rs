@@ -2,7 +2,7 @@ use anyhow::Result;
 use serde_json::json;
 use std::path::PathBuf;
 use theater::capabilities::{ActorCapability, BaseActorCapability};
-use theater::{ActorInput, Store, WasmActor};
+use theater::{Actor, ActorInput, Store, WasmActor};
 use wasmtime::{Engine, Store as WasmStore};
 use wasmtime::component::{Component, Linker};
 
