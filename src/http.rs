@@ -97,16 +97,36 @@ impl HostHandler for HttpHandler {
         Box::pin(async move {
             let mut app = Server::with_state(mailbox_tx);
             app.at("/").post(HttpHost::handle_request);
-            match app.listen(format!("127.0.0.1:{}", self.port)).await {
-                Ok(_) => {
-                    println!("[HTTP] Successfully bound to port {}", self.port);
-                    Ok(())
+
+            // Create a channel to signal when we're bound
+            let (tx, rx) = tokio::sync::oneshot::channel();
+            println!("[HTTP] Setting up routes on /");
+
+            // Spawn the server in a separate task
+            let server_port = self.port;
+            tokio::spawn(async move {
+                match app.listen(format!("127.0.0.1:{}", server_port)).await {
+                    Ok(_) => {
+                        println!("[HTTP] Successfully bound to port {}", server_port);
+                        let _ = tx.send(Ok(()));
+                    }
+                    Err(e) => {
+                        println!("[HTTP] Failed to bind to port {}: {}", server_port, e);
+                        let _ = tx.send(Err(anyhow!("Failed to bind HTTP server: {}", e)));
+                    }
                 }
-                Err(e) => {
-                    println!("[HTTP] Failed to bind to port {}: {}", self.port, e);
-                    Err(anyhow!("Failed to bind HTTP server: {}", e))
-                }
-            }?;
+            });
+
+            // Wait for server to bind
+            rx.await
+                .map_err(|e| anyhow!("Server startup failed: {}", e))?
+                .map_err(|e| e)?;
+
+            println!("[HTTP] Server started on port {}", self.port);
+
+            // Keep this task alive
+            std::future::pending::<()>().await;
+
             Ok(())
         })
     }

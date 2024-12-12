@@ -151,7 +151,7 @@ impl ActorRuntime {
             match (http_port, http_server_port) {
                 (Some(hp), Some(hsp)) => Store::with_both_http(hp, hsp, tx.clone()),
                 (Some(p), None) => Store::with_http(p, tx.clone()),
-                _ => Store::new()
+                _ => Store::new(),
             }
         };
 
@@ -187,16 +187,37 @@ impl ActorRuntime {
 
         // Start all handlers
         println!("[RUNTIME] Starting {} handlers...", handlers.len());
-        for handler in handlers.iter_mut() {
-            println!("[RUNTIME] Starting {} handler...", handler.name());
+        println!(
+            "[RUNTIME] Handlers to start: {}",
+            handlers
+                .iter()
+                .map(|h| h.name())
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+        for (idx, handler) in handlers.iter_mut().enumerate() {
+            let handler_name = handler.name();
+            println!("[RUNTIME] Processing handler '{}'", handler_name);
+            //println!("[RUNTIME] Starting handler {} of {}", idx + 1, handlers.len());
             match handler.start(tx.clone()).await {
-                Ok(_) => println!("[RUNTIME] Successfully started {} handler", handler.name()),
+                Ok(_) => {
+                    println!("[RUNTIME] Successfully started '{}' handler", handler_name);
+                    println!("[RUNTIME] Moving to next handler...");
+                }
                 Err(e) => {
-                    println!("[RUNTIME] Error starting {} handler: {}", handler.name(), e);
-                    return Err(anyhow::anyhow!("Failed to start handler {}: {}", handler.name(), e));
+                    println!("[RUNTIME] Error starting '{}' handler: {}", handler_name, e);
+                    return Err(anyhow::anyhow!(
+                        "Failed to start handler '{}': {}",
+                        handler_name,
+                        e
+                    ));
                 }
             }
         }
+        println!(
+            "[RUNTIME] All {} handlers started successfully",
+            handlers.len()
+        );
 
         Ok(Self {
             config,
