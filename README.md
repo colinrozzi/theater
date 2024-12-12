@@ -1,4 +1,4 @@
-# Runtime V2
+# Theatre
 
 A WebAssembly actor system that enables state management, verification, and flexible interaction patterns.
 
