@@ -1,11 +1,12 @@
 use anyhow::Result;
 use theater::capabilities::{ActorCapability, BaseActorCapability};
-use wasmtime::{component::Component, Engine, Linker, Store};
+use wasmtime::{component::Linker, Engine, Store};
+use wasmtime::component::Component;
 
 #[test]
 fn test_base_actor_capability() -> Result<()> {
     let engine = Engine::default();
-    let mut linker = Linker::new(&engine);
+    let mut linker = Linker::<theater::Store>::new(&engine);
     let mut store = Store::new(&engine, theater::Store::new());
     
     let capability = BaseActorCapability;
@@ -33,7 +34,7 @@ fn test_base_actor_capability() -> Result<()> {
 #[test]
 fn test_log_host_function() -> Result<()> {
     let engine = Engine::default();
-    let mut linker = Linker::new(&engine);
+    let mut linker = Linker::<theater::Store>::new(&engine);
     let mut store = Store::new(&engine, theater::Store::new());
     
     let capability = BaseActorCapability;
@@ -60,7 +61,7 @@ fn test_log_host_function() -> Result<()> {
 #[test]
 fn test_send_host_function() -> Result<()> {
     let engine = Engine::default();
-    let mut linker = Linker::new(&engine);
+    let mut linker = Linker::<theater::Store>::new(&engine);
     let store = theater::Store::new();
     let mut wasm_store = Store::new(&engine, store);
     
