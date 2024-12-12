@@ -14,6 +14,18 @@ pub trait ActorCapability: Send {
 
     /// Return interface name this capability implements
     fn interface_name(&self) -> &str;
+    
+    #[cfg(test)]
+    fn create_test_component(engine: &Engine) -> Result<Component> {
+        Component::new(engine, r#"
+            (component
+                (export "init" (func))
+                (export "handle" (func))
+                (export "state-contract" (func))
+                (export "message-contract" (func))
+            )
+        "#.as_bytes())
+    }
 }
 
 /// The base actor capability that all actors must implement
