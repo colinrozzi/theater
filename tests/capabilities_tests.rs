@@ -15,10 +15,17 @@ fn test_base_actor_capability() -> Result<()> {
     // Test that required exports are present
     let exports = capability.get_exports(&Component::new(&engine, r#"
         (component
-            (export "init" (func))
-            (export "handle" (func))
-            (export "state-contract" (func))
-            (export "message-contract" (func))
+            (core module $m
+                (func $init (export "init"))
+                (func $handle (export "handle"))
+                (func $state_contract (export "state-contract"))
+                (func $message_contract (export "message-contract"))
+            )
+            (core instance $i (instantiate $m))
+            (func (export "init") (call $i "init"))
+            (func (export "handle") (call $i "handle"))
+            (func (export "state-contract") (call $i "state-contract"))
+            (func (export "message-contract") (call $i "message-contract"))
         )
     "#.as_bytes())?)?;
     
