@@ -7,7 +7,7 @@ use wasmtime::component::{Component, Linker};
 fn test_base_actor_capability() -> Result<()> {
     let engine = Engine::default();
     let mut linker = Linker::<theater::Store>::new(&engine);
-    let store = Store::new(&engine, theater::Store::new());
+    let _store = Store::new(&engine, theater::Store::new());
     
     let capability = BaseActorCapability;
     capability.setup_host_functions(&mut linker)?;
@@ -57,7 +57,7 @@ fn test_log_host_function() -> Result<()> {
                 )
             )
             (core instance $i (instantiate $m))
-            (func (export "log_test") (call $i "log_test"))
+            (func (export "log_test") (canon lift (core func $i "log_test")))
         )
     "#.as_bytes())?;
     
@@ -93,7 +93,7 @@ fn test_send_host_function() -> Result<()> {
                 )
             )
             (core instance $i (instantiate $m))
-            (func (export "send_test") (call $i "send_test"))
+            (func (export "send_test") (canon lift (core func $i "send_test")))
         )
     "#.as_bytes())?;
     
