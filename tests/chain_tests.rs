@@ -11,11 +11,11 @@ fn test_chain_basic_operations() {
     
     // Add first entry
     let hash1 = chain.add(json!({"count": 1}));
-    assert_eq!(chain.get_head(), Some(&hash1));
+    assert_eq!(chain.get_head(), Some(hash1.as_str()));
     
     // Add second entry
     let hash2 = chain.add(json!({"count": 2}));
-    assert_eq!(chain.get_head(), Some(&hash2));
+    assert_eq!(chain.get_head(), Some(hash2.as_str()));
     
     // Verify chain contents
     let full_chain = chain.get_full_chain();

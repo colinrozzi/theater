@@ -1,5 +1,5 @@
 use anyhow::Result;
-use clap::{Parser, CommandFactory};
+use clap::Parser;
 use theater::ActorRuntime;
 use std::path::PathBuf;
 
