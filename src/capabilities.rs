@@ -1,6 +1,6 @@
 use anyhow::Result;
 use serde_json::Value;
-use wasmtime::component::{Component, ComponentExportIndex, Linker, LinkerInstance};
+use wasmtime::component::{Component, ComponentExportIndex, Linker};
 
 use crate::store::Store;
 
