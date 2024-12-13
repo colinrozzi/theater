@@ -5,7 +5,6 @@ use bindings::exports::ntwk::simple_actor::actor::Message;
 use bindings::exports::ntwk::simple_actor::actor::State;
 
 use bindings::ntwk::simple_actor::runtime::log;
-use bindings::ntwk::simple_actor::runtime::send;
 
 struct Component;
 
