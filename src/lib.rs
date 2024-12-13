@@ -4,8 +4,8 @@ use serde_json::Value;
 use std::future::Future;
 use std::path::PathBuf;
 use std::pin::Pin;
-
 use tokio::sync::{mpsc, oneshot};
+use tracing::{error, info};
 
 pub mod capabilities;
 pub mod chain;
@@ -178,7 +178,7 @@ impl ActorRuntime {
         let mut actor_process = ActorProcess::new(actor, rx)?;
         let process_handle = tokio::spawn(async move {
             if let Err(e) = actor_process.run().await {
-                eprintln!("Actor process error: {}", e);
+                error!("Actor process failed: {}", e);
             }
         });
 

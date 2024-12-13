@@ -3,8 +3,9 @@ use md5;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
+use tracing::{debug, info};
 
-use crate::logging::{log_chain_event, ChainEvent, ChainEventType};
+use crate::logging::{ChainEvent, ChainEventType};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChainEntry {
@@ -40,7 +41,8 @@ impl HashChain {
         let event = ChainEvent {
             hash: hash.clone(),
             timestamp: Utc::now(),
-            actor_name: data.get("actor_name")
+            actor_name: data
+                .get("actor_name")
                 .and_then(|v| v.as_str())
                 .unwrap_or("unknown")
                 .to_string(),
@@ -52,7 +54,8 @@ impl HashChain {
             data,
             parent: self.head.clone(),
         };
-        log_chain_event(&event);
+        info!("\n{}", event);
+        debug!("Chain event logged: #{}", event.hash);
 
         // Store entry and update head
         self.entries.insert(hash.clone(), entry);

@@ -1,9 +1,9 @@
 use anyhow::Result;
 use chrono::Utc;
 use clap::Parser;
-use theater::ActorRuntime;
-use theater::logging::{SystemEvent, SystemEventType, log_system_event};
 use std::path::PathBuf;
+use theater::ActorRuntime;
+use tracing::info;
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -19,22 +19,15 @@ async fn main() -> Result<()> {
     let args = Args::parse();
 
     // Create and initialize the runtime
-    log_system_event(SystemEvent {
-        timestamp: Utc::now(),
-        event_type: SystemEventType::Runtime,
-        component: "Init".to_string(),
-        message: "Creating actor runtime".to_string(),
-        related_hash: None,
-    });
     let mut runtime = ActorRuntime::from_file(args.manifest).await?;
 
-    println!("Actor '{}' initialized successfully!", runtime.config.name);
+    info!("Actor '{}' initialized successfully!", runtime.config.name);
 
     // Wait for Ctrl+C
-    println!("Actor is running. Press Ctrl+C to exit.");
+    info!("Actor started at {}", Utc::now());
     tokio::signal::ctrl_c().await?;
 
-    println!("Shutting down...");
+    info!("Shutting down...");
     runtime.shutdown().await?;
 
     Ok(())

@@ -93,11 +93,11 @@ impl ActorCapability for BaseActorCapability {
                     let address = address.clone();
                     tokio::spawn(async move {
                         if let Err(e) = http.send_message(address, msg_value).await {
-                            eprintln!("Failed to send message: {}", e);
+                            error!("Failed to send message: {}", e);
                         }
                     });
                 } else {
-                    println!("Warning: No HTTP host available for sending messages");
+                    error!("No HTTP host available for sending messages");
                 }
 
                 Ok(())
@@ -154,7 +154,7 @@ impl ActorCapability for HttpCapability {
         runtime.func_wrap(
             "log",
             |_: wasmtime::StoreContextMut<'_, Store>, (msg,): (String,)| {
-                println!("[WASM] {}", msg);
+                info!("[WASM] {}", msg);
                 Ok(())
             },
         )?;
@@ -164,7 +164,7 @@ impl ActorCapability for HttpCapability {
             "send",
             |mut ctx: wasmtime::StoreContextMut<'_, Store>, (address, msg): (String, Vec<u8>)| {
                 let msg_value: Value = serde_json::from_slice(&msg).map_err(|e| {
-                    println!("Failed to parse message as JSON: {}", e);
+                    error!("Failed to parse message as JSON: {}", e);
                     wasmtime::Error::msg("Invalid message format")
                 })?;
 

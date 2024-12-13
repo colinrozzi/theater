@@ -8,8 +8,8 @@ use wasmtime::Engine;
 
 use crate::capabilities::{ActorCapability, BaseActorCapability, HttpCapability};
 use crate::config::ManifestConfig;
-use tracing::{info, error};
 use crate::{Actor, ActorInput, ActorOutput, Store};
+use tracing::{error, info};
 
 #[derive(Error, Debug)]
 pub enum WasmError {
