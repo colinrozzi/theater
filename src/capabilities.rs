@@ -79,13 +79,7 @@ impl ActorCapability for BaseActorCapability {
             |mut ctx: wasmtime::StoreContextMut<'_, Store>, (address, msg): (String, Vec<u8>)| {
                 // Convert message bytes to JSON Value
                 let msg_value: Value = serde_json::from_slice(&msg).map_err(|e| {
-                    log_system_event(SystemEvent {
-                        timestamp: chrono::Utc::now(),
-                        event_type: SystemEventType::Error,
-                        component: "actor".to_string(),
-                        message: format!("Failed to parse message as JSON: {}", e),
-                        related_hash: None,
-                    });
+                    error!("Failed to parse message as JSON: {}", e);
                     wasmtime::Error::msg("Invalid message format")
                 })?;
 
@@ -181,23 +175,11 @@ impl ActorCapability for HttpCapability {
                     let address = address.clone();
                     tokio::spawn(async move {
                         if let Err(e) = http.send_message(address, msg_value).await {
-                            log_system_event(SystemEvent {
-                                timestamp: chrono::Utc::now(),
-                                event_type: SystemEventType::Error,
-                                component: "http-actor".to_string(),
-                                message: format!("Failed to send message: {}", e),
-                                related_hash: None,
-                            });
+                            error!("Failed to send message: {}", e);
                         }
                     });
                 } else {
-                    log_system_event(SystemEvent {
-                        timestamp: chrono::Utc::now(),
-                        event_type: SystemEventType::Error,
-                        component: "http-actor".to_string(),
-                        message: "No HTTP host available for sending messages".to_string(),
-                        related_hash: None,
-                    });
+                    error!("No HTTP host available for sending messages");
                 }
 
                 Ok(())

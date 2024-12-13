@@ -21,13 +21,7 @@ impl HttpServerHost {
 
     // Handle incoming HTTP request from external clients
     async fn handle_request(mut req: Request<HttpServerHost>) -> tide::Result {
-        log_system_event(SystemEvent {
-            timestamp: Utc::now(),
-            event_type: SystemEventType::Http,
-            component: "HttpServer".to_string(),
-            message: format!("Received {} request to {}", req.method(), req.url().path()),
-            related_hash: None,
-        });
+        info!("Received {} request to {}", req.method(), req.url().path());
         // Create a channel for receiving the response
         let (response_tx, response_rx) = oneshot::channel();
 
@@ -125,13 +119,7 @@ impl HostHandler for HttpServerHandler {
             // Then start accepting connections
             listener.accept().await?;
 
-            log_system_event(SystemEvent {
-                timestamp: Utc::now(),
-                event_type: SystemEventType::Http,
-                component: "HttpServer".to_string(),
-                message: format!("HTTP server started on port {}", self.port),
-                related_hash: None,
-            });
+            info!("HTTP server started on port {}", self.port);
 
             Ok(())
         })

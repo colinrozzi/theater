@@ -201,22 +201,10 @@ impl ActorRuntime {
                 let start_future = handler.start(tx.clone());
                 match start_future.await {
                     Ok(_) => {
-                        log_system_event(SystemEvent {
-                            timestamp: Utc::now(),
-                            event_type: SystemEventType::Runtime,
-                            component: handler_name.clone(),
-                            message: format!("Handler {} started successfully", handler_name),
-                            related_hash: None,
-                        });
+                        info!("Handler {} started successfully", handler_name);
                     }
                     Err(e) => {
-                        log_system_event(SystemEvent {
-                            timestamp: Utc::now(),
-                            event_type: SystemEventType::Error,
-                            component: handler_name.clone(),
-                            message: format!("Failed to start handler: {}", e),
-                            related_hash: None,
-                        });
+                        error!("Failed to start handler: {}", e);
                     }
                 }
             });
