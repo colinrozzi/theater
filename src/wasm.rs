@@ -36,7 +36,10 @@ impl WasmActor {
     pub fn new(config: &ManifestConfig, store: Store) -> Result<Self> {
         // Load WASM component
         let engine = Engine::default();
-        let wasm_bytes = std::fs::read(&config.component_path)?;
+        let wasm_bytes = std::fs::read(&config.component_path).map_err(|e| WasmError::WasmError {
+            context: "component loading",
+            message: format!("Failed to load WASM component from {}: {}", config.component_path.display(), e),
+        })?;
         let component = Component::new(&engine, &wasm_bytes)?;
         let linker = Linker::new(&engine);
 

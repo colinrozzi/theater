@@ -18,6 +18,11 @@ async fn main() -> Result<()> {
     // Parse command line arguments
     let args = Args::parse();
 
+    // Verify manifest file exists
+    if !args.manifest.exists() {
+        return Err(anyhow::anyhow!("Manifest file not found: {}", args.manifest.display()));
+    }
+
     // Create and initialize the runtime
     let mut runtime = ActorRuntime::from_file(args.manifest).await?;
 
