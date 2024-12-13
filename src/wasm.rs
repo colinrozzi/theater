@@ -1,7 +1,6 @@
 use anyhow::Result;
 use serde_json::Value;
 use std::collections::HashMap;
-use std::path::Path;
 use thiserror::Error;
 use wasmtime::component::{Component, ComponentExportIndex, Instance, Linker};
 use wasmtime::Engine;
@@ -34,10 +33,7 @@ pub struct WasmActor {
 }
 
 impl WasmActor {
-    pub fn new<P: AsRef<Path>>(manifest_path: P, store: Store) -> Result<Self> {
-        // Load and parse manifest
-        let config = ManifestConfig::from_file(manifest_path)?;
-
+    pub fn new(config: &ManifestConfig, store: Store) -> Result<Self> {
         // Load WASM component
         let engine = Engine::default();
         let wasm_bytes = std::fs::read(&config.component_path)?;

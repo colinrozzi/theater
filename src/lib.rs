@@ -172,7 +172,7 @@ impl ActorRuntime {
         };
 
         // Create the WASM actor with the store
-        let actor = Box::new(wasm::WasmActor::new(manifest_path, store)?);
+        let actor = Box::new(wasm::WasmActor::new(&config, store)?);
 
         // Create and spawn actor process
         let mut actor_process = ActorProcess::new(actor, rx)?;

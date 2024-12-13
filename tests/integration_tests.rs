@@ -2,6 +2,7 @@ use anyhow::Result;
 use serde_json::json;
 use std::path::PathBuf;
 use theater::capabilities::{ActorCapability, BaseActorCapability};
+use theater::config::ManifestConfig;
 use theater::{Actor, ActorInput, Store, WasmActor};
 use wasmtime::component::{Component, Linker};
 use wasmtime::{Engine, Store as WasmStore};
@@ -67,7 +68,8 @@ async fn test_wasm_actor_lifecycle() -> Result<()> {
 
     // Create actor with empty store
     let store = Store::new();
-    let actor = WasmActor::new(manifest_path, store)?;
+    let config = ManifestConfig::from_file(&manifest_path)?;
+    let actor = WasmActor::new(&config, store)?;
 
     // Test initialization
     let initial_state = actor.init()?;
@@ -88,7 +90,8 @@ async fn test_wasm_actor_lifecycle() -> Result<()> {
 async fn test_wasm_actor_http_handling() -> Result<()> {
     let manifest_path = get_test_manifest_path_http();
     let store = Store::new();
-    let actor = WasmActor::new(manifest_path, store)?;
+    let config = ManifestConfig::from_file(&manifest_path)?;
+    let actor = WasmActor::new(&config, store)?;
 
     let initial_state = actor.init()?;
 
