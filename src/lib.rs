@@ -1,4 +1,5 @@
 use anyhow::Result;
+use chrono::Utc;
 use serde_json::Value;
 use std::future::Future;
 use std::path::PathBuf;
@@ -138,9 +139,7 @@ impl ActorRuntime {
 
         // Initialize logging
         let _ = FmtSubscriber::builder()
-            .with_env_filter(EnvFilter::new(
-                config.logging.level.clone()
-            ))
+            .with_env_filter(EnvFilter::new(config.logging.level.clone()))
             .with_target(false)
             .with_thread_ids(true)
             .with_file(true)
@@ -183,46 +182,47 @@ impl ActorRuntime {
             }
         });
 
-        println!("Parsed config: {:#?}", config);
         let mut handler_tasks = Vec::new();
-        println!("Initializing handlers...");
-        println!("{:?}", config.handlers);
         for handler_config in &config.handlers {
             let tx = tx.clone();
             let handler_config = handler_config.clone();
             let task = tokio::spawn(async move {
                 let handler: Box<dyn HostHandler> = match handler_config {
                     HandlerConfig::Http(http_config) => {
-                        println!("[RUNTIME] Creating Http handler...");
                         Box::new(http::HttpHandler::new(http_config.port))
                     }
                     HandlerConfig::HttpServer(http_config) => {
-                        println!("[RUNTIME] Creating Http-server handler...");
                         Box::new(http_server::HttpServerHandler::new(http_config.port))
                     }
                 };
 
                 let handler_name = handler.name().to_string();
-                println!("[RUNTIME] Starting handler: {}", handler_name);
 
                 let start_future = handler.start(tx.clone());
                 match start_future.await {
                     Ok(_) => {
-                        println!("[RUNTIME] Handler {} started successfully", handler_name);
+                        log_system_event(SystemEvent {
+                            timestamp: Utc::now(),
+                            event_type: SystemEventType::Runtime,
+                            component: handler_name.clone(),
+                            message: format!("Handler {} started successfully", handler_name),
+                            related_hash: None,
+                        });
                     }
                     Err(e) => {
-                        eprintln!("[RUNTIME] Handler {} failed to start: {}", handler_name, e);
+                        log_system_event(SystemEvent {
+                            timestamp: Utc::now(),
+                            event_type: SystemEventType::Error,
+                            component: handler_name.clone(),
+                            message: format!("Failed to start handler: {}", e),
+                            related_hash: None,
+                        });
                     }
                 }
             });
 
             handler_tasks.push(task);
         }
-
-        println!(
-            "[RUNTIME] All {} handlers started successfully",
-            handler_tasks.len()
-        );
 
         Ok(Self {
             config,

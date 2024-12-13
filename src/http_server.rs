@@ -1,6 +1,5 @@
 use anyhow::Result;
 use chrono::Utc;
-use crate::logging::{SystemEvent, SystemEventType, log_system_event};
 use serde_json::Value;
 use std::future::Future;
 use std::pin::Pin;
@@ -73,7 +72,7 @@ impl HttpServerHost {
                 let mut response = Response::new(status);
 
                 // Add headers
-        for (key, value) in headers {
+                for (key, value) in headers {
                     response.append_header(key.as_str(), value.as_str());
                 }
 
@@ -106,12 +105,7 @@ impl HostHandler for HttpServerHandler {
     }
 
     fn new(config: Value) -> Self {
-        println!(
-            "[HTTP_SERVER] Creating new handler with config: {:?}",
-            config
-        );
         let port = config.get("port").unwrap().as_u64().unwrap() as u16;
-        println!("[HTTP_SERVER] Configured for port {}", port);
         Self { port }
     }
 
@@ -119,24 +113,25 @@ impl HostHandler for HttpServerHandler {
         &self,
         mailbox_tx: mpsc::Sender<ActorMessage>,
     ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + '_>> {
-        println!("Starting http server on port {}", self.port);
-        println!(
-            "[HTTP_SERVER] Attempting to bind to 127.0.0.1:{}",
-            self.port
-        );
         Box::pin(async move {
             let state = HttpServerHost::new(mailbox_tx);
             let mut app = Server::with_state(state);
             app.at("/*").all(HttpServerHost::handle_request);
             app.at("/").all(HttpServerHost::handle_request);
-            println!("[HTTP_SERVER] Setting up routes on /*");
 
             // First bind the server
             let mut listener = app.bind(format!("127.0.0.1:{}", self.port)).await?;
-            println!("[HTTP_SERVER] Successfully bound to port {}", self.port);
 
             // Then start accepting connections
             listener.accept().await?;
+
+            log_system_event(SystemEvent {
+                timestamp: Utc::now(),
+                event_type: SystemEventType::Http,
+                component: "HttpServer".to_string(),
+                message: format!("HTTP server started on port {}", self.port),
+                related_hash: None,
+            });
 
             Ok(())
         })

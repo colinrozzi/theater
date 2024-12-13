@@ -1,6 +1,6 @@
-use crate::logging::{log_system_event, SystemEvent, SystemEventType};
 use anyhow::Result;
 use serde_json::Value;
+use tracing::{error, info};
 use wasmtime::component::{Component, ComponentExportIndex, Linker};
 
 use crate::store::Store;
