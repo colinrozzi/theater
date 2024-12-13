@@ -1,11 +1,11 @@
+use crate::chain_emitter::CHAIN_EMITTER;
+use crate::logging::{ChainEvent, ChainEventType};
 use chrono::Utc;
 use md5;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
 use tracing::{debug, info};
-
-use crate::logging::{ChainEvent, ChainEventType};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChainEntry {
@@ -54,7 +54,7 @@ impl HashChain {
             data,
             parent: self.head.clone(),
         };
-        info!("\n{}", event);
+        CHAIN_EMITTER.emit(event.clone());
         debug!("Chain event logged: #{}", event.hash);
 
         // Store entry and update head

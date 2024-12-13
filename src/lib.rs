@@ -9,6 +9,7 @@ use tracing::{error, info};
 
 pub mod capabilities;
 pub mod chain;
+pub mod chain_emitter;
 pub mod config;
 pub mod http;
 pub mod http_server;
