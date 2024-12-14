@@ -116,10 +116,10 @@ impl HostHandler for HttpServerHandler {
             // First bind the server
             let mut listener = app.bind(format!("127.0.0.1:{}", self.port)).await?;
 
+            info!("HTTP-SERVER starting on port {}", self.port);
+
             // Then start accepting connections
             listener.accept().await?;
-
-            info!("HTTP server started on port {}", self.port);
 
             Ok(())
         })
