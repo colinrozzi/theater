@@ -10,27 +10,19 @@ use tracing::debug;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ChainEvent {
-    Input {
+    ExternalInput {
         input: ActorInput,
+        timestamp: chrono::DateTime<Utc>,
+    },
+    ActorMessage {
+        source_actor: String,
+        source_chain_state: String,
+        content: Value,
         timestamp: chrono::DateTime<Utc>,
     },
     StateChange {
         old_state: Value,
         new_state: Value,
-        timestamp: chrono::DateTime<Utc>,
-    },
-    MessageSent {
-        target_actor: String,
-        target_chain_state: String,
-        source_chain_state: String,
-        payload: Value,
-        timestamp: chrono::DateTime<Utc>,
-    },
-    MessageReceived {
-        source_actor: String,
-        source_chain_state: String,
-        our_chain_state: String,
-        payload: Value,
         timestamp: chrono::DateTime<Utc>,
     },
     Output {

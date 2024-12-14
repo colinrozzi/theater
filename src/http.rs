@@ -1,11 +1,11 @@
 use anyhow::{anyhow, Result};
-use tracing::{info, error};
 use reqwest::Client;
 use serde_json::Value;
 use std::future::Future;
 use std::pin::Pin;
 use tide::{Request, Response, Server};
 use tokio::sync::mpsc;
+use tracing::{error, info};
 
 use crate::{ActorInput, ActorMessage, HostHandler};
 
@@ -53,7 +53,7 @@ impl HttpHost {
                 // Create message with no response channel
                 let msg = ActorMessage {
                     content: ActorInput::Message(payload),
-                    response_channel: None, // One-way message
+                    metadata: None,
                 };
 
                 // Send to actor

@@ -46,9 +46,21 @@ pub enum ActorOutput {
     },
 }
 
+#[derive(Debug)]
+pub enum MessageMetadata {
+    ActorSource {
+        source_actor: String,
+        source_chain_state: String,
+    },
+    HttpRequest {
+        response_channel: oneshot::Sender<ActorOutput>,
+    },
+}
+
+#[derive(Debug)]
 pub struct ActorMessage {
     pub content: ActorInput,
-    pub response_channel: Option<oneshot::Sender<ActorOutput>>,
+    pub metadata: Option<MessageMetadata>,
 }
 
 pub trait Actor: Send {
@@ -66,7 +78,7 @@ pub struct ActorProcess {
 
 impl ActorProcess {
     pub fn new(
-        name: &String,
+        name: String,
         actor: Box<dyn Actor>,
         mailbox_rx: mpsc::Receiver<ActorMessage>,
     ) -> Result<Self> {
@@ -84,17 +96,35 @@ impl ActorProcess {
             mailbox_rx,
             chain,
             actor,
-            name: name.to_string(),
+            name,
         })
     }
 
     pub async fn run(&mut self) -> Result<()> {
         while let Some(msg) = self.mailbox_rx.recv().await {
-            // Record input event
-            let input_hash = self.chain.add_event(ChainEvent::Input {
-                input: msg.content.clone(),
-                timestamp: Utc::now(),
-            });
+            // Record appropriate chain event based on message type
+            match &msg.metadata {
+                Some(MessageMetadata::ActorSource {
+                    source_actor,
+                    source_chain_state,
+                }) => {
+                    self.chain.add_event(ChainEvent::ActorMessage {
+                        source_actor: source_actor.clone(),
+                        source_chain_state: source_chain_state.clone(),
+                        content: match &msg.content {
+                            ActorInput::Message(v) => v.clone(),
+                            _ => serde_json::to_value(&msg.content).unwrap_or_default(),
+                        },
+                        timestamp: Utc::now(),
+                    });
+                }
+                _ => {
+                    self.chain.add_event(ChainEvent::ExternalInput {
+                        input: msg.content.clone(),
+                        timestamp: Utc::now(),
+                    });
+                }
+            }
 
             // Get current state from chain
             let current_state = self
@@ -119,9 +149,9 @@ impl ActorProcess {
                 timestamp: Utc::now(),
             });
 
-            // Send response if channel exists
-            if let Some(response_tx) = msg.response_channel {
-                let _ = response_tx.send(output);
+            // Send response if metadata contains response channel
+            if let Some(MessageMetadata::HttpRequest { response_channel }) = msg.metadata {
+                let _ = response_channel.send(output);
             }
         }
 
@@ -134,30 +164,22 @@ impl ActorProcess {
 
     pub fn send_message(&mut self, target: &str, msg: Value) -> Result<()> {
         // First record the send event
-        let event = ChainEvent::MessageSent {
-            target_actor: target.to_string(),
-            target_chain_state: get_actor_chain_state(target)?,
-            source_chain_state: self
-                .chain
-                .get_head()
-                .ok_or_else(|| anyhow::anyhow!("No chain head"))?
-                .to_string(),
-            payload: msg.clone(),
+        let current_chain_state = self
+            .chain
+            .get_head()
+            .ok_or_else(|| anyhow::anyhow!("No chain head"))?
+            .to_string();
+
+        self.chain.add_event(ChainEvent::ActorMessage {
+            source_actor: self.name.clone(),
+            source_chain_state: current_chain_state.clone(),
+            content: msg.clone(),
             timestamp: Utc::now(),
-        };
+        });
 
-        self.chain.add_event(event);
-
-        // Then actually send the message
-        // TODO: Implement actual message sending
+        // TODO: Implement actual message sending with metadata
         Ok(())
     }
-}
-
-// Gets the current chain state of another actor
-fn get_actor_chain_state(actor_name: &str) -> Result<String> {
-    // TODO: Implement actor discovery and chain state querying
-    Ok("unknown".to_string())
 }
 
 pub trait HostHandler: Send + Sync {

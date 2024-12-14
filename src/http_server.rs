@@ -7,7 +7,7 @@ use tide::{Body, Request, Response, Server};
 use tokio::sync::{mpsc, oneshot};
 use tracing::info;
 
-use crate::{ActorInput, ActorMessage, ActorOutput, HostHandler};
+use crate::{ActorInput, ActorMessage, ActorOutput, HostHandler, MessageMetadata};
 
 #[derive(Clone)]
 pub struct HttpServerHost {
@@ -19,16 +19,16 @@ impl HttpServerHost {
         Self { mailbox_tx }
     }
 
-    // Handle incoming HTTP request from external clients
     async fn handle_request(mut req: Request<HttpServerHost>) -> tide::Result {
         info!("Received {} request to {}", req.method(), req.url().path());
+        
         // Create a channel for receiving the response
         let (response_tx, response_rx) = oneshot::channel();
 
         // Get the body bytes
         let body_bytes = req.body_bytes().await?.to_vec();
 
-        // Create actor message with response channel
+        // Create actor message with http metadata
         let msg = ActorMessage {
             content: ActorInput::HttpRequest {
                 method: req.method().to_string(),
@@ -39,7 +39,9 @@ impl HttpServerHost {
                     .collect(),
                 body: Some(body_bytes),
             },
-            response_channel: Some(response_tx),
+            metadata: Some(MessageMetadata::HttpRequest {
+                response_channel: response_tx,
+            }),
         };
 
         // Send to actor
@@ -55,8 +57,6 @@ impl HttpServerHost {
             .map_err(|_| tide::Error::from_str(500, "Failed to receive response from actor"))?;
 
         // Process actor response
-
-        // Parse actor response
         match actor_response {
             ActorOutput::HttpResponse {
                 status,
@@ -72,7 +72,6 @@ impl HttpServerHost {
 
                 // Set body if present
                 if let Some(body_bytes) = body {
-                    // Set response body
                     response.set_body(Body::from_bytes(body_bytes));
                 }
 
@@ -127,7 +126,6 @@ impl HostHandler for HttpServerHandler {
 
     fn stop(&self) -> Pin<Box<dyn Future<Output = Result<()>> + Send>> {
         Box::pin(async move {
-            // Basic shutdown - the server will stop when dropped
             Ok(())
         })
     }
