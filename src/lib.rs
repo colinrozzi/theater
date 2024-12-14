@@ -1,4 +1,6 @@
 use anyhow::Result;
+use chrono::Utc;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::future::Future;
 use std::path::PathBuf;
@@ -16,19 +18,16 @@ pub mod logging;
 mod store;
 mod wasm;
 
+use chain::{ChainEvent, HashChain};
 use tracing_subscriber::{EnvFilter, FmtSubscriber};
 
 pub use config::{HandlerConfig, HttpHandlerConfig, HttpServerHandlerConfig, ManifestConfig};
 pub use store::Store;
 pub use wasm::{WasmActor, WasmError};
 
-// Core types that represent different kinds of actor interactions
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ActorInput {
-    /// Regular actor-to-actor messages
     Message(Value),
-
-    /// HTTP requests
     HttpRequest {
         method: String,
         uri: String,
@@ -37,12 +36,9 @@ pub enum ActorInput {
     },
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ActorOutput {
-    /// Regular actor-to-actor messages
     Message(Value),
-
-    /// HTTP responses
     HttpResponse {
         status: u16,
         headers: Vec<(String, String)>,
@@ -55,53 +51,76 @@ pub struct ActorMessage {
     pub response_channel: Option<oneshot::Sender<ActorOutput>>,
 }
 
-/// Core trait that all actors must implement
 pub trait Actor: Send {
-    /// Initialize the actor and return its initial state
     fn init(&self) -> Result<Value>;
-
-    /// Handle an input and return the output along with the new state
     fn handle_input(&self, input: ActorInput, state: &Value) -> Result<(ActorOutput, Value)>;
-
-    /// Verify that a given state is valid for this actor
     fn verify_state(&self, state: &Value) -> bool;
 }
 
-/// The core actor process that handles messages
 pub struct ActorProcess {
     mailbox_rx: mpsc::Receiver<ActorMessage>,
-    state: Value,
-    chain: chain::HashChain,
+    chain: HashChain,
     actor: Box<dyn Actor>,
+    name: String,
 }
 
 impl ActorProcess {
-    pub fn new(actor: Box<dyn Actor>, mailbox_rx: mpsc::Receiver<ActorMessage>) -> Result<Self> {
-        let mut chain = chain::HashChain::new();
-        chain.add(Value::Null); // Initialize chain with null entry
+    pub fn new(
+        name: &String,
+        actor: Box<dyn Actor>,
+        mailbox_rx: mpsc::Receiver<ActorMessage>,
+    ) -> Result<Self> {
+        let mut chain = HashChain::new();
 
-        let state = actor.init()?;
-        chain.add(state.clone());
+        // Initialize with initial state
+        let initial_state = actor.init()?;
+        chain.add_event(ChainEvent::StateChange {
+            old_state: Value::Null,
+            new_state: initial_state,
+            timestamp: Utc::now(),
+        });
 
         Ok(Self {
             mailbox_rx,
-            state,
             chain,
             actor,
+            name: name.to_string(),
         })
     }
 
     pub async fn run(&mut self) -> Result<()> {
         while let Some(msg) = self.mailbox_rx.recv().await {
-            let (output, new_state) = self.actor.handle_input(msg.content, &self.state)?;
+            // Record input event
+            let input_hash = self.chain.add_event(ChainEvent::Input {
+                input: msg.content.clone(),
+                timestamp: Utc::now(),
+            });
 
-            // Update state and chain
-            self.state = new_state.clone();
-            self.chain.add(new_state);
+            // Get current state from chain
+            let current_state = self
+                .chain
+                .get_current_state()
+                .ok_or_else(|| anyhow::anyhow!("No current state found in chain"))?;
+
+            // Process input
+            let (output, new_state) = self.actor.handle_input(msg.content, &current_state)?;
+
+            // Record state change
+            let state_hash = self.chain.add_event(ChainEvent::StateChange {
+                old_state: current_state,
+                new_state: new_state.clone(),
+                timestamp: Utc::now(),
+            });
+
+            // Record output
+            self.chain.add_event(ChainEvent::Output {
+                output: output.clone(),
+                chain_state: state_hash,
+                timestamp: Utc::now(),
+            });
 
             // Send response if channel exists
             if let Some(response_tx) = msg.response_channel {
-                // Ignore error if receiver was dropped
                 let _ = response_tx.send(output);
             }
         }
@@ -109,9 +128,36 @@ impl ActorProcess {
         Ok(())
     }
 
-    pub fn get_chain(&self) -> &chain::HashChain {
+    pub fn get_chain(&self) -> &HashChain {
         &self.chain
     }
+
+    pub fn send_message(&mut self, target: &str, msg: Value) -> Result<()> {
+        // First record the send event
+        let event = ChainEvent::MessageSent {
+            target_actor: target.to_string(),
+            target_chain_state: get_actor_chain_state(target)?,
+            source_chain_state: self
+                .chain
+                .get_head()
+                .ok_or_else(|| anyhow::anyhow!("No chain head"))?
+                .to_string(),
+            payload: msg.clone(),
+            timestamp: Utc::now(),
+        };
+
+        self.chain.add_event(event);
+
+        // Then actually send the message
+        // TODO: Implement actual message sending
+        Ok(())
+    }
+}
+
+// Gets the current chain state of another actor
+fn get_actor_chain_state(actor_name: &str) -> Result<String> {
+    // TODO: Implement actor discovery and chain state querying
+    Ok("unknown".to_string())
 }
 
 pub trait HostHandler: Send + Sync {
@@ -175,7 +221,7 @@ impl ActorRuntime {
         let actor = Box::new(wasm::WasmActor::new(&config, store)?);
 
         // Create and spawn actor process
-        let mut actor_process = ActorProcess::new(actor, rx)?;
+        let mut actor_process = ActorProcess::new(&config.name, actor, rx)?;
         let process_handle = tokio::spawn(async move {
             if let Err(e) = actor_process.run().await {
                 error!("Actor process failed: {}", e);

@@ -1,5 +1,6 @@
 use crate::chain_emitter::CHAIN_EMITTER;
-use crate::logging::{ChainEvent, ChainEventType};
+use crate::logging::ChainEventType;
+use crate::{ActorInput, ActorOutput};
 use chrono::Utc;
 use md5;
 use serde::{Deserialize, Serialize};
@@ -8,9 +9,41 @@ use std::collections::HashMap;
 use tracing::debug;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum ChainEvent {
+    Input {
+        input: ActorInput,
+        timestamp: chrono::DateTime<Utc>,
+    },
+    StateChange {
+        old_state: Value,
+        new_state: Value,
+        timestamp: chrono::DateTime<Utc>,
+    },
+    MessageSent {
+        target_actor: String,
+        target_chain_state: String,
+        source_chain_state: String,
+        payload: Value,
+        timestamp: chrono::DateTime<Utc>,
+    },
+    MessageReceived {
+        source_actor: String,
+        source_chain_state: String,
+        our_chain_state: String,
+        payload: Value,
+        timestamp: chrono::DateTime<Utc>,
+    },
+    Output {
+        output: ActorOutput,
+        chain_state: String,
+        timestamp: chrono::DateTime<Utc>,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChainEntry {
     pub parent: Option<String>,
-    pub data: Value,
+    pub event: ChainEvent,
 }
 
 #[derive(Debug)]
@@ -27,37 +60,31 @@ impl HashChain {
         }
     }
 
-    pub fn add(&mut self, data: Value) -> String {
+    pub fn add_event(&mut self, event: ChainEvent) -> String {
         let entry = ChainEntry {
             parent: self.head.clone(),
-            data: data.clone(),
+            event,
         };
 
-        // Calculate hash of entry
         let serialized = serde_json::to_string(&entry).expect("Failed to serialize entry");
         let hash = format!("{:x}", md5::compute(serialized));
 
-        // Create and log chain event
-        let event = ChainEvent {
+        // Emit logging event
+        CHAIN_EMITTER.emit(crate::logging::ChainEvent {
             hash: hash.clone(),
             timestamp: Utc::now(),
-            actor_name: data
-                .get("actor_name")
-                .and_then(|v| v.as_str())
-                .unwrap_or("unknown")
-                .to_string(),
+            actor_name: "unknown".to_string(), // TODO: Store actor name in chain
             event_type: if self.head.is_none() {
                 ChainEventType::Init
             } else {
                 ChainEventType::StateTransition
             },
-            data,
+            data: serde_json::to_value(&entry).unwrap(),
             parent: self.head.clone(),
-        };
-        CHAIN_EMITTER.emit(event.clone());
-        debug!("Chain event logged: #{}", event.hash);
+        });
 
-        // Store entry and update head
+        debug!("Chain event logged: #{}", hash);
+
         self.entries.insert(hash.clone(), entry);
         self.head = Some(hash.clone());
 
@@ -66,6 +93,22 @@ impl HashChain {
 
     pub fn get_head(&self) -> Option<&str> {
         self.head.as_deref()
+    }
+
+    pub fn get_current_state(&self) -> Option<Value> {
+        let mut current = self.head.as_ref()?;
+        
+        while let Some(entry) = self.entries.get(current) {
+            if let ChainEvent::StateChange { new_state, .. } = &entry.event {
+                return Some(new_state.clone());
+            }
+            if let Some(parent) = &entry.parent {
+                current = parent;
+            } else {
+                break;
+            }
+        }
+        None
     }
 
     pub fn get_full_chain(&self) -> Vec<(String, ChainEntry)> {

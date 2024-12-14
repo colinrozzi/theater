@@ -1,6 +1,6 @@
 use anyhow::Result;
 use serde_json::json;
-use theater::{Actor, ActorProcess, ActorInput, ActorOutput, ActorMessage};
+use theater::{Actor, ActorInput, ActorMessage, ActorOutput, ActorProcess};
 use tokio::sync::mpsc;
 
 struct TestActor;
@@ -37,11 +37,11 @@ impl Actor for TestActor {
 async fn test_actor_process() -> Result<()> {
     let (tx, rx) = mpsc::channel(32);
     let actor = Box::new(TestActor);
-    let process = ActorProcess::new(actor, rx)?;
-    
+    let process = ActorProcess::new(&"test-actor".to_string(), actor, rx)?;
+
     // Verify initial state
     assert!(process.get_chain().get_head().is_some());
-    
+
     // Send test message
     let test_msg = ActorInput::Message(json!({"test": "message"}));
     tx.send(ActorMessage {
@@ -49,18 +49,18 @@ async fn test_actor_process() -> Result<()> {
         response_channel: None,
     })
     .await?;
-    
+
     Ok(())
 }
 
 #[test]
 fn test_actor_state_verification() {
     let actor = TestActor;
-    
+
     // Valid state
     let valid_state = json!({"count": 0});
     assert!(actor.verify_state(&valid_state));
-    
+
     // Invalid state
     let invalid_state = json!({"invalid": "state"});
     assert!(!actor.verify_state(&invalid_state));
