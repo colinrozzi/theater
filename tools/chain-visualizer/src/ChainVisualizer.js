@@ -7,20 +7,84 @@ const ACTOR_SERVERS = [
   { name: 'llm-gateway', port: 3032 }
 ];
 
+// Helper to get event type summary
+const getEventSummary = (event) => {
+  if (!event.data) return 'Unknown Event';
+  
+  // Handle different event types
+  if ('source_actor' in event.data) return `Message from ${event.data.source_actor}`;
+  if ('old_state' in event.data) return 'State Change';
+  if ('input' in event.data) return 'External Input';
+  if ('output' in event.data) return 'Output';
+  
+  return 'Unknown Event Type';
+};
+
+const EventCard = ({ event, related }) => {
+  const [isExpanded, setIsExpanded] = useState(false);
+  
+  return (
+    <div 
+      className={`p-4 hover:bg-gray-50 cursor-pointer ${
+        related?.length ? 'border-l-4 border-blue-500' : ''
+      }`}
+      onClick={() => setIsExpanded(!isExpanded)}
+    >
+      <div className="flex justify-between items-center">
+        <div className="font-mono text-sm text-gray-600">
+          {new Date(event.timestamp).toLocaleString()}
+        </div>
+        <div className="text-sm font-medium">
+          {getEventSummary(event)}
+          <span className="ml-2 text-gray-400">
+            {isExpanded ? '▼' : '▶'}
+          </span>
+        </div>
+      </div>
+      
+      {isExpanded && (
+        <>
+          <pre className="mt-4 text-sm overflow-auto bg-gray-50 p-4 rounded">
+            {JSON.stringify(event.data, null, 2)}
+          </pre>
+          {related?.length > 0 && (
+            <div className="mt-2 text-sm text-blue-600">
+              Related to events in: {related.map(r => r.actorName).join(', ')}
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+};
+
 const ChainVisualizer = () => {
   const [eventsByActor, setEventsByActor] = useState({});
   const [connections, setConnections] = useState({});
 
-  // Create WebSocket connections for each actor
-  const sockets = ACTOR_SERVERS.map(server => {
-    const { lastMessage } = useWebSocket(`ws://localhost:${server.port}/events/ws`, {
-      onOpen: () => setConnections(prev => ({ ...prev, [server.name]: true })),
-      onClose: () => setConnections(prev => ({ ...prev, [server.name]: false })),
-      shouldReconnect: () => true,
-      reconnectAttempts: 10,
-      reconnectInterval: 3000
-    });
-    return { server, lastMessage };
+  const wsOptions = {
+    shouldReconnect: (closeEvent) => true,
+    reconnectAttempts: 10,
+    reconnectInterval: 3000,
+  };
+
+  // Create individual WebSocket connections for each actor
+  const browserUISocket = useWebSocket(`ws://localhost:3030/events/ws`, {
+    ...wsOptions,
+    onOpen: () => setConnections(prev => ({ ...prev, 'browser-ui': true })),
+    onClose: () => setConnections(prev => ({ ...prev, 'browser-ui': false })),
+  });
+
+  const chatStateSocket = useWebSocket(`ws://localhost:3031/events/ws`, {
+    ...wsOptions,
+    onOpen: () => setConnections(prev => ({ ...prev, 'chat-state': true })),
+    onClose: () => setConnections(prev => ({ ...prev, 'chat-state': false })),
+  });
+
+  const llmGatewaySocket = useWebSocket(`ws://localhost:3032/events/ws`, {
+    ...wsOptions,
+    onOpen: () => setConnections(prev => ({ ...prev, 'llm-gateway': true })),
+    onClose: () => setConnections(prev => ({ ...prev, 'llm-gateway': false })),
   });
 
   // Fetch initial history for each actor
@@ -40,20 +104,26 @@ const ChainVisualizer = () => {
 
   // Handle incoming WebSocket messages
   useEffect(() => {
-    sockets.forEach(({ server, lastMessage }) => {
-      if (lastMessage) {
+    const sockets = {
+      'browser-ui': browserUISocket.lastMessage,
+      'chat-state': chatStateSocket.lastMessage,
+      'llm-gateway': llmGatewaySocket.lastMessage
+    };
+
+    Object.entries(sockets).forEach(([actorName, message]) => {
+      if (message) {
         try {
-          const event = JSON.parse(lastMessage.data);
+          const event = JSON.parse(message.data);
           setEventsByActor(prev => ({
             ...prev,
-            [server.name]: [...(prev[server.name] || []), event]
+            [actorName]: [...(prev[actorName] || []), event]
           }));
         } catch (err) {
           console.error('Failed to parse event:', err);
         }
       }
     });
-  }, [sockets.map(s => s.lastMessage)]);
+  }, [browserUISocket.lastMessage, chatStateSocket.lastMessage, llmGatewaySocket.lastMessage]);
 
   // Find related events by chain state
   const findRelatedEvents = (event) => {
@@ -98,36 +168,20 @@ const ChainVisualizer = () => {
           <div className="grid grid-cols-3 gap-6">
             {ACTOR_SERVERS.map(server => (
               <div key={server.name} className="border rounded-lg overflow-hidden bg-white">
-                <div className="bg-gray-50 px-4 py-2 border-b sticky top-0">
+                <div className="bg-gray-50 px-4 py-2 border-b sticky top-0 z-10">
                   <h2 className="font-semibold">{server.name}</h2>
                   <div className="text-sm text-gray-500">
                     {(eventsByActor[server.name] || []).length} events
                   </div>
                 </div>
                 <div className="divide-y max-h-[700px] overflow-auto">
-                  {(eventsByActor[server.name] || []).map((event, i) => {
-                    const related = findRelatedEvents(event);
-                    return (
-                      <div 
-                        key={i} 
-                        className={`p-4 hover:bg-gray-50 ${
-                          related?.length ? 'border-l-4 border-blue-500' : ''
-                        }`}
-                      >
-                        <div className="font-mono text-sm text-gray-600 mb-2">
-                          {new Date(event.timestamp).toLocaleString()}
-                        </div>
-                        <pre className="text-sm overflow-auto">
-                          {JSON.stringify(event.data, null, 2)}
-                        </pre>
-                        {related?.length > 0 && (
-                          <div className="mt-2 text-sm text-blue-600">
-                            Related to events in: {related.map(r => r.actorName).join(', ')}
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
+                  {(eventsByActor[server.name] || []).map((event, i) => (
+                    <EventCard
+                      key={i}
+                      event={event}
+                      related={findRelatedEvents(event)}
+                    />
+                  ))}
                 </div>
               </div>
             ))}
