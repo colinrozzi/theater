@@ -12,6 +12,7 @@ pub mod capabilities;
 pub mod chain;
 pub mod chain_emitter;
 pub mod config;
+pub mod event_server;
 pub mod http;
 pub mod http_server;
 pub mod logging;
