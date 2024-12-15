@@ -78,7 +78,7 @@ pub struct ActorProcess {
 
 impl ActorProcess {
     pub fn new(
-        name: String,
+        name: &String,
         actor: Box<dyn Actor>,
         mailbox_rx: mpsc::Receiver<ActorMessage>,
     ) -> Result<Self> {
@@ -96,7 +96,7 @@ impl ActorProcess {
             mailbox_rx,
             chain,
             actor,
-            name,
+            name: name.to_string(),
         })
     }
 
