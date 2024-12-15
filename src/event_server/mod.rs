@@ -1,10 +1,6 @@
 use crate::chain_emitter::CHAIN_EMITTER;
-use crate::logging::ChainEvent;
-use futures::SinkExt;
-use futures::{FutureExt, StreamExt};
-use std::convert::Infallible;
-use tokio::sync::broadcast;
-use warp::{ws::Message, Filter, Reply};
+use futures::{SinkExt, StreamExt};
+use warp::{ws::Message, Filter};
 
 pub async fn run_event_server(port: u16) {
     // Route for getting event history
@@ -57,4 +53,3 @@ async fn handle_ws_client(ws: warp::ws::WebSocket) {
         }
     };
 }
-

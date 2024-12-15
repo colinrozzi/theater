@@ -2,7 +2,6 @@ use std::collections::VecDeque;
 use std::sync::Mutex;
 use chrono::Utc;
 use tokio::sync::broadcast;
-use serde::Serialize;
 
 use crate::logging::ChainEvent;
 

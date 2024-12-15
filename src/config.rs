@@ -11,6 +11,13 @@ pub struct ManifestConfig {
     pub handlers: Vec<HandlerConfig>,
     #[serde(default)]
     pub logging: LoggingConfig,
+    #[serde(default)]
+    pub event_server: Option<EventServerConfig>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EventServerConfig {
+    pub port: u16,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
