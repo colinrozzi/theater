@@ -1,71 +1,60 @@
 use crate::chain_emitter::CHAIN_EMITTER;
 use crate::logging::ChainEvent;
-use axum::{
-    extract::ws::{WebSocket, WebSocketUpgrade},
-    response::IntoResponse,
-    routing::get,
-    Router,
-};
-use futures::{SinkExt, StreamExt};
-use serde_json::json;
-use std::net::SocketAddr;
+use futures::SinkExt;
+use futures::{FutureExt, StreamExt};
+use std::convert::Infallible;
 use tokio::sync::broadcast;
-use tower_http::cors::CorsLayer;
+use warp::{ws::Message, Filter, Reply};
 
 pub async fn run_event_server(port: u16) {
-    // Create our router
-    let app = Router::new()
-        .route("/events/history", get(get_history))
-        .route("/events/ws", get(websocket_handler))
-        .layer(CorsLayer::permissive()); // Be careful with this in production!
+    // Route for getting event history
+    let history = warp::path!("events" / "history").and(warp::get()).map(|| {
+        let history = CHAIN_EMITTER.get_history();
+        warp::reply::json(&history)
+    });
 
-    // Run it
-    let addr = SocketAddr::from(([127, 0, 0, 1], port));
-    println!("Event server listening on {}", addr);
-    axum::Server::bind(&addr)
-        .serve(app.into_make_service())
-        .await
-        .unwrap();
+    // Route for WebSocket connections
+    let ws = warp::path!("events" / "ws")
+        .and(warp::ws())
+        .map(|ws: warp::ws::Ws| ws.on_upgrade(handle_ws_client));
+
+    // CORS configuration
+    let cors = warp::cors()
+        .allow_any_origin()
+        .allow_methods(vec!["GET", "POST", "OPTIONS"])
+        .allow_headers(vec!["content-type"]);
+
+    // Combine routes
+    let routes = history.or(ws).with(cors).with(warp::trace::request());
+
+    // Start the server
+    println!("Event server listening on port {}", port);
+    warp::serve(routes).run(([127, 0, 0, 1], port)).await;
 }
 
-async fn get_history() -> impl IntoResponse {
-    let history = CHAIN_EMITTER.get_history();
-    axum::Json(json!({
-        "events": history
-    }))
-}
-
-async fn websocket_handler(ws: WebSocketUpgrade) -> impl IntoResponse {
-    ws.on_upgrade(handle_socket)
-}
-
-async fn handle_socket(socket: WebSocket) {
-    let (mut sender, mut receiver) = socket.split();
+async fn handle_ws_client(ws: warp::ws::WebSocket) {
+    let (mut ws_tx, mut ws_rx) = ws.split();
 
     // Subscribe to chain events
     let mut event_rx = CHAIN_EMITTER.subscribe();
 
-    // Spawn a task to forward events to the WebSocket
+    // Forward events to WebSocket clients
     let mut send_task = tokio::spawn(async move {
         while let Ok(event) = event_rx.recv().await {
             if let Ok(json) = serde_json::to_string(&event) {
-                if sender
-                    .send(axum::extract::ws::Message::Text(json))
-                    .await
-                    .is_err()
-                {
+                if ws_tx.send(Message::text(json)).await.is_err() {
                     break;
                 }
             }
         }
     });
 
-    // Wait for the client to close or the send task to finish
+    // Keep the connection alive until client disconnects
     tokio::select! {
         _ = (&mut send_task) => {},
-        _ = receiver.next() => {
+        _ = ws_rx.next() => {
             send_task.abort();
         }
-    }
+    };
 }
 

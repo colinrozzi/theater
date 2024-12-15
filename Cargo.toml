@@ -9,7 +9,7 @@ chrono = { version = "0.4", features = ["serde"] }
 tracing = "0.1"
 tower-http = { version = "0.5", features = ["cors"] }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-axum = { version = "0.7", features = ["ws"] }
+warp = { version = "0.3", features = ["tls"] }
 tokio = { version = "1.0", features = ["full"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
@@ -21,6 +21,7 @@ toml = "0.8"
 reqwest = { version = "0.11", features = ["json"] }
 clap = { version = "4.4", features = ["derive"] }
 lazy_static = "1.4"
+futures = "0.3"
 
 [dev-dependencies]
 test-log = "0.2"
