@@ -20,6 +20,8 @@ mod store;
 mod wasm;
 
 use chain::{ChainEvent, HashChain};
+use chain::{HashChain};
+use serde_json::json;
 use tracing_subscriber::{EnvFilter, FmtSubscriber};
 
 pub use config::{HandlerConfig, HttpHandlerConfig, HttpServerHandlerConfig, ManifestConfig};
@@ -87,11 +89,13 @@ impl ActorProcess {
 
         // Initialize with initial state
         let initial_state = actor.init()?;
-        chain.add_event(ChainEvent::StateChange {
-            old_state: Value::Null,
-            new_state: initial_state,
-            timestamp: Utc::now(),
-        });
+        chain.add_event(
+            "state_change".to_string(),
+            json!({
+                "old_state": null,
+                "new_state": initial_state,
+            }),
+        );
 
         Ok(Self {
             mailbox_rx,
@@ -109,21 +113,25 @@ impl ActorProcess {
                     source_actor,
                     source_chain_state,
                 }) => {
-                    self.chain.add_event(ChainEvent::ActorMessage {
-                        source_actor: source_actor.clone(),
-                        source_chain_state: source_chain_state.clone(),
-                        content: match &msg.content {
-                            ActorInput::Message(v) => v.clone(),
-                            _ => serde_json::to_value(&msg.content).unwrap_or_default(),
-                        },
-                        timestamp: Utc::now(),
-                    });
+                    self.chain.add_event(
+                        "actor_message".to_string(),
+                        json!({
+                            "source_actor": source_actor,
+                            "source_chain_state": source_chain_state,
+                            "content": match &msg.content {
+                                ActorInput::Message(v) => v,
+                                _ => serde_json::to_value(&msg.content).unwrap_or_default(),
+                            }
+                        }),
+                    );
                 }
                 _ => {
-                    self.chain.add_event(ChainEvent::ExternalInput {
-                        input: msg.content.clone(),
-                        timestamp: Utc::now(),
-                    });
+                    self.chain.add_event(
+                        "external_input".to_string(),
+                        json!({
+                            "input": msg.content
+                        }),
+                    );
                 }
             }
 
@@ -137,18 +145,22 @@ impl ActorProcess {
             let (output, new_state) = self.actor.handle_input(msg.content, &current_state)?;
 
             // Record state change
-            let state_hash = self.chain.add_event(ChainEvent::StateChange {
-                old_state: current_state,
-                new_state: new_state.clone(),
-                timestamp: Utc::now(),
-            });
+            let state_hash = self.chain.add_event(
+                "state_change".to_string(),
+                json!({
+                    "old_state": current_state,
+                    "new_state": new_state,
+                }),
+            );
 
             // Record output
-            self.chain.add_event(ChainEvent::Output {
-                output: output.clone(),
-                chain_state: state_hash,
-                timestamp: Utc::now(),
-            });
+            self.chain.add_event(
+                "output".to_string(),
+                json!({
+                    "output": output,
+                    "chain_state": state_hash,
+                }),
+            );
 
             // Send response if metadata contains response channel
             if let Some(MessageMetadata::HttpRequest { response_channel }) = msg.metadata {
