@@ -1,13 +1,12 @@
 use crate::chain_emitter::CHAIN_EMITTER;
-use crate::logging::ChainEventType;
-use crate::{ActorInput, ActorOutput};
+use crate::logging::{ChainEvent, ChainEventType};
 use chrono::Utc;
-use md5;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
 use tracing::debug;
 
+/// Represents a single event in the system
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Event {
     /// The type and data of the event
@@ -33,6 +32,8 @@ pub struct HashChain {
     head: Option<String>,
     /// Map of event hashes to their content
     entries: HashMap<String, Event>,
+    /// Name of the actor that owns this chain
+    actor_name: String,
 }
 
 impl HashChain {
@@ -41,14 +42,23 @@ impl HashChain {
         Self {
             head: None,
             entries: HashMap::new(),
+            actor_name: "unknown".to_string(),
         }
+    }
+
+    /// Set the actor name for this chain
+    pub fn set_actor_name(&mut self, name: String) {
+        self.actor_name = name;
     }
 
     /// Adds a new event to the chain
     /// Returns the hash of the new event
     pub fn add_event(&mut self, type_: String, data: Value) -> String {
         let event = Event {
-            event: EventContent { type_, data },
+            event: EventContent {
+                type_,
+                data: data.clone(),
+            },
             parent: self.head.clone(),
         };
 
@@ -57,6 +67,23 @@ impl HashChain {
         let hash = format!("{:x}", md5::compute(serialized));
 
         debug!("Adding event to chain: {}", hash);
+        
+        // Emit logging event
+        CHAIN_EMITTER.emit(ChainEvent {
+            hash: hash.clone(),
+            timestamp: Utc::now(),
+            actor_name: self.actor_name.clone(),
+            event_type: if self.head.is_none() {
+                ChainEventType::Init
+            } else {
+                match event.event.type_.as_str() {
+                    "actor_message" | "message_sent" => ChainEventType::Message,
+                    _ => ChainEventType::StateTransition,
+                }
+            },
+            data: data,
+            parent: self.head.clone(),
+        });
 
         // Store the event and update the head
         self.entries.insert(hash.clone(), event);
@@ -111,21 +138,25 @@ mod tests {
     #[test]
     fn test_basic_chain_operations() {
         let mut chain = HashChain::new();
-
+        chain.set_actor_name("test-actor".to_string());
+        
         // Add first event
-        let hash1 = chain.add_event("state_change".to_string(), json!({ "new_state": "value1" }));
-        assert_eq!(chain.get_head(), Some(&hash1.clone()).map(|x| x.as_str()));
-
+        let hash1 = chain.add_event(
+            "state_change".to_string(),
+            json!({ "new_state": "value1" }),
+        );
+        assert_eq!(chain.get_head(), Some(&hash1));
+        
         // Add second event
         let hash2 = chain.add_event(
             "message_received".to_string(),
             json!({ "content": "hello" }),
         );
-
+        
         // Check parent relationship
         let event2 = chain.get_event(&hash2).unwrap();
-        assert_eq!(event2.parent, Some(hash1.clone()));
-
+        assert_eq!(event2.parent, Some(hash1));
+        
         // Check full chain
         let full_chain = chain.get_full_chain();
         assert_eq!(full_chain.len(), 2);
