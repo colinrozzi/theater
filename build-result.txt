@@ -1,0 +1,94 @@
+   Compiling theater v0.1.0 (/Users/colinrozzi/work/theater)
+error[E0433]: failed to resolve: use of undeclared type `ChainEvent`
+   --> src/lib.rs:185:30
+    |
+185 |         self.chain.add_event(ChainEvent::ActorMessage {
+    |                              ^^^^^^^^^^ use of undeclared type `ChainEvent`
+    |
+help: consider importing this struct
+    |
+1   + use crate::logging::ChainEvent;
+    |
+
+warning: unused import: `crate::chain_emitter::CHAIN_EMITTER`
+ --> src/chain.rs:1:5
+  |
+1 | use crate::chain_emitter::CHAIN_EMITTER;
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` on by default
+
+warning: unused import: `crate::logging::ChainEventType`
+ --> src/chain.rs:2:5
+  |
+2 | use crate::logging::ChainEventType;
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused imports: `ActorInput` and `ActorOutput`
+ --> src/chain.rs:3:13
+  |
+3 | use crate::{ActorInput, ActorOutput};
+  |             ^^^^^^^^^^  ^^^^^^^^^^^
+
+warning: unused import: `chrono::Utc`
+ --> src/chain.rs:4:5
+  |
+4 | use chrono::Utc;
+  |     ^^^^^^^^^^^
+
+warning: unused import: `Event`
+  --> src/lib.rs:22:13
+   |
+22 | use chain::{Event, HashChain};
+   |             ^^^^^
+
+error[E0599]: no method named `get_current_state` found for struct `HashChain` in the current scope
+   --> src/lib.rs:140:18
+    |
+138 |               let current_state = self
+    |  _________________________________-
+139 | |                 .chain
+140 | |                 .get_current_state()
+    | |_________________-^^^^^^^^^^^^^^^^^
+    |
+   ::: src/chain.rs:31:1
+    |
+31  |   pub struct HashChain {
+    |   -------------------- method `get_current_state` not found for this struct
+    |
+help: there is a method `in_current_span` with a similar name
+    |
+140 |                 .in_current_span()
+    |                  ~~~~~~~~~~~~~~~
+
+error[E0061]: this method takes 2 arguments but 1 argument was supplied
+   --> src/lib.rs:185:20
+    |
+185 |           self.chain.add_event(ChainEvent::ActorMessage {
+    |  ____________________^^^^^^^^^-
+186 | |             source_actor: self.name.clone(),
+187 | |             source_chain_state: current_chain_state.clone(),
+188 | |             content: msg.clone(),
+189 | |             timestamp: Utc::now(),
+190 | |         });
+    | |__________- argument #2 of type `serde_json::Value` is missing
+    |
+note: method defined here
+   --> src/chain.rs:49:12
+    |
+49  |     pub fn add_event(&mut self, type_: String, data: Value) -> String {
+    |            ^^^^^^^^^            -------------  -----------
+help: provide the argument
+    |
+185 ~         self.chain.add_event(ChainEvent::ActorMessage {
+186 +             source_actor: self.name.clone(),
+187 +             source_chain_state: current_chain_state.clone(),
+188 +             content: msg.clone(),
+189 +             timestamp: Utc::now(),
+190 ~         }, /* serde_json::Value */);
+    |
+
+Some errors have detailed explanations: E0061, E0433, E0599.
+For more information about an error, try `rustc --explain E0061`.
+warning: `theater` (lib) generated 5 warnings
+error: could not compile `theater` (lib) due to 3 previous errors; 5 warnings emitted

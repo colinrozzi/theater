@@ -1,7 +1,6 @@
 use anyhow::Result;
-use chrono::Utc;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{json, Value};
 use std::future::Future;
 use std::path::PathBuf;
 use std::pin::Pin;
@@ -16,12 +15,12 @@ pub mod event_server;
 pub mod http;
 pub mod http_server;
 pub mod logging;
+mod state;
 mod store;
 mod wasm;
 
-use chain::{ChainEvent, HashChain};
-use chain::{HashChain};
-use serde_json::json;
+use chain::HashChain;
+use state::ActorState;
 use tracing_subscriber::{EnvFilter, FmtSubscriber};
 
 pub use config::{HandlerConfig, HttpHandlerConfig, HttpServerHandlerConfig, ManifestConfig};
@@ -75,6 +74,7 @@ pub trait Actor: Send {
 pub struct ActorProcess {
     mailbox_rx: mpsc::Receiver<ActorMessage>,
     chain: HashChain,
+    state: ActorState,
     actor: Box<dyn Actor>,
     name: String,
 }
@@ -87,19 +87,22 @@ impl ActorProcess {
     ) -> Result<Self> {
         let mut chain = HashChain::new();
 
-        // Initialize with initial state
+        // Initialize actor state
         let initial_state = actor.init()?;
+        let state = ActorState::new(initial_state.clone());
+
+        // Record initialization in chain
         chain.add_event(
-            "state_change".to_string(),
+            "init".to_string(),
             json!({
-                "old_state": null,
-                "new_state": initial_state,
+                "initial_state": initial_state
             }),
         );
 
         Ok(Self {
             mailbox_rx,
             chain,
+            state,
             actor,
             name: name.to_string(),
         })
@@ -107,23 +110,23 @@ impl ActorProcess {
 
     pub async fn run(&mut self) -> Result<()> {
         while let Some(msg) = self.mailbox_rx.recv().await {
-            // Record appropriate chain event based on message type
+            // Record received message in chain
             match &msg.metadata {
                 Some(MessageMetadata::ActorSource {
                     source_actor,
                     source_chain_state,
                 }) => {
-                    self.chain.add_event(
-                        "actor_message".to_string(),
+                    self.chain.add_event("actor_message".to_string(), {
+                        let content_value = match &msg.content {
+                            ActorInput::Message(v) => v,
+                            _ => &serde_json::to_value(&msg.content).unwrap_or_default(),
+                        };
                         json!({
                             "source_actor": source_actor,
                             "source_chain_state": source_chain_state,
-                            "content": match &msg.content {
-                                ActorInput::Message(v) => v,
-                                _ => serde_json::to_value(&msg.content).unwrap_or_default(),
-                            }
-                        }),
-                    );
+                            "content": content_value
+                        })
+                    });
                 }
                 _ => {
                     self.chain.add_event(
@@ -135,36 +138,43 @@ impl ActorProcess {
                 }
             }
 
-            // Get current state from chain
-            let current_state = self
-                .chain
-                .get_current_state()
-                .ok_or_else(|| anyhow::anyhow!("No current state found in chain"))?;
+            // Process input using current state
+            let current_state = self.state.get_state();
+            let (output, new_state) = self.actor.handle_input(msg.content, current_state)?;
 
-            // Process input
-            let (output, new_state) = self.actor.handle_input(msg.content, &current_state)?;
+            // Verify and update state
+            if self.actor.verify_state(&new_state) {
+                let old_state = self.state.update_state(new_state);
 
-            // Record state change
-            let state_hash = self.chain.add_event(
-                "state_change".to_string(),
-                json!({
-                    "old_state": current_state,
-                    "new_state": new_state,
-                }),
-            );
+                // Record state change in chain
+                self.chain.add_event(
+                    "state_change".to_string(),
+                    json!({
+                        "old_state": old_state,
+                        "new_state": self.state.get_state()
+                    }),
+                );
 
-            // Record output
-            self.chain.add_event(
-                "output".to_string(),
-                json!({
-                    "output": output,
-                    "chain_state": state_hash,
-                }),
-            );
+                // Record output in chain
+                self.chain.add_event(
+                    "output".to_string(),
+                    json!({
+                        "output": output
+                    }),
+                );
 
-            // Send response if metadata contains response channel
-            if let Some(MessageMetadata::HttpRequest { response_channel }) = msg.metadata {
-                let _ = response_channel.send(output);
+                // Send response if metadata contains response channel
+                if let Some(MessageMetadata::HttpRequest { response_channel }) = msg.metadata {
+                    let _ = response_channel.send(output);
+                }
+            } else {
+                // Record invalid state transition
+                self.chain.add_event(
+                    "invalid_state_transition".to_string(),
+                    json!({
+                        "attempted_state": new_state
+                    }),
+                );
             }
         }
 
@@ -176,21 +186,16 @@ impl ActorProcess {
     }
 
     pub fn send_message(&mut self, target: &str, msg: Value) -> Result<()> {
-        // First record the send event
-        let current_chain_state = self
-            .chain
-            .get_head()
-            .ok_or_else(|| anyhow::anyhow!("No chain head"))?
-            .to_string();
+        // Record the send event in chain
+        self.chain.add_event(
+            "message_sent".to_string(),
+            json!({
+                "target": target,
+                "message": msg
+            }),
+        );
 
-        self.chain.add_event(ChainEvent::ActorMessage {
-            source_actor: self.name.clone(),
-            source_chain_state: current_chain_state.clone(),
-            content: msg.clone(),
-            timestamp: Utc::now(),
-        });
-
-        // TODO: Implement actual message sending with metadata
+        // TODO: Implement actual message sending
         Ok(())
     }
 }

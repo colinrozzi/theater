@@ -21,7 +21,7 @@ impl HttpServerHost {
 
     async fn handle_request(mut req: Request<HttpServerHost>) -> tide::Result {
         info!("Received {} request to {}", req.method(), req.url().path());
-        
+
         // Create a channel for receiving the response
         let (response_tx, response_rx) = oneshot::channel();
 
@@ -125,8 +125,7 @@ impl HostHandler for HttpServerHandler {
     }
 
     fn stop(&self) -> Pin<Box<dyn Future<Output = Result<()>> + Send>> {
-        Box::pin(async move {
-            Ok(())
-        })
+        Box::pin(async move { Ok(()) })
     }
 }
+

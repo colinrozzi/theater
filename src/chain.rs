@@ -8,6 +8,7 @@ use serde_json::Value;
 use std::collections::HashMap;
 use tracing::debug;
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Event {
     /// The type and data of the event
     pub event: EventContent,
@@ -113,7 +114,7 @@ mod tests {
 
         // Add first event
         let hash1 = chain.add_event("state_change".to_string(), json!({ "new_state": "value1" }));
-        assert_eq!(chain.get_head(), Some(&hash1));
+        assert_eq!(chain.get_head(), Some(&hash1.clone()).map(|x| x.as_str()));
 
         // Add second event
         let hash2 = chain.add_event(
@@ -123,7 +124,7 @@ mod tests {
 
         // Check parent relationship
         let event2 = chain.get_event(&hash2).unwrap();
-        assert_eq!(event2.parent, Some(hash1));
+        assert_eq!(event2.parent, Some(hash1.clone()));
 
         // Check full chain
         let full_chain = chain.get_full_chain();
