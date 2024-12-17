@@ -1,6 +1,6 @@
 use crate::actor::Actor;
 use crate::actor_process::ActorProcess;
-use crate::config::{HandlerConfig, ManifestConfig};
+use crate::config::{HandlerConfig, ManifestConfig, LoggingConfig, LogOutput};
 use crate::host_handler::HostHandler;
 use crate::http::HttpHandler;
 use crate::http_server::HttpServerHandler;
@@ -19,13 +19,31 @@ pub struct ActorRuntime {
 }
 
 impl ActorRuntime {
-    pub async fn from_file(manifest_path: PathBuf) -> Result<Self> {
+    pub async fn from_file(manifest_path: PathBuf, actor_only: bool) -> Result<Self> {
         // Load manifest config
-        let config = ManifestConfig::from_file(&manifest_path)?;
+        let mut config = ManifestConfig::from_file(&manifest_path)?;
 
-        // Initialize logging
+        // If actor_only is true, disable chain events and adjust logging
+        if actor_only {
+            config.logging = LoggingConfig {
+                chain_events: false,  // Disable chain events
+                level: "info".to_string(),
+                output: LogOutput::Stdout,
+                file_path: None,
+            };
+        }
+
+        // Initialize logging with filter based on actor_only flag
+        let filter = if actor_only {
+            EnvFilter::builder()
+                .parse("[ACTOR]=info,[HTTP]=info")
+                .unwrap_or_else(|_| EnvFilter::new("error"))
+        } else {
+            EnvFilter::new(config.logging.level.clone())
+        };
+
         let _ = FmtSubscriber::builder()
-            .with_env_filter(EnvFilter::new(config.logging.level.clone()))
+            .with_env_filter(filter)
             .with_target(false)
             .with_thread_ids(true)
             .with_file(true)

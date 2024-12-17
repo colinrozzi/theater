@@ -1,6 +1,6 @@
+use chrono::Utc;
 use std::collections::VecDeque;
 use std::sync::Mutex;
-use chrono::Utc;
 use tokio::sync::broadcast;
 
 use crate::logging::ChainEvent;
@@ -33,8 +33,8 @@ impl ChainEmitter {
         let _ = self.tx.send(event.clone());
 
         // Print to stdout in a clearly marked format
-        println!("\n[CHAIN] Event at {}", Utc::now().to_rfc3339());
-        println!("{}", event);
+        //println!("\n[CHAIN] Event at {}", Utc::now().to_rfc3339());
+        //println!("{}", event);
     }
 
     pub fn subscribe(&self) -> broadcast::Receiver<ChainEvent> {
@@ -50,3 +50,4 @@ impl ChainEmitter {
 lazy_static::lazy_static! {
     pub static ref CHAIN_EMITTER: ChainEmitter = ChainEmitter::new(1000);
 }
+

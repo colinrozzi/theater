@@ -11,6 +11,10 @@ struct Args {
     /// Path to the actor manifest file
     #[arg(short, long)]
     manifest: PathBuf,
+
+    /// Show only actor and HTTP logs
+    #[arg(short, long)]
+    actor_only: bool,
 }
 
 #[tokio::main]
@@ -26,8 +30,8 @@ async fn main() -> Result<()> {
         ));
     }
 
-    // Create and initialize the runtime
-    let runtime = ActorRuntime::from_file(args.manifest).await?;
+    // Create and initialize the runtime with actor_only flag
+    let runtime = ActorRuntime::from_file(args.manifest, args.actor_only).await?;
 
     // Start the event server if configured
     if let Some(event_config) = &runtime.config.event_server.clone() {
