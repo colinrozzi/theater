@@ -5,9 +5,10 @@ use thiserror::Error;
 use wasmtime::component::{Component, ComponentExportIndex, Instance, Linker};
 use wasmtime::Engine;
 
+use crate::actor::{Actor, ActorInput, ActorOutput};
 use crate::capabilities::{ActorCapability, BaseActorCapability, HttpCapability};
 use crate::config::ManifestConfig;
-use crate::{Actor, ActorInput, ActorOutput, Store};
+use crate::Store;
 use tracing::{error, info};
 
 #[derive(Error, Debug)]
@@ -36,10 +37,15 @@ impl WasmActor {
     pub fn new(config: &ManifestConfig, store: Store) -> Result<Self> {
         // Load WASM component
         let engine = Engine::default();
-        let wasm_bytes = std::fs::read(&config.component_path).map_err(|e| WasmError::WasmError {
-            context: "component loading",
-            message: format!("Failed to load WASM component from {}: {}", config.component_path.display(), e),
-        })?;
+        let wasm_bytes =
+            std::fs::read(&config.component_path).map_err(|e| WasmError::WasmError {
+                context: "component loading",
+                message: format!(
+                    "Failed to load WASM component from {}: {}",
+                    config.component_path.display(),
+                    e
+                ),
+            })?;
         let component = Component::new(&engine, &wasm_bytes)?;
         let linker = Linker::new(&engine);
 

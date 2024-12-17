@@ -1,3 +1,8 @@
+use crate::actor::ActorInput;
+use crate::actor::ActorMessage;
+use crate::actor::ActorOutput;
+use crate::actor::MessageMetadata;
+use crate::host_handler::HostHandler;
 use anyhow::Result;
 use serde_json::Value;
 use std::future::Future;
@@ -6,8 +11,6 @@ use tide::listener::Listener;
 use tide::{Body, Request, Response, Server};
 use tokio::sync::{mpsc, oneshot};
 use tracing::info;
-
-use crate::{ActorInput, ActorMessage, ActorOutput, HostHandler, MessageMetadata};
 
 #[derive(Clone)]
 pub struct HttpServerHost {
@@ -128,4 +131,3 @@ impl HostHandler for HttpServerHandler {
         Box::pin(async move { Ok(()) })
     }
 }
-

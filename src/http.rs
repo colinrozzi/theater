@@ -1,3 +1,6 @@
+use crate::actor::ActorInput;
+use crate::actor::ActorMessage;
+use crate::host_handler::HostHandler;
 use anyhow::{anyhow, Result};
 use reqwest::Client;
 use serde_json::Value;
@@ -6,8 +9,6 @@ use std::pin::Pin;
 use tide::{Request, Response, Server};
 use tokio::sync::mpsc;
 use tracing::{error, info};
-
-use crate::{ActorInput, ActorMessage, HostHandler};
 
 // HTTP interface for actor-to-actor communication
 #[derive(Clone)]

@@ -2,7 +2,7 @@ use anyhow::Result;
 use chrono::Utc;
 use clap::Parser;
 use std::path::PathBuf;
-use theater::ActorRuntime;
+use theater::actor_runtime::ActorRuntime;
 use tracing::info;
 
 #[derive(Parser)]
@@ -47,4 +47,3 @@ async fn main() -> Result<()> {
     info!("Shutting down...");
     Ok(())
 }
-

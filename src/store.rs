@@ -1,6 +1,7 @@
+use crate::actor::ActorMessage;
 use crate::http::HttpHost;
-use tracing::info;
 use tokio::sync::mpsc;
+use tracing::info;
 
 /// Store type for sharing resources with WASM host functions
 #[derive(Clone)]
@@ -17,8 +18,11 @@ impl Store {
         }
     }
 
-    pub fn with_http(port: u16, mailbox_tx: mpsc::Sender<crate::ActorMessage>) -> Self {
-        info!("[STORE] Initializing store with HTTP handler on port {}", port);
+    pub fn with_http(port: u16, mailbox_tx: mpsc::Sender<ActorMessage>) -> Self {
+        info!(
+            "[STORE] Initializing store with HTTP handler on port {}",
+            port
+        );
         Self {
             http: Some(HttpHost::new(mailbox_tx)),
             http_server: None,
@@ -28,7 +32,7 @@ impl Store {
     pub fn with_both_http(
         http_port: u16,
         http_server_port: u16,
-        mailbox_tx: mpsc::Sender<crate::ActorMessage>,
+        mailbox_tx: mpsc::Sender<ActorMessage>,
     ) -> Self {
         info!(
             "[STORE] Initializing store with HTTP handler on port {} and HTTP server on port {}",
