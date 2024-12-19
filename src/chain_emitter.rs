@@ -1,9 +1,14 @@
 use chrono::Utc;
+use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 use std::sync::Mutex;
 use tokio::sync::broadcast;
 
-use crate::logging::ChainEvent;
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChainEvent {
+    timestamp: String,
+    event: String,
+}
 
 pub struct ChainEmitter {
     history: Mutex<VecDeque<ChainEvent>>,
@@ -50,4 +55,3 @@ impl ChainEmitter {
 lazy_static::lazy_static! {
     pub static ref CHAIN_EMITTER: ChainEmitter = ChainEmitter::new(1000);
 }
-

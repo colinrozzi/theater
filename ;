@@ -2,15 +2,18 @@ use crate::actor::Event;
 use crate::actor_process::ActorMessage;
 use crate::actor_process::ActorProcess;
 use crate::chain::{ChainEntry, HashChain};
-use crate::config::{HandlerConfig, ManifestConfig};
+use crate::config::{HandlerConfig, LogOutput, LoggingConfig, ManifestConfig};
+use crate::host_handler::HostHandler;
 use crate::http_server::HttpServerHost;
-use crate::message_server::MessageServerHost;
+use crate::message_server::{MessageServerHandler, MessageServerHost};
 use crate::store::Store;
 use crate::Result;
 use crate::WasmActor;
 use std::path::PathBuf;
+use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
+use tokio::sync::Mutex;
 use tracing::{error, info};
 
 pub struct RuntimeComponents {
@@ -158,9 +161,6 @@ impl ActorRuntime {
         if let Some(handle) = self.process_handle.take() {
             handle.abort();
         }
-
-        // Cancel chain task
-        self.chain_task.abort();
 
         Ok(())
     }

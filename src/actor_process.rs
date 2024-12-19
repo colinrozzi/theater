@@ -1,19 +1,28 @@
 use crate::actor::Actor;
-use crate::actor::ActorInput;
-use crate::actor::ActorMessage;
-use crate::actor::MessageMetadata;
+use crate::actor::Event;
+use crate::actor_runtime::ChainRequest;
+use crate::actor_runtime::ChainRequestType;
+use crate::actor_runtime::ChainResponse;
+use crate::chain::ChainEntry;
 use crate::chain::HashChain;
 use crate::state::ActorState;
 use crate::Result;
 use serde_json::{json, Value};
 use tokio::sync::mpsc;
+use tracing::info;
+use warp::filters::ws::ws;
 
 pub struct ActorProcess {
     mailbox_rx: mpsc::Receiver<ActorMessage>,
-    chain: HashChain,
+    chain_tx: mpsc::Sender<ChainRequest>,
     state: ActorState,
     actor: Box<dyn Actor>,
     name: String,
+}
+
+pub struct ActorMessage {
+    pub event: Event,
+    pub response_channel: Option<mpsc::Sender<Value>>,
 }
 
 impl ActorProcess {
@@ -21,6 +30,7 @@ impl ActorProcess {
         name: &String,
         actor: Box<dyn Actor>,
         mailbox_rx: mpsc::Receiver<ActorMessage>,
+        chain_tx: mpsc::Sender<ChainRequest>,
     ) -> Result<Self> {
         let mut chain = HashChain::new();
 
@@ -29,110 +39,83 @@ impl ActorProcess {
         let state = ActorState::new(initial_state.clone());
 
         // Record initialization in chain
-        chain.add_event(
-            "init".to_string(),
-            json!({
-                "initial_state": initial_state
-            }),
-        );
+        chain.add_event("init".to_string(), json!(initial_state));
 
         Ok(Self {
             mailbox_rx,
-            chain,
+            chain_tx,
             state,
             actor,
             name: name.to_string(),
         })
     }
 
+    pub async fn add_event(&mut self, event: Event) -> Result<()> {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        self.chain_tx
+            .send(ChainRequest {
+                request_type: ChainRequestType::AddEvent { event },
+                response_tx: tx,
+            })
+            .await
+            .expect("Failed to record message in chain");
+        rx.await?;
+
+        Ok(())
+    }
+
     pub async fn run(&mut self) -> Result<()> {
         while let Some(msg) = self.mailbox_rx.recv().await {
-            // Record received message in chain
-            match &msg.metadata {
-                Some(MessageMetadata::ActorSource {
-                    source_actor,
-                    source_chain_state,
-                }) => {
-                    self.chain.add_event("actor_message".to_string(), {
-                        let content_value = match &msg.content {
-                            ActorInput::Message(v) => v,
-                            _ => &serde_json::to_value(&msg.content).unwrap_or_default(),
-                        };
-                        json!({
-                            "source_actor": source_actor,
-                            "source_chain_state": source_chain_state,
-                            "content": content_value
-                        })
-                    });
-                }
-                _ => {
-                    self.chain.add_event(
-                        "external_input".to_string(),
-                        json!({
-                            "input": msg.content
-                        }),
-                    );
-                }
-            }
+            let evt = msg.event;
+
+            info!("Recording event in chain");
+            // Record the event in chain
+            self.add_event(evt.clone()).await?;
 
             // Process input using current state
             let current_state = self.state.get_state();
-            let (output, new_state) = self.actor.handle_input(msg.content, current_state)?;
+            let (new_state, response) = self
+                .actor
+                .handle_event(evt.clone(), current_state.clone())?;
 
-            // Verify and update state
-            if self.actor.verify_state(&new_state) {
-                let old_state = self.state.update_state(new_state);
+            self.add_event(Event {
+                type_: "state".to_string(),
+                data: json!(new_state),
+            })
+            .await?;
 
-                // Record state change in chain
-                self.chain.add_event(
-                    "state_change".to_string(),
-                    json!({
-                        "old_state": old_state,
-                        "new_state": self.state.get_state()
-                    }),
-                );
+            self.state.update_state(new_state.clone());
 
-                // Record output in chain
-                self.chain.add_event(
-                    "output".to_string(),
-                    json!({
-                        "output": output
-                    }),
-                );
-
-                // Send response if metadata contains response channel
-                if let Some(MessageMetadata::HttpRequest { response_channel }) = msg.metadata {
-                    let _ = response_channel.send(output);
-                }
-            } else {
-                // Record invalid state transition
-                self.chain.add_event(
-                    "invalid_state_transition".to_string(),
-                    json!({
-                        "attempted_state": new_state
-                    }),
-                );
+            // Send response if metadata contains response channel
+            if let Some(response_channel) = msg.response_channel {
+                self.add_event(Event {
+                    type_: "response".to_string(),
+                    data: response.clone(),
+                })
+                .await?;
+                info!("Response channel found, sending response");
+                let a = response_channel.send(response).await;
+                info!("Response sent: {:?}", a);
             }
         }
 
         Ok(())
     }
 
-    pub fn get_chain(&self) -> &HashChain {
-        &self.chain
-    }
-
-    pub fn send_message(&mut self, target: &str, msg: Value) -> Result<()> {
-        // Record the send event in chain
-        self.chain.add_event(
-            "message_sent".to_string(),
-            json!({
-                "target": target,
-                "message": msg
-            }),
-        );
-
-        // TODO: Implement actual message sending
-        Ok(())
+    pub async fn get_chain(&self) -> Vec<(String, ChainEntry)> {
+        let (tx, mut rx) = tokio::sync::oneshot::channel();
+        self.chain_tx
+            .send(ChainRequest {
+                request_type: ChainRequestType::GetChain,
+                response_tx: tx,
+            })
+            .await
+            .expect("Failed to get chain");
+        let chain_response = rx.try_recv().expect("Failed to get chain");
+        if let ChainResponse::FullChain(chain) = chain_response {
+            chain
+        } else {
+            panic!("Failed to get chain");
+        }
     }
 }

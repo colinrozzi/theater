@@ -1,3 +1,4 @@
+use crate::chain_emitter::ChainEvent;
 use crate::chain_emitter::CHAIN_EMITTER;
 use futures::{SinkExt, StreamExt};
 use warp::{ws::Message, Filter};

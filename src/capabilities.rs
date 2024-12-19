@@ -1,6 +1,10 @@
+use crate::actor::Event;
+use crate::actor_runtime::ChainRequest;
+use crate::actor_runtime::ChainRequestType;
 use anyhow::Result;
+use serde_json::json;
 use serde_json::Value;
-use tracing::{error, info};
+use tracing::{error, event, info, span, Level};
 use wasmtime::component::{Component, ComponentExportIndex, Linker};
 
 use crate::store::Store;
@@ -68,7 +72,7 @@ impl ActorCapability for BaseActorCapability {
         runtime.func_wrap(
             "log",
             |_: wasmtime::StoreContextMut<'_, Store>, (msg,): (String,)| {
-                info!("[WASM] {}", msg);
+                log(msg);
                 Ok(())
             },
         )?;
@@ -77,29 +81,8 @@ impl ActorCapability for BaseActorCapability {
         runtime.func_wrap(
             "send",
             |mut ctx: wasmtime::StoreContextMut<'_, Store>, (address, msg): (String, Vec<u8>)| {
-                // Convert message bytes to JSON Value
-                let msg_value: Value = serde_json::from_slice(&msg).map_err(|e| {
-                    error!("Failed to parse message as JSON: {}", e);
-                    wasmtime::Error::msg("Invalid message format")
-                })?;
-
-                // Get store reference
                 let store = ctx.data_mut();
-
-                // If we have HTTP host, send the message
-                if let Some(http) = &store.http {
-                    // Spawn task to send message since we can't await in this context
-                    let http = http.clone();
-                    let address = address.clone();
-                    tokio::spawn(async move {
-                        if let Err(e) = http.send_message(address, msg_value).await {
-                            error!("Failed to send message: {}", e);
-                        }
-                    });
-                } else {
-                    error!("No HTTP host available for sending messages");
-                }
-
+                send(store, address, msg);
                 Ok(())
             },
         )?;
@@ -154,7 +137,7 @@ impl ActorCapability for HttpCapability {
         runtime.func_wrap(
             "log",
             |_: wasmtime::StoreContextMut<'_, Store>, (msg,): (String,)| {
-                info!("[WASM] {}", msg);
+                log(msg);
                 Ok(())
             },
         )?;
@@ -163,25 +146,10 @@ impl ActorCapability for HttpCapability {
         runtime.func_wrap(
             "send",
             |mut ctx: wasmtime::StoreContextMut<'_, Store>, (address, msg): (String, Vec<u8>)| {
-                let msg_value: Value = serde_json::from_slice(&msg).map_err(|e| {
-                    error!("Failed to parse message as JSON: {}", e);
-                    wasmtime::Error::msg("Invalid message format")
-                })?;
-
                 let store = ctx.data_mut();
-
-                if let Some(http) = &store.http {
-                    let http = http.clone();
-                    let address = address.clone();
-                    tokio::spawn(async move {
-                        if let Err(e) = http.send_message(address, msg_value).await {
-                            error!("Failed to send message: {}", e);
-                        }
-                    });
-                } else {
-                    error!("No HTTP host available for sending messages");
-                }
-
+                // THIS IS NOT RIGHT
+                todo!();
+                send(store, address, msg);
                 Ok(())
             },
         )?;
@@ -232,4 +200,41 @@ impl ActorCapability for HttpCapability {
     fn interface_name(&self) -> &str {
         "ntwk:simple-http-actor/http-actor"
     }
+}
+
+fn log(msg: String) {
+    info!("[ACTOR] {}", msg);
+}
+
+fn send(store: &Store, address: String, msg: Vec<u8>) {
+    let msg_value: Value = serde_json::from_slice(&msg).expect("Failed to parse message as JSON");
+    let evt = Event {
+        type_: "actor-message".to_string(),
+        data: json!({
+            "address": address,
+            "message": msg_value,
+        }),
+    };
+
+    let chain_tx = store.chain_tx.clone();
+
+    tokio::spawn(async move {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+
+        chain_tx
+            .send(ChainRequest {
+                request_type: ChainRequestType::AddEvent { event: evt },
+                response_tx: tx,
+            })
+            .await
+            .expect("Failed to record message in chain");
+        rx.await.expect("Failed to get response from chain");
+        let client = reqwest::Client::new();
+        let _response = client
+            .post(&address)
+            .json(&msg_value)
+            .send()
+            .await
+            .expect("Failed to send message");
+    });
 }

@@ -57,18 +57,19 @@ pub struct InterfacesConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", content = "config")]
 pub enum HandlerConfig {
-    Http(HttpHandlerConfig),
     #[serde(rename = "Http-server")]
     HttpServer(HttpServerHandlerConfig),
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct HttpHandlerConfig {
-    pub port: u16,
+    #[serde(rename = "Message-server")]
+    MessageServer(MessageServerConfig),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HttpServerHandlerConfig {
+    pub port: u16,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MessageServerConfig {
     pub port: u16,
 }
 
@@ -85,5 +86,23 @@ impl ManifestConfig {
 
     pub fn interface(&self) -> &str {
         &self.interface.implements
+    }
+
+    pub fn message_server_port(&self) -> Option<u16> {
+        for handler in &self.handlers {
+            if let HandlerConfig::MessageServer(config) = handler {
+                return Some(config.port);
+            }
+        }
+        None
+    }
+
+    pub fn http_server_port(&self) -> Option<u16> {
+        for handler in &self.handlers {
+            if let HandlerConfig::HttpServer(config) = handler {
+                return Some(config.port);
+            }
+        }
+        None
     }
 }

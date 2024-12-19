@@ -1,11 +1,12 @@
 use anyhow::Result;
+use serde_json::json;
 use serde_json::Value;
 use std::collections::HashMap;
 use thiserror::Error;
 use wasmtime::component::{Component, ComponentExportIndex, Instance, Linker};
 use wasmtime::Engine;
 
-use crate::actor::{Actor, ActorInput, ActorOutput};
+use crate::actor::{Actor, ActorOutput, Event, State};
 use crate::capabilities::{ActorCapability, BaseActorCapability, HttpCapability};
 use crate::config::ManifestConfig;
 use crate::Store;
@@ -98,6 +99,7 @@ impl WasmActor {
         T: wasmtime::component::Lower + wasmtime::component::ComponentNamedList,
         U: wasmtime::component::Lift + wasmtime::component::ComponentNamedList,
     {
+        info!("Calling function: {}", export_name);
         let index = self
             .get_export(export_name)
             .ok_or_else(|| WasmError::WasmError {
@@ -111,12 +113,15 @@ impl WasmActor {
                 context: "function access",
                 message: format!("Failed to get function {}", export_name),
             })?;
+        // get the types of the function
+        info!("params type: {:?}", func.params(&mut *store));
+        info!("results type: {:?}", func.results(&mut *store));
 
         let typed = func
             .typed::<T, U>(&mut *store)
             .map_err(|e| WasmError::WasmError {
                 context: "function type",
-                message: e.to_string(),
+                message: format!("typed call failed: {}", e),
             })?;
 
         Ok(typed
@@ -139,85 +144,30 @@ impl Actor for WasmActor {
         Ok(state)
     }
 
-    fn handle_input(&self, input: ActorInput, state: &Value) -> Result<(ActorOutput, Value)> {
+    fn handle_event(&self, event: Event, state: Value) -> Result<(State, ActorOutput)> {
+        info!("Handling event: {:?}", event);
         let mut store = wasmtime::Store::new(&self.engine, self.store.clone());
         let instance = self.linker.instantiate(&mut store, &self.component)?;
 
-        let state_bytes = serde_json::to_vec(state)?;
+        let event_bytes = serde_json::to_vec(&event)?;
+        let state_bytes = serde_json::to_vec(&state)?;
 
-        match input {
-            ActorInput::Message(msg) => {
-                let msg_bytes = serde_json::to_vec(&msg)?;
-                info!("[ACTOR] Received message: {}", msg);
-                let (result,) = self.call_func::<(Vec<u8>, Vec<u8>), (Vec<u8>,)>(
-                    &mut store,
-                    &instance,
-                    "handle",
-                    (msg_bytes, state_bytes),
-                )?;
-                info!("[ACTOR] Response size: {} bytes", result.len());
-                let new_state: Value = serde_json::from_slice(&result)?;
-                Ok((ActorOutput::Message(msg), new_state))
-            }
-            ActorInput::HttpRequest {
-                method,
-                uri,
-                headers,
-                body,
-            } => {
-                if !self.exports.contains_key("handle-http") {
-                    return Err(anyhow::anyhow!("Actor does not support HTTP"));
-                }
+        let result = self.call_func::<(Vec<u8>, Vec<u8>), ((Vec<u8>, Vec<u8>),)>(
+            &mut store,
+            &instance,
+            "handle",
+            (event_bytes, state_bytes),
+        )?;
 
-                let request = serde_json::json!({
-                    "method": method,
-                    "uri": uri,
-                    "headers": { "fields": headers },
-                    "body": body,
-                });
+        let (after_state, response) = result.0;
 
-                info!("[HTTP] Received request: {} {}", method, uri);
-                let request_bytes = serde_json::to_vec(&request)?;
-                let (result,) = self.call_func::<(Vec<u8>, Vec<u8>), (Vec<u8>,)>(
-                    &mut store,
-                    &instance,
-                    "handle-http",
-                    (request_bytes, state_bytes),
-                )?;
+        let new_state: Value = serde_json::from_slice(&after_state)?;
+        let response: Value = serde_json::from_slice(&response)?;
 
-                let response: Value = serde_json::from_slice(&result)?;
-                info!("[HTTP] Response: {:?}", response);
-                let new_state = response["state"].clone();
-                let http_response = response["response"].clone();
+        info!("New state: {:?}", new_state);
+        //info!("Response: {:?}", response);
 
-                // HTTP Response: {"body":"<!DOCTYPE html>\n<html>\n<head>\n    <title>Simple Frontend</title>\n</head>\n<body>\n    <h1>Hello from the Frontend Actor!</h1>\n    <p>This is a simple HTML page served by our WebAssembly actor.</p>\n</body>\n</html>","headers":{"Content-Type":"text/html"},"status":200}
-
-                let status = http_response["status"].as_u64().unwrap_or(500) as u16;
-
-                let headers = http_response["headers"]
-                    .as_object()
-                    .map(|obj| {
-                        obj.iter()
-                            .map(|(k, v)| (k.to_string(), v.as_str().unwrap_or("").to_string()))
-                            .collect()
-                    })
-                    .unwrap_or_default();
-
-                let body = http_response["body"]
-                    .as_str()
-                    .map(|s| s.as_bytes().to_vec())
-                    .unwrap_or_default();
-
-                Ok((
-                    ActorOutput::HttpResponse {
-                        status,
-                        headers,
-                        body: Some(body),
-                    },
-                    new_state,
-                ))
-            }
-        }
+        Ok((new_state, response))
     }
 
     fn verify_state(&self, state: &Value) -> bool {

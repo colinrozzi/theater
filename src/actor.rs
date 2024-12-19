@@ -1,48 +1,22 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use tokio::sync::oneshot;
 
+pub type State = Value;
+pub type ActorOutput = Value;
+
+/// The content of an event
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum ActorInput {
-    Message(Value),
-    HttpRequest {
-        method: String,
-        uri: String,
-        headers: Vec<(String, String)>,
-        body: Option<Vec<u8>>,
-    },
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum ActorOutput {
-    Message(Value),
-    HttpResponse {
-        status: u16,
-        headers: Vec<(String, String)>,
-        body: Option<Vec<u8>>,
-    },
-}
-
-#[derive(Debug)]
-pub enum MessageMetadata {
-    ActorSource {
-        source_actor: String,
-        source_chain_state: String,
-    },
-    HttpRequest {
-        response_channel: oneshot::Sender<ActorOutput>,
-    },
-}
-
-#[derive(Debug)]
-pub struct ActorMessage {
-    pub content: ActorInput,
-    pub metadata: Option<MessageMetadata>,
+pub struct Event {
+    /// The type of event that occurred
+    #[serde(rename = "type")]
+    pub type_: String,
+    /// The data associated with this event
+    pub data: Value,
 }
 
 pub trait Actor: Send {
     fn init(&self) -> Result<Value>;
-    fn handle_input(&self, input: ActorInput, state: &Value) -> Result<(ActorOutput, Value)>;
+    fn handle_event(&self, event: Event, state: State) -> Result<(Value, State)>;
     fn verify_state(&self, state: &Value) -> bool;
 }

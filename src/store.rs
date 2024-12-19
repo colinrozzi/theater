@@ -1,54 +1,18 @@
-use crate::actor::ActorMessage;
-use crate::http::HttpHost;
-use tokio::sync::mpsc;
+use crate::actor_process::ActorMessage;
+use crate::actor_runtime::ChainRequest;
+use crate::http_server::HttpServerHost;
+use crate::message_server::MessageServerHost;
+use tokio::sync::mpsc::Sender;
 use tracing::info;
 
 /// Store type for sharing resources with WASM host functions
 #[derive(Clone)]
 pub struct Store {
-    pub http: Option<HttpHost>,
-    pub http_server: Option<HttpHost>,
+    pub chain_tx: Sender<ChainRequest>,
 }
 
 impl Store {
-    pub fn new() -> Self {
-        Self {
-            http: None,
-            http_server: None,
-        }
-    }
-
-    pub fn with_http(port: u16, mailbox_tx: mpsc::Sender<ActorMessage>) -> Self {
-        info!(
-            "[STORE] Initializing store with HTTP handler on port {}",
-            port
-        );
-        Self {
-            http: Some(HttpHost::new(mailbox_tx)),
-            http_server: None,
-        }
-    }
-
-    pub fn with_both_http(
-        http_port: u16,
-        http_server_port: u16,
-        mailbox_tx: mpsc::Sender<ActorMessage>,
-    ) -> Self {
-        info!(
-            "[STORE] Initializing store with HTTP handler on port {} and HTTP server on port {}",
-            http_port, http_server_port
-        );
-        Self {
-            http: Some(HttpHost::new(mailbox_tx.clone())),
-            http_server: Some(HttpHost::new(mailbox_tx)),
-        }
-    }
-
-    pub fn http_port(&self) -> Option<u16> {
-        self.http.as_ref().map(|_| 8080)
-    }
-
-    pub fn http_server_port(&self) -> Option<u16> {
-        self.http_server.as_ref().map(|_| 8081)
+    pub fn new(chain_tx: Sender<ChainRequest>) -> Self {
+        Self { chain_tx }
     }
 }

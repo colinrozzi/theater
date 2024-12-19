@@ -4,6 +4,7 @@ use clap::Parser;
 use std::path::PathBuf;
 use theater::actor_runtime::ActorRuntime;
 use tracing::info;
+use tracing_subscriber::EnvFilter;
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -12,15 +13,18 @@ struct Args {
     #[arg(short, long)]
     manifest: PathBuf,
 
-    /// Show only actor and HTTP logs
-    #[arg(short, long)]
-    actor_only: bool,
+    /// logging
+    #[arg(short, long, default_value = "info")]
+    log_level: String,
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
     // Parse command line arguments
     let args = Args::parse();
+
+    // Setup logging
+    setup_logging(&args.log_level, true);
 
     // Verify manifest file exists
     if !args.manifest.exists() {
@@ -31,18 +35,8 @@ async fn main() -> Result<()> {
     }
 
     // Create and initialize the runtime with actor_only flag
-    let runtime = ActorRuntime::from_file(args.manifest, args.actor_only).await?;
-
-    // Start the event server if configured
-    if let Some(event_config) = &runtime.config.event_server.clone() {
-        tokio::spawn(async move {
-            theater::event_server::run_event_server(runtime.config.event_server.unwrap().port)
-                .await;
-        });
-        info!("Event server starting on port {}", event_config.port);
-    }
-
-    info!("Actor '{}' initialized successfully!", runtime.config.name);
+    let runtime_components = ActorRuntime::from_file(args.manifest).await?;
+    let _runtime = ActorRuntime::start(runtime_components).await?;
 
     // Wait for Ctrl+C
     info!("Actor started at {}", Utc::now());
@@ -50,4 +44,22 @@ async fn main() -> Result<()> {
 
     info!("Shutting down...");
     Ok(())
+}
+
+fn setup_logging(level: &str, actor_only: bool) {
+    let filter = if actor_only {
+        EnvFilter::from_default_env()
+            .add_directive(format!("theater={}", level).parse().unwrap())
+            .add_directive("actix_web=info".parse().unwrap())
+            .add_directive("actor=info".parse().unwrap())
+            .add_directive("wasm_component=debug".parse().unwrap())
+    } else {
+        EnvFilter::from_default_env()
+            .add_directive(format!("theater={}", level).parse().unwrap())
+    };
+
+    tracing_subscriber::fmt()
+        .with_env_filter(filter)
+        .with_writer(std::io::stdout)
+        .init();
 }
