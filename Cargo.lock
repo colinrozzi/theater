@@ -446,17 +446,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ace50bade8e6234aa140d9a2f552bbee1db4d353f69b8217bc503490fc1a9f26"
 
 [[package]]
-name = "axum-macros"
-version = "0.4.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "57d123550fa8d071b7255cb0cc04dc302baa6c8c4a79f55701552684d8399bce"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.90",
-]
-
-[[package]]
 name = "backtrace"
 version = "0.3.74"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3282,12 +3271,9 @@ name = "theater"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "async-trait",
- "axum-macros",
  "chrono",
  "clap",
  "futures",
- "hyper",
  "lazy_static",
  "md5",
  "pretty_assertions",
@@ -3303,7 +3289,6 @@ dependencies = [
  "tower-http",
  "tracing",
  "tracing-subscriber",
- "uuid",
  "warp",
  "wasmtime",
 ]
@@ -3726,9 +3711,6 @@ name = "uuid"
 version = "1.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f8c5f0a0af699448548ad1a2fbf920fb4bee257eae39953ba95cb84891a0446a"
-dependencies = [
- "getrandom 0.2.15",
-]
 
 [[package]]
 name = "valuable"

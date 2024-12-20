@@ -14,6 +14,15 @@ pub struct Event {
     pub data: Value,
 }
 
+impl Event {
+    pub fn noop() -> Self {
+        Self {
+            type_: "noop".to_string(),
+            data: Value::Null,
+        }
+    }
+}
+
 pub trait Actor: Send {
     fn init(&self) -> Result<Value>;
     fn handle_event(&self, state: State, event: Event) -> Result<(State, Event)>;

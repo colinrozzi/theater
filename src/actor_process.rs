@@ -9,7 +9,7 @@ use crate::state::ActorState;
 use crate::Result;
 use serde_json::json;
 use tokio::sync::mpsc;
-use tracing::info;
+use tracing::{error, info};
 
 pub struct ActorProcess {
     mailbox_rx: mpsc::Receiver<ActorMessage>,
@@ -66,33 +66,39 @@ impl ActorProcess {
 
     pub async fn run(&mut self) -> Result<()> {
         while let Some(msg) = self.mailbox_rx.recv().await {
-            let evt = msg.event;
+            info!("Processing message with event type: {}", msg.event.type_);
 
-            info!("Recording event in chain");
-            // Record the event in chain
-            self.add_event(evt.clone()).await?;
+            match self.add_event(msg.event.clone()).await {
+                Ok(_) => info!("Event recorded in chain"),
+                Err(e) => {
+                    error!("Failed to record event in chain: {:?}", e);
+                }
+            }
 
-            // Process input using current state
             let current_state = self.state.get_state();
-            let (new_state, response_event) = self
+            match self
                 .actor
-                .handle_event(current_state.clone(), evt.clone())?;
+                .handle_event(current_state.clone(), msg.event.clone())
+            {
+                Ok((new_state, response_event)) => {
+                    self.add_event(Event {
+                        type_: "state".to_string(),
+                        data: json!(new_state),
+                    })
+                    .await?;
 
-            self.add_event(Event {
-                type_: "state".to_string(),
-                data: json!(new_state),
-            })
-            .await?;
+                    self.state.update_state(new_state.clone());
 
-            self.add_event(response_event.clone()).await?;
-
-            self.state.update_state(new_state.clone());
-
-            // Send response if metadata contains response channel
-            if let Some(response_channel) = msg.response_channel {
-                info!("Response channel found, sending response event");
-                let a = response_channel.send(response_event).await;
-                info!("Response sent: {:?}", a);
+                    if let Some(response_channel) = msg.response_channel {
+                        self.add_event(response_event.clone()).await?;
+                        info!("Response channel found, sending response event");
+                        let a = response_channel.send(response_event).await;
+                        info!("Response sent: {:?}", a);
+                    }
+                }
+                Err(e) => {
+                    error!("Failed to handle event: {:?}", e);
+                }
             }
         }
 
@@ -100,7 +106,7 @@ impl ActorProcess {
     }
 
     pub async fn get_chain(&self) -> Vec<(String, ChainEntry)> {
-        let (tx, mut rx) = tokio::sync::oneshot::channel();
+        let (tx, rx) = tokio::sync::oneshot::channel();
         self.chain_tx
             .send(ChainRequest {
                 request_type: ChainRequestType::GetChain,
@@ -108,11 +114,9 @@ impl ActorProcess {
             })
             .await
             .expect("Failed to get chain");
-        let chain_response = rx.try_recv().expect("Failed to get chain");
-        if let ChainResponse::FullChain(chain) = chain_response {
-            chain
-        } else {
-            panic!("Failed to get chain");
+        match rx.await.expect("Failed to get chain") {
+            ChainResponse::FullChain(chain) => chain,
+            _ => panic!("Failed to get chain"),
         }
     }
 }

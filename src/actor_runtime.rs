@@ -183,6 +183,10 @@ impl ChainRequestHandler {
                 Some(req) = self.chain_rx.recv() => {
                     self.handle_chain_request(req).await;
                 }
+                else => {
+                    info!("Chain request handler shutting down");
+                    break;
+                }
             }
         }
     }

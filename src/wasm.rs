@@ -36,7 +36,7 @@ pub struct WasmActor {
 impl WasmActor {
     pub fn new(config: &ManifestConfig, store: Store) -> Result<Self> {
         // Load WASM component
-        let engine = Engine::default();
+        let engine = Engine::new(wasmtime::Config::new().async_support(true))?;
         let wasm_bytes =
             std::fs::read(&config.component_path).map_err(|e| WasmError::WasmError {
                 context: "component loading",
@@ -62,7 +62,7 @@ impl WasmActor {
             actor.add_capability(Box::new(BaseActorCapability))?;
         }
 
-        if config.implements_interface("ntwk:simple-http-actor/http-actor") {
+        if config.implements_interface("ntwk:simple-http-actor/actor") {
             actor.add_capability(Box::new(HttpCapability))?;
         }
 
@@ -148,25 +148,42 @@ impl Actor for WasmActor {
         let mut store = wasmtime::Store::new(&self.engine, self.store.clone());
         let instance = self.linker.instantiate(&mut store, &self.component)?;
 
-        let event_bytes = serde_json::to_vec(&event)?;
-        let state_bytes = serde_json::to_vec(&state)?;
+        let event_bytes = serde_json::to_vec(&event).map_err(|e| WasmError::WasmError {
+            context: "event serialization",
+            message: format!("Failed to serialize event: {}", e),
+        })?;
+        let state_bytes = serde_json::to_vec(&state).map_err(|e| WasmError::WasmError {
+            context: "state serialization",
+            message: format!("Failed to serialize state: {}", e),
+        })?;
 
-        let result = self.call_func::<(Vec<u8>, Vec<u8>), ((Vec<u8>, Vec<u8>),)>(
+        let result = self.call_func::<(Vec<u8>, Vec<u8>), ((Vec<u8>, Option<Vec<u8>>),)>(
             &mut store,
             &instance,
             "handle",
             (event_bytes, state_bytes),
         )?;
 
+        // what should I expect the response to be? Should it be an event, or should it be
+        // something else?
         let (after_state, response) = result.0;
 
-        let new_state: Value = serde_json::from_slice(&after_state)?;
-        let response: Event = serde_json::from_slice(&response)?;
-
-        info!("New state: {:?}", new_state);
-        //info!("Response: {:?}", response);
-
-        Ok((new_state, response))
+        let new_state: Value =
+            serde_json::from_slice(&after_state).map_err(|e| WasmError::WasmError {
+                context: "state deserialization",
+                message: format!("Failed to deserialize state: {}", e),
+            })?;
+        match response {
+            Some(response_bytes) => {
+                let response: Event =
+                    serde_json::from_slice(&response_bytes).map_err(|e| WasmError::WasmError {
+                        context: "response deserialization",
+                        message: format!("Failed to deserialize response: {}", e),
+                    })?;
+                Ok((new_state, response))
+            }
+            None => Ok((new_state, Event::noop())),
+        }
     }
 
     fn verify_state(&self, state: &Value) -> bool {

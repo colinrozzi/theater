@@ -35,7 +35,7 @@ impl MessageServerHost {
         let body_bytes = req.body_bytes().await?.to_vec();
 
         let evt = Event {
-            type_: "http_request".to_string(),
+            type_: "actor_message".to_string(),
             data: json!(body_bytes),
         };
 
