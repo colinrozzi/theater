@@ -147,8 +147,6 @@ impl ActorCapability for HttpCapability {
             "send",
             |mut ctx: wasmtime::StoreContextMut<'_, Store>, (address, msg): (String, Vec<u8>)| {
                 let store = ctx.data_mut();
-                // THIS IS NOT RIGHT
-                todo!();
                 send(store, address, msg);
                 Ok(())
             },

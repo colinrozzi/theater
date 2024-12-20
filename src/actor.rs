@@ -9,7 +9,6 @@ pub type ActorOutput = Value;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Event {
     /// The type of event that occurred
-    #[serde(rename = "type")]
     pub type_: String,
     /// The data associated with this event
     pub data: Value,
