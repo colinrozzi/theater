@@ -1,9 +1,5 @@
-use crate::actor_process::ActorMessage;
 use crate::actor_runtime::ChainRequest;
-use crate::http_server::HttpServerHost;
-use crate::message_server::MessageServerHost;
 use tokio::sync::mpsc::Sender;
-use tracing::info;
 
 /// Store type for sharing resources with WASM host functions
 #[derive(Clone)]

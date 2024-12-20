@@ -1,4 +1,3 @@
-use anyhow::Result;
 use serde_json::Value;
 
 /// Manages the current state of an actor
@@ -28,6 +27,7 @@ impl ActorState {
     }
 
     /// Verifies if a state transition is valid
+    #[allow(unused)]
     pub fn verify_transition(&self, new_state: &Value) -> bool {
         // For now, all transitions are considered valid
         // This could be expanded to include validation logic
@@ -57,3 +57,4 @@ mod tests {
         assert!(state.verify_transition(&json!({"count": 2})));
     }
 }
+

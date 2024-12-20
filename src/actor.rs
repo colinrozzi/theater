@@ -17,6 +17,6 @@ pub struct Event {
 
 pub trait Actor: Send {
     fn init(&self) -> Result<Value>;
-    fn handle_event(&self, event: Event, state: State) -> Result<(Value, State)>;
+    fn handle_event(&self, state: State, event: Event) -> Result<(State, Event)>;
     fn verify_state(&self, state: &Value) -> bool;
 }

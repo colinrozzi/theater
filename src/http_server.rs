@@ -1,15 +1,11 @@
-use crate::actor::{ActorOutput, Event};
+use crate::actor::Event;
 use crate::actor_process::ActorMessage;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use serde_json::Value;
-use std::any::type_name;
-use std::future::Future;
-use std::pin::Pin;
 use tide::listener::Listener;
 use tide::{Body, Request, Response, Server};
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::mpsc;
 use tracing::info;
 
 #[derive(Clone, Debug)]
@@ -97,13 +93,13 @@ impl HttpServerHost {
         // Wait for response
         let actor_response = response_rx.recv().await.unwrap();
 
-        // print the type of actor response
+        // actor response will come back as an Event, with the HTTP response in the data field
+        let http_response: HttpResponse = serde_json::from_value(actor_response.data).unwrap();
 
+        // print the type of actor response
         // Process actor response
         // will come back as a serde_json::Value, so we need to convert it to a HttpResponse
-        let http_response: HttpResponse = serde_json::from_value(actor_response).unwrap();
-
-        println!("Parsed response: {:?}", http_response);
+        //let http_response: HttpResponse = serde_json::from_value(actor_response).unwrap();
 
         let mut response = Response::new(http_response.status);
 

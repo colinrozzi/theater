@@ -4,7 +4,7 @@ use crate::actor_runtime::ChainRequestType;
 use anyhow::Result;
 use serde_json::json;
 use serde_json::Value;
-use tracing::{error, event, info, span, Level};
+use tracing::info;
 use wasmtime::component::{Component, ComponentExportIndex, Linker};
 
 use crate::store::Store;

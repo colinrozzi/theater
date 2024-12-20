@@ -1,12 +1,11 @@
 use anyhow::Result;
-use serde_json::json;
 use serde_json::Value;
 use std::collections::HashMap;
 use thiserror::Error;
 use wasmtime::component::{Component, ComponentExportIndex, Instance, Linker};
 use wasmtime::Engine;
 
-use crate::actor::{Actor, ActorOutput, Event, State};
+use crate::actor::{Actor, Event, State};
 use crate::capabilities::{ActorCapability, BaseActorCapability, HttpCapability};
 use crate::config::ManifestConfig;
 use crate::Store;
@@ -144,7 +143,7 @@ impl Actor for WasmActor {
         Ok(state)
     }
 
-    fn handle_event(&self, event: Event, state: Value) -> Result<(State, ActorOutput)> {
+    fn handle_event(&self, state: Value, event: Event) -> Result<(State, Event)> {
         info!("Handling event: {:?}", event);
         let mut store = wasmtime::Store::new(&self.engine, self.store.clone());
         let instance = self.linker.instantiate(&mut store, &self.component)?;
@@ -162,7 +161,7 @@ impl Actor for WasmActor {
         let (after_state, response) = result.0;
 
         let new_state: Value = serde_json::from_slice(&after_state)?;
-        let response: Value = serde_json::from_slice(&response)?;
+        let response: Event = serde_json::from_slice(&response)?;
 
         info!("New state: {:?}", new_state);
         //info!("Response: {:?}", response);

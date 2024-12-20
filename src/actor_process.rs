@@ -7,22 +7,22 @@ use crate::chain::ChainEntry;
 use crate::chain::HashChain;
 use crate::state::ActorState;
 use crate::Result;
-use serde_json::{json, Value};
+use serde_json::json;
 use tokio::sync::mpsc;
 use tracing::info;
-use warp::filters::ws::ws;
 
 pub struct ActorProcess {
     mailbox_rx: mpsc::Receiver<ActorMessage>,
     chain_tx: mpsc::Sender<ChainRequest>,
     state: ActorState,
     actor: Box<dyn Actor>,
+    #[allow(dead_code)]
     name: String,
 }
 
 pub struct ActorMessage {
     pub event: Event,
-    pub response_channel: Option<mpsc::Sender<Value>>,
+    pub response_channel: Option<mpsc::Sender<Event>>,
 }
 
 impl ActorProcess {
@@ -74,9 +74,9 @@ impl ActorProcess {
 
             // Process input using current state
             let current_state = self.state.get_state();
-            let (new_state, response) = self
+            let (new_state, response_event) = self
                 .actor
-                .handle_event(evt.clone(), current_state.clone())?;
+                .handle_event(current_state.clone(), evt.clone())?;
 
             self.add_event(Event {
                 type_: "state".to_string(),
@@ -84,17 +84,14 @@ impl ActorProcess {
             })
             .await?;
 
+            self.add_event(response_event.clone()).await?;
+
             self.state.update_state(new_state.clone());
 
             // Send response if metadata contains response channel
             if let Some(response_channel) = msg.response_channel {
-                self.add_event(Event {
-                    type_: "response".to_string(),
-                    data: response.clone(),
-                })
-                .await?;
-                info!("Response channel found, sending response");
-                let a = response_channel.send(response).await;
+                info!("Response channel found, sending response event");
+                let a = response_channel.send(response_event).await;
                 info!("Response sent: {:?}", a);
             }
         }
