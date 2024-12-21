@@ -1,4 +1,5 @@
 use anyhow::Result;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
 use thiserror::Error;
@@ -13,7 +14,7 @@ use tracing::{error, info};
 // Move Event and State from actor.rs
 pub type State = Value;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Event {
     pub type_: String,
     pub data: Value,
@@ -129,7 +130,7 @@ impl WasmActor {
                 context: "function access",
                 message: format!("Failed to get function {}", export_name),
             })?;
-        
+
         info!("params type: {:?}", func.params(&mut *store));
         info!("results type: {:?}", func.results(&mut *store));
 
@@ -151,9 +152,14 @@ impl WasmActor {
 
     pub async fn init(&self) -> Result<Value> {
         let mut store = wasmtime::Store::new(&self.engine, self.store.clone());
-        let instance = self.linker.instantiate_async(&mut store, &self.component).await?;
+        let instance = self
+            .linker
+            .instantiate_async(&mut store, &self.component)
+            .await?;
 
-        let (result,) = self.call_func::<(), (Vec<u8>,)>(&mut store, &instance, "init", ()).await?;
+        let (result,) = self
+            .call_func::<(), (Vec<u8>,)>(&mut store, &instance, "init", ())
+            .await?;
         let state: Value = serde_json::from_slice(&result)?;
 
         Ok(state)
@@ -162,7 +168,10 @@ impl WasmActor {
     pub async fn handle_event(&self, state: Value, event: Event) -> Result<(State, Event)> {
         info!("Handling event: {:?}", event);
         let mut store = wasmtime::Store::new(&self.engine, self.store.clone());
-        let instance = self.linker.instantiate_async(&mut store, &self.component).await?;
+        let instance = self
+            .linker
+            .instantiate_async(&mut store, &self.component)
+            .await?;
 
         let event_bytes = serde_json::to_vec(&event).map_err(|e| WasmError::WasmError {
             context: "event serialization",
@@ -173,12 +182,14 @@ impl WasmActor {
             message: format!("Failed to serialize state: {}", e),
         })?;
 
-        let result = self.call_func::<(Vec<u8>, Vec<u8>), ((Vec<u8>, Option<Vec<u8>>),)>(
-            &mut store,
-            &instance,
-            "handle",
-            (event_bytes, state_bytes),
-        ).await?;
+        let result = self
+            .call_func::<(Vec<u8>, Vec<u8>), ((Vec<u8>, Option<Vec<u8>>),)>(
+                &mut store,
+                &instance,
+                "handle",
+                (event_bytes, state_bytes),
+            )
+            .await?;
 
         let (after_state, response) = result.0;
 
@@ -202,7 +213,11 @@ impl WasmActor {
 
     pub async fn verify_state(&self, state: &Value) -> bool {
         let mut store = wasmtime::Store::new(&self.engine, self.store.clone());
-        let instance = match self.linker.instantiate_async(&mut store, &self.component).await {
+        let instance = match self
+            .linker
+            .instantiate_async(&mut store, &self.component)
+            .await
+        {
             Ok(instance) => instance,
             Err(_) => return false,
         };
@@ -223,3 +238,4 @@ impl WasmActor {
         .unwrap_or(false)
     }
 }
+

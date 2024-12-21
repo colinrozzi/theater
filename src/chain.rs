@@ -1,4 +1,4 @@
-use crate::actor::Event;
+use crate::wasm::Event;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;

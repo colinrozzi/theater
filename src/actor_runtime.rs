@@ -1,4 +1,3 @@
-use crate::wasm::{Event, WasmActor};
 use crate::actor_process::ActorMessage;
 use crate::actor_process::ActorProcess;
 use crate::chain::{ChainEntry, HashChain};
@@ -6,6 +5,7 @@ use crate::config::{HandlerConfig, ManifestConfig};
 use crate::http_server::HttpServerHost;
 use crate::message_server::MessageServerHost;
 use crate::store::Store;
+use crate::wasm::{Event, WasmActor};
 use crate::Result;
 use std::path::PathBuf;
 use tokio::sync::mpsc;
@@ -70,15 +70,15 @@ impl ActorRuntime {
     pub async fn from_file(manifest_path: PathBuf) -> Result<RuntimeComponents> {
         // Load manifest config
         let config = ManifestConfig::from_file(&manifest_path)?;
-        let runtime = Self::new(&config)?;
+        let runtime = Self::new(&config).await?;
         Ok(runtime)
     }
 
-    pub fn new(config: &ManifestConfig) -> Result<RuntimeComponents> {
-        Self::init_components(config)
+    pub async fn new(config: &ManifestConfig) -> Result<RuntimeComponents> {
+        Self::init_components(config).await
     }
 
-    fn init_components(config: &ManifestConfig) -> Result<RuntimeComponents> {
+    async fn init_components(config: &ManifestConfig) -> Result<RuntimeComponents> {
         let (chain_tx, chain_rx) = mpsc::channel(32);
         let (actor_tx, actor_rx) = mpsc::channel(32);
 
@@ -96,10 +96,10 @@ impl ActorRuntime {
             .collect();
 
         let store = Store::new(chain_tx.clone());
-        let actor = WasmActor::new(config, store)?;
+        let actor = WasmActor::new(config, store).await?;
 
         // Create and spawn actor process
-        let actor_process = ActorProcess::new(&config.name, actor, actor_rx, chain_tx)?;
+        let actor_process = ActorProcess::new(&config.name, actor, actor_rx, chain_tx).await?;
 
         let chain_handler = ChainRequestHandler::new(chain_rx);
 
@@ -213,3 +213,4 @@ impl ChainRequestHandler {
         let _ = req.response_tx.send(response);
     }
 }
+

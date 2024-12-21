@@ -1,7 +1,7 @@
-use crate::actor::Event;
 use crate::actor_runtime::ChainRequest;
 use crate::actor_runtime::ChainRequestType;
 use crate::store::Store;
+use crate::wasm::Event;
 use anyhow::Result;
 use reqwest::Method;
 use serde::{Deserialize, Serialize};
@@ -10,7 +10,6 @@ use serde_json::Value;
 use std::future::Future;
 use tokio::sync::mpsc::Sender;
 use tracing::info;
-use wasmtime::component::types::List;
 use wasmtime::component::{Component, ComponentExportIndex, Linker};
 
 /// Represents a set of capabilities that a WASM component can implement
@@ -70,7 +69,7 @@ pub struct BaseActorCapability;
 
 impl ActorCapability for BaseActorCapability {
     async fn setup_host_functions(&self, linker: &mut Linker<Store>) -> Result<()> {
-        let mut runtime = linker.instance_async("ntwk:simple-actor/runtime").await?;
+        let mut runtime = linker.instance("ntwk:simple-actor/runtime")?;
 
         // Add log function
         runtime.func_wrap(
@@ -135,7 +134,7 @@ pub struct HttpCapability;
 
 impl ActorCapability for HttpCapability {
     async fn setup_host_functions(&self, linker: &mut Linker<Store>) -> Result<()> {
-        let mut runtime = linker.instance_async("ntwk:simple-http-actor/http-runtime").await?;
+        let mut runtime = linker.instance("ntwk:simple-http-actor/http-runtime")?;
 
         // Add log function
         runtime.func_wrap(

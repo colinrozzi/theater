@@ -25,7 +25,7 @@ pub struct ActorMessage {
 }
 
 impl ActorProcess {
-    pub fn new(
+    pub async fn new(
         name: &String,
         actor: WasmActor,
         mailbox_rx: mpsc::Receiver<ActorMessage>,
@@ -34,7 +34,7 @@ impl ActorProcess {
         let mut chain = HashChain::new();
 
         // Initialize actor state
-        let initial_state = actor.init()?;
+        let initial_state = actor.init().await?;
         let state = ActorState::new(initial_state.clone());
 
         // Record initialization in chain
@@ -120,3 +120,4 @@ impl ActorProcess {
         }
     }
 }
+

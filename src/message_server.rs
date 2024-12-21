@@ -1,5 +1,5 @@
-use crate::actor::Event;
 use crate::actor_process::ActorMessage;
+use crate::wasm::Event;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
