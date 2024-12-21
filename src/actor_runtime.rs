@@ -1,4 +1,4 @@
-use crate::actor::Event;
+use crate::wasm::{Event, WasmActor};
 use crate::actor_process::ActorMessage;
 use crate::actor_process::ActorProcess;
 use crate::chain::{ChainEntry, HashChain};
@@ -7,7 +7,6 @@ use crate::http_server::HttpServerHost;
 use crate::message_server::MessageServerHost;
 use crate::store::Store;
 use crate::Result;
-use crate::WasmActor;
 use std::path::PathBuf;
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
@@ -97,7 +96,7 @@ impl ActorRuntime {
             .collect();
 
         let store = Store::new(chain_tx.clone());
-        let actor = Box::new(WasmActor::new(config, store)?);
+        let actor = WasmActor::new(config, store)?;
 
         // Create and spawn actor process
         let actor_process = ActorProcess::new(&config.name, actor, actor_rx, chain_tx)?;

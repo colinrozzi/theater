@@ -5,11 +5,28 @@ use thiserror::Error;
 use wasmtime::component::{Component, ComponentExportIndex, Instance, Linker};
 use wasmtime::Engine;
 
-use crate::actor::{Actor, Event, State};
 use crate::capabilities::{ActorCapability, BaseActorCapability, HttpCapability};
 use crate::config::ManifestConfig;
 use crate::Store;
 use tracing::{error, info};
+
+// Move Event and State from actor.rs
+pub type State = Value;
+
+#[derive(Debug, Clone)]
+pub struct Event {
+    pub type_: String,
+    pub data: Value,
+}
+
+impl Event {
+    pub fn noop() -> Self {
+        Event {
+            type_: "noop".to_string(),
+            data: Value::Null,
+        }
+    }
+}
 
 #[derive(Error, Debug)]
 pub enum WasmError {
@@ -23,7 +40,7 @@ pub enum WasmError {
     },
 }
 
-/// Implementation of the Actor trait for WebAssembly components
+/// WebAssembly actor implementation
 pub struct WasmActor {
     engine: Engine,
     component: Component,
@@ -112,7 +129,7 @@ impl WasmActor {
                 context: "function access",
                 message: format!("Failed to get function {}", export_name),
             })?;
-        // get the types of the function
+        
         info!("params type: {:?}", func.params(&mut *store));
         info!("results type: {:?}", func.results(&mut *store));
 
@@ -131,10 +148,8 @@ impl WasmActor {
                 message: e.to_string(),
             })?)
     }
-}
 
-impl Actor for WasmActor {
-    async fn init(&self) -> Result<Value> {
+    pub async fn init(&self) -> Result<Value> {
         let mut store = wasmtime::Store::new(&self.engine, self.store.clone());
         let instance = self.linker.instantiate_async(&mut store, &self.component).await?;
 
@@ -144,7 +159,7 @@ impl Actor for WasmActor {
         Ok(state)
     }
 
-    async fn handle_event(&self, state: Value, event: Event) -> Result<(State, Event)> {
+    pub async fn handle_event(&self, state: Value, event: Event) -> Result<(State, Event)> {
         info!("Handling event: {:?}", event);
         let mut store = wasmtime::Store::new(&self.engine, self.store.clone());
         let instance = self.linker.instantiate_async(&mut store, &self.component).await?;
@@ -185,7 +200,7 @@ impl Actor for WasmActor {
         }
     }
 
-    async fn verify_state(&self, state: &Value) -> bool {
+    pub async fn verify_state(&self, state: &Value) -> bool {
         let mut store = wasmtime::Store::new(&self.engine, self.store.clone());
         let instance = match self.linker.instantiate_async(&mut store, &self.component).await {
             Ok(instance) => instance,

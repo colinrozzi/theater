@@ -1,11 +1,10 @@
-use crate::actor::Actor;
-use crate::actor::Event;
 use crate::actor_runtime::ChainRequest;
 use crate::actor_runtime::ChainRequestType;
 use crate::actor_runtime::ChainResponse;
 use crate::chain::ChainEntry;
 use crate::chain::HashChain;
 use crate::state::ActorState;
+use crate::wasm::{Event, WasmActor};
 use crate::Result;
 use serde_json::json;
 use tokio::sync::mpsc;
@@ -15,7 +14,7 @@ pub struct ActorProcess {
     mailbox_rx: mpsc::Receiver<ActorMessage>,
     chain_tx: mpsc::Sender<ChainRequest>,
     state: ActorState,
-    actor: Box<dyn Actor>,
+    actor: WasmActor,
     #[allow(dead_code)]
     name: String,
 }
@@ -28,7 +27,7 @@ pub struct ActorMessage {
 impl ActorProcess {
     pub fn new(
         name: &String,
-        actor: Box<dyn Actor>,
+        actor: WasmActor,
         mailbox_rx: mpsc::Receiver<ActorMessage>,
         chain_tx: mpsc::Sender<ChainRequest>,
     ) -> Result<Self> {
@@ -79,6 +78,7 @@ impl ActorProcess {
             match self
                 .actor
                 .handle_event(current_state.clone(), msg.event.clone())
+                .await
             {
                 Ok((new_state, response_event)) => {
                     self.add_event(Event {
