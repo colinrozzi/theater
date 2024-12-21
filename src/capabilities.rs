@@ -16,7 +16,7 @@ use wasmtime::component::{Component, ComponentExportIndex, Linker};
 /// Represents a set of capabilities that a WASM component can implement
 pub trait ActorCapability: Send {
     /// Set up host functions in the linker
-    fn setup_host_functions(&self, linker: &mut Linker<Store>) -> Result<()>;
+    async fn setup_host_functions(&self, linker: &mut Linker<Store>) -> Result<()>;
 
     /// Get required export indices from component
     fn get_exports(&self, component: &Component) -> Result<Vec<(String, ComponentExportIndex)>>;
@@ -69,8 +69,8 @@ pub trait ActorCapability: Send {
 pub struct BaseActorCapability;
 
 impl ActorCapability for BaseActorCapability {
-    fn setup_host_functions(&self, linker: &mut Linker<Store>) -> Result<()> {
-        let mut runtime = linker.instance("ntwk:simple-actor/runtime")?;
+    async fn setup_host_functions(&self, linker: &mut Linker<Store>) -> Result<()> {
+        let mut runtime = linker.instance_async("ntwk:simple-actor/runtime").await?;
 
         // Add log function
         runtime.func_wrap(
@@ -134,8 +134,8 @@ impl ActorCapability for BaseActorCapability {
 pub struct HttpCapability;
 
 impl ActorCapability for HttpCapability {
-    fn setup_host_functions(&self, linker: &mut Linker<Store>) -> Result<()> {
-        let mut runtime = linker.instance("ntwk:simple-http-actor/http-runtime")?;
+    async fn setup_host_functions(&self, linker: &mut Linker<Store>) -> Result<()> {
+        let mut runtime = linker.instance_async("ntwk:simple-http-actor/http-runtime").await?;
 
         // Add log function
         runtime.func_wrap(
@@ -257,7 +257,6 @@ struct HttpResponse {
     body: Option<Vec<u8>>,
 }
 
-// rewrite
 async fn http_send(
     chain_tx: Sender<ChainRequest>,
     address: String,
@@ -355,101 +354,3 @@ async fn http_send(
 
     Ok(response_bytes)
 }
-
-/*
-fn http_send_2(
-    store: &Store,
-    address: String,
-    msg: Vec<u8>,
-) -> impl Future<Output = Result<(Vec<u8>,)>> {
-    let msg_value: Value = serde_json::from_slice(&msg).expect("Failed to parse message as JSON");
-    let evt = Event {
-        type_: "actor-message".to_string(),
-        data: json!({
-            "address": address,
-            "message": msg_value,
-        }),
-    };
-
-    let req: HttpRequest = serde_json::from_value(msg_value).expect("Failed to parse request");
-
-    let chain_tx = store.chain_tx.clone();
-
-    tokio::spawn(async move {
-        let (tx, rx) = tokio::sync::oneshot::channel();
-
-        chain_tx
-            .send(ChainRequest {
-                request_type: ChainRequestType::AddEvent { event: evt },
-                response_tx: tx,
-            })
-            .await
-            .expect("Failed to record message in chain");
-        rx.await.expect("Failed to get response from chain");
-
-        let client = reqwest::Client::new();
-        let request = client
-            .request(
-                Method::from_bytes(req.method.as_bytes()).expect("Failed to parse method"),
-                &address,
-            )
-            .headers(
-                req.headers
-                    .iter()
-                    .map(|(name, value)| {
-                        (
-                            reqwest::header::HeaderName::from_bytes(name.as_bytes()).unwrap(),
-                            reqwest::header::HeaderValue::from_str(value).unwrap(),
-                        )
-                    })
-                    .collect(),
-            )
-            .body(req.body.unwrap_or_default());
-
-        let response = request.send().await.expect("Failed to send request");
-
-        let status = response.status().as_u16();
-
-        let mut headers = Vec::new();
-        for (name, value) in response.headers() {
-            headers.push((
-                name.as_str().to_string(),
-                value.to_str().unwrap().to_string(),
-            ));
-        }
-
-        let body = response.bytes().await.expect("Failed to get response body");
-
-        let response = HttpResponse {
-            status,
-            headers,
-            body: Some(body.to_vec()),
-        };
-
-        let response_bytes = serde_json::to_vec(&response).expect("Failed to serialize response");
-
-        let chain_tx = chain_tx.clone();
-        let evt = Event {
-            type_: "actor-message".to_string(),
-            data: json!({
-                "address": address,
-                "message": response_bytes,
-            }),
-        };
-        let (tx, rx) = tokio::sync::oneshot::channel();
-
-        chain_tx
-            .send(ChainRequest {
-                request_type: ChainRequestType::AddEvent { event: evt },
-                response_tx: tx,
-            })
-            .await
-            .expect("Failed to record message in chain");
-        rx.await.expect("Failed to get response from chain");
-
-        let response_bytes = serde_json::to_vec(&response).expect("Failed to serialize response");
-
-        (response_bytes,)
-    })
-}
-*/

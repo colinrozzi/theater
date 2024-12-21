@@ -34,7 +34,7 @@ pub struct WasmActor {
 }
 
 impl WasmActor {
-    pub fn new(config: &ManifestConfig, store: Store) -> Result<Self> {
+    pub async fn new(config: &ManifestConfig, store: Store) -> Result<Self> {
         // Load WASM component
         let engine = Engine::new(wasmtime::Config::new().async_support(true))?;
         let wasm_bytes =
@@ -59,19 +59,19 @@ impl WasmActor {
         };
 
         if config.interface() == "ntwk:simple-actor/actor" {
-            actor.add_capability(Box::new(BaseActorCapability))?;
+            actor.add_capability(Box::new(BaseActorCapability)).await?;
         }
 
         if config.implements_interface("ntwk:simple-http-actor/actor") {
-            actor.add_capability(Box::new(HttpCapability))?;
+            actor.add_capability(Box::new(HttpCapability)).await?;
         }
 
         Ok(actor)
     }
 
-    fn add_capability(&mut self, capability: Box<dyn ActorCapability>) -> Result<()> {
+    async fn add_capability(&mut self, capability: Box<dyn ActorCapability>) -> Result<()> {
         // Setup host functions
-        capability.setup_host_functions(&mut self.linker)?;
+        capability.setup_host_functions(&mut self.linker).await?;
 
         // Get and store exports
         let exports = capability.get_exports(&self.component)?;
@@ -87,7 +87,7 @@ impl WasmActor {
         self.exports.get(name)
     }
 
-    fn call_func<T, U>(
+    async fn call_func<T, U>(
         &self,
         store: &mut wasmtime::Store<Store>,
         instance: &Instance,
@@ -124,7 +124,8 @@ impl WasmActor {
             })?;
 
         Ok(typed
-            .call(&mut *store, args)
+            .call_async(&mut *store, args)
+            .await
             .map_err(|e| WasmError::WasmError {
                 context: "function call",
                 message: e.to_string(),
@@ -133,20 +134,20 @@ impl WasmActor {
 }
 
 impl Actor for WasmActor {
-    fn init(&self) -> Result<Value> {
+    async fn init(&self) -> Result<Value> {
         let mut store = wasmtime::Store::new(&self.engine, self.store.clone());
-        let instance = self.linker.instantiate(&mut store, &self.component)?;
+        let instance = self.linker.instantiate_async(&mut store, &self.component).await?;
 
-        let (result,) = self.call_func::<(), (Vec<u8>,)>(&mut store, &instance, "init", ())?;
+        let (result,) = self.call_func::<(), (Vec<u8>,)>(&mut store, &instance, "init", ()).await?;
         let state: Value = serde_json::from_slice(&result)?;
 
         Ok(state)
     }
 
-    fn handle_event(&self, state: Value, event: Event) -> Result<(State, Event)> {
+    async fn handle_event(&self, state: Value, event: Event) -> Result<(State, Event)> {
         info!("Handling event: {:?}", event);
         let mut store = wasmtime::Store::new(&self.engine, self.store.clone());
-        let instance = self.linker.instantiate(&mut store, &self.component)?;
+        let instance = self.linker.instantiate_async(&mut store, &self.component).await?;
 
         let event_bytes = serde_json::to_vec(&event).map_err(|e| WasmError::WasmError {
             context: "event serialization",
@@ -162,10 +163,8 @@ impl Actor for WasmActor {
             &instance,
             "handle",
             (event_bytes, state_bytes),
-        )?;
+        ).await?;
 
-        // what should I expect the response to be? Should it be an event, or should it be
-        // something else?
         let (after_state, response) = result.0;
 
         let new_state: Value =
@@ -186,9 +185,9 @@ impl Actor for WasmActor {
         }
     }
 
-    fn verify_state(&self, state: &Value) -> bool {
+    async fn verify_state(&self, state: &Value) -> bool {
         let mut store = wasmtime::Store::new(&self.engine, self.store.clone());
-        let instance = match self.linker.instantiate(&mut store, &self.component) {
+        let instance = match self.linker.instantiate_async(&mut store, &self.component).await {
             Ok(instance) => instance,
             Err(_) => return false,
         };
@@ -204,6 +203,7 @@ impl Actor for WasmActor {
             "state-contract",
             (state_bytes,),
         )
+        .await
         .map(|(result,)| result)
         .unwrap_or(false)
     }
