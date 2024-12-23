@@ -213,4 +213,3 @@ impl ChainRequestHandler {
         let _ = req.response_tx.send(response);
     }
 }
-
