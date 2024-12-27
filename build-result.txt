@@ -1,94 +1,584 @@
    Compiling theater v0.1.0 (/Users/colinrozzi/work/theater)
-error[E0433]: failed to resolve: use of undeclared type `ChainEvent`
-   --> src/lib.rs:185:30
-    |
-185 |         self.chain.add_event(ChainEvent::ActorMessage {
-    |                              ^^^^^^^^^^ use of undeclared type `ChainEvent`
-    |
-help: consider importing this struct
-    |
-1   + use crate::logging::ChainEvent;
-    |
+error[E0412]: cannot find type `Event` in this scope
+  --> src/actor.rs:11:55
+   |
+11 |     async fn handle_event(&self, state: State, event: Event) -> Result<(State, Event)>;
+   |                                                       ^^^^^ not found in this scope
+   |
+help: consider importing one of these structs
+   |
+1  + use crate::wasm::Event;
+   |
+1  + use tracing::Event;
+   |
+1  + use warp::sse::Event;
+   |
 
-warning: unused import: `crate::chain_emitter::CHAIN_EMITTER`
- --> src/chain.rs:1:5
+error[E0412]: cannot find type `Event` in this scope
+  --> src/actor.rs:11:80
+   |
+11 |     async fn handle_event(&self, state: State, event: Event) -> Result<(State, Event)>;
+   |                                                                                ^^^^^ not found in this scope
+   |
+help: consider importing one of these structs
+   |
+1  + use crate::wasm::Event;
+   |
+1  + use tracing::Event;
+   |
+1  + use warp::sse::Event;
+   |
+
+warning: unused imports: `Deserialize` and `Serialize`
+ --> src/actor.rs:2:13
   |
-1 | use crate::chain_emitter::CHAIN_EMITTER;
-  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+2 | use serde::{Deserialize, Serialize};
+  |             ^^^^^^^^^^^  ^^^^^^^^^
   |
   = note: `#[warn(unused_imports)]` on by default
 
-warning: unused import: `crate::logging::ChainEventType`
- --> src/chain.rs:2:5
+warning: unused import: `std::future::Future`
+ --> src/actor.rs:4:5
   |
-2 | use crate::logging::ChainEventType;
-  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+4 | use std::future::Future;
+  |     ^^^^^^^^^^^^^^^^^^^
 
-warning: unused imports: `ActorInput` and `ActorOutput`
- --> src/chain.rs:3:13
-  |
-3 | use crate::{ActorInput, ActorOutput};
-  |             ^^^^^^^^^^  ^^^^^^^^^^^
+error[E0277]: `T` cannot be sent between threads safely
+   --> src/wasm.rs:145:14
+    |
+145 |             .call_async(&mut *store, args)
+    |              ^^^^^^^^^^ `T` cannot be sent between threads safely
+    |
+note: required by a bound in `wasmtime::component::TypedFunc::<Params, Return>::call_async`
+   --> /Users/colinrozzi/.cargo/registry/src/index.crates.io-6f17d22bba15001f/wasmtime-27.0.0/src/runtime/component/func/typed.rs:180:17
+    |
+173 |     pub async fn call_async<T>(
+    |                  ---------- required by a bound in this associated function
+...
+180 |         Params: Send + Sync,
+    |                 ^^^^ required by this bound in `TypedFunc::<Params, Return>::call_async`
+help: consider further restricting this bound
+    |
+116 |         T: wasmtime::component::Lower + wasmtime::component::ComponentNamedList + std::marker::Send,
+    |                                                                                 +++++++++++++++++++
 
-warning: unused import: `chrono::Utc`
- --> src/chain.rs:4:5
-  |
-4 | use chrono::Utc;
-  |     ^^^^^^^^^^^
+error[E0277]: `T` cannot be shared between threads safely
+   --> src/wasm.rs:145:14
+    |
+145 |             .call_async(&mut *store, args)
+    |              ^^^^^^^^^^ `T` cannot be shared between threads safely
+    |
+note: required by a bound in `wasmtime::component::TypedFunc::<Params, Return>::call_async`
+   --> /Users/colinrozzi/.cargo/registry/src/index.crates.io-6f17d22bba15001f/wasmtime-27.0.0/src/runtime/component/func/typed.rs:180:24
+    |
+173 |     pub async fn call_async<T>(
+    |                  ---------- required by a bound in this associated function
+...
+180 |         Params: Send + Sync,
+    |                        ^^^^ required by this bound in `TypedFunc::<Params, Return>::call_async`
+help: consider further restricting this bound
+    |
+116 |         T: wasmtime::component::Lower + wasmtime::component::ComponentNamedList + std::marker::Sync,
+    |                                                                                 +++++++++++++++++++
 
-warning: unused import: `Event`
-  --> src/lib.rs:22:13
+error[E0277]: `U` cannot be sent between threads safely
+   --> src/wasm.rs:145:14
+    |
+145 |             .call_async(&mut *store, args)
+    |              ^^^^^^^^^^ `U` cannot be sent between threads safely
+    |
+note: required by a bound in `wasmtime::component::TypedFunc::<Params, Return>::call_async`
+   --> /Users/colinrozzi/.cargo/registry/src/index.crates.io-6f17d22bba15001f/wasmtime-27.0.0/src/runtime/component/func/typed.rs:181:17
+    |
+173 |     pub async fn call_async<T>(
+    |                  ---------- required by a bound in this associated function
+...
+181 |         Return: Send + Sync,
+    |                 ^^^^ required by this bound in `TypedFunc::<Params, Return>::call_async`
+help: consider further restricting this bound
+    |
+117 |         U: wasmtime::component::Lift + wasmtime::component::ComponentNamedList + std::marker::Send,
+    |                                                                                +++++++++++++++++++
+
+error[E0277]: `U` cannot be shared between threads safely
+   --> src/wasm.rs:145:14
+    |
+145 |             .call_async(&mut *store, args)
+    |              ^^^^^^^^^^ `U` cannot be shared between threads safely
+    |
+note: required by a bound in `wasmtime::component::TypedFunc::<Params, Return>::call_async`
+   --> /Users/colinrozzi/.cargo/registry/src/index.crates.io-6f17d22bba15001f/wasmtime-27.0.0/src/runtime/component/func/typed.rs:181:24
+    |
+173 |     pub async fn call_async<T>(
+    |                  ---------- required by a bound in this associated function
+...
+181 |         Return: Send + Sync,
+    |                        ^^^^ required by this bound in `TypedFunc::<Params, Return>::call_async`
+help: consider further restricting this bound
+    |
+117 |         U: wasmtime::component::Lift + wasmtime::component::ComponentNamedList + std::marker::Sync,
+    |                                                                                +++++++++++++++++++
+
+error[E0277]: `T` cannot be sent between threads safely
+   --> src/wasm.rs:144:12
+    |
+144 |           Ok(typed
+    |  ____________^
+145 | |             .call_async(&mut *store, args)
+    | |__________________________________________^ `T` cannot be sent between threads safely
+    |
+note: required by a bound in `wasmtime::component::TypedFunc::<Params, Return>::call_async`
+   --> /Users/colinrozzi/.cargo/registry/src/index.crates.io-6f17d22bba15001f/wasmtime-27.0.0/src/runtime/component/func/typed.rs:180:17
+    |
+173 |     pub async fn call_async<T>(
+    |                  ---------- required by a bound in this associated function
+...
+180 |         Params: Send + Sync,
+    |                 ^^^^ required by this bound in `TypedFunc::<Params, Return>::call_async`
+help: consider further restricting this bound
+    |
+116 |         T: wasmtime::component::Lower + wasmtime::component::ComponentNamedList + std::marker::Send,
+    |                                                                                 +++++++++++++++++++
+
+error[E0277]: `T` cannot be shared between threads safely
+   --> src/wasm.rs:144:12
+    |
+144 |           Ok(typed
+    |  ____________^
+145 | |             .call_async(&mut *store, args)
+    | |__________________________________________^ `T` cannot be shared between threads safely
+    |
+note: required by a bound in `wasmtime::component::TypedFunc::<Params, Return>::call_async`
+   --> /Users/colinrozzi/.cargo/registry/src/index.crates.io-6f17d22bba15001f/wasmtime-27.0.0/src/runtime/component/func/typed.rs:180:24
+    |
+173 |     pub async fn call_async<T>(
+    |                  ---------- required by a bound in this associated function
+...
+180 |         Params: Send + Sync,
+    |                        ^^^^ required by this bound in `TypedFunc::<Params, Return>::call_async`
+help: consider further restricting this bound
+    |
+116 |         T: wasmtime::component::Lower + wasmtime::component::ComponentNamedList + std::marker::Sync,
+    |                                                                                 +++++++++++++++++++
+
+error[E0277]: `U` cannot be sent between threads safely
+   --> src/wasm.rs:144:12
+    |
+144 |           Ok(typed
+    |  ____________^
+145 | |             .call_async(&mut *store, args)
+    | |__________________________________________^ `U` cannot be sent between threads safely
+    |
+note: required by a bound in `wasmtime::component::TypedFunc::<Params, Return>::call_async`
+   --> /Users/colinrozzi/.cargo/registry/src/index.crates.io-6f17d22bba15001f/wasmtime-27.0.0/src/runtime/component/func/typed.rs:181:17
+    |
+173 |     pub async fn call_async<T>(
+    |                  ---------- required by a bound in this associated function
+...
+181 |         Return: Send + Sync,
+    |                 ^^^^ required by this bound in `TypedFunc::<Params, Return>::call_async`
+help: consider further restricting this bound
+    |
+117 |         U: wasmtime::component::Lift + wasmtime::component::ComponentNamedList + std::marker::Send,
+    |                                                                                +++++++++++++++++++
+
+error[E0277]: `U` cannot be shared between threads safely
+   --> src/wasm.rs:144:12
+    |
+144 |           Ok(typed
+    |  ____________^
+145 | |             .call_async(&mut *store, args)
+    | |__________________________________________^ `U` cannot be shared between threads safely
+    |
+note: required by a bound in `wasmtime::component::TypedFunc::<Params, Return>::call_async`
+   --> /Users/colinrozzi/.cargo/registry/src/index.crates.io-6f17d22bba15001f/wasmtime-27.0.0/src/runtime/component/func/typed.rs:181:24
+    |
+173 |     pub async fn call_async<T>(
+    |                  ---------- required by a bound in this associated function
+...
+181 |         Return: Send + Sync,
+    |                        ^^^^ required by this bound in `TypedFunc::<Params, Return>::call_async`
+help: consider further restricting this bound
+    |
+117 |         U: wasmtime::component::Lift + wasmtime::component::ComponentNamedList + std::marker::Sync,
+    |                                                                                +++++++++++++++++++
+
+error[E0277]: `T` cannot be sent between threads safely
+   --> src/wasm.rs:146:14
+    |
+146 |             .await
+    |              ^^^^^ `T` cannot be sent between threads safely
+    |
+note: required by a bound in `wasmtime::component::TypedFunc::<Params, Return>::call_async`
+   --> /Users/colinrozzi/.cargo/registry/src/index.crates.io-6f17d22bba15001f/wasmtime-27.0.0/src/runtime/component/func/typed.rs:180:17
+    |
+173 |     pub async fn call_async<T>(
+    |                  ---------- required by a bound in this associated function
+...
+180 |         Params: Send + Sync,
+    |                 ^^^^ required by this bound in `TypedFunc::<Params, Return>::call_async`
+help: consider further restricting this bound
+    |
+116 |         T: wasmtime::component::Lower + wasmtime::component::ComponentNamedList + std::marker::Send,
+    |                                                                                 +++++++++++++++++++
+
+error[E0277]: `T` cannot be shared between threads safely
+   --> src/wasm.rs:146:14
+    |
+146 |             .await
+    |              ^^^^^ `T` cannot be shared between threads safely
+    |
+note: required by a bound in `wasmtime::component::TypedFunc::<Params, Return>::call_async`
+   --> /Users/colinrozzi/.cargo/registry/src/index.crates.io-6f17d22bba15001f/wasmtime-27.0.0/src/runtime/component/func/typed.rs:180:24
+    |
+173 |     pub async fn call_async<T>(
+    |                  ---------- required by a bound in this associated function
+...
+180 |         Params: Send + Sync,
+    |                        ^^^^ required by this bound in `TypedFunc::<Params, Return>::call_async`
+help: consider further restricting this bound
+    |
+116 |         T: wasmtime::component::Lower + wasmtime::component::ComponentNamedList + std::marker::Sync,
+    |                                                                                 +++++++++++++++++++
+
+error[E0277]: `U` cannot be sent between threads safely
+   --> src/wasm.rs:146:14
+    |
+146 |             .await
+    |              ^^^^^ `U` cannot be sent between threads safely
+    |
+note: required by a bound in `wasmtime::component::TypedFunc::<Params, Return>::call_async`
+   --> /Users/colinrozzi/.cargo/registry/src/index.crates.io-6f17d22bba15001f/wasmtime-27.0.0/src/runtime/component/func/typed.rs:181:17
+    |
+173 |     pub async fn call_async<T>(
+    |                  ---------- required by a bound in this associated function
+...
+181 |         Return: Send + Sync,
+    |                 ^^^^ required by this bound in `TypedFunc::<Params, Return>::call_async`
+help: consider further restricting this bound
+    |
+117 |         U: wasmtime::component::Lift + wasmtime::component::ComponentNamedList + std::marker::Send,
+    |                                                                                +++++++++++++++++++
+
+error[E0277]: `U` cannot be shared between threads safely
+   --> src/wasm.rs:146:14
+    |
+146 |             .await
+    |              ^^^^^ `U` cannot be shared between threads safely
+    |
+note: required by a bound in `wasmtime::component::TypedFunc::<Params, Return>::call_async`
+   --> /Users/colinrozzi/.cargo/registry/src/index.crates.io-6f17d22bba15001f/wasmtime-27.0.0/src/runtime/component/func/typed.rs:181:24
+    |
+173 |     pub async fn call_async<T>(
+    |                  ---------- required by a bound in this associated function
+...
+181 |         Return: Send + Sync,
+    |                        ^^^^ required by this bound in `TypedFunc::<Params, Return>::call_async`
+help: consider further restricting this bound
+    |
+117 |         U: wasmtime::component::Lift + wasmtime::component::ComponentNamedList + std::marker::Sync,
+    |                                                                                +++++++++++++++++++
+
+error[E0038]: the trait `ActorCapability` cannot be made into an object
+  --> src/wasm.rs:74:27
    |
-22 | use chain::{Event, HashChain};
-   |             ^^^^^
+74 |             capabilities: Vec::new(),
+   |                           ^^^^^^^^^^ `ActorCapability` cannot be made into an object
+   |
+note: for a trait to be "object safe" it needs to allow building a vtable to allow the call to be resolvable dynamically; for more information visit <https://doc.rust-lang.org/reference/items/traits.html#object-safety>
+  --> src/capabilities.rs:18:14
+   |
+16 | pub trait ActorCapability: Send {
+   |           --------------- this trait cannot be made into an object...
+17 |     /// Set up host functions in the linker
+18 |     async fn setup_host_functions(&self, linker: &mut Linker<Store>) -> Result<()>;
+   |              ^^^^^^^^^^^^^^^^^^^^ ...because method `setup_host_functions` is `async`
+   = help: consider moving `setup_host_functions` to another trait
+   = help: the following types implement the trait, consider defining an enum where each variant holds one of these types, implementing `ActorCapability` for this new enum and using it instead:
+             capabilities::BaseActorCapability
+             capabilities::HttpCapability
+   = note: `ActorCapability` can be implemented in other crates; if you want to support your users passing their own types here, you can't refer to a specific type
 
-error[E0599]: no method named `get_current_state` found for struct `HashChain` in the current scope
-   --> src/lib.rs:140:18
-    |
-138 |               let current_state = self
-    |  _________________________________-
-139 | |                 .chain
-140 | |                 .get_current_state()
-    | |_________________-^^^^^^^^^^^^^^^^^
-    |
-   ::: src/chain.rs:31:1
-    |
-31  |   pub struct HashChain {
-    |   -------------------- method `get_current_state` not found for this struct
-    |
-help: there is a method `in_current_span` with a similar name
-    |
-140 |                 .in_current_span()
-    |                  ~~~~~~~~~~~~~~~
+error[E0038]: the trait `ActorCapability` cannot be made into an object
+  --> src/wasm.rs:74:27
+   |
+74 |             capabilities: Vec::new(),
+   |                           ^^^^^^^^ `ActorCapability` cannot be made into an object
+   |
+note: for a trait to be "object safe" it needs to allow building a vtable to allow the call to be resolvable dynamically; for more information visit <https://doc.rust-lang.org/reference/items/traits.html#object-safety>
+  --> src/capabilities.rs:18:14
+   |
+16 | pub trait ActorCapability: Send {
+   |           --------------- this trait cannot be made into an object...
+17 |     /// Set up host functions in the linker
+18 |     async fn setup_host_functions(&self, linker: &mut Linker<Store>) -> Result<()>;
+   |              ^^^^^^^^^^^^^^^^^^^^ ...because method `setup_host_functions` is `async`
+   = help: consider moving `setup_host_functions` to another trait
+   = help: the following types implement the trait, consider defining an enum where each variant holds one of these types, implementing `ActorCapability` for this new enum and using it instead:
+             capabilities::BaseActorCapability
+             capabilities::HttpCapability
+   = note: `ActorCapability` can be implemented in other crates; if you want to support your users passing their own types here, you can't refer to a specific type
 
-error[E0061]: this method takes 2 arguments but 1 argument was supplied
-   --> src/lib.rs:185:20
-    |
-185 |           self.chain.add_event(ChainEvent::ActorMessage {
-    |  ____________________^^^^^^^^^-
-186 | |             source_actor: self.name.clone(),
-187 | |             source_chain_state: current_chain_state.clone(),
-188 | |             content: msg.clone(),
-189 | |             timestamp: Utc::now(),
-190 | |         });
-    | |__________- argument #2 of type `serde_json::Value` is missing
-    |
-note: method defined here
-   --> src/chain.rs:49:12
-    |
-49  |     pub fn add_event(&mut self, type_: String, data: Value) -> String {
-    |            ^^^^^^^^^            -------------  -----------
-help: provide the argument
-    |
-185 ~         self.chain.add_event(ChainEvent::ActorMessage {
-186 +             source_actor: self.name.clone(),
-187 +             source_chain_state: current_chain_state.clone(),
-188 +             content: msg.clone(),
-189 +             timestamp: Utc::now(),
-190 ~         }, /* serde_json::Value */);
-    |
+error[E0038]: the trait `ActorCapability` cannot be made into an object
+  --> src/wasm.rs:80:19
+   |
+80 |             actor.add_capability(Box::new(BaseActorCapability)).await?;
+   |                   ^^^^^^^^^^^^^^ `ActorCapability` cannot be made into an object
+   |
+note: for a trait to be "object safe" it needs to allow building a vtable to allow the call to be resolvable dynamically; for more information visit <https://doc.rust-lang.org/reference/items/traits.html#object-safety>
+  --> src/capabilities.rs:18:14
+   |
+16 | pub trait ActorCapability: Send {
+   |           --------------- this trait cannot be made into an object...
+17 |     /// Set up host functions in the linker
+18 |     async fn setup_host_functions(&self, linker: &mut Linker<Store>) -> Result<()>;
+   |              ^^^^^^^^^^^^^^^^^^^^ ...because method `setup_host_functions` is `async`
+   = help: consider moving `setup_host_functions` to another trait
+   = help: the following types implement the trait, consider defining an enum where each variant holds one of these types, implementing `ActorCapability` for this new enum and using it instead:
+             capabilities::BaseActorCapability
+             capabilities::HttpCapability
+   = note: `ActorCapability` can be implemented in other crates; if you want to support your users passing their own types here, you can't refer to a specific type
 
-Some errors have detailed explanations: E0061, E0433, E0599.
-For more information about an error, try `rustc --explain E0061`.
-warning: `theater` (lib) generated 5 warnings
-error: could not compile `theater` (lib) due to 3 previous errors; 5 warnings emitted
+error[E0038]: the trait `ActorCapability` cannot be made into an object
+  --> src/wasm.rs:80:34
+   |
+80 |             actor.add_capability(Box::new(BaseActorCapability)).await?;
+   |                                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `ActorCapability` cannot be made into an object
+   |
+note: for a trait to be "object safe" it needs to allow building a vtable to allow the call to be resolvable dynamically; for more information visit <https://doc.rust-lang.org/reference/items/traits.html#object-safety>
+  --> src/capabilities.rs:18:14
+   |
+16 | pub trait ActorCapability: Send {
+   |           --------------- this trait cannot be made into an object...
+17 |     /// Set up host functions in the linker
+18 |     async fn setup_host_functions(&self, linker: &mut Linker<Store>) -> Result<()>;
+   |              ^^^^^^^^^^^^^^^^^^^^ ...because method `setup_host_functions` is `async`
+   = help: consider moving `setup_host_functions` to another trait
+   = help: the following types implement the trait, consider defining an enum where each variant holds one of these types, implementing `ActorCapability` for this new enum and using it instead:
+             capabilities::BaseActorCapability
+             capabilities::HttpCapability
+   = note: `ActorCapability` can be implemented in other crates; if you want to support your users passing their own types here, you can't refer to a specific type
+   = note: required for the cast from `Box<BaseActorCapability>` to `Box<(dyn ActorCapability + 'static)>`
+
+error[E0038]: the trait `ActorCapability` cannot be made into an object
+  --> src/wasm.rs:84:19
+   |
+84 |             actor.add_capability(Box::new(HttpCapability)).await?;
+   |                   ^^^^^^^^^^^^^^ `ActorCapability` cannot be made into an object
+   |
+note: for a trait to be "object safe" it needs to allow building a vtable to allow the call to be resolvable dynamically; for more information visit <https://doc.rust-lang.org/reference/items/traits.html#object-safety>
+  --> src/capabilities.rs:18:14
+   |
+16 | pub trait ActorCapability: Send {
+   |           --------------- this trait cannot be made into an object...
+17 |     /// Set up host functions in the linker
+18 |     async fn setup_host_functions(&self, linker: &mut Linker<Store>) -> Result<()>;
+   |              ^^^^^^^^^^^^^^^^^^^^ ...because method `setup_host_functions` is `async`
+   = help: consider moving `setup_host_functions` to another trait
+   = help: the following types implement the trait, consider defining an enum where each variant holds one of these types, implementing `ActorCapability` for this new enum and using it instead:
+             capabilities::BaseActorCapability
+             capabilities::HttpCapability
+   = note: `ActorCapability` can be implemented in other crates; if you want to support your users passing their own types here, you can't refer to a specific type
+
+error[E0038]: the trait `ActorCapability` cannot be made into an object
+  --> src/wasm.rs:84:34
+   |
+84 |             actor.add_capability(Box::new(HttpCapability)).await?;
+   |                                  ^^^^^^^^^^^^^^^^^^^^^^^^ `ActorCapability` cannot be made into an object
+   |
+note: for a trait to be "object safe" it needs to allow building a vtable to allow the call to be resolvable dynamically; for more information visit <https://doc.rust-lang.org/reference/items/traits.html#object-safety>
+  --> src/capabilities.rs:18:14
+   |
+16 | pub trait ActorCapability: Send {
+   |           --------------- this trait cannot be made into an object...
+17 |     /// Set up host functions in the linker
+18 |     async fn setup_host_functions(&self, linker: &mut Linker<Store>) -> Result<()>;
+   |              ^^^^^^^^^^^^^^^^^^^^ ...because method `setup_host_functions` is `async`
+   = help: consider moving `setup_host_functions` to another trait
+   = help: the following types implement the trait, consider defining an enum where each variant holds one of these types, implementing `ActorCapability` for this new enum and using it instead:
+             capabilities::BaseActorCapability
+             capabilities::HttpCapability
+   = note: `ActorCapability` can be implemented in other crates; if you want to support your users passing their own types here, you can't refer to a specific type
+   = note: required for the cast from `Box<HttpCapability>` to `Box<(dyn ActorCapability + 'static)>`
+
+error[E0038]: the trait `ActorCapability` cannot be made into an object
+  --> src/wasm.rs:92:20
+   |
+92 |         capability.setup_host_functions(&mut self.linker).await?;
+   |                    ^^^^^^^^^^^^^^^^^^^^ `ActorCapability` cannot be made into an object
+   |
+note: for a trait to be "object safe" it needs to allow building a vtable to allow the call to be resolvable dynamically; for more information visit <https://doc.rust-lang.org/reference/items/traits.html#object-safety>
+  --> src/capabilities.rs:18:14
+   |
+16 | pub trait ActorCapability: Send {
+   |           --------------- this trait cannot be made into an object...
+17 |     /// Set up host functions in the linker
+18 |     async fn setup_host_functions(&self, linker: &mut Linker<Store>) -> Result<()>;
+   |              ^^^^^^^^^^^^^^^^^^^^ ...because method `setup_host_functions` is `async`
+   = help: consider moving `setup_host_functions` to another trait
+   = help: the following types implement the trait, consider defining an enum where each variant holds one of these types, implementing `ActorCapability` for this new enum and using it instead:
+             capabilities::BaseActorCapability
+             capabilities::HttpCapability
+   = note: `ActorCapability` can be implemented in other crates; if you want to support your users passing their own types here, you can't refer to a specific type
+
+error[E0038]: the trait `ActorCapability` cannot be made into an object
+  --> src/wasm.rs:92:9
+   |
+92 |         capability.setup_host_functions(&mut self.linker).await?;
+   |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `ActorCapability` cannot be made into an object
+   |
+note: for a trait to be "object safe" it needs to allow building a vtable to allow the call to be resolvable dynamically; for more information visit <https://doc.rust-lang.org/reference/items/traits.html#object-safety>
+  --> src/capabilities.rs:18:14
+   |
+16 | pub trait ActorCapability: Send {
+   |           --------------- this trait cannot be made into an object...
+17 |     /// Set up host functions in the linker
+18 |     async fn setup_host_functions(&self, linker: &mut Linker<Store>) -> Result<()>;
+   |              ^^^^^^^^^^^^^^^^^^^^ ...because method `setup_host_functions` is `async`
+   = help: consider moving `setup_host_functions` to another trait
+   = help: the following types implement the trait, consider defining an enum where each variant holds one of these types, implementing `ActorCapability` for this new enum and using it instead:
+             capabilities::BaseActorCapability
+             capabilities::HttpCapability
+   = note: `ActorCapability` can be implemented in other crates; if you want to support your users passing their own types here, you can't refer to a specific type
+
+error[E0038]: the trait `ActorCapability` cannot be made into an object
+  --> src/wasm.rs:95:34
+   |
+95 |         let exports = capability.get_exports(&self.component)?;
+   |                                  ^^^^^^^^^^^ `ActorCapability` cannot be made into an object
+   |
+note: for a trait to be "object safe" it needs to allow building a vtable to allow the call to be resolvable dynamically; for more information visit <https://doc.rust-lang.org/reference/items/traits.html#object-safety>
+  --> src/capabilities.rs:18:14
+   |
+16 | pub trait ActorCapability: Send {
+   |           --------------- this trait cannot be made into an object...
+17 |     /// Set up host functions in the linker
+18 |     async fn setup_host_functions(&self, linker: &mut Linker<Store>) -> Result<()>;
+   |              ^^^^^^^^^^^^^^^^^^^^ ...because method `setup_host_functions` is `async`
+   = help: consider moving `setup_host_functions` to another trait
+   = help: the following types implement the trait, consider defining an enum where each variant holds one of these types, implementing `ActorCapability` for this new enum and using it instead:
+             capabilities::BaseActorCapability
+             capabilities::HttpCapability
+   = note: `ActorCapability` can be implemented in other crates; if you want to support your users passing their own types here, you can't refer to a specific type
+
+error[E0038]: the trait `ActorCapability` cannot be made into an object
+  --> src/wasm.rs:95:23
+   |
+95 |         let exports = capability.get_exports(&self.component)?;
+   |                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `ActorCapability` cannot be made into an object
+   |
+note: for a trait to be "object safe" it needs to allow building a vtable to allow the call to be resolvable dynamically; for more information visit <https://doc.rust-lang.org/reference/items/traits.html#object-safety>
+  --> src/capabilities.rs:18:14
+   |
+16 | pub trait ActorCapability: Send {
+   |           --------------- this trait cannot be made into an object...
+17 |     /// Set up host functions in the linker
+18 |     async fn setup_host_functions(&self, linker: &mut Linker<Store>) -> Result<()>;
+   |              ^^^^^^^^^^^^^^^^^^^^ ...because method `setup_host_functions` is `async`
+   = help: consider moving `setup_host_functions` to another trait
+   = help: the following types implement the trait, consider defining an enum where each variant holds one of these types, implementing `ActorCapability` for this new enum and using it instead:
+             capabilities::BaseActorCapability
+             capabilities::HttpCapability
+   = note: `ActorCapability` can be implemented in other crates; if you want to support your users passing their own types here, you can't refer to a specific type
+
+error[E0038]: the trait `ActorCapability` cannot be made into an object
+   --> src/wasm.rs:100:9
+    |
+100 |         self.capabilities.push(capability);
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `ActorCapability` cannot be made into an object
+    |
+note: for a trait to be "object safe" it needs to allow building a vtable to allow the call to be resolvable dynamically; for more information visit <https://doc.rust-lang.org/reference/items/traits.html#object-safety>
+   --> src/capabilities.rs:18:14
+    |
+16  | pub trait ActorCapability: Send {
+    |           --------------- this trait cannot be made into an object...
+17  |     /// Set up host functions in the linker
+18  |     async fn setup_host_functions(&self, linker: &mut Linker<Store>) -> Result<()>;
+    |              ^^^^^^^^^^^^^^^^^^^^ ...because method `setup_host_functions` is `async`
+    = help: consider moving `setup_host_functions` to another trait
+    = help: the following types implement the trait, consider defining an enum where each variant holds one of these types, implementing `ActorCapability` for this new enum and using it instead:
+              capabilities::BaseActorCapability
+              capabilities::HttpCapability
+    = note: `ActorCapability` can be implemented in other crates; if you want to support your users passing their own types here, you can't refer to a specific type
+
+error[E0038]: the trait `ActorCapability` cannot be made into an object
+  --> src/wasm.rs:49:27
+   |
+49 |     capabilities: Vec<Box<dyn ActorCapability>>,
+   |                           ^^^^^^^^^^^^^^^^^^^ `ActorCapability` cannot be made into an object
+   |
+note: for a trait to be "object safe" it needs to allow building a vtable to allow the call to be resolvable dynamically; for more information visit <https://doc.rust-lang.org/reference/items/traits.html#object-safety>
+  --> src/capabilities.rs:18:14
+   |
+16 | pub trait ActorCapability: Send {
+   |           --------------- this trait cannot be made into an object...
+17 |     /// Set up host functions in the linker
+18 |     async fn setup_host_functions(&self, linker: &mut Linker<Store>) -> Result<()>;
+   |              ^^^^^^^^^^^^^^^^^^^^ ...because method `setup_host_functions` is `async`
+   = help: consider moving `setup_host_functions` to another trait
+   = help: the following types implement the trait, consider defining an enum where each variant holds one of these types, implementing `ActorCapability` for this new enum and using it instead:
+             capabilities::BaseActorCapability
+             capabilities::HttpCapability
+   = note: `ActorCapability` can be implemented in other crates; if you want to support your users passing their own types here, you can't refer to a specific type
+
+error[E0038]: the trait `ActorCapability` cannot be made into an object
+  --> src/wasm.rs:90:56
+   |
+90 |     async fn add_capability(&mut self, capability: Box<dyn ActorCapability>) -> Result<()> {
+   |                                                        ^^^^^^^^^^^^^^^^^^^ `ActorCapability` cannot be made into an object
+   |
+note: for a trait to be "object safe" it needs to allow building a vtable to allow the call to be resolvable dynamically; for more information visit <https://doc.rust-lang.org/reference/items/traits.html#object-safety>
+  --> src/capabilities.rs:18:14
+   |
+16 | pub trait ActorCapability: Send {
+   |           --------------- this trait cannot be made into an object...
+17 |     /// Set up host functions in the linker
+18 |     async fn setup_host_functions(&self, linker: &mut Linker<Store>) -> Result<()>;
+   |              ^^^^^^^^^^^^^^^^^^^^ ...because method `setup_host_functions` is `async`
+   = help: consider moving `setup_host_functions` to another trait
+   = help: the following types implement the trait, consider defining an enum where each variant holds one of these types, implementing `ActorCapability` for this new enum and using it instead:
+             capabilities::BaseActorCapability
+             capabilities::HttpCapability
+   = note: `ActorCapability` can be implemented in other crates; if you want to support your users passing their own types here, you can't refer to a specific type
+
+warning: unused variable: `result`
+   --> src/capabilities.rs:223:9
+    |
+223 |     let result = tokio::spawn(async move {
+    |         ^^^^^^ help: if this is intentional, prefix it with an underscore: `_result`
+    |
+    = note: `#[warn(unused_variables)]` on by default
+
+error: future cannot be sent between threads safely
+   --> src/actor_runtime.rs:130:35
+    |
+130 |           let process_handle = Some(tokio::spawn(async move {
+    |  ___________________________________^
+131 | |             if let Err(e) = components.actor_process.run().await {
+132 | |                 error!("Actor process failed: {}", e);
+133 | |             }
+134 | |         }));
+    | |__________^ future created by async block is not `Send`
+    |
+    = help: the trait `Sync` is not implemented for `(dyn ActorCapability + 'static)`, which is required by `{async block@src/actor_runtime.rs:130:48: 130:58}: Send`
+note: future is not `Send` as this value is used across an await
+   --> src/wasm.rs:174:14
+    |
+168 |     pub async fn handle_event(&self, state: Value, event: Event) -> Result<(State, Event)> {
+    |                               ----- has type `&WasmActor` which is not `Send`
+...
+174 |             .await?;
+    |              ^^^^^ await occurs here, with `&self` maybe used later
+note: required by a bound in `tokio::spawn`
+   --> /Users/colinrozzi/.cargo/registry/src/index.crates.io-6f17d22bba15001f/tokio-1.42.0/src/task/spawn.rs:168:21
+    |
+166 |     pub fn spawn<F>(future: F) -> JoinHandle<F::Output>
+    |            ----- required by a bound in this function
+167 |     where
+168 |         F: Future + Send + 'static,
+    |                     ^^^^ required by this bound in `spawn`
+
+Some errors have detailed explanations: E0038, E0277, E0412.
+For more information about an error, try `rustc --explain E0038`.
+warning: `theater` (lib) generated 3 warnings
+error: could not compile `theater` (lib) due to 28 previous errors; 3 warnings emitted

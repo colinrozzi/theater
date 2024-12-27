@@ -6,7 +6,7 @@ use thiserror::Error;
 use wasmtime::component::{Component, ComponentExportIndex, Instance, Linker};
 use wasmtime::Engine;
 
-use crate::capabilities::{ActorCapability, BaseActorCapability, HttpCapability};
+use crate::capabilities::{BaseCapability, Capability, HttpCapability};
 use crate::config::ManifestConfig;
 use crate::Store;
 use tracing::{error, info};
@@ -46,7 +46,7 @@ pub struct WasmActor {
     engine: Engine,
     component: Component,
     linker: Linker<Store>,
-    capabilities: Vec<Box<dyn ActorCapability>>,
+    capabilities: Vec<Capability>,
     exports: HashMap<String, ComponentExportIndex>,
     store: Store,
 }
@@ -77,17 +77,21 @@ impl WasmActor {
         };
 
         if config.interface() == "ntwk:simple-actor/actor" {
-            actor.add_capability(Box::new(BaseActorCapability)).await?;
+            actor
+                .add_capability(Capability::Base(BaseCapability))
+                .await?;
         }
 
         if config.implements_interface("ntwk:simple-http-actor/actor") {
-            actor.add_capability(Box::new(HttpCapability)).await?;
+            actor
+                .add_capability(Capability::Http(HttpCapability))
+                .await?;
         }
 
         Ok(actor)
     }
 
-    async fn add_capability(&mut self, capability: Box<dyn ActorCapability>) -> Result<()> {
+    async fn add_capability(&mut self, capability: Capability) -> Result<()> {
         // Setup host functions
         capability.setup_host_functions(&mut self.linker).await?;
 
@@ -113,8 +117,8 @@ impl WasmActor {
         args: T,
     ) -> Result<U>
     where
-        T: wasmtime::component::Lower + wasmtime::component::ComponentNamedList,
-        U: wasmtime::component::Lift + wasmtime::component::ComponentNamedList,
+        T: wasmtime::component::Lower + wasmtime::component::ComponentNamedList + Send + Sync,
+        U: wasmtime::component::Lift + wasmtime::component::ComponentNamedList + Send + Sync,
     {
         info!("Calling function: {}", export_name);
         let index = self
@@ -238,4 +242,3 @@ impl WasmActor {
         .unwrap_or(false)
     }
 }
-

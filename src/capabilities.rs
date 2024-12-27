@@ -12,62 +12,41 @@ use tokio::sync::mpsc::Sender;
 use tracing::info;
 use wasmtime::component::{Component, ComponentExportIndex, Linker};
 
-/// Represents a set of capabilities that a WASM component can implement
-pub trait ActorCapability: Send {
-    /// Set up host functions in the linker
-    async fn setup_host_functions(&self, linker: &mut Linker<Store>) -> Result<()>;
+pub enum Capability {
+    Base(BaseCapability),
+    Http(HttpCapability),
+}
 
-    /// Get required export indices from component
-    fn get_exports(&self, component: &Component) -> Result<Vec<(String, ComponentExportIndex)>>;
+impl Capability {
+    pub async fn setup_host_functions(&self, linker: &mut Linker<Store>) -> Result<()> {
+        match self {
+            Capability::Base(capability) => capability.setup_host_functions(linker).await,
+            Capability::Http(capability) => capability.setup_host_functions(linker).await,
+        }
+    }
 
-    /// Return interface name this capability implements
-    fn interface_name(&self) -> &str;
+    pub fn get_exports(
+        &self,
+        component: &Component,
+    ) -> Result<Vec<(String, ComponentExportIndex)>> {
+        match self {
+            Capability::Base(capability) => capability.get_exports(component),
+            Capability::Http(capability) => capability.get_exports(component),
+        }
+    }
 
-    #[cfg(test)]
-    fn create_test_component(engine: &wasmtime::Engine) -> Result<Component>
-    where
-        Self: Sized,
-    {
-        Component::new(
-            engine,
-            r#"
-            (component
-                (import "ntwk:simple-actor/runtime" (instance $runtime
-                    (export "log" (func (param "msg" string)))
-                    (export "send" (func (param "address" string) (param "msg" list u8)))
-                ))
-                
-                (core module $m
-                    (import "" "log" (func $host_log (param i32 i32)))
-                    (import "" "send" (func $host_send (param i32 i32 i32 i32)))
-                    (func $init (export "init"))
-                    (func $handle (export "handle"))
-                    (func $state_contract (export "state-contract"))
-                    (func $message_contract (export "message-contract"))
-                )
-                
-                (core instance $i (instantiate $m
-                    (with "" (instance
-                        (export "log" (func $runtime "log"))
-                        (export "send" (func $runtime "send"))
-                    ))
-                ))
-                
-                (func (export "init") (canon lift (core func $i "init")))
-                (func (export "handle") (canon lift (core func $i "handle")))
-                (func (export "state-contract") (canon lift (core func $i "state-contract")))
-                (func (export "message-contract") (canon lift (core func $i "message-contract")))
-            )
-        "#
-            .as_bytes(),
-        )
+    pub fn interface_name(&self) -> &str {
+        match self {
+            Capability::Base(capability) => capability.interface_name(),
+            Capability::Http(capability) => capability.interface_name(),
+        }
     }
 }
 
 /// The base actor capability that all actors must implement
-pub struct BaseActorCapability;
+pub struct BaseCapability;
 
-impl ActorCapability for BaseActorCapability {
+impl BaseCapability {
     async fn setup_host_functions(&self, linker: &mut Linker<Store>) -> Result<()> {
         let mut runtime = linker.instance("ntwk:simple-actor/runtime")?;
 
@@ -132,7 +111,7 @@ impl ActorCapability for BaseActorCapability {
 /// HTTP actor capability
 pub struct HttpCapability;
 
-impl ActorCapability for HttpCapability {
+impl HttpCapability {
     async fn setup_host_functions(&self, linker: &mut Linker<Store>) -> Result<()> {
         let mut runtime = linker.instance("ntwk:simple-http-actor/http-runtime")?;
 
@@ -220,7 +199,7 @@ fn send(store: &Store, address: String, msg: Vec<u8>) {
 
     let chain_tx = store.chain_tx.clone();
 
-    let result = tokio::spawn(async move {
+    let _result = tokio::spawn(async move {
         let (tx, rx) = tokio::sync::oneshot::channel();
 
         chain_tx
