@@ -1,47 +1,30 @@
-use crate::actor_process::ActorMessage;
-use crate::actor_process::ActorProcess;
-use crate::chain::{ChainEntry, HashChain};
+use crate::actor_process::{ActorProcess, ProcessMessage};
+use crate::chain::ChainRequestHandler;
 use crate::config::{HandlerConfig, ManifestConfig};
 use crate::http_server::HttpServerHost;
 use crate::message_server::MessageServerHost;
+use crate::messages::TheaterCommand;
 use crate::store::Store;
-use crate::wasm::{Event, WasmActor};
+use crate::wasm::WasmActor;
 use crate::Result;
 use std::path::PathBuf;
 use tokio::sync::mpsc;
-use tokio::sync::oneshot;
+use tokio::sync::mpsc::Sender;
 use tracing::{error, info};
 
 pub struct RuntimeComponents {
+    pub name: String,
     handlers: Vec<Handler>,
     actor_process: ActorProcess,
     chain_handler: ChainRequestHandler,
-    actor_tx: mpsc::Sender<ActorMessage>,
+    process_tx: mpsc::Sender<ProcessMessage>,
 }
 
 pub struct ActorRuntime {
+    pub actor_id: String,
     chain_task: tokio::task::JoinHandle<()>,
     process_handle: Option<tokio::task::JoinHandle<()>>,
     handler_tasks: Vec<tokio::task::JoinHandle<()>>,
-}
-
-pub struct ChainRequest {
-    pub request_type: ChainRequestType,
-    pub response_tx: oneshot::Sender<ChainResponse>,
-}
-
-#[derive(Debug)]
-pub enum ChainRequestType {
-    GetHead,
-    GetChainEntry(String),
-    GetChain,
-    AddEvent { event: Event },
-}
-
-pub enum ChainResponse {
-    Head(Option<String>),
-    ChainEntry(Option<ChainEntry>),
-    FullChain(Vec<(String, ChainEntry)>),
 }
 
 #[derive(Clone, Debug)]
@@ -51,10 +34,10 @@ pub enum Handler {
 }
 
 impl Handler {
-    pub async fn start(&self, actor_tx: mpsc::Sender<ActorMessage>) -> Result<()> {
+    pub async fn start(&self, process_tx: mpsc::Sender<ProcessMessage>) -> Result<()> {
         match self {
-            Handler::MessageServer(handler) => handler.start(actor_tx).await,
-            Handler::HttpServer(handler) => handler.start(actor_tx).await,
+            Handler::MessageServer(handler) => handler.start(process_tx).await,
+            Handler::HttpServer(handler) => handler.start(process_tx).await,
         }
     }
 
@@ -67,20 +50,29 @@ impl Handler {
 }
 
 impl ActorRuntime {
-    pub async fn from_file(manifest_path: PathBuf) -> Result<RuntimeComponents> {
+    pub async fn from_file(
+        manifest_path: PathBuf,
+        theater_tx: Sender<TheaterCommand>,
+    ) -> Result<RuntimeComponents> {
         // Load manifest config
         let config = ManifestConfig::from_file(&manifest_path)?;
-        let runtime = Self::new(&config).await?;
+        let runtime = Self::new(&config, theater_tx).await?;
         Ok(runtime)
     }
 
-    pub async fn new(config: &ManifestConfig) -> Result<RuntimeComponents> {
-        Self::init_components(config).await
+    pub async fn new(
+        config: &ManifestConfig,
+        theater_tx: Sender<TheaterCommand>,
+    ) -> Result<RuntimeComponents> {
+        Self::init_components(config, theater_tx).await
     }
 
-    async fn init_components(config: &ManifestConfig) -> Result<RuntimeComponents> {
+    async fn init_components(
+        config: &ManifestConfig,
+        theater_tx: Sender<TheaterCommand>,
+    ) -> Result<RuntimeComponents> {
         let (chain_tx, chain_rx) = mpsc::channel(32);
-        let (actor_tx, actor_rx) = mpsc::channel(32);
+        let (process_tx, process_rx) = mpsc::channel(32);
 
         let handlers = config
             .handlers
@@ -95,19 +87,20 @@ impl ActorRuntime {
             })
             .collect();
 
-        let store = Store::new(chain_tx.clone());
+        let store = Store::new(chain_tx.clone(), theater_tx.clone());
         let actor = WasmActor::new(config, store).await?;
 
         // Create and spawn actor process
-        let actor_process = ActorProcess::new(&config.name, actor, actor_rx, chain_tx).await?;
+        let actor_process = ActorProcess::new(&config.name, actor, process_rx, chain_tx).await?;
 
         let chain_handler = ChainRequestHandler::new(chain_rx);
 
         Ok(RuntimeComponents {
+            name: config.name.clone(),
             handlers,
             actor_process,
             chain_handler,
-            actor_tx,
+            process_tx,
         })
     }
 
@@ -117,7 +110,7 @@ impl ActorRuntime {
         // Start all handlers
         for handler in components.handlers {
             let handler_clone = handler.clone();
-            let tx = components.actor_tx.clone();
+            let tx = components.process_tx.clone();
             let task = tokio::spawn(async move {
                 if let Err(e) = handler_clone.start(tx).await {
                     error!("Handler failed: {}", e);
@@ -141,13 +134,14 @@ impl ActorRuntime {
         });
 
         Ok(Self {
+            actor_id: components.name,
             chain_task,
             process_handle,
             handler_tasks,
         })
     }
 
-    pub async fn shutdown(&mut self) -> Result<()> {
+    pub async fn stop(&mut self) -> Result<()> {
         // Stop all handlers
         for task in self.handler_tasks.drain(..) {
             task.abort();
@@ -162,54 +156,5 @@ impl ActorRuntime {
         self.chain_task.abort();
 
         Ok(())
-    }
-}
-
-struct ChainRequestHandler {
-    chain: HashChain,
-    chain_rx: mpsc::Receiver<ChainRequest>,
-}
-
-impl ChainRequestHandler {
-    pub fn new(chain_rx: mpsc::Receiver<ChainRequest>) -> Self {
-        let chain = HashChain::new();
-        Self { chain, chain_rx }
-    }
-
-    pub async fn run(&mut self) {
-        loop {
-            tokio::select! {
-                Some(req) = self.chain_rx.recv() => {
-                    self.handle_chain_request(req).await;
-                }
-                else => {
-                    info!("Chain request handler shutting down");
-                    break;
-                }
-            }
-        }
-    }
-
-    pub async fn handle_chain_request(&mut self, req: ChainRequest) {
-        let response = match req.request_type {
-            ChainRequestType::GetHead => {
-                let head = self.chain.get_head().map(|h| h.to_string());
-                ChainResponse::Head(head)
-            }
-            ChainRequestType::GetChainEntry(hash) => {
-                let entry = self.chain.get_chain_entry(&hash);
-                ChainResponse::ChainEntry(entry.cloned())
-            }
-            ChainRequestType::GetChain => {
-                let full_chain = self.chain.get_full_chain();
-                ChainResponse::FullChain(full_chain)
-            }
-            ChainRequestType::AddEvent { event } => {
-                let hash = self.chain.add(event);
-                ChainResponse::Head(Some(hash))
-            }
-        };
-
-        let _ = req.response_tx.send(response);
     }
 }

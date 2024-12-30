@@ -1,164 +1,141 @@
-# Building WebAssembly Component Actors: A Developer's Guide
-
-## Introduction
-
-WebAssembly components provide a secure, isolated foundation for building actor systems. This guide will walk you through creating actors that run in a WebAssembly sandbox, communicating through a well-defined message-passing interface.
+# Building WebAssembly Component Actors
 
 ## Project Structure
-
-Create a new actor project with the following structure:
-
 ```
 actor-name/
 ├── Cargo.toml
-├── actor.toml        # Actor manifest file
+├── actor.toml        # Actor manifest
 ├── src/
-│   └── lib.rs
+│   └── lib.rs        # Actor implementation
 └── wit/
-    └── actor.wit
+    └── actor.wit     # Interface definition
 ```
 
-## Actor Manifests
+## Actor Manifest
 
-The actor manifest (`actor.toml`) is the central configuration file that defines:
-
-### Basic Metadata
+### Basic Configuration
 ```toml
 name = "my-actor"
-version = "0.1.0"
-description = "Does something awesome"
+component_path = "path/to/actor.wasm"
+
+[interface]
+implements = "ntwk:simple-actor/actor"
+requires = []
+
+[[handlers]]
+type = "Http-server"
+config = { port = 8080 }
+
+[[handlers]]
+type = "Message-server"
+config = { port = 8081 }
+
+[logging]
+chain_events = true
+level = "info"
+output = "stdout"
 ```
 
-### Interfaces
+### Handler Types
 ```toml
-[interfaces]
-implements = ["ntwk:simple-actor/actor"]
-requires = ["wasi:filesystem/files"]  # if you need filesystem access
+# HTTP Server
+[[handlers]]
+type = "Http-server"
+config = { port = 8080 }
+
+# Message Server
+[[handlers]]
+type = "Message-server"
+config = { port = 8081 }
 ```
 
-### Capabilities
-```toml
-[capabilities.host]
-filesystem = { access = ["read"], root = "./data" }
-http = { bind_addr = "127.0.0.1:8080" }
+## Component Implementation
 
-[capabilities.actors]
-logger = { interface = "ntwk:logging/logger" }
+### Required Exports
+```rust
+// Initialize actor state
+fn init() -> Vec<u8>;
+
+// Handle incoming events
+fn handle(
+    msg: Vec<u8>, 
+    state: Vec<u8>
+) -> (Vec<u8>, Option<Vec<u8>>);
+
+// Verify state validity
+fn state_contract(state: Vec<u8>) -> bool;
+
+// Verify message validity
+fn message_contract(msg: Vec<u8>, state: Vec<u8>) -> bool;
 ```
 
-### Configuration
-```toml
-[config]
-timeout_seconds = 30
-max_retries = 3
-allowed_origins = ["https://example.com"]
+### Available Host Functions
+```rust
+// Log messages
+fn log(msg: &str);
+
+// Send message to another actor
+fn send(address: &str, msg: &[u8]);
+
+// Send HTTP request (if HTTP capability enabled)
+fn http_send(address: &str, msg: &[u8]) -> Vec<u8>;
 ```
 
-## Cargo Configuration
-
-Your `Cargo.toml` should look like this:
-
-```toml
-[package]
-name = "actor-name"
-version = "0.1.0"
-edition = "2021"
-
-[dependencies]
-serde_json = "1.0.133"
-wit-bindgen-rt = { version = "0.35.0", features = ["bitflags"] }
-
-[lib]
-crate-type = ["cdylib"]
-
-[profile.release]
-codegen-units = 1
-opt-level = "s"
-debug = false
-strip = true
-lto = true
-
-[package.metadata.component]
-package = "ntwk:simple-actor"
-```
-
-## Actor Implementation
-
-Here's the basic structure of an actor implementation:
+## Implementation Example
 
 ```rust
-mod bindings;
-
-use bindings::exports::ntwk::simple_actor::actor::Guest;
-use bindings::exports::ntwk::simple_actor::actor::Message;
-use bindings::exports::ntwk::simple_actor::actor::State;
-
-use bindings::ntwk::simple_actor::runtime::log;
-use bindings::ntwk::simple_actor::runtime::send;
+use serde_json::{json, Value};
 
 struct Component;
 
-// Helper functions for state management
-fn parse_json(data: &[u8]) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
-    let str_data = String::from_utf8(data.to_vec())?;
-    let json = serde_json::from_str(&str_data)?;
-    Ok(json)
-}
-
 impl Guest for Component {
     fn init() -> Vec<u8> {
-        log("Initializing actor");
-        // Return initial state as JSON bytes
-        serde_json::to_vec(&serde_json::json!({
-            "state_field": "initial_value"
-        })).unwrap()
-    }
-
-    fn handle(msg: Message, state: State) -> State {
-        log("Processing message");
-        let mut new_state = state.clone();
-
-        // Process message and update state
-        let result = parse_json(&msg).and_then(|msg_json| {
-            match msg_json.get("action").and_then(|a| a.as_str()) {
-                Some("some_action") => {
-                    // Handle the action
-                    // Update new_state accordingly
-                    Ok(())
-                }
-                _ => Ok(())
-            }
+        let initial_state = json!({
+            "counter": 0,
+            "last_updated": null
         });
-
-        if let Err(e) = result {
-            log(&format!("Error processing message: {}", e));
-        }
-
-        new_state
+        
+        serde_json::to_vec(&initial_state).unwrap()
     }
 
-    fn state_contract(state: State) -> bool {
-        if let Ok(state_str) = String::from_utf8(state.clone()) {
-            // Verify state is valid JSON
-            if let Ok(state_json) = serde_json::from_str::<serde_json::Value>(&state_str) {
-                // Add any additional state validation here
-                true
-            } else {
-                false
-            }
+    fn handle(msg: Vec<u8>, state: Vec<u8>) -> (Vec<u8>, Option<Vec<u8>>) {
+        let msg: Value = serde_json::from_slice(&msg).unwrap();
+        let mut state: Value = serde_json::from_slice(&state).unwrap();
+
+        match msg.get("type").and_then(|t| t.as_str()) {
+            Some("increment") => {
+                if let Some(counter) = state.get_mut("counter") {
+                    *counter = json!(counter.as_i64().unwrap() + 1);
+                }
+                
+                let response = json!({
+                    "type": "increment_response",
+                    "data": {
+                        "new_value": state["counter"]
+                    }
+                });
+
+                (
+                    serde_json::to_vec(&state).unwrap(),
+                    Some(serde_json::to_vec(&response).unwrap())
+                )
+            },
+            _ => (state.to_vec(), None)
+        }
+    }
+
+    fn state_contract(state: Vec<u8>) -> bool {
+        if let Ok(state) = serde_json::from_slice::<Value>(&state) {
+            state.get("counter").is_some() && 
+            state.get("last_updated").is_some()
         } else {
             false
         }
     }
 
-    fn message_contract(msg: Message, _state: State) -> bool {
-        if let Ok(msg_str) = String::from_utf8(msg.clone()) {
-            // Verify message is valid JSON and has expected structure
-            if let Ok(msg_json) = serde_json::from_str::<serde_json::Value>(&msg_str) {
-                msg_json.get("action").is_some()
-            } else {
-                false
-            }
+    fn message_contract(msg: Vec<u8>, _state: Vec<u8>) -> bool {
+        if let Ok(msg) = serde_json::from_slice::<Value>(&msg) {
+            msg.get("type").is_some()
         } else {
             false
         }
@@ -170,112 +147,60 @@ bindings::export!(Component with_types_in bindings);
 
 ## State Management
 
-States in this system are represented as byte vectors (`Vec<u8>`), typically containing JSON-encoded data. This approach provides flexibility while maintaining a simple interface.
+### State Structure
+- Use JSON for flexibility
+- Keep states minimal
+- Include all required fields
+- Version if needed
 
+### State Validation
 ```rust
-// Helper function to get a field from state
-fn get_field(state_json: &serde_json::Value, field: &str) -> Result<String, Box<dyn std::error::Error>> {
-    let value = state_json
-        .get(field)
-        .and_then(|v| v.as_str())
-        .ok_or(format!("{} not found or not a string", field))?;
-    Ok(value.to_string())
-}
-
-// Helper function to update state
-fn update_state(state: &[u8], updates: serde_json::Value) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
-    let mut state_json = parse_json(state)?;
-    
-    if let serde_json::Value::Object(ref mut map) = state_json {
-        if let serde_json::Value::Object(updates) = updates {
-            for (k, v) in updates {
-                map.insert(k, v);
-            }
-        }
-    }
-    
-    Ok(serde_json::to_vec(&state_json)?)
+fn validate_state(state: &Value) -> bool {
+    state.get("counter").is_some() &&
+    state.get("counter").unwrap().is_i64() &&
+    state.get("last_updated").is_some()
 }
 ```
 
-## Message Handling
-
-Messages, like state, are passed as byte vectors containing JSON data. Here's a typical message handling pattern:
-
+### State Updates
 ```rust
-fn handle(msg: Message, state: State) -> State {
-    let result = parse_json(&msg).and_then(|msg_json| {
-        match msg_json.get("action").and_then(|a| a.as_str()) {
-            Some(action) => {
-                match action {
-                    "update_field" => {
-                        let new_value = msg_json.get("value")
-                            .ok_or("missing value field")?;
-                        
-                        let updates = serde_json::json!({
-                            "field": new_value
-                        });
-                        
-                        update_state(&state, updates)
-                    }
-                    _ => Ok(state.clone())
-                }
-            }
-            None => Ok(state.clone())
-        }
-    });
-
-    match result {
-        Ok(new_state) => new_state,
-        Err(e) => {
-            log(&format!("Error: {}", e));
-            state
-        }
+fn update_state(mut state: Value, field: &str, value: Value) -> Value {
+    if let Some(field_value) = state.get_mut(field) {
+        *field_value = value;
     }
+    state
 }
 ```
 
-## Contracts and Validation
+## Event Handling
 
-Contract functions serve as guards to ensure state and message validity:
-
+### Event Structure
 ```rust
-fn state_contract(state: State) -> bool {
-    match parse_json(&state) {
-        Ok(json) => {
-            // Validate required fields exist
-            let valid = json.get("required_field").is_some();
-            // Add additional validation as needed
-            valid
-        }
-        Err(_) => false
-    }
+struct Event {
+    type_: String,
+    data: Value,
 }
+```
 
-fn message_contract(msg: Message, state: State) -> bool {
-    match (parse_json(&msg), parse_json(&state)) {
-        (Ok(msg_json), Ok(state_json)) => {
-            // Validate message structure
-            let has_action = msg_json.get("action").is_some();
-            
-            // Validate message is valid for current state
-            let state_allows_action = true; // Add your logic here
-            
-            has_action && state_allows_action
-        }
-        _ => false
+### Event Processing
+```rust
+fn process_event(event: &Event, state: &mut Value) -> Option<Event> {
+    match event.type_.as_str() {
+        "update" => {
+            // Update state
+            Some(Event {
+                type_: "update_complete".to_string(),
+                data: json!({"status": "success"})
+            })
+        },
+        _ => None
     }
 }
 ```
 
-## Building and Testing
+## Testing
 
-### Building
-```bash
-cargo component build --target wasm32-unknown-unknown --release
-```
-
-### Testing
+### Unit Tests
 ```rust
 #[cfg(test)]
 mod tests {
@@ -288,149 +213,101 @@ mod tests {
     }
 
     #[test]
-    fn test_message_handling() {
+    fn test_increment() {
         let state = Component::init();
-        let msg = serde_json::to_vec(&serde_json::json!({
-            "action": "test_action"
+        let msg = serde_json::to_vec(&json!({
+            "type": "increment"
         })).unwrap();
         
-        assert!(Component::message_contract(msg.clone(), state.clone()));
-        let new_state = Component::handle(msg, state);
+        let (new_state, response) = Component::handle(msg, state);
         assert!(Component::state_contract(new_state));
+        assert!(response.is_some());
     }
 }
 ```
 
-## Runtime Integration
-
-### Configuration Access
+### Integration Tests
 ```rust
-use bindings::ntwk::simple_actor::runtime::get_config;
-
-fn init() -> Vec<u8> {
-    // Get configuration from manifest
-    let config = get_config().expect("Failed to get config");
+#[tokio::test]
+async fn test_http_handler() {
+    let actor = ActorRuntime::from_file("test-actor.toml").await.unwrap();
     
-    // Use configuration values
-    let timeout = config["timeout_seconds"]
-        .as_u64()
-        .expect("Missing timeout config");
+    let response = reqwest::Client::new()
+        .post("http://localhost:8080")
+        .json(&json!({
+            "type": "increment"
+        }))
+        .send()
+        .await
+        .unwrap();
         
-    // Initialize state with config
-    serde_json::to_vec(&serde_json::json!({
-        "timeout": timeout,
-        "status": "initialized"
-    })).unwrap()
+    assert!(response.status().is_success());
 }
-```
-
-### Runtime Communication
-```rust
-// Logging
-log(&format!("Processing action: {}", action));
-
-// Send message to another actor
-let message = serde_json::to_vec(&serde_json::json!({
-    "action": "notify",
-    "data": "something changed"
-})).unwrap();
-send("other-actor", message);
 ```
 
 ## Best Practices
 
 1. **State Management**
-   - Keep states minimal and focused
-   - Validate all state transitions
+   - Keep states minimal
+   - Validate all transitions
    - Use clear field names
-   - Document state structure
+   - Version if needed
 
-2. **Message Design**
-   - Use clear action names
-   - Include necessary data only
-   - Version message formats if needed
-   - Document message structure
+2. **Event Handling**
+   - Clear event types
+   - Proper error handling
+   - Validate inputs
+   - Return appropriate responses
 
-3. **Error Handling**
-   - Log meaningful errors
-   - Return to safe states on failure
-   - Validate all inputs
-   - Handle all error cases
-
-4. **Testing**
-   - Test all message handlers
+3. **Testing**
+   - Test all handlers
    - Verify state transitions
-   - Test contract functions
-   - Include edge cases
+   - Test error cases
+   - Integration tests
 
-## Common Patterns
-
-### State Machine
-```rust
-#[derive(Serialize, Deserialize)]
-enum State {
-    Initial,
-    Processing { started_at: String },
-    Complete { result: String },
-    Error { message: String }
-}
-
-fn handle_state_transition(current: State, action: Action) -> State {
-    match (current, action) {
-        (State::Initial, Action::Start) => State::Processing {
-            started_at: Utc::now().to_rfc3339()
-        },
-        (State::Processing { .. }, Action::Complete(result)) => State::Complete {
-            result
-        },
-        // ... other transitions
-        _ => current
-    }
-}
-```
-
-### Event Sourcing
-```rust
-#[derive(Serialize, Deserialize)]
-enum Event {
-    Created { id: String, timestamp: String },
-    Updated { field: String, value: String },
-    Completed { timestamp: String }
-}
-
-fn apply_event(state: &mut Value, event: Event) {
-    match event {
-        Event::Created { id, timestamp } => {
-            state["id"] = json!(id);
-            state["created_at"] = json!(timestamp);
-        },
-        Event::Updated { field, value } => {
-            state[field] = json!(value);
-        },
-        Event::Completed { timestamp } => {
-            state["completed_at"] = json!(timestamp);
-        }
-    }
-}
-```
+4. **Security**
+   - Validate all inputs
+   - Sanitize outputs
+   - Handle errors gracefully
+   - Log security events
 
 ## Deployment
 
-1. Build your component:
+1. Build the component:
 ```bash
-cargo component build --target wasm32-unknown-unknown --release
+cargo build --target wasm32-unknown-unknown --release
 ```
 
-2. Create your manifest file (actor.toml)
-
-3. Deploy using the theater runtime:
+2. Deploy with theater:
 ```bash
-theater-cli deploy ./actor.toml
+theater-cli deploy actor.toml
 ```
 
-4. Monitor your actor:
+3. Monitor logs:
+```bash
+theater-cli logs <actor-id>
+```
+
+4. Check status:
 ```bash
 theater-cli status <actor-id>
 ```
 
-Remember to regularly check the chain state and monitor your actor's health when deployed in production.
+## Troubleshooting
+
+1. **Build Issues**
+   - Check wasm target is installed
+   - Verify dependencies
+   - Check component interface
+
+2. **Runtime Issues**
+   - Check logs
+   - Verify manifest
+   - Check port availability
+   - Validate handlers
+
+3. **State Issues**
+   - Verify state contract
+   - Check transitions
+   - Validate JSON
+   - Check chain integrity

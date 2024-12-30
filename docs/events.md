@@ -1,72 +1,162 @@
-# Event Structure
+# Events in Theater
 
-## Overview
-Theater uses a simple but powerful event structure to track all state changes and interactions within the system. Each event represents a single occurrence in the system and is connected to its predecessor, forming a chain that captures the complete history of an actor's state.
+## Event Structure
 
-## Basic Structure
-Every event in Theater follows this structure:
+Theater uses a strongly-typed event system defined in `wasm.rs`:
 
-```json
-{
-  "event": {
-    "type": "type-of-event",
-    "data": "event-specific-data"
-  },
-  "parent": "hash-of-parent-event"
+```rust
+pub struct Event {
+    pub type_: String,
+    pub data: Value,
 }
 ```
 
-### Fields Explained
-- `event.type`: Identifies what kind of event occurred
-- `event.data`: Contains all relevant information about the event
-- `parent`: Hash of the previous event in the chain, establishing the event ordering
+Events are wrapped in chain entries:
 
-## Common Event Types
+```rust
+pub struct ChainEntry {
+    pub event: Event,
+    pub parent: Option<String>,
+}
+```
 
-### State Change
+## Core Event Types
+
+### State Events
 ```json
 {
-  "event": {
-    "type": "state_change",
+    "type_": "state",
     "data": {
-      "new_state": "the-new-state-value"
+        // The new state value
     }
-  },
-  "parent": "previous-event-hash"
 }
 ```
 
-### Message Received
+### Actor Messages
 ```json
 {
-  "event": {
-    "type": "message_received",
+    "type_": "actor-message",
     "data": {
-      "from": "sender-id",
-      "content": "message-content"
+        "address": "target-actor-address",
+        "message": {
+            // Message content
+        }
     }
-  },
-  "parent": "previous-event-hash"
 }
 ```
 
-### HTTP Request
+### HTTP Requests
 ```json
 {
-  "event": {
-    "type": "http_request",
+    "type_": "http_request",
     "data": {
-      "method": "GET",
-      "path": "/example",
-      "headers": {},
-      "body": "request-body"
+        "method": "GET",
+        "uri": "/path",
+        "headers": [
+            ["header-name", "header-value"]
+        ],
+        "body": "base64-encoded-body"
     }
-  },
-  "parent": "previous-event-hash"
 }
 ```
 
-## Design Philosophy
-The event structure is intentionally minimal, capturing only the essential information needed to understand what happened and maintain the chain of events. This simplicity makes the system easier to understand, implement, and extend.
+### Initialization
+```json
+{
+    "type_": "init",
+    "data": {
+        // Initial state
+    }
+}
+```
 
-Additional metadata (timestamps, actor IDs, verification hashes, etc.) can be added in the future if needed, but the core structure should remain as simple as possible.
+## Event Processing
+
+1. **Event Creation**
+   - Events are created by handlers or actors
+   - Each event must have a type and data
+   - Data is always a valid JSON value
+
+2. **Chain Recording**
+   - Events are wrapped in ChainEntry structures
+   - Parent hash links to previous event
+   - Full history is maintained
+
+3. **Event Handling**
+   ```rust
+   async fn handle_event(
+       state: Value, 
+       event: Event
+   ) -> Result<(Value, Event)>
+   ```
+
+## Special Events
+
+### NoOp Event
+```rust
+impl Event {
+    pub fn noop() -> Self {
+        Event {
+            type_: "noop".to_string(),
+            data: Value::Null,
+        }
+    }
+}
+```
+
+### Error Events
+```json
+{
+    "type_": "error",
+    "data": {
+        "error": "error description",
+        "context": "error context"
+    }
+}
+```
+
+## Event Patterns
+
+### Request/Response
+1. Create request event with response channel
+2. Send to actor process
+3. Await response on channel
+4. Handle response or timeout
+
+### State Updates
+1. Handle event arrives
+2. Process state change
+3. Record new state event
+4. Return updated state
+
+### Message Forwarding
+1. Receive message event
+2. Transform if needed
+3. Forward to target actor
+4. Record in chain
+
+## Best Practices
+
+1. **Event Design**
+   - Use clear, consistent type names
+   - Include necessary context in data
+   - Keep events focused and small
+   - Handle all error cases
+
+2. **Chain Management**
+   - Monitor chain growth
+   - Implement pruning strategies
+   - Verify chain integrity
+   - Handle parent references
+
+3. **Error Handling**
+   - Clear error events
+   - Proper error context
+   - Response channel cleanup
+   - Timeout handling
+
+4. **Testing**
+   - Test all event types
+   - Verify chain recording
+   - Check error cases
+   - Test timeouts

@@ -1,5 +1,5 @@
-use crate::actor_runtime::ChainRequest;
-use crate::actor_runtime::ChainRequestType;
+use crate::chain::{ChainRequest, ChainRequestType};
+use crate::messages::TheaterCommand;
 use crate::store::Store;
 use crate::wasm::Event;
 use anyhow::Result;
@@ -8,8 +8,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use serde_json::Value;
 use std::future::Future;
+use std::path::PathBuf;
 use tokio::sync::mpsc::Sender;
-use tracing::info;
+use tracing::{error, info};
 use wasmtime::component::{Component, ComponentExportIndex, Linker};
 
 pub enum Capability {
@@ -66,6 +67,40 @@ impl BaseCapability {
                 let store = ctx.data_mut();
                 send(store, address, msg);
                 Ok(())
+            },
+        )?;
+
+        runtime.func_wrap_async(
+            "spawn",
+            |mut ctx: wasmtime::StoreContextMut<'_, Store>,
+             (manifest,): (String,)|
+             -> Box<dyn Future<Output = Result<(String,)>> + Send> {
+                let store = ctx.data_mut();
+                let theater_tx = store.theater_tx.clone();
+                info!("Spawning actor with manifest: {}", manifest);
+                Box::new(spawn(theater_tx, manifest))
+            },
+        )?;
+
+        runtime.func_wrap_async(
+            "get-chain",
+            |mut ctx: wasmtime::StoreContextMut<'_, Store>,
+             ()|
+             -> Box<dyn Future<Output = Result<(Vec<u8>,)>> + Send> {
+                let store = ctx.data_mut();
+                let chain_tx = store.chain_tx.clone();
+                Box::new(async move {
+                    let (tx, rx) = tokio::sync::oneshot::channel();
+                    chain_tx
+                        .send(ChainRequest {
+                            request_type: ChainRequestType::GetChain {},
+                            response_tx: tx,
+                        })
+                        .await?;
+                    let chain = rx.await?;
+                    let chain_bytes = serde_json::to_vec(&chain)?;
+                    Ok((chain_bytes,))
+                })
             },
         )?;
 
@@ -135,6 +170,39 @@ impl HttpCapability {
         )?;
 
         runtime.func_wrap_async(
+            "spawn",
+            |mut ctx: wasmtime::StoreContextMut<'_, Store>,
+             (manifest,): (String,)|
+             -> Box<dyn Future<Output = Result<(String,)>> + Send> {
+                let store = ctx.data_mut();
+                let theater_tx = store.theater_tx.clone();
+                Box::new(spawn(theater_tx, manifest))
+            },
+        )?;
+
+        runtime.func_wrap_async(
+            "get-chain",
+            |mut ctx: wasmtime::StoreContextMut<'_, Store>,
+             ()|
+             -> Box<dyn Future<Output = Result<(Vec<u8>,)>> + Send> {
+                let store = ctx.data_mut();
+                let chain_tx = store.chain_tx.clone();
+                Box::new(async move {
+                    let (tx, rx) = tokio::sync::oneshot::channel();
+                    chain_tx
+                        .send(ChainRequest {
+                            request_type: ChainRequestType::GetChain {},
+                            response_tx: tx,
+                        })
+                        .await?;
+                    let chain = rx.await?;
+                    let chain_bytes = serde_json::to_vec(&chain)?;
+                    Ok((chain_bytes,))
+                })
+            },
+        )?;
+
+        runtime.func_wrap_async(
             "http-send",
             |mut ctx: wasmtime::StoreContextMut<'_, Store>,
              (address, msg): (String, Vec<u8>)|
@@ -185,6 +253,24 @@ impl HttpCapability {
 
 fn log(msg: String) {
     info!("[ACTOR] {}", msg);
+}
+
+async fn spawn(theater_tx: Sender<TheaterCommand>, manifest: String) -> Result<(String,)> {
+    let (response_tx, response_rx) = tokio::sync::oneshot::channel();
+    info!("sending spawn command");
+    match theater_tx
+        .send(TheaterCommand::SpawnActor {
+            manifest_path: PathBuf::from(manifest),
+            response_tx,
+        })
+        .await
+    {
+        Ok(_) => info!("spawn command sent"),
+        Err(e) => error!("error sending spawn command: {:?}", e),
+    };
+    let actor_id = "test".to_string();
+    info!("Actor spawned with id: {:?}", actor_id);
+    Ok((actor_id,))
 }
 
 fn send(store: &Store, address: String, msg: Vec<u8>) {

@@ -7,8 +7,10 @@ pub mod chain;
 pub mod config;
 pub mod http_server;
 pub mod message_server;
+pub mod messages;
 mod state;
 mod store;
+pub mod theater_runtime;
 mod wasm;
 
 pub use config::{HandlerConfig, HttpServerHandlerConfig, ManifestConfig, MessageServerConfig};

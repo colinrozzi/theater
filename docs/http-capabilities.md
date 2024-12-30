@@ -1,177 +1,213 @@
-# HTTP Capabilities in Theater
-
-This document describes the current HTTP capabilities available in Theater, including both actor-to-actor communication and external HTTP request handling.
+# HTTP Capabilities
 
 ## Overview
 
-Theater provides two types of HTTP-related functionality:
-1. Actor-to-actor communication (via `http.rs`)
-2. External HTTP request handling (via `http_server.rs`)
+Theater provides two types of HTTP capabilities:
+1. HTTP Server (`HttpServerHost`)
+2. HTTP Client (via `HttpCapability`)
 
-## Actor-to-Actor Communication
-
-The `http.rs` module enables actors to communicate with each other using HTTP as the transport mechanism.
+## HTTP Server
 
 ### Configuration
-
-In your actor's manifest:
-```toml
-[[handlers]]
-type = "Http"
-config = { port = 8080 }
-```
-
-### Message Format
-
-Messages between actors are sent as JSON:
-
-```rust
-// Sending a message
-let message = serde_json::json!({
-    "action": "some_action",
-    "data": {
-        // message contents
-    }
-});
-
-// Message will be sent as POST request with JSON body
-```
-
-### Implementation Example
-
-```rust
-use serde_json::Value;
-
-// Receiving messages
-fn handle(msg: Vec<u8>, state: Vec<u8>) -> Vec<u8> {
-    let msg_json: Value = serde_json::from_slice(&msg)
-        .expect("Invalid message format");
-        
-    match msg_json.get("action").and_then(|a| a.as_str()) {
-        Some("some_action") => {
-            // Handle the action
-        },
-        _ => {
-            // Handle unknown action
-        }
-    }
-    
-    // Return updated state
-    state
-}
-```
-
-## External HTTP Request Handling
-
-The `http_server.rs` module handles HTTP requests from external clients.
-
-### Configuration
-
-In your actor's manifest:
 ```toml
 [[handlers]]
 type = "Http-server"
-config = { port = 8081 }
+config = { port = 8080 }
+```
+
+### Implementation
+```rust
+pub struct HttpServerHost {
+    port: u16,
+}
+
+pub struct HttpRequest {
+    method: String,
+    uri: String,
+    headers: Vec<(String, String)>,
+    body: Option<Vec<u8>>,
+}
+
+pub struct HttpResponse {
+    status: u16,
+    headers: Vec<(String, String)>,
+    body: Option<Vec<u8>>,
+}
+```
+
+### Request Processing
+1. HTTP request arrives
+2. Converted to HttpRequest structure
+3. Wrapped in Actor Event
+4. Processed by actor
+5. Response converted to HTTP response
+
+## HTTP Client Capability
+
+### Configuration
+```rust
+impl HttpCapability {
+    async fn setup_host_functions(&self, linker: &mut Linker<Store>) -> Result<()>
+}
+```
+
+### Available Functions
+```rust
+// Send HTTP request
+fn http_send(address: String, msg: Vec<u8>) -> Vec<u8>;
+
+// Log messages
+fn log(msg: String);
+
+// Send actor messages
+fn send(address: String, msg: Vec<u8>);
 ```
 
 ### Request Format
-
-Requests are passed to actors in the following format:
-
 ```rust
-ActorInput::HttpRequest {
-    method: String,      // HTTP method as string
-    uri: String,         // Request path
-    headers: Vec<(String, String)>,  // Request headers
-    body: Option<Vec<u8>>,  // Request body as bytes
+struct HttpRequest {
+    method: String,
+    url: String,
+    headers: Vec<(String, String)>,
+    body: Option<Vec<u8>>,
 }
 ```
 
 ### Response Format
-
-Actors should return responses in this format:
-
 ```rust
-ActorOutput::HttpResponse {
-    status: u16,         // HTTP status code
-    headers: Vec<(String, String)>,  // Response headers
-    body: Option<Vec<u8>>,  // Response body as bytes
+struct HttpResponse {
+    status: u16,
+    headers: Vec<(String, String)>,
+    body: Option<Vec<u8>>,
 }
 ```
 
-### Implementation Example
+## Usage Examples
 
+### HTTP Server Handler
 ```rust
-fn handle_request(input: ActorInput, state: Vec<u8>) -> (ActorOutput, Vec<u8>) {
-    match input {
-        ActorInput::HttpRequest { method, uri, headers, body } => {
-            // Parse body if present
-            let body_json: Value = if let Some(bytes) = body {
-                serde_json::from_slice(&bytes).unwrap_or_default()
-            } else {
-                Value::Null
-            };
-            
-            // Create response
-            let response = ActorOutput::HttpResponse {
-                status: 200,
-                headers: vec![
-                    ("Content-Type".to_string(), "application/json".to_string())
-                ],
-                body: Some(serde_json::to_vec(&response_data).unwrap()),
-            };
-            
-            (response, state)
-        },
-        _ => {
-            // Handle other input types
-            (ActorOutput::HttpResponse {
-                status: 400,
-                headers: vec![],
-                body: None,
-            }, state)
-        }
-    }
+async fn handle_request(mut req: Request<mpsc::Sender<ActorMessage>>) -> tide::Result {
+    let body_bytes = req.body_bytes().await?.to_vec();
+    
+    let http_request = HttpRequest {
+        method: req.method().to_string(),
+        uri: req.url().path().to_string(),
+        headers: req.header_names()
+            .map(|name| (
+                name.to_string(),
+                req.header(name).unwrap().first().unwrap().to_string(),
+            ))
+            .collect(),
+        body: Some(body_bytes),
+    };
+
+    // Create and send event...
 }
 ```
 
-## Common Patterns
-
-### JSON Request Handling
+### HTTP Client Usage
 ```rust
-fn parse_json_body(body: Option<Vec<u8>>) -> Result<Value, String> {
-    match body {
-        Some(bytes) => {
-            serde_json::from_slice(&bytes)
-                .map_err(|e| format!("Invalid JSON: {}", e))
-        },
-        None => Ok(Value::Null)
-    }
+// From component code
+let request = HttpRequest {
+    method: "GET".to_string(),
+    url: "https://api.example.com/data".to_string(),
+    headers: vec![
+        ("Content-Type".to_string(), "application/json".to_string())
+    ],
+    body: None,
+};
+
+let response_bytes = http_send("https://api.example.com", 
+    serde_json::to_vec(&request).unwrap());
+let response: HttpResponse = serde_json::from_slice(&response_bytes).unwrap();
+```
+
+## Chain Integration
+
+### Request Recording
+```rust
+let evt = Event {
+    type_: "http_request".to_string(),
+    data: json!(http_request),
+};
+
+chain_tx.send(ChainRequest {
+    request_type: ChainRequestType::AddEvent { event: evt },
+    response_tx: tx,
+}).await?;
+```
+
+### Response Recording
+```rust
+let evt = Event {
+    type_: "actor-message".to_string(),
+    data: json!({
+        "address": address,
+        "message": response_bytes,
+    }),
+};
+```
+
+## Error Handling
+
+### HTTP Errors
+```rust
+fn error_response(status: u16, message: &str) -> Response {
+    Response::builder(status)
+        .body(Body::from_string(message.to_string()))
+        .build()
 }
 ```
 
-### Basic Error Response
+### Chain Errors
 ```rust
-fn error_response(status: u16, message: &str) -> ActorOutput {
-    ActorOutput::HttpResponse {
-        status,
-        headers: vec![
-            ("Content-Type".to_string(), "application/json".to_string())
-        ],
-        body: Some(serde_json::to_vec(&serde_json::json!({
-            "error": message
-        })).unwrap()),
-    }
+if let Err(e) = chain_tx.send(ChainRequest {...}).await {
+    error!("Failed to record message in chain: {}", e);
+    return error_response(500, "Internal chain error");
 }
 ```
+
+## Security Considerations
+
+1. **Server Binding**
+   - Binds to localhost by default
+   - Port configuration via manifest
+   - No TLS in current implementation
+
+2. **Request Validation**
+   - All requests recorded in chain
+   - Headers and body validated
+   - Method validation
+
+3. **Response Security**
+   - Headers validated
+   - Body size limits
+   - Error handling
 
 ## Limitations
 
-Current limitations include:
-1. No built-in routing system
-2. Manual JSON parsing required
-3. No middleware support
-4. Basic request/response type system
-5. No WebSocket support
+Current limitations:
+1. No built-in routing
+2. Basic CORS support only
+3. No WebSocket support
+4. No streaming support
+5. Limited middleware options
 
-See the change requests directory for proposed improvements to these areas.
+## Future Improvements
+
+1. **Enhanced Routing**
+   - Path parameters
+   - Query handling
+   - Router middleware
+
+2. **Security Features**
+   - TLS support
+   - Authentication
+   - Rate limiting
+   - CORS configuration
+
+3. **Protocol Support**
+   - WebSocket handlers
+   - Server-sent events
+   - gRPC integration
+   - GraphQL support

@@ -1,4 +1,4 @@
-use crate::actor_process::ActorMessage;
+use crate::actor_process::{ActorMessage, ProcessMessage};
 use crate::wasm::Event;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
@@ -17,7 +17,7 @@ impl MessageServerHost {
         Self { port }
     }
 
-    pub async fn start(&self, mailbox_tx: mpsc::Sender<ActorMessage>) -> Result<()> {
+    pub async fn start(&self, mailbox_tx: mpsc::Sender<ProcessMessage>) -> Result<()> {
         let mut app = Server::with_state(mailbox_tx.clone());
         app.at("/*").all(Self::handle_request);
         app.at("/").all(Self::handle_request);
@@ -28,7 +28,7 @@ impl MessageServerHost {
         Ok(())
     }
 
-    async fn handle_request(mut req: Request<mpsc::Sender<ActorMessage>>) -> tide::Result {
+    async fn handle_request(mut req: Request<mpsc::Sender<ProcessMessage>>) -> tide::Result {
         info!("Received {} request to {}", req.method(), req.url().path());
 
         // Get the body bytes
@@ -39,14 +39,14 @@ impl MessageServerHost {
             data: json!(body_bytes),
         };
 
-        let actor_msg = ActorMessage {
+        let process_msg = ProcessMessage::ActorMessage(ActorMessage {
             event: evt,
             response_channel: None,
-        };
+        });
 
         // Send to actor
         req.state()
-            .send(actor_msg)
+            .send(process_msg)
             .await
             .map_err(|_| tide::Error::from_str(500, "Failed to forward request to actor"))?;
 

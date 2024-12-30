@@ -2,125 +2,105 @@
 
 ## HTTP API
 
-### POST /
-Process a message and update system state.
+### HTTP Server Interface
 
-#### Request
-- Method: `POST`
-- Content-Type: `application/json`
-- Body:
-```json
-{
-    "data": <JSON Value>
+The HTTP server accepts requests on the configured port and transforms them into actor events.
+
+#### Request Format
+All incoming HTTP requests are converted to this format:
+```rust
+struct HttpRequest {
+    method: String,
+    uri: String,
+    headers: Vec<(String, String)>,
+    body: Option<Vec<u8>>,
 }
 ```
 
-#### Response
-- Status: 200 OK
-- Content-Type: `application/json`
-- Body:
-```json
-{
-    "hash": "<state_hash>",
-    "state": <JSON Value>
+#### Response Format
+Actor responses are converted to this format:
+```rust
+struct HttpResponse {
+    status: u16,
+    headers: Vec<(String, String)>,
+    body: Option<Vec<u8>>,
 }
 ```
 
-#### Error Responses
-- Status: 400 Bad Request
-  - Invalid message format
-  - Contract violation
-  - State verification failure
-- Status: 500 Internal Server Error
-  - Runtime errors
-  - WASM execution errors
+### Message Server Interface
 
-### GET /chain
-Retrieve the complete hash chain.
+The message server handles actor-to-actor communication.
 
-#### Request
-- Method: `GET`
-- No request body required
-
-#### Response
-- Status: 200 OK
-- Content-Type: `application/json`
-- Body:
-```json
-{
-    "head": "current-head-hash",
-    "entries": [
-        ["hash1", {
-            "parent": "hash2",
-            "data": <JSON Value>
-        }],
-        ["hash2", {
-            "parent": "hash3",
-            "data": <JSON Value>
-        }],
-        ["hash3", {
-            "parent": null,
-            "data": <JSON Value>
-        }]
-    ]
+#### Message Format
+```rust
+struct ActorMessage {
+    event: Event {
+        type_: String,
+        data: Value,
+    },
+    response_channel: Option<mpsc::Sender<Event>>,
 }
 ```
 
-Notes:
-- Entries are ordered from newest to oldest
-- The genesis block has `null` as its parent
-- Each entry is a tuple of [hash, entry_data]
+### Chain Interface
 
-## Actor Interface
+#### ChainRequestType
+```rust
+pub enum ChainRequestType {
+    GetHead,                    // Get latest chain entry
+    GetChainEntry(String),      // Get specific entry by hash
+    GetChain,                   // Get complete chain
+    AddEvent { event: Event },  // Add new event
+}
+```
 
-### Component Interface
-Required implementation for WASM components.
+#### ChainResponse
+```rust
+pub enum ChainResponse {
+    Head(Option<String>),
+    ChainEntry(Option<ChainEntry>),
+    FullChain(Vec<(String, ChainEntry)>),
+}
+```
 
-#### `init() -> Value`
-Initialize component state.
-- Returns: Initial state as JSON value
+#### Chain Entry Structure
+```rust
+pub struct ChainEntry {
+    pub event: Event,
+    pub parent: Option<String>,
+}
+```
 
-#### `handle(msg: Value, state: Value) -> Value`
-Process a message and update state.
-- Parameters:
-  - msg: Message data as JSON
-  - state: Current state as JSON
-- Returns: New state as JSON value
+## WebAssembly Component Interface
 
-#### `message_contract(msg: Value, state: Value) -> bool`
-Verify message validity.
-- Parameters:
-  - msg: Message to verify
-  - state: Current state
-- Returns: true if valid, false if invalid
+### Required Exports
 
-#### `state_contract(state: Value) -> bool`
-Verify state validity.
-- Parameters:
-  - state: State to verify
-- Returns: true if valid, false if invalid
+Components must export these functions:
+
+```rust
+fn init() -> Result<Value>;
+fn handle_event(state: Value, event: Event) -> Result<(Value, Event)>;
+fn verify_state(state: &Value) -> bool;
+```
 
 ### Host Functions
-Functions provided by the runtime to components.
 
-#### `log(msg: &str)`
-Log a message from the component.
-- Parameters:
-  - msg: Message to log
+Available to components:
 
-#### `send(actor_id: &str, msg: &Value)`
-Send a message to another actor.
-- Parameters:
-  - actor_id: Target actor identifier
-  - msg: Message to send
+```rust
+fn log(msg: String);
+fn send(address: String, msg: Vec<u8>);
+fn http_send(address: String, msg: Vec<u8>) -> Vec<u8>;
+```
 
 ## Usage Examples
 
-### Send Message
+### HTTP Request
 ```bash
 curl -X POST http://localhost:8080/ \
      -H "Content-Type: application/json" \
      -d '{
+           "type": "user_action",
            "data": {
              "action": "update",
              "value": 42
@@ -128,80 +108,107 @@ curl -X POST http://localhost:8080/ \
          }'
 ```
 
-### Get Chain
-```bash
-curl http://localhost:8080/chain
+### Actor Message
+```rust
+let msg = ActorMessage {
+    event: Event {
+        type_: "state_update".to_string(),
+        data: json!({
+            "field": "value",
+            "new_value": 42
+        }),
+    },
+    response_channel: None,
+};
 ```
 
-### Response Examples
+### Chain Query
+```rust
+// Get chain head
+let request = ChainRequest {
+    request_type: ChainRequestType::GetHead,
+    response_tx: tx,
+};
 
-#### POST / Response
+// Get full chain
+let request = ChainRequest {
+    request_type: ChainRequestType::GetChain,
+    response_tx: tx,
+};
+```
+
+## Error Handling
+
+### HTTP Status Codes
+- 200: Success
+- 400: Invalid request format
+- 404: Resource not found
+- 500: Internal server error
+
+### Error Responses
 ```json
 {
-    "hash": "7f83b1657ff1fc53b92dc18148a1d65dfc2d4b1fa3d677284addd200126d9069",
-    "state": {
-        "counter": 42,
-        "last_update": "2024-12-04T10:00:00Z"
+    "error": {
+        "type": "error_type",
+        "message": "Error description"
     }
 }
 ```
 
-#### GET /chain Response
-```json
-{
-    "head": "7f83b1657ff1fc53b92dc18148a1d65dfc2d4b1fa3d677284addd200126d9069",
-    "entries": [
-        ["7f83b...9069", {
-            "parent": "6d23c...8901",
-            "data": {
-                "counter": 42,
-                "last_update": "2024-12-04T10:00:00Z"
-            }
-        }],
-        ["6d23c...8901", {
-            "parent": null,
-            "data": {
-                "component_hash": "####"
-            }
-        }]
-    ]
-}
-```
+## Security Notes
+
+1. **Local Server**
+   - HTTP server binds to localhost by default
+   - External access must be explicitly configured
+
+2. **Chain Integrity**
+   - All state changes are recorded
+   - Chain entries are immutable
+   - Parent hashes ensure chain integrity
+
+3. **Component Isolation**
+   - WebAssembly provides memory isolation
+   - Capability-based security model
+   - Limited host function access
 
 ## Best Practices
 
-### Chain Management
-1. Regularly verify chain integrity
-2. Monitor chain growth
-3. Consider data storage implications
-4. Cache frequently accessed states
+1. **State Management**
+   - Keep states small and focused
+   - Validate all state transitions
+   - Use meaningful event types
+   - Handle all error cases
 
-### Message Design
-1. Use clear action identifiers
-2. Include necessary data only
-3. Validate before sending
-4. Handle errors appropriately
+2. **Chain Management**
+   - Monitor chain growth
+   - Implement chain pruning if needed
+   - Verify chain integrity regularly
 
-### State Management
-1. Keep states minimal
-2. Validate all transitions
-3. Maintain data integrity
-4. Consider performance impact
+3. **Message Design**
+   - Use clear event types
+   - Include necessary context
+   - Handle response channels appropriately
+   - Implement timeouts for responses
 
-### Error Handling
-1. Check response status
-2. Parse error messages
-3. Implement retries when appropriate
-4. Log failures for debugging
+4. **Error Handling**
+   - Log all errors
+   - Return meaningful error messages
+   - Handle all response channel cases
+   - Implement proper cleanup
 
-## Rate Limiting
-- No explicit rate limiting currently implemented
-- Consider application-level throttling
-- Monitor system resources
+## Rate Limiting and Performance
 
-## Security Notes
-1. Local-only HTTP server
-2. No authentication currently
-3. Input validation required
-4. Contract enforcement critical
-5. Chain integrity verification important
+1. **Channel Capacity**
+   - Message channels have limited capacity
+   - Implement backpressure handling
+   - Monitor channel utilization
+
+2. **Chain Growth**
+   - Monitor chain size
+   - Implement retention policies
+   - Consider state snapshots
+
+3. **Resource Usage**
+   - Monitor memory usage
+   - Track WebAssembly instance lifecycle
+   - Implement proper cleanup

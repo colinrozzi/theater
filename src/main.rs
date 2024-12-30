@@ -1,8 +1,8 @@
 use anyhow::Result;
-use chrono::Utc;
 use clap::Parser;
 use std::path::PathBuf;
-use theater::actor_runtime::ActorRuntime;
+use theater::messages::TheaterCommand;
+use theater::theater_runtime::TheaterRuntime;
 use tracing::info;
 use tracing_subscriber::EnvFilter;
 
@@ -34,15 +34,32 @@ async fn main() -> Result<()> {
         ));
     }
 
-    // Create and initialize the runtime with actor_only flag
-    let runtime_components = ActorRuntime::from_file(args.manifest).await?;
-    let _runtime = ActorRuntime::start(runtime_components).await?;
+    let mut theater = TheaterRuntime::new().await?;
 
-    // Wait for Ctrl+C
-    info!("Actor started at {}", Utc::now());
+    let theater_tx = theater.theater_tx.clone();
+
+    // Start the theater runtime
+    let theater_handle = tokio::spawn(async move {
+        theater.run().await.unwrap();
+    });
+
+    let (response_tx, response_rx) = tokio::sync::oneshot::channel();
+    let _ = theater_tx
+        .send(TheaterCommand::SpawnActor {
+            manifest_path: args.manifest.clone(),
+            response_tx,
+        })
+        .await;
+
+    let actor_id = response_rx.await?;
+    info!("Actor spawned with id: {:?}", actor_id?);
+
+    // Wait for the theater runtime to finish
+    theater_handle.await?;
+
+    // Wait for ctrl-c
     tokio::signal::ctrl_c().await?;
 
-    info!("Shutting down...");
     Ok(())
 }
 
@@ -54,8 +71,7 @@ fn setup_logging(level: &str, actor_only: bool) {
             .add_directive("actor=info".parse().unwrap())
             .add_directive("wasm_component=debug".parse().unwrap())
     } else {
-        EnvFilter::from_default_env()
-            .add_directive(format!("theater={}", level).parse().unwrap())
+        EnvFilter::from_default_env().add_directive(format!("theater={}", level).parse().unwrap())
     };
 
     tracing_subscriber::fmt()
