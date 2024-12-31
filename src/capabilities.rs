@@ -54,8 +54,9 @@ impl BaseCapability {
         // Add log function
         runtime.func_wrap(
             "log",
-            |_: wasmtime::StoreContextMut<'_, Store>, (msg,): (String,)| {
-                log(msg);
+            |ctx: wasmtime::StoreContextMut<'_, Store>, (msg,): (String,)| {
+                let id = ctx.data().id.clone();
+                log(id, msg);
                 Ok(())
             },
         )?;
@@ -74,7 +75,7 @@ impl BaseCapability {
             "spawn",
             |mut ctx: wasmtime::StoreContextMut<'_, Store>,
              (manifest,): (String,)|
-             -> Box<dyn Future<Output = Result<(String,)>> + Send> {
+             -> Box<dyn Future<Output = Result<()>> + Send> {
                 let store = ctx.data_mut();
                 let theater_tx = store.theater_tx.clone();
                 info!("Spawning actor with manifest: {}", manifest);
@@ -153,8 +154,9 @@ impl HttpCapability {
         // Add log function
         runtime.func_wrap(
             "log",
-            |_: wasmtime::StoreContextMut<'_, Store>, (msg,): (String,)| {
-                log(msg);
+            |ctx: wasmtime::StoreContextMut<'_, Store>, (msg,): (String,)| {
+                let id = ctx.data().id.clone();
+                log(id, msg);
                 Ok(())
             },
         )?;
@@ -173,7 +175,7 @@ impl HttpCapability {
             "spawn",
             |mut ctx: wasmtime::StoreContextMut<'_, Store>,
              (manifest,): (String,)|
-             -> Box<dyn Future<Output = Result<(String,)>> + Send> {
+             -> Box<dyn Future<Output = Result<()>> + Send> {
                 let store = ctx.data_mut();
                 let theater_tx = store.theater_tx.clone();
                 Box::new(spawn(theater_tx, manifest))
@@ -251,11 +253,11 @@ impl HttpCapability {
     }
 }
 
-fn log(msg: String) {
-    info!("[ACTOR] {}", msg);
+fn log(id: String, msg: String) {
+    info!("[ACTOR] [{}] {}", id, msg);
 }
 
-async fn spawn(theater_tx: Sender<TheaterCommand>, manifest: String) -> Result<(String,)> {
+async fn spawn(theater_tx: Sender<TheaterCommand>, manifest: String) -> Result<()> {
     let (response_tx, response_rx) = tokio::sync::oneshot::channel();
     info!("sending spawn command");
     match theater_tx
@@ -268,9 +270,7 @@ async fn spawn(theater_tx: Sender<TheaterCommand>, manifest: String) -> Result<(
         Ok(_) => info!("spawn command sent"),
         Err(e) => error!("error sending spawn command: {:?}", e),
     };
-    let actor_id = "test".to_string();
-    info!("Actor spawned with id: {:?}", actor_id);
-    Ok((actor_id,))
+    Ok(())
 }
 
 fn send(store: &Store, address: String, msg: Vec<u8>) {

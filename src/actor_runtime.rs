@@ -87,7 +87,7 @@ impl ActorRuntime {
             })
             .collect();
 
-        let store = Store::new(chain_tx.clone(), theater_tx.clone());
+        let store = Store::new(config.name.clone(), chain_tx.clone(), theater_tx.clone());
         let actor = WasmActor::new(config, store).await?;
 
         // Create and spawn actor process

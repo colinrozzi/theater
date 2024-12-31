@@ -8,3 +8,4 @@ logs/*
 .env
 !.gitignore
 dir-rep.xml
+debug.log
