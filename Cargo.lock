@@ -3276,6 +3276,7 @@ dependencies = [
  "futures",
  "lazy_static",
  "md5",
+ "pin-utils",
  "pretty_assertions",
  "reqwest",
  "serde",

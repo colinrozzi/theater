@@ -2,6 +2,7 @@ target/
 target/*
 node_modules/
 node_modules/*
+notes/*
 logs/
 logs/*
 .aider*

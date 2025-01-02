@@ -1,13 +1,18 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 use serde_json::Value;
 use std::collections::HashMap;
+use std::future::Future;
+use std::path::PathBuf;
 use thiserror::Error;
 use wasmtime::component::{Component, ComponentExportIndex, Instance, Linker};
 use wasmtime::Engine;
 
 use crate::capabilities::{BaseCapability, Capability, HttpCapability};
+use crate::chain::{ChainRequest, ChainRequestType};
 use crate::config::ManifestConfig;
+use crate::messages::TheaterCommand;
 use crate::Store;
 use tracing::{error, info};
 
@@ -42,11 +47,11 @@ pub enum WasmError {
 }
 
 /// WebAssembly actor implementation
+#[derive(Clone)]
 pub struct WasmActor {
     engine: Engine,
     component: Component,
     linker: Linker<Store>,
-    capabilities: Vec<Capability>,
     exports: HashMap<String, ComponentExportIndex>,
     store: Store,
 }
@@ -71,37 +76,117 @@ impl WasmActor {
             engine,
             component,
             linker,
-            capabilities: Vec::new(),
             exports: HashMap::new(),
             store,
         };
 
-        if config.interface() == "ntwk:simple-actor/actor" {
-            actor
-                .add_capability(Capability::Base(BaseCapability))
-                .await?;
-        }
-
-        if config.implements_interface("ntwk:simple-http-actor/actor") {
-            actor
-                .add_capability(Capability::Http(HttpCapability))
-                .await?;
-        }
+        actor.add_runtime().await?;
 
         Ok(actor)
     }
 
-    async fn add_capability(&mut self, capability: Capability) -> Result<()> {
-        // Setup host functions
-        capability.setup_host_functions(&mut self.linker).await?;
+    async fn add_runtime(&mut self) -> Result<()> {
+        let mut runtime = self.linker.instance("ntwk:theater/runtime")?;
 
-        // Get and store exports
-        let exports = capability.get_exports(&self.component)?;
-        for (name, index) in exports {
-            self.exports.insert(name, index);
-        }
+        runtime.func_wrap(
+            "log",
+            |ctx: wasmtime::StoreContextMut<'_, Store>, (msg,): (String,)| {
+                let id = ctx.data().id.clone();
+                info!("[ACTOR] [{}] {}", id, msg);
+                Ok(())
+            },
+        )?;
 
-        self.capabilities.push(capability);
+        // Add send function
+        runtime.func_wrap(
+            "send",
+            |mut ctx: wasmtime::StoreContextMut<'_, Store>, (address, msg): (String, Vec<u8>)| {
+                let store = ctx.data_mut();
+                //send(store, address, msg);
+
+                let msg_value: Value =
+                    serde_json::from_slice(&msg).expect("Failed to parse message as JSON");
+                let evt = Event {
+                    type_: "actor-message".to_string(),
+                    data: json!({
+                        "address": address,
+                        "message": msg_value,
+                    }),
+                };
+
+                let chain_tx = store.chain_tx.clone();
+
+                let _result = tokio::spawn(async move {
+                    let (tx, rx) = tokio::sync::oneshot::channel();
+
+                    chain_tx
+                        .send(ChainRequest {
+                            request_type: ChainRequestType::AddEvent { event: evt },
+                            response_tx: tx,
+                        })
+                        .await
+                        .expect("Failed to record message in chain");
+                    rx.await.expect("Failed to get response from chain");
+                    let client = reqwest::Client::new();
+                    let _response = client
+                        .post(&address)
+                        .json(&msg_value)
+                        .send()
+                        .await
+                        .expect("Failed to send message");
+                });
+                Ok(())
+            },
+        )?;
+
+        runtime.func_wrap_async(
+            "spawn",
+            |mut ctx: wasmtime::StoreContextMut<'_, Store>,
+             (manifest,): (String,)|
+             -> Box<dyn Future<Output = Result<()>> + Send> {
+                let store = ctx.data_mut();
+                let theater_tx = store.theater_tx.clone();
+                info!("Spawning actor with manifest: {}", manifest);
+                Box::new(async move {
+                    let (response_tx, response_rx) = tokio::sync::oneshot::channel();
+                    info!("sending spawn command");
+                    match theater_tx
+                        .send(TheaterCommand::SpawnActor {
+                            manifest_path: PathBuf::from(manifest),
+                            response_tx,
+                        })
+                        .await
+                    {
+                        Ok(_) => info!("spawn command sent"),
+                        Err(e) => error!("error sending spawn command: {:?}", e),
+                    }
+                    Ok(())
+                })
+            },
+        );
+
+        runtime.func_wrap_async(
+            "get-chain",
+            |mut ctx: wasmtime::StoreContextMut<'_, Store>,
+             ()|
+             -> Box<dyn Future<Output = Result<(Vec<u8>,)>> + Send> {
+                let store = ctx.data_mut();
+                let chain_tx = store.chain_tx.clone();
+                Box::new(async move {
+                    let (tx, rx) = tokio::sync::oneshot::channel();
+                    chain_tx
+                        .send(ChainRequest {
+                            request_type: ChainRequestType::GetChain {},
+                            response_tx: tx,
+                        })
+                        .await?;
+                    let chain = rx.await?;
+                    let chain_bytes = serde_json::to_vec(&chain)?;
+                    Ok((chain_bytes,))
+                })
+            },
+        )?;
+
         Ok(())
     }
 
@@ -109,17 +194,34 @@ impl WasmActor {
         self.exports.get(name)
     }
 
-    async fn call_func<T, U>(
-        &self,
-        store: &mut wasmtime::Store<Store>,
-        instance: &Instance,
-        export_name: &str,
-        args: T,
-    ) -> Result<U>
+    pub async fn call_func<T, U>(&self, export_name: &str, args: T) -> Result<U>
     where
-        T: wasmtime::component::Lower + wasmtime::component::ComponentNamedList + Send + Sync,
-        U: wasmtime::component::Lift + wasmtime::component::ComponentNamedList + Send + Sync,
+        T: wasmtime::component::Lower
+            + wasmtime::component::ComponentNamedList
+            + Send
+            + Sync
+            + Serialize,
+        U: wasmtime::component::Lift
+            + wasmtime::component::ComponentNamedList
+            + Send
+            + Sync
+            + Serialize,
     {
+        let mut store = wasmtime::Store::new(&self.engine, self.store.clone());
+        let instance = self
+            .linker
+            .instantiate_async(&mut store, &self.component)
+            .await?;
+        // record the function call in the chain
+        let event = Event {
+            type_: "function-call".to_string(),
+            data: json!({
+                "function": export_name,
+                "args": args,
+            }),
+        };
+        self.add_to_chain(&event).await;
+
         info!("Calling function: {}", export_name);
         let index = self
             .get_export(export_name)
@@ -129,116 +231,67 @@ impl WasmActor {
             })?;
 
         let func = instance
-            .get_func(&mut *store, *index)
+            .get_func(&mut store, *index)
             .ok_or_else(|| WasmError::WasmError {
                 context: "function access",
                 message: format!("Failed to get function {}", export_name),
             })?;
 
-        info!("params type: {:?}", func.params(&mut *store));
-        info!("results type: {:?}", func.results(&mut *store));
+        info!("params type: {:?}", func.params(&mut store));
+        info!("results type: {:?}", func.results(&mut store));
 
         let typed = func
-            .typed::<T, U>(&mut *store)
+            .typed::<T, U>(&mut store)
             .map_err(|e| WasmError::WasmError {
                 context: "function type",
                 message: format!("typed call failed: {}", e),
             })?;
 
-        Ok(typed
-            .call_async(&mut *store, args)
-            .await
-            .map_err(|e| WasmError::WasmError {
-                context: "function call",
-                message: e.to_string(),
-            })?)
-    }
+        let result =
+            typed
+                .call_async(&mut store, args)
+                .await
+                .map_err(|e| WasmError::WasmError {
+                    context: "function call",
+                    message: e.to_string(),
+                })?;
 
-    pub async fn init(&self) -> Result<Value> {
-        let mut store = wasmtime::Store::new(&self.engine, self.store.clone());
-        let instance = self
-            .linker
-            .instantiate_async(&mut store, &self.component)
-            .await?;
-
-        let (result,) = self
-            .call_func::<(), (Vec<u8>,)>(&mut store, &instance, "init", ())
-            .await?;
-        let state: Value = serde_json::from_slice(&result)?;
-
-        Ok(state)
-    }
-
-    pub async fn handle_event(&self, state: Value, event: Event) -> Result<(State, Event)> {
-        info!("Handling event: {:?}", event);
-        let mut store = wasmtime::Store::new(&self.engine, self.store.clone());
-        let instance = self
-            .linker
-            .instantiate_async(&mut store, &self.component)
-            .await?;
-
-        let event_bytes = serde_json::to_vec(&event).map_err(|e| WasmError::WasmError {
-            context: "event serialization",
-            message: format!("Failed to serialize event: {}", e),
-        })?;
-        let state_bytes = serde_json::to_vec(&state).map_err(|e| WasmError::WasmError {
-            context: "state serialization",
-            message: format!("Failed to serialize state: {}", e),
-        })?;
-
-        let result = self
-            .call_func::<(Vec<u8>, Vec<u8>), ((Vec<u8>, Option<Vec<u8>>),)>(
-                &mut store,
-                &instance,
-                "handle",
-                (event_bytes, state_bytes),
-            )
-            .await?;
-
-        let (after_state, response) = result.0;
-
-        let new_state: Value =
-            serde_json::from_slice(&after_state).map_err(|e| WasmError::WasmError {
-                context: "state deserialization",
-                message: format!("Failed to deserialize state: {}", e),
-            })?;
-        match response {
-            Some(response_bytes) => {
-                let response: Event =
-                    serde_json::from_slice(&response_bytes).map_err(|e| WasmError::WasmError {
-                        context: "response deserialization",
-                        message: format!("Failed to deserialize response: {}", e),
-                    })?;
-                Ok((new_state, response))
-            }
-            None => Ok((new_state, Event::noop())),
-        }
-    }
-
-    pub async fn verify_state(&self, state: &Value) -> bool {
-        let mut store = wasmtime::Store::new(&self.engine, self.store.clone());
-        let instance = match self
-            .linker
-            .instantiate_async(&mut store, &self.component)
-            .await
-        {
-            Ok(instance) => instance,
-            Err(_) => return false,
+        let result_event = Event {
+            type_: "function-result".to_string(),
+            data: json!({
+                "function": export_name,
+                "result": result,
+            }),
         };
 
-        let state_bytes = match serde_json::to_vec(state) {
-            Ok(bytes) => bytes,
-            Err(_) => return false,
-        };
+        self.add_to_chain(&result_event).await;
+        Ok(result)
+    }
 
-        self.call_func::<(Vec<u8>,), (bool,)>(
-            &mut store,
-            &instance,
-            "state-contract",
-            (state_bytes,),
-        )
-        .await
-        .map(|(result,)| result)
-        .unwrap_or(false)
+    /// I am going to add a function that will allow us to set up functions to be imports that
+    /// will add the call and result of that function to the chain, similar to the call_func for
+    /// exports
+    ///
+    /// also, I think I can move ownership of the chain into the actor, as the chain should be used
+    /// for call_func and set up in wrap_func
+
+    async fn add_to_chain(&self, event: &Event) {
+        let chain_tx = self.store.chain_tx.clone();
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        chain_tx
+            .send(ChainRequest {
+                request_type: ChainRequestType::AddEvent {
+                    event: event.clone(),
+                },
+                response_tx: tx,
+            })
+            .await
+            .expect("Failed to record message in chain");
+        rx.await.expect("Failed to get response from chain");
+    }
+
+    pub async fn main(&self) -> Result<()> {
+        self.call_func::<(), (Vec<u8>,)>("main", ()).await?;
+        Ok(())
     }
 }

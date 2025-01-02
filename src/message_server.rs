@@ -1,4 +1,5 @@
 use crate::actor_process::{ActorMessage, ProcessMessage};
+use crate::store::Store;
 use crate::wasm::Event;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
@@ -6,6 +7,7 @@ use serde_json::json;
 use tide::{Body, Request, Response, Server};
 use tokio::sync::mpsc;
 use tracing::info;
+use wasmtime::component::Linker;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct MessageServerHost {
@@ -15,6 +17,10 @@ pub struct MessageServerHost {
 impl MessageServerHost {
     pub fn new(port: u16) -> Self {
         Self { port }
+    }
+
+    pub fn setup_host_function(&self, _linker: &mut Linker<Store>) -> Result<()> {
+        Ok(())
     }
 
     pub async fn start(&self, mailbox_tx: mpsc::Sender<ProcessMessage>) -> Result<()> {

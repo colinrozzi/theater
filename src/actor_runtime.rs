@@ -1,3 +1,4 @@
+use crate::actor_handle::ActorHandle;
 use crate::actor_process::{ActorProcess, ProcessMessage};
 use crate::chain::ChainRequestHandler;
 use crate::config::{HandlerConfig, ManifestConfig};
@@ -11,6 +12,7 @@ use std::path::PathBuf;
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::Sender;
 use tracing::{error, info};
+use wasmtime::component::{Component, Linker};
 
 pub struct RuntimeComponents {
     pub name: String,
@@ -27,7 +29,6 @@ pub struct ActorRuntime {
     handler_tasks: Vec<tokio::task::JoinHandle<()>>,
 }
 
-#[derive(Clone, Debug)]
 pub enum Handler {
     MessageServer(MessageServerHost),
     HttpServer(HttpServerHost),
@@ -46,6 +47,14 @@ impl Handler {
             Handler::MessageServer(_) => "message-server".to_string(),
             Handler::HttpServer(_) => "http-server".to_string(),
         }
+    }
+
+    pub async fn setup_host_function(&self, linker: &mut Linker<Store>) -> Result<()> {
+        match self {
+            Handler::MessageServer(handler) => handler.setup_host_function(linker)?,
+            Handler::HttpServer(handler) => handler.setup_host_function(linker)?,
+        }
+        Ok(())
     }
 }
 
@@ -74,6 +83,10 @@ impl ActorRuntime {
         let (chain_tx, chain_rx) = mpsc::channel(32);
         let (process_tx, process_rx) = mpsc::channel(32);
 
+        let store = Store::new(config.name.clone(), chain_tx.clone(), theater_tx.clone());
+        let actor = WasmActor::new(config, store).await?;
+        let actor_handler = ActorHandle::new(actor);
+
         let handlers = config
             .handlers
             .iter()
@@ -82,13 +95,10 @@ impl ActorRuntime {
                     Handler::MessageServer(MessageServerHost::new(config.port))
                 }
                 HandlerConfig::HttpServer(config) => {
-                    Handler::HttpServer(HttpServerHost::new(config.port))
+                    Handler::HttpServer(HttpServerHost::new(config.port, actor_handler.clone()))
                 }
             })
             .collect();
-
-        let store = Store::new(config.name.clone(), chain_tx.clone(), theater_tx.clone());
-        let actor = WasmActor::new(config, store).await?;
 
         // Create and spawn actor process
         let actor_process = ActorProcess::new(&config.name, actor, process_rx, chain_tx).await?;
@@ -109,10 +119,9 @@ impl ActorRuntime {
 
         // Start all handlers
         for handler in components.handlers {
-            let handler_clone = handler.clone();
             let tx = components.process_tx.clone();
             let task = tokio::spawn(async move {
-                if let Err(e) = handler_clone.start(tx).await {
+                if let Err(e) = handler.start(tx).await {
                     error!("Handler failed: {}", e);
                 }
             });

@@ -49,7 +49,7 @@ pub struct BaseCapability;
 
 impl BaseCapability {
     async fn setup_host_functions(&self, linker: &mut Linker<Store>) -> Result<()> {
-        let mut runtime = linker.instance("ntwk:simple-actor/runtime")?;
+        let mut runtime = linker.instance("ntwk:theater/runtime")?;
 
         // Add log function
         runtime.func_wrap(
