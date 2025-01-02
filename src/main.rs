@@ -1,8 +1,7 @@
 use anyhow::Result;
 use clap::Parser;
 use std::path::PathBuf;
-use theater::messages::TheaterCommand;
-use theater::theater_runtime::TheaterRuntime;
+use theater::Process;
 use tracing::info;
 use tracing_subscriber::EnvFilter;
 
@@ -34,28 +33,8 @@ async fn main() -> Result<()> {
         ));
     }
 
-    let mut theater = TheaterRuntime::new().await?;
-
-    let theater_tx = theater.theater_tx.clone();
-
-    // Start the theater runtime
-    let theater_handle = tokio::spawn(async move {
-        theater.run().await.unwrap();
-    });
-
-    let (response_tx, response_rx) = tokio::sync::oneshot::channel();
-    let _ = theater_tx
-        .send(TheaterCommand::SpawnActor {
-            manifest_path: args.manifest.clone(),
-            response_tx,
-        })
-        .await;
-
-    let actor_id = response_rx.await?;
-    info!("Actor spawned with id: {:?}", actor_id?);
-
-    // Wait for the theater runtime to finish
-    theater_handle.await?;
+    // Create the process
+    let mut process = Process::new(&args.manifest).await?;
 
     // Wait for ctrl-c
     tokio::signal::ctrl_c().await?;
