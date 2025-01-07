@@ -3,14 +3,14 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use serde_json::Value;
 use std::collections::HashMap;
+use std::fmt::Debug;
 use std::future::Future;
+use std::marker::Copy;
 use std::path::PathBuf;
 use thiserror::Error;
 use wasmtime::component::{Component, ComponentExportIndex, Instance, Linker};
-use wasmtime::Engine;
+use wasmtime::{Engine, StoreContextMut};
 
-use crate::capabilities::{BaseCapability, Capability, HttpCapability};
-use crate::chain::{ChainRequest, ChainRequestType};
 use crate::config::ManifestConfig;
 use crate::messages::TheaterCommand;
 use crate::Store;
@@ -106,27 +106,8 @@ impl WasmActor {
 
                 let msg_value: Value =
                     serde_json::from_slice(&msg).expect("Failed to parse message as JSON");
-                let evt = Event {
-                    type_: "actor-message".to_string(),
-                    data: json!({
-                        "address": address,
-                        "message": msg_value,
-                    }),
-                };
-
-                let chain_tx = store.chain_tx.clone();
 
                 let _result = tokio::spawn(async move {
-                    let (tx, rx) = tokio::sync::oneshot::channel();
-
-                    chain_tx
-                        .send(ChainRequest {
-                            request_type: ChainRequestType::AddEvent { event: evt },
-                            response_tx: tx,
-                        })
-                        .await
-                        .expect("Failed to record message in chain");
-                    rx.await.expect("Failed to get response from chain");
                     let client = reqwest::Client::new();
                     let _response = client
                         .post(&address)
@@ -165,25 +146,11 @@ impl WasmActor {
             },
         );
 
-        runtime.func_wrap_async(
+        runtime.func_wrap(
             "get-chain",
-            |mut ctx: wasmtime::StoreContextMut<'_, Store>,
-             ()|
-             -> Box<dyn Future<Output = Result<(Vec<u8>,)>> + Send> {
-                let store = ctx.data_mut();
-                let chain_tx = store.chain_tx.clone();
-                Box::new(async move {
-                    let (tx, rx) = tokio::sync::oneshot::channel();
-                    chain_tx
-                        .send(ChainRequest {
-                            request_type: ChainRequestType::GetChain {},
-                            response_tx: tx,
-                        })
-                        .await?;
-                    let chain = rx.await?;
-                    let chain_bytes = serde_json::to_vec(&chain)?;
-                    Ok((chain_bytes,))
-                })
+            |mut ctx: StoreContextMut<'_, Store>, ()| -> Result<(Vec<u8>,)> {
+                let chain = ctx.get_chain();
+                Ok((serde_json::to_vec(&json!(chain))?,))
             },
         )?;
 
@@ -200,27 +167,21 @@ impl WasmActor {
             + wasmtime::component::ComponentNamedList
             + Send
             + Sync
-            + Serialize,
+            + Serialize
+            + Debug,
         U: wasmtime::component::Lift
             + wasmtime::component::ComponentNamedList
             + Send
             + Sync
-            + Serialize,
+            + Serialize
+            + Debug
+            + Clone,
     {
         let mut store = wasmtime::Store::new(&self.engine, self.store.clone());
         let instance = self
             .linker
             .instantiate_async(&mut store, &self.component)
             .await?;
-        // record the function call in the chain
-        let event = Event {
-            type_: "function-call".to_string(),
-            data: json!({
-                "function": export_name,
-                "args": args,
-            }),
-        };
-        self.add_to_chain(&event).await;
 
         info!("Calling function: {}", export_name);
         let index = self
@@ -256,42 +217,13 @@ impl WasmActor {
                     message: e.to_string(),
                 })?;
 
-        let result_event = Event {
-            type_: "function-result".to_string(),
-            data: json!({
-                "function": export_name,
-                "result": result,
-            }),
-        };
-
-        self.add_to_chain(&result_event).await;
         Ok(result)
     }
 
-    /// I am going to add a function that will allow us to set up functions to be imports that
-    /// will add the call and result of that function to the chain, similar to the call_func for
-    /// exports
-    ///
-    /// also, I think I can move ownership of the chain into the actor, as the chain should be used
-    /// for call_func and set up in wrap_func
-
-    async fn add_to_chain(&self, event: &Event) {
-        let chain_tx = self.store.chain_tx.clone();
-        let (tx, rx) = tokio::sync::oneshot::channel();
-        chain_tx
-            .send(ChainRequest {
-                request_type: ChainRequestType::AddEvent {
-                    event: event.clone(),
-                },
-                response_tx: tx,
-            })
-            .await
-            .expect("Failed to record message in chain");
-        rx.await.expect("Failed to get response from chain");
-    }
-
-    pub async fn main(&self) -> Result<()> {
-        self.call_func::<(), (Vec<u8>,)>("main", ()).await?;
-        Ok(())
-    }
+    // I am going to add a function that will allow us to set up functions to be imports that
+    // will add the call and result of that function to the chain, similar to the call_func for
+    // exports
+    //
+    // also, I think I can move ownership of the chain into the actor, as the chain should be used
+    // for call_func and set up in wrap_func
 }

@@ -1,4 +1,3 @@
-use crate::http_server::HttpRequest;
 use crate::wasm::WasmActor;
 use anyhow::Result;
 use tokio::sync::Mutex;

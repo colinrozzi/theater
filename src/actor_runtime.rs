@@ -1,6 +1,5 @@
 use crate::actor_handle::ActorHandle;
 use crate::actor_process::{ActorProcess, ProcessMessage};
-use crate::chain::ChainRequestHandler;
 use crate::config::{HandlerConfig, ManifestConfig};
 use crate::http_server::HttpServerHost;
 use crate::message_server::MessageServerHost;
@@ -12,19 +11,17 @@ use std::path::PathBuf;
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::Sender;
 use tracing::{error, info};
-use wasmtime::component::{Component, Linker};
+use wasmtime::component::Linker;
 
 pub struct RuntimeComponents {
     pub name: String,
     handlers: Vec<Handler>,
     actor_process: ActorProcess,
-    chain_handler: ChainRequestHandler,
     process_tx: mpsc::Sender<ProcessMessage>,
 }
 
 pub struct ActorRuntime {
     pub actor_id: String,
-    chain_task: tokio::task::JoinHandle<()>,
     process_handle: Option<tokio::task::JoinHandle<()>>,
     handler_tasks: Vec<tokio::task::JoinHandle<()>>,
 }
@@ -80,10 +77,9 @@ impl ActorRuntime {
         config: &ManifestConfig,
         theater_tx: Sender<TheaterCommand>,
     ) -> Result<RuntimeComponents> {
-        let (chain_tx, chain_rx) = mpsc::channel(32);
         let (process_tx, process_rx) = mpsc::channel(32);
 
-        let store = Store::new(config.name.clone(), chain_tx.clone(), theater_tx.clone());
+        let store = Store::new(config.name.clone(), theater_tx.clone());
         let actor = WasmActor::new(config, store).await?;
         let actor_handler = ActorHandle::new(actor);
 
@@ -101,15 +97,12 @@ impl ActorRuntime {
             .collect();
 
         // Create and spawn actor process
-        let actor_process = ActorProcess::new(&config.name, actor, process_rx, chain_tx).await?;
-
-        let chain_handler = ChainRequestHandler::new(chain_rx);
+        let actor_process = ActorProcess::new(&config.name, actor_handler, process_rx).await?;
 
         Ok(RuntimeComponents {
             name: config.name.clone(),
             handlers,
             actor_process,
-            chain_handler,
             process_tx,
         })
     }
@@ -137,14 +130,8 @@ impl ActorRuntime {
 
         info!("Actor runtime started");
 
-        // spawn the chain request handler
-        let chain_task = tokio::spawn(async move {
-            components.chain_handler.run().await;
-        });
-
         Ok(Self {
             actor_id: components.name,
-            chain_task,
             process_handle,
             handler_tasks,
         })
@@ -160,9 +147,6 @@ impl ActorRuntime {
         if let Some(handle) = self.process_handle.take() {
             handle.abort();
         }
-
-        // Cancel chain task
-        self.chain_task.abort();
 
         Ok(())
     }
