@@ -8,6 +8,7 @@ use std::future::Future;
 use std::marker::Copy;
 use std::path::PathBuf;
 use thiserror::Error;
+use wasmtime::chain::Chain;
 use wasmtime::component::{Component, ComponentExportIndex, Instance, Linker};
 use wasmtime::{Engine, StoreContextMut};
 
@@ -149,9 +150,9 @@ impl WasmActor {
 
         runtime.func_wrap(
             "get-chain",
-            |mut ctx: StoreContextMut<'_, Store>, ()| -> Result<(Vec<u8>,)> {
+            |mut ctx: StoreContextMut<'_, Store>, ()| -> Result<(Chain,)> {
                 let chain = ctx.get_chain();
-                Ok((serde_json::to_vec(&json!(chain))?,))
+                Ok((chain.clone(),))
             },
         )?;
 
