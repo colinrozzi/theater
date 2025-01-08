@@ -1,9 +1,7 @@
 use anyhow::Result;
 
 pub mod actor_handle;
-pub mod actor_process;
 pub mod actor_runtime;
-pub mod capabilities;
 pub mod config;
 pub mod http_server;
 pub mod message_server;

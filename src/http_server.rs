@@ -1,5 +1,4 @@
 use crate::actor_handle::ActorHandle;
-use crate::actor_process::{ActorMessage, ProcessMessage};
 use crate::store::Store;
 use crate::wasm::Event;
 use anyhow::Result;
@@ -44,7 +43,7 @@ impl HttpServerHost {
         Ok(())
     }
 
-    pub async fn start(&self, mailbox_tx: mpsc::Sender<ProcessMessage>) -> Result<()> {
+    pub async fn start(&self) -> Result<()> {
         info!("HTTP-SERVER starting on port {}", self.port);
         let mut app = Server::with_state(self.actor_handle.clone());
         app.at("/*").all(Self::handle_request);

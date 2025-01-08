@@ -1,16 +1,17 @@
 use crate::wasm::WasmActor;
 use anyhow::Result;
+use std::sync::Arc;
 use tokio::sync::Mutex;
 
 #[derive(Clone)]
 pub struct ActorHandle {
-    actor: Mutex<WasmActor>,
+    actor: Arc<Mutex<WasmActor>>,
 }
 
 impl ActorHandle {
     pub fn new(actor: WasmActor) -> Self {
         Self {
-            actor: Mutex::new(actor),
+            actor: Arc::new(Mutex::new(actor)),
         }
     }
 

@@ -80,12 +80,13 @@ impl WasmActor {
             store,
         };
 
-        actor.add_runtime().await?;
+        actor.add_runtime_host_func().await?;
+        actor.add_runtime_exports()?;
 
         Ok(actor)
     }
 
-    async fn add_runtime(&mut self) -> Result<()> {
+    async fn add_runtime_host_func(&mut self) -> Result<()> {
         let mut runtime = self.linker.instance("ntwk:theater/runtime")?;
 
         runtime.func_wrap(
@@ -155,6 +156,30 @@ impl WasmActor {
         )?;
 
         Ok(())
+    }
+
+    fn add_runtime_exports(&mut self) -> Result<()> {
+        let init_export = self.find_export("ntwk:theater/runtime", "init")?;
+        let handle_export = self.find_export("ntwk:theater/runtime", "handle")?;
+        self.exports.insert("init".to_string(), init_export);
+        self.exports.insert("handle".to_string(), handle_export);
+        Ok(())
+    }
+
+    fn find_export(
+        &mut self,
+        interface_name: &str,
+        export_name: &str,
+    ) -> Result<ComponentExportIndex> {
+        let (_, instance) = self
+            .component
+            .export_index(None, interface_name)
+            .expect("Failed to find interface export");
+        let (_, export) = self
+            .component
+            .export_index(None, export_name)
+            .expect("Failed to find export");
+        Ok(export)
     }
 
     fn get_export(&self, name: &str) -> Option<&ComponentExportIndex> {

@@ -1,4 +1,4 @@
-use crate::actor_process::{ActorMessage, ProcessMessage};
+use crate::actor_handle::ActorHandle;
 use crate::store::Store;
 use crate::wasm::Event;
 use anyhow::Result;
@@ -9,22 +9,23 @@ use tokio::sync::mpsc;
 use tracing::info;
 use wasmtime::component::Linker;
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone)]
 pub struct MessageServerHost {
     port: u16,
+    actor_handle: ActorHandle,
 }
 
 impl MessageServerHost {
-    pub fn new(port: u16) -> Self {
-        Self { port }
+    pub fn new(port: u16, actor_handle: ActorHandle) -> Self {
+        Self { port, actor_handle }
     }
 
     pub fn setup_host_function(&self, _linker: &mut Linker<Store>) -> Result<()> {
         Ok(())
     }
 
-    pub async fn start(&self, mailbox_tx: mpsc::Sender<ProcessMessage>) -> Result<()> {
-        let mut app = Server::with_state(mailbox_tx.clone());
+    pub async fn start(&self) -> Result<()> {
+        let mut app = Server::with_state(self.actor_handle.clone());
         app.at("/*").all(Self::handle_request);
         app.at("/").all(Self::handle_request);
 
@@ -34,7 +35,7 @@ impl MessageServerHost {
         Ok(())
     }
 
-    async fn handle_request(mut req: Request<mpsc::Sender<ProcessMessage>>) -> tide::Result {
+    async fn handle_request(mut req: Request<ActorHandle>) -> tide::Result {
         info!("Received {} request to {}", req.method(), req.url().path());
 
         // Get the body bytes
@@ -45,16 +46,14 @@ impl MessageServerHost {
             data: json!(body_bytes),
         };
 
-        let process_msg = ProcessMessage::ActorMessage(ActorMessage {
-            event: evt,
-            response_channel: None,
-        });
+        let evt_bytes = serde_json::to_vec(&evt)?;
 
-        // Send to actor
         req.state()
-            .send(process_msg)
-            .await
-            .map_err(|_| tide::Error::from_str(500, "Failed to forward request to actor"))?;
+            .with_actor(|actor| {
+                actor.call_func("handle", &evt_bytes);
+                Ok(())
+            })
+            .await?;
 
         Ok(Response::builder(200)
             .body(Body::from_string("Request forwarded to actor".to_string()))

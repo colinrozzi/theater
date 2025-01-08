@@ -1,5 +1,4 @@
 use crate::actor_handle::ActorHandle;
-use crate::actor_process::{ActorProcess, ProcessMessage};
 use crate::config::{HandlerConfig, ManifestConfig};
 use crate::http_server::HttpServerHost;
 use crate::message_server::MessageServerHost;
@@ -16,14 +15,13 @@ use wasmtime::component::Linker;
 pub struct RuntimeComponents {
     pub name: String,
     handlers: Vec<Handler>,
-    actor_process: ActorProcess,
-    process_tx: mpsc::Sender<ProcessMessage>,
+    actor_handle: ActorHandle,
 }
 
 pub struct ActorRuntime {
     pub actor_id: String,
-    process_handle: Option<tokio::task::JoinHandle<()>>,
     handler_tasks: Vec<tokio::task::JoinHandle<()>>,
+    actor_handle: ActorHandle,
 }
 
 pub enum Handler {
@@ -32,10 +30,21 @@ pub enum Handler {
 }
 
 impl Handler {
-    pub async fn start(&self, process_tx: mpsc::Sender<ProcessMessage>) -> Result<()> {
+    pub fn new(handler_config: HandlerConfig, actor_handle: ActorHandle) -> Self {
+        match handler_config {
+            HandlerConfig::MessageServer(config) => {
+                Handler::MessageServer(MessageServerHost::new(config.port, actor_handle))
+            }
+            HandlerConfig::HttpServer(config) => {
+                Handler::HttpServer(HttpServerHost::new(config.port, actor_handle))
+            }
+        }
+    }
+
+    pub async fn start(&self) -> Result<()> {
         match self {
-            Handler::MessageServer(handler) => handler.start(process_tx).await,
-            Handler::HttpServer(handler) => handler.start(process_tx).await,
+            Handler::MessageServer(handler) => handler.start().await,
+            Handler::HttpServer(handler) => handler.start().await,
         }
     }
 
@@ -77,62 +86,49 @@ impl ActorRuntime {
         config: &ManifestConfig,
         theater_tx: Sender<TheaterCommand>,
     ) -> Result<RuntimeComponents> {
-        let (process_tx, process_rx) = mpsc::channel(32);
-
         let store = Store::new(config.name.clone(), theater_tx.clone());
         let actor = WasmActor::new(config, store).await?;
-        let actor_handler = ActorHandle::new(actor);
+        actor.call_func("init", ()).await?;
+        let actor_handle = ActorHandle::new(actor);
 
         let handlers = config
             .handlers
             .iter()
             .map(|handler_config| match handler_config {
-                HandlerConfig::MessageServer(config) => {
-                    Handler::MessageServer(MessageServerHost::new(config.port))
-                }
+                HandlerConfig::MessageServer(config) => Handler::MessageServer(
+                    MessageServerHost::new(config.port, actor_handle.clone()),
+                ),
                 HandlerConfig::HttpServer(config) => {
-                    Handler::HttpServer(HttpServerHost::new(config.port, actor_handler.clone()))
+                    Handler::HttpServer(HttpServerHost::new(config.port, actor_handle.clone()))
                 }
             })
             .collect();
 
-        // Create and spawn actor process
-        let actor_process = ActorProcess::new(&config.name, actor_handler, process_rx).await?;
-
         Ok(RuntimeComponents {
             name: config.name.clone(),
             handlers,
-            actor_process,
-            process_tx,
+            actor_handle,
         })
     }
 
-    pub async fn start(mut components: RuntimeComponents) -> Result<Self> {
+    pub async fn start(components: RuntimeComponents) -> Result<Self> {
         let mut handler_tasks = Vec::new();
 
         // Start all handlers
         for handler in components.handlers {
-            let tx = components.process_tx.clone();
             let task = tokio::spawn(async move {
-                if let Err(e) = handler.start(tx).await {
+                if let Err(e) = handler.start().await {
                     error!("Handler failed: {}", e);
                 }
             });
             handler_tasks.push(task);
         }
 
-        // Start the actor process
-        let process_handle = Some(tokio::spawn(async move {
-            if let Err(e) = components.actor_process.run().await {
-                error!("Actor process failed: {}", e);
-            }
-        }));
-
         info!("Actor runtime started");
 
         Ok(Self {
             actor_id: components.name,
-            process_handle,
+            actor_handle: components.actor_handle,
             handler_tasks,
         })
     }
@@ -141,11 +137,6 @@ impl ActorRuntime {
         // Stop all handlers
         for task in self.handler_tasks.drain(..) {
             task.abort();
-        }
-
-        // Cancel actor process
-        if let Some(handle) = self.process_handle.take() {
-            handle.abort();
         }
 
         Ok(())
