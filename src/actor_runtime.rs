@@ -1,13 +1,13 @@
 use crate::actor_handle::ActorHandle;
 use crate::config::{HandlerConfig, ManifestConfig};
-use crate::http_server::HttpServerHost;
-use crate::message_server::MessageServerHost;
+use crate::host::handler::Handler;
+use crate::host::http_server::HttpServerHost;
+use crate::host::message_server::MessageServerHost;
 use crate::messages::TheaterCommand;
 use crate::store::Store;
 use crate::wasm::WasmActor;
 use crate::Result;
 use std::path::PathBuf;
-use tokio::sync::mpsc;
 use tokio::sync::mpsc::Sender;
 use tracing::{error, info};
 use wasmtime::component::Linker;
@@ -15,53 +15,11 @@ use wasmtime::component::Linker;
 pub struct RuntimeComponents {
     pub name: String,
     handlers: Vec<Handler>,
-    actor_handle: ActorHandle,
 }
 
 pub struct ActorRuntime {
     pub actor_id: String,
     handler_tasks: Vec<tokio::task::JoinHandle<()>>,
-    actor_handle: ActorHandle,
-}
-
-pub enum Handler {
-    MessageServer(MessageServerHost),
-    HttpServer(HttpServerHost),
-}
-
-impl Handler {
-    pub fn new(handler_config: HandlerConfig, actor_handle: ActorHandle) -> Self {
-        match handler_config {
-            HandlerConfig::MessageServer(config) => {
-                Handler::MessageServer(MessageServerHost::new(config.port, actor_handle))
-            }
-            HandlerConfig::HttpServer(config) => {
-                Handler::HttpServer(HttpServerHost::new(config.port, actor_handle))
-            }
-        }
-    }
-
-    pub async fn start(&self) -> Result<()> {
-        match self {
-            Handler::MessageServer(handler) => handler.start().await,
-            Handler::HttpServer(handler) => handler.start().await,
-        }
-    }
-
-    pub fn name(&self) -> String {
-        match self {
-            Handler::MessageServer(_) => "message-server".to_string(),
-            Handler::HttpServer(_) => "http-server".to_string(),
-        }
-    }
-
-    pub async fn setup_host_function(&self, linker: &mut Linker<Store>) -> Result<()> {
-        match self {
-            Handler::MessageServer(handler) => handler.setup_host_function(linker)?,
-            Handler::HttpServer(handler) => handler.setup_host_function(linker)?,
-        }
-        Ok(())
-    }
 }
 
 impl ActorRuntime {
@@ -107,7 +65,6 @@ impl ActorRuntime {
         Ok(RuntimeComponents {
             name: config.name.clone(),
             handlers,
-            actor_handle,
         })
     }
 
@@ -128,7 +85,6 @@ impl ActorRuntime {
 
         Ok(Self {
             actor_id: components.name,
-            actor_handle: components.actor_handle,
             handler_tasks,
         })
     }

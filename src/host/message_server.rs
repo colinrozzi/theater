@@ -2,10 +2,8 @@ use crate::actor_handle::ActorHandle;
 use crate::store::Store;
 use crate::wasm::Event;
 use anyhow::Result;
-use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tide::{Body, Request, Response, Server};
-use tokio::sync::mpsc;
 use tracing::info;
 use wasmtime::component::Linker;
 

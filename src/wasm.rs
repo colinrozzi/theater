@@ -1,15 +1,13 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
-use serde_json::json;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::future::Future;
-use std::marker::Copy;
 use std::path::PathBuf;
 use thiserror::Error;
 use wasmtime::chain::Chain;
-use wasmtime::component::{Component, ComponentExportIndex, Instance, Linker};
+use wasmtime::component::{Component, ComponentExportIndex, Linker};
 use wasmtime::{Engine, StoreContextMut};
 
 use crate::config::ManifestConfig;
@@ -17,22 +15,10 @@ use crate::messages::TheaterCommand;
 use crate::Store;
 use tracing::{error, info};
 
-// Move Event and State from actor.rs
-pub type State = Value;
-
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Event {
     pub type_: String,
     pub data: Value,
-}
-
-impl Event {
-    pub fn noop() -> Self {
-        Event {
-            type_: "noop".to_string(),
-            data: Value::Null,
-        }
-    }
 }
 
 #[derive(Error, Debug)]
@@ -102,10 +88,7 @@ impl WasmActor {
         // Add send function
         runtime.func_wrap(
             "send",
-            |mut ctx: wasmtime::StoreContextMut<'_, Store>, (address, msg): (String, Vec<u8>)| {
-                let store = ctx.data_mut();
-                //send(store, address, msg);
-
+            |_ctx: wasmtime::StoreContextMut<'_, Store>, (address, msg): (String, Vec<u8>)| {
                 let msg_value: Value =
                     serde_json::from_slice(&msg).expect("Failed to parse message as JSON");
 
@@ -122,7 +105,7 @@ impl WasmActor {
             },
         )?;
 
-        runtime.func_wrap_async(
+        let _ = runtime.func_wrap_async(
             "spawn",
             |mut ctx: wasmtime::StoreContextMut<'_, Store>,
              (manifest,): (String,)|
@@ -131,7 +114,7 @@ impl WasmActor {
                 let theater_tx = store.theater_tx.clone();
                 info!("Spawning actor with manifest: {}", manifest);
                 Box::new(async move {
-                    let (response_tx, response_rx) = tokio::sync::oneshot::channel();
+                    let (response_tx, _response_rx) = tokio::sync::oneshot::channel();
                     info!("sending spawn command");
                     match theater_tx
                         .send(TheaterCommand::SpawnActor {
@@ -150,7 +133,7 @@ impl WasmActor {
 
         runtime.func_wrap(
             "get-chain",
-            |mut ctx: StoreContextMut<'_, Store>, ()| -> Result<(Chain,)> {
+            |ctx: StoreContextMut<'_, Store>, ()| -> Result<(Chain,)> {
                 let chain = ctx.get_chain();
                 Ok((chain.clone(),))
             },
@@ -178,7 +161,7 @@ impl WasmActor {
             .expect("Failed to find interface export");
         let (_, export) = self
             .component
-            .export_index(None, export_name)
+            .export_index(Some(&instance), export_name)
             .expect("Failed to find export");
         Ok(export)
     }
