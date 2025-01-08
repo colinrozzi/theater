@@ -50,7 +50,7 @@ impl MessageServerHost {
 
         req.state()
             .with_actor(|actor| {
-                actor.call_func("handle", &evt_bytes);
+                actor.call_func("handle", (evt_bytes,));
                 Ok(())
             })
             .await?;

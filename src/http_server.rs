@@ -86,7 +86,7 @@ impl HttpServerHost {
 
         let http_response: HttpResponse = Some(
             req.state()
-                .with_actor(|actor| actor.call_func("handle_http_request", http_request))
+                .with_actor(|actor| actor.call_func("handle_http_request", (http_request,)))
                 .await,
         );
 
