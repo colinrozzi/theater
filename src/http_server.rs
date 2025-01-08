@@ -8,8 +8,7 @@ use tide::listener::Listener;
 use tide::{Body, Request, Response, Server};
 use tokio::sync::mpsc;
 use tracing::info;
-use wasmtime::component::ComponentType;
-use wasmtime::component::Linker;
+use wasmtime::component::{ComponentType, Lift, Linker, Lower};
 
 #[derive(Clone)]
 pub struct HttpServerHost {
@@ -17,7 +16,7 @@ pub struct HttpServerHost {
     actor_handle: ActorHandle,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, ComponentType)]
+#[derive(Debug, Clone, Deserialize, Serialize, ComponentType, Lift, Lower)]
 #[component(record)]
 pub struct HttpRequest {
     method: String,
@@ -26,7 +25,7 @@ pub struct HttpRequest {
     body: Option<Vec<u8>>,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, ComponentType)]
+#[derive(Debug, Clone, Deserialize, Serialize, ComponentType, Lift, Lower)]
 #[component(record)]
 pub struct HttpResponse {
     status: u16,
@@ -63,9 +62,6 @@ impl HttpServerHost {
     async fn handle_request(mut req: Request<ActorHandle>) -> tide::Result {
         info!("Received {} request to {}", req.method(), req.url().path());
 
-        // Create a channel for receiving the response
-        let (response_tx, mut response_rx) = mpsc::channel(1);
-
         // Get the body bytes
         let body_bytes = req.body_bytes().await?.to_vec();
 
@@ -84,11 +80,19 @@ impl HttpServerHost {
             body: Some(body_bytes),
         };
 
-        let http_response: HttpResponse = Some(
-            req.state()
-                .with_actor(|actor| actor.call_func("handle_http_request", (http_request,)))
-                .await,
-        );
+        let handle_result = req
+            .state()
+            .with_actor_owned(|actor| {
+                let request = http_request.clone();
+                Ok(actor.call_func_async::<(HttpRequest,), (HttpResponse,)>(
+                    "handle_http_request",
+                    (request,),
+                ))
+            })
+            .await;
+
+        // Get the response out of the handle result
+        let http_response = handle_result.unwrap().await.unwrap().0;
 
         // print the type of actor response
         // Process actor response

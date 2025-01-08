@@ -245,6 +245,79 @@ impl WasmActor {
         Ok(result)
     }
 
+    pub fn call_func_async<T, U>(
+        &self,
+        export_name: &str,
+        args: T,
+    ) -> impl Future<Output = Result<U>> + Send
+    where
+        T: wasmtime::component::Lower
+            + wasmtime::component::ComponentNamedList
+            + Send
+            + Sync
+            + Serialize
+            + Debug
+            + 'static,
+        U: wasmtime::component::Lift
+            + wasmtime::component::ComponentNamedList
+            + Send
+            + Sync
+            + Serialize
+            + Debug
+            + Clone
+            + 'static,
+    {
+        // Clone everything we need to move into the future
+        let engine = self.engine.clone();
+        let component = self.component.clone();
+        let linker = self.linker.clone();
+        let store = self.store.clone();
+        let exports = self.exports.clone();
+        let export_name = export_name.to_string();
+
+        async move {
+            let mut store = wasmtime::Store::new(&engine, store);
+            let instance = linker.instantiate_async(&mut store, &component).await?;
+
+            info!("Calling function: {}", export_name);
+            let index = exports
+                .get(&export_name)
+                .ok_or_else(|| WasmError::WasmError {
+                    context: "function lookup",
+                    message: format!("Function {} not found", export_name),
+                })?;
+
+            let func =
+                instance
+                    .get_func(&mut store, *index)
+                    .ok_or_else(|| WasmError::WasmError {
+                        context: "function access",
+                        message: format!("Failed to get function {}", export_name),
+                    })?;
+
+            info!("params type: {:?}", func.params(&mut store));
+            info!("results type: {:?}", func.results(&mut store));
+
+            let typed = func
+                .typed::<T, U>(&mut store)
+                .map_err(|e| WasmError::WasmError {
+                    context: "function type",
+                    message: format!("typed call failed: {}", e),
+                })?;
+
+            let result =
+                typed
+                    .call_async(&mut store, args)
+                    .await
+                    .map_err(|e| WasmError::WasmError {
+                        context: "function call",
+                        message: e.to_string(),
+                    })?;
+
+            Ok(result)
+        }
+    }
+
     // I am going to add a function that will allow us to set up functions to be imports that
     // will add the call and result of that function to the chain, similar to the call_func for
     // exports
