@@ -1,13 +1,12 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::future::Future;
 use std::path::PathBuf;
 use thiserror::Error;
 use wasmtime::chain::Chain;
-use wasmtime::component::{Component, ComponentExportIndex, Linker};
+use wasmtime::component::{Component, ComponentExportIndex, ComponentType, Lift, Linker, Lower};
 use wasmtime::{Engine, StoreContextMut};
 
 use crate::config::ManifestConfig;
@@ -15,11 +14,15 @@ use crate::messages::TheaterCommand;
 use crate::Store;
 use tracing::{error, info};
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, ComponentType, Lift, Lower)]
+#[component(record)]
 pub struct Event {
-    pub type_: String,
-    pub data: Value,
+    pub event_type: String,
+    pub parent: Option<u64>,
+    pub data: Vec<u8>,
 }
+
+type ActorState = Vec<u8>;
 
 #[derive(Error, Debug)]
 pub enum WasmError {
@@ -31,6 +34,15 @@ pub enum WasmError {
         context: &'static str,
         message: String,
     },
+
+    #[error("Function types were incorrect for {func_name} call \n Expected params: {expected_params} \n Expected result: {expected_result} \n Error: {err}")]
+    GetFuncTypedError {
+        context: &'static str,
+        func_name: String,
+        expected_params: String,
+        expected_result: String,
+        err: wasmtime::Error,
+    },
 }
 
 /// WebAssembly actor implementation
@@ -41,6 +53,7 @@ pub struct WasmActor {
     linker: Linker<Store>,
     exports: HashMap<String, ComponentExportIndex>,
     store: Store,
+    actor_state: ActorState,
 }
 
 impl WasmActor {
@@ -65,12 +78,34 @@ impl WasmActor {
             linker,
             exports: HashMap::new(),
             store,
+            actor_state: vec![],
         };
 
         actor.add_runtime_host_func().await?;
         actor.add_runtime_exports()?;
+        actor.init().await;
 
         Ok(actor)
+    }
+
+    async fn init(&mut self) {
+        let init_state_bytes = self
+            .call_func::<(), (ActorState,)>("init", ())
+            .await
+            .unwrap();
+        self.actor_state = init_state_bytes.0;
+    }
+
+    pub async fn handle_event(&mut self, event: Event) -> Result<()> {
+        info!("handling event");
+        let new_state = self
+            .call_func::<(Event, ActorState), (ActorState,)>(
+                "handle",
+                (event, self.actor_state.clone()),
+            )
+            .await?;
+        self.actor_state = new_state.0;
+        Ok(())
     }
 
     async fn add_runtime_host_func(&mut self) -> Result<()> {
@@ -88,15 +123,21 @@ impl WasmActor {
         // Add send function
         runtime.func_wrap(
             "send",
-            |_ctx: wasmtime::StoreContextMut<'_, Store>, (address, msg): (String, Vec<u8>)| {
-                let msg_value: Value =
-                    serde_json::from_slice(&msg).expect("Failed to parse message as JSON");
+            |ctx: wasmtime::StoreContextMut<'_, Store>, (address, msg): (String, Vec<u8>)| {
+                // think about whether this is the correct parent for the message. it feels like
+                // yes but I am not entirely sure
+                let cur_head = ctx.get_chain().head();
+                let evt = Event {
+                    event_type: "message".to_string(),
+                    parent: cur_head,
+                    data: msg,
+                };
 
                 let _result = tokio::spawn(async move {
                     let client = reqwest::Client::new();
                     let _response = client
                         .post(&address)
-                        .json(&msg_value)
+                        .json(&evt)
                         .send()
                         .await
                         .expect("Failed to send message");
@@ -143,8 +184,8 @@ impl WasmActor {
     }
 
     fn add_runtime_exports(&mut self) -> Result<()> {
-        let init_export = self.find_export("ntwk:theater/runtime", "init")?;
-        let handle_export = self.find_export("ntwk:theater/runtime", "handle")?;
+        let init_export = self.find_export("ntwk:theater/actor", "init")?;
+        let handle_export = self.find_export("ntwk:theater/actor", "handle")?;
         self.exports.insert("init".to_string(), init_export);
         self.exports.insert("handle".to_string(), handle_export);
         Ok(())
@@ -212,9 +253,12 @@ impl WasmActor {
 
         let typed = func
             .typed::<T, U>(&mut store)
-            .map_err(|e| WasmError::WasmError {
+            .map_err(|e| WasmError::GetFuncTypedError {
                 context: "function type",
-                message: format!("typed call failed: {}", e),
+                func_name: export_name.to_string(),
+                expected_params: format!("{:?}", func.params(&store)),
+                expected_result: format!("{:?}", func.results(&store)),
+                err: e,
             })?;
 
         let result =

@@ -1,8 +1,9 @@
 use crate::actor_handle::ActorHandle;
 use crate::store::Store;
 use crate::wasm::Event;
+use crate::wasm::WasmActor;
 use anyhow::Result;
-use serde_json::json;
+use thiserror::Error;
 use tide::{Body, Request, Response, Server};
 use tracing::info;
 use wasmtime::component::Linker;
@@ -11,6 +12,15 @@ use wasmtime::component::Linker;
 pub struct MessageServerHost {
     port: u16,
     actor_handle: ActorHandle,
+}
+
+#[derive(Error, Debug)]
+pub enum MessageServerError {
+    #[error("Calling WASM error: {context} - {message}")]
+    WasmError {
+        context: &'static str,
+        message: String,
+    },
 }
 
 impl MessageServerHost {
@@ -38,20 +48,23 @@ impl MessageServerHost {
 
         // Get the body bytes
         let body_bytes = req.body_bytes().await?.to_vec();
+        let evt: Event = serde_json::from_slice(&body_bytes)?;
 
-        let evt = Event {
-            type_: "actor_message".to_string(),
-            data: json!(body_bytes),
-        };
-
-        let evt_bytes = serde_json::to_vec(&evt)?;
-
-        req.state()
-            .with_actor(|actor| {
-                actor.call_func::<(Vec<u8>,), ()>("handle", (evt_bytes,));
-                Ok(())
+        info!("Calling actor");
+        let call = req
+            .state()
+            .with_actor_owned(|mut actor: WasmActor| {
+                Ok(async move {
+                    info!("hello");
+                    actor.handle_event(evt).await.expect("handle_event failed");
+                    info!("calling success");
+                    Ok::<(), MessageServerError>(())
+                })
             })
+            .await?
             .await?;
+        info!("success");
+        info!("Call result: {:?}", call);
 
         Ok(Response::builder(200)
             .body(Body::from_string("Request forwarded to actor".to_string()))

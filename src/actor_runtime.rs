@@ -10,7 +10,6 @@ use crate::Result;
 use std::path::PathBuf;
 use tokio::sync::mpsc::Sender;
 use tracing::{error, info};
-use wasmtime::component::Linker;
 
 pub struct RuntimeComponents {
     pub name: String,
@@ -46,7 +45,6 @@ impl ActorRuntime {
     ) -> Result<RuntimeComponents> {
         let store = Store::new(config.name.clone(), theater_tx.clone());
         let actor = WasmActor::new(config, store).await?;
-        actor.call_func("init", ()).await?;
         let actor_handle = ActorHandle::new(actor);
 
         let handlers = config
