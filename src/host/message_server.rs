@@ -50,13 +50,13 @@ impl MessageServerHost {
         let body_bytes = req.body_bytes().await?.to_vec();
         let evt: Event = serde_json::from_slice(&body_bytes)?;
 
-        info!("Calling actor");
+        info!("Received event: {:?}", evt);
         let call = req
             .state()
             .with_actor_owned(|mut actor: WasmActor| {
                 Ok(async move {
                     info!("hello");
-                    actor.handle_event(evt).await.expect("handle_event failed");
+                    actor.handle_event(evt).await.expect("handle event failed");
                     info!("calling success");
                     Ok::<(), MessageServerError>(())
                 })

@@ -1,5 +1,6 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::future::Future;
@@ -14,12 +15,15 @@ use crate::messages::TheaterCommand;
 use crate::Store;
 use tracing::{error, info};
 
+pub type Json = Vec<u8>;
+
 #[derive(Debug, Clone, Deserialize, Serialize, ComponentType, Lift, Lower)]
 #[component(record)]
 pub struct Event {
+    #[component(name = "event-type")]
     pub event_type: String,
     pub parent: Option<u64>,
-    pub data: Vec<u8>,
+    pub data: Json,
 }
 
 type ActorState = Vec<u8>;
@@ -98,6 +102,12 @@ impl WasmActor {
 
     pub async fn handle_event(&mut self, event: Event) -> Result<()> {
         info!("handling event");
+        info!("Event details: {:#?}", event); // Log full event structure
+        info!(
+            "Current actor state {}",
+            serde_json::to_string(&json!(self.actor_state))?
+        );
+
         let new_state = self
             .call_func::<(Event, ActorState), (ActorState,)>(
                 "handle",
@@ -128,7 +138,7 @@ impl WasmActor {
                 // yes but I am not entirely sure
                 let cur_head = ctx.get_chain().head();
                 let evt = Event {
-                    event_type: "message".to_string(),
+                    event_type: "actor-message".to_string(),
                     parent: cur_head,
                     data: msg,
                 };
@@ -248,8 +258,12 @@ impl WasmActor {
                 message: format!("Failed to get function {}", export_name),
             })?;
 
-        info!("params type: {:?}", func.params(&mut store));
-        info!("results type: {:?}", func.results(&mut store));
+        info!("Function details:");
+        info!("  - Name: {}", export_name);
+        info!("  - Param types raw: {:?}", func.params(&mut store));
+        info!("  - Result types raw: {:?}", func.results(&mut store));
+        info!("  - Generic type T: {}", std::any::type_name::<T>());
+        info!("  - Generic type U: {}", std::any::type_name::<U>());
 
         let typed = func
             .typed::<T, U>(&mut store)
