@@ -9,6 +9,7 @@ use crate::wasm::WasmActor;
 use crate::Result;
 use std::path::PathBuf;
 use tokio::sync::mpsc::Sender;
+use tokio::task::JoinHandle;
 use tracing::{error, info};
 
 pub struct RuntimeComponents {
@@ -18,7 +19,8 @@ pub struct RuntimeComponents {
 
 pub struct ActorRuntime {
     pub actor_id: String,
-    handler_tasks: Vec<tokio::task::JoinHandle<()>>,
+    handler_tasks: Vec<JoinHandle<()>>,
+    actor_task: JoinHandle<()>,
 }
 
 impl ActorRuntime {
@@ -45,7 +47,6 @@ impl ActorRuntime {
     ) -> Result<RuntimeComponents> {
         let store = Store::new(config.name.clone(), theater_tx.clone());
         let actor = WasmActor::new(config, store).await?;
-        let actor_handle = ActorHandle::new(actor);
 
         let handlers = config
             .handlers

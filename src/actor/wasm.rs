@@ -5,7 +5,11 @@ use std::collections::HashMap;
 use std::fmt::Debug;
 use std::future::Future;
 use std::path::PathBuf;
+use std::pin::Pin;
 use thiserror::Error;
+use tokio::sync::mpsc::{Receiver, Sender};
+use tokio::sync::oneshot;
+use tokio::task::JoinHandle;
 use wasmtime::chain::Chain;
 use wasmtime::component::{Component, ComponentExportIndex, ComponentType, Lift, Linker, Lower};
 use wasmtime::{Engine, StoreContextMut};
@@ -49,6 +53,36 @@ pub enum WasmError {
     },
 }
 
+pub enum ActorCommand<T, U>
+where
+    T: wasmtime::component::Lower
+        + wasmtime::component::ComponentNamedList
+        + Send
+        + Sync
+        + Serialize
+        + Debug,
+    U: wasmtime::component::Lift
+        + wasmtime::component::ComponentNamedList
+        + Send
+        + Sync
+        + Serialize
+        + Debug
+        + Clone,
+{
+    Call {
+        export_name: String,
+        args: T,
+        response_tx: oneshot::Sender<Result<U>>,
+    },
+}
+
+pub enum ActorCommandWrapped {
+    Call {
+        export_name: String,
+        handler: Box<dyn FnOnce(&mut WasmActor) -> Pin<Box<dyn Future<Output = ()> + Send>> + Send>,
+    },
+}
+
 /// WebAssembly actor implementation
 #[derive(Clone)]
 pub struct WasmActor {
@@ -58,10 +92,11 @@ pub struct WasmActor {
     pub exports: HashMap<String, ComponentExportIndex>,
     store: Store,
     pub actor_state: ActorState,
+    command_tx: Sender<ActorCommandWrapped>,
 }
 
 impl WasmActor {
-    pub async fn new(config: &ManifestConfig, store: Store) -> Result<Self> {
+    pub async fn new(config: &ManifestConfig, store: Store) -> Result<JoinHandle<()>> {
         // Load WASM component
         let engine = Engine::new(wasmtime::Config::new().async_support(true))?;
         let wasm_bytes =
@@ -76,6 +111,8 @@ impl WasmActor {
         let component = Component::new(&engine, &wasm_bytes)?;
         let linker = Linker::new(&engine);
 
+        let (tx, rx) = tokio::sync::mpsc::channel(100);
+
         let mut actor = WasmActor {
             engine,
             component,
@@ -83,6 +120,7 @@ impl WasmActor {
             exports: HashMap::new(),
             store,
             actor_state: vec![],
+            command_tx: tx,
         };
 
         actor
@@ -94,7 +132,7 @@ impl WasmActor {
             .expect("Failed to add runtime exports");
         actor.init().await;
 
-        Ok(actor)
+        Ok(
     }
 
     async fn init(&mut self) {
@@ -105,7 +143,128 @@ impl WasmActor {
         self.actor_state = init_state_bytes.0;
     }
 
-    pub async fn handle_event(&mut self, event: Event) -> Result<()> {
+    async fn start(mut self, mut rx: Receiver<ActorCommandWrapped>) -> JoinHandle<()> {
+        tokio::spawn(async move {
+            while let Some(cmd) = rx.recv().await {
+                match cmd {
+                    ActorCommandWrapped::Call { handler, .. } => {
+                        handler(&mut self).await;
+                    }
+                }
+            }
+        })
+    }
+
+    async fn handle_command<T, U>(&mut self, cmd: ActorCommand<T, U>) -> Result<()>
+    where
+        T: wasmtime::component::Lower
+            + wasmtime::component::ComponentNamedList
+            + Send
+            + Sync
+            + Serialize
+            + Debug,
+        U: wasmtime::component::Lift
+            + wasmtime::component::ComponentNamedList
+            + Send
+            + Sync
+            + Serialize
+            + Debug
+            + Clone,
+    {
+        match cmd {
+            ActorCommand::Call {
+                export_name,
+                args,
+                response_tx,
+            } => {
+                let mut store = wasmtime::Store::new(&self.engine, self.store.clone());
+                let instance = self
+                    .linker
+                    .instantiate_async(&mut store, &self.component)
+                    .await?;
+
+                let index = self
+                    .exports
+                    .get(&export_name)
+                    .ok_or_else(|| WasmError::WasmError {
+                        context: "function lookup",
+                        message: format!("Function {} not found", export_name),
+                    })?;
+
+                let func =
+                    instance
+                        .get_func(&mut store, *index)
+                        .ok_or_else(|| WasmError::WasmError {
+                            context: "function access",
+                            message: format!("Failed to get function {}", export_name),
+                        })?;
+
+                // This is where type checking happens!
+                let typed =
+                    func.typed::<T, U>(&mut store)
+                        .map_err(|e| WasmError::GetFuncTypedError {
+                            context: "function type",
+                            func_name: export_name.clone(),
+                            expected_params: format!("{:?}", func.params(&store)),
+                            expected_result: format!("{:?}", func.results(&store)),
+                            err: e,
+                        })?;
+
+                let result =
+                    typed
+                        .call_async(&mut store, args)
+                        .await
+                        .map_err(|e| WasmError::WasmError {
+                            context: "function call",
+                            message: e.to_string(),
+                        })?;
+
+                let _ = response_tx.send(Ok(result));
+                Ok(())
+            }
+        }
+    }
+
+    pub async fn call_into_actor<T, U>(&mut self, export_name: String, args: T) -> Result<U>
+    where
+        T: wasmtime::component::Lower
+            + wasmtime::component::ComponentNamedList
+            + Send
+            + Sync
+            + Serialize
+            + Debug,
+        U: wasmtime::component::Lift
+            + wasmtime::component::ComponentNamedList
+            + Send
+            + Sync
+            + Serialize
+            + Debug
+            + Clone,
+    {
+        let (response_tx, response_rx) = oneshot::channel();
+        let cmd = ActorCommand::Call {
+            export_name,
+            args,
+            response_tx,
+        };
+        let handler = Box::new(move |actor: &mut WasmActor| {
+            Box::pin(async move {
+                let _ = actor.handle_command(cmd).await;
+            })
+        });
+
+        self.command_tx
+            .send(ActorCommandWrapped::Call {
+                export_name,
+                handler: handler,
+            })
+            .await
+            .expect("Failed to send command to actor");
+
+        response_rx.await.expect("Failed to receive response")
+    }
+
+    async fn handle_event(&mut self, event: Event) -> Result<()> {
         info!("handling event");
         info!("Event details: {:#?}", event); // Log full event structure
         info!(
@@ -214,7 +373,7 @@ impl WasmActor {
         Ok(())
     }
 
-    pub fn find_export(
+    fn find_export(
         &mut self,
         interface_name: &str,
         export_name: &str,
@@ -234,7 +393,7 @@ impl WasmActor {
         self.exports.get(name)
     }
 
-    pub async fn call_func<T, U>(&self, export_name: &str, args: T) -> Result<U>
+    async fn call_func<T, U>(&self, export_name: &str, args: T) -> Result<U>
     where
         T: wasmtime::component::Lower
             + wasmtime::component::ComponentNamedList
@@ -304,11 +463,4 @@ impl WasmActor {
 
         Ok(result)
     }
-
-    // I am going to add a function that will allow us to set up functions to be imports that
-    // will add the call and result of that function to the chain, similar to the call_func for
-    // exports
-    //
-    // also, I think I can move ownership of the chain into the actor, as the chain should be used
-    // for call_func and set up in wrap_func
 }
