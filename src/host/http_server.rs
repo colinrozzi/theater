@@ -101,12 +101,15 @@ impl HttpServerHost {
                 let request = http_request.clone();
                 info!("calling handle-request");
                 info!("exports: {:?}", actor.exports);
-                Ok(
-                    actor.call_func_async::<(HttpRequest, Vec<u8>), (HttpResponse, Vec<u8>)>(
-                        "handle-request",
-                        (request, actor.actor_state.clone()),
-                    ),
-                )
+                let future = actor.call_func::<(HttpRequest, Vec<u8>), (HttpResponse, Vec<u8>)>(
+                    "handle-request",
+                    (request, actor.actor_state.clone()),
+                );
+                Ok(async move {
+                    let (http_response, new_state) =
+                        future.await.expect("Failed to await handle-request future");
+                    Ok((http_response, new_state))
+                })
             })
             .await
             .expect("Failed to call handle-request");

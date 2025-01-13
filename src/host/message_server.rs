@@ -59,11 +59,8 @@ impl MessageServerHost {
             .with_actor_mut_future(|actor: &mut WasmActor| {
                 let (export_name, args) = ("handle", (evt, actor.actor_state.clone()));
                 let future =
-                    actor.call_func_async::<(Event, ActorState), (ActorState,)>(export_name, args);
-                Ok(async move {
-                    let new_state = future.await?;
-                    Ok(new_state)
-                })
+                    actor.call_func::<(Event, ActorState), (ActorState,)>(export_name, args);
+                Ok(async { future.await })
             })
             .await?;
 
