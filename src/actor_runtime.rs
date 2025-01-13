@@ -72,6 +72,9 @@ impl ActorRuntime {
         // Start all handlers
         for handler in components.handlers {
             let task = tokio::spawn(async move {
+                let _ = handler.setup_host_function().await;
+                let _ = handler.add_exports().await;
+
                 if let Err(e) = handler.start().await {
                     error!("Handler failed: {}", e);
                 }

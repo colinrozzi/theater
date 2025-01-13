@@ -34,12 +34,21 @@ impl ActorHandle {
         future.await
     }
 
-    pub async fn with_actor_owned<F, R>(&self, f: F) -> Result<R>
+    pub async fn with_actor_mut_future<F, Fut, R>(&self, f: F) -> Result<R>
     where
-        F: FnOnce(WasmActor) -> Result<R>,
+        F: FnOnce(&mut WasmActor) -> Result<Fut>,
+        Fut: Future<Output = Result<R>>,
     {
-        let actor = self.actor.lock().await;
-        let actor_clone = actor.clone();
-        f(actor_clone)
+        let mut actor = self.actor.lock().await;
+        let future = f(&mut actor)?;
+        future.await
+    }
+
+    pub async fn with_actor_mut<F, R>(&self, f: F) -> Result<R>
+    where
+        F: FnOnce(&mut WasmActor) -> Result<R>,
+    {
+        let mut actor = self.actor.lock().await;
+        f(&mut actor)
     }
 }

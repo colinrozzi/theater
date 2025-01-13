@@ -1,11 +1,11 @@
 use crate::actor_handle::ActorHandle;
-use crate::store::Store;
+use crate::wasm::WasmActor;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use tide::listener::Listener;
 use tide::{Body, Request, Response, Server};
 use tracing::info;
-use wasmtime::component::{ComponentType, Lift, Linker, Lower};
+use wasmtime::component::{ComponentType, Lift, Lower};
 
 #[derive(Clone)]
 pub struct HttpServerHost {
@@ -35,7 +35,25 @@ impl HttpServerHost {
         Self { port, actor_handle }
     }
 
-    pub fn setup_host_function(&self, _linker: &mut Linker<Store>) -> Result<()> {
+    pub fn setup_host_functions(&self) -> Result<()> {
+        Ok(())
+    }
+
+    pub async fn add_exports(&self) -> Result<()> {
+        info!("Adding exports to http-server");
+        let _ = self
+            .actor_handle
+            .with_actor_mut(|actor: &mut WasmActor| -> Result<()> {
+                let handle_request_export =
+                    actor.find_export("ntwk:theater/http-server", "handle-request")?;
+                actor
+                    .exports
+                    .insert("handle-request".to_string(), handle_request_export);
+                info!("Added handle-request export to http-server");
+                info!("exports: {:?}", actor.exports);
+                Ok(())
+            })
+            .await;
         Ok(())
     }
 
@@ -77,19 +95,30 @@ impl HttpServerHost {
             body: Some(body_bytes),
         };
 
-        let handle_result = req
+        let (http_response, new_state): (HttpResponse, Vec<u8>) = req
             .state()
-            .with_actor_owned(|actor| {
+            .with_actor_mut_future(|actor: &mut WasmActor| {
                 let request = http_request.clone();
-                Ok(actor.call_func_async::<(HttpRequest,), (HttpResponse,)>(
-                    "handle_http_request",
-                    (request,),
-                ))
+                info!("calling handle-request");
+                info!("exports: {:?}", actor.exports);
+                Ok(
+                    actor.call_func_async::<(HttpRequest, Vec<u8>), (HttpResponse, Vec<u8>)>(
+                        "handle-request",
+                        (request, actor.actor_state.clone()),
+                    ),
+                )
             })
-            .await;
+            .await
+            .expect("Failed to call handle-request");
 
-        // Get the response out of the handle result
-        let http_response = handle_result.unwrap().await.unwrap().0;
+        // Update the actor state
+        req.state()
+            .with_actor_mut(|actor: &mut WasmActor| {
+                actor.actor_state = new_state;
+                Ok(())
+            })
+            .await
+            .expect("Failed to update actor state");
 
         // print the type of actor response
         // Process actor response

@@ -1,12 +1,11 @@
 use crate::actor_handle::ActorHandle;
-use crate::store::Store;
+use crate::wasm::ActorState;
 use crate::wasm::Event;
 use crate::wasm::WasmActor;
 use anyhow::Result;
 use thiserror::Error;
 use tide::{Body, Request, Response, Server};
 use tracing::info;
-use wasmtime::component::Linker;
 
 #[derive(Clone)]
 pub struct MessageServerHost {
@@ -28,7 +27,11 @@ impl MessageServerHost {
         Self { port, actor_handle }
     }
 
-    pub fn setup_host_function(&self, _linker: &mut Linker<Store>) -> Result<()> {
+    pub fn setup_host_functions(&self) -> Result<()> {
+        Ok(())
+    }
+
+    pub async fn add_exports(&self) -> Result<()> {
         Ok(())
     }
 
@@ -53,18 +56,25 @@ impl MessageServerHost {
         info!("Received event: {:?}", evt);
         let call = req
             .state()
-            .with_actor_owned(|mut actor: WasmActor| {
+            .with_actor_mut_future(|actor: &mut WasmActor| {
+                let (export_name, args) = ("handle", (evt, actor.actor_state.clone()));
+                let future =
+                    actor.call_func_async::<(Event, ActorState), (ActorState,)>(export_name, args);
                 Ok(async move {
-                    info!("hello");
-                    actor.handle_event(evt).await.expect("handle event failed");
-                    info!("calling success");
-                    Ok::<(), MessageServerError>(())
+                    let new_state = future.await?;
+                    Ok(new_state)
                 })
             })
-            .await?
             .await?;
+
+        req.state()
+            .with_actor_mut(|actor: &mut WasmActor| {
+                actor.actor_state = call.0;
+                Ok(())
+            })
+            .await?;
+
         info!("success");
-        info!("Call result: {:?}", call);
 
         Ok(Response::builder(200)
             .body(Body::from_string("Request forwarded to actor".to_string()))

@@ -76,6 +76,7 @@ fn setup_logging(level: &str, actor_only: bool) {
 
     tracing_subscriber::fmt()
         .with_env_filter(filter)
+        .with_line_number(true)
         .with_writer(std::io::stdout)
         .init();
 }

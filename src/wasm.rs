@@ -26,7 +26,7 @@ pub struct Event {
     pub data: Json,
 }
 
-type ActorState = Vec<u8>;
+pub type ActorState = Vec<u8>;
 
 #[derive(Error, Debug)]
 pub enum WasmError {
@@ -55,9 +55,9 @@ pub struct WasmActor {
     engine: Engine,
     component: Component,
     linker: Linker<Store>,
-    exports: HashMap<String, ComponentExportIndex>,
+    pub exports: HashMap<String, ComponentExportIndex>,
     store: Store,
-    actor_state: ActorState,
+    pub actor_state: ActorState,
 }
 
 impl WasmActor {
@@ -85,8 +85,13 @@ impl WasmActor {
             actor_state: vec![],
         };
 
-        actor.add_runtime_host_func().await?;
-        actor.add_runtime_exports()?;
+        actor
+            .add_runtime_host_func()
+            .await
+            .expect("Failed to add runtime host functions");
+        actor
+            .add_runtime_exports()
+            .expect("Failed to add runtime exports");
         actor.init().await;
 
         Ok(actor)
@@ -105,7 +110,7 @@ impl WasmActor {
         info!("Event details: {:#?}", event); // Log full event structure
         info!(
             "Current actor state {}",
-            serde_json::to_string(&json!(self.actor_state))?
+            serde_json::to_string(&json!(self.actor_state)).expect("Failed to serialize state")
         );
 
         let new_state = self
@@ -113,13 +118,17 @@ impl WasmActor {
                 "handle",
                 (event, self.actor_state.clone()),
             )
-            .await?;
+            .await
+            .expect("Failed to call handle function");
         self.actor_state = new_state.0;
         Ok(())
     }
 
     async fn add_runtime_host_func(&mut self) -> Result<()> {
-        let mut runtime = self.linker.instance("ntwk:theater/runtime")?;
+        let mut runtime = self
+            .linker
+            .instance("ntwk:theater/runtime")
+            .expect("Failed to get runtime instance");
 
         runtime.func_wrap(
             "log",
@@ -194,14 +203,18 @@ impl WasmActor {
     }
 
     fn add_runtime_exports(&mut self) -> Result<()> {
-        let init_export = self.find_export("ntwk:theater/actor", "init")?;
-        let handle_export = self.find_export("ntwk:theater/actor", "handle")?;
+        let init_export = self
+            .find_export("ntwk:theater/actor", "init")
+            .expect("Failed to find init export");
+        let handle_export = self
+            .find_export("ntwk:theater/actor", "handle")
+            .expect("Failed to find handle export");
         self.exports.insert("init".to_string(), init_export);
         self.exports.insert("handle".to_string(), handle_export);
         Ok(())
     }
 
-    fn find_export(
+    pub fn find_export(
         &mut self,
         interface_name: &str,
         export_name: &str,
@@ -241,9 +254,14 @@ impl WasmActor {
         let instance = self
             .linker
             .instantiate_async(&mut store, &self.component)
-            .await?;
+            .await
+            .map_err(|e| WasmError::WasmError {
+                context: "instantiation",
+                message: e.to_string(),
+            })?;
 
         info!("Calling function: {}", export_name);
+        info!("Existing exports: {:?}", self.exports);
         let index = self
             .get_export(export_name)
             .ok_or_else(|| WasmError::WasmError {
@@ -337,8 +355,12 @@ impl WasmActor {
                         message: format!("Failed to get function {}", export_name),
                     })?;
 
-            info!("params type: {:?}", func.params(&mut store));
-            info!("results type: {:?}", func.results(&mut store));
+            info!("Function details:");
+            info!("  - Name: {}", export_name);
+            info!("  - Param types raw: {:?}", func.params(&mut store));
+            info!("  - Result types raw: {:?}", func.results(&mut store));
+            info!("  - Generic type T: {}", std::any::type_name::<T>());
+            info!("  - Generic type U: {}", std::any::type_name::<U>());
 
             let typed = func
                 .typed::<T, U>(&mut store)

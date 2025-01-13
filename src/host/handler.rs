@@ -3,8 +3,6 @@ use crate::config::HandlerConfig;
 use crate::host::http_server::HttpServerHost;
 use crate::host::message_server::MessageServerHost;
 use crate::Result;
-use crate::Store;
-use wasmtime::component::Linker;
 
 pub enum Handler {
     MessageServer(MessageServerHost),
@@ -37,11 +35,18 @@ impl Handler {
         }
     }
 
-    pub async fn setup_host_function(&self, linker: &mut Linker<Store>) -> Result<()> {
+    pub async fn setup_host_function(&self) -> Result<()> {
         match self {
-            Handler::MessageServer(handler) => handler.setup_host_function(linker)?,
-            Handler::HttpServer(handler) => handler.setup_host_function(linker)?,
+            Handler::MessageServer(handler) => handler.setup_host_functions()?,
+            Handler::HttpServer(handler) => handler.setup_host_functions()?,
         }
         Ok(())
+    }
+
+    pub async fn add_exports(&self) -> Result<()> {
+        match self {
+            Handler::MessageServer(handler) => Ok(handler.add_exports().await?),
+            Handler::HttpServer(handler) => Ok(handler.add_exports().await?),
+        }
     }
 }
