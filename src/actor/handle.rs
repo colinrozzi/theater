@@ -1,54 +1,45 @@
-use crate::wasm::WasmActor;
+use super::wasm::WasmActor;
 use anyhow::Result;
+use serde::{Deserialize, Serialize};
+use std::fmt::Debug;
 use std::future::Future;
-use std::sync::Arc;
-use tokio::sync::Mutex;
+use std::pin::Pin;
+use tokio::sync::{mpsc, oneshot};
+use tokio::task::JoinHandle;
+use wasmtime::component::{ComponentNamedList, Lift, Lower};
 
-#[derive(Clone)]
+use super::command::ActorCommand;
+
+#[derive(Debug, Clone)]
 pub struct ActorHandle {
-    actor: Arc<Mutex<WasmActor>>,
+    command_tx: mpsc::Sender<ActorMessage<T, U>>,
 }
 
 impl ActorHandle {
-    pub fn new(actor: WasmActor) -> Self {
-        Self {
-            actor: Arc::new(Mutex::new(actor)),
-        }
+    pub fn new(command_tx: mpsc::Sender<ActorMessage<T, U>>) -> Self {
+        Self { command_tx }
     }
 
-    pub async fn with_actor<F, R>(&self, f: F) -> Result<R>
+    pub async fn call_func<T, U>(&self, export_name: String, params: T) -> Result<U>
     where
-        F: FnOnce(&WasmActor) -> Result<R>,
+        T: Lower + ComponentNamedList + Send + Sync + Serialize + Debug + 'static,
+        U: Lift + ComponentNamedList + Send + Sync + Serialize + Debug + Clone + 'static,
     {
-        let actor = self.actor.lock().await;
-        f(&actor)
+        let (response_tx, response_rx) = oneshot::channel();
+
+        self.command_tx
+            .send(ActorCommand::Call {
+                export_name,
+                params,
+                response_tx,
+            })
+            .await?;
+
+        response_rx.await?
     }
 
-    pub async fn with_actor_future<F, Fut, R>(&self, f: F) -> Result<R>
-    where
-        F: FnOnce(&WasmActor) -> Result<Fut>,
-        Fut: Future<Output = Result<R>>,
-    {
-        let actor = self.actor.lock().await;
-        let future = f(&actor)?;
-        future.await
-    }
-
-    pub async fn with_actor_mut_future<F, Fut, R>(&self, f: F) -> Result<R>
-    where
-        F: FnOnce(&mut WasmActor) -> Result<Fut>,
-        Fut: Future<Output = Result<R>>,
-    {
-        let mut actor = self.actor.lock().await;
-        let future = f(&mut actor)?;
-        future.await
-    }
-
-    pub async fn with_actor_mut<F, R>(&self, f: F) -> Result<R>
-    where
-        F: FnOnce(&mut WasmActor) -> Result<R>,
-    {
-        let mut actor = self.actor.lock().await;
-        f(&mut actor)
+    pub async fn shutdown(self) -> Result<()> {
+        drop(self.command_tx);
+        Ok(())
     }
 }

@@ -1,19 +1,22 @@
-use crate::actor_handle::ActorHandle;
+use crate::actor::ActorCommandErased;
+use crate::actor::ActorHandle;
+use crate::actor::WasmActor;
 use crate::config::{HandlerConfig, ManifestConfig};
 use crate::host::handler::Handler;
 use crate::host::http_server::HttpServerHost;
 use crate::host::message_server::MessageServerHost;
 use crate::messages::TheaterCommand;
 use crate::store::Store;
-use crate::wasm::WasmActor;
 use crate::Result;
 use std::path::PathBuf;
-use tokio::sync::mpsc::Sender;
+use tokio::sync::mpsc::{Receiver, Sender};
 use tokio::task::JoinHandle;
 use tracing::{error, info};
 
 pub struct RuntimeComponents {
     pub name: String,
+    pub actor_rx: Receiver<ActorCommandErased>,
+    pub actor: WasmActor,
     handlers: Vec<Handler>,
 }
 
@@ -46,7 +49,9 @@ impl ActorRuntime {
         theater_tx: Sender<TheaterCommand>,
     ) -> Result<RuntimeComponents> {
         let store = Store::new(config.name.clone(), theater_tx.clone());
+        let (actor_tx, actor_rx) = tokio::sync::mpsc::channel(100);
         let actor = WasmActor::new(config, store).await?;
+        let actor_handle = ActorHandle::new(actor_tx);
 
         let handlers = config
             .handlers
@@ -63,6 +68,8 @@ impl ActorRuntime {
 
         Ok(RuntimeComponents {
             name: config.name.clone(),
+            actor_rx,
+            actor,
             handlers,
         })
     }
@@ -83,10 +90,15 @@ impl ActorRuntime {
             handler_tasks.push(task);
         }
 
+        let actor_task = tokio::spawn(async move {
+            let _ = components.actor.run(components.actor_rx).await;
+        });
+
         info!("Actor runtime started");
 
         Ok(Self {
             actor_id: components.name,
+            actor_task,
             handler_tasks,
         })
     }

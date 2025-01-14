@@ -1,5 +1,5 @@
-use crate::actor_handle::ActorHandle;
-use crate::wasm::WasmActor;
+use crate::actor::ActorHandle;
+use crate::actor::WasmActor;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use tide::listener::Listener;

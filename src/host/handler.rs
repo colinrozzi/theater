@@ -1,4 +1,4 @@
-use crate::actor_handle::ActorHandle;
+use crate::actor::ActorHandle;
 use crate::config::HandlerConfig;
 use crate::host::http_server::HttpServerHost;
 use crate::host::message_server::MessageServerHost;
