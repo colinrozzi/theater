@@ -1,7 +1,6 @@
 use crate::actor_handle::ActorHandle;
 use crate::wasm::ActorState;
 use crate::wasm::Event;
-use crate::wasm::WasmActor;
 use anyhow::Result;
 use thiserror::Error;
 use tide::{Body, Request, Response, Server};

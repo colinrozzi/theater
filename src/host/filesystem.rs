@@ -1,12 +1,11 @@
 use crate::actor_handle::ActorHandle;
-use crate::wasm::WasmActor;
 use crate::Store;
 use anyhow::Result;
 use std::fs::File;
-use std::io::{BufRead, BufReader, Read};
+use std::io::{BufReader, Read};
 use std::path::{Path, PathBuf};
 use tracing::{error, info};
-use wasmtime::{StoreContextMut, Trap};
+use wasmtime::StoreContextMut;
 
 pub struct FileSystemHost {
     path: PathBuf,
