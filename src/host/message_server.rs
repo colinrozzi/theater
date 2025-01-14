@@ -54,22 +54,16 @@ impl MessageServerHost {
         let evt: Event = serde_json::from_slice(&body_bytes)?;
 
         info!("Received event: {:?}", evt);
-        let call = req
-            .state()
-            .with_actor_mut_future(|actor: &mut WasmActor| {
-                let (export_name, args) = ("handle", (evt, actor.actor_state.clone()));
-                let future =
-                    actor.call_func::<(Event, ActorState), (ActorState,)>(export_name, args);
-                Ok(async { future.await })
-            })
-            .await?;
+        let mut actor = req.state().inner().lock().await;
+        let (new_state,) = actor
+            .call_func::<(Event, ActorState), (ActorState,)>(
+                "handle-request",
+                (evt, actor.actor_state.clone()),
+            )
+            .await
+            .expect("Failed to call handle-request");
 
-        req.state()
-            .with_actor_mut(|actor: &mut WasmActor| {
-                actor.actor_state = call.0;
-                Ok(())
-            })
-            .await?;
+        actor.actor_state = new_state;
 
         info!("success");
 

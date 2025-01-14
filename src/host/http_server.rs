@@ -95,33 +95,17 @@ impl HttpServerHost {
             body: Some(body_bytes),
         };
 
-        let (http_response, new_state): (HttpResponse, Vec<u8>) = req
-            .state()
-            .with_actor_mut_future(|actor: &mut WasmActor| {
-                let request = http_request.clone();
-                info!("calling handle-request");
-                info!("exports: {:?}", actor.exports);
-                let future = actor.call_func::<(HttpRequest, Vec<u8>), (HttpResponse, Vec<u8>)>(
-                    "handle-request",
-                    (request, actor.actor_state.clone()),
-                );
-                Ok(async move {
-                    let (http_response, new_state) =
-                        future.await.expect("Failed to await handle-request future");
-                    Ok((http_response, new_state))
-                })
-            })
+        let mut actor = req.state().inner().lock().await;
+
+        let (http_response, new_state) = actor
+            .call_func::<(HttpRequest, Vec<u8>), (HttpResponse, Vec<u8>)>(
+                "handle-request",
+                (http_request, actor.actor_state.clone()),
+            )
             .await
             .expect("Failed to call handle-request");
 
-        // Update the actor state
-        req.state()
-            .with_actor_mut(|actor: &mut WasmActor| {
-                actor.actor_state = new_state;
-                Ok(())
-            })
-            .await
-            .expect("Failed to update actor state");
+        actor.actor_state = new_state;
 
         // print the type of actor response
         // Process actor response
