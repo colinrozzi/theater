@@ -1,5 +1,6 @@
 use crate::actor_handle::ActorHandle;
 use crate::config::{HandlerConfig, ManifestConfig};
+use crate::host::filesystem::FileSystemHost;
 use crate::host::handler::Handler;
 use crate::host::http_server::HttpServerHost;
 use crate::host::message_server::MessageServerHost;
@@ -13,6 +14,7 @@ use tracing::{error, info};
 
 pub struct RuntimeComponents {
     pub name: String,
+    pub actor_handle: ActorHandle,
     handlers: Vec<Handler>,
 }
 
@@ -57,29 +59,42 @@ impl ActorRuntime {
                 HandlerConfig::HttpServer(config) => {
                     Handler::HttpServer(HttpServerHost::new(config.port, actor_handle.clone()))
                 }
+                HandlerConfig::FileSystem(config) => Handler::FileSystem(FileSystemHost::new(
+                    config.path.clone(),
+                    actor_handle.clone(),
+                )),
             })
             .collect();
 
         Ok(RuntimeComponents {
             name: config.name.clone(),
+            actor_handle,
             handlers,
         })
     }
 
     pub async fn start(components: RuntimeComponents) -> Result<Self> {
-        let mut handler_tasks = Vec::new();
+        {
+            for handler in &components.handlers {
+                let _ = handler.setup_host_function().await;
+                let _ = handler.add_exports().await;
+            }
+        }
 
+        let mut handler_tasks = Vec::new();
         // Start all handlers
         for handler in components.handlers {
             let task = tokio::spawn(async move {
-                let _ = handler.setup_host_function().await;
-                let _ = handler.add_exports().await;
-
                 if let Err(e) = handler.start().await {
                     error!("Handler failed: {}", e);
                 }
             });
             handler_tasks.push(task);
+        }
+
+        {
+            let mut actor = components.actor_handle.inner().lock().await;
+            actor.init().await;
         }
 
         info!("Actor runtime started");

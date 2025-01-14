@@ -63,10 +63,12 @@ pub struct InterfacesConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", content = "config")]
 pub enum HandlerConfig {
-    #[serde(rename = "Http-server")]
+    #[serde(rename = "http-server")]
     HttpServer(HttpServerHandlerConfig),
-    #[serde(rename = "Message-server")]
+    #[serde(rename = "message-server")]
     MessageServer(MessageServerConfig),
+    #[serde(rename = "filesystem")]
+    FileSystem(FileSystemHandlerConfig),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -77,6 +79,11 @@ pub struct HttpServerHandlerConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MessageServerConfig {
     pub port: u16,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FileSystemHandlerConfig {
+    pub path: PathBuf,
 }
 
 impl ManifestConfig {

@@ -54,9 +54,9 @@ pub enum WasmError {
 pub struct WasmActor {
     engine: Engine,
     component: Component,
-    linker: Linker<Store>,
+    pub linker: Linker<Store>,
     pub exports: HashMap<String, ComponentExportIndex>,
-    store: Store,
+    pub store: Store,
     pub actor_state: ActorState,
 }
 
@@ -92,12 +92,11 @@ impl WasmActor {
         actor
             .add_runtime_exports()
             .expect("Failed to add runtime exports");
-        actor.init().await;
 
         Ok(actor)
     }
 
-    async fn init(&mut self) {
+    pub async fn init(&mut self) {
         let init_state_bytes = self
             .call_func::<(), (ActorState,)>("init", ())
             .await

@@ -1,5 +1,6 @@
 use crate::actor_handle::ActorHandle;
 use crate::config::HandlerConfig;
+use crate::host::filesystem::FileSystemHost;
 use crate::host::http_server::HttpServerHost;
 use crate::host::message_server::MessageServerHost;
 use crate::Result;
@@ -7,6 +8,7 @@ use crate::Result;
 pub enum Handler {
     MessageServer(MessageServerHost),
     HttpServer(HttpServerHost),
+    FileSystem(FileSystemHost),
 }
 
 impl Handler {
@@ -18,6 +20,9 @@ impl Handler {
             HandlerConfig::HttpServer(config) => {
                 Handler::HttpServer(HttpServerHost::new(config.port, actor_handle))
             }
+            HandlerConfig::FileSystem(config) => {
+                Handler::FileSystem(FileSystemHost::new(config.path, actor_handle))
+            }
         }
     }
 
@@ -25,6 +30,7 @@ impl Handler {
         match self {
             Handler::MessageServer(handler) => handler.start().await,
             Handler::HttpServer(handler) => handler.start().await,
+            Handler::FileSystem(handler) => handler.start().await,
         }
     }
 
@@ -32,6 +38,7 @@ impl Handler {
         match self {
             Handler::MessageServer(_) => "message-server".to_string(),
             Handler::HttpServer(_) => "http-server".to_string(),
+            Handler::FileSystem(_) => "filesystem".to_string(),
         }
     }
 
@@ -39,6 +46,7 @@ impl Handler {
         match self {
             Handler::MessageServer(handler) => handler.setup_host_functions()?,
             Handler::HttpServer(handler) => handler.setup_host_functions()?,
+            Handler::FileSystem(handler) => handler.setup_host_functions().await?,
         }
         Ok(())
     }
@@ -47,6 +55,7 @@ impl Handler {
         match self {
             Handler::MessageServer(handler) => Ok(handler.add_exports().await?),
             Handler::HttpServer(handler) => Ok(handler.add_exports().await?),
+            Handler::FileSystem(handler) => Ok(handler.add_exports().await?),
         }
     }
 }

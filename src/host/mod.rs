@@ -6,3 +6,6 @@ pub use message_server::MessageServerHost;
 
 pub mod handler;
 pub use handler::Handler;
+
+pub mod filesystem;
+pub use filesystem::FileSystemHost;
