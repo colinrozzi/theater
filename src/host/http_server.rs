@@ -97,8 +97,8 @@ impl HttpServerHost {
 
         let mut actor = req.state().inner().lock().await;
 
-        let (http_response, new_state) = actor
-            .call_func::<(HttpRequest, Vec<u8>), (HttpResponse, Vec<u8>)>(
+        let ((http_response, new_state),) = actor
+            .call_func::<(HttpRequest, Vec<u8>), ((HttpResponse, Vec<u8>),)>(
                 "handle-request",
                 (http_request, actor.actor_state.clone()),
             )
