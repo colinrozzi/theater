@@ -1,14 +1,32 @@
 use anyhow::Result;
-use serde_json::Value;
+use serde::{Deserialize, Serialize};
+use serde_json::json;
 use std::collections::HashMap;
+use std::fmt::Debug;
+use std::future::Future;
+use std::path::PathBuf;
 use thiserror::Error;
-use wasmtime::component::{Component, ComponentExportIndex, Instance, Linker};
-use wasmtime::Engine;
+use wasmtime::chain::Chain;
+use wasmtime::component::{Component, ComponentExportIndex, ComponentType, Lift, Linker, Lower};
+use wasmtime::{Engine, StoreContextMut};
 
-use crate::capabilities::{ActorCapability, BaseActorCapability, HttpCapability};
 use crate::config::ManifestConfig;
-use crate::{Actor, ActorInput, ActorOutput, Store};
+use crate::messages::TheaterCommand;
+use crate::Store;
 use tracing::{error, info};
+
+pub type Json = Vec<u8>;
+
+#[derive(Debug, Clone, Deserialize, Serialize, ComponentType, Lift, Lower)]
+#[component(record)]
+pub struct Event {
+    #[component(name = "event-type")]
+    pub event_type: String,
+    pub parent: Option<u64>,
+    pub data: Json,
+}
+
+pub type ActorState = Vec<u8>;
 
 #[derive(Error, Debug)]
 pub enum WasmError {
@@ -20,26 +38,41 @@ pub enum WasmError {
         context: &'static str,
         message: String,
     },
+
+    #[error("Function types were incorrect for {func_name} call \n Expected params: {expected_params} \n Expected result: {expected_result} \n Error: {err}")]
+    GetFuncTypedError {
+        context: &'static str,
+        func_name: String,
+        expected_params: String,
+        expected_result: String,
+        err: wasmtime::Error,
+    },
 }
 
-/// Implementation of the Actor trait for WebAssembly components
+/// WebAssembly actor implementation
+#[derive(Clone)]
 pub struct WasmActor {
     engine: Engine,
     component: Component,
-    linker: Linker<Store>,
-    capabilities: Vec<Box<dyn ActorCapability>>,
-    exports: HashMap<String, ComponentExportIndex>,
-    store: Store,
+    pub linker: Linker<Store>,
+    pub exports: HashMap<String, ComponentExportIndex>,
+    pub store: Store,
+    pub actor_state: ActorState,
 }
 
 impl WasmActor {
-    pub fn new(config: &ManifestConfig, store: Store) -> Result<Self> {
+    pub async fn new(config: &ManifestConfig, store: Store) -> Result<Self> {
         // Load WASM component
-        let engine = Engine::default();
-        let wasm_bytes = std::fs::read(&config.component_path).map_err(|e| WasmError::WasmError {
-            context: "component loading",
-            message: format!("Failed to load WASM component from {}: {}", config.component_path.display(), e),
-        })?;
+        let engine = Engine::new(wasmtime::Config::new().async_support(true))?;
+        let wasm_bytes =
+            std::fs::read(&config.component_path).map_err(|e| WasmError::WasmError {
+                context: "component loading",
+                message: format!(
+                    "Failed to load WASM component from {}: {}",
+                    config.component_path.display(),
+                    e
+                ),
+            })?;
         let component = Component::new(&engine, &wasm_bytes)?;
         let linker = Linker::new(&engine);
 
@@ -47,51 +80,187 @@ impl WasmActor {
             engine,
             component,
             linker,
-            capabilities: Vec::new(),
             exports: HashMap::new(),
             store,
+            actor_state: vec![],
         };
 
-        if config.interface() == "ntwk:simple-actor/actor" {
-            actor.add_capability(Box::new(BaseActorCapability))?;
-        }
-
-        if config.implements_interface("ntwk:simple-http-actor/http-actor") {
-            actor.add_capability(Box::new(HttpCapability))?;
-        }
+        actor
+            .add_runtime_host_func()
+            .await
+            .expect("Failed to add runtime host functions");
+        actor
+            .add_runtime_exports()
+            .expect("Failed to add runtime exports");
 
         Ok(actor)
     }
 
-    fn add_capability(&mut self, capability: Box<dyn ActorCapability>) -> Result<()> {
-        // Setup host functions
-        capability.setup_host_functions(&mut self.linker)?;
+    pub async fn init(&mut self) {
+        let init_state_bytes = self
+            .call_func::<(), (ActorState,)>("init", ())
+            .await
+            .unwrap();
+        self.actor_state = init_state_bytes.0;
+    }
 
-        // Get and store exports
-        let exports = capability.get_exports(&self.component)?;
-        for (name, index) in exports {
-            self.exports.insert(name, index);
-        }
+    pub async fn handle_event(&mut self, event: Event) -> Result<()> {
+        info!("handling event");
+        info!("Event details: {:#?}", event); // Log full event structure
+        info!(
+            "Current actor state {}",
+            serde_json::to_string(&json!(self.actor_state)).expect("Failed to serialize state")
+        );
 
-        self.capabilities.push(capability);
+        let new_state = self
+            .call_func::<(Event, ActorState), (ActorState,)>(
+                "handle",
+                (event, self.actor_state.clone()),
+            )
+            .await
+            .expect("Failed to call handle function");
+        self.actor_state = new_state.0;
         Ok(())
+    }
+
+    async fn add_runtime_host_func(&mut self) -> Result<()> {
+        let mut runtime = self
+            .linker
+            .instance("ntwk:theater/runtime")
+            .expect("Failed to get runtime instance");
+
+        runtime.func_wrap(
+            "log",
+            |ctx: wasmtime::StoreContextMut<'_, Store>, (msg,): (String,)| {
+                let id = ctx.data().id.clone();
+                info!("[ACTOR] [{}] {}", id, msg);
+                Ok(())
+            },
+        )?;
+
+        // Add send function
+        runtime.func_wrap(
+            "send",
+            |ctx: wasmtime::StoreContextMut<'_, Store>, (address, msg): (String, Vec<u8>)| {
+                // think about whether this is the correct parent for the message. it feels like
+                // yes but I am not entirely sure
+                let cur_head = ctx.get_chain().head();
+                let evt = Event {
+                    event_type: "actor-message".to_string(),
+                    parent: cur_head,
+                    data: msg,
+                };
+
+                let _result = tokio::spawn(async move {
+                    let client = reqwest::Client::new();
+                    let _response = client
+                        .post(&address)
+                        .json(&evt)
+                        .send()
+                        .await
+                        .expect("Failed to send message");
+                });
+                Ok(())
+            },
+        )?;
+
+        let _ = runtime.func_wrap_async(
+            "spawn",
+            |mut ctx: wasmtime::StoreContextMut<'_, Store>,
+             (manifest,): (String,)|
+             -> Box<dyn Future<Output = Result<()>> + Send> {
+                let store = ctx.data_mut();
+                let theater_tx = store.theater_tx.clone();
+                info!("Spawning actor with manifest: {}", manifest);
+                Box::new(async move {
+                    let (response_tx, _response_rx) = tokio::sync::oneshot::channel();
+                    info!("sending spawn command");
+                    match theater_tx
+                        .send(TheaterCommand::SpawnActor {
+                            manifest_path: PathBuf::from(manifest),
+                            response_tx,
+                        })
+                        .await
+                    {
+                        Ok(_) => info!("spawn command sent"),
+                        Err(e) => error!("error sending spawn command: {:?}", e),
+                    }
+                    Ok(())
+                })
+            },
+        );
+
+        runtime.func_wrap(
+            "get-chain",
+            |ctx: StoreContextMut<'_, Store>, ()| -> Result<(Chain,)> {
+                let chain = ctx.get_chain();
+                Ok((chain.clone(),))
+            },
+        )?;
+
+        Ok(())
+    }
+
+    fn add_runtime_exports(&mut self) -> Result<()> {
+        let init_export = self
+            .find_export("ntwk:theater/actor", "init")
+            .expect("Failed to find init export");
+        let handle_export = self
+            .find_export("ntwk:theater/actor", "handle")
+            .expect("Failed to find handle export");
+        self.exports.insert("init".to_string(), init_export);
+        self.exports.insert("handle".to_string(), handle_export);
+        Ok(())
+    }
+
+    pub fn find_export(
+        &mut self,
+        interface_name: &str,
+        export_name: &str,
+    ) -> Result<ComponentExportIndex> {
+        let (_, instance) = self
+            .component
+            .export_index(None, interface_name)
+            .expect("Failed to find interface export");
+        let (_, export) = self
+            .component
+            .export_index(Some(&instance), export_name)
+            .expect("Failed to find export");
+        Ok(export)
     }
 
     fn get_export(&self, name: &str) -> Option<&ComponentExportIndex> {
         self.exports.get(name)
     }
 
-    fn call_func<T, U>(
-        &self,
-        store: &mut wasmtime::Store<Store>,
-        instance: &Instance,
-        export_name: &str,
-        args: T,
-    ) -> Result<U>
+    pub async fn call_func<T, U>(&self, export_name: &str, args: T) -> Result<U>
     where
-        T: wasmtime::component::Lower + wasmtime::component::ComponentNamedList,
-        U: wasmtime::component::Lift + wasmtime::component::ComponentNamedList,
+        T: wasmtime::component::Lower
+            + wasmtime::component::ComponentNamedList
+            + Send
+            + Sync
+            + Serialize
+            + Debug,
+        U: wasmtime::component::Lift
+            + wasmtime::component::ComponentNamedList
+            + Send
+            + Sync
+            + Serialize
+            + Debug
+            + Clone,
     {
+        let mut store = wasmtime::Store::new(&self.engine, self.store.clone());
+        let instance = self
+            .linker
+            .instantiate_async(&mut store, &self.component)
+            .await
+            .map_err(|e| WasmError::WasmError {
+                context: "instantiation",
+                message: e.to_string(),
+            })?;
+
+        info!("Calling function: {}", export_name);
+        info!("Existing exports: {:?}", self.exports);
         let index = self
             .get_export(export_name)
             .ok_or_else(|| WasmError::WasmError {
@@ -100,139 +269,45 @@ impl WasmActor {
             })?;
 
         let func = instance
-            .get_func(&mut *store, *index)
+            .get_func(&mut store, *index)
             .ok_or_else(|| WasmError::WasmError {
                 context: "function access",
                 message: format!("Failed to get function {}", export_name),
             })?;
 
+        info!("Function details:");
+        info!("  - Name: {}", export_name);
+        info!("  - Param types raw: {:?}", func.params(&mut store));
+        info!("  - Result types raw: {:?}", func.results(&mut store));
+        info!("  - Generic type T: {}", std::any::type_name::<T>());
+        info!("  - Generic type U: {}", std::any::type_name::<U>());
+
         let typed = func
-            .typed::<T, U>(&mut *store)
-            .map_err(|e| WasmError::WasmError {
+            .typed::<T, U>(&mut store)
+            .map_err(|e| WasmError::GetFuncTypedError {
                 context: "function type",
-                message: e.to_string(),
+                func_name: export_name.to_string(),
+                expected_params: format!("{:?}", func.params(&store)),
+                expected_result: format!("{:?}", func.results(&store)),
+                err: e,
             })?;
 
-        Ok(typed
-            .call(&mut *store, args)
-            .map_err(|e| WasmError::WasmError {
-                context: "function call",
-                message: e.to_string(),
-            })?)
-    }
-}
+        let result =
+            typed
+                .call_async(&mut store, args)
+                .await
+                .map_err(|e| WasmError::WasmError {
+                    context: "function call",
+                    message: e.to_string(),
+                })?;
 
-impl Actor for WasmActor {
-    fn init(&self) -> Result<Value> {
-        let mut store = wasmtime::Store::new(&self.engine, self.store.clone());
-        let instance = self.linker.instantiate(&mut store, &self.component)?;
-
-        let (result,) = self.call_func::<(), (Vec<u8>,)>(&mut store, &instance, "init", ())?;
-        let state: Value = serde_json::from_slice(&result)?;
-
-        Ok(state)
+        Ok(result)
     }
 
-    fn handle_input(&self, input: ActorInput, state: &Value) -> Result<(ActorOutput, Value)> {
-        let mut store = wasmtime::Store::new(&self.engine, self.store.clone());
-        let instance = self.linker.instantiate(&mut store, &self.component)?;
-
-        let state_bytes = serde_json::to_vec(state)?;
-
-        match input {
-            ActorInput::Message(msg) => {
-                let msg_bytes = serde_json::to_vec(&msg)?;
-                info!("[ACTOR] Received message: {}", msg);
-                let (result,) = self.call_func::<(Vec<u8>, Vec<u8>), (Vec<u8>,)>(
-                    &mut store,
-                    &instance,
-                    "handle",
-                    (msg_bytes, state_bytes),
-                )?;
-                info!("[ACTOR] Response size: {} bytes", result.len());
-                let new_state: Value = serde_json::from_slice(&result)?;
-                Ok((ActorOutput::Message(msg), new_state))
-            }
-            ActorInput::HttpRequest {
-                method,
-                uri,
-                headers,
-                body,
-            } => {
-                if !self.exports.contains_key("handle-http") {
-                    return Err(anyhow::anyhow!("Actor does not support HTTP"));
-                }
-
-                let request = serde_json::json!({
-                    "method": method,
-                    "uri": uri,
-                    "headers": { "fields": headers },
-                    "body": body,
-                });
-
-                info!("[HTTP] Received request: {} {}", method, uri);
-                let request_bytes = serde_json::to_vec(&request)?;
-                let (result,) = self.call_func::<(Vec<u8>, Vec<u8>), (Vec<u8>,)>(
-                    &mut store,
-                    &instance,
-                    "handle-http",
-                    (request_bytes, state_bytes),
-                )?;
-
-                let response: Value = serde_json::from_slice(&result)?;
-                info!("[HTTP] Response: {:?}", response);
-                let new_state = response["state"].clone();
-                let http_response = response["response"].clone();
-
-                // HTTP Response: {"body":"<!DOCTYPE html>\n<html>\n<head>\n    <title>Simple Frontend</title>\n</head>\n<body>\n    <h1>Hello from the Frontend Actor!</h1>\n    <p>This is a simple HTML page served by our WebAssembly actor.</p>\n</body>\n</html>","headers":{"Content-Type":"text/html"},"status":200}
-
-                let status = http_response["status"].as_u64().unwrap_or(500) as u16;
-
-                let headers = http_response["headers"]
-                    .as_object()
-                    .map(|obj| {
-                        obj.iter()
-                            .map(|(k, v)| (k.to_string(), v.as_str().unwrap_or("").to_string()))
-                            .collect()
-                    })
-                    .unwrap_or_default();
-
-                let body = http_response["body"]
-                    .as_str()
-                    .map(|s| s.as_bytes().to_vec())
-                    .unwrap_or_default();
-
-                Ok((
-                    ActorOutput::HttpResponse {
-                        status,
-                        headers,
-                        body: Some(body),
-                    },
-                    new_state,
-                ))
-            }
-        }
-    }
-
-    fn verify_state(&self, state: &Value) -> bool {
-        let mut store = wasmtime::Store::new(&self.engine, self.store.clone());
-        let instance = match self.linker.instantiate(&mut store, &self.component) {
-            Ok(instance) => instance,
-            Err(_) => return false,
-        };
-
-        let state_bytes = match serde_json::to_vec(state) {
-            Ok(bytes) => bytes,
-            Err(_) => return false,
-        };
-
-        self.call_func::<(Vec<u8>,), (bool,)>(
-            &mut store,
-            &instance,
-            "state-contract",
-            (state_bytes,),
-        )
-        .map(|(result,)| result)
-        .unwrap_or(false)
-    }
+    // I am going to add a function that will allow us to set up functions to be imports that
+    // will add the call and result of that function to the chain, similar to the call_func for
+    // exports
+    //
+    // also, I think I can move ownership of the chain into the actor, as the chain should be used
+    // for call_func and set up in wrap_func
 }

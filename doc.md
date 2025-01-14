@@ -18,139 +18,131 @@ Theater is designed to solve several key challenges in distributed systems:
 ## System Architecture
 
 ```
-┌─────────────────┐         ┌─────────────────┐
-│   HTTP Server   │         │  WASM Component │
-│                 │◄────────│                 │
-└────────┬────────┘         └────────┬────────┘
-         │                           │
-         │         ┌─────────────────┤
-         │         │                 │
-    ┌────▼─────────▼────┐     ┌─────┴──────┐
-    │    Runtime Core   │◄────┤  Manifest   │
-    │                  │     │  Parser     │
-    └────────┬─────────┘     └────────────┘
+┌─────────────────────────┐         ┌─────────────────────┐
+│      Handler Layer      │         │   WASM Component    │
+│  ┌─────────┬─────────┐ │◄────────│                     │
+│  │  HTTP   │ Message │ │         └─────────┬───────────┘
+│  │ Server  │ Server  │ │                   │
+└──┴─────────┴─────────┴─┘                   │
+           │                                  │
+           │              ┌──────────────────▼┐
+     ┌─────▼──────────┐  │   Actor Process   │
+     │ Actor Runtime  │◄─┤                    │
+     └───────┬────────┘  └──────────┬────────┘
+             │                       │
+     ┌───────▼────────┐    ┌────────▼───────┐
+     │  Chain Handler │    │   Actor State   │
+     └───────┬────────┘    └────────────────┘
              │
-    ┌────────▼─────────┐
-    │    Hash Chain    │
-    │                 │
-    └────────┬─────────┘
-             │
-    ┌────────▼─────────┐
-    │  State Storage   │
-    │    (Memory)      │
-    └──────────────────┘
+     ┌───────▼────────┐
+     │  Hash Chain    │
+     └────────────────┘
 ```
 
 ### Key Components
 
-1. **Runtime Core**: Manages actor lifecycle, state, and chain recording
-   - State management
-   - Chain recording
-   - Component lifecycle
-   - Message routing
+1. **Handler Layer**
+   - `HttpServerHost`: Handles incoming HTTP requests
+   - `MessageServerHost`: Manages actor-to-actor messaging
+   - Routing incoming requests to appropriate actors
 
-2. **Hash Chain**: Records and verifies all state changes
-   - Immutable history
+2. **Actor Runtime**
+   - `ActorRuntime`: Manages component lifecycle
+   - `RuntimeComponents`: Core runtime infrastructure
+   - Chain request handling
+   - Component initialization
+
+3. **Actor Process**
+   - State management
+   - Event handling
+   - Message processing
+   - Chain synchronization
+
+4. **Chain Handler**
+   - Chain entry management
+   - Event recording
    - State verification
    - Chain integrity
-   - Audit capability
 
-3. **WebAssembly Integration**: Manages component execution
+5. **WebAssembly Integration**
    - Component loading
-   - State isolation
-   - Message handling
-   - Contract verification
-
-4. **Network Interface**: Exposes actors to the world
-   - HTTP endpoints
-   - Message routing
-   - Chain access
-   - State queries
+   - Capability management
+   - Host function provisioning
+   - Interface verification
 
 ## Features
 
 ### Actor State Management
-- Complete state history
-- Verifiable transitions
-- Contract enforcement
-- State isolation
+- Complete state history through HashChain
+- Verifiable state transitions
+- JSON-based state storage
+- Atomic updates
 
-### Hash Chain Verification
-- Immutable record
-- State verification
-- Chain integrity
-- Audit support
+### Event System
+- Structured event types
+  - HttpRequest
+  - ActorMessage
+  - StateChange
+- Complete event history
+- Event verification
+- Chain-based ordering
 
 ### Multiple Interface Types
-- Actor-to-actor messaging
 - HTTP server capabilities
-- HTTP client capabilities
-- Extensible interface system
+- Actor-to-actor messaging
+- Extensible handler system
+- Common message format
 
-## Design Principles
-
-1. **Explicit over Implicit**
-   - All possible interactions explicitly modeled
-   - Clear state transitions
-   - Defined contracts
-   - Transparent routing
-
-2. **Verifiable State**
-   - Every change recorded
-   - Chain verification
-   - Contract enforcement
-   - State validation
-
-3. **Extensible Interfaces**
-   - Multiple interaction patterns
-   - Easy to add new interfaces
-   - Protocol abstraction
-   - Clean separation
-
-4. **Clean Separation**
-   - Modular design
-   - Interface independence
-   - Clear boundaries
-   - Minimal coupling
-
-5. **Type Safety**
-   - Strong typing
-   - Contract verification
-   - Message validation
-   - State checking
+### WebAssembly Integration
+- Component model support
+- Capability-based security
+- Interface contracts
+- Runtime isolation
 
 ## Implementation Notes
 
-### State Management
+### Actor Interface
 ```rust
 pub trait Actor {
-    fn init(&self) -> Result<Value>;
-    fn handle_input(&self, input: ActorInput, state: &Value) -> Result<(ActorOutput, Value)>;
-    fn verify_state(&self, state: &Value) -> bool;
+    async fn init(&self) -> Result<Value>;
+    async fn handle_event(&self, state: Value, event: Event) 
+        -> Result<(Value, Event)>;
+    async fn verify_state(&self, state: &Value) -> bool;
 }
 ```
 
-### Message Processing
+### Event Structure
 ```rust
-pub enum ActorInput {
-    Message(Value),
-    HttpRequest { ... },
-    // Future input types
+pub struct Event {
+    pub type_: String,
+    pub data: Value,
 }
 
-pub enum ActorOutput {
-    Message(Value),
-    HttpResponse { ... },
-    // Future output types
+pub struct ChainEntry {
+    pub event: Event,
+    pub parent: Option<String>,
+}
+```
+
+### Handler Types
+```rust
+pub enum Handler {
+    MessageServer(MessageServerHost),
+    HttpServer(HttpServerHost),
+}
+
+pub enum ChainRequestType {
+    GetHead,
+    GetChainEntry(String),
+    GetChain,
+    AddEvent { event: Event },
 }
 ```
 
 ## Quick Start
 
-1. Install Rust and cargo
+1. Install dependencies
 ```bash
-git clone https://github.com/colinrozzi/theater.git
-cd theater
 cargo build
 ```
 
@@ -161,48 +153,57 @@ component_path = "path/to/actor.wasm"
 
 [interface]
 implements = "ntwk:simple-actor/actor"
-requires = []
 
 [[handlers]]
-type = "Http"
+type = "Http-server"
 config = { port = 8080 }
+
+[[handlers]]
+type = "Message-server"
+config = { port = 8081 }
 ```
 
-3. Run an actor:
+3. Run the actor:
 ```bash
-cargo run -- --manifest path/to/your/manifest.toml
+cargo run -- --manifest path/to/manifest.toml
 ```
 
 ## Development Status
 
-Current work focuses on:
-1. Manifest parsing and runtime initialization
-2. Actor-to-actor communication
-3. HTTP interface implementation
+Current features:
+1. Basic actor system with state management
+2. HTTP and message server handlers
+3. Chain-based event recording
+4. WebAssembly component support
+5. JSON-based state and messaging
 
-See [Building Actors](docs/building-actors.md) for detailed development documentation.
+In progress:
+1. Enhanced chain verification
+2. Additional handler types
+3. More complex component interactions
 
 ## Contributing
 
-When adding new features:
-1. Consider how they fit into the core abstractions
-2. Ensure all state changes are properly recorded
-3. Add appropriate tests
-4. Update documentation
+When adding features:
+1. Consider the actor model
+2. Ensure state verification
+3. Maintain chain integrity
+4. Add appropriate tests
+5. Update documentation
 
 ## Next Steps
 
-### Phase 1: Core Implementation
-- Complete basic message-passing interface
-- Add WASM component integration
-- Implement manifest parsing
+### Phase 1: Core Stability
+- Enhance error handling
+- Improve state verification
+- Add chain optimization
 
-### Phase 2: HTTP Support
-- Implement HTTP server interface
-- Create example HTTP actors
-- Add WebSocket support
+### Phase 2: Extended Features
+- Additional handler types
+- Enhanced HTTP capabilities
+- WebSocket support
 
-### Phase 3: Enhanced Features
-- Add more interface types (filesystem, timers, etc.)
-- Improve chain verification
-- Develop debugging and visualization tools
+### Phase 3: Developer Tools
+- Chain visualization
+- State inspection tools
+- Development utilities

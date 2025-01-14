@@ -1,0 +1,5 @@
+package ntwk:theater;
+
+interface filesystem {
+    read-file: func(path: string) -> string;
+}

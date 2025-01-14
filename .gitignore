@@ -2,8 +2,11 @@ target/
 target/*
 node_modules/
 node_modules/*
+notes/*
 logs/
 logs/*
 .aider*
 .env
 !.gitignore
+dir-rep.xml
+debug.log

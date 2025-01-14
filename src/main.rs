@@ -1,9 +1,10 @@
 use anyhow::Result;
-use chrono::Utc;
 use clap::Parser;
 use std::path::PathBuf;
-use theater::ActorRuntime;
+use theater::messages::TheaterCommand;
+use theater::theater_runtime::TheaterRuntime;
 use tracing::info;
+use tracing_subscriber::EnvFilter;
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -11,12 +12,19 @@ struct Args {
     /// Path to the actor manifest file
     #[arg(short, long)]
     manifest: PathBuf,
+
+    /// logging
+    #[arg(short, long, default_value = "info")]
+    log_level: String,
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
     // Parse command line arguments
     let args = Args::parse();
+
+    // Setup logging
+    setup_logging(&args.log_level, true);
 
     // Verify manifest file exists
     if !args.manifest.exists() {
@@ -26,25 +34,49 @@ async fn main() -> Result<()> {
         ));
     }
 
-    // Create and initialize the runtime
-    let runtime = ActorRuntime::from_file(args.manifest).await?;
+    let mut theater = TheaterRuntime::new().await?;
 
-    // Start the event server if configured
-    if let Some(event_config) = &runtime.config.event_server.clone() {
-        tokio::spawn(async move {
-            theater::event_server::run_event_server(runtime.config.event_server.unwrap().port)
-                .await;
-        });
-        info!("Event server starting on port {}", event_config.port);
-    }
+    let theater_tx = theater.theater_tx.clone();
 
-    info!("Actor '{}' initialized successfully!", runtime.config.name);
+    // Start the theater runtime
+    let theater_handle = tokio::spawn(async move {
+        theater.run().await.unwrap();
+    });
 
-    // Wait for Ctrl+C
-    info!("Actor started at {}", Utc::now());
+    let (response_tx, response_rx) = tokio::sync::oneshot::channel();
+    let _ = theater_tx
+        .send(TheaterCommand::SpawnActor {
+            manifest_path: args.manifest.clone(),
+            response_tx,
+        })
+        .await;
+
+    let actor_id = response_rx.await?;
+    info!("Actor spawned with id: {:?}", actor_id?);
+
+    // Wait for the theater runtime to finish
+    theater_handle.await?;
+
+    // Wait for ctrl-c
     tokio::signal::ctrl_c().await?;
 
-    info!("Shutting down...");
     Ok(())
 }
 
+fn setup_logging(level: &str, actor_only: bool) {
+    let filter = if actor_only {
+        EnvFilter::from_default_env()
+            .add_directive(format!("theater={}", level).parse().unwrap())
+            .add_directive("actix_web=info".parse().unwrap())
+            .add_directive("actor=info".parse().unwrap())
+            .add_directive("wasm_component=debug".parse().unwrap())
+    } else {
+        EnvFilter::from_default_env().add_directive(format!("theater={}", level).parse().unwrap())
+    };
+
+    tracing_subscriber::fmt()
+        .with_env_filter(filter)
+        .with_line_number(true)
+        .with_writer(std::io::stdout)
+        .init();
+}
