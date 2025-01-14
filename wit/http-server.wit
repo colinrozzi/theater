@@ -1,0 +1,20 @@
+package ntwk:theater;
+
+interface http-server {
+    use types.{json};
+
+    record http-request {
+        method: string,
+        uri: string,
+        headers: list<tuple<string, string>>,
+        body: option<json>
+    }
+
+    record http-response {
+        status: u16,
+        headers: list<tuple<string, string>>,
+        body: option<json>
+    }
+
+    handle-request: func(req: http-request, state: json) -> tuple<http-response, json>;
+}
