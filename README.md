@@ -18,25 +18,72 @@ A WebAssembly actor system that enables state management, verification, and flex
 
 ### Using Nix (Recommended)
 
-The easiest way to get started is using Nix with flakes enabled:
+Theater uses Nix with flakes for reproducible development environments. Here's how to get started:
 
-1. [Install Nix](https://nixos.org/download.html)
+1. First, install Nix:
+https://nixos.org/download/
+
 2. Enable flakes by either:
-   - Adding `experimental-features = nix-command flakes` to your `/etc/nix/nix.conf`
-   - Or using `nix --experimental-features 'nix-command flakes'` for each command
+   - Adding to your `/etc/nix/nix.conf`:
+     ```
+     experimental-features = nix-command flakes
+     ```
+   - Or using the environment variable for each command:
+     ```bash
+     export NIX_CONFIG="experimental-features = nix-command flakes"
+     ```
 
 3. Clone the repository:
-```bash
-git clone https://github.com/colinrozzi/theater.git
-cd theater
-```
+   ```bash
+   git clone https://github.com/colinrozzi/theater.git
+   cd theater
+   ```
 
 4. Enter the development environment:
-```bash
-nix develop
-```
+   ```bash
+   nix develop
+   ```
 
-This will set up everything you need including the correct Rust version and all required dependencies.
+The development environment provides:
+- Rust toolchain with the exact version needed
+- LLVM and Clang for wasmtime
+- All required system dependencies
+- Development tools like `cargo-watch`, `cargo-expand`, etc.
+
+#### Common Nix Commands
+
+- Start a new shell with the development environment:
+  ```bash
+  nix develop
+  ```
+
+- Run a command in the development environment without entering a shell:
+  ```bash
+  nix develop --command cargo build
+  ```
+
+- Update flake dependencies:
+  ```bash
+  nix flake update
+  ```
+
+#### Troubleshooting Nix
+
+- If you see "experimental feature" errors:
+  Make sure you've enabled flakes as described above.
+
+- If you see "nix-command" errors:
+  Your Nix installation might be too old. Update it with:
+  ```bash
+  nix-env -iA nixpkgs.nix
+  ```
+
+- If builds are slow on macOS:
+  Consider enabling the binary cache:
+  ```bash
+  nix-env -iA nixpkgs.cachix
+  cachix use your-cache-name
+  ```
 
 ### Manual Setup
 
