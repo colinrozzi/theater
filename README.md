@@ -155,6 +155,3 @@ When using the Nix development environment, you get access to several useful too
 7. Push to the branch (`git push origin feature/amazing-feature`)
 8. Open a Pull Request
 
-## License
-
-[Insert your chosen license here]
