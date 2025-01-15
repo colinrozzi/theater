@@ -1,9 +1,17 @@
 use crate::actor_handle::ActorHandle;
 use crate::wasm::WasmActor;
 use anyhow::Result;
+use axum::{
+    body::Bytes,
+    extract::State,
+    http::{HeaderValue, Request, StatusCode},
+    response::{IntoResponse, Response},
+    routing::any,
+    Router,
+};
 use serde::{Deserialize, Serialize};
-use tide::listener::Listener;
-use tide::{Body, Request, Response, Server};
+use std::net::SocketAddr;
+use std::sync::Arc;
 use tracing::info;
 use wasmtime::component::{ComponentType, Lift, Lower};
 
@@ -58,70 +66,92 @@ impl HttpServerHost {
     }
 
     pub async fn start(&self) -> Result<()> {
-        info!("HTTP-SERVER starting on port {}", self.port);
-        let mut app = Server::with_state(self.actor_handle.clone());
-        app.at("/*").all(Self::handle_request);
-        app.at("/").all(Self::handle_request);
+        let app = Router::new()
+            .route("/*path", any(Self::handle_request))
+            .with_state(Arc::new(self.actor_handle.clone()));
 
-        // First bind the server
-        let mut listener = app.bind(format!("127.0.0.1:{}", self.port)).await?;
+        let addr = SocketAddr::from(([127, 0, 0, 1], self.port));
+        info!("HTTP server starting on port {}", self.port);
+        let listener = tokio::net::TcpListener::bind(&addr).await?;
 
-        info!("HTTP-SERVER starting on port {}", self.port);
-
-        // Then start accepting connections
-        listener.accept().await?;
+        axum::serve(listener, app.into_make_service()).await?;
 
         Ok(())
     }
 
-    async fn handle_request(mut req: Request<ActorHandle>) -> tide::Result {
-        info!("Received {} request to {}", req.method(), req.url().path());
+    async fn handle_request(
+        State(actor_handle): State<Arc<ActorHandle>>,
+        request: Request<Bytes>,
+    ) -> Response {
+        // Changed return type to concrete Response
+        info!(
+            "Received {} request to {}",
+            request.method(),
+            request.uri().path()
+        );
+
+        // Convert headers to Vec<(String, String)>
+        let headers: Vec<(String, String)> = request
+            .headers()
+            .iter()
+            .map(|(name, value)| {
+                (
+                    name.to_string(),
+                    value.to_str().unwrap_or_default().to_string(),
+                )
+            })
+            .collect();
 
         // Get the body bytes
-        let body_bytes = req.body_bytes().await?.to_vec();
+        let body = request.into_body();
+        let body_bytes = body.to_vec();
 
         let http_request = HttpRequest {
-            method: req.method().to_string(),
-            uri: req.url().path().to_string(),
-            headers: req
-                .header_names()
-                .map(|name| {
-                    (
-                        name.to_string(),
-                        req.header(name).unwrap().iter().next().unwrap().to_string(),
-                    )
-                })
-                .collect(),
+            method: request.method().to_string(),
+            uri: request.uri().path().to_string(),
+            headers,
             body: Some(body_bytes),
         };
 
-        let mut actor = req.state().inner().lock().await;
+        let mut actor = actor_handle.inner().lock().await;
 
-        let ((http_response, new_state),) = actor
+        match actor
             .call_func::<(HttpRequest, Vec<u8>), ((HttpResponse, Vec<u8>),)>(
                 "handle-request",
                 (http_request, actor.actor_state.clone()),
             )
             .await
-            .expect("Failed to call handle-request");
+        {
+            Ok(((http_response, new_state),)) => {
+                actor.actor_state = new_state;
 
-        actor.actor_state = new_state;
+                // Convert HttpResponse to axum Response
+                let mut response = Response::builder()
+                    .status(StatusCode::from_u16(http_response.status).unwrap_or(StatusCode::OK));
 
-        // print the type of actor response
-        // Process actor response
-        // will come back as a serde_json::Value, so we need to convert it to a HttpResponse
-        //let http_response: HttpResponse = serde_json::from_value(actor_response).unwrap();
+                if let Some(headers) = response.headers_mut() {
+                    for (key, value) in http_response.headers {
+                        if let Ok(header_value) = HeaderValue::from_str(&value) {
+                            if let Ok(header_name) = key.parse() {
+                                headers.insert(header_name, header_value);
+                            }
+                        }
+                    }
+                }
 
-        let mut response = Response::new(http_response.status);
+                // Add body if present
+                let response = if let Some(body) = http_response.body {
+                    response.body(body.into()).unwrap_or_default()
+                } else {
+                    response.body(Vec::new().into()).unwrap_or_default()
+                };
 
-        for (key, value) in http_response.headers {
-            response.insert_header(key.as_str(), value.as_str());
+                response
+            }
+            Err(e) => Response::builder()
+                .status(StatusCode::INTERNAL_SERVER_ERROR)
+                .body(format!("Error: {}", e).into())
+                .unwrap_or_default(),
         }
-
-        if let Some(body) = http_response.body {
-            response.set_body(Body::from_bytes(body));
-        }
-
-        Ok(response)
     }
 }
