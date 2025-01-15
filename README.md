@@ -119,14 +119,19 @@ component_path = "path/to/actor.wasm"
 implements = "ntwk:simple-actor/actor"
 requires = []
 
+# Optional message-server capability
 [[handlers]]
 type = "message-server"
 config = { port = 8080 }
+interface = "ntwk:theater/message-server-client"
 
+# Optional HTTP server capability
 [[handlers]]
 type = "http-server"
 config = { port = 8081 }
 ```
+
+Note: The message-server handler is optional and requires implementing the `message-server-client` interface if you want your actor to handle messages.
 
 ## Development Tools
 

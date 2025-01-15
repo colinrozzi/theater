@@ -4,26 +4,45 @@ Theater's interface system enables actors to expose and consume functionality wh
 
 ## Core Interface
 
-Every actor implements a core message handler:
+Every actor implements a core initialization interface:
 
 ```rust
-fn handle(state: &str, message: &str) -> (String, String)
+fn init() -> String
 ```
 
-This simple interface:
-- Takes JSON state and message
-- Returns new state and response
-- Creates hash chain entries
-- Enables composition
+This creates the initial state for the actor. Additional functionality like message handling can be added through optional interfaces.
+
+## Message Handler Interface
+
+Actors can optionally implement the message-server-client interface to handle messages:
+
+```rust
+fn handle(event: Event, state: &str) -> String
+```
+
+This interface:
+- Takes an event and current state
+- Returns new state
+- Is tracked in the hash chain
+- Enables actor-to-actor communication
 
 ## Interface Types
 
 ### Actor-to-Actor
 ```toml
 [interface]
-implements = "ntwk:simple-actor/actor"
+implements = [
+    "ntwk:simple-actor/actor",
+    "ntwk:theater/message-server-client"
+]
 requires = []
+
+[[handlers]]
+type = "message-server"
+config = { port = 8080 }
 ```
+
+Note: The message-server interface is optional. Only implement it if your actor needs to handle messages.
 
 Basic message pattern:
 ```json
@@ -180,8 +199,16 @@ struct MultiActor {
 }
 
 impl Actor for MultiActor {
-    fn handle(&self, state: &str, msg: &str) -> (String, String) {
-        // Handle basic actor messages
+    fn init(&self) -> String {
+        // Initialize actor state
+        "{}".to_string()
+    }
+}
+
+impl MessageServerClient for MultiActor {
+    fn handle(&self, event: Event, state: &str) -> String {
+        // Handle incoming messages
+        // Return new state
     }
 }
 
@@ -206,6 +233,7 @@ component_path = "multi_actor.wasm"
 [interface]
 implements = [
   "ntwk:simple-actor/actor",
+  "ntwk:theater/message-server-client",
   "ntwk:simple-actor/http-server",
   "ntwk:simple-actor/metrics"
 ]
