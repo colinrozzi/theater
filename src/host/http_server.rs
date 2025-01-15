@@ -4,7 +4,7 @@ use anyhow::Result;
 use axum::{
     body::Bytes,
     extract::State,
-    http::{HeaderValue, Request, StatusCode},
+    http::{HeaderName, HeaderValue, Request, StatusCode},
     response::{IntoResponse, Response},
     routing::any,
     Router,
@@ -81,34 +81,37 @@ impl HttpServerHost {
 
     async fn handle_request(
         State(actor_handle): State<Arc<ActorHandle>>,
-        request: Request<Bytes>,
+        request: Bytes,
     ) -> Response {
+        let http_request = match serde_json::from_slice::<HttpRequest>(&request) {
+            Ok(http_request) => http_request,
+            Err(e) => {
+                return Response::builder()
+                    .status(StatusCode::BAD_REQUEST)
+                    .body(format!("Error: {}", e).into())
+                    .unwrap_or_default()
+            }
+        };
         // Changed return type to concrete Response
         info!(
             "Received {} request to {}",
-            request.method(),
-            request.uri().path()
+            http_request.method, http_request.uri
         );
 
         // Convert headers to Vec<(String, String)>
-        let headers: Vec<(String, String)> = request
-            .headers()
+        let headers: Vec<(String, String)> = http_request
+            .headers
             .iter()
-            .map(|(name, value)| {
-                (
-                    name.to_string(),
-                    value.to_str().unwrap_or_default().to_string(),
-                )
-            })
+            .map(|(name, value)| (name.to_string(), value.to_string()))
             .collect();
 
         // Get the body bytes
-        let body = request.into_body();
+        let body = http_request.body.unwrap_or_default();
         let body_bytes = body.to_vec();
 
         let http_request = HttpRequest {
-            method: request.method().to_string(),
-            uri: request.uri().path().to_string(),
+            method: http_request.method.to_string(),
+            uri: http_request.uri.to_string(),
             headers,
             body: Some(body_bytes),
         };
@@ -132,7 +135,7 @@ impl HttpServerHost {
                 if let Some(headers) = response.headers_mut() {
                     for (key, value) in http_response.headers {
                         if let Ok(header_value) = HeaderValue::from_str(&value) {
-                            if let Ok(header_name) = key.parse() {
+                            if let Ok(header_name) = key.parse::<HeaderName>() {
                                 headers.insert(header_name, header_value);
                             }
                         }
