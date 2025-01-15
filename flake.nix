@@ -9,10 +9,8 @@
     };
     flake-utils.url = "github:numtide/flake-utils";
     
-    # Add crane for better Rust handling
     crane = {
       url = "github:ipetkov/crane";
-      inputs.nixpkgs.follows = "nixpkgs";
     };
   };
 
@@ -24,8 +22,8 @@
           inherit system overlays;
         };
 
-        # Get a specific rust toolchain with component-model support
-        rustToolchain = pkgs.rust-bin.stable."1.75.0".default.override {
+        # Updated to Rust 1.81.0 for cranelift-entity
+        rustToolchain = pkgs.rust-bin.stable."1.82.0".default.override {
           extensions = [ 
             "rust-src"
             "rust-analyzer"
@@ -43,6 +41,13 @@
           buildInputs = with pkgs; [
             pkg-config
             openssl
+          ];
+          
+          # Add LLVM dependencies for wasmtime
+          nativeBuildInputs = with pkgs; [
+            llvmPackages.llvm
+            llvmPackages.clang
+            cmake
           ];
         };
 
@@ -87,6 +92,9 @@
             pkg-config
             openssl
             curl
+            llvmPackages.llvm
+            llvmPackages.clang
+            cmake
 
             # Development tools
             cargo-watch
@@ -102,6 +110,9 @@
           # Environment variables
           shellHook = ''
             export RUST_SRC_PATH="${rustToolchain}/lib/rustlib/src/rust/library"
+            
+            # Required for wasmtime build
+            export LIBCLANG_PATH="${pkgs.llvmPackages.libclang.lib}/lib"
             
             # Print some helpful information
             echo "🎭 Theater Development Environment"
