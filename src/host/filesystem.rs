@@ -4,7 +4,7 @@ use anyhow::Result;
 use std::fs::File;
 use std::io::{BufReader, Read};
 use std::path::{Path, PathBuf};
-use tracing::{error, info};
+use tracing::info;
 use wasmtime::StoreContextMut;
 
 pub struct FileSystemHost {

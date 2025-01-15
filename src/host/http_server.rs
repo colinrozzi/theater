@@ -4,8 +4,8 @@ use anyhow::Result;
 use axum::{
     body::Bytes,
     extract::State,
-    http::{HeaderName, HeaderValue, Request, StatusCode},
-    response::{IntoResponse, Response},
+    http::{HeaderName, HeaderValue, StatusCode},
+    response::Response,
     routing::any,
     Router,
 };
