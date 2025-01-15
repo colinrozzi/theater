@@ -138,32 +138,6 @@ impl WasmActor {
             },
         )?;
 
-        // Add send function
-        runtime.func_wrap(
-            "send",
-            |ctx: wasmtime::StoreContextMut<'_, Store>, (address, msg): (String, Vec<u8>)| {
-                // think about whether this is the correct parent for the message. it feels like
-                // yes but I am not entirely sure
-                let cur_head = ctx.get_chain().head();
-                let evt = Event {
-                    event_type: "actor-message".to_string(),
-                    parent: cur_head,
-                    data: msg,
-                };
-
-                let _result = tokio::spawn(async move {
-                    let client = reqwest::Client::new();
-                    let _response = client
-                        .post(&address)
-                        .json(&evt)
-                        .send()
-                        .await
-                        .expect("Failed to send message");
-                });
-                Ok(())
-            },
-        )?;
-
         let _ = runtime.func_wrap_async(
             "spawn",
             |mut ctx: wasmtime::StoreContextMut<'_, Store>,
@@ -205,11 +179,7 @@ impl WasmActor {
         let init_export = self
             .find_export("ntwk:theater/actor", "init")
             .expect("Failed to find init export");
-        let handle_export = self
-            .find_export("ntwk:theater/actor", "handle")
-            .expect("Failed to find handle export");
         self.exports.insert("init".to_string(), init_export);
-        self.exports.insert("handle".to_string(), handle_export);
         Ok(())
     }
 
@@ -303,11 +273,4 @@ impl WasmActor {
 
         Ok(result)
     }
-
-    // I am going to add a function that will allow us to set up functions to be imports that
-    // will add the call and result of that function to the chain, similar to the call_func for
-    // exports
-    //
-    // also, I think I can move ownership of the chain into the actor, as the chain should be used
-    // for call_func and set up in wrap_func
 }

@@ -33,14 +33,8 @@ impl FileSystemHost {
                 info!("Reading file {:?}", file_path);
                 let file_path = Path::new(&file_path);
 
-                // check if the file is a child of the allowed path
-                if !file_path.starts_with(allowed_path.clone()) {
-                    error!(
-                        "File path is not allowed. \n expected: {:?} \n actual: {:?}",
-                        allowed_path, file_path
-                    );
-                    return Err(anyhow::anyhow!("file path is not allowed"));
-                }
+                // append the file path to the allowed path
+                let file_path = allowed_path.join(file_path);
 
                 info!("File path is allowed");
 

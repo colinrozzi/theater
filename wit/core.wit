@@ -25,17 +25,13 @@ interface runtime {
     use types.{json, chain};
 
     log: func(msg: string) -> ();
-    send: func(actor-id: string, msg: json) -> ();
     spawn: func(manifest-path: string) -> ();
     get-chain: func() -> chain;
 }
 
 interface actor {
     use types.{json, event};
-
-    type response = option<json>;
     
-    handle: func(evt: event, state: json) -> json;
     init: func() -> json;
 }
 

@@ -1,6 +1,6 @@
 use crate::actor_handle::ActorHandle;
-use crate::wasm::ActorState;
-use crate::wasm::Event;
+use crate::wasm::{ActorState, Event, WasmActor};
+use crate::Store;
 use anyhow::Result;
 use thiserror::Error;
 use tide::{Body, Request, Response, Server};
@@ -26,11 +26,54 @@ impl MessageServerHost {
         Self { port, actor_handle }
     }
 
-    pub fn setup_host_functions(&self) -> Result<()> {
+    pub async fn setup_host_functions(&self) -> Result<()> {
+        info!("Setting up host functions for filesystem");
+        let mut actor = self.actor_handle.inner().lock().await;
+        let mut interface = actor
+            .linker
+            .instance("ntwk:theater/message-server-host")
+            .expect("could not instantiate ntwk:theater/message-server-host");
+
+        // Add send function
+        interface.func_wrap(
+            "send",
+            |ctx: wasmtime::StoreContextMut<'_, Store>, (address, msg): (String, Vec<u8>)| {
+                // think about whether this is the correct parent for the message. it feels like
+                // yes but I am not entirely sure
+                let cur_head = ctx.get_chain().head();
+                let evt = Event {
+                    event_type: "actor-message".to_string(),
+                    parent: cur_head,
+                    data: msg,
+                };
+
+                let _result = tokio::spawn(async move {
+                    let client = reqwest::Client::new();
+                    let _response = client
+                        .post(&address)
+                        .json(&evt)
+                        .send()
+                        .await
+                        .expect("Failed to send message");
+                });
+                Ok(())
+            },
+        )?;
         Ok(())
     }
 
     pub async fn add_exports(&self) -> Result<()> {
+        info!("Adding exports to http-server");
+        let _ = self
+            .actor_handle
+            .with_actor_mut(|actor: &mut WasmActor| -> Result<()> {
+                let handle_export = actor
+                    .find_export("ntwk:theater/message-server-client", "handle")
+                    .expect("Failed to find handle export");
+                actor.exports.insert("handle".to_string(), handle_export);
+                Ok(())
+            })
+            .await;
         Ok(())
     }
 

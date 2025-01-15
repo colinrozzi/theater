@@ -44,8 +44,8 @@ impl Handler {
 
     pub async fn setup_host_function(&self) -> Result<()> {
         match self {
-            Handler::MessageServer(handler) => handler.setup_host_functions()?,
-            Handler::HttpServer(handler) => handler.setup_host_functions()?,
+            Handler::MessageServer(handler) => handler.setup_host_functions().await?,
+            Handler::HttpServer(handler) => handler.setup_host_functions().await?,
             Handler::FileSystem(handler) => handler.setup_host_functions().await?,
         }
         Ok(())

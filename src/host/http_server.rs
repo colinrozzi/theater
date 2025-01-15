@@ -35,7 +35,7 @@ impl HttpServerHost {
         Self { port, actor_handle }
     }
 
-    pub fn setup_host_functions(&self) -> Result<()> {
+    pub async fn setup_host_functions(&self) -> Result<()> {
         Ok(())
     }
 

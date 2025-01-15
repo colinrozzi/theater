@@ -78,13 +78,6 @@ The development environment provides:
   nix-env -iA nixpkgs.nix
   ```
 
-- If builds are slow on macOS:
-  Consider enabling the binary cache:
-  ```bash
-  nix-env -iA nixpkgs.cachix
-  cachix use your-cache-name
-  ```
-
 ### Manual Setup
 
 If you prefer not to use Nix, you'll need:
@@ -127,11 +120,11 @@ implements = "ntwk:simple-actor/actor"
 requires = []
 
 [[handlers]]
-type = "Http"
+type = "message-server"
 config = { port = 8080 }
 
 [[handlers]]
-type = "Http-server"
+type = "http-server"
 config = { port = 8081 }
 ```
 

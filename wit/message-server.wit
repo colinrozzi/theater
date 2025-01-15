@@ -1,0 +1,11 @@
+interface message-server-client {
+    use types.{json, event};
+
+    handle: func(evt: event, state: json) -> json;
+}
+
+interface message-server-host {
+    use types.{json};
+
+    send: func(actor-id: string, msg: json) -> ();
+}

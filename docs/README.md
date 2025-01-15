@@ -14,4 +14,5 @@
 ## Reference
 - [API Documentation](api.md) - Complete API reference with examples
 - [Configuration Reference](configuration.md) - Detailed configuration guide
+- [Host Services](host-services.md) - Available host services and their usage
 - Troubleshooting Guide (coming soon)
