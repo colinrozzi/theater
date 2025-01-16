@@ -2,7 +2,6 @@ use crate::actor_handle::ActorHandle;
 use crate::wasm::WasmActor;
 use anyhow::Result;
 use axum::{
-    body::Bytes,
     extract::State,
     http::{HeaderName, HeaderValue, StatusCode},
     response::Response,
@@ -67,30 +66,46 @@ impl HttpServerHost {
 
     pub async fn start(&self) -> Result<()> {
         let app = Router::new()
-            .route("/*path", any(Self::handle_request))
+            .route("/", any(Self::handle_request))
+            .route("/{*wildcard}", any(Self::handle_request))
             .with_state(Arc::new(self.actor_handle.clone()));
-
         let addr = SocketAddr::from(([127, 0, 0, 1], self.port));
-        info!("HTTP server starting on port {}", self.port);
+        info!("Starting http server on port {}", self.port);
         let listener = tokio::net::TcpListener::bind(&addr).await?;
-
+        info!("Listening on {}", addr);
         axum::serve(listener, app.into_make_service()).await?;
-
+        info!("Server started");
         Ok(())
     }
 
     async fn handle_request(
         State(actor_handle): State<Arc<ActorHandle>>,
-        request: Bytes,
+        req: axum::http::Request<axum::body::Body>,
     ) -> Response {
-        let http_request = match serde_json::from_slice::<HttpRequest>(&request) {
-            Ok(http_request) => http_request,
-            Err(e) => {
-                return Response::builder()
-                    .status(StatusCode::BAD_REQUEST)
-                    .body(format!("Error: {}", e).into())
-                    .unwrap_or_default()
-            }
+        info!("Handling request");
+
+        // Convert axum request to HttpRequest
+        let (parts, body) = req.into_parts();
+        let body_bytes = axum::body::to_bytes(body, 100 * 1024 * 1024)
+            .await
+            .unwrap_or_default();
+
+        let headers = parts
+            .headers
+            .iter()
+            .map(|(name, value)| {
+                (
+                    name.as_str().to_string(),
+                    value.to_str().unwrap_or_default().to_string(),
+                )
+            })
+            .collect();
+
+        let http_request = HttpRequest {
+            method: parts.method.as_str().to_string(),
+            uri: parts.uri.to_string(),
+            headers,
+            body: Some(body_bytes.to_vec()),
         };
         // Changed return type to concrete Response
         info!(

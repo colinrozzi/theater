@@ -39,6 +39,7 @@ impl MessageServerHost {
         interface.func_wrap(
             "send",
             |ctx: wasmtime::StoreContextMut<'_, Store>, (address, msg): (String, Vec<u8>)| {
+                info!("Sending message to {}", address);
                 let cur_head = ctx.get_chain().head();
                 let evt = Event {
                     event_type: "actor-message".to_string(),
@@ -53,6 +54,7 @@ impl MessageServerHost {
                         tracing::error!("Failed to send message: {}", e);
                     }
                 });
+                info!("Message sent");
                 Ok(())
             },
         )?;
@@ -76,7 +78,8 @@ impl MessageServerHost {
 
     pub async fn start(&self) -> Result<()> {
         let app = Router::new()
-            .route("/*path", any(Self::handle_request))
+            .route("/", any(Self::handle_request))
+            .route("/{*path}", any(Self::handle_request))
             .with_state(Arc::new(self.actor_handle.clone()));
 
         let addr = SocketAddr::from(([127, 0, 0, 1], self.port));
@@ -100,7 +103,7 @@ impl MessageServerHost {
                 let mut actor = actor_handle.inner().lock().await;
                 match actor
                     .call_func::<(Event, ActorState), (ActorState,)>(
-                        "handle-request",
+                        "handle",
                         (evt, actor.actor_state.clone()),
                     )
                     .await

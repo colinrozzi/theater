@@ -69,6 +69,8 @@ pub enum HandlerConfig {
     MessageServer(MessageServerConfig),
     #[serde(rename = "filesystem")]
     FileSystem(FileSystemHandlerConfig),
+    #[serde(rename = "http-client")]
+    HttpClient(()),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
