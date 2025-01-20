@@ -1,9 +1,12 @@
 use crate::actor_handle::ActorHandle;
 use crate::config::MessageServerConfig;
+use crate::wasm::Json;
 use crate::wasm::{ActorState, Event, WasmActor};
 use crate::Store;
 use anyhow::Result;
-use axum::{body::Bytes, extract::State, response::IntoResponse, routing::any, serve, Router};
+use axum::{body::Bytes, extract::State, response::Response, routing::any, serve, Router};
+use serde_json::json;
+use std::future::Future;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use thiserror::Error;
@@ -40,28 +43,23 @@ impl MessageServerHost {
             .instance("ntwk:theater/message-server-host")
             .expect("could not instantiate ntwk:theater/message-server-host");
 
-        interface.func_wrap(
-            "send",
-            |ctx: wasmtime::StoreContextMut<'_, Store>, (address, msg): (String, Vec<u8>)| {
-                info!("Sending message to {}", address);
-                let cur_head = ctx.get_chain().head();
-                let evt = Event {
-                    event_type: "actor-message".to_string(),
-                    parent: cur_head,
-                    data: msg,
-                };
-
-                // Since we're now fully in the Tokio runtime, this should work
-                tokio::spawn(async move {
-                    let client = reqwest::Client::new();
-                    if let Err(e) = client.post(&address).json(&evt).send().await {
-                        tracing::error!("Failed to send message: {}", e);
-                    }
-                });
-                info!("Message sent");
-                Ok(())
-            },
-        )?;
+        interface
+            .func_wrap_async(
+                "send",
+                |_ctx: wasmtime::StoreContextMut<'_, crate::Store>,
+                 (address, msg): (String, Vec<u8>)|
+                 -> Box<dyn Future<Output = Result<(Vec<u8>,)>> + Send> {
+                    let address = address.clone();
+                    let msg = msg.clone();
+                    Box::new(async move {
+                        let client = reqwest::Client::new();
+                        let response = client.post(&address).json(&msg).send().await?;
+                        let body = response.bytes().await?;
+                        Ok((body.to_vec(),))
+                    })
+                },
+            )
+            .expect("Failed to wrap async send function");
         Ok(())
     }
 
@@ -97,30 +95,67 @@ impl MessageServerHost {
 
     async fn handle_request(
         State(actor_handle): State<Arc<ActorHandle>>,
-        bytes: Bytes,
-    ) -> impl IntoResponse {
+        req: axum::http::Request<axum::body::Body>,
+    ) -> Response {
         info!("Received request");
+
+        let (parts, body) = req.into_parts();
+        let bytes = axum::body::to_bytes(body, 100 * 1024 * 1024)
+            .await
+            .unwrap_or_default();
+
+        let response = Response::builder();
 
         match serde_json::from_slice::<Event>(&bytes) {
             Ok(evt) => {
                 info!("Received event: {:?}", evt);
                 let mut actor = actor_handle.inner().lock().await;
+                let actor_state = actor.actor_state.clone();
                 match actor
-                    .call_func::<(Event, ActorState), (ActorState,)>(
+                    .call_func::<(Event, ActorState), (Json, ActorState)>(
                         "handle",
-                        (evt, actor.actor_state.clone()),
+                        (evt, actor_state),
                     )
                     .await
                 {
-                    Ok((new_state,)) => {
+                    Ok((resp, new_state)) => {
                         actor.actor_state = new_state;
                         info!("success");
-                        "Request forwarded to actor".into_response()
+                        response
+                            .status(200)
+                            .body(axum::body::Body::from(
+                                serde_json::to_vec(&resp)
+                                    .unwrap_or_else(|_| b"{}".to_vec())
+                                    .to_vec(),
+                            ))
+                            .unwrap()
                     }
-                    Err(e) => format!("Error handling request: {}", e).into_response(),
+                    Err(e) => {
+                        info!("error");
+                        response
+                            .status(500)
+                            .body(axum::body::Body::from(
+                                serde_json::to_vec(&json!({
+                                    "error": format!("Error calling handle function: {}", e)
+                                }))
+                                .unwrap(),
+                            ))
+                            .expect("Failed to set response body")
+                    }
                 }
             }
-            Err(e) => format!("Error parsing event: {}", e).into_response(),
+            Err(e) => {
+                info!("error");
+                response
+                    .status(400)
+                    .body(axum::body::Body::from(
+                        serde_json::to_vec(&json!({
+                            "error": format!("Error parsing request: {}", e)
+                        }))
+                        .unwrap(),
+                    ))
+                    .expect("Failed to set response body")
+            }
         }
     }
 }

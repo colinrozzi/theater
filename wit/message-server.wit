@@ -1,11 +1,11 @@
 interface message-server-client {
     use types.{json, event};
 
-    handle: func(evt: event, state: json) -> json;
+    handle: func(evt: event, state: json) -> (event, json);
 }
 
 interface message-server-host {
     use types.{json};
 
-    send: func(actor-id: string, msg: json) -> ();
+    send: func(actor-id: string, msg: json) -> json;
 }

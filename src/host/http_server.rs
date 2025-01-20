@@ -136,11 +136,12 @@ impl HttpServerHost {
         };
 
         let mut actor = actor_handle.inner().lock().await;
+        let actor_state = actor.actor_state.clone();
 
         match actor
             .call_func::<(HttpRequest, Vec<u8>), ((HttpResponse, Vec<u8>),)>(
                 "handle-request",
-                (http_request, actor.actor_state.clone()),
+                (http_request, actor_state),
             )
             .await
         {

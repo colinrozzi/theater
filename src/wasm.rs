@@ -8,11 +8,11 @@ use std::path::PathBuf;
 use thiserror::Error;
 use wasmtime::chain::Chain;
 use wasmtime::component::{Component, ComponentExportIndex, ComponentType, Lift, Linker, Lower};
-use wasmtime::{Engine, StoreContextMut};
+use wasmtime::{Engine, Store, StoreContextMut};
 
 use crate::config::ManifestConfig;
 use crate::messages::TheaterCommand;
-use crate::Store;
+use crate::Store as ActorStore;
 use tracing::{error, info};
 
 pub type Json = Vec<u8>;
@@ -50,20 +50,25 @@ pub enum WasmError {
 }
 
 /// WebAssembly actor implementation
-#[derive(Clone)]
 pub struct WasmActor {
+    name: String,
     engine: Engine,
     component: Component,
-    pub linker: Linker<Store>,
+    pub linker: Linker<ActorStore>,
     pub exports: HashMap<String, ComponentExportIndex>,
-    pub store: Store,
+    pub store: Store<ActorStore>,
+    pub actor_store: ActorStore,
     pub actor_state: ActorState,
 }
 
 impl WasmActor {
-    pub async fn new(config: &ManifestConfig, store: Store) -> Result<Self> {
+    pub async fn new(config: &ManifestConfig, actor_store: ActorStore) -> Result<Self> {
         // Load WASM component
         let engine = Engine::new(wasmtime::Config::new().async_support(true))?;
+        info!(
+            "Loading WASM component from: {}",
+            config.component_path.display()
+        );
         let wasm_bytes =
             std::fs::read(&config.component_path).map_err(|e| WasmError::WasmError {
                 context: "component loading",
@@ -75,13 +80,16 @@ impl WasmActor {
             })?;
         let component = Component::new(&engine, &wasm_bytes)?;
         let linker = Linker::new(&engine);
+        let store = Store::new(&engine, actor_store.clone());
 
         let mut actor = WasmActor {
+            name: config.name.clone(),
             engine,
             component,
             linker,
             exports: HashMap::new(),
             store,
+            actor_store,
             actor_state: vec![],
         };
 
@@ -97,6 +105,7 @@ impl WasmActor {
     }
 
     pub async fn init(&mut self) {
+        info!("Initializing actor");
         let init_state_bytes = self
             .call_func::<(), (ActorState,)>("init", ())
             .await
@@ -124,6 +133,7 @@ impl WasmActor {
     }
 
     async fn add_runtime_host_func(&mut self) -> Result<()> {
+        info!("Adding runtime host functions");
         let mut runtime = self
             .linker
             .instance("ntwk:theater/runtime")
@@ -131,7 +141,7 @@ impl WasmActor {
 
         runtime.func_wrap(
             "log",
-            |ctx: wasmtime::StoreContextMut<'_, Store>, (msg,): (String,)| {
+            |ctx: wasmtime::StoreContextMut<'_, ActorStore>, (msg,): (String,)| {
                 let id = ctx.data().id.clone();
                 info!("[ACTOR] [{}] {}", id, msg);
                 Ok(())
@@ -140,7 +150,7 @@ impl WasmActor {
 
         let _ = runtime.func_wrap_async(
             "spawn",
-            |mut ctx: wasmtime::StoreContextMut<'_, Store>,
+            |mut ctx: wasmtime::StoreContextMut<'_, ActorStore>,
              (manifest,): (String,)|
              -> Box<dyn Future<Output = Result<()>> + Send> {
                 let store = ctx.data_mut();
@@ -166,11 +176,13 @@ impl WasmActor {
 
         runtime.func_wrap(
             "get-chain",
-            |ctx: StoreContextMut<'_, Store>, ()| -> Result<(Chain,)> {
+            |ctx: StoreContextMut<'_, ActorStore>, ()| -> Result<(Chain,)> {
                 let chain = ctx.get_chain();
                 Ok((chain.clone(),))
             },
         )?;
+
+        info!("Runtime host functions added");
 
         Ok(())
     }
@@ -188,6 +200,10 @@ impl WasmActor {
         interface_name: &str,
         export_name: &str,
     ) -> Result<ComponentExportIndex> {
+        info!(
+            "Finding export: {} from interface: {}",
+            export_name, interface_name
+        );
         let (_, instance) = self
             .component
             .export_index(None, interface_name)
@@ -199,11 +215,15 @@ impl WasmActor {
         Ok(export)
     }
 
-    fn get_export(&self, name: &str) -> Option<&ComponentExportIndex> {
-        self.exports.get(name)
+    fn save_chain(&self) {
+        let chain = self.store.get_chain();
+        let chain_json = serde_json::to_string(&chain).expect("Failed to serialize chain");
+        // chain path: chain/actor_name.json
+        let chain_path = format!("chain/{}.json", self.name);
+        std::fs::write(chain_path, chain_json).expect("Failed to write chain to file");
     }
 
-    pub async fn call_func<T, U>(&self, export_name: &str, args: T) -> Result<U>
+    pub async fn call_func<T, U>(&mut self, export_name: &str, args: T) -> Result<U>
     where
         T: wasmtime::component::Lower
             + wasmtime::component::ComponentNamedList
@@ -219,10 +239,9 @@ impl WasmActor {
             + Debug
             + Clone,
     {
-        let mut store = wasmtime::Store::new(&self.engine, self.store.clone());
         let instance = self
             .linker
-            .instantiate_async(&mut store, &self.component)
+            .instantiate_async(&mut self.store, &self.component)
             .await
             .map_err(|e| WasmError::WasmError {
                 context: "instantiation",
@@ -232,44 +251,49 @@ impl WasmActor {
         info!("Calling function: {}", export_name);
         info!("Existing exports: {:?}", self.exports);
         let index = self
-            .get_export(export_name)
+            .exports
+            .get(export_name)
             .ok_or_else(|| WasmError::WasmError {
                 context: "function lookup",
                 message: format!("Function {} not found", export_name),
             })?;
 
-        let func = instance
-            .get_func(&mut store, *index)
-            .ok_or_else(|| WasmError::WasmError {
-                context: "function access",
-                message: format!("Failed to get function {}", export_name),
-            })?;
+        let func =
+            instance
+                .get_func(&mut self.store, *index)
+                .ok_or_else(|| WasmError::WasmError {
+                    context: "function access",
+                    message: format!("Failed to get function {}", export_name),
+                })?;
 
         info!("Function details:");
         info!("  - Name: {}", export_name);
-        info!("  - Param types raw: {:?}", func.params(&mut store));
-        info!("  - Result types raw: {:?}", func.results(&mut store));
+        info!("  - Function details: {:?}", func);
+        info!("  - Param types raw: {:?}", func.params(&mut self.store));
+        info!("  - Result types raw: {:?}", func.results(&mut self.store));
         info!("  - Generic type T: {}", std::any::type_name::<T>());
         info!("  - Generic type U: {}", std::any::type_name::<U>());
 
-        let typed = func
-            .typed::<T, U>(&mut store)
-            .map_err(|e| WasmError::GetFuncTypedError {
-                context: "function type",
-                func_name: export_name.to_string(),
-                expected_params: format!("{:?}", func.params(&store)),
-                expected_result: format!("{:?}", func.results(&store)),
-                err: e,
-            })?;
+        let typed =
+            func.typed::<T, U>(&mut self.store)
+                .map_err(|e| WasmError::GetFuncTypedError {
+                    context: "function type",
+                    func_name: export_name.to_string(),
+                    expected_params: format!("{:?}", func.params(&self.store)),
+                    expected_result: format!("{:?}", func.results(&self.store)),
+                    err: e,
+                })?;
 
         let result =
             typed
-                .call_async(&mut store, args)
+                .call_async(&mut self.store, args)
                 .await
                 .map_err(|e| WasmError::WasmError {
                     context: "function call",
                     message: e.to_string(),
                 })?;
+
+        self.save_chain();
 
         Ok(result)
     }
