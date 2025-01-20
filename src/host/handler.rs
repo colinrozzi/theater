@@ -17,13 +17,13 @@ impl Handler {
     pub fn new(handler_config: HandlerConfig, actor_handle: ActorHandle) -> Self {
         match handler_config {
             HandlerConfig::MessageServer(config) => {
-                Handler::MessageServer(MessageServerHost::new(config.port, actor_handle))
+                Handler::MessageServer(MessageServerHost::new(config, actor_handle))
             }
             HandlerConfig::HttpServer(config) => {
-                Handler::HttpServer(HttpServerHost::new(config.port, actor_handle))
+                Handler::HttpServer(HttpServerHost::new(config, actor_handle))
             }
             HandlerConfig::FileSystem(config) => {
-                Handler::FileSystem(FileSystemHost::new(config.path, actor_handle))
+                Handler::FileSystem(FileSystemHost::new(config, actor_handle))
             }
             HandlerConfig::HttpClient(config) => {
                 Handler::HttpClient(HttpClientHost::new(config, actor_handle))
@@ -51,20 +51,44 @@ impl Handler {
 
     pub async fn setup_host_function(&self) -> Result<()> {
         match self {
-            Handler::MessageServer(handler) => handler.setup_host_functions().await?,
-            Handler::HttpServer(handler) => handler.setup_host_functions().await?,
-            Handler::FileSystem(handler) => handler.setup_host_functions().await?,
-            Handler::HttpClient(handler) => handler.setup_host_functions().await?,
+            Handler::MessageServer(handler) => handler
+                .setup_host_functions()
+                .await
+                .expect("could not setup host functions for message server"),
+            Handler::HttpServer(handler) => handler
+                .setup_host_functions()
+                .await
+                .expect("could not setup host functions for http server"),
+            Handler::FileSystem(handler) => handler
+                .setup_host_functions()
+                .await
+                .expect("could not setup host functions for filesystem"),
+            Handler::HttpClient(handler) => handler
+                .setup_host_functions()
+                .await
+                .expect("could not setup host functions for http client"),
         }
         Ok(())
     }
 
     pub async fn add_exports(&self) -> Result<()> {
         match self {
-            Handler::MessageServer(handler) => Ok(handler.add_exports().await?),
-            Handler::HttpServer(handler) => Ok(handler.add_exports().await?),
-            Handler::FileSystem(handler) => Ok(handler.add_exports().await?),
-            Handler::HttpClient(handler) => Ok(handler.add_exports().await?),
+            Handler::MessageServer(handler) => Ok(handler
+                .add_exports()
+                .await
+                .expect("could not add exports for message server")),
+            Handler::HttpServer(handler) => Ok(handler
+                .add_exports()
+                .await
+                .expect("could not add exports for http server")),
+            Handler::FileSystem(handler) => Ok(handler
+                .add_exports()
+                .await
+                .expect("could not add exports for filesystem")),
+            Handler::HttpClient(handler) => Ok(handler
+                .add_exports()
+                .await
+                .expect("could not add exports for http client")),
         }
     }
 }

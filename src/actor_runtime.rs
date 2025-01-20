@@ -55,17 +55,16 @@ impl ActorRuntime {
             .iter()
             .map(|handler_config| match handler_config {
                 HandlerConfig::MessageServer(config) => Handler::MessageServer(
-                    MessageServerHost::new(config.port, actor_handle.clone()),
+                    MessageServerHost::new(config.clone(), actor_handle.clone()),
                 ),
                 HandlerConfig::HttpServer(config) => {
-                    Handler::HttpServer(HttpServerHost::new(config.port, actor_handle.clone()))
+                    Handler::HttpServer(HttpServerHost::new(config.clone(), actor_handle.clone()))
                 }
-                HandlerConfig::FileSystem(config) => Handler::FileSystem(FileSystemHost::new(
-                    config.path.clone(),
-                    actor_handle.clone(),
-                )),
-                HandlerConfig::HttpClient(_) => {
-                    Handler::HttpClient(HttpClientHost::new((), actor_handle.clone()))
+                HandlerConfig::FileSystem(config) => {
+                    Handler::FileSystem(FileSystemHost::new(config.clone(), actor_handle.clone()))
+                }
+                HandlerConfig::HttpClient(config) => {
+                    Handler::HttpClient(HttpClientHost::new(config.clone(), actor_handle.clone()))
                 }
             })
             .collect();

@@ -70,7 +70,7 @@ pub enum HandlerConfig {
     #[serde(rename = "filesystem")]
     FileSystem(FileSystemHandlerConfig),
     #[serde(rename = "http-client")]
-    HttpClient(()),
+    HttpClient(HttpClientHandlerConfig),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -87,6 +87,9 @@ pub struct MessageServerConfig {
 pub struct FileSystemHandlerConfig {
     pub path: PathBuf,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HttpClientHandlerConfig {}
 
 impl ManifestConfig {
     pub fn from_file<P: AsRef<std::path::Path>>(path: P) -> anyhow::Result<Self> {

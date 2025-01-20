@@ -1,4 +1,5 @@
 use crate::actor_handle::ActorHandle;
+use crate::config::MessageServerConfig;
 use crate::wasm::{ActorState, Event, WasmActor};
 use crate::Store;
 use anyhow::Result;
@@ -24,12 +25,15 @@ pub enum MessageServerError {
 }
 
 impl MessageServerHost {
-    pub fn new(port: u16, actor_handle: ActorHandle) -> Self {
-        Self { port, actor_handle }
+    pub fn new(config: MessageServerConfig, actor_handle: ActorHandle) -> Self {
+        Self {
+            port: config.port,
+            actor_handle,
+        }
     }
 
     pub async fn setup_host_functions(&self) -> Result<()> {
-        info!("Setting up host functions for filesystem");
+        info!("Setting up host functions for message-server-host");
         let mut actor = self.actor_handle.inner().lock().await;
         let mut interface = actor
             .linker
@@ -62,7 +66,7 @@ impl MessageServerHost {
     }
 
     pub async fn add_exports(&self) -> Result<()> {
-        info!("Adding exports to http-server");
+        info!("Adding exports for message-server-client");
         let _ = self
             .actor_handle
             .with_actor_mut(|actor: &mut WasmActor| -> Result<()> {

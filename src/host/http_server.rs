@@ -1,4 +1,5 @@
 use crate::actor_handle::ActorHandle;
+use crate::config::HttpServerHandlerConfig;
 use crate::wasm::WasmActor;
 use anyhow::Result;
 use axum::{
@@ -38,8 +39,11 @@ pub struct HttpResponse {
 }
 
 impl HttpServerHost {
-    pub fn new(port: u16, actor_handle: ActorHandle) -> Self {
-        Self { port, actor_handle }
+    pub fn new(config: HttpServerHandlerConfig, actor_handle: ActorHandle) -> Self {
+        Self {
+            port: config.port,
+            actor_handle,
+        }
     }
 
     pub async fn setup_host_functions(&self) -> Result<()> {
