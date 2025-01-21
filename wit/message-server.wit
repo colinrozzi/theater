@@ -1,7 +1,7 @@
 interface message-server-client {
     use types.{json, event};
 
-    handle: func(evt: event, state: json) -> (event, json);
+    handle: func(msg: json, state: json) -> tuple<json, json>;
 }
 
 interface message-server-host {

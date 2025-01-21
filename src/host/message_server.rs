@@ -6,6 +6,7 @@ use crate::Store;
 use anyhow::Result;
 use axum::{body::Bytes, extract::State, response::Response, routing::any, serve, Router};
 use serde_json::json;
+use serde_json::Value;
 use std::future::Future;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -53,7 +54,7 @@ impl MessageServerHost {
                     let msg = msg.clone();
                     Box::new(async move {
                         let client = reqwest::Client::new();
-                        let response = client.post(&address).json(&msg).send().await?;
+                        let response = client.post(&address).body(msg).send().await?;
                         let body = response.bytes().await?;
                         Ok((body.to_vec(),))
                     })
@@ -106,32 +107,31 @@ impl MessageServerHost {
 
         let response = Response::builder();
 
-        match serde_json::from_slice::<Event>(&bytes) {
-            Ok(evt) => {
-                info!("Received event: {:?}", evt);
+        match serde_json::from_slice::<Value>(&bytes) {
+            Ok(val) => {
+                info!("Received val: {:?}", val);
                 let mut actor = actor_handle.inner().lock().await;
                 let actor_state = actor.actor_state.clone();
                 match actor
-                    .call_func::<(Event, ActorState), (Json, ActorState)>(
+                    .call_func::<(Json, ActorState), ((Json, ActorState),)>(
                         "handle",
-                        (evt, actor_state),
+                        (
+                            serde_json::to_vec(&val).expect("cannot parse val in bytes"),
+                            actor_state,
+                        ),
                     )
                     .await
                 {
-                    Ok((resp, new_state)) => {
+                    Ok(((resp, new_state),)) => {
                         actor.actor_state = new_state;
                         info!("success");
                         response
                             .status(200)
-                            .body(axum::body::Body::from(
-                                serde_json::to_vec(&resp)
-                                    .unwrap_or_else(|_| b"{}".to_vec())
-                                    .to_vec(),
-                            ))
+                            .body(axum::body::Body::from(resp))
                             .unwrap()
                     }
                     Err(e) => {
-                        info!("error");
+                        info!("{}", format!("Error calling handle function: {}", e));
                         response
                             .status(500)
                             .body(axum::body::Body::from(
@@ -145,7 +145,7 @@ impl MessageServerHost {
                 }
             }
             Err(e) => {
-                info!("error");
+                info!("{}", format!("Error parsing request: {}", e));
                 response
                     .status(400)
                     .body(axum::body::Body::from(
