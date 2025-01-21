@@ -1,0 +1,33 @@
+package ntwk:theater;
+
+interface http-types {
+    type bytes = list<u8>;
+
+    record http-request {
+        method: string,
+        uri: string,
+        headers: list<tuple<string, string>>,
+        body: option<bytes>
+    }
+
+    record http-response {
+        status: u16,
+        headers: list<tuple<string, string>>,
+        body: option<bytes>
+    }
+    
+}
+
+interface http-server {
+    use types.{state};
+    use http-types.{http-request, http-response};
+
+    handle-request: func(req: http-request, state: state) -> tuple<http-response, state>;
+}
+
+interface http-client {
+    use types.{json};
+    use http-types.{http-request, http-response};
+
+    send-http: func(req: http-request) -> http-response;
+}
