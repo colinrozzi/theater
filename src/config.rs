@@ -71,7 +71,12 @@ pub enum HandlerConfig {
     FileSystem(FileSystemHandlerConfig),
     #[serde(rename = "http-client")]
     HttpClient(HttpClientHandlerConfig),
+    #[serde(rename = "runtime")]
+    Runtime(RuntimeHostConfig),
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RuntimeHostConfig {}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HttpServerHandlerConfig {

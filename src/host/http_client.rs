@@ -1,5 +1,6 @@
 use crate::actor_handle::ActorHandle;
 use crate::config::HttpClientHandlerConfig;
+use crate::ActorStore;
 use anyhow::Result;
 use reqwest::Method;
 use serde::{Deserialize, Serialize};
@@ -44,7 +45,7 @@ impl HttpClientHost {
 
         interface.func_wrap_async(
             "send-http",
-            |_ctx: wasmtime::StoreContextMut<'_, crate::Store>,
+            |_ctx: wasmtime::StoreContextMut<'_, ActorStore>,
              (req,): (HttpRequest,)|
              -> Box<dyn Future<Output = Result<(HttpResponse,)>> + Send> {
                 let client = reqwest::Client::new();

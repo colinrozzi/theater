@@ -10,5 +10,5 @@ pub mod theater_runtime;
 mod wasm;
 
 pub use config::{HandlerConfig, HttpServerHandlerConfig, ManifestConfig, MessageServerConfig};
-pub use store::Store;
+pub use store::ActorStore;
 pub use wasm::{WasmActor, WasmError};

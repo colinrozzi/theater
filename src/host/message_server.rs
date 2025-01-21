@@ -1,10 +1,10 @@
 use crate::actor_handle::ActorHandle;
 use crate::config::MessageServerConfig;
 use crate::wasm::Json;
-use crate::wasm::{ActorState, Event, WasmActor};
-use crate::Store;
+use crate::wasm::{ActorState, WasmActor};
+use crate::ActorStore;
 use anyhow::Result;
-use axum::{body::Bytes, extract::State, response::Response, routing::any, serve, Router};
+use axum::{extract::State, response::Response, routing::any, serve, Router};
 use serde_json::json;
 use serde_json::Value;
 use std::future::Future;
@@ -47,7 +47,7 @@ impl MessageServerHost {
         interface
             .func_wrap_async(
                 "send",
-                |_ctx: wasmtime::StoreContextMut<'_, crate::Store>,
+                |_ctx: wasmtime::StoreContextMut<'_, ActorStore>,
                  (address, msg): (String, Vec<u8>)|
                  -> Box<dyn Future<Output = Result<(Vec<u8>,)>> + Send> {
                     let address = address.clone();
@@ -100,7 +100,7 @@ impl MessageServerHost {
     ) -> Response {
         info!("Received request");
 
-        let (parts, body) = req.into_parts();
+        let (_parts, body) = req.into_parts();
         let bytes = axum::body::to_bytes(body, 100 * 1024 * 1024)
             .await
             .unwrap_or_default();

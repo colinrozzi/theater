@@ -3,16 +3,12 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::collections::HashMap;
 use std::fmt::Debug;
-use std::future::Future;
-use std::path::PathBuf;
 use thiserror::Error;
-use wasmtime::chain::Chain;
 use wasmtime::component::{Component, ComponentExportIndex, ComponentType, Lift, Linker, Lower};
-use wasmtime::{Engine, Store, StoreContextMut};
+use wasmtime::{Engine, Store};
 
 use crate::config::ManifestConfig;
-use crate::messages::TheaterCommand;
-use crate::Store as ActorStore;
+use crate::store::ActorStore;
 use tracing::{error, info};
 
 pub type Json = Vec<u8>;
@@ -93,14 +89,6 @@ impl WasmActor {
             actor_state: vec![],
         };
 
-        actor
-            .add_runtime_host_func()
-            .await
-            .expect("Failed to add runtime host functions");
-        actor
-            .add_runtime_exports()
-            .expect("Failed to add runtime exports");
-
         Ok(actor)
     }
 
@@ -132,69 +120,6 @@ impl WasmActor {
         Ok(())
     }
 
-    async fn add_runtime_host_func(&mut self) -> Result<()> {
-        info!("Adding runtime host functions");
-        let mut runtime = self
-            .linker
-            .instance("ntwk:theater/runtime")
-            .expect("Failed to get runtime instance");
-
-        runtime.func_wrap(
-            "log",
-            |ctx: wasmtime::StoreContextMut<'_, ActorStore>, (msg,): (String,)| {
-                let id = ctx.data().id.clone();
-                info!("[ACTOR] [{}] {}", id, msg);
-                Ok(())
-            },
-        )?;
-
-        let _ = runtime.func_wrap_async(
-            "spawn",
-            |mut ctx: wasmtime::StoreContextMut<'_, ActorStore>,
-             (manifest,): (String,)|
-             -> Box<dyn Future<Output = Result<()>> + Send> {
-                let store = ctx.data_mut();
-                let theater_tx = store.theater_tx.clone();
-                info!("Spawning actor with manifest: {}", manifest);
-                Box::new(async move {
-                    let (response_tx, _response_rx) = tokio::sync::oneshot::channel();
-                    info!("sending spawn command");
-                    match theater_tx
-                        .send(TheaterCommand::SpawnActor {
-                            manifest_path: PathBuf::from(manifest),
-                            response_tx,
-                        })
-                        .await
-                    {
-                        Ok(_) => info!("spawn command sent"),
-                        Err(e) => error!("error sending spawn command: {:?}", e),
-                    }
-                    Ok(())
-                })
-            },
-        );
-
-        runtime.func_wrap(
-            "get-chain",
-            |ctx: StoreContextMut<'_, ActorStore>, ()| -> Result<(Chain,)> {
-                let chain = ctx.get_chain();
-                Ok((chain.clone(),))
-            },
-        )?;
-
-        info!("Runtime host functions added");
-
-        Ok(())
-    }
-
-    fn add_runtime_exports(&mut self) -> Result<()> {
-        let init_export = self
-            .find_export("ntwk:theater/actor", "init")
-            .expect("Failed to find init export");
-        self.exports.insert("init".to_string(), init_export);
-        Ok(())
-    }
-
     pub fn find_export(
         &mut self,
         interface_name: &str,
@@ -215,6 +140,7 @@ impl WasmActor {
         Ok(export)
     }
 
+    #[allow(dead_code)]
     fn save_chain(&self) {
         let chain = self.store.get_chain();
         let chain_json = serde_json::to_string(&chain).expect("Failed to serialize chain");
@@ -292,8 +218,6 @@ impl WasmActor {
                     context: "function call",
                     message: e.to_string(),
                 })?;
-
-        self.save_chain();
 
         Ok(result)
     }

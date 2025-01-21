@@ -4,6 +4,7 @@ use crate::host::filesystem::FileSystemHost;
 use crate::host::http_client::HttpClientHost;
 use crate::host::http_server::HttpServerHost;
 use crate::host::message_server::MessageServerHost;
+use crate::host::runtime::RuntimeHost;
 use crate::Result;
 
 pub enum Handler {
@@ -11,6 +12,7 @@ pub enum Handler {
     HttpServer(HttpServerHost),
     FileSystem(FileSystemHost),
     HttpClient(HttpClientHost),
+    Runtime(RuntimeHost),
 }
 
 impl Handler {
@@ -28,6 +30,9 @@ impl Handler {
             HandlerConfig::HttpClient(config) => {
                 Handler::HttpClient(HttpClientHost::new(config, actor_handle))
             }
+            HandlerConfig::Runtime(config) => {
+                Handler::Runtime(RuntimeHost::new(config, actor_handle))
+            }
         }
     }
 
@@ -37,6 +42,7 @@ impl Handler {
             Handler::HttpServer(handler) => handler.start().await,
             Handler::FileSystem(handler) => handler.start().await,
             Handler::HttpClient(handler) => handler.start().await,
+            Handler::Runtime(handler) => handler.start().await,
         }
     }
 
@@ -46,6 +52,7 @@ impl Handler {
             Handler::HttpServer(_) => "http-server".to_string(),
             Handler::FileSystem(_) => "filesystem".to_string(),
             Handler::HttpClient(_) => "http-client".to_string(),
+            Handler::Runtime(_) => "runtime".to_string(),
         }
     }
 
@@ -67,6 +74,10 @@ impl Handler {
                 .setup_host_functions()
                 .await
                 .expect("could not setup host functions for http client"),
+            Handler::Runtime(handler) => handler
+                .setup_host_functions()
+                .await
+                .expect("could not setup host functions for runtime"),
         }
         Ok(())
     }
@@ -89,6 +100,10 @@ impl Handler {
                 .add_exports()
                 .await
                 .expect("could not add exports for http client")),
+            Handler::Runtime(handler) => Ok(handler
+                .add_exports()
+                .await
+                .expect("could not add exports for runtime")),
         }
     }
 }

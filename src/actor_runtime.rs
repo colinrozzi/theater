@@ -5,8 +5,9 @@ use crate::host::handler::Handler;
 use crate::host::http_client::HttpClientHost;
 use crate::host::http_server::HttpServerHost;
 use crate::host::message_server::MessageServerHost;
+use crate::host::runtime::RuntimeHost;
 use crate::messages::TheaterCommand;
-use crate::store::Store;
+use crate::store::ActorStore;
 use crate::wasm::WasmActor;
 use crate::Result;
 use std::path::PathBuf;
@@ -46,7 +47,7 @@ impl ActorRuntime {
         config: &ManifestConfig,
         theater_tx: Sender<TheaterCommand>,
     ) -> Result<RuntimeComponents> {
-        let store = Store::new(config.name.clone(), theater_tx.clone());
+        let store = ActorStore::new(config.name.clone(), theater_tx.clone());
         let actor = WasmActor::new(config, store).await?;
         let actor_handle = ActorHandle::new(actor);
 
@@ -65,6 +66,9 @@ impl ActorRuntime {
                 }
                 HandlerConfig::HttpClient(config) => {
                     Handler::HttpClient(HttpClientHost::new(config.clone(), actor_handle.clone()))
+                }
+                HandlerConfig::Runtime(config) => {
+                    Handler::Runtime(RuntimeHost::new(config.clone(), actor_handle.clone()))
                 }
             })
             .collect();

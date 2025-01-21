@@ -1,6 +1,6 @@
 use crate::actor_handle::ActorHandle;
 use crate::config::FileSystemHandlerConfig;
-use crate::Store;
+use crate::ActorStore;
 use anyhow::Result;
 use std::fs::File;
 use std::io::{BufReader, Read, Write};
@@ -33,7 +33,9 @@ impl FileSystemHost {
 
         let _ = interface.func_wrap(
             "read-file",
-            move |_ctx: StoreContextMut<'_, Store>, (file_path,): (String,)| -> Result<(String,)> {
+            move |_ctx: StoreContextMut<'_, ActorStore>,
+                  (file_path,): (String,)|
+                  -> Result<(String,)> {
                 info!("Reading file {:?}", file_path);
                 let file_path = Path::new(&file_path);
 
@@ -57,7 +59,8 @@ impl FileSystemHost {
 
         let _ = interface.func_wrap(
             "write-file",
-            move |_ctx: StoreContextMut<'_, Store>, (file_path, contents): (String, String)| {
+            move |_ctx: StoreContextMut<'_, ActorStore>,
+                  (file_path, contents): (String, String)| {
                 info!("Writing file {:?}", file_path);
                 let file_path = Path::new(&file_path);
 
@@ -76,7 +79,7 @@ impl FileSystemHost {
 
         let _ = interface.func_wrap(
             "list-files",
-            move |_ctx: StoreContextMut<'_, Store>,
+            move |_ctx: StoreContextMut<'_, ActorStore>,
                   (dir_path,): (String,)|
                   -> Result<(Vec<String>,)> {
                 info!("Listing files in {:?}", dir_path);
@@ -105,7 +108,7 @@ impl FileSystemHost {
 
         let _ = interface.func_wrap(
             "delete-file",
-            move |_ctx: StoreContextMut<'_, Store>, (file_path,): (String,)| {
+            move |_ctx: StoreContextMut<'_, ActorStore>, (file_path,): (String,)| {
                 info!("Deleting file {:?}", file_path);
                 let file_path = Path::new(&file_path);
 
@@ -122,7 +125,7 @@ impl FileSystemHost {
 
         let _ = interface.func_wrap(
             "create-dir",
-            move |_ctx: StoreContextMut<'_, Store>, (dir_path,): (String,)| {
+            move |_ctx: StoreContextMut<'_, ActorStore>, (dir_path,): (String,)| {
                 info!("Creating directory {:?}", dir_path);
                 let dir_path = Path::new(&dir_path);
 
@@ -139,7 +142,7 @@ impl FileSystemHost {
 
         let _ = interface.func_wrap(
             "delete-dir",
-            move |_ctx: StoreContextMut<'_, Store>, (dir_path,): (String,)| {
+            move |_ctx: StoreContextMut<'_, ActorStore>, (dir_path,): (String,)| {
                 info!("Deleting directory {:?}", dir_path);
                 let dir_path = Path::new(&dir_path);
 
