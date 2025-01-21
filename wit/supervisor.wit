@@ -1,0 +1,15 @@
+package ntwk:theater;
+
+interface supervisor-host {
+    use types.{json};
+
+    spawn: func(manifest-path: string) -> ();
+    kill: func(actor-id: string) -> ();
+    send: func(actor-id: string, msg: json) -> json;
+}
+
+interface supervisor-client {
+    use types.{event, state};
+
+    handle-event: func(evt: event, state: state) -> state;
+}
