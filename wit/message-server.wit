@@ -1,3 +1,5 @@
+package ntwk:theater;
+
 interface message-server-client {
     use types.{json, event};
 

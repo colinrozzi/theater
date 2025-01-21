@@ -1,0 +1,9 @@
+package ntwk:theater;
+
+interface runtime {
+    use types.{json, chain};
+
+    log: func(msg: string) -> ();
+    spawn: func(manifest-path: string) -> ();
+    get-chain: func() -> chain;
+}

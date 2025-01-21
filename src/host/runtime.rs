@@ -65,7 +65,7 @@ impl RuntimeHost {
         runtime.func_wrap(
             "get-chain",
             |ctx: StoreContextMut<'_, ActorStore>, ()| -> Result<(Chain,)> {
-                let chain = ctx.get_chain();
+                let chain = ctx.chain();
                 Ok((chain.clone(),))
             },
         )?;

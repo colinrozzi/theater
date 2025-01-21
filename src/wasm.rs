@@ -142,7 +142,7 @@ impl WasmActor {
 
     #[allow(dead_code)]
     fn save_chain(&self) {
-        let chain = self.store.get_chain();
+        let chain = self.store.chain();
         let chain_json = serde_json::to_string(&chain).expect("Failed to serialize chain");
         // chain path: chain/actor_name.json
         let chain_path = format!("chain/{}.json", self.name);
@@ -218,6 +218,9 @@ impl WasmActor {
                     context: "function call",
                     message: e.to_string(),
                 })?;
+
+        let wasm_event = self.store.chain().get_last_wasm_event_chain();
+        info!("WASM event chain: {:?}", wasm_event);
 
         Ok(result)
     }
