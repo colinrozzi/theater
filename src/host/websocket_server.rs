@@ -2,7 +2,10 @@ use crate::actor_handle::ActorHandle;
 use crate::config::WebSocketServerHandlerConfig;
 use crate::wasm::WasmActor;
 use anyhow::Result;
-use axum::{extract::State, extract::WebSocketUpgrade, response::Response, routing::get, Router};
+use axum::{
+    extract::ws::Message, extract::State, extract::WebSocketUpgrade, response::Response,
+    routing::get, Router,
+};
 use futures::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -15,9 +18,21 @@ use tracing::{error, info};
 use wasmtime::component::{ComponentType, Lift, Lower};
 
 #[derive(Debug, Clone, Deserialize, Serialize, ComponentType, Lift, Lower)]
+#[component(variant)]
+pub enum MessageType {
+    Text,
+    Binary,
+    Connect,
+    Close,
+    Ping,
+    Pong,
+    Other(String),
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, ComponentType, Lift, Lower)]
 #[component(record)]
 pub struct WebSocketMessage {
-    message_type: String,
+    ty: MessageType,
     data: Option<Vec<u8>>,
     text: Option<String>,
 }
@@ -187,12 +202,12 @@ impl WebSocketServerHost {
     ) -> Result<()> {
         // Convert incoming message to component message
         let component_msg = WebSocketMessage {
-            message_type: match msg.content {
-                axum::extract::ws::Message::Text(_) => "text".to_string(),
-                axum::extract::ws::Message::Binary(_) => "binary".to_string(),
-                axum::extract::ws::Message::Close(_) => "close".to_string(),
-                axum::extract::ws::Message::Ping(_) => "ping".to_string(),
-                axum::extract::ws::Message::Pong(_) => "pong".to_string(),
+            ty: match msg.content {
+                axum::extract::ws::Message::Text(_) => MessageType::Text,
+                axum::extract::ws::Message::Binary(_) => MessageType::Binary,
+                axum::extract::ws::Message::Close(_) => MessageType::Close,
+                axum::extract::ws::Message::Ping(_) => MessageType::Ping,
+                axum::extract::ws::Message::Pong(_) => MessageType::Pong,
             },
             data: match msg.content {
                 axum::extract::ws::Message::Binary(ref b) => Some(b.to_vec()),
@@ -220,15 +235,18 @@ impl WebSocketServerHost {
             // Send responses
             if let Some(connection) = connections.read().await.get(&msg.connection_id) {
                 for response_msg in response.messages {
-                    let ws_msg = match response_msg.message_type.as_str() {
-                        "text" => response_msg.text.map(|arg0: std::string::String| {
+                    let ws_msg = match response_msg.ty {
+                        MessageType::Text => response_msg.text.map(|arg0: std::string::String| {
                             axum::extract::ws::Message::Text(arg0.into())
                         }),
-                        "binary" => response_msg
+                        MessageType::Binary => response_msg
                             .data
-                            .map(|arg0: Vec<u8>| axum::extract::ws::Message::Binary(arg0.into())),
-                        "close" => Some(axum::extract::ws::Message::Close(None)),
-                        _ => None,
+                            .map(|arg0: Vec<u8>| Message::Binary(arg0.into())),
+                        MessageType::Close => Some(Message::Close(None)),
+                        MessageType::Ping => Some(Message::Ping(vec![].into())),
+                        MessageType::Pong => Some(Message::Pong(vec![].into())),
+                        MessageType::Connect => None, // Not applicable for outgoing messages
+                        MessageType::Other(_) => None, // Handle any other types as needed
                     };
 
                     if let Some(msg) = ws_msg {
