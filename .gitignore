@@ -1,12 +1,11 @@
-target/
 target/*
-node_modules/
 node_modules/*
 .next/*
 notes/*
 chain/*
+examples/*
 tools/chain-viewer/.next/*
-logs/
+tools/chain-viewer/node_modules/*
 logs/*
 .aider*
 .env
