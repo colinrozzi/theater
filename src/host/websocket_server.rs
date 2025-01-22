@@ -9,6 +9,7 @@ use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::sync::mpsc;
+use tokio::sync::Mutex;
 use tokio::sync::RwLock;
 use tracing::{error, info};
 use wasmtime::component::{ComponentType, Lift, Lower};
@@ -33,7 +34,9 @@ struct IncomingMessage {
 }
 
 struct ConnectionContext {
-    sender: futures::stream::SplitSink<axum::extract::ws::WebSocket, axum::extract::ws::Message>,
+    sender: Arc<
+        Mutex<futures::stream::SplitSink<axum::extract::ws::WebSocket, axum::extract::ws::Message>>,
+    >,
 }
 
 pub struct WebSocketServerHost {
@@ -140,10 +143,12 @@ impl WebSocketServerHost {
         let (sender, mut receiver) = socket.split();
 
         // Store sender for responses
-        connections
-            .write()
-            .await
-            .insert(connection_id, ConnectionContext { sender });
+        connections.write().await.insert(
+            connection_id,
+            ConnectionContext {
+                sender: Arc::new(Mutex::new(sender)),
+            },
+        );
 
         // Send initial connection message
         message_sender
@@ -227,7 +232,7 @@ impl WebSocketServerHost {
                     };
 
                     if let Some(msg) = ws_msg {
-                        if let Err(e) = connection.sender.send(msg).await {
+                        if let Err(e) = connection.sender.lock().await.send(msg).await {
                             error!("Error sending response: {}", e);
                         }
                     }
