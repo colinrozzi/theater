@@ -41,7 +41,7 @@ impl Handler {
         }
     }
 
-    pub async fn start(&self) -> Result<()> {
+    pub async fn start(&mut self) -> Result<()> {
         match self {
             Handler::MessageServer(handler) => handler.start().await,
             Handler::HttpServer(handler) => handler.start().await,

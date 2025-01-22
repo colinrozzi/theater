@@ -1,16 +1,17 @@
 use crate::actor_handle::ActorHandle;
 use crate::config::WebSocketServerHandlerConfig;
+use crate::wasm::WasmActor;
 use anyhow::Result;
 use axum::{extract::State, extract::WebSocketUpgrade, response::Response, routing::get, Router};
 use futures::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::sync::mpsc;
+use tokio::sync::RwLock;
 use tracing::{error, info};
 use wasmtime::component::{ComponentType, Lift, Lower};
-use std::collections::HashMap;
-use tokio::sync::RwLock;
 
 #[derive(Debug, Clone, Deserialize, Serialize, ComponentType, Lift, Lower)]
 #[component(record)]
@@ -79,7 +80,7 @@ impl WebSocketServerHost {
         Ok(())
     }
 
-    pub async fn start(&self) -> Result<()> {
+    pub async fn start(&mut self) -> Result<()> {
         let app = Router::new()
             .route("/ws", get(Self::handle_websocket_upgrade))
             .with_state(Arc::new((
@@ -90,18 +91,16 @@ impl WebSocketServerHost {
         let addr = SocketAddr::from(([127, 0, 0, 1], self.port));
         info!("Starting websocket server on port {}", self.port);
         let listener = tokio::net::TcpListener::bind(&addr).await?;
-        
+
         // Start message processing
         let actor_handle = self.actor_handle.clone();
-        let mut receiver = self.message_receiver.clone();
         let connections = self.connections.clone();
-        tokio::spawn(async move {
-            while let Some(msg) = receiver.recv().await {
-                if let Err(e) = Self::process_message(msg, &actor_handle, &connections).await {
-                    error!("Error processing message: {}", e);
-                }
+
+        while let Some(msg) = self.message_receiver.recv().await {
+            if let Err(e) = Self::process_message(msg, &actor_handle, &connections).await {
+                error!("Error processing message: {}", e);
             }
-        });
+        }
 
         info!("Listening on {}", addr);
         axum::serve(listener, app.into_make_service()).await?;
@@ -109,7 +108,12 @@ impl WebSocketServerHost {
     }
 
     async fn handle_websocket_upgrade(
-        State(state): State<Arc<(mpsc::Sender<IncomingMessage>, Arc<RwLock<HashMap<u64, ConnectionContext>>>)>>,
+        State(state): State<
+            Arc<(
+                mpsc::Sender<IncomingMessage>,
+                Arc<RwLock<HashMap<u64, ConnectionContext>>>,
+            )>,
+        >,
         ws: WebSocketUpgrade,
     ) -> Response {
         let (sender, connections) = &*state;
@@ -118,7 +122,9 @@ impl WebSocketServerHost {
         let connections = connections.clone();
 
         ws.on_upgrade(move |socket| async move {
-            if let Err(e) = Self::handle_websocket_connection(socket, connection_id, sender, connections).await {
+            if let Err(e) =
+                Self::handle_websocket_connection(socket, connection_id, sender, connections).await
+            {
                 error!("WebSocket connection error: {}", e);
             }
         })
@@ -132,26 +138,35 @@ impl WebSocketServerHost {
     ) -> Result<()> {
         info!("New WebSocket connection: {}", connection_id);
         let (sender, mut receiver) = socket.split();
-        
+
         // Store sender for responses
-        connections.write().await.insert(connection_id, ConnectionContext { sender });
+        connections
+            .write()
+            .await
+            .insert(connection_id, ConnectionContext { sender });
 
         // Send initial connection message
-        message_sender.send(IncomingMessage {
-            connection_id,
-            content: axum::extract::ws::Message::Text(
-                serde_json::json!({
-                    "type": "connect"
-                }).to_string(),
-            ),
-        }).await?;
-        
+        message_sender
+            .send(IncomingMessage {
+                connection_id,
+                content: axum::extract::ws::Message::Text(
+                    serde_json::json!({
+                        "type": "connect"
+                    })
+                    .to_string()
+                    .into(),
+                ),
+            })
+            .await?;
+
         // Forward incoming messages
         while let Some(Ok(msg)) = receiver.next().await {
-            message_sender.send(IncomingMessage {
-                connection_id,
-                content: msg,
-            }).await?;
+            message_sender
+                .send(IncomingMessage {
+                    connection_id,
+                    content: msg,
+                })
+                .await?;
         }
 
         // Clean up on disconnect
@@ -175,23 +190,24 @@ impl WebSocketServerHost {
                 axum::extract::ws::Message::Pong(_) => "pong".to_string(),
             },
             data: match msg.content {
-                axum::extract::ws::Message::Binary(b) => Some(b),
+                axum::extract::ws::Message::Binary(ref b) => Some(b.to_vec()),
                 _ => None,
             },
             text: match msg.content {
-                axum::extract::ws::Message::Text(t) => Some(t),
+                axum::extract::ws::Message::Text(t) => Some(t.to_string()),
                 _ => None,
             },
         };
 
         // Process with actor
         let mut actor = actor_handle.inner().lock().await;
+        let actor_state = actor.actor_state.clone();
         if let Ok(((new_state, response),)) = actor
             .call_func::<(WebSocketMessage, Vec<u8>), ((Vec<u8>, WebSocketResponse),)>(
                 "handle-message",
-                (component_msg, actor.actor_state.clone()),
+                (component_msg, actor_state),
             )
-            .await 
+            .await
         {
             actor.actor_state = new_state;
             drop(actor);
@@ -200,8 +216,12 @@ impl WebSocketServerHost {
             if let Some(connection) = connections.read().await.get(&msg.connection_id) {
                 for response_msg in response.messages {
                     let ws_msg = match response_msg.message_type.as_str() {
-                        "text" => response_msg.text.map(axum::extract::ws::Message::Text),
-                        "binary" => response_msg.data.map(axum::extract::ws::Message::Binary),
+                        "text" => response_msg.text.map(|arg0: std::string::String| {
+                            axum::extract::ws::Message::Text(arg0.into())
+                        }),
+                        "binary" => response_msg
+                            .data
+                            .map(|arg0: Vec<u8>| axum::extract::ws::Message::Binary(arg0.into())),
                         "close" => Some(axum::extract::ws::Message::Close(None)),
                         _ => None,
                     };

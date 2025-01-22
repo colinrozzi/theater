@@ -24,6 +24,7 @@ clap = { version = "4.4", features = ["derive"] }
 lazy_static = "1.4"
 futures = "0.3"
 pin-utils = "0.1"
+rand = "0.8.5"
 
 [dev-dependencies]
 test-log = "0.2"

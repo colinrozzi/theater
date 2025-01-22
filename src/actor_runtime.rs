@@ -94,7 +94,7 @@ impl ActorRuntime {
 
         let mut handler_tasks = Vec::new();
         // Start all handlers
-        for handler in components.handlers {
+        for mut handler in components.handlers {
             let task = tokio::spawn(async move {
                 if let Err(e) = handler.start().await {
                     error!("Handler failed: {}", e);
