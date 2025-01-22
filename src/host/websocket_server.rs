@@ -106,7 +106,7 @@ impl WebSocketServerHost {
                 self.connections.clone(),
             )));
 
-        let addr = SocketAddr::from(([127, 0, 0, 1], self.port));
+        let addr = SocketAddr::from(([0, 0, 0, 0], self.port));
         info!("Starting websocket server on port {}", self.port);
         let listener = tokio::net::TcpListener::bind(&addr).await?;
 
