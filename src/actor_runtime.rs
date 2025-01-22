@@ -6,6 +6,7 @@ use crate::host::http_client::HttpClientHost;
 use crate::host::http_server::HttpServerHost;
 use crate::host::message_server::MessageServerHost;
 use crate::host::runtime::RuntimeHost;
+use crate::host::websocket_server::WebSocketServerHost;
 use crate::messages::TheaterCommand;
 use crate::store::ActorStore;
 use crate::wasm::WasmActor;
@@ -70,6 +71,9 @@ impl ActorRuntime {
                 HandlerConfig::Runtime(config) => {
                     Handler::Runtime(RuntimeHost::new(config.clone(), actor_handle.clone()))
                 }
+                HandlerConfig::WebSocketServer(config) => Handler::WebSocketServer(
+                    WebSocketServerHost::new(config.clone(), actor_handle.clone()),
+                ),
             })
             .collect();
 

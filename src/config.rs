@@ -73,6 +73,8 @@ pub enum HandlerConfig {
     HttpClient(HttpClientHandlerConfig),
     #[serde(rename = "runtime")]
     Runtime(RuntimeHostConfig),
+    #[serde(rename = "websocket-server")]
+    WebSocketServer(WebSocketServerHandlerConfig),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -80,6 +82,11 @@ pub struct RuntimeHostConfig {}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HttpServerHandlerConfig {
+    pub port: u16,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WebSocketServerHandlerConfig {
     pub port: u16,
 }
 
@@ -114,6 +121,15 @@ impl ManifestConfig {
     pub fn message_server_port(&self) -> Option<u16> {
         for handler in &self.handlers {
             if let HandlerConfig::MessageServer(config) = handler {
+                return Some(config.port);
+            }
+        }
+        None
+    }
+
+    pub fn websocket_server_port(&self) -> Option<u16> {
+        for handler in &self.handlers {
+            if let HandlerConfig::WebSocketServer(config) = handler {
                 return Some(config.port);
             }
         }
