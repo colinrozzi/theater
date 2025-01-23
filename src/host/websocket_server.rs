@@ -20,12 +20,19 @@ use wasmtime::component::{ComponentType, Lift, Lower};
 #[derive(Debug, Clone, Deserialize, Serialize, ComponentType, Lift, Lower)]
 #[component(variant)]
 pub enum MessageType {
+    #[component(name = "text")]
     Text,
+    #[component(name = "binary")]
     Binary,
+    #[component(name = "connect")]
     Connect,
+    #[component(name = "close")]
     Close,
+    #[component(name = "ping")]
     Ping,
+    #[component(name = "pong")]
     Pong,
+    #[component(name = "other")]
     Other(String),
 }
 
@@ -57,19 +64,14 @@ struct ConnectionContext {
 pub struct WebSocketServerHost {
     port: u16,
     actor_handle: ActorHandle,
-    message_sender: mpsc::Sender<IncomingMessage>,
-    message_receiver: mpsc::Receiver<IncomingMessage>,
     connections: Arc<RwLock<HashMap<u64, ConnectionContext>>>,
 }
 
 impl WebSocketServerHost {
     pub fn new(config: WebSocketServerHandlerConfig, actor_handle: ActorHandle) -> Self {
-        let (message_sender, message_receiver) = mpsc::channel(100);
         Self {
             port: config.port,
             actor_handle,
-            message_sender,
-            message_receiver,
             connections: Arc::new(RwLock::new(HashMap::new())),
         }
     }
@@ -83,8 +85,9 @@ impl WebSocketServerHost {
         let _ = self
             .actor_handle
             .with_actor_mut(|actor: &mut WasmActor| -> Result<()> {
-                let handle_message_export =
-                    actor.find_export("ntwk:theater/websocket-server", "handle-message")?;
+                let handle_message_export = actor
+                    .find_export("ntwk:theater/websocket-server", "handle-message")
+                    .expect("Could not find handle-message export");
 
                 actor
                     .exports
@@ -99,12 +102,11 @@ impl WebSocketServerHost {
     }
 
     pub async fn start(&mut self) -> Result<()> {
+        let (message_sender, mut message_receiver) = mpsc::channel(100);
+
         let app = Router::new()
             .route("/ws", get(Self::handle_websocket_upgrade))
-            .with_state(Arc::new((
-                self.message_sender.clone(),
-                self.connections.clone(),
-            )));
+            .with_state(Arc::new((message_sender.clone(), self.connections.clone())));
 
         let addr = SocketAddr::from(([0, 0, 0, 0], self.port));
         info!("Starting websocket server on port {}", self.port);
@@ -114,14 +116,25 @@ impl WebSocketServerHost {
         let actor_handle = self.actor_handle.clone();
         let connections = self.connections.clone();
 
-        while let Some(msg) = self.message_receiver.recv().await {
-            if let Err(e) = Self::process_message(msg, &actor_handle, &connections).await {
-                error!("Error processing message: {}", e);
+        tokio::spawn(async move {
+            while let Some(msg) = message_receiver.recv().await {
+                info!("Message Recieved");
+                if let Err(e) = Self::process_message(msg, &actor_handle, &connections).await {
+                    error!("Error processing message: {}", e);
+                }
+                info!("Message processed");
             }
-        }
+        });
+
+        // Spawn the server task
+        tokio::spawn(async move {
+            if let Err(e) = axum::serve(listener, app.into_make_service()).await {
+                error!("Server error: {}", e);
+            }
+        });
 
         info!("Listening on {}", addr);
-        axum::serve(listener, app.into_make_service()).await?;
+        //  axum::serve(listener, app.into_make_service()).await?;
         Ok(())
     }
 
@@ -195,6 +208,102 @@ impl WebSocketServerHost {
         Ok(())
     }
 
+    async fn call_j(&self) {
+        let mut actor = self.actor_handle.inner().lock().await;
+        let actor_state = actor.actor_state.clone();
+        match actor.call_func::<(Vec<u8>,), ()>("j", (actor_state,)).await {
+            Ok(()) => {
+                info!("j call successfull");
+            }
+            Err(e) => {
+                error!("Actor function call failed: {}", e);
+            }
+        }
+    }
+
+    async fn call_t(&self) {
+        let mt = MessageType::Text;
+        let mut actor = self.actor_handle.inner().lock().await;
+        match actor.call_func::<(MessageType,), ()>("t", (mt,)).await {
+            Ok(()) => {
+                info!("t call successfull");
+            }
+            Err(e) => {
+                error!("Actor function call failed: {}", e);
+            }
+        }
+    }
+
+    async fn call_m(&self) {
+        let msg = WebSocketMessage {
+            ty: MessageType::Text,
+            text: Some("hi".to_string()),
+            data: None,
+        };
+        let mut actor = self.actor_handle.inner().lock().await;
+        match actor
+            .call_func::<(WebSocketMessage,), ()>("m", (msg,))
+            .await
+        {
+            Ok(()) => {
+                info!("m call successfull");
+            }
+            Err(e) => {
+                error!("Actor function call failed: {}", e);
+            }
+        }
+    }
+
+    async fn call_r(&self) {
+        #[derive(Debug, Clone, Deserialize, Serialize, ComponentType, Lift, Lower)]
+        #[component(record)]
+        struct TestMessage {
+            text: String,
+        }
+
+        let mut actor = self.actor_handle.inner().lock().await;
+        match actor
+            .call_func::<(TestMessage,), ()>(
+                "r",
+                (TestMessage {
+                    text: "hi".to_string(),
+                },),
+            )
+            .await
+        {
+            Ok(()) => {
+                info!("r call successfull");
+            }
+            Err(e) => {
+                error!("Actor function call failed: {}", e);
+            }
+        }
+    }
+
+    async fn call_v(&self) -> Result<()> {
+        #[derive(Debug, Clone, Deserialize, Serialize, ComponentType, Lift, Lower)]
+        #[component(variant)]
+        enum TestVar {
+            #[component(name = "text")]
+            Text,
+        }
+
+        let mut actor = self.actor_handle.inner().lock().await;
+        let actor_state = actor.actor_state.clone();
+        match actor
+            .call_func::<(TestVar,), ()>("v", (TestVar::Text,))
+            .await
+        {
+            Ok(()) => {
+                info!("v call successfull");
+            }
+            Err(e) => {
+                error!("Actor function call failed: {}", e);
+            }
+        }
+        Ok(())
+    }
+
     async fn process_message(
         msg: IncomingMessage,
         actor_handle: &ActorHandle,
@@ -203,58 +312,66 @@ impl WebSocketServerHost {
         // Convert incoming message to component message
         let component_msg = WebSocketMessage {
             ty: match msg.content {
-                axum::extract::ws::Message::Text(_) => MessageType::Text,
-                axum::extract::ws::Message::Binary(_) => MessageType::Binary,
-                axum::extract::ws::Message::Close(_) => MessageType::Close,
-                axum::extract::ws::Message::Ping(_) => MessageType::Ping,
-                axum::extract::ws::Message::Pong(_) => MessageType::Pong,
+                Message::Text(_) => MessageType::Text,
+                Message::Binary(_) => MessageType::Binary,
+                Message::Close(_) => MessageType::Close,
+                Message::Ping(_) => MessageType::Ping,
+                Message::Pong(_) => MessageType::Pong,
             },
             data: match msg.content {
-                axum::extract::ws::Message::Binary(ref b) => Some(b.to_vec()),
+                Message::Binary(ref b) => Some(b.to_vec()),
                 _ => None,
             },
             text: match msg.content {
-                axum::extract::ws::Message::Text(t) => Some(t.to_string()),
+                Message::Text(t) => Some(t.to_string()),
                 _ => None,
             },
         };
 
         // Process with actor
         let mut actor = actor_handle.inner().lock().await;
-        let actor_state = actor.actor_state.clone();
-        if let Ok(((new_state, response),)) = actor
+        info!("Claimed actor handle");
+        let actor_state: Vec<u8> = actor.actor_state.clone();
+        match actor
             .call_func::<(WebSocketMessage, Vec<u8>), ((Vec<u8>, WebSocketResponse),)>(
                 "handle-message",
                 (component_msg, actor_state),
             )
             .await
         {
-            actor.actor_state = new_state;
-            drop(actor);
+            Ok(((new_state, response),)) => {
+                info!("Actor function call successful");
+                actor.actor_state = new_state;
 
-            // Send responses
-            if let Some(connection) = connections.read().await.get(&msg.connection_id) {
-                for response_msg in response.messages {
-                    let ws_msg = match response_msg.ty {
-                        MessageType::Text => response_msg.text.map(|arg0: std::string::String| {
-                            axum::extract::ws::Message::Text(arg0.into())
-                        }),
-                        MessageType::Binary => response_msg
-                            .data
-                            .map(|arg0: Vec<u8>| Message::Binary(arg0.into())),
-                        MessageType::Close => Some(Message::Close(None)),
-                        MessageType::Ping => Some(Message::Ping(vec![].into())),
-                        MessageType::Pong => Some(Message::Pong(vec![].into())),
-                        MessageType::Connect => None, // Not applicable for outgoing messages
-                        MessageType::Other(_) => None, // Handle any other types as needed
-                    };
+                // Send responses
+                if let Some(connection) = connections.read().await.get(&msg.connection_id) {
+                    for response_msg in response.messages {
+                        let ws_msg = match response_msg.ty {
+                            MessageType::Text => {
+                                response_msg.text.map(|arg0: std::string::String| {
+                                    axum::extract::ws::Message::Text(arg0.into())
+                                })
+                            }
+                            MessageType::Binary => response_msg
+                                .data
+                                .map(|arg0: Vec<u8>| Message::Binary(arg0.into())),
+                            MessageType::Close => Some(Message::Close(None)),
+                            MessageType::Ping => Some(Message::Ping(vec![].into())),
+                            MessageType::Pong => Some(Message::Pong(vec![].into())),
+                            MessageType::Connect => None, // Not applicable for outgoing messages
+                            MessageType::Other(_) => None, // Handle any other types as needed
+                        };
 
-                    if let Some(msg) = ws_msg {
-                        if let Err(e) = connection.sender.lock().await.send(msg).await {
-                            error!("Error sending response: {}", e);
+                        if let Some(msg) = ws_msg {
+                            if let Err(e) = connection.sender.lock().await.send(msg).await {
+                                error!("Error sending response: {}", e);
+                            }
                         }
                     }
                 }
+            }
+            Err(e) => {
+                error!("Actor function call failed: {}", e);
             }
         }
 

@@ -218,6 +218,7 @@ impl WasmActor {
                     context: "function call",
                     message: e.to_string(),
                 })?;
+        info!("Function call result: {:?}", result);
 
         let wasm_event = self.store.chain().get_last_wasm_event_chain();
         info!("WASM event chain: {:?}", wasm_event);
