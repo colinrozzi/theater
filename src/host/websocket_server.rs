@@ -52,7 +52,7 @@ pub struct WebSocketResponse {
 
 struct IncomingMessage {
     connection_id: u64,
-    content: axum::extract::ws::Message,
+    content: Message,
 }
 
 struct ConnectionContext {
@@ -205,102 +205,6 @@ impl WebSocketServerHost {
         // Clean up on disconnect
         info!("WebSocket disconnected: {}", connection_id);
         connections.write().await.remove(&connection_id);
-        Ok(())
-    }
-
-    async fn call_j(&self) {
-        let mut actor = self.actor_handle.inner().lock().await;
-        let actor_state = actor.actor_state.clone();
-        match actor.call_func::<(Vec<u8>,), ()>("j", (actor_state,)).await {
-            Ok(()) => {
-                info!("j call successfull");
-            }
-            Err(e) => {
-                error!("Actor function call failed: {}", e);
-            }
-        }
-    }
-
-    async fn call_t(&self) {
-        let mt = MessageType::Text;
-        let mut actor = self.actor_handle.inner().lock().await;
-        match actor.call_func::<(MessageType,), ()>("t", (mt,)).await {
-            Ok(()) => {
-                info!("t call successfull");
-            }
-            Err(e) => {
-                error!("Actor function call failed: {}", e);
-            }
-        }
-    }
-
-    async fn call_m(&self) {
-        let msg = WebSocketMessage {
-            ty: MessageType::Text,
-            text: Some("hi".to_string()),
-            data: None,
-        };
-        let mut actor = self.actor_handle.inner().lock().await;
-        match actor
-            .call_func::<(WebSocketMessage,), ()>("m", (msg,))
-            .await
-        {
-            Ok(()) => {
-                info!("m call successfull");
-            }
-            Err(e) => {
-                error!("Actor function call failed: {}", e);
-            }
-        }
-    }
-
-    async fn call_r(&self) {
-        #[derive(Debug, Clone, Deserialize, Serialize, ComponentType, Lift, Lower)]
-        #[component(record)]
-        struct TestMessage {
-            text: String,
-        }
-
-        let mut actor = self.actor_handle.inner().lock().await;
-        match actor
-            .call_func::<(TestMessage,), ()>(
-                "r",
-                (TestMessage {
-                    text: "hi".to_string(),
-                },),
-            )
-            .await
-        {
-            Ok(()) => {
-                info!("r call successfull");
-            }
-            Err(e) => {
-                error!("Actor function call failed: {}", e);
-            }
-        }
-    }
-
-    async fn call_v(&self) -> Result<()> {
-        #[derive(Debug, Clone, Deserialize, Serialize, ComponentType, Lift, Lower)]
-        #[component(variant)]
-        enum TestVar {
-            #[component(name = "text")]
-            Text,
-        }
-
-        let mut actor = self.actor_handle.inner().lock().await;
-        let actor_state = actor.actor_state.clone();
-        match actor
-            .call_func::<(TestVar,), ()>("v", (TestVar::Text,))
-            .await
-        {
-            Ok(()) => {
-                info!("v call successfull");
-            }
-            Err(e) => {
-                error!("Actor function call failed: {}", e);
-            }
-        }
         Ok(())
     }
 
