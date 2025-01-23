@@ -1,50 +1,77 @@
-# Building Actors Guide
+# Building Actors in Theater
 
-This guide walks you through building actors in Theater, from basic concepts to advanced patterns.
+This guide walks you through creating actors in Theater, from basic concepts to advanced patterns, with practical examples.
 
-## What is a Theater Actor?
+## Quick Start
 
-A Theater actor is a WebAssembly component that:
-- Maintains state as JSON
-- Handles messages and events
-- Can serve HTTP requests
-- Creates verifiable state transitions
+Create a new actor project:
 
-## Creating Your First Actor
+```bash
+cargo new my-actor
+cd my-actor
+```
 
-### Project Structure
+Add dependencies to Cargo.toml:
+```toml
+[package]
+name = "my-actor"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+chrono = { version = "0.4", features = ["serde"] }
+```
+
+## Project Structure
+
 ```
 my-actor/
-├── Cargo.toml
-├── actor.toml        # Actor manifest
-├── assets/          # Static assets
+├── Cargo.toml              # Project configuration
+├── actor.toml             # Actor manifest
 ├── src/
-│   ├── lib.rs       # Actor implementation
-│   └── bindings.rs  # WIT bindings
-└── wit/            # Interface definitions
+│   ├── lib.rs            # Actor implementation
+│   └── state.rs          # State management
+└── wit/                  # Interface definitions
+    └── actor.wit         # Actor interface
 ```
 
-### Basic Actor Implementation
+## Basic Actor Implementation
+
+Here's a complete example of a simple counter actor:
 
 ```rust
-use serde::{Deserialize, Serialize};
+// src/lib.rs
 use bindings::exports::ntwk::theater::actor::Guest as ActorGuest;
 use bindings::ntwk::theater::types::{Event, Json};
 use bindings::ntwk::theater::runtime::log;
+use serde::{Deserialize, Serialize};
 
-// Define your actor's state
+// Define actor state
 #[derive(Serialize, Deserialize)]
 struct State {
     count: i32,
     last_updated: String,
 }
 
+// Define message types
+#[derive(Deserialize)]
+#[serde(tag = "type")]
+enum Message {
+    Increment { amount: i32 },
+    Decrement { amount: i32 },
+    Reset,
+}
+
 struct Component;
 
 impl ActorGuest for Component {
-    // Initialize actor state
     fn init() -> Vec<u8> {
-        log("Initializing actor");
+        log("Initializing counter actor");
         
         let initial_state = State {
             count: 0,
@@ -54,295 +81,333 @@ impl ActorGuest for Component {
         serde_json::to_vec(&initial_state).unwrap()
     }
 
-    // Handle incoming messages
-    fn handle(evt: Event, state: Json) -> Json {
+    fn handle(evt: Event, state: Vec<u8>) -> Vec<u8> {
         log(&format!("Handling event: {:?}", evt));
         
         let mut current_state: State = serde_json::from_slice(&state).unwrap();
         
-        // Handle the event and update state
-        match serde_json::from_value(evt.data) {
-            Ok(message) => {
-                // Process message...
-                current_state.last_updated = chrono::Utc::now().to_string();
+        if let Ok(message) = serde_json::from_slice(&evt.data) {
+            match message {
+                Message::Increment { amount } => {
+                    current_state.count += amount;
+                }
+                Message::Decrement { amount } => {
+                    current_state.count -= amount;
+                }
+                Message::Reset => {
+                    current_state.count = 0;
+                }
             }
-            Err(e) => log(&format!("Error parsing message: {}", e)),
+            current_state.last_updated = chrono::Utc::now().to_string();
         }
         
         serde_json::to_vec(&current_state).unwrap()
     }
 }
 
-// Export the component
 bindings::export!(Component with_types_in bindings);
 ```
 
-### Actor Manifest (actor.toml)
+## Actor Manifest
+
+Configure your actor in actor.toml:
 
 ```toml
-name = "my-actor"
-version = "0.1.0"
-description = "Example Theater actor"
-
-component_path = "target/wasm32-unknown-unknown/release/my_actor.wasm"
+name = "counter-actor"
+component_path = "target/wasm32-wasi/release/counter_actor.wasm"
 
 [interface]
-implements = "ntwk:actor/actor"
+implements = "ntwk:theater/actor"
 requires = []
 
 [[handlers]]
 type = "http-server"
 config = { port = 8080 }
 
-[[handlers]]
-type = "filesystem"
-config = { path = "assets" }
+[logging]
+level = "debug"
+output = "stdout"
 ```
 
-## Available Host Functions
+## Adding HTTP Capabilities
 
-Theater provides several host functions through WIT bindings:
-
-### Runtime Functions
-```rust
-use bindings::ntwk::theater::runtime::{
-    log,       // Log messages
-    send,      // Send messages to other actors
-    spawn,     // Spawn new actors
-    get_chain, // Get hash chain entries
-};
-```
-
-### HTTP Functions
-```rust
-use bindings::exports::ntwk::theater::http_server::{
-    Guest as HttpGuest,
-    HttpRequest,
-    HttpResponse,
-};
-
-impl HttpGuest for Component {
-    fn handle_request(req: HttpRequest, state: Json) -> (HttpResponse, Json) {
-        // Handle HTTP request
-        let response = HttpResponse {
-            status: 200,
-            headers: vec![
-                ("Content-Type".to_string(), "text/html".to_string())
-            ],
-            body: Some(b"Hello, World!".to_vec()),
-        };
-        (response, state)
-    }
-}
-```
-
-### Filesystem Access
-```rust
-use bindings::ntwk::theater::filesystem::read_file;
-
-// Read static files
-let content = read_file("assets/index.html");
-```
-
-## State Management
-
-Theater actors maintain their state as JSON:
+Extend the actor to handle HTTP requests:
 
 ```rust
-#[derive(Serialize, Deserialize)]
-struct State {
-    // Define your state structure
-    data: Value,
-    metadata: HashMap<String, String>,
-}
+use bindings::exports::ntwk::theater::http_server::Guest as HttpGuest;
+use bindings::ntwk::theater::http_server::{HttpRequest, HttpResponse};
 
-impl ActorGuest for Component {
-    fn handle(evt: Event, state: Json) -> Json {
-        // Parse current state
-        let mut current_state: State = 
-            serde_json::from_slice(&state).unwrap();
-        
-        // Update state based on event
-        current_state.data = process_event(evt);
-        
-        // Return new state
-        serde_json::to_vec(&current_state).unwrap()
-    }
-}
-```
-
-## Handling HTTP Requests
-
-Theater actors can serve HTTP requests:
-
-```rust
 impl HttpGuest for Component {
     fn handle_request(req: HttpRequest, state: Json) -> (HttpResponse, Json) {
         match (req.method.as_str(), req.path.as_str()) {
-            // Serve static content
-            ("GET", "/") => {
-                let index = read_file("assets/index.html");
-                (
-                    HttpResponse {
-                        status: 200,
-                        headers: vec![
-                            ("Content-Type".to_string(), "text/html".to_string())
-                        ],
-                        body: Some(index),
-                    },
-                    state
-                )
+            // Get current count
+            ("GET", "/count") => {
+                let current_state: State = serde_json::from_slice(&state).unwrap();
+                
+                (HttpResponse {
+                    status: 200,
+                    headers: vec![
+                        ("Content-Type".to_string(), "application/json".to_string())
+                    ],
+                    body: Some(serde_json::json!({
+                        "count": current_state.count,
+                        "last_updated": current_state.last_updated
+                    }).to_string().into_bytes()),
+                }, state)
             },
             
-            // Handle API requests
-            ("POST", "/api/data") => {
-                let mut current_state: State = 
-                    serde_json::from_slice(&state).unwrap();
-                
-                // Update state based on request
+            // Increment count
+            ("POST", "/increment") => {
                 if let Some(body) = req.body {
-                    current_state.data = 
-                        serde_json::from_slice(&body).unwrap();
+                    if let Ok(increment) = serde_json::from_slice::<serde_json::Value>(&body) {
+                        let amount = increment["amount"].as_i64().unwrap_or(1) as i32;
+                        
+                        let evt = Event {
+                            event_type: "increment".to_string(),
+                            parent: None,
+                            data: serde_json::json!({
+                                "type": "Increment",
+                                "amount": amount
+                            }).to_string().into_bytes(),
+                        };
+                        
+                        let new_state = Component::handle(evt, state);
+                        
+                        return (HttpResponse {
+                            status: 200,
+                            headers: vec![
+                                ("Content-Type".to_string(), "application/json".to_string())
+                            ],
+                            body: Some(b"{"status":"ok"}".to_vec()),
+                        }, new_state);
+                    }
                 }
                 
-                let new_state = serde_json::to_vec(&current_state).unwrap();
-                
-                (
-                    HttpResponse {
-                        status: 200,
-                        headers: vec![
-                            ("Content-Type".to_string(), 
-                             "application/json".to_string())
-                        ],
-                        body: Some(b"{}".to_vec()),
-                    },
-                    new_state
-                )
+                (HttpResponse {
+                    status: 400,
+                    headers: vec![],
+                    body: Some(b"{"error":"invalid request"}".to_vec()),
+                }, state)
             },
             
-            // Handle unknown routes
-            _ => (
-                HttpResponse {
-                    status: 404,
-                    headers: vec![],
-                    body: None,
-                },
-                state
-            ),
+            _ => (HttpResponse {
+                status: 404,
+                headers: vec![],
+                body: None,
+            }, state)
         }
     }
 }
 ```
 
-## Common Patterns
+## Adding WebSocket Support
 
-### Event Handling
+Enable real-time updates with WebSocket support:
+
 ```rust
-#[derive(Deserialize)]
-enum Message {
-    Increment { amount: i32 },
-    Reset,
-    Update { data: Value },
-}
+use bindings::exports::ntwk::theater::websocket_server::Guest as WebSocketGuest;
+use bindings::ntwk::theater::websocket_server::{
+    WebSocketMessage,
+    WebSocketResponse,
+    MessageType
+};
 
-fn handle_message(msg: Message, state: &mut State) -> Result<(), Error> {
-    match msg {
-        Message::Increment { amount } => {
-            state.count += amount;
-            Ok(())
-        },
-        Message::Reset => {
-            state.count = 0;
-            Ok(())
-        },
-        Message::Update { data } => {
-            state.data = data;
-            Ok(())
-        },
-    }
-}
-```
-
-### Error Handling
-```rust
-impl ActorGuest for Component {
-    fn handle(evt: Event, state: Json) -> Json {
-        match handle_event(evt, &state) {
-            Ok(new_state) => new_state,
-            Err(e) => {
-                log(&format!("Error handling event: {}", e));
-                // Return unchanged state on error
-                state
-            }
+impl WebSocketGuest for Component {
+    fn handle_message(msg: WebSocketMessage, state: Json) -> (Json, WebSocketResponse) {
+        match msg.ty {
+            MessageType::Text => {
+                if let Some(text) = msg.text {
+                    // Parse command
+                    if let Ok(command) = serde_json::from_str::<serde_json::Value>(&text) {
+                        match command["action"].as_str() {
+                            Some("subscribe") => {
+                                // Send current state
+                                let current_state: State = 
+                                    serde_json::from_slice(&state).unwrap();
+                                    
+                                return (state, WebSocketResponse {
+                                    messages: vec![WebSocketMessage {
+                                        ty: MessageType::Text,
+                                        text: Some(serde_json::json!({
+                                            "type": "update",
+                                            "count": current_state.count
+                                        }).to_string()),
+                                        data: None,
+                                    }]
+                                });
+                            },
+                            _ => {}
+                        }
+                    }
+                }
+            },
+            _ => {}
         }
+        
+        (state, WebSocketResponse { messages: vec![] })
     }
 }
 ```
 
-### Communication with Other Actors
+## Using Host Functions
+
+Theater provides several host functions for common operations:
+
 ```rust
-use bindings::ntwk::theater::runtime::send;
+use bindings::ntwk::theater::runtime::{log, spawn};
+use bindings::ntwk::theater::filesystem::read_file;
 
-// Send message to another actor
-let message = json!({
-    "type": "update",
-    "data": { "value": 42 }
-});
+// Logging
+log("Actor processing message...");
 
-send("other-actor", &message);
+// Spawn another actor
+spawn("other-actor.toml");
+
+// Read a file
+let content = read_file("config.json");
 ```
 
-## Best Practices
+## State Management Best Practices
 
-1. **State Management**
-   - Keep state serializable
-   - Use strong typing
-   - Handle missing fields
-   - Include timestamps
+1. **Use Strong Typing**
+```rust
+#[derive(Serialize, Deserialize)]
+struct State {
+    data: HashMap<String, Value>,
+    metadata: Metadata,
+    updated_at: DateTime<Utc>,
+}
 
-2. **Error Handling**
-   - Log errors with context
-   - Return unchanged state on error
-   - Validate inputs
-   - Handle all cases
+#[derive(Serialize, Deserialize)]
+struct Metadata {
+    version: u32,
+    owner: String,
+}
+```
 
-3. **HTTP Handling**
-   - Serve static files efficiently
-   - Use appropriate status codes
-   - Handle all routes
-   - Validate request bodies
+2. **Handle Errors Gracefully**
+```rust
+fn handle(evt: Event, state: Json) -> Json {
+    let current_state: State = match serde_json::from_slice(&state) {
+        Ok(state) => state,
+        Err(e) => {
+            log(&format!("Error parsing state: {}", e));
+            return state; // Return unchanged state on error
+        }
+    };
+    
+    // Process event...
+}
+```
 
-4. **Message Design**
-   - Use clear message types
-   - Include necessary context
-   - Version messages if needed
-   - Document message formats
+3. **Include Timestamps**
+```rust
+fn update_state(mut state: State) -> State {
+    state.updated_at = chrono::Utc::now();
+    state
+}
+```
 
-5. **Testing**
-   - Test state transitions
-   - Verify error handling
-   - Test HTTP endpoints
-   - Check edge cases
+## Testing
+
+Create tests for your actor:
+
+```rust
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_increment() {
+        let state = State {
+            count: 0,
+            last_updated: chrono::Utc::now().to_string(),
+        };
+        
+        let event = Event {
+            event_type: "increment".to_string(),
+            parent: None,
+            data: serde_json::json!({
+                "type": "Increment",
+                "amount": 5
+            }).to_string().into_bytes(),
+        };
+        
+        let state_json = serde_json::to_vec(&state).unwrap();
+        let new_state_json = Component::handle(event, state_json);
+        let new_state: State = serde_json::from_slice(&new_state_json).unwrap();
+        
+        assert_eq!(new_state.count, 5);
+    }
+}
+```
+
+## Advanced Patterns
+
+### 1. State History
+```rust
+#[derive(Serialize, Deserialize)]
+struct State {
+    current: StateData,
+    history: VecDeque<StateChange>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct StateChange {
+    timestamp: DateTime<Utc>,
+    change_type: String,
+    previous_value: Value,
+}
+```
+
+### 2. Event Correlation
+```rust
+#[derive(Serialize, Deserialize)]
+struct Event {
+    id: String,
+    correlation_id: Option<String>,
+    causation_id: Option<String>,
+    data: Value,
+}
+```
+
+### 3. Validation Chain
+```rust
+fn validate_state(state: &State) -> Result<(), String> {
+    validate_constraints(state)?;
+    validate_relationships(state)?;
+    validate_business_rules(state)?;
+    Ok(())
+}
+```
 
 ## Development Tips
 
-1. Start with a clear state structure
-2. Use type-safe message handling
-3. Implement error handling early
-4. Test with real HTTP requests
-5. Monitor actor logs
+1. Use the runtime log function liberally
+2. Test with different message types
+3. Verify state transitions
+4. Handle all error cases
+5. Monitor the hash chain
+6. Test all handler interfaces
 
-## Debugging
+## Common Pitfalls
 
-1. Use `log()` for visibility
-2. Check state transitions
-3. Verify message handling
-4. Test HTTP endpoints
-5. Monitor resource usage
+1. **Not Handling JSON Errors**
+   - Always handle deserialization errors
+   - Validate JSON structure
+   - Handle missing fields
 
-The Theater actor model combines simplicity with power:
-- JSON for state and messages
-- HTTP integration
-- File system access
-- Strong typing
-- Verifiable state
+2. **State Inconsistency**
+   - Validate state after changes
+   - Keep state updates atomic
+   - Handle partial updates
+
+3. **Missing Error Logging**
+   - Log all errors
+   - Include context
+   - Track error patterns
+
+4. **Resource Management**
+   - Clean up resources
+   - Handle timeouts
+   - Monitor memory usage

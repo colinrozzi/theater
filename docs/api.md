@@ -1,466 +1,302 @@
-# Theater API Reference
+# Theater API Documentation
+
+## Core Concepts
+
+Theater uses WebAssembly components to create isolated, deterministic actors that communicate through a message-passing interface. Each actor is a WebAssembly component that implements specific interfaces defined using the WebAssembly Interface Type (WIT) system.
 
 ## Core Actor Interface
 
-The fundamental interface all Theater actors implement:
+Every Theater actor must implement the core actor interface:
 
-```rust
-/// Core actor trait that all Theater actors must implement
-pub trait Actor {
-    /// Handle an incoming message and current state, return new state and response
-    /// 
-    /// # Arguments
-    /// * `state` - Current actor state as JSON string
-    /// * `message` - Incoming message as JSON string
-    /// 
-    /// # Returns
-    /// Tuple of (new_state, response) as JSON strings
-    fn handle(&self, state: &str, message: &str) -> Result<(String, String), ActorError>;
-}
+```wit
+// ntwk:theater/actor interface
+package ntwk:theater
 
-/// Common error types for actor operations
-#[derive(Debug)]
-pub enum ActorError {
-    /// Invalid JSON in state or message
-    InvalidJson(String),
-    /// Error processing message
-    ProcessingError(String),
-    /// State validation failed
-    StateError(String),
-}
-```
-
-### Example Implementation
-
-```rust
-use serde_json::{json, Value};
-use theater::Actor;
-
-struct CounterActor;
-
-impl Actor for CounterActor {
-    fn handle(&self, state: &str, message: &str) -> Result<(String, String), ActorError> {
-        // Parse current state
-        let mut state: Value = serde_json::from_str(state)
-            .map_err(|e| ActorError::InvalidJson(e.to_string()))?;
-        
-        // Parse message
-        let message: Value = serde_json::from_str(message)
-            .map_err(|e| ActorError::InvalidJson(e.to_string()))?;
-
-        // Handle increment message
-        if message["type"] == "increment" {
-            let amount = message["amount"]
-                .as_i64()
-                .ok_or(ActorError::ProcessingError("Invalid amount".into()))?;
-            
-            let new_count = state["count"].as_i64().unwrap_or(0) + amount;
-            state["count"] = json!(new_count);
-            
-            // Return new state and response
-            Ok((
-                state.to_string(),
-                json!({
-                    "type": "increment_complete",
-                    "new_count": new_count
-                }).to_string()
-            ))
-        } else {
-            Err(ActorError::ProcessingError("Unknown message type".into()))
-        }
+interface types {
+    /// JSON-encoded data
+    type json = list<u8>
+    
+    /// Event structure for actor messages
+    record event {
+        event-type: string,
+        parent: option<u64>,
+        data: json
     }
 }
-```
 
-## HTTP Handler Interface
+interface actor {
+    use types.{json, event}
 
-Interface for actors that handle HTTP requests:
+    /// Initialize actor state
+    init: func() -> json
 
-```rust
-/// HTTP handler trait for actors that serve HTTP requests
-pub trait HttpHandler {
-    /// Handle an HTTP request
-    /// 
-    /// # Arguments
-    /// * `request` - The incoming HTTP request
-    /// * `state` - Current actor state
-    /// 
-    /// # Returns
-    /// HTTP response and new state
-    fn handle_request(
-        &self,
-        request: HttpRequest,
-        state: &str
-    ) -> Result<(HttpResponse, String), ActorError>;
-}
-
-/// HTTP request structure
-#[derive(Debug)]
-pub struct HttpRequest {
-    pub method: String,
-    pub path: String,
-    pub headers: HashMap<String, String>,
-    pub body: Option<Vec<u8>>,
-}
-
-/// HTTP response structure
-#[derive(Debug)]
-pub struct HttpResponse {
-    pub status: u16,
-    pub headers: HashMap<String, String>,
-    pub body: Vec<u8>,
+    /// Handle an incoming event, returning new state
+    handle: func(evt: event, state: json) -> json
 }
 ```
 
-### Example HTTP Handler
+### Implementation Example
+
+Here's how to implement the core actor interface in Rust:
 
 ```rust
-impl HttpHandler for CounterActor {
-    fn handle_request(
-        &self,
-        request: HttpRequest,
-        state: &str,
-    ) -> Result<(HttpResponse, String), ActorError> {
-        match (request.method.as_str(), request.path.as_str()) {
-            // GET /count - Return current count
+use bindings::exports::ntwk::theater::actor::Guest as ActorGuest;
+use bindings::ntwk::theater::types::{Event, Json};
+use serde::{Deserialize, Serialize};
+
+// Define your actor's state
+#[derive(Serialize, Deserialize)]
+struct State {
+    count: i32,
+    last_updated: String,
+}
+
+struct Component;
+
+impl ActorGuest for Component {
+    // Initialize actor state
+    fn init() -> Vec<u8> {
+        let initial_state = State {
+            count: 0,
+            last_updated: chrono::Utc::now().to_string(),
+        };
+        
+        serde_json::to_vec(&initial_state).unwrap()
+    }
+
+    // Handle incoming messages
+    fn handle(evt: Event, state: Vec<u8>) -> Vec<u8> {
+        let mut current_state: State = serde_json::from_slice(&state).unwrap();
+        
+        // Process the event
+        if let Ok(message) = serde_json::from_slice(&evt.data) {
+            // Update state based on message...
+        }
+        
+        serde_json::to_vec(&current_state).unwrap()
+    }
+}
+
+bindings::export!(Component with_types_in bindings);
+```
+
+## Available Host Functions
+
+Theater provides several host functions that actors can use:
+
+### Runtime Interface
+
+```wit
+// ntwk:theater/runtime interface
+interface runtime {
+    /// Log a message to the host system
+    log: func(msg: string)
+
+    /// Spawn a new actor from a manifest
+    spawn: func(manifest: string)
+
+    /// Get the current event chain
+    get-chain: func() -> chain
+}
+```
+
+### HTTP Server Interface
+
+```wit
+// ntwk:theater/http-server interface
+interface http-server {
+    record http-request {
+        method: string,
+        path: string,
+        headers: list<tuple<string, string>>,
+        body: option<list<u8>>
+    }
+
+    record http-response {
+        status: u16,
+        headers: list<tuple<string, string>>,
+        body: option<list<u8>>
+    }
+
+    handle-request: func(req: http-request, state: json) -> tuple<http-response, json>
+}
+```
+
+### WebSocket Server Interface
+
+```wit
+// ntwk:theater/websocket-server interface
+interface websocket-server {
+    use types.{json}
+
+    /// Types of WebSocket messages
+    enum message-type {
+        text,
+        binary,
+        connect,
+        close,
+        ping,
+        pong,
+        other(string)
+    }
+
+    /// WebSocket message structure
+    record websocket-message {
+        ty: message-type,
+        data: option<list<u8>>,
+        text: option<string>
+    }
+
+    /// WebSocket response structure
+    record websocket-response {
+        messages: list<websocket-message>
+    }
+
+    /// Handle an incoming WebSocket message
+    handle-message: func(msg: websocket-message, state: json) -> tuple<json, websocket-response>
+}
+```
+
+## Handler Implementation Examples
+
+### HTTP Server Handler
+
+```rust
+use bindings::exports::ntwk::theater::http_server::Guest as HttpGuest;
+use bindings::ntwk::theater::types::Json;
+use bindings::ntwk::theater::http_server::{HttpRequest, HttpResponse};
+
+impl HttpGuest for Component {
+    fn handle_request(req: HttpRequest, state: Json) -> (HttpResponse, Json) {
+        match (req.method.as_str(), req.path.as_str()) {
             ("GET", "/count") => {
-                let state: Value = serde_json::from_str(state)?;
-                let count = state["count"].as_i64().unwrap_or(0);
+                let current_state: State = serde_json::from_slice(&state).unwrap();
                 
-                Ok((
-                    HttpResponse {
-                        status: 200,
-                        headers: HashMap::from([
-                            ("Content-Type".into(), "application/json".into())
-                        ]),
-                        body: json!({ "count": count }).to_string().into_bytes(),
-                    },
-                    state.to_string()
-                ))
+                (HttpResponse {
+                    status: 200,
+                    headers: vec![
+                        ("Content-Type".to_string(), "application/json".to_string())
+                    ],
+                    body: Some(serde_json::json!({
+                        "count": current_state.count
+                    }).to_string().into_bytes()),
+                }, state)
             },
-            
-            // POST /increment - Increment counter
-            ("POST", "/increment") => {
-                let body: Value = serde_json::from_slice(&request.body.unwrap_or_default())?;
-                
-                // Reuse actor message handling
-                let (new_state, response) = self.handle(
-                    state,
-                    json!({
-                        "type": "increment",
-                        "amount": body["amount"]
-                    }).to_string().as_str()
-                )?;
-                
-                Ok((
-                    HttpResponse {
-                        status: 200,
-                        headers: HashMap::from([
-                            ("Content-Type".into(), "application/json".into())
-                        ]),
-                        body: response.into_bytes(),
-                    },
-                    new_state
-                ))
-            },
-            
-            // 404 for unknown routes
-            _ => Ok((
-                HttpResponse {
-                    status: 404,
-                    headers: HashMap::new(),
-                    body: vec![],
-                },
-                state.to_string()
-            )),
+            _ => (HttpResponse {
+                status: 404,
+                headers: vec![],
+                body: None,
+            }, state)
         }
     }
 }
 ```
 
-## Supervision API
-
-Interface for actors that supervise other actors:
+### WebSocket Server Handler
 
 ```rust
-/// Supervisor trait for managing child actors
-pub trait Supervisor {
-    /// Handle lifecycle events from supervised actors
-    fn handle_lifecycle(
-        &self,
-        event: LifecycleEvent,
-        state: &str
-    ) -> Result<(String, SupervisorAction), ActorError>;
-}
+use bindings::exports::ntwk::theater::websocket_server::Guest as WebSocketGuest;
+use bindings::ntwk::theater::types::Json;
+use bindings::ntwk::theater::websocket_server::{
+    WebSocketMessage,
+    WebSocketResponse,
+    MessageType
+};
 
-/// Events from supervised actors
-#[derive(Debug)]
-pub enum LifecycleEvent {
-    Started {
-        actor_id: String,
-        initial_state: String,
-    },
-    Stopped {
-        actor_id: String,
-        final_state: String,
-    },
-    Failed {
-        actor_id: String,
-        error: String,
-        state: String,
-    },
-}
-
-/// Actions a supervisor can take
-#[derive(Debug)]
-pub enum SupervisorAction {
-    /// Do nothing
-    Continue,
-    /// Restart the actor
-    Restart {
-        actor_id: String,
-        initial_state: String,
-    },
-    /// Stop the actor
-    Stop {
-        actor_id: String,
-    },
-    /// Escalate the failure
-    Escalate {
-        error: String,
-    },
-}
-```
-
-### Example Supervisor
-
-```rust
-impl Supervisor for WorkerSupervisor {
-    fn handle_lifecycle(
-        &self,
-        event: LifecycleEvent,
-        state: &str
-    ) -> Result<(String, SupervisorAction), ActorError> {
-        let mut state: Value = serde_json::from_str(state)?;
+impl WebSocketGuest for Component {
+    fn handle_message(msg: WebSocketMessage, state: Json) -> (Json, WebSocketResponse) {
+        let mut current_state: State = serde_json::from_slice(&state).unwrap();
         
-        match event {
-            LifecycleEvent::Failed { actor_id, error, state: failed_state } => {
-                // Track failure in supervisor state
-                let failures = state["failures"]
-                    .as_array_mut()
-                    .ok_or(ActorError::StateError("Invalid failures array".into()))?;
-                
-                failures.push(json!({
-                    "actor_id": actor_id,
-                    "error": error,
-                    "timestamp": chrono::Utc::now(),
-                    "state": failed_state
-                }));
-                
-                // Decide whether to restart
-                if failures.len() < 3 {
-                    Ok((
-                        state.to_string(),
-                        SupervisorAction::Restart {
-                            actor_id,
-                            initial_state: json!({ "count": 0 }).to_string(),
-                        }
-                    ))
+        let response = match msg.ty {
+            MessageType::Text => {
+                if let Some(text) = msg.text {
+                    // Process text message...
+                    WebSocketResponse {
+                        messages: vec![WebSocketMessage {
+                            ty: MessageType::Text,
+                            text: Some("Message received".to_string()),
+                            data: None,
+                        }]
+                    }
                 } else {
-                    Ok((
-                        state.to_string(),
-                        SupervisorAction::Escalate {
-                            error: "Too many failures".into()
-                        }
-                    ))
+                    WebSocketResponse { messages: vec![] }
                 }
             },
-            
-            // Handle other lifecycle events...
-            _ => Ok((state.to_string(), SupervisorAction::Continue))
-        }
+            _ => WebSocketResponse { messages: vec![] }
+        };
+        
+        (serde_json::to_vec(&current_state).unwrap(), response)
     }
 }
 ```
 
-## Hash Chain API
+## Actor Configuration
 
-Interface for working with state hash chains:
+Actors are configured using TOML manifests:
 
-```rust
-/// Hash chain operations
-pub trait HashChain {
-    /// Get entry by hash
-    fn get_entry(&self, hash: &str) -> Result<HashEntry, HashChainError>;
-    
-    /// Get latest entry
-    fn get_latest(&self) -> Result<HashEntry, HashChainError>;
-    
-    /// Verify entry and its history
-    fn verify(&self, hash: &str) -> Result<bool, HashChainError>;
-    
-    /// Get history between hashes
-    fn get_history(
-        &self,
-        start_hash: &str,
-        end_hash: &str
-    ) -> Result<Vec<HashEntry>, HashChainError>;
-}
+```toml
+name = "example-actor"
+component_path = "target/wasm32-wasi/release/example_actor.wasm"
 
-/// Entry in the hash chain
-#[derive(Debug)]
-pub struct HashEntry {
-    pub hash: String,
-    pub parent_hash: Option<String>,
-    pub state: String,
-    pub message: Option<String>,
-    pub timestamp: DateTime<Utc>,
-    pub metadata: HashMap<String, String>,
-}
+[interface]
+implements = "ntwk:theater/websocket-server"
+requires = []
+
+[[handlers]]
+type = "websocket-server"
+config = { port = 8080 }
+
+[logging]
+level = "debug"
 ```
 
-### Example Hash Chain Usage
+## Hash Chain Integration
+
+Theater uses wasmtime's built-in hash chain functionality to track state transitions. Each state change is automatically recorded in the hash chain, enabling:
+
+- Complete state history
+- Deterministic replay
+- State verification
+
+Access the chain through the runtime interface:
 
 ```rust
-use theater::HashChain;
+use bindings::ntwk::theater::runtime::get_chain;
 
-fn verify_state_history(chain: &impl HashChain, hash: &str) -> Result<(), HashChainError> {
-    // Get entry to verify
-    let entry = chain.get_entry(hash)?;
-    
-    // Verify this entry and its history
-    if !chain.verify(hash)? {
-        return Err(HashChainError::VerificationFailed);
-    }
-    
-    // Get history from start to this entry
-    let history = chain.get_history(
-        &chain.get_latest()?.hash,
-        hash
-    )?;
-    
-    // Process history
-    for entry in history {
-        println!(
-            "State transition at {}: {} -> {}",
-            entry.timestamp,
-            entry.parent_hash.unwrap_or_else(|| "none".into()),
-            entry.hash
-        );
-    }
-    
-    Ok(())
-}
-```
-
-## Configuration Types
-
-Common configuration structures:
-
-```rust
-/// Actor configuration in manifest
-#[derive(Debug, Deserialize)]
-pub struct ActorConfig {
-    pub name: String,
-    pub component_path: String,
-    pub interface: InterfaceConfig,
-    pub handlers: Vec<HandlerConfig>,
-}
-
-/// Interface implementation configuration
-#[derive(Debug, Deserialize)]
-pub struct InterfaceConfig {
-    pub implements: Vec<String>,
-    pub requires: Vec<String>,
-}
-
-/// Handler configuration
-#[derive(Debug, Deserialize)]
-#[serde(tag = "type")]
-pub enum HandlerConfig {
-    #[serde(rename = "Http-server")]
-    HttpServer {
-        config: HttpServerConfig,
-    },
-    #[serde(rename = "Http-client")]
-    HttpClient {
-        config: HttpClientConfig,
-    },
-    #[serde(rename = "Metrics")]
-    Metrics {
-        config: MetricsConfig,
-    },
-}
-
-/// HTTP server configuration
-#[derive(Debug, Deserialize)]
-pub struct HttpServerConfig {
-    pub port: u16,
-    pub host: Option<String>,
-    pub tls: Option<TlsConfig>,
-}
-```
-
-## Error Types
-
-Common error types used across the API:
-
-```rust
-/// Actor-related errors
-#[derive(Debug)]
-pub enum ActorError {
-    InvalidJson(String),
-    ProcessingError(String),
-    StateError(String),
-    InterfaceError(String),
-}
-
-/// Hash chain errors
-#[derive(Debug)]
-pub enum HashChainError {
-    EntryNotFound(String),
-    InvalidHash(String),
-    VerificationFailed,
-    DatabaseError(String),
-}
-
-/// Handler errors
-#[derive(Debug)]
-pub enum HandlerError {
-    Configuration(String),
-    Runtime(String),
-    Protocol(String),
-}
+// Get current chain
+let chain = get_chain();
 ```
 
 ## Best Practices
 
-1. **Error Handling**
-   - Use specific error types
-   - Include context in errors
-   - Handle all error cases
+1. **State Management**
+   - Use serde for state serialization
+   - Keep state JSON-serializable
+   - Include timestamps in state
+   - Handle serialization errors
+
+2. **Message Handling**
+   - Validate message format
+   - Handle all message types
+   - Return consistent responses
+   - Preserve state on errors
+
+3. **Handler Implementation**
+   - Implement appropriate interfaces
+   - Handle all request types
+   - Return proper responses
    - Maintain state consistency
 
-2. **State Management**
-   - Validate state transitions
-   - Keep state serializable
-   - Use appropriate types
-   - Handle missing fields
+4. **Error Handling**
+   - Log errors with context
+   - Return unchanged state on error
+   - Validate all inputs
+   - Handle all error cases
 
-3. **Message Processing**
-   - Validate message format
-   - Handle unknown messages
-   - Check field types
-   - Use typed structures
+## Development Tips
 
-4. **HTTP Handling**
-   - Validate routes
-   - Check content types
-   - Handle missing data
-   - Use status codes properly
-
-5. **Supervision**
-   - Track failure history
-   - Use appropriate restart strategy
-   - Handle all lifecycle events
-   - Maintain supervisor state
+1. Use the chat-room example as a reference implementation
+2. Test with multiple handler types
+3. Monitor the hash chain during development
+4. Use logging for debugging
+5. Validate state transitions
