@@ -1,5 +1,6 @@
 use crate::actor_runtime::ActorRuntime;
 use crate::messages::TheaterCommand;
+use crate::router::Router;
 use crate::Result;
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -10,6 +11,7 @@ use tracing::info;
 
 pub struct TheaterRuntime {
     actors: HashMap<String, tokio::task::JoinHandle<ActorRuntime>>,
+    router: Router,
     pub theater_tx: Sender<TheaterCommand>,
     theater_rx: Receiver<TheaterCommand>,
 }
@@ -20,6 +22,7 @@ impl TheaterRuntime {
         Ok(Self {
             theater_tx,
             theater_rx,
+            router: Router::new(),
             actors: HashMap::new(),
         })
     }

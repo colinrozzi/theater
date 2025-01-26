@@ -1,5 +1,6 @@
 use crate::actor_handle::ActorHandle;
 use crate::config::MessageServerConfig;
+use crate::messages::ActorMessage;
 use crate::wasm::Json;
 use crate::wasm::{ActorState, WasmActor};
 use crate::ActorStore;
@@ -11,11 +12,11 @@ use std::future::Future;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use thiserror::Error;
+use tokio::sync::mpsc::Receiver;
 use tracing::info;
 
-#[derive(Clone)]
 pub struct MessageServerHost {
-    port: u16,
+    actor_mailbox: Receiver<ActorMessage>,
     actor_handle: ActorHandle,
 }
 
@@ -29,9 +30,13 @@ pub enum MessageServerError {
 }
 
 impl MessageServerHost {
-    pub fn new(config: MessageServerConfig, actor_handle: ActorHandle) -> Self {
+    pub fn new(
+        config: MessageServerConfig,
+        actor_mailbox: Receiver<ActorMessage>,
+        actor_handle: ActorHandle,
+    ) -> Self {
         Self {
-            port: config.port,
+            actor_mailbox,
             actor_handle,
         }
     }

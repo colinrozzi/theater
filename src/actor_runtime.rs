@@ -7,7 +7,7 @@ use crate::host::http_server::HttpServerHost;
 use crate::host::message_server::MessageServerHost;
 use crate::host::runtime::RuntimeHost;
 use crate::host::websocket_server::WebSocketServerHost;
-use crate::messages::TheaterCommand;
+use crate::messages::{ActorMessage, TheaterCommand};
 use crate::store::ActorStore;
 use crate::wasm::WasmActor;
 use crate::Result;
@@ -30,23 +30,26 @@ impl ActorRuntime {
     pub async fn from_file(
         manifest_path: PathBuf,
         theater_tx: Sender<TheaterCommand>,
+        actor_mailbox: Sender<ActorMessage>,
     ) -> Result<RuntimeComponents> {
         // Load manifest config
         let config = ManifestConfig::from_file(&manifest_path)?;
-        let runtime = Self::new(&config, theater_tx).await?;
+        let runtime = Self::new(&config, theater_tx, actor_mailbox).await?;
         Ok(runtime)
     }
 
     pub async fn new(
         config: &ManifestConfig,
         theater_tx: Sender<TheaterCommand>,
+        actor_mailbox: Sender<ActorMessage>,
     ) -> Result<RuntimeComponents> {
-        Self::init_components(config, theater_tx).await
+        Self::init_components(config, theater_tx, actor_mailbox).await
     }
 
     async fn init_components(
         config: &ManifestConfig,
         theater_tx: Sender<TheaterCommand>,
+        actor_mailbox: Sender<ActorMessage>,
     ) -> Result<RuntimeComponents> {
         let store = ActorStore::new(config.name.clone(), theater_tx.clone());
         let actor = WasmActor::new(config, store).await?;
@@ -57,7 +60,7 @@ impl ActorRuntime {
             .iter()
             .map(|handler_config| match handler_config {
                 HandlerConfig::MessageServer(config) => Handler::MessageServer(
-                    MessageServerHost::new(config.clone(), actor_handle.clone()),
+                    MessageServerHost::new(config.clone(), actor_mailbox, actor_handle.clone()),
                 ),
                 HandlerConfig::HttpServer(config) => {
                     Handler::HttpServer(HttpServerHost::new(config.clone(), actor_handle.clone()))

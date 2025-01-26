@@ -5,6 +5,7 @@ pub mod actor_runtime;
 pub mod config;
 pub mod host;
 pub mod messages;
+pub mod router;
 mod store;
 pub mod theater_runtime;
 mod wasm;

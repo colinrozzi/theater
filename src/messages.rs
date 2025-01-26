@@ -14,6 +14,11 @@ pub enum TheaterCommand {
     },
 }
 
+pub struct ActorMessage {
+    pub actor_id: String,
+    pub data: Vec<u8>,
+}
+
 #[derive(Debug)]
 pub enum ActorStatus {
     Running,
