@@ -12,10 +12,14 @@ pub enum TheaterCommand {
         actor_id: String,
         response_tx: oneshot::Sender<Result<()>>,
     },
+    SendMessage {
+        actor_id: String,
+        actor_message: ActorMessage,
+    },
 }
 
+#[derive(Debug)]
 pub struct ActorMessage {
-    pub actor_id: String,
     pub data: Vec<u8>,
 }
 

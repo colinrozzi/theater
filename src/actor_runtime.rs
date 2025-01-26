@@ -12,7 +12,7 @@ use crate::store::ActorStore;
 use crate::wasm::WasmActor;
 use crate::Result;
 use std::path::PathBuf;
-use tokio::sync::mpsc::Sender;
+use tokio::sync::mpsc::{Receiver, Sender};
 use tracing::{error, info};
 
 pub struct RuntimeComponents {
@@ -30,7 +30,7 @@ impl ActorRuntime {
     pub async fn from_file(
         manifest_path: PathBuf,
         theater_tx: Sender<TheaterCommand>,
-        actor_mailbox: Sender<ActorMessage>,
+        actor_mailbox: Receiver<ActorMessage>,
     ) -> Result<RuntimeComponents> {
         // Load manifest config
         let config = ManifestConfig::from_file(&manifest_path)?;
@@ -41,7 +41,7 @@ impl ActorRuntime {
     pub async fn new(
         config: &ManifestConfig,
         theater_tx: Sender<TheaterCommand>,
-        actor_mailbox: Sender<ActorMessage>,
+        actor_mailbox: Receiver<ActorMessage>,
     ) -> Result<RuntimeComponents> {
         Self::init_components(config, theater_tx, actor_mailbox).await
     }
@@ -49,36 +49,48 @@ impl ActorRuntime {
     async fn init_components(
         config: &ManifestConfig,
         theater_tx: Sender<TheaterCommand>,
-        actor_mailbox: Sender<ActorMessage>,
+        actor_mailbox: Receiver<ActorMessage>,
     ) -> Result<RuntimeComponents> {
         let store = ActorStore::new(config.name.clone(), theater_tx.clone());
         let actor = WasmActor::new(config, store).await?;
         let actor_handle = ActorHandle::new(actor);
 
-        let handlers = config
-            .handlers
-            .iter()
-            .map(|handler_config| match handler_config {
-                HandlerConfig::MessageServer(config) => Handler::MessageServer(
-                    MessageServerHost::new(config.clone(), actor_mailbox, actor_handle.clone()),
-                ),
-                HandlerConfig::HttpServer(config) => {
-                    Handler::HttpServer(HttpServerHost::new(config.clone(), actor_handle.clone()))
-                }
-                HandlerConfig::FileSystem(config) => {
-                    Handler::FileSystem(FileSystemHost::new(config.clone(), actor_handle.clone()))
-                }
-                HandlerConfig::HttpClient(config) => {
-                    Handler::HttpClient(HttpClientHost::new(config.clone(), actor_handle.clone()))
-                }
-                HandlerConfig::Runtime(config) => {
-                    Handler::Runtime(RuntimeHost::new(config.clone(), actor_handle.clone()))
-                }
-                HandlerConfig::WebSocketServer(config) => Handler::WebSocketServer(
-                    WebSocketServerHost::new(config.clone(), actor_handle.clone()),
-                ),
-            })
-            .collect();
+        let mut handlers = Vec::new();
+
+        handlers.push(Handler::MessageServer(MessageServerHost::new(
+            actor_mailbox,
+            theater_tx.clone(),
+            actor_handle.clone(),
+        )));
+
+        handlers.extend(
+            config
+                .handlers
+                .iter()
+                .map(|handler_config| match handler_config {
+                    HandlerConfig::MessageServer(_) => {
+                        panic!("MessageServer handler is already added")
+                    }
+                    HandlerConfig::HttpServer(config) => Handler::HttpServer(HttpServerHost::new(
+                        config.clone(),
+                        actor_handle.clone(),
+                    )),
+                    HandlerConfig::FileSystem(config) => Handler::FileSystem(FileSystemHost::new(
+                        config.clone(),
+                        actor_handle.clone(),
+                    )),
+                    HandlerConfig::HttpClient(config) => Handler::HttpClient(HttpClientHost::new(
+                        config.clone(),
+                        actor_handle.clone(),
+                    )),
+                    HandlerConfig::Runtime(config) => {
+                        Handler::Runtime(RuntimeHost::new(config.clone(), actor_handle.clone()))
+                    }
+                    HandlerConfig::WebSocketServer(config) => Handler::WebSocketServer(
+                        WebSocketServerHost::new(config.clone(), actor_handle.clone()),
+                    ),
+                }),
+        );
 
         Ok(RuntimeComponents {
             name: config.name.clone(),

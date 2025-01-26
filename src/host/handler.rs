@@ -1,5 +1,3 @@
-use crate::actor_handle::ActorHandle;
-use crate::config::HandlerConfig;
 use crate::host::filesystem::FileSystemHost;
 use crate::host::http_client::HttpClientHost;
 use crate::host::http_server::HttpServerHost;
@@ -18,29 +16,6 @@ pub enum Handler {
 }
 
 impl Handler {
-    pub fn new(handler_config: HandlerConfig, actor_handle: ActorHandle) -> Self {
-        match handler_config {
-            HandlerConfig::MessageServer(config) => {
-                Handler::MessageServer(MessageServerHost::new(config, actor_handle))
-            }
-            HandlerConfig::HttpServer(config) => {
-                Handler::HttpServer(HttpServerHost::new(config, actor_handle))
-            }
-            HandlerConfig::FileSystem(config) => {
-                Handler::FileSystem(FileSystemHost::new(config, actor_handle))
-            }
-            HandlerConfig::HttpClient(config) => {
-                Handler::HttpClient(HttpClientHost::new(config, actor_handle))
-            }
-            HandlerConfig::Runtime(config) => {
-                Handler::Runtime(RuntimeHost::new(config, actor_handle))
-            }
-            HandlerConfig::WebSocketServer(config) => {
-                Handler::WebSocketServer(WebSocketServerHost::new(config, actor_handle))
-            }
-        }
-    }
-
     pub async fn start(&mut self) -> Result<()> {
         match self {
             Handler::MessageServer(handler) => handler.start().await,

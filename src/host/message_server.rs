@@ -1,6 +1,5 @@
 use crate::actor_handle::ActorHandle;
-use crate::config::MessageServerConfig;
-use crate::messages::ActorMessage;
+use crate::messages::{ActorMessage, TheaterCommand};
 use crate::wasm::Json;
 use crate::wasm::{ActorState, WasmActor};
 use crate::ActorStore;
@@ -12,11 +11,12 @@ use std::future::Future;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use thiserror::Error;
-use tokio::sync::mpsc::Receiver;
+use tokio::sync::mpsc::{Receiver, Sender};
 use tracing::info;
 
 pub struct MessageServerHost {
-    actor_mailbox: Receiver<ActorMessage>,
+    mailbox_rx: Receiver<ActorMessage>,
+    theater_tx: Sender<TheaterCommand>,
     actor_handle: ActorHandle,
 }
 
@@ -31,12 +31,13 @@ pub enum MessageServerError {
 
 impl MessageServerHost {
     pub fn new(
-        config: MessageServerConfig,
-        actor_mailbox: Receiver<ActorMessage>,
+        mailbox_rx: Receiver<ActorMessage>,
+        theater_tx: Sender<TheaterCommand>,
         actor_handle: ActorHandle,
     ) -> Self {
         Self {
-            actor_mailbox,
+            mailbox_rx,
+            theater_tx,
             actor_handle,
         }
     }
