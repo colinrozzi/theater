@@ -6,6 +6,8 @@ interface types {
     type json = list<u8>;
     type state = list<u8>;
 
+    type actor-id = string;
+
     record chain {
         events: list<meta-event>
     }

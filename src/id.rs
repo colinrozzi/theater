@@ -56,3 +56,4 @@ mod tests {
         assert_eq!(id, deserialized);
     }
 }
+

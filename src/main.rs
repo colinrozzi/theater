@@ -48,6 +48,7 @@ async fn main() -> Result<()> {
         .send(TheaterCommand::SpawnActor {
             manifest_path: args.manifest.clone(),
             response_tx,
+            parent_id: None,
         })
         .await;
 

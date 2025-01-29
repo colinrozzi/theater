@@ -51,6 +51,7 @@ impl RuntimeHost {
                         .send(TheaterCommand::SpawnActor {
                             manifest_path: PathBuf::from(manifest),
                             response_tx,
+                            parent_id: Some(ctx.data().id.clone()),
                         })
                         .await
                     {

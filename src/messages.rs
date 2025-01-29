@@ -9,6 +9,7 @@ pub enum TheaterCommand {
     SpawnActor {
         manifest_path: PathBuf,
         response_tx: oneshot::Sender<Result<TheaterId>>, // Now returns TheaterId instead of String
+        parent_id: Option<TheaterId>,
     },
     StopActor {
         actor_id: TheaterId,
@@ -36,4 +37,3 @@ pub enum ActorStatus {
     Stopped,
     Failed,
 }
-
