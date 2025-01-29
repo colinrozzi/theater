@@ -4,12 +4,7 @@ use crate::wasm::Json;
 use crate::wasm::{ActorState, WasmActor};
 use crate::ActorStore;
 use anyhow::Result;
-use axum::{extract::State, response::Response, routing::any, serve, Router};
-use serde_json::json;
-use serde_json::Value;
 use std::future::Future;
-use std::net::SocketAddr;
-use std::sync::Arc;
 use thiserror::Error;
 use tokio::sync::mpsc::{Receiver, Sender};
 use tracing::info;
@@ -49,20 +44,40 @@ impl MessageServerHost {
             .linker
             .instance("ntwk:theater/message-server-host")
             .expect("could not instantiate ntwk:theater/message-server-host");
+        let theater_tx = self.theater_tx.clone();
 
         interface
             .func_wrap_async(
                 "send",
-                |_ctx: wasmtime::StoreContextMut<'_, ActorStore>,
-                 (address, msg): (String, Vec<u8>)|
-                 -> Box<dyn Future<Output = Result<(Vec<u8>,)>> + Send> {
-                    let address = address.clone();
-                    let msg = msg.clone();
+                move |_ctx: wasmtime::StoreContextMut<'_, ActorStore>,
+                      (address, msg): (String, Vec<u8>)|
+                      -> Box<dyn Future<Output = Result<(Vec<u8>,)>> + Send> {
+                    // make a channel that will carry the byte array of the resposne
+                    let (response_tx, response_rx) = tokio::sync::oneshot::channel();
+                    let actor_message = TheaterCommand::SendMessage {
+                        actor_id: address,
+                        actor_message: ActorMessage {
+                            data: msg,
+                            response_tx,
+                        },
+                    };
+                    let theater_tx = theater_tx.clone();
                     Box::new(async move {
-                        let client = reqwest::Client::new();
-                        let response = client.post(&address).body(msg).send().await?;
-                        let body = response.bytes().await?;
-                        Ok((body.to_vec(),))
+                        theater_tx.send(actor_message).await.map_err(|e| {
+                            MessageServerError::WasmError {
+                                context: "send",
+                                message: e.to_string(),
+                            }
+                        })?;
+                        // wait for the response from the actor
+                        let response =
+                            response_rx
+                                .await
+                                .map_err(|e| MessageServerError::WasmError {
+                                    context: "send",
+                                    message: e.to_string(),
+                                })?;
+                        Ok((response,))
                     })
                 },
             )
@@ -85,83 +100,26 @@ impl MessageServerHost {
         Ok(())
     }
 
-    pub async fn start(&self) -> Result<()> {
-        let app = Router::new()
-            .route("/", any(Self::handle_request))
-            .route("/{*path}", any(Self::handle_request))
-            .with_state(Arc::new(self.actor_handle.clone()));
-
-        let addr = SocketAddr::from(([127, 0, 0, 1], self.port));
-        info!("Message server starting on port {}", self.port);
-        let listener = tokio::net::TcpListener::bind(&addr).await?;
-
-        serve(listener, app.into_make_service()).await?;
-
+    pub async fn start(&mut self) -> Result<()> {
+        info!("Starting message server host");
+        while let Some(msg) = self.mailbox_rx.recv().await {
+            self.process_message(msg).await
+        }
         Ok(())
     }
 
-    async fn handle_request(
-        State(actor_handle): State<Arc<ActorHandle>>,
-        req: axum::http::Request<axum::body::Body>,
-    ) -> Response {
-        info!("Received request");
-
-        let (_parts, body) = req.into_parts();
-        let bytes = axum::body::to_bytes(body, 100 * 1024 * 1024)
+    async fn process_message(&self, msg: ActorMessage) -> () {
+        let mut actor = self.actor_handle.inner().lock().await;
+        let actor_state = actor.actor_state.clone();
+        match actor
+            .call_func::<(Json, ActorState), (Json, ActorState)>("handle", (msg.data, actor_state))
             .await
-            .unwrap_or_default();
-
-        let response = Response::builder();
-
-        match serde_json::from_slice::<Value>(&bytes) {
-            Ok(val) => {
-                info!("Received val: {:?}", val);
-                let mut actor = actor_handle.inner().lock().await;
-                let actor_state = actor.actor_state.clone();
-                match actor
-                    .call_func::<(Json, ActorState), ((Json, ActorState),)>(
-                        "handle",
-                        (
-                            serde_json::to_vec(&val).expect("cannot parse val in bytes"),
-                            actor_state,
-                        ),
-                    )
-                    .await
-                {
-                    Ok(((resp, new_state),)) => {
-                        actor.actor_state = new_state;
-                        info!("success");
-                        response
-                            .status(200)
-                            .body(axum::body::Body::from(resp))
-                            .unwrap()
-                    }
-                    Err(e) => {
-                        info!("{}", format!("Error calling handle function: {}", e));
-                        response
-                            .status(500)
-                            .body(axum::body::Body::from(
-                                serde_json::to_vec(&json!({
-                                    "error": format!("Error calling handle function: {}", e)
-                                }))
-                                .unwrap(),
-                            ))
-                            .expect("Failed to set response body")
-                    }
-                }
+        {
+            Ok((resp, new_state)) => {
+                actor.actor_state = new_state;
+                let _ = msg.response_tx.send(resp);
             }
-            Err(e) => {
-                info!("{}", format!("Error parsing request: {}", e));
-                response
-                    .status(400)
-                    .body(axum::body::Body::from(
-                        serde_json::to_vec(&json!({
-                            "error": format!("Error parsing request: {}", e)
-                        }))
-                        .unwrap(),
-                    ))
-                    .expect("Failed to set response body")
-            }
+            Err(e) => info!("Error processing message: {}", e),
         }
     }
 }

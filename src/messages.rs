@@ -16,10 +16,15 @@ pub enum TheaterCommand {
         actor_id: String,
         actor_message: ActorMessage,
     },
+    NewEvent {
+        actor_id: String,
+        event: Vec<u8>,
+    },
 }
 
 #[derive(Debug)]
 pub struct ActorMessage {
+    pub response_tx: oneshot::Sender<Vec<u8>>,
     pub data: Vec<u8>,
 }
 

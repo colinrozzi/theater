@@ -1,6 +1,5 @@
 use crate::actor_runtime::ActorRuntime;
 use crate::messages::{ActorMessage, TheaterCommand};
-use crate::router::Router;
 use crate::Result;
 use std::collections::HashMap;
 use std::path::PathBuf;

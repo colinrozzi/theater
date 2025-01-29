@@ -52,7 +52,7 @@ impl ActorRuntime {
         actor_mailbox: Receiver<ActorMessage>,
     ) -> Result<RuntimeComponents> {
         let store = ActorStore::new(config.name.clone(), theater_tx.clone());
-        let actor = WasmActor::new(config, store).await?;
+        let actor = WasmActor::new(config, store, &theater_tx).await?;
         let actor_handle = ActorHandle::new(actor);
 
         let mut handlers = Vec::new();

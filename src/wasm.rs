@@ -4,10 +4,12 @@ use serde_json::json;
 use std::collections::HashMap;
 use std::fmt::Debug;
 use thiserror::Error;
+use tokio::sync::mpsc::Sender;
 use wasmtime::component::{Component, ComponentExportIndex, ComponentType, Lift, Linker, Lower};
 use wasmtime::{Engine, Store};
 
 use crate::config::ManifestConfig;
+use crate::messages::TheaterCommand;
 use crate::store::ActorStore;
 use tracing::{error, info};
 
@@ -48,17 +50,23 @@ pub enum WasmError {
 /// WebAssembly actor implementation
 pub struct WasmActor {
     name: String,
-    engine: Engine,
+    id: String,
     component: Component,
     pub linker: Linker<ActorStore>,
     pub exports: HashMap<String, ComponentExportIndex>,
     pub store: Store<ActorStore>,
     pub actor_store: ActorStore,
     pub actor_state: ActorState,
+    theater_tx: Sender<TheaterCommand>,
 }
 
 impl WasmActor {
-    pub async fn new(config: &ManifestConfig, actor_store: ActorStore) -> Result<Self> {
+    pub async fn new(
+        id: String,
+        config: &ManifestConfig,
+        actor_store: ActorStore,
+        theater_tx: &Sender<TheaterCommand>,
+    ) -> Result<Self> {
         // Load WASM component
         let engine = Engine::new(wasmtime::Config::new().async_support(true))?;
         info!(
@@ -78,15 +86,16 @@ impl WasmActor {
         let linker = Linker::new(&engine);
         let store = Store::new(&engine, actor_store.clone());
 
-        let mut actor = WasmActor {
+        let actor = WasmActor {
             name: config.name.clone(),
-            engine,
+            id,
             component,
             linker,
             exports: HashMap::new(),
             store,
             actor_store,
             actor_state: vec![],
+            theater_tx: theater_tx.clone(),
         };
 
         Ok(actor)
@@ -222,6 +231,11 @@ impl WasmActor {
 
         let wasm_event = self.store.chain().get_last_wasm_event_chain();
         info!("WASM event chain: {:?}", wasm_event);
+
+        self.theater_tx.send(TheaterCommand::NewEvent {
+            actor_id: self.id.clone(),
+            event: wasm_event,
+        });
 
         Ok(result)
     }
