@@ -1,4 +1,5 @@
 use crate::actor_runtime::ActorRuntime;
+use crate::id::TheaterId;
 use crate::messages::{ActorMessage, TheaterCommand};
 use crate::Result;
 use std::collections::HashMap;
@@ -10,13 +11,13 @@ use tokio::task::JoinHandle;
 use tracing::info;
 
 pub struct TheaterRuntime {
-    actors: HashMap<String, ActorProcess>,
+    actors: HashMap<TheaterId, ActorProcess>,
     pub theater_tx: Sender<TheaterCommand>,
     theater_rx: Receiver<TheaterCommand>,
 }
 
 pub struct ActorProcess {
-    pub actor_id: String,
+    pub actor_id: TheaterId,
     pub process: JoinHandle<ActorRuntime>,
     pub mailbox_tx: mpsc::Sender<ActorMessage>,
 }
@@ -60,13 +61,17 @@ impl TheaterRuntime {
                         proc.mailbox_tx.send(actor_message).await.unwrap();
                     }
                 }
+                TheaterCommand::NewEvent { actor_id, event } => {
+                    // Handle new events - this will be expanded later for supervisor logic
+                    info!("Received new event from actor {:?}", actor_id);
+                }
             };
         }
         info!("Theater runtime shutting down");
         Ok(())
     }
 
-    async fn spawn_actor(&mut self, manifest_path: PathBuf) -> Result<String> {
+    async fn spawn_actor(&mut self, manifest_path: PathBuf) -> Result<TheaterId> {
         // start the actor in a new process
         let (response_tx, response_rx) = tokio::sync::oneshot::channel();
         let (mailbox_tx, mailbox_rx) = mpsc::channel(100);
@@ -75,8 +80,8 @@ impl TheaterRuntime {
             let components = ActorRuntime::from_file(manifest_path, theater_tx, mailbox_rx)
                 .await
                 .unwrap();
-            let actor_id = components.name.clone();
-            response_tx.send(actor_id.clone()).unwrap();
+            let actor_id = components.id.clone();
+            response_tx.send(actor_id).unwrap();
             ActorRuntime::start(components).await.unwrap()
         });
         let actor_id = response_rx.await.unwrap();
@@ -91,7 +96,7 @@ impl TheaterRuntime {
         Ok(actor_id)
     }
 
-    async fn stop_actor(&mut self, actor_id: String) -> Result<()> {
+    async fn stop_actor(&mut self, actor_id: TheaterId) -> Result<()> {
         if let Some(proc) = self.actors.remove(&actor_id) {
             proc.process.abort();
         }

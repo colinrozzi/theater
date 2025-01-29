@@ -7,6 +7,7 @@ use crate::host::http_server::HttpServerHost;
 use crate::host::message_server::MessageServerHost;
 use crate::host::runtime::RuntimeHost;
 use crate::host::websocket_server::WebSocketServerHost;
+use crate::id::TheaterId;
 use crate::messages::{ActorMessage, TheaterCommand};
 use crate::store::ActorStore;
 use crate::wasm::WasmActor;
@@ -16,13 +17,14 @@ use tokio::sync::mpsc::{Receiver, Sender};
 use tracing::{error, info};
 
 pub struct RuntimeComponents {
+    pub id: TheaterId,
     pub name: String,
     pub actor_handle: ActorHandle,
     handlers: Vec<Handler>,
 }
 
 pub struct ActorRuntime {
-    pub actor_id: String,
+    pub actor_id: TheaterId,
     handler_tasks: Vec<tokio::task::JoinHandle<()>>,
 }
 
@@ -51,7 +53,8 @@ impl ActorRuntime {
         theater_tx: Sender<TheaterCommand>,
         actor_mailbox: Receiver<ActorMessage>,
     ) -> Result<RuntimeComponents> {
-        let store = ActorStore::new(config.name.clone(), theater_tx.clone());
+        let id = TheaterId::generate();
+        let store = ActorStore::new(id.clone(), theater_tx.clone());
         let actor = WasmActor::new(config, store, &theater_tx).await?;
         let actor_handle = ActorHandle::new(actor);
 
@@ -93,6 +96,7 @@ impl ActorRuntime {
         );
 
         Ok(RuntimeComponents {
+            id,
             name: config.name.clone(),
             actor_handle,
             handlers,
@@ -126,7 +130,7 @@ impl ActorRuntime {
         info!("Actor runtime started");
 
         Ok(Self {
-            actor_id: components.name,
+            actor_id: components.id,
             handler_tasks,
         })
     }

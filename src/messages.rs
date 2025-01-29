@@ -1,24 +1,26 @@
+use crate::id::TheaterId;
 use crate::Result;
 use std::path::PathBuf;
 use tokio::sync::oneshot;
+use wasmtime::chain::MetaEvent;
 
 #[derive(Debug)]
 pub enum TheaterCommand {
     SpawnActor {
         manifest_path: PathBuf,
-        response_tx: oneshot::Sender<Result<String>>, // Returns actor ID on success
+        response_tx: oneshot::Sender<Result<TheaterId>>, // Now returns TheaterId instead of String
     },
     StopActor {
-        actor_id: String,
+        actor_id: TheaterId,
         response_tx: oneshot::Sender<Result<()>>,
     },
     SendMessage {
-        actor_id: String,
+        actor_id: TheaterId,
         actor_message: ActorMessage,
     },
     NewEvent {
-        actor_id: String,
-        event: Vec<u8>,
+        actor_id: TheaterId,
+        event: Vec<MetaEvent>,
     },
 }
 
@@ -34,3 +36,4 @@ pub enum ActorStatus {
     Stopped,
     Failed,
 }
+

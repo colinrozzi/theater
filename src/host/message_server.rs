@@ -1,4 +1,5 @@
 use crate::actor_handle::ActorHandle;
+use crate::id::TheaterId;
 use crate::messages::{ActorMessage, TheaterCommand};
 use crate::wasm::Json;
 use crate::wasm::{ActorState, WasmActor};
@@ -55,7 +56,7 @@ impl MessageServerHost {
                     // make a channel that will carry the byte array of the resposne
                     let (response_tx, response_rx) = tokio::sync::oneshot::channel();
                     let actor_message = TheaterCommand::SendMessage {
-                        actor_id: address,
+                        actor_id: TheaterId::parse(&address).expect("Failed to parse actor ID"),
                         actor_message: ActorMessage {
                             data: msg,
                             response_tx,

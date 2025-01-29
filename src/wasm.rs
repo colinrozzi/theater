@@ -50,7 +50,6 @@ pub enum WasmError {
 /// WebAssembly actor implementation
 pub struct WasmActor {
     name: String,
-    id: String,
     component: Component,
     pub linker: Linker<ActorStore>,
     pub exports: HashMap<String, ComponentExportIndex>,
@@ -62,7 +61,6 @@ pub struct WasmActor {
 
 impl WasmActor {
     pub async fn new(
-        id: String,
         config: &ManifestConfig,
         actor_store: ActorStore,
         theater_tx: &Sender<TheaterCommand>,
@@ -88,7 +86,6 @@ impl WasmActor {
 
         let actor = WasmActor {
             name: config.name.clone(),
-            id,
             component,
             linker,
             exports: HashMap::new(),
@@ -229,13 +226,20 @@ impl WasmActor {
                 })?;
         info!("Function call result: {:?}", result);
 
-        let wasm_event = self.store.chain().get_last_wasm_event_chain();
+        let wasm_event = self
+            .store
+            .chain()
+            .get_last_wasm_event_chain()
+            .expect("Failed to get last wasm event chain");
         info!("WASM event chain: {:?}", wasm_event);
 
-        self.theater_tx.send(TheaterCommand::NewEvent {
-            actor_id: self.id.clone(),
-            event: wasm_event,
-        });
+        self.theater_tx
+            .send(TheaterCommand::NewEvent {
+                actor_id: self.actor_store.id.clone(),
+                event: wasm_event,
+            })
+            .await
+            .expect("Failed to send new event to theater");
 
         Ok(result)
     }
