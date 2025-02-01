@@ -66,34 +66,29 @@ impl ActorRuntime {
             actor_handle.clone(),
         )));
 
-        handlers.extend(
-            config
-                .handlers
-                .iter()
-                .map(|handler_config| match handler_config {
-                    HandlerConfig::MessageServer(_) => {
-                        panic!("MessageServer handler is already added")
-                    }
-                    HandlerConfig::HttpServer(config) => Handler::HttpServer(HttpServerHost::new(
-                        config.clone(),
-                        actor_handle.clone(),
-                    )),
-                    HandlerConfig::FileSystem(config) => Handler::FileSystem(FileSystemHost::new(
-                        config.clone(),
-                        actor_handle.clone(),
-                    )),
-                    HandlerConfig::HttpClient(config) => Handler::HttpClient(HttpClientHost::new(
-                        config.clone(),
-                        actor_handle.clone(),
-                    )),
-                    HandlerConfig::Runtime(config) => {
-                        Handler::Runtime(RuntimeHost::new(config.clone(), actor_handle.clone()))
-                    }
-                    HandlerConfig::WebSocketServer(config) => Handler::WebSocketServer(
-                        WebSocketServerHost::new(config.clone(), actor_handle.clone()),
-                    ),
-                }),
-        );
+        for handler_config in &config.handlers {
+            let handler = match handler_config {
+                HandlerConfig::MessageServer(_) => {
+                    panic!("MessageServer handler is already added")
+                }
+                HandlerConfig::HttpServer(config) => {
+                    Handler::HttpServer(HttpServerHost::new(config.clone(), actor_handle.clone()))
+                }
+                HandlerConfig::FileSystem(config) => {
+                    Handler::FileSystem(FileSystemHost::new(config.clone(), actor_handle.clone()))
+                }
+                HandlerConfig::HttpClient(config) => {
+                    Handler::HttpClient(HttpClientHost::new(config.clone(), actor_handle.clone()))
+                }
+                HandlerConfig::Runtime(config) => {
+                    Handler::Runtime(RuntimeHost::new(config.clone(), actor_handle.clone()))
+                }
+                HandlerConfig::WebSocketServer(config) => Handler::WebSocketServer(
+                    WebSocketServerHost::new(config.clone(), actor_handle.clone()),
+                ),
+            };
+            handlers.push(handler);
+        }
 
         Ok(RuntimeComponents {
             id,
@@ -106,13 +101,27 @@ impl ActorRuntime {
     pub async fn start(components: RuntimeComponents) -> Result<Self> {
         {
             for handler in &components.handlers {
-                let _ = handler.setup_host_function().await;
-                let _ = handler.add_exports().await;
+                info!(
+                    "Setting up host functions for handler: {:?}",
+                    handler.name()
+                );
+                handler.setup_host_function().await.expect(
+                    format!(
+                        "Failed to setup host functions for handler: {:?}",
+                        handler.name()
+                    )
+                    .as_str(),
+                );
+                info!("Adding exports for handler: {:?}", handler.name());
+                handler.add_exports().await.expect(
+                    format!("Failed to add exports for handler: {:?}", handler.name()).as_str(),
+                );
             }
         }
 
         let mut handler_tasks = Vec::new();
         // Start all handlers
+        info!("Starting handlers");
         for mut handler in components.handlers {
             let task = tokio::spawn(async move {
                 if let Err(e) = handler.start().await {
@@ -122,6 +131,7 @@ impl ActorRuntime {
             handler_tasks.push(task);
         }
 
+        info!("Running init on actor");
         {
             let mut actor = components.actor_handle.inner().lock().await;
             actor.init().await;

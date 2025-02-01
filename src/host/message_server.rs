@@ -113,10 +113,13 @@ impl MessageServerHost {
         let mut actor = self.actor_handle.inner().lock().await;
         let actor_state = actor.actor_state.clone();
         match actor
-            .call_func::<(Json, ActorState), (Json, ActorState)>("handle", (msg.data, actor_state))
+            .call_func::<(Json, ActorState), ((Json, ActorState),)>(
+                "handle",
+                (msg.data, actor_state),
+            )
             .await
         {
-            Ok((resp, new_state)) => {
+            Ok(((resp, new_state),)) => {
                 actor.actor_state = new_state;
                 let _ = msg.response_tx.send(resp);
             }

@@ -22,57 +22,70 @@ impl RuntimeHost {
     pub async fn setup_host_functions(&self) -> Result<()> {
         info!("Setting up host functions for runtime");
         let mut actor = self.actor_handle.inner().lock().await;
+        let name = actor.name.clone();
         let mut runtime = actor
             .linker
             .instance("ntwk:theater/runtime")
             .expect("Failed to get runtime instance");
 
-        runtime.func_wrap(
-            "log",
-            |ctx: wasmtime::StoreContextMut<'_, ActorStore>, (msg,): (String,)| {
-                let id = ctx.data().id.clone();
-                info!("[ACTOR] [{}] {}", id, msg);
-                Ok(())
-            },
-        )?;
-
-        let _ = runtime.func_wrap_async(
-            "spawn",
-            |mut ctx: wasmtime::StoreContextMut<'_, ActorStore>,
-             (manifest,): (String,)|
-             -> Box<dyn Future<Output = Result<()>> + Send> {
-                let store = ctx.data_mut();
-                let theater_tx = store.theater_tx.clone();
-                info!("Spawning actor with manifest: {}", manifest);
-                Box::new(async move {
-                    let (response_tx, _response_rx) = tokio::sync::oneshot::channel();
-                    info!("sending spawn command");
-                    match theater_tx
-                        .send(TheaterCommand::SpawnActor {
-                            manifest_path: PathBuf::from(manifest),
-                            response_tx,
-                            parent_id: Some(ctx.data().id.clone()),
-                        })
-                        .await
-                    {
-                        Ok(_) => info!("spawn command sent"),
-                        Err(e) => error!("error sending spawn command: {:?}", e),
-                    }
+        runtime
+            .func_wrap(
+                "log",
+                move |_ctx: wasmtime::StoreContextMut<'_, ActorStore>, (msg,): (String,)| {
+                    info!("[ACTOR] [{}] {}", name, msg);
                     Ok(())
-                })
-            },
-        );
+                },
+            )
+            .expect("Failed to wrap log function");
 
-        runtime.func_wrap(
-            "get-chain",
-            |ctx: StoreContextMut<'_, ActorStore>, ()| -> Result<(Chain,)> {
-                let chain = ctx.chain();
-                Ok((chain.clone(),))
-            },
-        )?;
+        runtime
+            .func_wrap_async(
+                "spawn",
+                |mut ctx: wasmtime::StoreContextMut<'_, ActorStore>,
+                 (manifest,): (String,)|
+                 -> Box<dyn Future<Output = Result<(String,)>> + Send> {
+                    let store = ctx.data_mut();
+                    let theater_tx = store.theater_tx.clone();
+                    info!("Spawning actor with manifest: {}", manifest);
+                    Box::new(async move {
+                        let (response_tx, response_rx) = tokio::sync::oneshot::channel();
+                        info!("sending spawn command");
+                        match theater_tx
+                            .send(TheaterCommand::SpawnActor {
+                                manifest_path: PathBuf::from(manifest),
+                                response_tx,
+                                parent_id: Some(ctx.data().id.clone()),
+                            })
+                            .await
+                        {
+                            Ok(_) => {
+                                // await the Ok(actor_id) response on the response channel
+                                let actor_id =
+                                    response_rx.await.expect("Failed to get actor id").unwrap();
+                                info!("spawned actor with id: {}", actor_id);
+                                Ok((actor_id.to_string(),))
+                            }
+                            Err(e) => {
+                                error!("Failed to send spawn command: {}", e);
+                                Err(anyhow::anyhow!("Failed to send spawn command"))
+                            }
+                        }
+                    })
+                },
+            )
+            .expect("Failed to wrap spawn function");
+
+        runtime
+            .func_wrap(
+                "get-chain",
+                |ctx: StoreContextMut<'_, ActorStore>, ()| -> Result<(Chain,)> {
+                    let chain = ctx.chain();
+                    Ok((chain.clone(),))
+                },
+            )
+            .expect("Failed to wrap get-chain function");
 
         info!("Runtime host functions added");
-
         Ok(())
     }
 

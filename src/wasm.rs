@@ -49,7 +49,7 @@ pub enum WasmError {
 
 /// WebAssembly actor implementation
 pub struct WasmActor {
-    name: String,
+    pub name: String,
     component: Component,
     pub linker: Linker<ActorStore>,
     pub exports: HashMap<String, ComponentExportIndex>,
