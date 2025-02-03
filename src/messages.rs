@@ -25,6 +25,25 @@ pub enum TheaterCommand {
     },
 }
 
+impl TheaterCommand {
+    pub fn to_log(&self) -> String {
+        match self {
+            TheaterCommand::SpawnActor { manifest_path, .. } => {
+                format!("SpawnActor: {}", manifest_path.display())
+            }
+            TheaterCommand::StopActor { actor_id, .. } => {
+                format!("StopActor: {:?}", actor_id)
+            }
+            TheaterCommand::SendMessage { actor_id, .. } => {
+                format!("SendMessage: {:?}", actor_id)
+            }
+            TheaterCommand::NewEvent { actor_id, .. } => {
+                format!("NewEvent: {:?}", actor_id)
+            }
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct ActorMessage {
     pub response_tx: oneshot::Sender<Vec<u8>>,

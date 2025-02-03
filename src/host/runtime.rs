@@ -31,8 +31,9 @@ impl RuntimeHost {
         runtime
             .func_wrap(
                 "log",
-                move |_ctx: wasmtime::StoreContextMut<'_, ActorStore>, (msg,): (String,)| {
-                    info!("[ACTOR] [{}] {}", name, msg);
+                move |ctx: wasmtime::StoreContextMut<'_, ActorStore>, (msg,): (String,)| {
+                    let id = ctx.data().id.clone();
+                    info!("[ACTOR] [{}] {} {}", id, name, msg);
                     Ok(())
                 },
             )

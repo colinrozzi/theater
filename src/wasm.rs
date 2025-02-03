@@ -231,7 +231,6 @@ impl WasmActor {
             .chain()
             .get_last_wasm_event_chain()
             .expect("Failed to get last wasm event chain");
-        info!("WASM event chain: {:?}", wasm_event);
 
         self.theater_tx
             .send(TheaterCommand::NewEvent {

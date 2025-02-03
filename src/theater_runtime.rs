@@ -39,7 +39,7 @@ impl TheaterRuntime {
         info!("Theater runtime starting");
 
         while let Some(cmd) = self.theater_rx.recv().await {
-            info!("Received command: {:?}", cmd);
+            info!("Received command: {:?}", cmd.to_log());
             match cmd {
                 TheaterCommand::SpawnActor {
                     manifest_path,
@@ -194,4 +194,3 @@ impl TheaterRuntime {
         Ok(())
     }
 }
-
