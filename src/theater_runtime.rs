@@ -1,6 +1,6 @@
 use crate::actor_runtime::ActorRuntime;
 use crate::id::TheaterId;
-use crate::messages::{ActorMessage, TheaterCommand};
+use crate::messages::{ActorMessage, ActorStatus, TheaterCommand};
 use crate::Result;
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -16,6 +16,7 @@ pub struct TheaterRuntime {
     actors: HashMap<TheaterId, ActorProcess>,
     pub theater_tx: Sender<TheaterCommand>,
     theater_rx: Receiver<TheaterCommand>,
+    event_subscribers: Vec<mpsc::Sender<(TheaterId, Vec<MetaEvent>)>>,
 }
 
 pub struct ActorProcess {
@@ -23,6 +24,7 @@ pub struct ActorProcess {
     pub process: JoinHandle<ActorRuntime>,
     pub mailbox_tx: mpsc::Sender<ActorMessage>,
     pub children: HashSet<TheaterId>,
+    pub status: ActorStatus,
 }
 
 impl TheaterRuntime {
@@ -32,7 +34,14 @@ impl TheaterRuntime {
             theater_tx,
             theater_rx,
             actors: HashMap::new(),
+            event_subscribers: Vec::new(),
         })
+    }
+
+    pub async fn subscribe_to_events(&mut self) -> Result<mpsc::Receiver<(TheaterId, Vec<MetaEvent>)>> {
+        let (tx, rx) = mpsc::channel(32);
+        self.event_subscribers.push(tx);
+        Ok(rx)
     }
 
     pub async fn run(&mut self) -> Result<()> {
@@ -74,11 +83,25 @@ impl TheaterRuntime {
                     }
                 }
                 TheaterCommand::NewEvent { actor_id, event } => {
-                    // Handle new events - this will be expanded later for supervisor logic
                     info!("Received new event from actor {:?}", actor_id);
+                    // Forward event to subscribers
+                    self.event_subscribers.retain_mut(|tx| {
+                        tx.try_send((actor_id.clone(), event.clone())).is_ok()
+                    });
+                    
                     self.handle_actor_event(actor_id, event)
                         .await
                         .expect("Failed to handle event");
+                }
+                TheaterCommand::GetActors { response_tx } => {
+                    let actors = self.actors.keys().cloned().collect();
+                    let _ = response_tx.send(Ok(actors));
+                }
+                TheaterCommand::GetActorStatus { actor_id, response_tx } => {
+                    let status = self.actors.get(&actor_id)
+                        .map(|proc| proc.status.clone())
+                        .unwrap_or(ActorStatus::Stopped);
+                    let _ = response_tx.send(Ok(status));
                 }
             };
         }
@@ -109,6 +132,7 @@ impl TheaterRuntime {
             process: actor_runtime_process,
             mailbox_tx,
             children: HashSet::new(),
+            status: ActorStatus::Running,
         };
 
         if let Some(parent_id) = parent_id {
@@ -141,8 +165,9 @@ impl TheaterRuntime {
         }
 
         // Finally stop this actor
-        if let Some(proc) = self.actors.remove(&actor_id) {
+        if let Some(mut proc) = self.actors.remove(&actor_id) {
             proc.process.abort();
+            proc.status = ActorStatus::Stopped;
         }
 
         Ok(())
@@ -188,8 +213,9 @@ impl TheaterRuntime {
     }
 
     async fn stop_actor(&mut self, actor_id: TheaterId) -> Result<()> {
-        if let Some(proc) = self.actors.remove(&actor_id) {
+        if let Some(mut proc) = self.actors.remove(&actor_id) {
             proc.process.abort();
+            proc.status = ActorStatus::Stopped;
         }
         Ok(())
     }

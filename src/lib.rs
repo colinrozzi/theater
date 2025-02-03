@@ -9,10 +9,10 @@ pub mod messages;
 pub mod router;
 mod store;
 pub mod theater_runtime;
+pub mod theater_server;
 mod wasm;
 
 pub use config::{HandlerConfig, HttpServerHandlerConfig, ManifestConfig, MessageServerConfig};
 pub use id::TheaterId; // Expose TheaterId type
 pub use store::ActorStore;
 pub use wasm::{WasmActor, WasmError};
-

@@ -1,19 +1,18 @@
 use anyhow::Result;
 use clap::Parser;
-use std::path::PathBuf;
-use theater::messages::TheaterCommand;
-use theater::theater_runtime::TheaterRuntime;
+use std::net::SocketAddr;
 use tracing::info;
 use tracing_subscriber::EnvFilter;
+use crate::theater_server::TheaterServer;
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
 struct Args {
-    /// Path to the actor manifest file
-    #[arg(short, long)]
-    manifest: PathBuf,
+    /// Address to bind the theater server to
+    #[arg(short, long, default_value = "127.0.0.1:9000")]
+    address: SocketAddr,
 
-    /// logging
+    /// logging level
     #[arg(short, long, default_value = "info")]
     log_level: String,
 }
@@ -26,40 +25,11 @@ async fn main() -> Result<()> {
     // Setup logging
     setup_logging(&args.log_level, true);
 
-    // Verify manifest file exists
-    if !args.manifest.exists() {
-        return Err(anyhow::anyhow!(
-            "Manifest file not found: {}",
-            args.manifest.display()
-        ));
-    }
-
-    let mut theater = TheaterRuntime::new().await?;
-
-    let theater_tx = theater.theater_tx.clone();
-
-    // Start the theater runtime
-    let theater_handle = tokio::spawn(async move {
-        theater.run().await.unwrap();
-    });
-
-    let (response_tx, response_rx) = tokio::sync::oneshot::channel();
-    let _ = theater_tx
-        .send(TheaterCommand::SpawnActor {
-            manifest_path: args.manifest.clone(),
-            response_tx,
-            parent_id: None,
-        })
-        .await;
-
-    let actor_id = response_rx.await?;
-    info!("Actor spawned with id: {:?}", actor_id?);
-
-    // Wait for the theater runtime to finish
-    theater_handle.await?;
-
-    // Wait for ctrl-c
-    tokio::signal::ctrl_c().await?;
+    info!("Starting theater server on {}", args.address);
+    
+    // Create and run the theater server
+    let mut server = TheaterServer::new(args.address).await?;
+    server.run().await?;
 
     Ok(())
 }

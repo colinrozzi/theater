@@ -2324,6 +2324,7 @@ dependencies = [
  "test-log",
  "thiserror 1.0.69",
  "tokio",
+ "tokio-util",
  "toml",
  "tower-http",
  "tracing",

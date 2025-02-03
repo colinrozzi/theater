@@ -8,7 +8,7 @@ use wasmtime::chain::MetaEvent;
 pub enum TheaterCommand {
     SpawnActor {
         manifest_path: PathBuf,
-        response_tx: oneshot::Sender<Result<TheaterId>>, // Now returns TheaterId instead of String
+        response_tx: oneshot::Sender<Result<TheaterId>>,
         parent_id: Option<TheaterId>,
     },
     StopActor {
@@ -22,6 +22,13 @@ pub enum TheaterCommand {
     NewEvent {
         actor_id: TheaterId,
         event: Vec<MetaEvent>,
+    },
+    GetActors {
+        response_tx: oneshot::Sender<Result<Vec<TheaterId>>>,
+    },
+    GetActorStatus {
+        actor_id: TheaterId,
+        response_tx: oneshot::Sender<Result<ActorStatus>>,
     },
 }
 
@@ -40,6 +47,12 @@ impl TheaterCommand {
             TheaterCommand::NewEvent { actor_id, .. } => {
                 format!("NewEvent: {:?}", actor_id)
             }
+            TheaterCommand::GetActors { .. } => {
+                "GetActors".to_string()
+            }
+            TheaterCommand::GetActorStatus { actor_id, .. } => {
+                format!("GetActorStatus: {:?}", actor_id)
+            }
         }
     }
 }
@@ -50,7 +63,7 @@ pub struct ActorMessage {
     pub data: Vec<u8>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum ActorStatus {
     Running,
     Stopped,
