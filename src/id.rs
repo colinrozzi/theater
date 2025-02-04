@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::fmt;
+use std::str::FromStr;
 use uuid::Uuid;
 
 /// A unique identifier for entities within the theater system
@@ -20,6 +21,14 @@ impl TheaterId {
     /// Get the underlying UUID
     pub fn as_uuid(&self) -> &Uuid {
         &self.0
+    }
+}
+
+impl FromStr for TheaterId {
+    type Err = uuid::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(Self(Uuid::parse_str(s)?))
     }
 }
 
@@ -44,7 +53,7 @@ mod tests {
     fn test_parse_and_display() {
         let id = TheaterId::generate();
         let id_str = id.to_string();
-        let parsed = TheaterId::parse(&id_str).unwrap();
+        let parsed = TheaterId::from_str(&id_str).unwrap();
         assert_eq!(id, parsed);
     }
 
@@ -56,4 +65,3 @@ mod tests {
         assert_eq!(id, deserialized);
     }
 }
-

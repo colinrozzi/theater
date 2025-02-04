@@ -1,9 +1,9 @@
 use anyhow::Result;
 use clap::Parser;
 use std::net::SocketAddr;
+use theater::theater_server::TheaterServer;
 use tracing::info;
 use tracing_subscriber::EnvFilter;
-use crate::theater_server::TheaterServer;
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -26,7 +26,7 @@ async fn main() -> Result<()> {
     setup_logging(&args.log_level, true);
 
     info!("Starting theater server on {}", args.address);
-    
+
     // Create and run the theater server
     let mut server = TheaterServer::new(args.address).await?;
     server.run().await?;

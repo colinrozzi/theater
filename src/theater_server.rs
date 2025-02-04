@@ -1,4 +1,5 @@
 use anyhow::Result;
+use bytes::Bytes;
 use futures::sink::SinkExt;
 use futures::stream::StreamExt;
 use serde::{Deserialize, Serialize};
@@ -8,7 +9,7 @@ use std::sync::Arc;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{mpsc, Mutex};
 use tokio_util::codec::{Framed, LengthDelimitedCodec};
-use tracing::{error, info};
+use tracing::{debug, error, info};
 use uuid::Uuid;
 
 use crate::id::TheaterId;
@@ -22,7 +23,10 @@ pub enum ManagementCommand {
     StopActor { id: TheaterId },
     ListActors,
     SubscribeToActor { id: TheaterId },
-    UnsubscribeFromActor { id: TheaterId },
+    UnsubscribeFromActor { 
+        id: TheaterId,
+        subscription_id: Uuid,
+    },
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -38,6 +42,7 @@ pub enum ManagementResponse {
     },
     Subscribed {
         id: TheaterId,
+        subscription_id: Uuid,
     },
     Unsubscribed {
         id: TheaterId,
@@ -51,10 +56,22 @@ pub enum ManagementResponse {
     },
 }
 
-#[derive(Debug, Eq, PartialEq, Hash)]
+#[derive(Debug)]
 struct Subscription {
     id: Uuid,
     sender: mpsc::Sender<ManagementResponse>,
+}
+
+impl Eq for Subscription {}
+impl PartialEq for Subscription {
+    fn eq(&self, other: &Self) -> bool {
+        self.id == other.id
+    }
+}
+impl std::hash::Hash for Subscription {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.id.hash(state);
+    }
 }
 
 pub struct TheaterServer {
@@ -132,26 +149,16 @@ impl TheaterServer {
         subscriptions: Arc<Mutex<HashMap<TheaterId, HashSet<Subscription>>>>,
     ) -> Result<()> {
         let mut framed = Framed::new(socket, LengthDelimitedCodec::new());
-        let (response_tx, mut response_rx) = mpsc::channel(32);
-
-        // Spawn task to forward responses back to client
-        let mut framed_tx = framed.sink_map_err(|e| anyhow::anyhow!("Frame error: {}", e));
-        tokio::spawn(async move {
-            while let Some(response) = response_rx.recv().await {
-                if let Err(e) = framed_tx.send(serde_json::to_vec(&response)?).await {
-                    error!("Failed to send response to client: {}", e);
-                    break;
-                }
-            }
-            Ok::<_, anyhow::Error>(())
-        });
 
         while let Some(msg) = framed.next().await {
+            debug!("Received management message");
             let msg = msg?;
             let cmd: ManagementCommand = serde_json::from_slice(&msg)?;
+            debug!("Parsed command: {:?}", cmd);
 
-            match cmd {
+            let response = match cmd {
                 ManagementCommand::StartActor { manifest } => {
+                    info!("Starting actor from manifest: {:?}", manifest);
                     let (cmd_tx, cmd_rx) = tokio::sync::oneshot::channel();
                     runtime_tx
                         .send(TheaterCommand::SpawnActor {
@@ -163,20 +170,19 @@ impl TheaterServer {
 
                     match cmd_rx.await? {
                         Ok(actor_id) => {
-                            response_tx
-                                .send(ManagementResponse::ActorStarted { id: actor_id })
-                                .await?
+                            info!("Actor started with ID: {:?}", actor_id);
+                            ManagementResponse::ActorStarted { id: actor_id }
                         }
                         Err(e) => {
-                            response_tx
-                                .send(ManagementResponse::Error {
-                                    message: format!("Failed to start actor: {}", e),
-                                })
-                                .await?
+                            error!("Failed to start actor: {}", e);
+                            ManagementResponse::Error {
+                                message: format!("Failed to start actor: {}", e),
+                            }
                         }
                     }
                 }
                 ManagementCommand::StopActor { id } => {
+                    info!("Stopping actor: {:?}", id);
                     let (cmd_tx, cmd_rx) = tokio::sync::oneshot::channel();
                     runtime_tx
                         .send(TheaterCommand::StopActor {
@@ -187,22 +193,16 @@ impl TheaterServer {
 
                     match cmd_rx.await? {
                         Ok(_) => {
-                            // Remove any subscriptions for this actor
                             subscriptions.lock().await.remove(&id);
-                            response_tx
-                                .send(ManagementResponse::ActorStopped { id })
-                                .await?
+                            ManagementResponse::ActorStopped { id }
                         }
-                        Err(e) => {
-                            response_tx
-                                .send(ManagementResponse::Error {
-                                    message: format!("Failed to stop actor: {}", e),
-                                })
-                                .await?
-                        }
+                        Err(e) => ManagementResponse::Error {
+                            message: format!("Failed to stop actor: {}", e),
+                        },
                     }
                 }
                 ManagementCommand::ListActors => {
+                    debug!("Listing actors");
                     let (cmd_tx, cmd_rx) = tokio::sync::oneshot::channel();
                     runtime_tx
                         .send(TheaterCommand::GetActors {
@@ -212,23 +212,20 @@ impl TheaterServer {
 
                     match cmd_rx.await? {
                         Ok(actors) => {
-                            response_tx
-                                .send(ManagementResponse::ActorList { actors })
-                                .await?
+                            info!("Found {} actors", actors.len());
+                            ManagementResponse::ActorList { actors }
                         }
-                        Err(e) => {
-                            response_tx
-                                .send(ManagementResponse::Error {
-                                    message: format!("Failed to list actors: {}", e),
-                                })
-                                .await?
-                        }
+                        Err(e) => ManagementResponse::Error {
+                            message: format!("Failed to list actors: {}", e),
+                        },
                     }
                 }
                 ManagementCommand::SubscribeToActor { id } => {
+                    info!("New subscription request for actor: {:?}", id);
+                    let subscription_id = Uuid::new_v4();
                     let subscription = Subscription {
-                        id: Uuid::new_v4(),
-                        sender: response_tx.clone(),
+                        id: subscription_id,
+                        sender: mpsc::channel(32).0,
                     };
 
                     subscriptions
@@ -238,33 +235,31 @@ impl TheaterServer {
                         .or_insert_with(HashSet::new)
                         .insert(subscription);
 
-                    response_tx
-                        .send(ManagementResponse::Subscribed { id })
-                        .await?;
+                    ManagementResponse::Subscribed {
+                        id,
+                        subscription_id,
+                    }
                 }
-                ManagementCommand::UnsubscribeFromActor { id } => {
+                ManagementCommand::UnsubscribeFromActor { id, subscription_id } => {
                     subscriptions
                         .lock()
                         .await
                         .entry(id.clone())
                         .and_modify(|subs| {
-                            subs.retain(|sub| sub.sender != response_tx);
+                            subs.retain(|sub| sub.id != subscription_id);
                         });
 
-                    response_tx
-                        .send(ManagementResponse::Unsubscribed { id })
-                        .await?;
+                    ManagementResponse::Unsubscribed { id }
                 }
-            }
-        }
+            };
 
-        // Clean up subscriptions for this connection
-        let mut subs = subscriptions.lock().await;
-        for subscribers in subs.values_mut() {
-            subscribers.retain(|sub| sub.sender != response_tx);
+            debug!("Sending response: {:?}", response);
+            framed
+                .send(Bytes::from(serde_json::to_vec(&response)?))
+                .await?;
+            debug!("Response sent");
         }
 
         Ok(())
     }
 }
-

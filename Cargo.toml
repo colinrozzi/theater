@@ -2,6 +2,7 @@
 name = "theater"
 version = "0.1.0"
 edition = "2021"
+default-run = "theater"
 
 [dependencies]
 anyhow = "1.0"
@@ -26,7 +27,8 @@ futures = "0.3"
 pin-utils = "0.1"
 rand = "0.8.5"
 uuid = { version = "1.6", features = ["v4", "serde"] }
-tokio-util = "0.7.13"
+tokio-util = { version = "0.7.13", features = ["codec"] }
+bytes = "1.0"
 
 [dev-dependencies]
 test-log = "0.2"
