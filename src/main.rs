@@ -43,7 +43,7 @@ async fn main() -> Result<()> {
         args.log_level
     );
 
-    logging::setup_file_logging(log_path, &filter_string, args.log_stdout)
+    logging::setup_global_logging(log_path, &filter_string, args.log_stdout)
         .expect("Failed to setup logging");
 
     info!("Starting theater server on {}", args.address);
