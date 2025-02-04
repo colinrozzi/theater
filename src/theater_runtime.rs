@@ -145,7 +145,7 @@ impl TheaterRuntime {
         Ok(())
     }
 
-    async fn spawn_actor(
+    async fn old_spawn_actor(
         &mut self,
         manifest_path: PathBuf,
         parent_id: Option<TheaterId>,
@@ -197,6 +197,77 @@ impl TheaterRuntime {
         Ok(actor_id)
     }
 
+    async fn spawn_actor(
+        &mut self,
+        manifest_path: PathBuf,
+        parent_id: Option<TheaterId>,
+    ) -> Result<TheaterId> {
+        debug!(
+            "Starting actor spawn process from manifest: {:?}",
+            manifest_path
+        );
+
+        // Check if manifest exists
+        if !manifest_path.exists() {
+            error!("Manifest file does not exist: {:?}", manifest_path);
+            return Err(anyhow::anyhow!("Manifest file does not exist"));
+        }
+
+        // start the actor in a new process
+        let (response_tx, response_rx) = tokio::sync::oneshot::channel();
+        let (mailbox_tx, mailbox_rx) = mpsc::channel(100);
+        let theater_tx = self.theater_tx.clone();
+
+        let manifest_path_clone = manifest_path.clone();
+        let actor_runtime_process = tokio::spawn(async move {
+            debug!("Initializing actor runtime");
+            let components = ActorRuntime::from_file(manifest_path_clone, theater_tx, mailbox_rx)
+                .await
+                .unwrap();
+            let actor_id = components.id.clone();
+            debug!("Actor components initialized with ID: {:?}", actor_id);
+            response_tx.send(actor_id).unwrap();
+            debug!("Starting actor runtime");
+            ActorRuntime::start(components).await.unwrap()
+        });
+
+        match response_rx.await {
+            Ok(actor_id) => {
+                debug!(
+                    "Received actor ID from runtime initialization: {:?}",
+                    actor_id
+                );
+                let process = ActorProcess {
+                    actor_id: actor_id.clone(),
+                    process: actor_runtime_process,
+                    mailbox_tx,
+                    children: HashSet::new(),
+                    status: ActorStatus::Running,
+                };
+
+                if let Some(parent_id) = parent_id {
+                    if let Some(parent) = self.actors.get_mut(&parent_id) {
+                        parent.children.insert(actor_id.clone());
+                        debug!("Added actor {:?} as child of {:?}", actor_id, parent_id);
+                    } else {
+                        warn!(
+                            "Parent actor {:?} not found for new actor {:?}",
+                            parent_id, actor_id
+                        );
+                    }
+                }
+
+                self.actors.insert(actor_id.clone(), process);
+                debug!("Actor process registered with runtime");
+                Ok(actor_id)
+            }
+            Err(e) => {
+                error!("Failed to receive actor ID: {}", e);
+                Err(anyhow::anyhow!("Failed to receive actor ID"))
+            }
+        }
+    }
+
     async fn handle_actor_event(
         &mut self,
         actor_id: TheaterId,
@@ -241,4 +312,3 @@ impl TheaterRuntime {
         Ok(())
     }
 }
-
