@@ -54,6 +54,10 @@ impl ActorRuntime {
         actor_mailbox: Receiver<ActorMessage>,
     ) -> Result<RuntimeComponents> {
         let id = TheaterId::generate();
+
+        let span = tracing::info_span!("actor", actor_id = %id, actor_name = %config.name);
+        let _enter = span.enter();
+
         let store = ActorStore::new(id.clone(), theater_tx.clone());
         let actor = WasmActor::new(config, store, &theater_tx).await?;
         let actor_handle = ActorHandle::new(actor);

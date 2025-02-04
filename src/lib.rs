@@ -5,6 +5,7 @@ pub mod actor_runtime;
 pub mod config;
 pub mod host;
 pub mod id; // Add the new id module
+pub mod logging;
 pub mod messages;
 pub mod router;
 mod store;

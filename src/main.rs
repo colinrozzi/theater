@@ -1,6 +1,10 @@
 use anyhow::Result;
 use clap::Parser;
+use std::fs;
+use std::fs::File;
 use std::net::SocketAddr;
+use std::path::PathBuf;
+use theater::logging;
 use theater::theater_server::TheaterServer;
 use tracing::info;
 use tracing_subscriber::EnvFilter;
@@ -13,8 +17,16 @@ struct Args {
     address: SocketAddr,
 
     /// logging level
-    #[arg(short, long, default_value = "info")]
+    #[arg(short, long, default_value = "debug")]
     log_level: String,
+
+    /// log directory
+    #[arg(long, default_value = "logs/theater")]
+    log_dir: PathBuf,
+
+    /// log to stdout
+    #[arg(long, default_value = "false")]
+    log_stdout: bool,
 }
 
 #[tokio::main]
@@ -22,32 +34,24 @@ async fn main() -> Result<()> {
     // Parse command line arguments
     let args = Args::parse();
 
-    // Setup logging
-    setup_logging(&args.log_level, true);
+    // Create the runtime log file path
+    let log_path = args.log_dir.join("theater.log");
+
+    // Build the subscriber
+    let filter_string = format!(
+        "debug,theater={},wasmtime=debug,wit_bindgen=debug",
+        args.log_level
+    );
+
+    logging::setup_file_logging(log_path, &filter_string, args.log_stdout)
+        .expect("Failed to setup logging");
 
     info!("Starting theater server on {}", args.address);
+    info!("Logging to directory: {}", args.log_dir.display());
 
     // Create and run the theater server
-    let mut server = TheaterServer::new(args.address).await?;
+    let server = TheaterServer::new(args.address).await?;
     server.run().await?;
 
     Ok(())
-}
-
-fn setup_logging(level: &str, actor_only: bool) {
-    let filter = if actor_only {
-        EnvFilter::from_default_env()
-            .add_directive(format!("theater={}", level).parse().unwrap())
-            .add_directive("actix_web=info".parse().unwrap())
-            .add_directive("actor=info".parse().unwrap())
-            .add_directive("wasm_component=debug".parse().unwrap())
-    } else {
-        EnvFilter::from_default_env().add_directive(format!("theater={}", level).parse().unwrap())
-    };
-
-    tracing_subscriber::fmt()
-        .with_env_filter(filter)
-        .with_line_number(true)
-        .with_writer(std::io::stdout)
-        .init();
 }

@@ -32,6 +32,7 @@ pub struct LoggingConfig {
     pub chain_events: bool,
     pub level: String,
     pub output: LogOutput,
+    pub log_dir: Option<PathBuf>,
     pub file_path: Option<PathBuf>,
 }
 
@@ -47,7 +48,8 @@ impl Default for LoggingConfig {
         Self {
             chain_events: true,
             level: "info".to_string(),
-            output: LogOutput::Stdout,
+            output: LogOutput::File,
+            log_dir: Some(PathBuf::from("logs")),
             file_path: None,
         }
     }

@@ -28,8 +28,7 @@ pub struct ActorProcess {
 }
 
 impl TheaterRuntime {
-    pub async fn new() -> Result<Self> {
-        let (theater_tx, theater_rx) = mpsc::channel(32);
+    pub async fn new(theater_tx: Sender<TheaterCommand>, theater_rx: Receiver<TheaterCommand>) -> Result<Self> {
         Ok(Self {
             theater_tx,
             theater_rx,
@@ -47,6 +46,115 @@ impl TheaterRuntime {
     }
 
     pub async fn run(&mut self) -> Result<()> {
+        info!("Theater runtime starting");
+
+        while let Some(cmd) = self.theater_rx.recv().await {
+            debug!("Runtime received command: {:?}", cmd.to_log());
+            match cmd {
+                TheaterCommand::SpawnActor {
+                    manifest_path,
+                    parent_id,
+                    response_tx,
+                } => {
+                    debug!(
+                        "Processing SpawnActor command for manifest: {:?}",
+                        manifest_path
+                    );
+                    match self.spawn_actor(manifest_path.clone(), parent_id).await {
+                        Ok(actor_id) => {
+                            info!("Successfully spawned actor: {:?}", actor_id);
+                            if let Err(e) = response_tx.send(Ok(actor_id.clone())) {
+                                error!(
+                                    "Failed to send success response for actor {:?}: {:?}",
+                                    actor_id, e
+                                );
+                            }
+                        }
+                        Err(e) => {
+                            error!("Failed to spawn actor from {:?}: {}", manifest_path, e);
+                            if let Err(send_err) = response_tx.send(Err(e)) {
+                                error!("Failed to send error response: {:?}", send_err);
+                            }
+                        }
+                    }
+                }
+                TheaterCommand::StopActor {
+                    actor_id,
+                    response_tx,
+                } => {
+                    debug!("Stopping actor: {:?}", actor_id);
+                    match self.stop_actor(actor_id).await {
+                        Ok(_) => {
+                            info!("Actor stopped successfully");
+                            let _ = response_tx.send(Ok(()));
+                        }
+                        Err(e) => {
+                            error!("Failed to stop actor: {}", e);
+                            let _ = response_tx.send(Err(e));
+                        }
+                    }
+                }
+                TheaterCommand::SendMessage {
+                    actor_id,
+                    actor_message,
+                } => {
+                    debug!("Sending message to actor: {:?}", actor_id);
+                    if let Some(proc) = self.actors.get_mut(&actor_id) {
+                        if let Err(e) = proc.mailbox_tx.send(actor_message).await {
+                            error!("Failed to send message to actor: {}", e);
+                        }
+                    } else {
+                        warn!(
+                            "Attempted to send message to non-existent actor: {:?}",
+                            actor_id
+                        );
+                    }
+                }
+                TheaterCommand::NewEvent { actor_id, event } => {
+                    debug!("Received new event from actor {:?}", actor_id);
+                    // Forward event to subscribers
+                    self.event_subscribers.retain_mut(|tx| {
+                        match tx.try_send((actor_id.clone(), event.clone())) {
+                            Ok(_) => true,
+                            Err(e) => {
+                                warn!("Failed to forward event to subscriber: {}", e);
+                                false
+                            }
+                        }
+                    });
+
+                    if let Err(e) = self.handle_actor_event(actor_id, event).await {
+                        error!("Failed to handle actor event: {}", e);
+                    }
+                }
+                TheaterCommand::GetActors { response_tx } => {
+                    debug!("Getting list of actors");
+                    let actors = self.actors.keys().cloned().collect();
+                    if let Err(e) = response_tx.send(Ok(actors)) {
+                        error!("Failed to send actor list: {:?}", e);
+                    }
+                }
+                TheaterCommand::GetActorStatus {
+                    actor_id,
+                    response_tx,
+                } => {
+                    debug!("Getting status for actor: {:?}", actor_id);
+                    let status = self
+                        .actors
+                        .get(&actor_id)
+                        .map(|proc| proc.status.clone())
+                        .unwrap_or(ActorStatus::Stopped);
+                    if let Err(e) = response_tx.send(Ok(status)) {
+                        error!("Failed tk send actor status: {:?}", e);
+                    }
+                }
+            };
+        }
+        info!("Theater runtime shutting down");
+        Ok(())
+    }
+
+    pub async fn old_run(&mut self) -> Result<()> {
         info!("Theater runtime starting");
 
         while let Some(cmd) = self.theater_rx.recv().await {
