@@ -39,7 +39,8 @@ async fn main() -> Result<()> {
 
     // Build the subscriber
     let filter_string = format!(
-        "debug,theater={},wasmtime=debug,wit_bindgen=debug",
+        //"debug,theater={},wasmtime=debug,wit_bindgen=debug",
+        "{}",
         args.log_level
     );
 

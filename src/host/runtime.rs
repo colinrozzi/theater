@@ -33,7 +33,7 @@ impl RuntimeHost {
                 "log",
                 move |ctx: wasmtime::StoreContextMut<'_, ActorStore>, (msg,): (String,)| {
                     let id = ctx.data().id.clone();
-                    info!("[ACTOR] [{}] {} {}", id, name, msg);
+                    info!("[ACTOR] [{}] [{}] {}", id, name, msg);
                     Ok(())
                 },
             )

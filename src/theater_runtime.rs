@@ -1,7 +1,9 @@
 use crate::actor_runtime::ActorRuntime;
 use crate::id::TheaterId;
 use crate::messages::{ActorMessage, ActorStatus, TheaterCommand};
+use crate::wasm::Event;
 use crate::Result;
+use serde_json::json;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -28,7 +30,10 @@ pub struct ActorProcess {
 }
 
 impl TheaterRuntime {
-    pub async fn new(theater_tx: Sender<TheaterCommand>, theater_rx: Receiver<TheaterCommand>) -> Result<Self> {
+    pub async fn new(
+        theater_tx: Sender<TheaterCommand>,
+        theater_rx: Receiver<TheaterCommand>,
+    ) -> Result<Self> {
         Ok(Self {
             theater_tx,
             theater_rx,
@@ -379,7 +384,7 @@ impl TheaterRuntime {
     async fn handle_actor_event(
         &mut self,
         actor_id: TheaterId,
-        event: Vec<MetaEvent>,
+        events: Vec<MetaEvent>,
     ) -> Result<()> {
         debug!("Handling event from actor {:?}", actor_id);
         // Find the parent of this actor
@@ -390,6 +395,15 @@ impl TheaterRuntime {
                 None
             }
         });
+
+        let event = Event {
+            event_type: "wasm-event".to_string(),
+            parent: None,
+            data: serde_json::to_vec(&json!({
+                "actor_id": actor_id,
+                "events": events,
+            }))?,
+        };
 
         // If there's a parent, forward the event
         if let Some(parent_id) = parent_id {
