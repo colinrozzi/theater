@@ -105,7 +105,7 @@ impl WebSocketServerHost {
         let (message_sender, mut message_receiver) = mpsc::channel(100);
 
         let app = Router::new()
-            .route("/ws", get(Self::handle_websocket_upgrade))
+            .route("/", get(Self::handle_websocket_upgrade))
             .with_state(Arc::new((message_sender.clone(), self.connections.clone())));
 
         let addr = SocketAddr::from(([0, 0, 0, 0], self.port));
