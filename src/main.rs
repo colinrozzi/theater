@@ -1,13 +1,10 @@
 use anyhow::Result;
 use clap::Parser;
-use std::fs;
-use std::fs::File;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use theater::logging;
 use theater::theater_server::TheaterServer;
 use tracing::info;
-use tracing_subscriber::EnvFilter;
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]

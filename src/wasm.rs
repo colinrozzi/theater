@@ -103,7 +103,7 @@ impl WasmActor {
         let init_state_bytes = self
             .call_func::<(), (ActorState,)>("init", ())
             .await
-            .unwrap();
+            .expect("Failed to call init function");
         self.actor_state = init_state_bytes.0;
     }
 

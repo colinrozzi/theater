@@ -5,7 +5,7 @@ use anyhow::Result;
 use std::fs::File;
 use std::io::{BufReader, Read, Write};
 use std::path::{Path, PathBuf};
-use tracing::info;
+use tracing::{error, info};
 use wasmtime::StoreContextMut;
 
 pub struct FileSystemHost {
@@ -35,7 +35,7 @@ impl FileSystemHost {
             "read-file",
             move |_ctx: StoreContextMut<'_, ActorStore>,
                   (file_path,): (String,)|
-                  -> Result<(String,)> {
+                  -> Result<(Result<Vec<u8>, String>,)> {
                 info!("Reading file {:?}", file_path);
                 let file_path = Path::new(&file_path);
 
@@ -44,14 +44,19 @@ impl FileSystemHost {
 
                 info!("File path is allowed");
 
-                let file = File::open(file_path).expect("could not open file");
+                let file = match File::open(file_path) {
+                    Ok(f) => f,
+                    Err(e) => return Ok((Err(e.to_string()),)),
+                };
+
                 let mut reader = BufReader::new(file);
-                let mut contents = String::new();
-                reader
-                    .read_to_string(&mut contents)
-                    .expect("could not read file");
+                let mut contents = Vec::new();
+                if let Err(e) = reader.read_to_end(&mut contents) {
+                    return Ok((Err(e.to_string()),));
+                }
+
                 info!("File read successfully");
-                Ok((contents,))
+                Ok((Ok(contents),))
             },
         );
 
@@ -60,18 +65,26 @@ impl FileSystemHost {
         let _ = interface.func_wrap(
             "write-file",
             move |_ctx: StoreContextMut<'_, ActorStore>,
-                  (file_path, contents): (String, String)| {
+                  (file_path, contents): (String, String)|
+                  -> Result<(Result<(), String>,)> {
                 info!("Writing file {:?}", file_path);
                 let file_path = Path::new(&file_path);
 
                 // append the file path to the allowed path
                 let file_path = allowed_path.join(file_path);
 
-                let mut file = File::create(file_path).expect("could not create file");
-                file.write_all(contents.as_bytes())
-                    .expect("could not write file");
-                info!("File written successfully");
-                Ok(())
+                info!("File path: {:?}", file_path);
+
+                match File::create(file_path) {
+                    Ok(mut file) => match file.write_all(contents.as_bytes()) {
+                        Ok(_) => {
+                            info!("File written successfully");
+                            Ok((Ok(()),))
+                        }
+                        Err(e) => Ok((Err(e.to_string()),)),
+                    },
+                    Err(e) => Ok((Err(e.to_string()),)),
+                }
             },
         );
 
@@ -81,26 +94,25 @@ impl FileSystemHost {
             "list-files",
             move |_ctx: StoreContextMut<'_, ActorStore>,
                   (dir_path,): (String,)|
-                  -> Result<(Vec<String>,)> {
+                  -> Result<(Result<Vec<String>, String>,)> {
                 info!("Listing files in {:?}", dir_path);
                 let dir_path = Path::new(&dir_path);
 
                 // append the file path to the allowed path
                 let dir_path = allowed_path.join(dir_path);
 
-                let entries = dir_path
-                    .read_dir()
-                    .expect("could not read directory")
-                    .map(|entry| {
-                        entry
-                            .expect("could not read entry")
-                            .file_name()
-                            .into_string()
-                            .expect("could not convert OsString to String")
-                    })
-                    .collect();
-                info!("Files listed successfully");
-                Ok((entries,))
+                match dir_path.read_dir() {
+                    Ok(entries) => {
+                        let files: Result<Vec<String>, String> = Ok(entries
+                            .filter_map(|entry| {
+                                entry.ok().and_then(|e| e.file_name().into_string().ok())
+                            })
+                            .collect());
+                        info!("Files listed successfully");
+                        Ok((files,))
+                    }
+                    Err(e) => Ok((Err(e.to_string()),)),
+                }
             },
         );
 
@@ -108,16 +120,22 @@ impl FileSystemHost {
 
         let _ = interface.func_wrap(
             "delete-file",
-            move |_ctx: StoreContextMut<'_, ActorStore>, (file_path,): (String,)| {
+            move |_ctx: StoreContextMut<'_, ActorStore>,
+                  (file_path,): (String,)|
+                  -> Result<(Result<(), String>,)> {
                 info!("Deleting file {:?}", file_path);
                 let file_path = Path::new(&file_path);
 
                 // append the file path to the allowed path
                 let file_path = allowed_path.join(file_path);
 
-                std::fs::remove_file(file_path).expect("could not delete file");
-                info!("File deleted successfully");
-                Ok(())
+                match std::fs::remove_file(file_path) {
+                    Ok(_) => {
+                        info!("File deleted successfully");
+                        Ok((Ok(()),))
+                    }
+                    Err(e) => Ok((Err(e.to_string()),)),
+                }
             },
         );
 
@@ -125,16 +143,28 @@ impl FileSystemHost {
 
         let _ = interface.func_wrap(
             "create-dir",
-            move |_ctx: StoreContextMut<'_, ActorStore>, (dir_path,): (String,)| {
+            move |_ctx: StoreContextMut<'_, ActorStore>,
+                  (dir_path,): (String,)|
+                  -> Result<(Result<(), String>,)> {
                 info!("Creating directory {:?}", dir_path);
                 let dir_path = Path::new(&dir_path);
 
                 // append the file path to the allowed path
                 let dir_path = allowed_path.join(dir_path);
 
-                std::fs::create_dir(dir_path).expect("could not create directory");
-                info!("Directory created successfully");
-                Ok(())
+                info!("Creating directory at {:?}", dir_path);
+
+                match std::fs::create_dir(dir_path) {
+                    Ok(_) => {
+                        info!("Directory created successfully");
+                        Ok((Ok(()),))
+                    }
+                    Err(e) => {
+                        info!("Failed to create directory");
+                        error!("Error: {:?}", e);
+                        Ok((Err(e.to_string()),))
+                    }
+                }
             },
         );
 
@@ -142,16 +172,22 @@ impl FileSystemHost {
 
         let _ = interface.func_wrap(
             "delete-dir",
-            move |_ctx: StoreContextMut<'_, ActorStore>, (dir_path,): (String,)| {
+            move |_ctx: StoreContextMut<'_, ActorStore>,
+                  (dir_path,): (String,)|
+                  -> Result<(Result<(), String>,)> {
                 info!("Deleting directory {:?}", dir_path);
                 let dir_path = Path::new(&dir_path);
 
                 // append the file path to the allowed path
                 let dir_path = allowed_path.join(dir_path);
 
-                std::fs::remove_dir_all(dir_path).expect("could not delete directory");
-                info!("Directory deleted successfully");
-                Ok(())
+                match std::fs::remove_dir_all(dir_path) {
+                    Ok(_) => {
+                        info!("Directory deleted successfully");
+                        Ok((Ok(()),))
+                    }
+                    Err(e) => Ok((Err(e.to_string()),)),
+                }
             },
         );
 

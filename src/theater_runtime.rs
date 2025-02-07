@@ -258,58 +258,6 @@ impl TheaterRuntime {
         Ok(())
     }
 
-    async fn old_spawn_actor(
-        &mut self,
-        manifest_path: PathBuf,
-        parent_id: Option<TheaterId>,
-    ) -> Result<TheaterId> {
-        debug!(
-            "Starting actor spawn process from manifest: {:?}",
-            manifest_path
-        );
-
-        // start the actor in a new process
-        let (response_tx, response_rx) = tokio::sync::oneshot::channel();
-        let (mailbox_tx, mailbox_rx) = mpsc::channel(100);
-        let theater_tx = self.theater_tx.clone();
-        let actor_runtime_process = tokio::spawn(async move {
-            debug!("Initializing actor runtime");
-            let components = ActorRuntime::from_file(manifest_path, theater_tx, mailbox_rx)
-                .await
-                .unwrap();
-            let actor_id = components.id.clone();
-            response_tx.send(actor_id).unwrap();
-            ActorRuntime::start(components).await.unwrap()
-        });
-
-        let actor_id = response_rx.await.unwrap();
-        debug!("Actor runtime initialized with ID: {:?}", actor_id);
-
-        let process = ActorProcess {
-            actor_id: actor_id.clone(),
-            process: actor_runtime_process,
-            mailbox_tx,
-            children: HashSet::new(),
-            status: ActorStatus::Running,
-        };
-
-        if let Some(parent_id) = parent_id {
-            if let Some(parent) = self.actors.get_mut(&parent_id) {
-                parent.children.insert(actor_id.clone());
-                debug!("Added actor {:?} as child of {:?}", actor_id, parent_id);
-            } else {
-                warn!(
-                    "Parent actor {:?} not found for new actor {:?}",
-                    parent_id, actor_id
-                );
-            }
-        }
-
-        self.actors.insert(actor_id.clone(), process);
-        debug!("Actor process registered with runtime");
-        Ok(actor_id)
-    }
-
     async fn spawn_actor(
         &mut self,
         manifest_path: PathBuf,

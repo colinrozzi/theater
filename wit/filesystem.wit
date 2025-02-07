@@ -1,10 +1,10 @@
 package ntwk:theater;
 
 interface filesystem {
-    read-file: func(path: string) -> string;
-    write-file: func(path: string, content: string) -> ();
-    list-files: func(path: string) -> list<string>;
-    delete-file: func(path: string) -> ();
-    create-dir: func(path: string) -> ();
-    delete-dir: func(path: string) -> ();
+    read-file: func(path: string) -> result<list<u8>, string>;
+    write-file: func(path: string, content: string) -> result<_, string>;
+    list-files: func(path: string) -> result<list<string>, string>;
+    delete-file: func(path: string) -> result<_, string>;
+    create-dir: func(path: string) -> result<_, string>;
+    delete-dir: func(path: string) -> result<_, string>;
 }
