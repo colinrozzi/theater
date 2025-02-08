@@ -54,6 +54,7 @@ impl MessageServerHost {
                       (address, msg): (String, Vec<u8>)|
                       -> Box<dyn Future<Output = Result<(Vec<u8>,)>> + Send> {
                     // make a channel that will carry the byte array of the resposne
+                    info!("Sending message to actor: {}", address);
                     let (response_tx, response_rx) = tokio::sync::oneshot::channel();
                     let actor_message = TheaterCommand::SendMessage {
                         actor_id: TheaterId::parse(&address).expect("Failed to parse actor ID"),
