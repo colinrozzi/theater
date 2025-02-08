@@ -9,5 +9,9 @@ interface message-server-client {
 interface message-server-host {
     use types.{json, actor-id};
 
-    send: func(actor-id: actor-id, msg: json) -> json;
+    // send and forget message
+    send: func(actor-id: actor-id, msg: json) -> result<_, string>;
+
+    // send message and wait for response
+    request: func(actor-id: actor-id, msg: json) -> result<json, string>;
 }

@@ -47,9 +47,7 @@ impl TheaterCommand {
             TheaterCommand::NewEvent { actor_id, .. } => {
                 format!("NewEvent: {:?}", actor_id)
             }
-            TheaterCommand::GetActors { .. } => {
-                "GetActors".to_string()
-            }
+            TheaterCommand::GetActors { .. } => "GetActors".to_string(),
             TheaterCommand::GetActorStatus { actor_id, .. } => {
                 format!("GetActorStatus: {:?}", actor_id)
             }
@@ -59,7 +57,7 @@ impl TheaterCommand {
 
 #[derive(Debug)]
 pub struct ActorMessage {
-    pub response_tx: oneshot::Sender<Vec<u8>>,
+    pub response_tx: Option<oneshot::Sender<Vec<u8>>>,
     pub data: Vec<u8>,
 }
 
@@ -69,3 +67,4 @@ pub enum ActorStatus {
     Stopped,
     Failed,
 }
+

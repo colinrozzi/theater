@@ -359,7 +359,7 @@ impl TheaterRuntime {
             if let Some(parent) = self.actors.get(&parent_id) {
                 let event_message = ActorMessage {
                     data: serde_json::to_vec(&event)?,
-                    response_tx: tokio::sync::oneshot::channel().0, // We don't need the response
+                    response_tx: Some(tokio::sync::oneshot::channel().0), // We don't need the response
                 };
                 if let Err(e) = parent.mailbox_tx.send(event_message).await {
                     error!("Failed to forward event to parent: {}", e);

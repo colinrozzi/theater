@@ -45,14 +45,41 @@ impl MessageServerHost {
             .linker
             .instance("ntwk:theater/message-server-host")
             .expect("could not instantiate ntwk:theater/message-server-host");
-        let theater_tx = self.theater_tx.clone();
 
+        let theater_tx = self.theater_tx.clone();
         interface
             .func_wrap_async(
                 "send",
                 move |_ctx: wasmtime::StoreContextMut<'_, ActorStore>,
                       (address, msg): (String, Vec<u8>)|
-                      -> Box<dyn Future<Output = Result<(Vec<u8>,)>> + Send> {
+                      -> Box<dyn Future<Output = Result<(Result<(), String>,)>> + Send> {
+                    // make a channel that will carry the byte array of the resposne
+                    info!("Sending message to actor: {}", address);
+                    let actor_message = TheaterCommand::SendMessage {
+                        actor_id: TheaterId::parse(&address).expect("Failed to parse actor ID"),
+                        actor_message: ActorMessage {
+                            data: msg,
+                            response_tx: None,
+                        },
+                    };
+                    let theater_tx = theater_tx.clone();
+                    Box::new(async move {
+                        match theater_tx.send(actor_message).await {
+                            Ok(_) => Ok((Ok(()),)),
+                            Err(e) => Ok((Err(e.to_string()),)),
+                        }
+                    })
+                },
+            )
+            .expect("Failed to wrap async send function");
+
+        let theater_tx = self.theater_tx.clone();
+        interface
+            .func_wrap_async(
+                "request",
+                move |_ctx: wasmtime::StoreContextMut<'_, ActorStore>,
+                      (address, msg): (String, Vec<u8>)|
+                      -> Box<dyn Future<Output = Result<(Result<Vec<u8>, String>,)>> + Send> {
                     // make a channel that will carry the byte array of the resposne
                     info!("Sending message to actor: {}", address);
                     let (response_tx, response_rx) = tokio::sync::oneshot::channel();
@@ -60,27 +87,21 @@ impl MessageServerHost {
                         actor_id: TheaterId::parse(&address).expect("Failed to parse actor ID"),
                         actor_message: ActorMessage {
                             data: msg,
-                            response_tx,
+                            response_tx: Some(response_tx),
                         },
                     };
                     let theater_tx = theater_tx.clone();
                     Box::new(async move {
-                        theater_tx.send(actor_message).await.map_err(|e| {
-                            MessageServerError::WasmError {
-                                context: "send",
-                                message: e.to_string(),
-                            }
-                        })?;
-                        // wait for the response from the actor
-                        let response =
-                            response_rx
-                                .await
-                                .map_err(|e| MessageServerError::WasmError {
-                                    context: "send",
-                                    message: e.to_string(),
-                                })?;
-                        Ok((response,))
-                    })
+                        match theater_tx.send(actor_message).await {
+                            Ok(_) => {
+                                // wait for the response from the actor
+                                match response_rx.await {
+                                    Ok(response) => Ok((Ok(response),)),
+                                    Err(e) => Ok((Err(e.to_string()),)),
+                                }
+                            },
+                            Err(e) => Ok((Err(e.to_string()),)),
+                    }})
                 },
             )
             .expect("Failed to wrap async send function");
@@ -122,7 +143,9 @@ impl MessageServerHost {
         {
             Ok(((resp, new_state),)) => {
                 actor.actor_state = new_state;
-                let _ = msg.response_tx.send(resp);
+                if let Some(tx) = msg.response_tx {
+                    let _ = tx.send(resp);
+                }
             }
             Err(e) => info!("Error processing message: {}", e),
         }
