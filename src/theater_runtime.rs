@@ -1,6 +1,6 @@
 use crate::actor_runtime::ActorRuntime;
 use crate::id::TheaterId;
-use crate::messages::{ActorMessage, ActorStatus, TheaterCommand};
+use crate::messages::{ActorMessage, ActorSend, ActorStatus, TheaterCommand};
 use crate::wasm::Event;
 use crate::Result;
 use serde_json::json;
@@ -357,10 +357,9 @@ impl TheaterRuntime {
         if let Some(parent_id) = parent_id {
             debug!("Forwarding event to parent actor {:?}", parent_id);
             if let Some(parent) = self.actors.get(&parent_id) {
-                let event_message = ActorMessage {
+                let event_message = ActorMessage::Send(ActorSend {
                     data: serde_json::to_vec(&event)?,
-                    response_tx: Some(tokio::sync::oneshot::channel().0), // We don't need the response
-                };
+                });
                 if let Err(e) = parent.mailbox_tx.send(event_message).await {
                     error!("Failed to forward event to parent: {}", e);
                 }

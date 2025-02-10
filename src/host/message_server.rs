@@ -1,6 +1,6 @@
 use crate::actor_handle::ActorHandle;
 use crate::id::TheaterId;
-use crate::messages::{ActorMessage, TheaterCommand};
+use crate::messages::{ActorMessage, ActorRequest, ActorSend, TheaterCommand};
 use crate::wasm::Json;
 use crate::wasm::{ActorState, WasmActor};
 use crate::ActorStore;
@@ -57,10 +57,9 @@ impl MessageServerHost {
                     info!("Sending message to actor: {}", address);
                     let actor_message = TheaterCommand::SendMessage {
                         actor_id: TheaterId::parse(&address).expect("Failed to parse actor ID"),
-                        actor_message: ActorMessage {
+                        actor_message: ActorMessage::Send(ActorSend {
                             data: msg,
-                            response_tx: None,
-                        },
+                        }),
                     };
                     let theater_tx = theater_tx.clone();
                     Box::new(async move {
@@ -85,10 +84,10 @@ impl MessageServerHost {
                     let (response_tx, response_rx) = tokio::sync::oneshot::channel();
                     let actor_message = TheaterCommand::SendMessage {
                         actor_id: TheaterId::parse(&address).expect("Failed to parse actor ID"),
-                        actor_message: ActorMessage {
+                        actor_message: ActorMessage::Request(ActorRequest {
                             data: msg,
-                            response_tx: Some(response_tx),
-                        },
+                            response_tx,
+                        }),
                     };
                     let theater_tx = theater_tx.clone();
                     Box::new(async move {
@@ -132,20 +131,50 @@ impl MessageServerHost {
     }
 
     async fn process_message(&self, msg: ActorMessage) -> () {
+        match msg {
+            ActorMessage::Send(ActorSend { data }) => {
+                self.handle_send(data).await;
+            }
+            ActorMessage::Request(ActorRequest { response_tx, data }) => {
+                self.handle_request(data, response_tx).await;
+            }
+        }
+    }
+
+    async fn handle_send(&self, data: Vec<u8>) -> () {
+        let mut actor = self.actor_handle.inner().lock().await;
+        let actor_state = actor.actor_state.clone();
+        match actor
+            .call_func::<(Json, ActorState), ((ActorState,),)>(
+                "handle-send",
+                (Json::from(data), actor_state),
+            )
+            .await
+        {
+            Ok(((new_state,),)) => {
+                actor.actor_state = new_state;
+            }
+            Err(e) => info!("Error processing message: {}", e),
+        }
+    }
+
+    async fn handle_request(
+        &self,
+        data: Vec<u8>,
+        response_tx: tokio::sync::oneshot::Sender<Vec<u8>>,
+    ) -> () {
         let mut actor = self.actor_handle.inner().lock().await;
         let actor_state = actor.actor_state.clone();
         match actor
             .call_func::<(Json, ActorState), ((Json, ActorState),)>(
-                "handle",
-                (msg.data, actor_state),
+                "handle-request",
+                (Json::from(data), actor_state),
             )
             .await
         {
             Ok(((resp, new_state),)) => {
                 actor.actor_state = new_state;
-                if let Some(tx) = msg.response_tx {
-                    let _ = tx.send(resp);
-                }
+                let _ = response_tx.send(resp.into());
             }
             Err(e) => info!("Error processing message: {}", e),
         }

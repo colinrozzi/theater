@@ -56,9 +56,21 @@ impl TheaterCommand {
 }
 
 #[derive(Debug)]
-pub struct ActorMessage {
-    pub response_tx: Option<oneshot::Sender<Vec<u8>>>,
+pub struct ActorRequest {
+    pub response_tx: oneshot::Sender<Vec<u8>>,
     pub data: Vec<u8>,
+}
+
+#[derive(Debug)]
+pub struct ActorSend {
+    pub data: Vec<u8>,
+}
+
+// enum for both actorrequest and actormessage
+#[derive(Debug)]
+pub enum ActorMessage {
+    Request(ActorRequest),
+    Send(ActorSend),
 }
 
 #[derive(Debug, Clone)]
@@ -67,4 +79,3 @@ pub enum ActorStatus {
     Stopped,
     Failed,
 }
-

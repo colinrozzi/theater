@@ -3,7 +3,8 @@ package ntwk:theater;
 interface message-server-client {
     use types.{json, event};
 
-    handle: func(msg: json, state: json) -> tuple<json, json>;
+    handle-send: func(msg: json, state: json) -> json;
+    handle-request: func(msg: json, state: json) -> tuple<json, json>;
 }
 
 interface message-server-host {
