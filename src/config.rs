@@ -12,6 +12,8 @@ pub struct ManifestConfig {
     pub name: String,
     pub component_path: PathBuf,
     #[serde(default)]
+    pub init_data: Option<PathBuf>,
+    #[serde(default)]
     pub interface: InterfacesConfig,
     #[serde(default)]
     pub handlers: Vec<HandlerConfig>,
@@ -118,6 +120,16 @@ impl ManifestConfig {
 
     pub fn interface(&self) -> &str {
         &self.interface.implements
+    }
+
+    pub fn load_init_data(&self) -> anyhow::Result<Option<Vec<u8>>> {
+        match &self.init_data {
+            Some(path) => {
+                let data = std::fs::read(path)?;
+                Ok(Some(data))
+            }
+            None => Ok(None),
+        }
     }
 
     pub fn message_server_port(&self) -> Option<u16> {

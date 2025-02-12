@@ -3,5 +3,5 @@ package ntwk:theater;
 interface actor {
     use types.{json, event};
     
-    init: func() -> json;
+    init: func(data: json) -> json;
 }
