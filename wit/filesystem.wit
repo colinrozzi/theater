@@ -7,4 +7,5 @@ interface filesystem {
     delete-file: func(path: string) -> result<_, string>;
     create-dir: func(path: string) -> result<_, string>;
     delete-dir: func(path: string) -> result<_, string>;
+    path-exists: func(path: string) -> result<bool, string>;
 }

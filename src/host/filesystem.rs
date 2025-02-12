@@ -116,6 +116,19 @@ impl FileSystemHost {
             },
         );
 
+        let _ = interface.func_wrap(
+            "path-exists",
+            move |_ctx: StoreContextMut<'_, ActorStore>,
+                  (path,): (String,)|
+                  -> Result<(Result<bool, String>,)> {
+                info!("Checking if path exists: {:?}", path);
+                let path = Path::new(&path);
+                let exists = path.exists();
+                info!("Path exists: {:?}", exists);
+                Ok((Ok(exists),))
+            },
+        );
+
         let allowed_path = self.path.clone();
 
         let _ = interface.func_wrap(
@@ -154,7 +167,7 @@ impl FileSystemHost {
 
                 info!("Creating directory at {:?}", dir_path);
 
-                match std::fs::create_dir(dir_path) {
+                match std::fs::create_dir_all(dir_path) {
                     Ok(_) => {
                         info!("Directory created successfully");
                         Ok((Ok(()),))

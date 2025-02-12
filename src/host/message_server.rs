@@ -113,9 +113,17 @@ impl MessageServerHost {
             .actor_handle
             .with_actor_mut(|actor: &mut WasmActor| -> Result<()> {
                 let handle_export = actor
-                    .find_export("ntwk:theater/message-server-client", "handle")
-                    .expect("Failed to find handle export");
-                actor.exports.insert("handle".to_string(), handle_export);
+                    .find_export("ntwk:theater/message-server-client", "handle-send")
+                    .expect("Failed to find handle-send export");
+                actor
+                    .exports
+                    .insert("handle-send".to_string(), handle_export);
+                let handle_export = actor
+                    .find_export("ntwk:theater/message-server-client", "handle-request")
+                    .expect("Failed to find handle-request export");
+                actor
+                    .exports
+                    .insert("handle-request".to_string(), handle_export);
                 Ok(())
             })
             .await;

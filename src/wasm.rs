@@ -138,11 +138,11 @@ impl WasmActor {
         let (_, instance) = self
             .component
             .export_index(None, interface_name)
-            .expect("Failed to find interface export");
+            .expect(format!("Failed to find interface export: {}", interface_name).as_str());
         let (_, export) = self
             .component
             .export_index(Some(&instance), export_name)
-            .expect("Failed to find export");
+            .expect(format!("Failed to find export: {}", export_name).as_str());
         Ok(export)
     }
 
