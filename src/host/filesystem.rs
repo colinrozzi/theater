@@ -42,7 +42,7 @@ impl FileSystemHost {
                 // append the file path to the allowed path
                 let file_path = allowed_path.join(file_path);
 
-                info!("File path is allowed");
+                info!("Reading file {:?}", file_path);
 
                 let file = match File::open(file_path) {
                     Ok(f) => f,

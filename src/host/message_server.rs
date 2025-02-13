@@ -153,13 +153,13 @@ impl MessageServerHost {
         let mut actor = self.actor_handle.inner().lock().await;
         let actor_state = actor.actor_state.clone();
         match actor
-            .call_func::<(Json, ActorState), ((ActorState,),)>(
+            .call_func::<(Json, ActorState), (ActorState,)>(
                 "handle-send",
                 (Json::from(data), actor_state),
             )
             .await
         {
-            Ok(((new_state,),)) => {
+            Ok((new_state,)) => {
                 actor.actor_state = new_state;
             }
             Err(e) => info!("Error processing message: {}", e),

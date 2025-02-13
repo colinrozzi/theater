@@ -57,7 +57,7 @@ pub struct WasmActor {
     pub actor_store: ActorStore,
     pub actor_state: ActorState,
     theater_tx: Sender<TheaterCommand>,
-    init_data: Vec<u8>,
+    init_data: Option<Vec<u8>>,
 }
 
 impl WasmActor {
@@ -101,7 +101,7 @@ impl WasmActor {
             actor_store,
             actor_state: vec![],
             theater_tx: theater_tx.clone(),
-            init_data: serde_json::to_vec(&init_data)?, // Store the init data
+            init_data: init_data, // Store the init data
         };
 
         Ok(actor)
@@ -110,7 +110,7 @@ impl WasmActor {
     pub async fn init(&mut self) {
         info!("Initializing actor with init data");
         let init_state_bytes = self
-            .call_func::<(Json,), (ActorState,)>("init", (self.init_data.clone(),))
+            .call_func::<(Option<Json>,), (ActorState,)>("init", (self.init_data.clone(),))
             .await
             .expect("Failed to call init function");
         self.actor_state = init_state_bytes.0;
