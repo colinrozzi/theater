@@ -375,6 +375,10 @@ impl TheaterRuntime {
             proc.process.abort();
             proc.status = ActorStatus::Stopped;
             debug!("Actor stopped and removed from runtime");
+            let children = proc.children.clone();
+            for child_id in children {
+                Box::pin(self.stop_actor(child_id)).await?;
+            }
         } else {
             warn!("Attempted to stop non-existent actor: {:?}", actor_id);
         }

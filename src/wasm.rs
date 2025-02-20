@@ -101,7 +101,7 @@ impl WasmActor {
             actor_store,
             actor_state: vec![],
             theater_tx: theater_tx.clone(),
-            init_data: init_data, // Store the init data
+            init_data,
         };
 
         Ok(actor)
@@ -109,6 +109,7 @@ impl WasmActor {
 
     pub async fn init(&mut self) {
         info!("Initializing actor with init data");
+        info!("Init data: {:?}", self.init_data);
         let init_state_bytes = self
             .call_func::<(Option<Json>,), (ActorState,)>("init", (self.init_data.clone(),))
             .await
