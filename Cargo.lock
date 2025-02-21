@@ -2369,6 +2369,7 @@ dependencies = [
  "reqwest",
  "serde",
  "serde_json",
+ "sha1",
  "test-log",
  "thiserror 1.0.69",
  "tokio",

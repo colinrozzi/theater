@@ -2,6 +2,7 @@ use crate::actor_runtime::ActorRuntime;
 use crate::id::TheaterId;
 use crate::messages::{ActorMessage, ActorSend, ActorStatus, TheaterCommand};
 use crate::wasm::Event;
+use crate::chain::ChainEvent;
 use crate::Result;
 use serde_json::json;
 use std::collections::HashMap;
@@ -12,13 +13,12 @@ use tokio::sync::mpsc::Receiver;
 use tokio::sync::mpsc::Sender;
 use tokio::task::JoinHandle;
 use tracing::{debug, error, info, warn};
-use wasmtime::chain::MetaEvent;
 
 pub struct TheaterRuntime {
     actors: HashMap<TheaterId, ActorProcess>,
     pub theater_tx: Sender<TheaterCommand>,
     theater_rx: Receiver<TheaterCommand>,
-    event_subscribers: Vec<mpsc::Sender<(TheaterId, Vec<MetaEvent>)>>,
+    event_subscribers: Vec<mpsc::Sender<(TheaterId, ChainEvent)>>,
 }
 
 pub struct ActorProcess {
@@ -44,7 +44,7 @@ impl TheaterRuntime {
 
     pub async fn subscribe_to_events(
         &mut self,
-    ) -> Result<mpsc::Receiver<(TheaterId, Vec<MetaEvent>)>> {
+    ) -> Result<mpsc::Receiver<(TheaterId, ChainEvent)>> {
         let (tx, rx) = mpsc::channel(32);
         self.event_subscribers.push(tx);
         Ok(rx)
@@ -80,105 +80,6 @@ impl TheaterRuntime {
                             if let Err(send_err) = response_tx.send(Err(e)) {
                                 error!("Failed to send error response: {:?}", send_err);
                             }
-                        }
-                    }
-                }
-                TheaterCommand::StopActor {
-                    actor_id,
-                    response_tx,
-                } => {
-                    debug!("Stopping actor: {:?}", actor_id);
-                    match self.stop_actor(actor_id).await {
-                        Ok(_) => {
-                            info!("Actor stopped successfully");
-                            let _ = response_tx.send(Ok(()));
-                        }
-                        Err(e) => {
-                            error!("Failed to stop actor: {}", e);
-                            let _ = response_tx.send(Err(e));
-                        }
-                    }
-                }
-                TheaterCommand::SendMessage {
-                    actor_id,
-                    actor_message,
-                } => {
-                    debug!("Sending message to actor: {:?}", actor_id);
-                    if let Some(proc) = self.actors.get_mut(&actor_id) {
-                        if let Err(e) = proc.mailbox_tx.send(actor_message).await {
-                            error!("Failed to send message to actor: {}", e);
-                        }
-                    } else {
-                        warn!(
-                            "Attempted to send message to non-existent actor: {:?}",
-                            actor_id
-                        );
-                    }
-                }
-                TheaterCommand::NewEvent { actor_id, event } => {
-                    debug!("Received new event from actor {:?}", actor_id);
-                    // Forward event to subscribers
-                    self.event_subscribers.retain_mut(|tx| {
-                        match tx.try_send((actor_id.clone(), event.clone())) {
-                            Ok(_) => true,
-                            Err(e) => {
-                                warn!("Failed to forward event to subscriber: {}", e);
-                                false
-                            }
-                        }
-                    });
-
-                    if let Err(e) = self.handle_actor_event(actor_id, event).await {
-                        error!("Failed to handle actor event: {}", e);
-                    }
-                }
-                TheaterCommand::GetActors { response_tx } => {
-                    debug!("Getting list of actors");
-                    let actors = self.actors.keys().cloned().collect();
-                    if let Err(e) = response_tx.send(Ok(actors)) {
-                        error!("Failed to send actor list: {:?}", e);
-                    }
-                }
-                TheaterCommand::GetActorStatus {
-                    actor_id,
-                    response_tx,
-                } => {
-                    debug!("Getting status for actor: {:?}", actor_id);
-                    let status = self
-                        .actors
-                        .get(&actor_id)
-                        .map(|proc| proc.status.clone())
-                        .unwrap_or(ActorStatus::Stopped);
-                    if let Err(e) = response_tx.send(Ok(status)) {
-                        error!("Failed tk send actor status: {:?}", e);
-                    }
-                }
-            };
-        }
-        info!("Theater runtime shutting down");
-        Ok(())
-    }
-
-    pub async fn old_run(&mut self) -> Result<()> {
-        info!("Theater runtime starting");
-
-        while let Some(cmd) = self.theater_rx.recv().await {
-            debug!("Processing command: {:?}", cmd.to_log());
-            match cmd {
-                TheaterCommand::SpawnActor {
-                    manifest_path,
-                    parent_id,
-                    response_tx,
-                } => {
-                    debug!("Spawning actor from manifest: {:?}", manifest_path);
-                    match self.spawn_actor(manifest_path, parent_id).await {
-                        Ok(actor_id) => {
-                            info!("Actor spawned successfully with id: {:?}", actor_id);
-                            let _ = response_tx.send(Ok(actor_id.clone()));
-                        }
-                        Err(e) => {
-                            error!("Failed to spawn actor: {}", e);
-                            let _ = response_tx.send(Err(e));
                         }
                     }
                 }
@@ -332,7 +233,7 @@ impl TheaterRuntime {
     async fn handle_actor_event(
         &mut self,
         actor_id: TheaterId,
-        events: Vec<MetaEvent>,
+        event: ChainEvent,
     ) -> Result<()> {
         debug!("Handling event from actor {:?}", actor_id);
         // Find the parent of this actor
@@ -344,13 +245,10 @@ impl TheaterRuntime {
             }
         });
 
-        let event = Event {
-            event_type: "wasm-event".to_string(),
+        let wasm_event = Event {
+            event_type: event.event_type.clone(),
             parent: None,
-            data: serde_json::to_vec(&json!({
-                "actor_id": actor_id,
-                "events": events,
-            }))?,
+            data: event.data.clone(),
         };
 
         // If there's a parent, forward the event
@@ -358,7 +256,7 @@ impl TheaterRuntime {
             debug!("Forwarding event to parent actor {:?}", parent_id);
             if let Some(parent) = self.actors.get(&parent_id) {
                 let event_message = ActorMessage::Send(ActorSend {
-                    data: serde_json::to_vec(&event)?,
+                    data: serde_json::to_vec(&wasm_event)?,
                 });
                 if let Err(e) = parent.mailbox_tx.send(event_message).await {
                     error!("Failed to forward event to parent: {}", e);

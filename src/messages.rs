@@ -1,8 +1,8 @@
 use crate::id::TheaterId;
+use crate::chain::ChainEvent;
 use crate::Result;
 use std::path::PathBuf;
 use tokio::sync::oneshot;
-use wasmtime::chain::MetaEvent;
 
 #[derive(Debug)]
 pub enum TheaterCommand {
@@ -21,7 +21,7 @@ pub enum TheaterCommand {
     },
     NewEvent {
         actor_id: TheaterId,
-        event: Vec<MetaEvent>,
+        event: ChainEvent,
     },
     GetActors {
         response_tx: oneshot::Sender<Result<Vec<TheaterId>>>,
@@ -66,7 +66,6 @@ pub struct ActorSend {
     pub data: Vec<u8>,
 }
 
-// enum for both actorrequest and actormessage
 #[derive(Debug)]
 pub enum ActorMessage {
     Request(ActorRequest),

@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use std::fmt::Debug;
 use thiserror::Error;
 use tokio::sync::mpsc::Sender;
-use wasmtime::component::{Component, ComponentExportIndex, ComponentType, Lift, Linker, Lower};
+use wasmtime::component::{Component, ComponentExportIndex, ComponentType, Lift, Lower, Linker};
 use wasmtime::{Engine, Store};
 
 use crate::config::ManifestConfig;
@@ -110,20 +110,34 @@ impl WasmActor {
     pub async fn init(&mut self) {
         info!("Initializing actor with init data");
         info!("Init data: {:?}", self.init_data);
+        
+        // Record init event
+        if let Some(init_data) = self.init_data.clone() {
+            self.actor_store.record_event("init".into(), init_data.clone()).await;
+        }
+        
         let init_state_bytes = self
             .call_func::<(Option<Json>,), (ActorState,)>("init", (self.init_data.clone(),))
             .await
             .expect("Failed to call init function");
+            
+        // Record initial state
+        self.actor_store.record_event("initial_state".into(), init_state_bytes.0.clone()).await;
+        
         self.actor_state = init_state_bytes.0;
     }
 
     pub async fn handle_event(&mut self, event: Event) -> Result<()> {
         info!("handling event");
-        info!("Event details: {:#?}", event); // Log full event structure
+        info!("Event details: {:#?}", event);
         info!(
             "Current actor state {}",
             serde_json::to_string(&json!(self.actor_state)).expect("Failed to serialize state")
         );
+
+        // Record incoming event
+        let event_data = serde_json::to_vec(&event)?;
+        let chain_event = self.actor_store.record_event("handle_event".into(), event_data).await;
 
         let new_state = self
             .call_func::<(Event, ActorState), (ActorState,)>(
@@ -132,7 +146,21 @@ impl WasmActor {
             )
             .await
             .expect("Failed to call handle function");
+            
+        // Record state update
+        self.actor_store.record_event("state_update".into(), new_state.0.clone()).await;
+            
         self.actor_state = new_state.0;
+
+        // Notify theater of the new event
+        self.theater_tx
+            .send(TheaterCommand::NewEvent {
+                actor_id: self.actor_store.id.clone(),
+                event: chain_event,
+            })
+            .await
+            .expect("Failed to send new event to theater");
+
         Ok(())
     }
 
@@ -156,13 +184,10 @@ impl WasmActor {
         Ok(export)
     }
 
-    #[allow(dead_code)]
-    fn save_chain(&self) {
-        let chain = self.store.chain();
-        let chain_json = serde_json::to_string(&chain).expect("Failed to serialize chain");
-        // chain path: chain/actor_name.json
+    pub async fn save_chain(&self) -> Result<()> {
         let chain_path = format!("chain/{}.json", self.name);
-        std::fs::write(chain_path, chain_json).expect("Failed to write chain to file");
+        self.actor_store.save_chain(std::path::Path::new(&chain_path)).await?;
+        Ok(())
     }
 
     pub async fn call_func<T, U>(&mut self, export_name: &str, args: T) -> Result<U>
@@ -236,19 +261,13 @@ impl WasmActor {
                 })?;
         info!("Function call result: {:?}", result);
 
-        let wasm_event = self
-            .store
-            .chain()
-            .get_last_wasm_event_chain()
-            .expect("Failed to get last wasm event chain");
-
-        self.theater_tx
-            .send(TheaterCommand::NewEvent {
-                actor_id: self.actor_store.id.clone(),
-                event: wasm_event,
-            })
-            .await
-            .expect("Failed to send new event to theater");
+        // Record function call result
+        if let Ok(result_data) = serde_json::to_vec(&result) {
+            self.actor_store.record_event(
+                format!("function_call_{}", export_name),
+                result_data
+            ).await;
+        }
 
         Ok(result)
     }
