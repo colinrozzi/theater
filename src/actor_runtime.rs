@@ -4,6 +4,7 @@ use crate::host::filesystem::FileSystemHost;
 use crate::host::handler::Handler;
 use crate::host::http_client::HttpClientHost;
 use crate::host::http_server::HttpServerHost;
+use crate::host::supervisor::SupervisorHost;
 use crate::host::message_server::MessageServerHost;
 use crate::host::runtime::RuntimeHost;
 use crate::host::websocket_server::WebSocketServerHost;

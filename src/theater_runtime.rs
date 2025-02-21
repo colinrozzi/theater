@@ -7,7 +7,7 @@ use crate::Result;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::path::PathBuf;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, oneshot};
 use tokio::sync::mpsc::Receiver;
 use tokio::sync::mpsc::Sender;
 use tokio::task::JoinHandle;
@@ -353,11 +353,11 @@ impl TheaterRuntime {
     async fn get_actor_state(&self, actor_id: TheaterId) -> Result<Vec<u8>> {
         if let Some(proc) = self.actors.get(&actor_id) {
             // Send a message to get the actor's state
-            let (tx, rx) = tokio::sync::oneshot::channel();
+            let (tx, rx): (oneshot::Sender<Vec<u8>>, oneshot::Receiver<Vec<u8>>) = oneshot::channel();
             proc.mailbox_tx.send(ActorMessage::Request(ActorRequest {
                 response_tx: tx,
                 data: Vec::new(), // Empty data for state request
-            })).await?
+            })).await?;
 
             match rx.await {
                 Ok(state) => Ok(state),
@@ -371,11 +371,11 @@ impl TheaterRuntime {
     async fn get_actor_events(&self, actor_id: TheaterId) -> Result<Vec<ChainEvent>> {
         if let Some(proc) = self.actors.get(&actor_id) {
             // Send a message to get the actor's event history
-            let (tx, rx) = tokio::sync::oneshot::channel();
+            let (tx, rx): (oneshot::Sender<Vec<u8>>, oneshot::Receiver<Vec<u8>>) = oneshot::channel();
             proc.mailbox_tx.send(ActorMessage::Request(ActorRequest {
                 response_tx: tx,
                 data: Vec::new(), // Empty data for events request
-            })).await?
+            })).await?;
 
             match rx.await {
                 Ok(events_data) => {

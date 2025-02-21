@@ -232,7 +232,7 @@ impl SupervisorHost {
                 "get-child-events",
                 move |mut ctx: StoreContextMut<'_, ActorStore>,
                       (child_id,): (String,)|
-                      -> Box<dyn Future<Output = Result<(Result<Vec<ChainEvent>, String>,)>> + Send> {
+                      -> Box<dyn Future<Output = Result<(Result<Vec<u8>, String>,)>> + Send> {
                     let store = ctx.data_mut();
                     let theater_tx = store.theater_tx.clone();
                     let boundary = boundary.clone();
@@ -250,7 +250,13 @@ impl SupervisorHost {
                         {
                             Ok(_) => {
                                 match response_rx.await {
-                                    Ok(Ok(events)) => Ok((Ok(events),)),
+                                    Ok(Ok(events)) => {
+                                        // Serialize events to JSON
+                                        match serde_json::to_vec(&events) {
+                                            Ok(events_json) => Ok((Ok(events_json),)),
+                                            Err(e) => Ok((Err(format!("Failed to serialize events: {}", e)),))
+                                        }
+                                    }
                                     Ok(Err(e)) => Ok((Err(e.to_string()),)),
                                     Err(e) => Ok((Err(format!("Failed to receive events: {}", e)),))
                                 }

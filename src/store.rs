@@ -36,6 +36,15 @@ impl ActorStore {
         chain.get_last_event().cloned()
     }
 
+    pub fn get_current_state(&self) -> Option<Vec<u8>> {
+        self.get_last_event().map(|e| e.data)
+    }
+
+    pub fn get_all_events(&self) -> Vec<ChainEvent> {
+        let chain = self.chain.lock().unwrap();
+        chain.get_events().to_vec()
+    }
+
     pub fn save_chain(&self, path: &std::path::Path) -> anyhow::Result<()> {
         let chain = self.chain.lock().unwrap();
         chain.save_to_file(path)?;
@@ -48,14 +57,4 @@ impl ActorStore {
         *current_chain = chain;
         Ok(())
     }
-
-    pub fn get_all_events(&self) -> Vec<ChainEvent> {
-        let chain = self.chain.lock().unwrap();
-        chain.get_events().to_vec()
-    }
-
-    pub fn get_current_state(&self) -> Option<Vec<u8>> {
-        self.get_last_event().map(|e| e.data)
-    }
 }
-
