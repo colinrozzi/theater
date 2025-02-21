@@ -3,6 +3,7 @@ use wasmtime::StoreContextMut;
 use serde::Serialize;
 use anyhow::Result;
 
+#[derive(Clone)]
 pub struct HostFunctionBoundary {
     pub function_name: String,
     pub interface_name: String,
@@ -46,16 +47,4 @@ impl HostFunctionBoundary {
 
         Ok(result)
     }
-}
-
-/// Helper macro to wrap a host function with boundary tracking
-#[macro_export]
-macro_rules! host_func_wrap {
-    ($interface:expr, $name:expr, $ctx:expr, |$($param:ident: $ty:ty),*| $body:expr) => {{
-        let boundary = HostFunctionBoundary::new($interface, $name);
-        move |mut store: StoreContextMut<'_, ActorStore>, ($($param),*): ($($ty),*)| {
-            let args = ($($param.clone()),*);
-            boundary.wrap(&mut store, args, |($($param),*)| $body)
-        }
-    }};
 }

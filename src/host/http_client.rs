@@ -1,6 +1,7 @@
 use crate::actor_handle::ActorHandle;
 use crate::config::HttpClientHandlerConfig;
 use crate::ActorStore;
+use crate::host::host_wrapper::HostFunctionBoundary;
 use anyhow::Result;
 use reqwest::Method;
 use serde::{Deserialize, Serialize};
@@ -43,55 +44,70 @@ impl HttpClientHost {
             .instance("ntwk:theater/http-client")
             .expect("could not instantiate ntwk:theater/http-client");
 
+        let boundary = HostFunctionBoundary::new("ntwk:theater/http-client", "send-http");
+
         interface.func_wrap_async(
             "send-http",
-            |_ctx: wasmtime::StoreContextMut<'_, ActorStore>,
-             (req,): (HttpRequest,)|
-             -> Box<dyn Future<Output = Result<(Result<HttpResponse, String>,)>> + Send> {
-                let client = reqwest::Client::new();
-                let mut request = client.request(
-                    Method::from_bytes(req.method.as_bytes()).unwrap(),
-                    req.uri.clone(),
-                );
-                for (key, value) in req.headers {
-                    request = request.header(key, value);
-                }
-                if let Some(body) = req.body {
-                    request = request.body(body);
-                }
-                info!("Sending {} request to {}", req.method, req.uri);
+            move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore>,
+                  (req,): (HttpRequest,)|
+                  -> Box<dyn Future<Output = Result<(Result<HttpResponse, String>,)>> + Send> {
+                let req_clone = req.clone();
+                let boundary = boundary.clone();
+                
                 Box::new(async move {
-                    info!("sending request from inside async block");
-                    match request.send().await {
-                    Ok(response) => {
-                    info!("Response received");
-                    let status = response.status().as_u16();
-                    let headers = response
-                        .headers()
-                        .iter()
-                        .map(|(key, value)| {
-                            (
-                                key.as_str().to_string(),
-                                value.to_str().unwrap().to_string(),
-                            )
-                        })
-                        .collect();
-                    let body = response.bytes().await.unwrap().to_vec();
-                    info!("Response body received");
-                    Ok((Ok(HttpResponse {
-                        status,
-                        headers,
-                        body: Some(body),
-                    }),))
+                    // Record the outbound request
+                    let request = boundary.wrap(&mut ctx, (req_clone.clone(),), |req| {
+                        let client = reqwest::Client::new();
+                        let mut request = client.request(
+                            Method::from_bytes(req.method.as_bytes()).unwrap(),
+                            req.uri.clone(),
+                        );
+                        for (key, value) in req.headers {
+                            request = request.header(key, value);
                         }
-                    Err(e) => {
-                        info!("Error sending request: {:?}", e);
-                        Ok((Err(e.to_string()),))
+                        if let Some(body) = req.body {
+                            request = request.body(body);
+                        }
+                        info!("Sending {} request to {}", req.method, req.uri);
+                        
+                        Ok(request)
+                    })?;
+
+                    match request.send().await {
+                        Ok(response) => {
+                            let status = response.status().as_u16();
+                            let headers = response
+                                .headers()
+                                .iter()
+                                .map(|(key, value)| {
+                                    (
+                                        key.as_str().to_string(),
+                                        value.to_str().unwrap().to_string(),
+                                    )
+                                })
+                                .collect();
+                            
+                            // Need to await the body here
+                            let body = response.bytes().await.ok().map(|b| b.to_vec());
+                            
+                            let resp = HttpResponse {
+                                status,
+                                headers,
+                                body,
+                            };
+                            
+                            // Record the response
+                            boundary.wrap(&mut ctx, resp.clone(), |resp| Ok((Ok(resp),)))
+                        }
+                        Err(e) => {
+                            let err = e.to_string();
+                            boundary.wrap(&mut ctx, err.clone(), |err| Ok((Err(err),)))
+                        }
                     }
-                }
                 })
             },
         )?;
+        
         info!("Host functions set up for http-client");
         Ok(())
     }
