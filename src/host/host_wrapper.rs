@@ -1,7 +1,7 @@
 use crate::ActorStore;
-use wasmtime::StoreContextMut;
-use serde::Serialize;
 use anyhow::Result;
+use serde::Serialize;
+use wasmtime::StoreContextMut;
 
 #[derive(Clone)]
 pub struct HostFunctionBoundary {
@@ -32,7 +32,7 @@ impl HostFunctionBoundary {
         let args_json = serde_json::to_vec(&args)?;
         store.data_mut().record_event(
             format!("{}/{}_call", self.interface_name, self.function_name),
-            args_json
+            args_json,
         );
 
         // Execute the host function
@@ -42,9 +42,10 @@ impl HostFunctionBoundary {
         let result_json = serde_json::to_vec(&result)?;
         store.data_mut().record_event(
             format!("{}/{}_return", self.interface_name, self.function_name),
-            result_json
+            result_json,
         );
 
         Ok(result)
     }
 }
+
