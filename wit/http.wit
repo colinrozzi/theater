@@ -29,5 +29,5 @@ interface http-client {
     use types.{json};
     use http-types.{http-request, http-response};
 
-    send-http: func(req: http-request) -> http-response;
+    send-http: func(req: http-request) -> result<http-response, string>;
 }

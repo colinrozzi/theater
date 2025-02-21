@@ -1,13 +1,13 @@
 use anyhow::Result;
+use bytes::Bytes;
 use clap::{Parser, Subcommand};
 use futures::sink::SinkExt;
 use futures::stream::StreamExt;
 use std::path::PathBuf;
+use theater::theater_server::{ManagementCommand, ManagementResponse};
 use tokio::net::TcpStream;
 use tokio_util::codec::{Framed, LengthDelimitedCodec};
-use theater::theater_server::{ManagementCommand, ManagementResponse};
-use tracing::{info, error, debug};
-use bytes::Bytes;
+use tracing::{debug, error, info};
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -45,17 +45,17 @@ enum Commands {
 async fn main() -> Result<()> {
     // Setup logging with debug level
     tracing_subscriber::fmt()
-        .with_env_filter("debug")
+        .with_env_filter("info")
         .with_line_number(true)
         .with_file(true)
         .init();
 
     let args = Args::parse();
-    
+
     // Connect to the server
     let stream = TcpStream::connect(&args.address).await?;
     info!("Connected to theater server at {}", args.address);
-    
+
     let mut framed = Framed::new(stream, LengthDelimitedCodec::new());
 
     // Send command based on CLI args
@@ -63,23 +63,19 @@ async fn main() -> Result<()> {
         Commands::Start { manifest } => {
             info!("Starting actor from manifest: {:?}", manifest);
             ManagementCommand::StartActor { manifest }
-        },
+        }
         Commands::Stop { id } => {
             info!("Stopping actor: {}", id);
-            ManagementCommand::StopActor { 
-                id: id.parse()? 
-            }
-        },
+            ManagementCommand::StopActor { id: id.parse()? }
+        }
         Commands::List => {
             info!("Listing actors");
             ManagementCommand::ListActors
-        },
+        }
         Commands::Subscribe { id } => {
             info!("Subscribing to actor: {}", id);
-            ManagementCommand::SubscribeToActor { 
-                id: id.parse()? 
-            }
-        },
+            ManagementCommand::SubscribeToActor { id: id.parse()? }
+        }
     };
 
     // Send the command
@@ -100,32 +96,38 @@ async fn main() -> Result<()> {
                 match response {
                     ManagementResponse::ActorStarted { id } => {
                         println!("Actor started successfully with ID: {:?}", id);
-                    },
+                    }
                     ManagementResponse::ActorStopped { id } => {
                         println!("Actor {:?} stopped successfully", id);
-                    },
+                    }
                     ManagementResponse::ActorList { actors } => {
                         println!("Running actors:");
                         for actor in actors {
                             println!("  {:?}", actor);
                         }
-                    },
-                    ManagementResponse::Subscribed { id, subscription_id } => {
-                        println!("Subscribed to actor {:?} with subscription ID: {:?}", id, subscription_id);
+                    }
+                    ManagementResponse::Subscribed {
+                        id,
+                        subscription_id,
+                    } => {
+                        println!(
+                            "Subscribed to actor {:?} with subscription ID: {:?}",
+                            id, subscription_id
+                        );
                         println!("Listening for events (Ctrl+C to stop)...");
-                    },
+                    }
                     ManagementResponse::ActorEvent { id, event } => {
                         println!("Event from actor {:?}:", id);
                         println!("  {:?}", event);
-                    },
+                    }
                     ManagementResponse::Unsubscribed { id } => {
                         println!("Unsubscribed from actor {:?}", id);
-                    },
+                    }
                     ManagementResponse::Error { message } => {
                         error!("Server error: {}", message);
-                    },
+                    }
                 }
-            },
+            }
             Err(e) => {
                 error!("Error receiving response: {}", e);
                 break;
@@ -141,3 +143,4 @@ async fn main() -> Result<()> {
 
     Ok(())
 }
+

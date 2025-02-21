@@ -47,7 +47,7 @@ impl HttpClientHost {
             "send-http",
             |_ctx: wasmtime::StoreContextMut<'_, ActorStore>,
              (req,): (HttpRequest,)|
-             -> Box<dyn Future<Output = Result<(HttpResponse,)>> + Send> {
+             -> Box<dyn Future<Output = Result<(Result<HttpResponse, String>,)>> + Send> {
                 let client = reqwest::Client::new();
                 let mut request = client.request(
                     Method::from_bytes(req.method.as_bytes()).unwrap(),
@@ -62,7 +62,8 @@ impl HttpClientHost {
                 info!("Sending {} request to {}", req.method, req.uri);
                 Box::new(async move {
                     info!("sending request from inside async block");
-                    let response = request.send().await.expect("could not send request");
+                    match request.send().await {
+                    Ok(response) => {
                     info!("Response received");
                     let status = response.status().as_u16();
                     let headers = response
@@ -75,13 +76,19 @@ impl HttpClientHost {
                             )
                         })
                         .collect();
-                    let body = response.bytes().await?.to_vec();
+                    let body = response.bytes().await.unwrap().to_vec();
                     info!("Response body received");
-                    Ok((HttpResponse {
+                    Ok((Ok(HttpResponse {
                         status,
                         headers,
                         body: Some(body),
-                    },))
+                    }),))
+                        }
+                    Err(e) => {
+                        info!("Error sending request: {:?}", e);
+                        Ok((Err(e.to_string()),))
+                    }
+                }
                 })
             },
         )?;
