@@ -6,7 +6,7 @@ use anyhow::Result;
 use std::fs::File;
 use std::io::{BufReader, Read, Write};
 use std::path::{Path, PathBuf};
-use tracing::{error, info};
+use tracing::info;
 use wasmtime::StoreContextMut;
 
 pub struct FileSystemHost {
@@ -84,9 +84,6 @@ impl FileSystemHost {
                 })
             },
         );
-
-        // Similar updates for other functions...
-        // I'll leave these as an exercise, but they would follow the same pattern
 
         Ok(())
     }
