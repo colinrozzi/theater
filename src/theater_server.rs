@@ -1,3 +1,4 @@
+use crate::ChainEvent;
 use anyhow::Result;
 use bytes::Bytes;
 use futures::sink::SinkExt;
@@ -55,7 +56,7 @@ pub enum ManagementResponse {
     },
     ActorEvent {
         id: TheaterId,
-        event: Vec<MetaEvent>,
+        event: ChainEvent,
     },
     Error {
         message: String,
