@@ -1,7 +1,7 @@
 use crate::actor_runtime::ActorRuntime;
 use crate::chain::ChainEvent;
 use crate::id::TheaterId;
-use crate::messages::{ActorMessage, ActorSend, ActorStatus, TheaterCommand};
+use crate::messages::{ActorMessage, ActorRequest, ActorSend, ActorStatus, TheaterCommand};
 use crate::wasm::Event;
 use crate::Result;
 use std::collections::HashMap;

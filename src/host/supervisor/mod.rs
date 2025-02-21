@@ -1,13 +1,12 @@
 use crate::actor_handle::ActorHandle;
 use crate::config::SupervisorHostConfig;
-use crate::messages::{TheaterCommand, ActorStatus};
+use crate::messages::TheaterCommand;
 use crate::store::ActorStore;
 use crate::host::host_wrapper::HostFunctionBoundary;
-use crate::chain::ChainEvent;
 use anyhow::Result;
 use std::future::Future;
 use std::path::PathBuf;
-use tracing::{error, info, debug};
+use tracing::info;
 use wasmtime::StoreContextMut;
 use tokio::sync::oneshot;
 
