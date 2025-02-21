@@ -26,6 +26,7 @@ pub struct ActorProcess {
     pub mailbox_tx: mpsc::Sender<ActorMessage>,
     pub children: HashSet<TheaterId>,
     pub status: ActorStatus,
+    pub manifest_path: PathBuf,
 }
 
 impl TheaterRuntime {
@@ -53,6 +54,49 @@ impl TheaterRuntime {
         while let Some(cmd) = self.theater_rx.recv().await {
             debug!("Runtime received command: {:?}", cmd.to_log());
             match cmd {
+                TheaterCommand::ListChildren { parent_id, response_tx } => {
+                    debug!("Getting children for actor: {:?}", parent_id);
+                    if let Some(proc) = self.actors.get(&parent_id) {
+                        let children = proc.children.iter().cloned().collect();
+                        let _ = response_tx.send(children);
+                    } else {
+                        let _ = response_tx.send(Vec::new());
+                    }
+                }
+                TheaterCommand::RestartActor { actor_id, response_tx } => {
+                    debug!("Restarting actor: {:?}", actor_id);
+                    match self.restart_actor(actor_id).await {
+                        Ok(_) => {
+                            let _ = response_tx.send(Ok(()));
+                        }
+                        Err(e) => {
+                            let _ = response_tx.send(Err(e));
+                        }
+                    }
+                }
+                TheaterCommand::GetChildState { child_id, response_tx } => {
+                    debug!("Getting state for actor: {:?}", child_id);
+                    match self.get_actor_state(child_id).await {
+                        Ok(state) => {
+                            let _ = response_tx.send(Ok(state));
+                        }
+                        Err(e) => {
+                            let _ = response_tx.send(Err(e));
+                        }
+                    }
+                }
+                TheaterCommand::GetChildEvents { child_id, response_tx } => {
+                    debug!("Getting events for actor: {:?}", child_id);
+                    match self.get_actor_events(child_id).await {
+                        Ok(events) => {
+                            let _ = response_tx.send(Ok(events));
+                        }
+                        Err(e) => {
+                            let _ = response_tx.send(Err(e));
+                        }
+                    }
+                }
+                match cmd {
                 TheaterCommand::SpawnActor {
                     manifest_path,
                     parent_id,
@@ -202,6 +246,7 @@ impl TheaterRuntime {
                     mailbox_tx,
                     children: HashSet::new(),
                     status: ActorStatus::Running,
+                    manifest_path: manifest_path.clone(),
                 };
 
                 if let Some(parent_id) = parent_id {
@@ -274,6 +319,75 @@ impl TheaterRuntime {
             warn!("Attempted to stop non-existent actor: {:?}", actor_id);
         }
         Ok(())
+    }
+
+    async fn restart_actor(&mut self, actor_id: TheaterId) -> Result<()> {
+        debug!("Starting actor restart process for: {:?}", actor_id);
+        
+        // Get the actor's info before stopping it
+        let (manifest_path, parent_id) = if let Some(proc) = self.actors.get(&actor_id) {
+            let manifest = proc.manifest_path.clone();
+            
+            // Find the parent ID
+            let parent_id = self.actors.iter().find_map(|(id, proc)| {
+                if proc.children.contains(&actor_id) {
+                    Some(id.clone())
+                } else {
+                    None
+                }
+            });
+            
+            (manifest, parent_id)
+        } else {
+            return Err(anyhow::anyhow!("Actor not found"));
+        };
+
+        // Stop the actor
+        self.stop_actor(actor_id).await?;
+
+        // Spawn it again
+        self.spawn_actor(manifest_path, parent_id).await?;
+
+        Ok(())
+    }
+
+    async fn get_actor_state(&self, actor_id: TheaterId) -> Result<Vec<u8>> {
+        if let Some(proc) = self.actors.get(&actor_id) {
+            // Send a message to get the actor's state
+            let (tx, rx) = tokio::sync::oneshot::channel();
+            proc.mailbox_tx.send(ActorMessage::Request(ActorRequest {
+                response_tx: tx,
+                data: Vec::new(), // Empty data for state request
+            })).await?
+
+            match rx.await {
+                Ok(state) => Ok(state),
+                Err(e) => Err(anyhow::anyhow!("Failed to receive state: {}", e)),
+            }
+        } else {
+            Err(anyhow::anyhow!("Actor not found"))
+        }
+    }
+
+    async fn get_actor_events(&self, actor_id: TheaterId) -> Result<Vec<ChainEvent>> {
+        if let Some(proc) = self.actors.get(&actor_id) {
+            // Send a message to get the actor's event history
+            let (tx, rx) = tokio::sync::oneshot::channel();
+            proc.mailbox_tx.send(ActorMessage::Request(ActorRequest {
+                response_tx: tx,
+                data: Vec::new(), // Empty data for events request
+            })).await?
+
+            match rx.await {
+                Ok(events_data) => {
+                    serde_json::from_slice(&events_data)
+                        .map_err(|e| anyhow::anyhow!("Failed to deserialize events: {}", e))
+                }
+                Err(e) => Err(anyhow::anyhow!("Failed to receive events: {}", e)),
+            }
+        } else {
+            Err(anyhow::anyhow!("Actor not found"))
+        }
     }
 }
 

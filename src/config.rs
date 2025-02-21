@@ -79,7 +79,12 @@ pub enum HandlerConfig {
     Runtime(RuntimeHostConfig),
     #[serde(rename = "websocket-server")]
     WebSocketServer(WebSocketServerHandlerConfig),
+    #[serde(rename = "supervisor")]
+    Supervisor(SupervisorHostConfig),
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SupervisorHostConfig {}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RuntimeHostConfig {}

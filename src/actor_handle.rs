@@ -25,4 +25,14 @@ impl ActorHandle {
         let mut actor = self.actor.lock().await;
         f(&mut actor)
     }
+
+    pub async fn get_current_state(&self) -> Option<Vec<u8>> {
+        let actor = self.actor.lock().await;
+        actor.store.get_current_state()
+    }
+
+    pub async fn get_event_history(&self) -> Vec<crate::chain::ChainEvent> {
+        let actor = self.actor.lock().await;
+        actor.store.get_all_events()
+    }
 }

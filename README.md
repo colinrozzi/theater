@@ -12,6 +12,7 @@ A WebAssembly actor system that enables state management, verification, and flex
   - Actor-to-actor messaging
   - HTTP server capabilities
   - HTTP client capabilities
+  - Parent-child supervision
   - Extensible interface system
 
 ## Documentation
@@ -19,6 +20,50 @@ A WebAssembly actor system that enables state management, verification, and flex
 - [Why Theater](docs/why-theater.md) - Core concepts and motivation
 - [Making Changes](docs/making-changes.md) - Guide for contributing changes
 - [Current Changes](changes/in-progress.md) - Overview of work in progress
+
+# Supervision System
+
+Theater provides a robust supervision system that enables parent actors to manage their children:
+
+## Parent-Child Relationships
+
+Actors can spawn and manage child actors using the supervisor interface:
+
+```toml
+# Parent actor manifest
+name = "parent-actor"
+component_path = "parent.wasm"
+
+[[handlers]]
+type = "supervisor"
+config = {}
+```
+
+## Supervisor Interface
+
+Parent actors can:
+- Spawn new child actors
+- List their children
+- Monitor child status
+- Stop and restart children
+- Access child state and event history
+
+Example usage in a parent actor:
+
+```rust
+use theater::supervisor::*;
+
+// Spawn a child actor
+let child_id = supervisor::spawn_child("child_manifest.toml")?;
+
+// Get child status
+let status = supervisor::get_child_status(&child_id)?;
+
+// Restart child if needed
+if status != ActorStatus::Running {
+    supervisor::restart_child(&child_id)?;
+}
+```
 
 ## Development Setup
 

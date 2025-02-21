@@ -90,6 +90,9 @@ impl ActorRuntime {
                 HandlerConfig::WebSocketServer(config) => Handler::WebSocketServer(
                     WebSocketServerHost::new(config.clone(), actor_handle.clone()),
                 ),
+                HandlerConfig::Supervisor(config) => Handler::Supervisor(
+                    SupervisorHost::new(config.clone(), actor_handle.clone()),
+                ),
             };
             handlers.push(handler);
         }

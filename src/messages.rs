@@ -30,6 +30,23 @@ pub enum TheaterCommand {
         actor_id: TheaterId,
         response_tx: oneshot::Sender<Result<ActorStatus>>,
     },
+    // New supervisor commands
+    ListChildren {
+        parent_id: TheaterId,
+        response_tx: oneshot::Sender<Vec<TheaterId>>,
+    },
+    RestartActor {
+        actor_id: TheaterId,
+        response_tx: oneshot::Sender<Result<()>>,
+    },
+    GetChildState {
+        child_id: TheaterId,
+        response_tx: oneshot::Sender<Result<Vec<u8>>>,
+    },
+    GetChildEvents {
+        child_id: TheaterId,
+        response_tx: oneshot::Sender<Result<Vec<ChainEvent>>>,
+    },
 }
 
 impl TheaterCommand {
@@ -50,6 +67,18 @@ impl TheaterCommand {
             TheaterCommand::GetActors { .. } => "GetActors".to_string(),
             TheaterCommand::GetActorStatus { actor_id, .. } => {
                 format!("GetActorStatus: {:?}", actor_id)
+            }
+            TheaterCommand::ListChildren { parent_id, .. } => {
+                format!("ListChildren: {:?}", parent_id)
+            }
+            TheaterCommand::RestartActor { actor_id, .. } => {
+                format!("RestartActor: {:?}", actor_id)
+            }
+            TheaterCommand::GetChildState { child_id, .. } => {
+                format!("GetChildState: {:?}", child_id)
+            }
+            TheaterCommand::GetChildEvents { child_id, .. } => {
+                format!("GetChildEvents: {:?}", child_id)
             }
         }
     }

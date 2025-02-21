@@ -6,6 +6,8 @@ use crate::host::runtime::RuntimeHost;
 use crate::host::websocket_server::WebSocketServerHost;
 use crate::Result;
 
+use super::supervisor::SupervisorHost;
+
 pub enum Handler {
     MessageServer(MessageServerHost),
     HttpServer(HttpServerHost),
@@ -13,6 +15,7 @@ pub enum Handler {
     HttpClient(HttpClientHost),
     Runtime(RuntimeHost),
     WebSocketServer(WebSocketServerHost),
+    Supervisor(SupervisorHost),
 }
 
 impl Handler {
@@ -24,6 +27,7 @@ impl Handler {
             Handler::HttpClient(handler) => handler.start().await,
             Handler::Runtime(handler) => handler.start().await,
             Handler::WebSocketServer(handler) => handler.start().await,
+            Handler::Supervisor(handler) => handler.start().await,
         }
     }
 
@@ -35,6 +39,7 @@ impl Handler {
             Handler::HttpClient(_) => "http-client".to_string(),
             Handler::Runtime(_) => "runtime".to_string(),
             Handler::WebSocketServer(_) => "websocket-server".to_string(),
+            Handler::Supervisor(_) => "supervisor".to_string(),
         }
     }
 
@@ -64,6 +69,10 @@ impl Handler {
                 .setup_host_functions()
                 .await
                 .expect("could not setup host functions for websocket server"),
+            Handler::Supervisor(handler) => handler
+                .setup_host_functions()
+                .await
+                .expect("could not setup host functions for supervisor"),
         }
         Ok(())
     }
@@ -94,6 +103,10 @@ impl Handler {
                 .add_exports()
                 .await
                 .expect("could not add exports for websocket server")),
+            Handler::Supervisor(handler) => Ok(handler
+                .add_exports()
+                .await
+                .expect("could not add exports for supervisor")),
         }
     }
 }
