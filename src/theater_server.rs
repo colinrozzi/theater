@@ -16,7 +16,6 @@ use uuid::Uuid;
 use crate::id::TheaterId;
 use crate::messages::TheaterCommand;
 use crate::theater_runtime::TheaterRuntime;
-use wasmtime::chain::MetaEvent;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub enum ManagementCommand {

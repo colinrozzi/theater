@@ -1,10 +1,9 @@
 use crate::actor_runtime::ActorRuntime;
+use crate::chain::ChainEvent;
 use crate::id::TheaterId;
 use crate::messages::{ActorMessage, ActorSend, ActorStatus, TheaterCommand};
 use crate::wasm::Event;
-use crate::chain::ChainEvent;
 use crate::Result;
-use serde_json::json;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -42,9 +41,7 @@ impl TheaterRuntime {
         })
     }
 
-    pub async fn subscribe_to_events(
-        &mut self,
-    ) -> Result<mpsc::Receiver<(TheaterId, ChainEvent)>> {
+    pub async fn subscribe_to_events(&mut self) -> Result<mpsc::Receiver<(TheaterId, ChainEvent)>> {
         let (tx, rx) = mpsc::channel(32);
         self.event_subscribers.push(tx);
         Ok(rx)
@@ -230,11 +227,7 @@ impl TheaterRuntime {
         }
     }
 
-    async fn handle_actor_event(
-        &mut self,
-        actor_id: TheaterId,
-        event: ChainEvent,
-    ) -> Result<()> {
+    async fn handle_actor_event(&mut self, actor_id: TheaterId, event: ChainEvent) -> Result<()> {
         debug!("Handling event from actor {:?}", actor_id);
         // Find the parent of this actor
         let parent_id = self.actors.iter().find_map(|(id, proc)| {
@@ -283,3 +276,4 @@ impl TheaterRuntime {
         Ok(())
     }
 }
+
