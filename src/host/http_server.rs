@@ -1,6 +1,7 @@
 use crate::actor_handle::ActorHandle;
 use crate::config::HttpServerHandlerConfig;
 use crate::wasm::WasmActor;
+use crate::host::host_wrapper::HostFunctionBoundary;
 use anyhow::Result;
 use axum::{
     extract::State,
@@ -111,42 +112,31 @@ impl HttpServerHost {
             headers,
             body: Some(body_bytes.to_vec()),
         };
-        // Changed return type to concrete Response
+
         info!(
             "Received {} request to {}",
             http_request.method, http_request.uri
         );
 
-        // Convert headers to Vec<(String, String)>
-        let headers: Vec<(String, String)> = http_request
-            .headers
-            .iter()
-            .map(|(name, value)| (name.to_string(), value.to_string()))
-            .collect();
-
-        // Get the body bytes
-        let body = http_request.body.unwrap_or_default();
-        let body_bytes = body.to_vec();
-
-        let http_request = HttpRequest {
-            method: http_request.method.to_string(),
-            uri: http_request.uri.to_string(),
-            headers,
-            body: Some(body_bytes),
-        };
-
         let mut actor = actor_handle.inner().lock().await;
         let actor_state = actor.actor_state.clone();
+
+        let boundary = HostFunctionBoundary::new("ntwk:theater/http-server", "handle-request");
 
         match actor
             .call_func::<(HttpRequest, Vec<u8>), ((HttpResponse, Vec<u8>),)>(
                 "handle-request",
-                (http_request, actor_state),
+                (http_request.clone(), actor_state),
             )
             .await
         {
             Ok(((http_response, new_state),)) => {
                 actor.actor_state = new_state;
+
+                // Record the request and response in the chain
+                // Note: We ignore chain recording errors here since we can't return them in the Response
+                let _ = boundary.wrap(&mut actor.store.into(), http_request, |_| Ok(()));
+                let _ = boundary.wrap(&mut actor.store.into(), http_response.clone(), |_| Ok(()));
 
                 // Convert HttpResponse to axum Response
                 let mut response = Response::builder()
@@ -163,13 +153,11 @@ impl HttpServerHost {
                 }
 
                 // Add body if present
-                let response = if let Some(body) = http_response.body {
+                if let Some(body) = http_response.body {
                     response.body(body.into()).unwrap_or_default()
                 } else {
                     response.body(Vec::new().into()).unwrap_or_default()
-                };
-
-                response
+                }
             }
             Err(e) => Response::builder()
                 .status(StatusCode::INTERNAL_SERVER_ERROR)

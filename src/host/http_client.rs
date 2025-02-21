@@ -56,22 +56,22 @@ impl HttpClientHost {
                 
                 Box::new(async move {
                     // Record the outbound request
-                    let request = boundary.wrap(&mut ctx, (req_clone.clone(),), |req| {
-                        let client = reqwest::Client::new();
-                        let mut request = client.request(
-                            Method::from_bytes(req.method.as_bytes()).unwrap(),
-                            req.uri.clone(),
-                        );
-                        for (key, value) in req.headers {
-                            request = request.header(key, value);
-                        }
-                        if let Some(body) = req.body {
-                            request = request.body(body);
-                        }
-                        info!("Sending {} request to {}", req.method, req.uri);
-                        
-                        Ok(request)
-                    })?;
+                    boundary.wrap(&mut ctx, req_clone.clone(), |req| Ok(req))?;
+
+                    let client = reqwest::Client::new();
+                    let mut request = client.request(
+                        Method::from_bytes(req_clone.method.as_bytes()).unwrap(),
+                        req_clone.uri.clone(),
+                    );
+                    
+                    for (key, value) in req_clone.headers {
+                        request = request.header(key, value);
+                    }
+                    if let Some(body) = req_clone.body {
+                        request = request.body(body);
+                    }
+                    
+                    info!("Sending {} request to {}", req_clone.method, req_clone.uri);
 
                     match request.send().await {
                         Ok(response) => {
@@ -87,7 +87,6 @@ impl HttpClientHost {
                                 })
                                 .collect();
                             
-                            // Need to await the body here
                             let body = response.bytes().await.ok().map(|b| b.to_vec());
                             
                             let resp = HttpResponse {
@@ -97,11 +96,11 @@ impl HttpClientHost {
                             };
                             
                             // Record the response
-                            boundary.wrap(&mut ctx, resp.clone(), |resp| Ok((Ok(resp),)))
+                            boundary.wrap(&mut ctx, resp.clone(), |r| Ok((Ok(r),)))
                         }
                         Err(e) => {
                             let err = e.to_string();
-                            boundary.wrap(&mut ctx, err.clone(), |err| Ok((Err(err),)))
+                            boundary.wrap(&mut ctx, err.clone(), |e| Ok((Err(e),)))
                         }
                     }
                 })

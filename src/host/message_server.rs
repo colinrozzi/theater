@@ -4,6 +4,7 @@ use crate::messages::{ActorMessage, ActorRequest, ActorSend, TheaterCommand};
 use crate::wasm::Json;
 use crate::wasm::{ActorState, WasmActor};
 use crate::ActorStore;
+use crate::host::host_wrapper::HostFunctionBoundary;
 use anyhow::Result;
 use std::future::Future;
 use thiserror::Error;
@@ -47,25 +48,43 @@ impl MessageServerHost {
             .expect("could not instantiate ntwk:theater/message-server-host");
 
         let theater_tx = self.theater_tx.clone();
+        let boundary = HostFunctionBoundary::new("ntwk:theater/message-server-host", "send");
+
         interface
             .func_wrap_async(
                 "send",
-                move |_ctx: wasmtime::StoreContextMut<'_, ActorStore>,
+                move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore>,
                       (address, msg): (String, Vec<u8>)|
                       -> Box<dyn Future<Output = Result<(Result<(), String>,)>> + Send> {
-                    // make a channel that will carry the byte array of the resposne
-                    info!("Sending message to actor: {}", address);
-                    let actor_message = TheaterCommand::SendMessage {
-                        actor_id: TheaterId::parse(&address).expect("Failed to parse actor ID"),
-                        actor_message: ActorMessage::Send(ActorSend {
-                            data: msg,
-                        }),
-                    };
                     let theater_tx = theater_tx.clone();
+                    let boundary = boundary.clone();
+                    let msg_clone = msg.clone();
+                    
                     Box::new(async move {
+                        // Record the outbound message
+                        if let Err(e) = boundary.wrap(&mut ctx, (address.clone(), msg_clone), |_| Ok(())) {
+                            return Ok((Err(e.to_string()),));
+                        }
+
+                        let actor_message = TheaterCommand::SendMessage {
+                            actor_id: TheaterId::parse(&address).expect("Failed to parse actor ID"),
+                            actor_message: ActorMessage::Send(ActorSend { data: msg }),
+                        };
+
                         match theater_tx.send(actor_message).await {
-                            Ok(_) => Ok((Ok(()),)),
-                            Err(e) => Ok((Err(e.to_string()),)),
+                            Ok(_) => {
+                                match boundary.wrap(&mut ctx, "success", |_| Ok(())) {
+                                    Ok(_) => Ok((Ok(()),)),
+                                    Err(e) => Ok((Err(e.to_string()),))
+                                }
+                            }
+                            Err(e) => {
+                                let err = e.to_string();
+                                match boundary.wrap(&mut ctx, err.clone(), |_| Ok(())) {
+                                    Ok(_) => Ok((Err(err),)),
+                                    Err(e) => Ok((Err(e.to_string()),))
+                                }
+                            }
                         }
                     })
                 },
@@ -73,37 +92,64 @@ impl MessageServerHost {
             .expect("Failed to wrap async send function");
 
         let theater_tx = self.theater_tx.clone();
+        let boundary = HostFunctionBoundary::new("ntwk:theater/message-server-host", "request");
+
         interface
             .func_wrap_async(
                 "request",
-                move |_ctx: wasmtime::StoreContextMut<'_, ActorStore>,
+                move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore>,
                       (address, msg): (String, Vec<u8>)|
                       -> Box<dyn Future<Output = Result<(Result<Vec<u8>, String>,)>> + Send> {
-                    // make a channel that will carry the byte array of the resposne
-                    info!("Sending message to actor: {}", address);
-                    let (response_tx, response_rx) = tokio::sync::oneshot::channel();
-                    let actor_message = TheaterCommand::SendMessage {
-                        actor_id: TheaterId::parse(&address).expect("Failed to parse actor ID"),
-                        actor_message: ActorMessage::Request(ActorRequest {
-                            data: msg,
-                            response_tx,
-                        }),
-                    };
                     let theater_tx = theater_tx.clone();
+                    let boundary = boundary.clone();
+                    let msg_clone = msg.clone();
+
                     Box::new(async move {
+                        // Record the outbound request
+                        if let Err(e) = boundary.wrap(&mut ctx, (address.clone(), msg_clone), |_| Ok(())) {
+                            return Ok((Err(e.to_string()),));
+                        }
+
+                        let (response_tx, response_rx) = tokio::sync::oneshot::channel();
+                        let actor_message = TheaterCommand::SendMessage {
+                            actor_id: TheaterId::parse(&address).expect("Failed to parse actor ID"),
+                            actor_message: ActorMessage::Request(ActorRequest {
+                                data: msg,
+                                response_tx,
+                            }),
+                        };
+
                         match theater_tx.send(actor_message).await {
                             Ok(_) => {
-                                // wait for the response from the actor
                                 match response_rx.await {
-                                    Ok(response) => Ok((Ok(response),)),
-                                    Err(e) => Ok((Err(e.to_string()),)),
+                                    Ok(response) => {
+                                        match boundary.wrap(&mut ctx, response.clone(), |_| Ok(())) {
+                                            Ok(_) => Ok((Ok(response),)),
+                                            Err(e) => Ok((Err(e.to_string()),))
+                                        }
+                                    }
+                                    Err(e) => {
+                                        let err = e.to_string();
+                                        match boundary.wrap(&mut ctx, err.clone(), |_| Ok(())) {
+                                            Ok(_) => Ok((Err(err),)),
+                                            Err(e) => Ok((Err(e.to_string()),))
+                                        }
+                                    }
                                 }
-                            },
-                            Err(e) => Ok((Err(e.to_string()),)),
-                    }})
+                            }
+                            Err(e) => {
+                                let err = e.to_string();
+                                match boundary.wrap(&mut ctx, err.clone(), |_| Ok(())) {
+                                    Ok(_) => Ok((Err(err),)),
+                                    Err(e) => Ok((Err(e.to_string()),))
+                                }
+                            }
+                        }
+                    })
                 },
             )
-            .expect("Failed to wrap async send function");
+            .expect("Failed to wrap async request function");
+
         Ok(())
     }
 
@@ -150,8 +196,10 @@ impl MessageServerHost {
     }
 
     async fn handle_send(&self, data: Vec<u8>) -> () {
+        let boundary = HostFunctionBoundary::new("ntwk:theater/message-server-client", "handle-send");
         let mut actor = self.actor_handle.inner().lock().await;
         let actor_state = actor.actor_state.clone();
+
         match actor
             .call_func::<(Json, ActorState), (ActorState,)>(
                 "handle-send",
@@ -171,8 +219,10 @@ impl MessageServerHost {
         data: Vec<u8>,
         response_tx: tokio::sync::oneshot::Sender<Vec<u8>>,
     ) -> () {
+        let boundary = HostFunctionBoundary::new("ntwk:theater/message-server-client", "handle-request");
         let mut actor = self.actor_handle.inner().lock().await;
         let actor_state = actor.actor_state.clone();
+
         match actor
             .call_func::<(Json, ActorState), ((Json, ActorState),)>(
                 "handle-request",
