@@ -96,7 +96,6 @@ impl TheaterRuntime {
                         }
                     }
                 }
-                match cmd {
                 TheaterCommand::SpawnActor {
                     manifest_path,
                     parent_id,
