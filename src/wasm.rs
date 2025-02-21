@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use std::fmt::Debug;
 use thiserror::Error;
 use tokio::sync::mpsc::Sender;
-use wasmtime::component::{Component, ComponentExportIndex, ComponentType, Lift, Lower, Linker};
+use wasmtime::component::{Component, ComponentExportIndex, ComponentType, Lift, Linker, Lower};
 use wasmtime::{Engine, Store};
 
 use crate::config::ManifestConfig;
@@ -110,20 +110,22 @@ impl WasmActor {
     pub async fn init(&mut self) {
         info!("Initializing actor with init data");
         info!("Init data: {:?}", self.init_data);
-        
+
         // Record init event
         if let Some(init_data) = self.init_data.clone() {
-            self.actor_store.record_event("init".into(), init_data.clone());
+            self.actor_store
+                .record_event("init".into(), init_data.clone());
         }
-        
+
         let init_state_bytes = self
             .call_func::<(Option<Json>,), (ActorState,)>("init", (self.init_data.clone(),))
             .await
             .expect("Failed to call init function");
-            
+
         // Record initial state
-        self.actor_store.record_event("initial_state".into(), init_state_bytes.0.clone());
-        
+        self.actor_store
+            .record_event("initial_state".into(), init_state_bytes.0.clone());
+
         self.actor_state = init_state_bytes.0;
     }
 
@@ -137,7 +139,9 @@ impl WasmActor {
 
         // Record incoming event
         let event_data = serde_json::to_vec(&event)?;
-        let chain_event = self.actor_store.record_event("handle_event".into(), event_data);
+        let chain_event = self
+            .actor_store
+            .record_event("handle_event".into(), event_data);
 
         let new_state = self
             .call_func::<(Event, ActorState), (ActorState,)>(
@@ -146,10 +150,11 @@ impl WasmActor {
             )
             .await
             .expect("Failed to call handle function");
-            
+
         // Record state update
-        self.actor_store.record_event("state_update".into(), new_state.0.clone());
-            
+        self.actor_store
+            .record_event("state_update".into(), new_state.0.clone());
+
         self.actor_state = new_state.0;
 
         // Notify theater of the new event
@@ -186,7 +191,8 @@ impl WasmActor {
 
     pub async fn save_chain(&self) -> Result<()> {
         let chain_path = format!("chain/{}.json", self.name);
-        self.actor_store.save_chain(std::path::Path::new(&chain_path))?;
+        self.actor_store
+            .save_chain(std::path::Path::new(&chain_path))?;
         Ok(())
     }
 
@@ -264,12 +270,13 @@ impl WasmActor {
 
         // Record function call result
         if let Ok(result_data) = serde_json::to_vec(&result) {
-            self.actor_store.record_event(
-                format!("function_call_{}", export_name),
-                result_data
-            );
+            self.actor_store
+                .record_event(format!("function_call_{}", export_name), result_data);
         }
+
+        info!("Function call complete");
 
         Ok(result)
     }
 }
+

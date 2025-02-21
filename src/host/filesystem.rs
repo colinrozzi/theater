@@ -1,7 +1,7 @@
 use crate::actor_handle::ActorHandle;
 use crate::config::FileSystemHandlerConfig;
-use crate::ActorStore;
 use crate::host::host_wrapper::HostFunctionBoundary;
+use crate::ActorStore;
 use anyhow::Result;
 use std::fs::File;
 use std::io::{BufReader, Read, Write};
@@ -67,20 +67,191 @@ impl FileSystemHost {
             move |mut ctx: StoreContextMut<'_, ActorStore>,
                   (file_path, contents): (String, String)|
                   -> Result<(Result<(), String>,)> {
-                boundary.wrap(&mut ctx, (file_path.clone(), contents.clone()), |(file_path, contents)| {
-                    let file_path = allowed_path.join(Path::new(&file_path));
-                    info!("Writing file {:?}", file_path);
+                boundary.wrap(
+                    &mut ctx,
+                    (file_path.clone(), contents.clone()),
+                    |(file_path, contents)| {
+                        let file_path = allowed_path.join(Path::new(&file_path));
+                        info!("Writing file {:?}", file_path);
 
-                    match File::create(&file_path) {
-                        Ok(mut file) => match file.write_all(contents.as_bytes()) {
+                        match File::create(&file_path) {
+                            Ok(mut file) => match file.write_all(contents.as_bytes()) {
+                                Ok(_) => {
+                                    info!("File written successfully");
+                                    Ok((Ok(()),))
+                                }
+                                Err(e) => Ok((Err(e.to_string()),)),
+                            },
+                            Err(e) => Ok((Err(e.to_string()),)),
+                        }
+                    },
+                )
+            },
+        );
+
+        let allowed_path = self.path.clone();
+        let boundary = HostFunctionBoundary::new("ntwk:theater/filesystem", "list-files");
+
+        let _ = interface.func_wrap(
+            "list-files",
+            move |mut ctx: StoreContextMut<'_, ActorStore>,
+                  ()|
+                  -> Result<(Result<Vec<String>, String>,)> {
+                boundary.wrap(&mut ctx, (), |_| {
+                    let files = match std::fs::read_dir(&allowed_path) {
+                        Ok(files) => files,
+                        Err(e) => return Ok((Err(e.to_string()),)),
+                    };
+
+                    let files: Vec<String> = files
+                        .filter_map(|f| f.ok())
+                        .filter_map(|f| f.file_name().into_string().ok())
+                        .collect();
+
+                    info!("Listed files: {:?}", files);
+                    Ok((Ok(files),))
+                })
+            },
+        );
+
+        let allowed_path = self.path.clone();
+        let boundary = HostFunctionBoundary::new("ntwk:theater/filesystem", "delete-file");
+
+        let _ = interface.func_wrap(
+            "delete-file",
+            move |mut ctx: StoreContextMut<'_, ActorStore>,
+                  (file_path,): (String,)|
+                  -> Result<(Result<(), String>,)> {
+                boundary.wrap(&mut ctx, file_path.clone(), |file_path| {
+                    let file_path = allowed_path.join(Path::new(&file_path));
+                    info!("Deleting file {:?}", file_path);
+
+                    match std::fs::remove_file(&file_path) {
+                        Ok(_) => {
+                            info!("File deleted successfully");
+                            Ok((Ok(()),))
+                        }
+                        Err(e) => Ok((Err(e.to_string()),)),
+                    }
+                })
+            },
+        );
+
+        let allowed_path = self.path.clone();
+        let boundary = HostFunctionBoundary::new("ntwk:theater/filesystem", "create-dir");
+
+        let _ = interface.func_wrap(
+            "create-dir",
+            move |mut ctx: StoreContextMut<'_, ActorStore>,
+                  (dir_path,): (String,)|
+                  -> Result<(Result<(), String>,)> {
+                boundary.wrap(&mut ctx, dir_path.clone(), |dir_path| {
+                    let dir_path = allowed_path.join(Path::new(&dir_path));
+                    info!("Creating directory {:?}", dir_path);
+
+                    match std::fs::create_dir(&dir_path) {
+                        Ok(_) => {
+                            info!("Directory created successfully");
+                            Ok((Ok(()),))
+                        }
+                        Err(e) => Ok((Err(e.to_string()),)),
+                    }
+                })
+            },
+        );
+
+        let allowed_path = self.path.clone();
+        let boundary = HostFunctionBoundary::new("ntwk:theater/filesystem", "delete-dir");
+
+        let _ = interface.func_wrap(
+            "delete-dir",
+            move |mut ctx: StoreContextMut<'_, ActorStore>,
+                  (dir_path,): (String,)|
+                  -> Result<(Result<(), String>,)> {
+                boundary.wrap(&mut ctx, dir_path.clone(), |dir_path| {
+                    let dir_path = allowed_path.join(Path::new(&dir_path));
+                    info!("Deleting directory {:?}", dir_path);
+
+                    match std::fs::remove_dir_all(&dir_path) {
+                        Ok(_) => {
+                            info!("Directory deleted successfully");
+                            Ok((Ok(()),))
+                        }
+                        Err(e) => Ok((Err(e.to_string()),)),
+                    }
+                })
+            },
+        );
+
+        let allowed_path = self.path.clone();
+        let boundary = HostFunctionBoundary::new("ntwk:theater/filesystem", "rename-file");
+
+        let _ = interface.func_wrap(
+            "rename-file",
+            move |mut ctx: StoreContextMut<'_, ActorStore>,
+                  (old_path, new_path): (String, String)|
+                  -> Result<(Result<(), String>,)> {
+                boundary.wrap(
+                    &mut ctx,
+                    (old_path.clone(), new_path.clone()),
+                    |(old_path, new_path)| {
+                        let old_path = allowed_path.join(Path::new(&old_path));
+                        let new_path = allowed_path.join(Path::new(&new_path));
+                        info!("Renaming file {:?} to {:?}", old_path, new_path);
+
+                        match std::fs::rename(&old_path, &new_path) {
                             Ok(_) => {
-                                info!("File written successfully");
+                                info!("File renamed successfully");
                                 Ok((Ok(()),))
                             }
                             Err(e) => Ok((Err(e.to_string()),)),
-                        },
-                        Err(e) => Ok((Err(e.to_string()),)),
-                    }
+                        }
+                    },
+                )
+            },
+        );
+
+        let allowed_path = self.path.clone();
+        let boundary = HostFunctionBoundary::new("ntwk:theater/filesystem", "rename-dir");
+
+        let _ = interface.func_wrap(
+            "rename-dir",
+            move |mut ctx: StoreContextMut<'_, ActorStore>,
+                  (old_path, new_path): (String, String)|
+                  -> Result<(Result<(), String>,)> {
+                boundary.wrap(
+                    &mut ctx,
+                    (old_path.clone(), new_path.clone()),
+                    |(old_path, new_path)| {
+                        let old_path = allowed_path.join(Path::new(&old_path));
+                        let new_path = allowed_path.join(Path::new(&new_path));
+                        info!("Renaming directory {:?} to {:?}", old_path, new_path);
+
+                        match std::fs::rename(&old_path, &new_path) {
+                            Ok(_) => {
+                                info!("Directory renamed successfully");
+                                Ok((Ok(()),))
+                            }
+                            Err(e) => Ok((Err(e.to_string()),)),
+                        }
+                    },
+                )
+            },
+        );
+
+        let allowed_path = self.path.clone();
+        let boundary = HostFunctionBoundary::new("ntwk:theater/filesystem", "path-exists");
+
+        let _ = interface.func_wrap(
+            "path-exists",
+            move |mut ctx: StoreContextMut<'_, ActorStore>,
+                  (path,): (String,)|
+                  -> Result<(Result<bool, String>,)> {
+                boundary.wrap(&mut ctx, path.clone(), |path| {
+                    let path = allowed_path.join(Path::new(&path));
+                    info!("Checking if path {:?} exists", path);
+
+                    Ok((Ok(path.exists()),))
                 })
             },
         );
@@ -98,3 +269,4 @@ impl FileSystemHost {
         Ok(())
     }
 }
+
