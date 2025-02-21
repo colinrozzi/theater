@@ -1,7 +1,7 @@
 use crate::actor_handle::ActorHandle;
 use crate::config::HttpServerHandlerConfig;
-use crate::wasm::WasmActor;
 use crate::host::host_wrapper::HostFunctionBoundary;
+use crate::wasm::WasmActor;
 use anyhow::Result;
 use axum::{
     extract::State,
@@ -15,6 +15,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use tracing::info;
 use wasmtime::component::{ComponentType, Lift, Lower};
+use wasmtime::AsContextMut;
 
 #[derive(Clone)]
 pub struct HttpServerHost {
@@ -135,8 +136,9 @@ impl HttpServerHost {
 
                 // Record the request and response in the chain
                 // Note: We ignore chain recording errors here since we can't return them in the Response
-                let _ = boundary.wrap(&mut actor.store.into(), http_request, |_| Ok(()));
-                let _ = boundary.wrap(&mut actor.store.into(), http_response.clone(), |_| Ok(()));
+                let mut store_ctx = actor.store.as_context_mut();
+                let _ = boundary.wrap(&mut store_ctx, http_request, |_| Ok(()));
+                let _ = boundary.wrap(&mut store_ctx, http_response.clone(), |_| Ok(()));
 
                 // Convert HttpResponse to axum Response
                 let mut response = Response::builder()
@@ -166,3 +168,4 @@ impl HttpServerHost {
         }
     }
 }
+
