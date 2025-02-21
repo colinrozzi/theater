@@ -113,7 +113,7 @@ impl WasmActor {
         
         // Record init event
         if let Some(init_data) = self.init_data.clone() {
-            self.actor_store.record_event("init".into(), init_data.clone()).await;
+            self.actor_store.record_event("init".into(), init_data.clone());
         }
         
         let init_state_bytes = self
@@ -122,7 +122,7 @@ impl WasmActor {
             .expect("Failed to call init function");
             
         // Record initial state
-        self.actor_store.record_event("initial_state".into(), init_state_bytes.0.clone()).await;
+        self.actor_store.record_event("initial_state".into(), init_state_bytes.0.clone());
         
         self.actor_state = init_state_bytes.0;
     }
@@ -137,7 +137,7 @@ impl WasmActor {
 
         // Record incoming event
         let event_data = serde_json::to_vec(&event)?;
-        let chain_event = self.actor_store.record_event("handle_event".into(), event_data).await;
+        let chain_event = self.actor_store.record_event("handle_event".into(), event_data);
 
         let new_state = self
             .call_func::<(Event, ActorState), (ActorState,)>(
@@ -148,7 +148,7 @@ impl WasmActor {
             .expect("Failed to call handle function");
             
         // Record state update
-        self.actor_store.record_event("state_update".into(), new_state.0.clone()).await;
+        self.actor_store.record_event("state_update".into(), new_state.0.clone());
             
         self.actor_state = new_state.0;
 
@@ -186,7 +186,7 @@ impl WasmActor {
 
     pub async fn save_chain(&self) -> Result<()> {
         let chain_path = format!("chain/{}.json", self.name);
-        self.actor_store.save_chain(std::path::Path::new(&chain_path)).await?;
+        self.actor_store.save_chain(std::path::Path::new(&chain_path))?;
         Ok(())
     }
 
@@ -259,6 +259,7 @@ impl WasmActor {
                     context: "function call",
                     message: e.to_string(),
                 })?;
+
         info!("Function call result: {:?}", result);
 
         // Record function call result
@@ -266,7 +267,7 @@ impl WasmActor {
             self.actor_store.record_event(
                 format!("function_call_{}", export_name),
                 result_data
-            ).await;
+            );
         }
 
         Ok(result)

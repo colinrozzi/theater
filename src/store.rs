@@ -1,7 +1,7 @@
 use crate::id::TheaterId;
 use crate::messages::TheaterCommand;
 use crate::chain::{StateChain, ChainEvent};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc::Sender;
 
 /// Store type for sharing resources with WASM host functions
@@ -9,7 +9,7 @@ use tokio::sync::mpsc::Sender;
 pub struct ActorStore {
     pub id: TheaterId,
     pub theater_tx: Sender<TheaterCommand>,
-    chain: Mutex<StateChain>,
+    chain: Arc<Mutex<StateChain>>,
 }
 
 impl ActorStore {
@@ -17,7 +17,7 @@ impl ActorStore {
         Self { 
             id, 
             theater_tx,
-            chain: Mutex::new(StateChain::new()),
+            chain: Arc::new(Mutex::new(StateChain::new())),
         }
     }
 
