@@ -1,5 +1,6 @@
 use crate::actor_handle::ActorHandle;
 use crate::config::WebSocketServerHandlerConfig;
+use crate::host::host_wrapper::HostFunctionBoundary;
 use crate::wasm::WasmActor;
 use anyhow::Result;
 use axum::{
@@ -16,6 +17,7 @@ use tokio::sync::Mutex;
 use tokio::sync::RwLock;
 use tracing::{error, info};
 use wasmtime::component::{ComponentType, Lift, Lower};
+use wasmtime::AsContextMut;
 
 #[derive(Debug, Clone, Deserialize, Serialize, ComponentType, Lift, Lower)]
 #[component(variant)]
@@ -118,7 +120,7 @@ impl WebSocketServerHost {
 
         tokio::spawn(async move {
             while let Some(msg) = message_receiver.recv().await {
-                info!("Message Recieved");
+                info!("Message Received");
                 if let Err(e) = Self::process_message(msg, &actor_handle, &connections).await {
                     error!("Error processing message: {}", e);
                 }
@@ -134,7 +136,6 @@ impl WebSocketServerHost {
         });
 
         info!("Listening on {}", addr);
-        //  axum::serve(listener, app.into_make_service()).await?;
         Ok(())
     }
 
@@ -213,6 +214,8 @@ impl WebSocketServerHost {
         actor_handle: &ActorHandle,
         connections: &Arc<RwLock<HashMap<u64, ConnectionContext>>>,
     ) -> Result<()> {
+        let boundary = HostFunctionBoundary::new("ntwk:theater/websocket-server", "handle-message");
+
         // Convert incoming message to component message
         let component_msg = WebSocketMessage {
             ty: match msg.content {
@@ -235,7 +238,11 @@ impl WebSocketServerHost {
         // Process with actor
         let mut actor = actor_handle.inner().lock().await;
         info!("Claimed actor handle");
-        let actor_state: Vec<u8> = actor.actor_state.clone();
+        let actor_state = actor.actor_state.clone();
+
+        let mut store_ctx = actor.store.as_context_mut();
+        let _ = boundary.wrap(&mut store_ctx, component_msg.clone(), |_| Ok(()));
+
         match actor
             .call_func::<(WebSocketMessage, Vec<u8>), ((Vec<u8>, WebSocketResponse),)>(
                 "handle-message",
@@ -246,6 +253,9 @@ impl WebSocketServerHost {
             Ok(((new_state, response),)) => {
                 info!("Actor function call successful");
                 actor.actor_state = new_state;
+
+                let mut store_ctx = actor.store.as_context_mut();
+                let _ = boundary.wrap(&mut store_ctx, response.clone(), |_| Ok(()));
 
                 // Send responses
                 if let Some(connection) = connections.read().await.get(&msg.connection_id) {
@@ -262,8 +272,8 @@ impl WebSocketServerHost {
                             MessageType::Close => Some(Message::Close(None)),
                             MessageType::Ping => Some(Message::Ping(vec![].into())),
                             MessageType::Pong => Some(Message::Pong(vec![].into())),
-                            MessageType::Connect => None, // Not applicable for outgoing messages
-                            MessageType::Other(_) => None, // Handle any other types as needed
+                            MessageType::Connect => None,
+                            MessageType::Other(_) => None,
                         };
 
                         if let Some(msg) = ws_msg {
@@ -276,9 +286,12 @@ impl WebSocketServerHost {
             }
             Err(e) => {
                 error!("Actor function call failed: {}", e);
+                let mut store_ctx = actor.store.as_context_mut();
+                let _ = boundary.wrap(&mut store_ctx, format!("Error: {}", e), |_| Ok(()));
             }
         }
 
         Ok(())
     }
 }
+
