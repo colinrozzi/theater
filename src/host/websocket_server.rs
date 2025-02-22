@@ -1,7 +1,7 @@
 use crate::actor_handle::ActorHandle;
+use crate::actor_executor::ActorError;
 use crate::config::WebSocketServerHandlerConfig;
-use crate::host::host_wrapper::HostFunctionBoundary;
-use crate::wasm::WasmActor;
+use crate::wasm::Event;
 use anyhow::Result;
 use axum::{
     extract::ws::Message, extract::State, extract::WebSocketUpgrade, response::Response,
@@ -12,44 +12,49 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
+use thiserror::Error;
 use tokio::sync::mpsc;
 use tokio::sync::Mutex;
 use tokio::sync::RwLock;
 use tracing::{error, info};
-use wasmtime::component::{ComponentType, Lift, Lower};
-use wasmtime::AsContextMut;
 
-#[derive(Debug, Clone, Deserialize, Serialize, ComponentType, Lift, Lower)]
-#[component(variant)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub enum MessageType {
-    #[component(name = "text")]
     Text,
-    #[component(name = "binary")]
     Binary,
-    #[component(name = "connect")]
     Connect,
-    #[component(name = "close")]
     Close,
-    #[component(name = "ping")]
     Ping,
-    #[component(name = "pong")]
     Pong,
-    #[component(name = "other")]
     Other(String),
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, ComponentType, Lift, Lower)]
-#[component(record)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct WebSocketMessage {
     ty: MessageType,
     data: Option<Vec<u8>>,
     text: Option<String>,
+    connection_id: u64,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, ComponentType, Lift, Lower)]
-#[component(record)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct WebSocketResponse {
     messages: Vec<WebSocketMessage>,
+}
+
+#[derive(Error, Debug)]
+pub enum WebSocketError {
+    #[error("Connection error: {0}")]
+    ConnectionError(String),
+    
+    #[error("Message processing error: {0}")]
+    ProcessingError(String),
+    
+    #[error("Actor error: {0}")]
+    ActorError(#[from] ActorError),
+    
+    #[error("Serialization error: {0}")]
+    SerializationError(#[from] serde_json::Error),
 }
 
 struct IncomingMessage {
@@ -84,22 +89,6 @@ impl WebSocketServerHost {
 
     pub async fn add_exports(&self) -> Result<()> {
         info!("Adding exports to websocket-server");
-        let _ = self
-            .actor_handle
-            .with_actor_mut(|actor: &mut WasmActor| -> Result<()> {
-                let handle_message_export = actor
-                    .find_export("ntwk:theater/websocket-server", "handle-message")
-                    .expect("Could not find handle-message export");
-
-                actor
-                    .exports
-                    .insert("handle-message".to_string(), handle_message_export);
-
-                info!("Added websocket exports");
-                info!("exports: {:?}", actor.exports);
-                Ok(())
-            })
-            .await;
         Ok(())
     }
 
@@ -183,12 +172,12 @@ impl WebSocketServerHost {
         message_sender
             .send(IncomingMessage {
                 connection_id,
-                content: axum::extract::ws::Message::Text(
+                content: Message::Text(
                     serde_json::json!({
-                        "type": "connect"
+                        "type": "connect",
+                        "connection_id": connection_id
                     })
-                    .to_string()
-                    .into(),
+                    .to_string(),
                 ),
             })
             .await?;
@@ -213,9 +202,7 @@ impl WebSocketServerHost {
         msg: IncomingMessage,
         actor_handle: &ActorHandle,
         connections: &Arc<RwLock<HashMap<u64, ConnectionContext>>>,
-    ) -> Result<()> {
-        let boundary = HostFunctionBoundary::new("ntwk:theater/websocket-server", "handle-message");
-
+    ) -> Result<(), WebSocketError> {
         // Convert incoming message to component message
         let component_msg = WebSocketMessage {
             ty: match msg.content {
@@ -230,68 +217,51 @@ impl WebSocketServerHost {
                 _ => None,
             },
             text: match msg.content {
-                Message::Text(t) => Some(t.to_string()),
+                Message::Text(t) => Some(t),
                 _ => None,
             },
+            connection_id: msg.connection_id,
         };
 
-        // Process with actor
-        let mut actor = actor_handle.inner().lock().await;
-        info!("Claimed actor handle");
-        let actor_state = actor.actor_state.clone();
+        // Create event for message handling
+        let event = Event {
+            event_type: "handle-message".to_string(),
+            parent: None,
+            data: serde_json::to_vec(&component_msg)?,
+        };
 
-        let mut store_ctx = actor.store.as_context_mut();
-        let _ = boundary.wrap(&mut store_ctx, component_msg.clone(), |_| Ok(()));
+        // Handle the event
+        actor_handle.handle_event(event).await?;
 
-        match actor
-            .call_func::<(WebSocketMessage, Vec<u8>), ((Vec<u8>, WebSocketResponse),)>(
-                "handle-message",
-                (component_msg, actor_state),
-            )
-            .await
-        {
-            Ok(((new_state, response),)) => {
-                info!("Actor function call successful");
-                actor.actor_state = new_state;
+        // Get the updated state which should contain our response
+        let state = actor_handle.get_state().await?;
 
-                let mut store_ctx = actor.store.as_context_mut();
-                let _ = boundary.wrap(&mut store_ctx, response.clone(), |_| Ok(()));
+        // Deserialize response
+        let response: WebSocketResponse = serde_json::from_slice(&state)?;
 
-                // Send responses
-                if let Some(connection) = connections.read().await.get(&msg.connection_id) {
-                    for response_msg in response.messages {
-                        let ws_msg = match response_msg.ty {
-                            MessageType::Text => {
-                                response_msg.text.map(|arg0: std::string::String| {
-                                    axum::extract::ws::Message::Text(arg0.into())
-                                })
-                            }
-                            MessageType::Binary => response_msg
-                                .data
-                                .map(|arg0: Vec<u8>| Message::Binary(arg0.into())),
-                            MessageType::Close => Some(Message::Close(None)),
-                            MessageType::Ping => Some(Message::Ping(vec![].into())),
-                            MessageType::Pong => Some(Message::Pong(vec![].into())),
-                            MessageType::Connect => None,
-                            MessageType::Other(_) => None,
-                        };
+        // Send responses
+        if let Some(connection) = connections.read().await.get(&msg.connection_id) {
+            for response_msg in response.messages {
+                let ws_msg = match response_msg.ty {
+                    MessageType::Text => {
+                        response_msg.text.map(Message::Text)
+                    }
+                    MessageType::Binary => response_msg.data.map(Message::Binary),
+                    MessageType::Close => Some(Message::Close(None)),
+                    MessageType::Ping => Some(Message::Ping(vec![].into())),
+                    MessageType::Pong => Some(Message::Pong(vec![].into())),
+                    MessageType::Connect => None,
+                    MessageType::Other(_) => None,
+                };
 
-                        if let Some(msg) = ws_msg {
-                            if let Err(e) = connection.sender.lock().await.send(msg).await {
-                                error!("Error sending response: {}", e);
-                            }
-                        }
+                if let Some(msg) = ws_msg {
+                    if let Err(e) = connection.sender.lock().await.send(msg).await {
+                        error!("Error sending response: {}", e);
                     }
                 }
-            }
-            Err(e) => {
-                error!("Actor function call failed: {}", e);
-                let mut store_ctx = actor.store.as_context_mut();
-                let _ = boundary.wrap(&mut store_ctx, format!("Error: {}", e), |_| Ok(()));
             }
         }
 
         Ok(())
     }
 }
-

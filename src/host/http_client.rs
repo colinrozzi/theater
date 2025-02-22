@@ -1,34 +1,51 @@
 use crate::actor_handle::ActorHandle;
+use crate::actor_executor::ActorError;
 use crate::config::HttpClientHandlerConfig;
-use crate::ActorStore;
-use crate::host::host_wrapper::HostFunctionBoundary;
+use crate::wasm::Event;
 use anyhow::Result;
 use reqwest::Method;
 use serde::{Deserialize, Serialize};
-use std::future::Future;
-use tracing::info;
-use wasmtime::component::{ComponentType, Lift, Lower};
+use thiserror::Error;
+use tracing::{info, error};
 
 #[derive(Clone)]
 pub struct HttpClientHost {
     actor_handle: ActorHandle,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, ComponentType, Lift, Lower)]
-#[component(record)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct HttpRequest {
     method: String,
     uri: String,
     headers: Vec<(String, String)>,
     body: Option<Vec<u8>>,
+    request_id: String,  // Added for tracking requests
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, ComponentType, Lift, Lower)]
-#[component(record)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct HttpResponse {
     status: u16,
     headers: Vec<(String, String)>,
     body: Option<Vec<u8>>,
+    request_id: String,  // Added to match responses with requests
+}
+
+#[derive(Error, Debug)]
+pub enum HttpClientError {
+    #[error("Request error: {0}")]
+    RequestError(String),
+    
+    #[error("Actor error: {0}")]
+    ActorError(#[from] ActorError),
+    
+    #[error("Serialization error: {0}")]
+    SerializationError(#[from] serde_json::Error),
+    
+    #[error("HTTP error: {0}")]
+    HttpError(#[from] reqwest::Error),
+    
+    #[error("Invalid method: {0}")]
+    InvalidMethod(String),
 }
 
 impl HttpClientHost {
@@ -38,76 +55,6 @@ impl HttpClientHost {
 
     pub async fn setup_host_functions(&self) -> Result<()> {
         info!("Setting up host functions for http-client");
-        let mut actor = self.actor_handle.inner().lock().await;
-        let mut interface = actor
-            .linker
-            .instance("ntwk:theater/http-client")
-            .expect("could not instantiate ntwk:theater/http-client");
-
-        let boundary = HostFunctionBoundary::new("ntwk:theater/http-client", "send-http");
-
-        interface.func_wrap_async(
-            "send-http",
-            move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore>,
-                  (req,): (HttpRequest,)|
-                  -> Box<dyn Future<Output = Result<(Result<HttpResponse, String>,)>> + Send> {
-                let req_clone = req.clone();
-                let boundary = boundary.clone();
-                
-                Box::new(async move {
-                    // Record the outbound request
-                    boundary.wrap(&mut ctx, req_clone.clone(), |req| Ok(req))?;
-
-                    let client = reqwest::Client::new();
-                    let mut request = client.request(
-                        Method::from_bytes(req_clone.method.as_bytes()).unwrap(),
-                        req_clone.uri.clone(),
-                    );
-                    
-                    for (key, value) in req_clone.headers {
-                        request = request.header(key, value);
-                    }
-                    if let Some(body) = req_clone.body {
-                        request = request.body(body);
-                    }
-                    
-                    info!("Sending {} request to {}", req_clone.method, req_clone.uri);
-
-                    match request.send().await {
-                        Ok(response) => {
-                            let status = response.status().as_u16();
-                            let headers = response
-                                .headers()
-                                .iter()
-                                .map(|(key, value)| {
-                                    (
-                                        key.as_str().to_string(),
-                                        value.to_str().unwrap().to_string(),
-                                    )
-                                })
-                                .collect();
-                            
-                            let body = response.bytes().await.ok().map(|b| b.to_vec());
-                            
-                            let resp = HttpResponse {
-                                status,
-                                headers,
-                                body,
-                            };
-                            
-                            // Record the response
-                            boundary.wrap(&mut ctx, resp.clone(), |r| Ok((Ok(r),)))
-                        }
-                        Err(e) => {
-                            let err = e.to_string();
-                            boundary.wrap(&mut ctx, err.clone(), |e| Ok((Err(e),)))
-                        }
-                    }
-                })
-            },
-        )?;
-        
-        info!("Host functions set up for http-client");
         Ok(())
     }
 
@@ -116,6 +63,74 @@ impl HttpClientHost {
     }
 
     pub async fn start(&self) -> Result<()> {
+        Ok(())
+    }
+
+    async fn handle_request(&self, request: HttpRequest) -> Result<HttpResponse, HttpClientError> {
+        let client = reqwest::Client::new();
+        
+        // Parse HTTP method
+        let method = Method::from_bytes(request.method.as_bytes())
+            .map_err(|_| HttpClientError::InvalidMethod(request.method.clone()))?;
+        
+        // Build request
+        let mut http_request = client.request(method, request.uri.clone());
+        
+        // Add headers
+        for (key, value) in request.headers.iter() {
+            http_request = http_request.header(key, value);
+        }
+        
+        // Add body if present
+        if let Some(body) = request.body.as_ref() {
+            http_request = http_request.body(body.clone());
+        }
+        
+        info!("Sending {} request to {}", request.method, request.uri);
+
+        // Send request
+        let response = http_request.send().await?;
+        
+        // Build response
+        let response = HttpResponse {
+            status: response.status().as_u16(),
+            headers: response
+                .headers()
+                .iter()
+                .map(|(key, value)| {
+                    (
+                        key.as_str().to_string(),
+                        value.to_str().unwrap_or_default().to_string(),
+                    )
+                })
+                .collect(),
+            body: response.bytes().await.ok().map(|b| b.to_vec()),
+            request_id: request.request_id,
+        };
+
+        Ok(response)
+    }
+
+    pub async fn process_http_event(&self, request: HttpRequest) -> Result<(), HttpClientError> {
+        // Handle the request
+        let response = match self.handle_request(request).await {
+            Ok(response) => response,
+            Err(e) => {
+                error!("HTTP request failed: {}", e);
+                return Err(e);
+            }
+        };
+        
+        // Create event with response
+        let event = Event {
+            event_type: "http-response".to_string(),
+            parent: None,
+            data: serde_json::to_vec(&response)?,
+        };
+
+        // Send event to actor
+        self.actor_handle.handle_event(event).await?;
+
         Ok(())
     }
 }

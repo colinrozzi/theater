@@ -1,13 +1,13 @@
-use crate::actor_executor::{ActorExecutor, ActorOperation, ActorError};
+use crate::actor_executor::{ActorError, ActorExecutor, ActorOperation};
 use crate::actor_handle::ActorHandle;
 use crate::config::{HandlerConfig, ManifestConfig};
 use crate::host::filesystem::FileSystemHost;
 use crate::host::handler::Handler;
 use crate::host::http_client::HttpClientHost;
 use crate::host::http_server::HttpServerHost;
-use crate::host::supervisor::SupervisorHost;
 use crate::host::message_server::MessageServerHost;
 use crate::host::runtime::RuntimeHost;
+use crate::host::supervisor::SupervisorHost;
 use crate::host::websocket_server::WebSocketServerHost;
 use crate::id::TheaterId;
 use crate::messages::{ActorMessage, TheaterCommand};
@@ -21,11 +21,18 @@ use tracing::{error, info, warn};
 
 const SHUTDOWN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
+#[derive(Debug)]
+pub struct RuntimeData {
+    pub actor: WasmActor,
+    pub operation_rx: mpsc::Receiver<ActorOperation>,
+}
+
 pub struct RuntimeComponents {
     pub id: TheaterId,
     pub name: String,
     pub actor_handle: ActorHandle,
     handlers: Vec<Handler>,
+    pub runtime_data: Option<RuntimeData>,
 }
 
 pub struct ActorRuntime {
@@ -70,7 +77,7 @@ impl ActorRuntime {
 
         // Create channels for the executor
         let (operation_tx, operation_rx) = mpsc::channel(32);
-        
+
         // Create actor handle
         let actor_handle = ActorHandle::new(operation_tx);
 
@@ -102,32 +109,40 @@ impl ActorRuntime {
                 HandlerConfig::WebSocketServer(config) => Handler::WebSocketServer(
                     WebSocketServerHost::new(config.clone(), actor_handle.clone()),
                 ),
-                HandlerConfig::Supervisor(config) => Handler::Supervisor(
-                    SupervisorHost::new(config.clone(), actor_handle.clone()),
-                ),
+                HandlerConfig::Supervisor(config) => {
+                    Handler::Supervisor(SupervisorHost::new(config.clone(), actor_handle.clone()))
+                }
             };
             handlers.push(handler);
         }
+
+        let runtime_data = Some(RuntimeData {
+            actor,
+            operation_rx,
+        });
 
         Ok(RuntimeComponents {
             id,
             name: config.name.clone(),
             actor_handle,
             handlers,
+            runtime_data,
         })
     }
 
     pub async fn start(mut components: RuntimeComponents) -> Result<Self> {
-        // Create executor
-        let executor = ActorExecutor::new(
-            actor,
-            operation_rx,
-        );
+        // Take the runtime data, which includes actor and operation_rx
+        let runtime_data = components
+            .runtime_data
+            .take()
+            .expect("Runtime data should be available");
+
+        // Create and spawn executor
+        let executor = ActorExecutor::new(runtime_data.actor, runtime_data.operation_rx);
 
         // Clone handle for the runtime
         let actor_handle = components.actor_handle.clone();
 
-        // Spawn executor task
         let executor_task = tokio::spawn(async move {
             executor.run().await;
         });
@@ -196,3 +211,4 @@ impl ActorRuntime {
         Ok(())
     }
 }
+

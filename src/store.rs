@@ -45,6 +45,10 @@ impl ActorStore {
         chain.get_events().to_vec()
     }
 
+    pub fn get_chain(&self) -> Vec<ChainEvent> {
+        self.get_all_events()
+    }
+
     pub fn save_chain(&self, path: &std::path::Path) -> anyhow::Result<()> {
         let chain = self.chain.lock().unwrap();
         chain.save_to_file(path)?;

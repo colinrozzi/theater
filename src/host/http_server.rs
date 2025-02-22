@@ -1,7 +1,7 @@
 use crate::actor_handle::ActorHandle;
+use crate::actor_executor::ActorError;
 use crate::config::HttpServerHandlerConfig;
-use crate::host::host_wrapper::HostFunctionBoundary;
-use crate::wasm::WasmActor;
+use crate::wasm::Event;
 use anyhow::Result;
 use axum::{
     extract::State,
@@ -13,9 +13,8 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
 use std::sync::Arc;
-use tracing::info;
-use wasmtime::component::{ComponentType, Lift, Lower};
-use wasmtime::AsContextMut;
+use thiserror::Error;
+use tracing::{info, error};
 
 #[derive(Clone)]
 pub struct HttpServerHost {
@@ -23,8 +22,7 @@ pub struct HttpServerHost {
     actor_handle: ActorHandle,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, ComponentType, Lift, Lower)]
-#[component(record)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct HttpRequest {
     method: String,
     uri: String,
@@ -32,12 +30,23 @@ pub struct HttpRequest {
     body: Option<Vec<u8>>,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, ComponentType, Lift, Lower)]
-#[component(record)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct HttpResponse {
     status: u16,
     headers: Vec<(String, String)>,
     body: Option<Vec<u8>>,
+}
+
+#[derive(Error, Debug)]
+pub enum HttpServerError {
+    #[error("Handler error: {0}")]
+    HandlerError(String),
+    
+    #[error("Actor error: {0}")]
+    ActorError(#[from] ActorError),
+    
+    #[error("Serialization error: {0}")]
+    SerializationError(#[from] serde_json::Error),
 }
 
 impl HttpServerHost {
@@ -54,19 +63,6 @@ impl HttpServerHost {
 
     pub async fn add_exports(&self) -> Result<()> {
         info!("Adding exports to http-server");
-        let _ = self
-            .actor_handle
-            .with_actor_mut(|actor: &mut WasmActor| -> Result<()> {
-                let handle_request_export =
-                    actor.find_export("ntwk:theater/http-server", "handle-request")?;
-                actor
-                    .exports
-                    .insert("handle-request".to_string(), handle_request_export);
-                info!("Added handle-request export to http-server");
-                info!("exports: {:?}", actor.exports);
-                Ok(())
-            })
-            .await;
         Ok(())
     }
 
@@ -92,9 +88,16 @@ impl HttpServerHost {
 
         // Convert axum request to HttpRequest
         let (parts, body) = req.into_parts();
-        let body_bytes = axum::body::to_bytes(body, 100 * 1024 * 1024)
-            .await
-            .unwrap_or_default();
+        let body_bytes = match axum::body::to_bytes(body, 100 * 1024 * 1024).await {
+            Ok(bytes) => bytes,
+            Err(e) => {
+                error!("Failed to read request body: {}", e);
+                return Response::builder()
+                    .status(StatusCode::BAD_REQUEST)
+                    .body("Failed to read request body".into())
+                    .unwrap_or_default();
+            }
+        };
 
         let headers = parts
             .headers
@@ -119,53 +122,80 @@ impl HttpServerHost {
             http_request.method, http_request.uri
         );
 
-        let mut actor = actor_handle.inner().lock().await;
-        let actor_state = actor.actor_state.clone();
+        // Create event for request handling
+        let event = match Self::create_request_event(&http_request) {
+            Ok(event) => event,
+            Err(e) => {
+                error!("Failed to create request event: {}", e);
+                return Response::builder()
+                    .status(StatusCode::INTERNAL_SERVER_ERROR)
+                    .body("Failed to process request".into())
+                    .unwrap_or_default();
+            }
+        };
 
-        let boundary = HostFunctionBoundary::new("ntwk:theater/http-server", "handle-request");
+        // Handle the event
+        if let Err(e) = actor_handle.handle_event(event).await {
+            error!("Failed to handle request: {}", e);
+            return Response::builder()
+                .status(StatusCode::INTERNAL_SERVER_ERROR)
+                .body("Failed to process request".into())
+                .unwrap_or_default();
+        }
 
-        match actor
-            .call_func::<(HttpRequest, Vec<u8>), ((HttpResponse, Vec<u8>),)>(
-                "handle-request",
-                (http_request.clone(), actor_state),
-            )
-            .await
-        {
-            Ok(((http_response, new_state),)) => {
-                actor.actor_state = new_state;
+        // Get the updated state which should contain our response
+        let state = match actor_handle.get_state().await {
+            Ok(state) => state,
+            Err(e) => {
+                error!("Failed to get state after request: {}", e);
+                return Response::builder()
+                    .status(StatusCode::INTERNAL_SERVER_ERROR)
+                    .body("Failed to process request".into())
+                    .unwrap_or_default();
+            }
+        };
 
-                // Record the request and response in the chain
-                // Note: We ignore chain recording errors here since we can't return them in the Response
-                let mut store_ctx = actor.store.as_context_mut();
-                let _ = boundary.wrap(&mut store_ctx, http_request, |_| Ok(()));
-                let _ = boundary.wrap(&mut store_ctx, http_response.clone(), |_| Ok(()));
+        // Deserialize response from state
+        let http_response: HttpResponse = match serde_json::from_slice(&state) {
+            Ok(response) => response,
+            Err(e) => {
+                error!("Failed to deserialize response: {}", e);
+                return Response::builder()
+                    .status(StatusCode::INTERNAL_SERVER_ERROR)
+                    .body("Failed to process response".into())
+                    .unwrap_or_default();
+            }
+        };
 
-                // Convert HttpResponse to axum Response
-                let mut response = Response::builder()
-                    .status(StatusCode::from_u16(http_response.status).unwrap_or(StatusCode::OK));
+        // Convert HttpResponse to axum Response
+        let mut response = Response::builder()
+            .status(StatusCode::from_u16(http_response.status).unwrap_or(StatusCode::OK));
 
-                if let Some(headers) = response.headers_mut() {
-                    for (key, value) in http_response.headers {
-                        if let Ok(header_value) = HeaderValue::from_str(&value) {
-                            if let Ok(header_name) = key.parse::<HeaderName>() {
-                                headers.insert(header_name, header_value);
-                            }
-                        }
+        // Add headers
+        if let Some(headers) = response.headers_mut() {
+            for (key, value) in http_response.headers {
+                if let Ok(header_value) = HeaderValue::from_str(&value) {
+                    if let Ok(header_name) = key.parse::<HeaderName>() {
+                        headers.insert(header_name, header_value);
                     }
                 }
-
-                // Add body if present
-                if let Some(body) = http_response.body {
-                    response.body(body.into()).unwrap_or_default()
-                } else {
-                    response.body(Vec::new().into()).unwrap_or_default()
-                }
             }
-            Err(e) => Response::builder()
-                .status(StatusCode::INTERNAL_SERVER_ERROR)
-                .body(format!("Error: {}", e).into())
-                .unwrap_or_default(),
+        }
+
+        // Add body if present
+        if let Some(body) = http_response.body {
+            response.body(body.into()).unwrap_or_default()
+        } else {
+            response.body(Vec::new().into()).unwrap_or_default()
         }
     }
-}
 
+    fn create_request_event(request: &HttpRequest) -> Result<Event, HttpServerError> {
+        let data = serde_json::to_vec(request)?;
+        Ok(Event {
+            event_type: "handle-request".to_string(),
+            parent: None,
+            data,
+        })
+    }
+}
