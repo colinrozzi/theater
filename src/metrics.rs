@@ -1,26 +1,26 @@
-use serde::Serialize;
 use std::sync::Arc;
-use std::time::{Duration, SystemTime};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::sync::RwLock;
+use serde::{Serialize, Deserialize};
 
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct OperationMetrics {
-    total_operations: u64,
-    failed_operations: u64,
+    pub total_operations: u64,
+    pub failed_operations: u64,
     #[serde(with = "duration_serde")]
-    total_processing_time: Duration,
+    pub total_processing_time: Duration,
     #[serde(with = "duration_serde")]
-    max_processing_time: Duration,
+    pub max_processing_time: Duration,
     #[serde(with = "option_duration_serde")]
-    min_processing_time: Option<Duration>,
+    pub min_processing_time: Option<Duration>,
 }
 
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct ResourceMetrics {
-    memory_usage: usize,
-    operation_queue_size: usize,
-    peak_memory_usage: usize,
-    peak_queue_size: usize,
+    pub memory_usage: usize,
+    pub operation_queue_size: usize,
+    pub peak_memory_usage: usize,
+    pub peak_queue_size: usize,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -48,7 +48,7 @@ impl Default for ActorMetrics {
 
 mod timestamp_serde {
     use serde::{Deserialize, Deserializer, Serializer};
-    use std::time::{Duration, SystemTime, UNIX_EPOCH};
+    use std::time::{SystemTime, UNIX_EPOCH, Duration};
 
     pub fn serialize<S>(time: &SystemTime, serializer: S) -> Result<S::Ok, S::Error>
     where
@@ -72,7 +72,7 @@ mod timestamp_serde {
 
 mod option_timestamp_serde {
     use serde::{Deserialize, Deserializer, Serializer};
-    use std::time::{Duration, SystemTime, UNIX_EPOCH};
+    use std::time::{SystemTime, UNIX_EPOCH, Duration};
 
     pub fn serialize<S>(time: &Option<SystemTime>, serializer: S) -> Result<S::Ok, S::Error>
     where
@@ -80,7 +80,10 @@ mod option_timestamp_serde {
     {
         match time {
             Some(t) => {
-                let timestamp = t.duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
+                let timestamp = t
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs();
                 serializer.serialize_some(&timestamp)
             }
             None => serializer.serialize_none(),

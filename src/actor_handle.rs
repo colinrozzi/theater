@@ -2,7 +2,7 @@ use anyhow::Result;
 use tokio::sync::{mpsc, oneshot};
 use tokio::time::timeout;
 
-use crate::actor_executor::{ActorOperation, ActorError, DEFAULT_OPERATION_TIMEOUT};
+use crate::actor_executor::{ActorError, ActorOperation, DEFAULT_OPERATION_TIMEOUT};
 use crate::chain::ChainEvent;
 use crate::metrics::ActorMetrics;
 use crate::wasm::Event;
@@ -19,7 +19,7 @@ impl ActorHandle {
 
     pub async fn handle_event(&self, event: Event) -> Result<(), ActorError> {
         let (tx, rx) = oneshot::channel();
-        
+
         self.operation_tx
             .send(ActorOperation::HandleEvent {
                 event,
@@ -36,7 +36,7 @@ impl ActorHandle {
 
     pub async fn get_state(&self) -> Result<Vec<u8>, ActorError> {
         let (tx, rx) = oneshot::channel();
-        
+
         self.operation_tx
             .send(ActorOperation::GetState { response_tx: tx })
             .await
@@ -50,7 +50,7 @@ impl ActorHandle {
 
     pub async fn get_chain(&self) -> Result<Vec<ChainEvent>, ActorError> {
         let (tx, rx) = oneshot::channel();
-        
+
         self.operation_tx
             .send(ActorOperation::GetChain { response_tx: tx })
             .await
@@ -64,7 +64,7 @@ impl ActorHandle {
 
     pub async fn get_metrics(&self) -> Result<ActorMetrics, ActorError> {
         let (tx, rx) = oneshot::channel();
-        
+
         self.operation_tx
             .send(ActorOperation::GetMetrics { response_tx: tx })
             .await
@@ -78,7 +78,7 @@ impl ActorHandle {
 
     pub async fn shutdown(&self) -> Result<(), ActorError> {
         let (tx, rx) = oneshot::channel();
-        
+
         self.operation_tx
             .send(ActorOperation::Shutdown { response_tx: tx })
             .await
