@@ -6,7 +6,7 @@ use crate::host::runtime::RuntimeHost;
 use crate::host::websocket_server::WebSocketServerHost;
 use crate::Result;
 
-use super::supervisor::SupervisorHost;
+use crate::host::supervisor::SupervisorHost;
 
 pub enum Handler {
     MessageServer(MessageServerHost),
