@@ -1,12 +1,16 @@
-use serde::{Deserialize, Serialize};
-use sha1::{Sha1, Digest};
-use std::path::Path;
 use anyhow::Result;
+use serde::{Deserialize, Serialize};
+use sha1::{Digest, Sha1};
+use std::path::Path;
+use wasmtime::component::{ComponentType, Lift, Lower};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ComponentType, Lift, Lower)]
+#[component(record)]
 pub struct ChainEvent {
     pub hash: Vec<u8>,
+    #[component(name = "parent-hash")]
     pub parent_hash: Option<Vec<u8>>,
+    #[component(name = "event-type")]
     pub event_type: String,
     pub data: Vec<u8>,
     pub timestamp: u64,
@@ -28,15 +32,15 @@ impl StateChain {
 
     pub fn add_event(&mut self, event_type: String, data: Vec<u8>) -> ChainEvent {
         let mut hasher = Sha1::new();
-        
+
         // Hash previous state + new event data
         if let Some(prev_hash) = &self.current_hash {
             hasher.update(prev_hash);
         }
         hasher.update(&data);
-        
+
         let hash = hasher.finalize().to_vec();
-        
+
         let event = ChainEvent {
             hash: hash.clone(),
             parent_hash: self.current_hash.clone(),
@@ -47,32 +51,32 @@ impl StateChain {
                 .unwrap()
                 .as_secs(),
         };
-        
+
         self.events.push(event.clone());
         self.current_hash = Some(hash);
-        
+
         event
     }
 
     pub fn verify(&self) -> bool {
         let mut prev_hash = None;
-        
+
         for event in &self.events {
             let mut hasher = Sha1::new();
-            
+
             if let Some(ph) = &prev_hash {
                 hasher.update(ph);
             }
             hasher.update(&event.data);
-            
+
             let computed_hash = hasher.finalize().to_vec();
             if computed_hash != event.hash {
                 return false;
             }
-            
+
             prev_hash = Some(event.hash.clone());
         }
-        
+
         true
     }
 
@@ -96,3 +100,4 @@ impl StateChain {
         &self.events
     }
 }
+

@@ -1,5 +1,5 @@
-
 use crate::actor_handle::ActorHandle;
+use crate::chain::ChainEvent;
 use crate::config::SupervisorHostConfig;
 use crate::messages::TheaterCommand;
 use crate::store::ActorStore;
@@ -30,10 +30,10 @@ impl SupervisorHost {
             .expect("Failed to get supervisor instance");
 
         // spawn-child implementation
-        let boundary = HostFunctionBoundary::new("ntwk:theater/supervisor", "spawn-child");
-        supervisor
+        let boundary = HostFunctionBoundary::new("ntwk:theater/supervisor", "spawn");
+        let _ = supervisor
             .func_wrap_async(
-                "spawn-child",
+                "spawn",
                 move |mut ctx: StoreContextMut<'_, ActorStore>,
                       (manifest,): (String,)|
                       -> Box<dyn Future<Output = Result<(Result<String, String>,)>> + Send> {
@@ -70,7 +70,7 @@ impl SupervisorHost {
                     })
                 },
             )
-            .expect("Failed to wrap spawn-child function");
+            .expect("Failed to wrap spawn function");
 
         // list-children implementation
         let boundary = HostFunctionBoundary::new("ntwk:theater/supervisor", "list-children");
@@ -232,7 +232,7 @@ impl SupervisorHost {
                 "get-child-events",
                 move |mut ctx: StoreContextMut<'_, ActorStore>,
                       (child_id,): (String,)|
-                      -> Box<dyn Future<Output = Result<(Result<Vec<u8>, String>,)>> + Send> {
+                      -> Box<dyn Future<Output = Result<(Result<Vec<ChainEvent>, String>,)>> + Send> {
                     let store = ctx.data_mut();
                     let theater_tx = store.theater_tx.clone();
                     let boundary = boundary.clone();
@@ -251,11 +251,8 @@ impl SupervisorHost {
                             Ok(_) => {
                                 match response_rx.await {
                                     Ok(Ok(events)) => {
-                                        // Serialize events to JSON
-                                        match serde_json::to_vec(&events) {
-                                            Ok(events_json) => Ok((Ok(events_json),)),
-                                            Err(e) => Ok((Err(format!("Failed to serialize events: {}", e)),))
-                                        }
+                                        let _ = boundary.wrap(&mut ctx, events.clone(), |_| Ok(()));
+                                        Ok((Ok(events),))
                                     }
                                     Ok(Err(e)) => Ok((Err(e.to_string()),)),
                                     Err(e) => Ok((Err(format!("Failed to receive events: {}", e)),))

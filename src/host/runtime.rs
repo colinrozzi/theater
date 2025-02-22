@@ -1,12 +1,9 @@
 use crate::actor_handle::ActorHandle;
 use crate::config::RuntimeHostConfig;
 use crate::host::host_wrapper::HostFunctionBoundary;
-use crate::messages::TheaterCommand;
 use crate::store::ActorStore;
 use anyhow::Result;
-use std::future::Future;
-use std::path::PathBuf;
-use tracing::{error, info};
+use tracing::info;
 use wasmtime::StoreContextMut;
 
 #[derive(Clone)]

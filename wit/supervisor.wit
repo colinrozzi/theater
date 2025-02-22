@@ -2,13 +2,10 @@ package ntwk:theater;
 
 interface supervisor {
     // Spawn a new child actor
-    spawn-child: func(manifest: string) -> result<string, string>;
+    spawn: func(manifest: string) -> result<string, string>;
     
     // Get list of child IDs
     list-children: func() -> list<string>;
-    
-    // Get status of a specific child
-    get-child-status: func(child-id: string) -> result<actor-status, string>;
     
     // Stop a specific child
     stop-child: func(child-id: string) -> result<_, string>;
@@ -22,13 +19,9 @@ interface supervisor {
     // Get event history of a child
     get-child-events: func(child-id: string) -> result<list<chain-event>, string>;
 
-    enum actor-status {
-        running,
-        stopped,
-        failed
-    }
-
     record chain-event {
+        hash: list<u8>,
+        parent-hash: option<list<u8>>,
         event-type: string,
         data: list<u8>,
         timestamp: u64
