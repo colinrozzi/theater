@@ -1,4 +1,4 @@
-use crate::actor_executor::{ActorError, ActorExecutor, ActorOperation};
+use crate::actor_executor::{ActorExecutor, ActorOperation};
 use crate::actor_handle::ActorHandle;
 use crate::config::{HandlerConfig, ManifestConfig};
 use crate::host::filesystem::FileSystemHost;

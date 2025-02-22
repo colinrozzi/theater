@@ -1,12 +1,12 @@
-use crate::actor_handle::ActorHandle;
 use crate::actor_executor::ActorError;
+use crate::actor_handle::ActorHandle;
 use crate::config::RuntimeHostConfig;
 use crate::wasm::Event;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
-use thiserror::Error;
-use tracing::{info, error};
 use std::time::{SystemTime, UNIX_EPOCH};
+use thiserror::Error;
+use tracing::{error, info, warn};
 
 #[derive(Clone)]
 pub struct RuntimeHost {
@@ -15,8 +15,8 @@ pub struct RuntimeHost {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum RuntimeCommand {
-    Log { 
-        level: LogLevel, 
+    Log {
+        level: LogLevel,
         message: String,
         timestamp: u64,
     },
@@ -50,10 +50,10 @@ pub struct RuntimeMetrics {
 pub enum RuntimeError {
     #[error("Runtime error: {0}")]
     RuntimeError(String),
-    
+
     #[error("Actor error: {0}")]
     ActorError(#[from] ActorError),
-    
+
     #[error("Serialization error: {0}")]
     SerializationError(#[from] serde_json::Error),
 }
@@ -78,10 +78,18 @@ impl RuntimeHost {
         Ok(())
     }
 
-    async fn handle_command(&self, command: RuntimeCommand) -> Result<RuntimeResponse, RuntimeError> {
+    async fn handle_command(
+        &self,
+        command: RuntimeCommand,
+    ) -> Result<RuntimeResponse, RuntimeError> {
         match command {
-            RuntimeCommand::Log { level, message, timestamp } => {
-                let log_event = format!("[{}] [{}] {}", 
+            RuntimeCommand::Log {
+                level,
+                message,
+                timestamp,
+            } => {
+                let log_event = format!(
+                    "[{}] [{}] {}",
                     timestamp,
                     match level {
                         LogLevel::Debug => "DEBUG",
@@ -91,7 +99,7 @@ impl RuntimeHost {
                     },
                     message
                 );
-                
+
                 match level {
                     LogLevel::Debug => info!("{}", log_event),
                     LogLevel::Info => info!("{}", log_event),
@@ -103,15 +111,21 @@ impl RuntimeHost {
             }
 
             RuntimeCommand::GetState => {
-                let state = self.actor_handle.get_state().await
+                let state = self
+                    .actor_handle
+                    .get_state()
+                    .await
                     .map_err(|e| RuntimeError::RuntimeError(e.to_string()))?;
                 Ok(RuntimeResponse::State(Ok(state)))
             }
 
             RuntimeCommand::GetMetrics => {
-                let metrics = self.actor_handle.get_metrics().await
+                let metrics = self
+                    .actor_handle
+                    .get_metrics()
+                    .await
                     .map_err(|e| RuntimeError::RuntimeError(e.to_string()))?;
-                
+
                 let runtime_metrics = RuntimeMetrics {
                     memory_usage: metrics.resource_metrics.memory_usage,
                     total_operations: metrics.operation_metrics.total_operations,
@@ -131,7 +145,7 @@ impl RuntimeHost {
 
         // Handle the command
         let response = self.handle_command(command).await?;
-        
+
         // Create event with response
         let event = Event {
             event_type: "runtime-response".to_string(),

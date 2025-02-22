@@ -1,4 +1,8 @@
 use crate::actor_handle::ActorHandle;
+use crate::wasm::ActorState;
+use crate::wasm::Json;
+use crate::wasm::WasmActor;
+use crate::store::ActorStore;
 use crate::host::host_wrapper::HostFunctionBoundary;
 use crate::id::TheaterId;
 use crate::messages::{ActorMessage, ActorRequest, ActorSend, TheaterCommand};
