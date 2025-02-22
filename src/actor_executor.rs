@@ -5,7 +5,7 @@ use tokio::time::{timeout, Duration, Instant};
 use tracing::{debug, error, info, warn};
 
 use crate::chain::ChainEvent;
-use crate::metrics::{MetricsCollector, ActorMetrics};
+use crate::metrics::{ActorMetrics, MetricsCollector};
 use crate::wasm::{Event, WasmActor};
 
 pub const DEFAULT_OPERATION_TIMEOUT: Duration = Duration::from_secs(30);
@@ -15,13 +15,13 @@ const METRICS_UPDATE_INTERVAL: Duration = Duration::from_secs(1);
 pub enum ActorError {
     #[error("Operation timed out after {0:?}")]
     OperationTimeout(Duration),
-    
+
     #[error("Operation channel closed")]
     ChannelClosed,
-    
+
     #[error("Actor is shutting down")]
     ShuttingDown,
-    
+
     #[error("Internal error: {0}")]
     Internal(#[from] anyhow::Error),
 }
@@ -66,16 +66,18 @@ impl ActorExecutor {
     async fn update_resource_metrics(&self) {
         // Get memory usage from wasm instance
         let memory_size = self.actor.get_memory_size();
-        
-        // Get operation queue size - note that capacity() returns Option<usize>
-        let queue_size = self.operation_rx.capacity().unwrap_or(0);
-        
-        self.metrics.update_resource_usage(memory_size, queue_size).await;
+
+        // Get operation queue size
+        let queue_size = self.operation_rx.capacity();
+
+        self.metrics
+            .update_resource_usage(memory_size, queue_size)
+            .await;
     }
 
     pub async fn run(&mut self) {
         info!("Actor executor starting");
-        
+
         // Initialize the actor
         if let Err(e) = self.actor.init().await {
             error!("Failed to initialize actor: {}", e);
@@ -84,16 +86,16 @@ impl ActorExecutor {
 
         // Set up metrics update interval
         let mut metrics_interval = tokio::time::interval(METRICS_UPDATE_INTERVAL);
-        
+
         loop {
             tokio::select! {
                 _ = metrics_interval.tick() => {
                     self.update_resource_metrics().await;
                 }
-                
+
                 Some(op) = self.operation_rx.recv() => {
                     debug!("Processing actor operation");
-                    
+
                     // If shutdown was initiated, only process Shutdown operations
                     if self.shutdown_initiated {
                         if !matches!(op, ActorOperation::Shutdown { .. }) {
@@ -103,7 +105,7 @@ impl ActorExecutor {
                             continue;
                         }
                     }
-                    
+
                     let start_time = Instant::now();
                     let result = match &op {
                         ActorOperation::HandleEvent { event, .. } => {
@@ -141,29 +143,30 @@ impl ActorExecutor {
                     let duration = start_time.elapsed();
                     self.metrics.record_operation(duration, result.is_ok()).await;
                 }
-                
+
                 else => {
                     info!("Operation channel closed, shutting down");
                     break;
                 }
             }
         }
-        
+
         info!("Actor executor shutting down");
         self.cleanup().await;
     }
-    
+
     async fn cleanup(&mut self) {
         // Add any necessary cleanup code here
         info!("Performing final cleanup");
-        
+
         // Save chain state if needed
         if let Err(e) = self.actor.save_chain().await {
             error!("Failed to save chain during cleanup: {}", e);
         }
-        
+
         // Log final metrics
         let final_metrics = self.metrics.get_metrics().await;
         info!("Final metrics at shutdown: {:?}", final_metrics);
     }
 }
+

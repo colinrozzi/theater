@@ -21,7 +21,6 @@ use tracing::{error, info, warn};
 
 const SHUTDOWN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
-#[derive(Debug)]
 pub struct RuntimeData {
     pub actor: WasmActor,
     pub operation_rx: mpsc::Receiver<ActorOperation>,
