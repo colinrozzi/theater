@@ -1,5 +1,6 @@
 use anyhow::Result;
 
+pub mod actor_executor;
 pub mod actor_handle;
 pub mod actor_runtime;
 pub mod chain;

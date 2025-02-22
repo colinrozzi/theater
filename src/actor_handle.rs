@@ -1,39 +1,44 @@
-use crate::wasm::WasmActor;
+use anyhow::Result;
+use tokio::sync::{mpsc, oneshot};
 
-use std::sync::Arc;
-use tokio::sync::Mutex;
+use crate::actor_executor::ActorOperation;
+use crate::chain::ChainEvent;
+use crate::wasm::Event;
 
 #[derive(Clone)]
 pub struct ActorHandle {
-    actor: Arc<Mutex<WasmActor>>,
+    operation_tx: mpsc::Sender<ActorOperation>,
 }
 
 impl ActorHandle {
-    pub fn new(actor: WasmActor) -> Self {
-        Self {
-            actor: Arc::new(Mutex::new(actor)),
-        }
+    pub fn new(operation_tx: mpsc::Sender<ActorOperation>) -> Self {
+        Self { operation_tx }
     }
 
-    pub fn inner(&self) -> &Arc<Mutex<WasmActor>> {
-        &self.actor
+    pub async fn handle_event(&self, event: Event) -> Result<()> {
+        let (tx, rx) = oneshot::channel();
+        self.operation_tx
+            .send(ActorOperation::HandleEvent {
+                event,
+                response_tx: tx,
+            })
+            .await?;
+        rx.await?
     }
 
-    pub async fn with_actor_mut<F, T>(&self, f: F) -> T
-    where
-        F: FnOnce(&mut WasmActor) -> T,
-    {
-        let mut actor = self.actor.lock().await;
-        f(&mut actor)
+    pub async fn get_state(&self) -> Result<Vec<u8>> {
+        let (tx, rx) = oneshot::channel();
+        self.operation_tx
+            .send(ActorOperation::GetState { response_tx: tx })
+            .await?;
+        rx.await?
     }
 
-    pub async fn get_current_state(&self) -> Option<Vec<u8>> {
-        let actor = self.actor.lock().await;
-        Some(actor.actor_state.clone())
-    }
-
-    pub async fn get_event_history(&self) -> Vec<crate::chain::ChainEvent> {
-        let actor = self.actor.lock().await;
-        actor.store.data().get_all_events()
+    pub async fn get_chain(&self) -> Result<Vec<ChainEvent>> {
+        let (tx, rx) = oneshot::channel();
+        self.operation_tx
+            .send(ActorOperation::GetChain { response_tx: tx })
+            .await?;
+        rx.await?
     }
 }

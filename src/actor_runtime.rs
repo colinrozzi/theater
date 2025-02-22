@@ -1,3 +1,4 @@
+use crate::actor_executor::{ActorExecutor, ActorOperation};
 use crate::actor_handle::ActorHandle;
 use crate::config::{HandlerConfig, ManifestConfig};
 use crate::host::filesystem::FileSystemHost;
@@ -14,7 +15,7 @@ use crate::store::ActorStore;
 use crate::wasm::WasmActor;
 use crate::Result;
 use std::path::PathBuf;
-use tokio::sync::mpsc::{Receiver, Sender};
+use tokio::sync::mpsc::{self, Receiver, Sender};
 use tracing::{error, info};
 
 pub struct RuntimeComponents {
@@ -27,6 +28,7 @@ pub struct RuntimeComponents {
 pub struct ActorRuntime {
     pub actor_id: TheaterId,
     handler_tasks: Vec<tokio::task::JoinHandle<()>>,
+    executor_task: tokio::task::JoinHandle<()>,
 }
 
 impl ActorRuntime {
@@ -61,7 +63,12 @@ impl ActorRuntime {
 
         let store = ActorStore::new(id.clone(), theater_tx.clone());
         let actor = WasmActor::new(config, store, &theater_tx).await?;
-        let actor_handle = ActorHandle::new(actor);
+
+        // Create channels for the executor
+        let (operation_tx, operation_rx) = mpsc::channel(32);
+        
+        // Create actor handle
+        let actor_handle = ActorHandle::new(operation_tx);
 
         let mut handlers = Vec::new();
 
@@ -107,6 +114,17 @@ impl ActorRuntime {
     }
 
     pub async fn start(components: RuntimeComponents) -> Result<Self> {
+        // Create executor
+        let executor = ActorExecutor::new(
+            actor.clone(),
+            operation_rx,
+        );
+
+        // Spawn executor task
+        let executor_task = tokio::spawn(async move {
+            executor.run().await;
+        });
+
         {
             for handler in &components.handlers {
                 info!(
@@ -139,17 +157,12 @@ impl ActorRuntime {
             handler_tasks.push(task);
         }
 
-        info!("Running init on actor");
-        {
-            let mut actor = components.actor_handle.inner().lock().await;
-            actor.init().await;
-        }
-
         info!("Actor runtime started");
 
         Ok(Self {
             actor_id: components.id,
             handler_tasks,
+            executor_task,
         })
     }
 
@@ -158,6 +171,9 @@ impl ActorRuntime {
         for task in self.handler_tasks.drain(..) {
             task.abort();
         }
+
+        // Stop the executor
+        self.executor_task.abort();
 
         Ok(())
     }
