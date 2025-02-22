@@ -1,4 +1,4 @@
-use crate::actor_executor::{ActorExecutor, ActorOperation};
+use crate::actor_executor::{ActorExecutor, ActorOperation, ActorError};
 use crate::actor_handle::ActorHandle;
 use crate::config::{HandlerConfig, ManifestConfig};
 use crate::host::filesystem::FileSystemHost;
@@ -16,7 +16,10 @@ use crate::wasm::WasmActor;
 use crate::Result;
 use std::path::PathBuf;
 use tokio::sync::mpsc::{self, Receiver, Sender};
-use tracing::{error, info};
+use tokio::time::timeout;
+use tracing::{error, info, warn};
+
+const SHUTDOWN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
 pub struct RuntimeComponents {
     pub id: TheaterId,
@@ -29,6 +32,7 @@ pub struct ActorRuntime {
     pub actor_id: TheaterId,
     handler_tasks: Vec<tokio::task::JoinHandle<()>>,
     executor_task: tokio::task::JoinHandle<()>,
+    actor_handle: ActorHandle,
 }
 
 impl ActorRuntime {
@@ -113,12 +117,15 @@ impl ActorRuntime {
         })
     }
 
-    pub async fn start(components: RuntimeComponents) -> Result<Self> {
+    pub async fn start(mut components: RuntimeComponents) -> Result<Self> {
         // Create executor
         let executor = ActorExecutor::new(
-            actor.clone(),
+            actor,
             operation_rx,
         );
+
+        // Clone handle for the runtime
+        let actor_handle = components.actor_handle.clone();
 
         // Spawn executor task
         let executor_task = tokio::spawn(async move {
@@ -163,18 +170,29 @@ impl ActorRuntime {
             actor_id: components.id,
             handler_tasks,
             executor_task,
+            actor_handle,
         })
     }
 
     pub async fn stop(&mut self) -> Result<()> {
+        info!("Initiating actor runtime shutdown");
+
+        // First, try to shutdown the actor gracefully
+        match timeout(SHUTDOWN_TIMEOUT, self.actor_handle.shutdown()).await {
+            Ok(Ok(_)) => info!("Actor shutdown completed successfully"),
+            Ok(Err(e)) => warn!("Actor shutdown completed with error: {}", e),
+            Err(_) => warn!("Actor shutdown timed out"),
+        }
+
         // Stop all handlers
         for task in self.handler_tasks.drain(..) {
             task.abort();
         }
 
-        // Stop the executor
+        // Finally abort the executor if it's still running
         self.executor_task.abort();
 
+        info!("Actor runtime shutdown complete");
         Ok(())
     }
 }
