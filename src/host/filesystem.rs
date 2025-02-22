@@ -95,21 +95,27 @@ impl FileSystemHost {
         let _ = interface.func_wrap(
             "list-files",
             move |mut ctx: StoreContextMut<'_, ActorStore>,
-                  ()|
+                  (dir_path,): (String,)|
                   -> Result<(Result<Vec<String>, String>,)> {
                 boundary.wrap(&mut ctx, (), |_| {
-                    let files = match std::fs::read_dir(&allowed_path) {
-                        Ok(files) => files,
-                        Err(e) => return Ok((Err(e.to_string()),)),
-                    };
+                    info!("Listing files in {:?}", dir_path);
+                    let dir_path = Path::new(&dir_path);
 
-                    let files: Vec<String> = files
-                        .filter_map(|f| f.ok())
-                        .filter_map(|f| f.file_name().into_string().ok())
-                        .collect();
+                    // append the file path to the allowed path
+                    let dir_path = allowed_path.join(dir_path);
 
-                    info!("Listed files: {:?}", files);
-                    Ok((Ok(files),))
+                    match dir_path.read_dir() {
+                        Ok(entries) => {
+                            let files: Result<Vec<String>, String> = Ok(entries
+                                .filter_map(|entry| {
+                                    entry.ok().and_then(|e| e.file_name().into_string().ok())
+                                })
+                                .collect());
+                            info!("Files listed successfully");
+                            Ok((files,))
+                        }
+                        Err(e) => Ok((Err(e.to_string()),)),
+                    }
                 })
             },
         );
@@ -146,6 +152,7 @@ impl FileSystemHost {
                   (dir_path,): (String,)|
                   -> Result<(Result<(), String>,)> {
                 boundary.wrap(&mut ctx, dir_path.clone(), |dir_path| {
+                    info!("Allowed path: {:?}", allowed_path);
                     let dir_path = allowed_path.join(Path::new(&dir_path));
                     info!("Creating directory {:?}", dir_path);
 
@@ -183,61 +190,63 @@ impl FileSystemHost {
             },
         );
 
-        let allowed_path = self.path.clone();
-        let boundary = HostFunctionBoundary::new("ntwk:theater/filesystem", "rename-file");
+        /*
+                let allowed_path = self.path.clone();
+                let boundary = HostFunctionBoundary::new("ntwk:theater/filesystem", "rename-file");
 
-        let _ = interface.func_wrap(
-            "rename-file",
-            move |mut ctx: StoreContextMut<'_, ActorStore>,
-                  (old_path, new_path): (String, String)|
-                  -> Result<(Result<(), String>,)> {
-                boundary.wrap(
-                    &mut ctx,
-                    (old_path.clone(), new_path.clone()),
-                    |(old_path, new_path)| {
-                        let old_path = allowed_path.join(Path::new(&old_path));
-                        let new_path = allowed_path.join(Path::new(&new_path));
-                        info!("Renaming file {:?} to {:?}", old_path, new_path);
+                let _ = interface.func_wrap(
+                    "rename-file",
+                    move |mut ctx: StoreContextMut<'_, ActorStore>,
+                          (old_path, new_path): (String, String)|
+                          -> Result<(Result<(), String>,)> {
+                        boundary.wrap(
+                            &mut ctx,
+                            (old_path.clone(), new_path.clone()),
+                            |(old_path, new_path)| {
+                                let old_path = allowed_path.join(Path::new(&old_path));
+                                let new_path = allowed_path.join(Path::new(&new_path));
+                                info!("Renaming file {:?} to {:?}", old_path, new_path);
 
-                        match std::fs::rename(&old_path, &new_path) {
-                            Ok(_) => {
-                                info!("File renamed successfully");
-                                Ok((Ok(()),))
-                            }
-                            Err(e) => Ok((Err(e.to_string()),)),
-                        }
+                                match std::fs::rename(&old_path, &new_path) {
+                                    Ok(_) => {
+                                        info!("File renamed successfully");
+                                        Ok((Ok(()),))
+                                    }
+                                    Err(e) => Ok((Err(e.to_string()),)),
+                                }
+                            },
+                        )
                     },
-                )
-            },
-        );
+                );
 
-        let allowed_path = self.path.clone();
-        let boundary = HostFunctionBoundary::new("ntwk:theater/filesystem", "rename-dir");
+                let allowed_path = self.path.clone();
+                let boundary = HostFunctionBoundary::new("ntwk:theater/filesystem", "rename-dir");
 
-        let _ = interface.func_wrap(
-            "rename-dir",
-            move |mut ctx: StoreContextMut<'_, ActorStore>,
-                  (old_path, new_path): (String, String)|
-                  -> Result<(Result<(), String>,)> {
-                boundary.wrap(
-                    &mut ctx,
-                    (old_path.clone(), new_path.clone()),
-                    |(old_path, new_path)| {
-                        let old_path = allowed_path.join(Path::new(&old_path));
-                        let new_path = allowed_path.join(Path::new(&new_path));
-                        info!("Renaming directory {:?} to {:?}", old_path, new_path);
+                let _ = interface.func_wrap(
+                    "rename-dir",
+                    move |mut ctx: StoreContextMut<'_, ActorStore>,
+                          (old_path, new_path): (String, String)|
+                          -> Result<(Result<(), String>,)> {
+                        boundary.wrap(
+                            &mut ctx,
+                            (old_path.clone(), new_path.clone()),
+                            |(old_path, new_path)| {
+                                let old_path = allowed_path.join(Path::new(&old_path));
+                                let new_path = allowed_path.join(Path::new(&new_path));
+                                info!("Renaming directory {:?} to {:?}", old_path, new_path);
 
-                        match std::fs::rename(&old_path, &new_path) {
-                            Ok(_) => {
-                                info!("Directory renamed successfully");
-                                Ok((Ok(()),))
-                            }
-                            Err(e) => Ok((Err(e.to_string()),)),
-                        }
+                                match std::fs::rename(&old_path, &new_path) {
+                                    Ok(_) => {
+                                        info!("Directory renamed successfully");
+                                        Ok((Ok(()),))
+                                    }
+                                    Err(e) => Ok((Err(e.to_string()),)),
+                                }
+                            },
+                        )
                     },
-                )
-            },
-        );
+                );
+        */
 
         let allowed_path = self.path.clone();
         let boundary = HostFunctionBoundary::new("ntwk:theater/filesystem", "path-exists");
@@ -269,4 +278,3 @@ impl FileSystemHost {
         Ok(())
     }
 }
-
