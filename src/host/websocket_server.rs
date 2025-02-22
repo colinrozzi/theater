@@ -4,8 +4,12 @@ use crate::config::WebSocketServerHandlerConfig;
 use crate::wasm::Event;
 use anyhow::Result;
 use axum::{
-    extract::ws::Message, extract::State, extract::WebSocketUpgrade, response::Response,
-    routing::get, Router,
+    extract::ws::{Message, self},
+    extract::State,
+    extract::WebSocketUpgrade,
+    response::Response,
+    routing::get,
+    Router,
 };
 use futures::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
@@ -152,7 +156,7 @@ impl WebSocketServerHost {
     }
 
     async fn handle_websocket_connection(
-        socket: axum::extract::ws::WebSocket,
+        socket: ws::WebSocket,
         connection_id: u64,
         message_sender: mpsc::Sender<IncomingMessage>,
         connections: Arc<RwLock<HashMap<u64, ConnectionContext>>>,
@@ -169,16 +173,15 @@ impl WebSocketServerHost {
         );
 
         // Send initial connection message
+        let connect_msg = serde_json::json!({
+            "type": "connect",
+            "connection_id": connection_id
+        }).to_string();
+
         message_sender
             .send(IncomingMessage {
                 connection_id,
-                content: Message::Text(
-                    serde_json::json!({
-                        "type": "connect",
-                        "connection_id": connection_id
-                    })
-                    .to_string(),
-                ),
+                content: Message::Text(connect_msg.into()),
             })
             .await?;
 
@@ -217,7 +220,7 @@ impl WebSocketServerHost {
                 _ => None,
             },
             text: match msg.content {
-                Message::Text(t) => Some(t),
+                Message::Text(ref t) => Some(t.to_string()),
                 _ => None,
             },
             connection_id: msg.connection_id,
@@ -244,14 +247,13 @@ impl WebSocketServerHost {
             for response_msg in response.messages {
                 let ws_msg = match response_msg.ty {
                     MessageType::Text => {
-                        response_msg.text.map(Message::Text)
+                        response_msg.text.map(|t| Message::Text(t.into()))
                     }
-                    MessageType::Binary => response_msg.data.map(Message::Binary),
+                    MessageType::Binary => response_msg.data.map(|d| Message::Binary(d.into())),
                     MessageType::Close => Some(Message::Close(None)),
-                    MessageType::Ping => Some(Message::Ping(vec![].into())),
-                    MessageType::Pong => Some(Message::Pong(vec![].into())),
-                    MessageType::Connect => None,
-                    MessageType::Other(_) => None,
+                    MessageType::Ping => Some(Message::Ping(Vec::new().into())),
+                    MessageType::Pong => Some(Message::Pong(Vec::new().into())),
+                    _ => None,
                 };
 
                 if let Some(msg) = ws_msg {

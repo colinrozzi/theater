@@ -129,6 +129,7 @@ impl ActorRuntime {
         })
     }
 
+    // Fixing the executor mutability issue
     pub async fn start(mut components: RuntimeComponents) -> Result<Self> {
         // Take the runtime data, which includes actor and operation_rx
         let runtime_data = components
@@ -137,7 +138,7 @@ impl ActorRuntime {
             .expect("Runtime data should be available");
 
         // Create and spawn executor
-        let executor = ActorExecutor::new(runtime_data.actor, runtime_data.operation_rx);
+        let mut executor = ActorExecutor::new(runtime_data.actor, runtime_data.operation_rx);
 
         // Clone handle for the runtime
         let actor_handle = components.actor_handle.clone();
@@ -145,7 +146,6 @@ impl ActorRuntime {
         let executor_task = tokio::spawn(async move {
             executor.run().await;
         });
-
         {
             for handler in &components.handlers {
                 info!(
@@ -210,4 +210,3 @@ impl ActorRuntime {
         Ok(())
     }
 }
-

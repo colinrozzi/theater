@@ -1,8 +1,8 @@
 use anyhow::Result;
 use thiserror::Error;
 use tokio::sync::{mpsc, oneshot};
-use tokio::time::{timeout, Duration, Instant};
-use tracing::{debug, error, info, warn};
+use tokio::time::{Duration, Instant};
+use tracing::{debug, error, info};
 
 use crate::chain::ChainEvent;
 use crate::metrics::{ActorMetrics, MetricsCollector};
@@ -98,38 +98,50 @@ impl ActorExecutor {
 
                     // If shutdown was initiated, only process Shutdown operations
                     if self.shutdown_initiated {
-                        if !matches!(op, ActorOperation::Shutdown { .. }) {
-                            if let ActorOperation::HandleEvent { response_tx, .. } = op {
+                        match op {
+                            ActorOperation::Shutdown { response_tx } => {
+                                info!("Processing shutdown request");
+                                let _ = response_tx.send(Ok(()));
+                                break;
+                            }
+                            ActorOperation::HandleEvent { response_tx, .. } => {
                                 let _ = response_tx.send(Err(ActorError::ShuttingDown));
                             }
-                            continue;
+                            ActorOperation::GetState { response_tx } => {
+                                let _ = response_tx.send(Err(ActorError::ShuttingDown));
+                            }
+                            ActorOperation::GetChain { response_tx } => {
+                                let _ = response_tx.send(Err(ActorError::ShuttingDown));
+                            }
+                            ActorOperation::GetMetrics { response_tx } => {
+                                let _ = response_tx.send(Err(ActorError::ShuttingDown));
+                            }
                         }
+                        continue;
                     }
 
                     let start_time = Instant::now();
-                    let result = match &op {
-                        ActorOperation::HandleEvent { event, .. } => {
+                    match op {
+                        ActorOperation::HandleEvent { event, response_tx } => {
                             debug!("Handling event: {:?}", event);
-                            self.actor.handle_event(event.clone()).await
-                                .map_err(|e| ActorError::Internal(e))
+                            let result = self.actor.handle_event(event).await
+                                .map_err(|e| ActorError::Internal(e));
+                            let _ = response_tx.send(result);
                         },
                         ActorOperation::GetState { response_tx } => {
                             debug!("Getting actor state");
                             let state = self.actor.actor_state.clone();
                             let _ = response_tx.send(Ok(state));
-                            Ok(())
                         },
                         ActorOperation::GetChain { response_tx } => {
                             debug!("Getting actor chain");
                             let chain = self.actor.actor_store.get_chain();
                             let _ = response_tx.send(Ok(chain));
-                            Ok(())
                         },
                         ActorOperation::GetMetrics { response_tx } => {
                             debug!("Getting metrics");
                             let metrics = self.metrics.get_metrics().await;
                             let _ = response_tx.send(Ok(metrics));
-                            Ok(())
                         },
                         ActorOperation::Shutdown { response_tx } => {
                             info!("Processing shutdown request");
@@ -141,7 +153,7 @@ impl ActorExecutor {
 
                     // Record operation metrics
                     let duration = start_time.elapsed();
-                    self.metrics.record_operation(duration, result.is_ok()).await;
+                    self.metrics.record_operation(duration, true).await;
                 }
 
                 else => {
@@ -156,7 +168,6 @@ impl ActorExecutor {
     }
 
     async fn cleanup(&mut self) {
-        // Add any necessary cleanup code here
         info!("Performing final cleanup");
 
         // Save chain state if needed
@@ -169,4 +180,3 @@ impl ActorExecutor {
         info!("Final metrics at shutdown: {:?}", final_metrics);
     }
 }
-

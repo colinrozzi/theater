@@ -4,6 +4,7 @@ use tokio::time::timeout;
 
 use crate::actor_executor::{ActorOperation, ActorError, DEFAULT_OPERATION_TIMEOUT};
 use crate::chain::ChainEvent;
+use crate::metrics::ActorMetrics;
 use crate::wasm::Event;
 
 #[derive(Clone)]
@@ -52,6 +53,20 @@ impl ActorHandle {
         
         self.operation_tx
             .send(ActorOperation::GetChain { response_tx: tx })
+            .await
+            .map_err(|_| ActorError::ChannelClosed)?;
+
+        match timeout(DEFAULT_OPERATION_TIMEOUT, rx).await {
+            Ok(result) => result.map_err(|_| ActorError::ChannelClosed)?,
+            Err(_) => Err(ActorError::OperationTimeout(DEFAULT_OPERATION_TIMEOUT)),
+        }
+    }
+
+    pub async fn get_metrics(&self) -> Result<ActorMetrics, ActorError> {
+        let (tx, rx) = oneshot::channel();
+        
+        self.operation_tx
+            .send(ActorOperation::GetMetrics { response_tx: tx })
             .await
             .map_err(|_| ActorError::ChannelClosed)?;
 
