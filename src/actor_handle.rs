@@ -1,4 +1,5 @@
 use crate::wasm::WasmActor;
+
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
@@ -28,11 +29,11 @@ impl ActorHandle {
 
     pub async fn get_current_state(&self) -> Option<Vec<u8>> {
         let actor = self.actor.lock().await;
-        actor.store.get_current_state()
+        Some(actor.actor_state.clone())
     }
 
     pub async fn get_event_history(&self) -> Vec<crate::chain::ChainEvent> {
         let actor = self.actor.lock().await;
-        actor.store.get_all_events()
+        actor.store.data().get_all_events()
     }
 }
