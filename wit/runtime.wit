@@ -4,6 +4,5 @@ interface runtime {
     use types.{json, chain, actor-id};
 
     log: func(msg: string) -> ();
-    spawn: func(manifest-path: string) -> actor-id;
     get-chain: func() -> chain;
 }
