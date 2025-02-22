@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::sync::RwLock;
 use serde::Serialize;
 
@@ -24,9 +24,44 @@ pub struct ResourceMetrics {
 pub struct ActorMetrics {
     pub operation_metrics: OperationMetrics,
     pub resource_metrics: ResourceMetrics,
-    pub last_update: Option<Instant>,
-    pub uptime: Duration,
-    pub start_time: Instant,
+    #[serde(with = "timestamp_serde")]
+    pub last_update: Option<SystemTime>,
+    pub uptime_secs: u64,
+    #[serde(with = "timestamp_serde")]
+    pub start_time: SystemTime,
+}
+
+mod timestamp_serde {
+    use serde::{Deserialize, Deserializer, Serializer};
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    pub fn serialize<S>(time: &SystemTime, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let timestamp = time
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        serializer.serialize_u64(timestamp)
+    }
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<SystemTime, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let timestamp = u64::deserialize(deserializer)?;
+        Ok(UNIX_EPOCH + Duration::from_secs(timestamp))
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct OperationStats {
+    pub success_rate: f64,
+    pub avg_processing_time: Duration,
+    pub operations_per_second: f64,
+    pub total_operations: u64,
+    pub failed_operations: u64,
 }
 
 #[derive(Debug, Clone)]
@@ -38,7 +73,7 @@ impl MetricsCollector {
     pub fn new() -> Self {
         Self {
             metrics: Arc::new(RwLock::new(ActorMetrics {
-                start_time: Instant::now(),
+                start_time: SystemTime::now(),
                 ..Default::default()
             })),
         }
@@ -56,8 +91,11 @@ impl MetricsCollector {
             metrics.operation_metrics.min_processing_time
                 .map_or(duration, |min| min.min(duration))
         );
-        metrics.last_update = Some(Instant::now());
-        metrics.uptime = metrics.start_time.elapsed();
+        metrics.last_update = Some(SystemTime::now());
+        metrics.uptime_secs = SystemTime::now()
+            .duration_since(metrics.start_time)
+            .unwrap_or_default()
+            .as_secs();
     }
 
     pub async fn update_resource_usage(&self, memory: usize, queue_size: usize) {
@@ -66,13 +104,19 @@ impl MetricsCollector {
         metrics.resource_metrics.operation_queue_size = queue_size;
         metrics.resource_metrics.peak_memory_usage = metrics.resource_metrics.peak_memory_usage.max(memory);
         metrics.resource_metrics.peak_queue_size = metrics.resource_metrics.peak_queue_size.max(queue_size);
-        metrics.last_update = Some(Instant::now());
-        metrics.uptime = metrics.start_time.elapsed();
+        metrics.last_update = Some(SystemTime::now());
+        metrics.uptime_secs = SystemTime::now()
+            .duration_since(metrics.start_time)
+            .unwrap_or_default()
+            .as_secs();
     }
 
     pub async fn get_metrics(&self) -> ActorMetrics {
         let mut metrics = self.metrics.write().await;
-        metrics.uptime = metrics.start_time.elapsed();
+        metrics.uptime_secs = SystemTime::now()
+            .duration_since(metrics.start_time)
+            .unwrap_or_default()
+            .as_secs();
         metrics.clone()
     }
 
@@ -93,8 +137,8 @@ impl MetricsCollector {
             } else {
                 Duration::default()
             },
-            operations_per_second: if metrics.uptime.as_secs() > 0 {
-                op_metrics.total_operations as f64 / metrics.uptime.as_secs_f64()
+            operations_per_second: if metrics.uptime_secs > 0 {
+                op_metrics.total_operations as f64 / metrics.uptime_secs as f64
             } else {
                 0.0
             },
@@ -102,13 +146,4 @@ impl MetricsCollector {
             failed_operations: op_metrics.failed_operations,
         }
     }
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct OperationStats {
-    pub success_rate: f64,
-    pub avg_processing_time: Duration,
-    pub operations_per_second: f64,
-    pub total_operations: u64,
-    pub failed_operations: u64,
 }

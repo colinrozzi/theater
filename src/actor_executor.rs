@@ -5,10 +5,10 @@ use tokio::time::{timeout, Duration, Instant};
 use tracing::{debug, error, info, warn};
 
 use crate::chain::ChainEvent;
-use crate::metrics::MetricsCollector;
+use crate::metrics::{MetricsCollector, ActorMetrics};
 use crate::wasm::{Event, WasmActor};
 
-const DEFAULT_OPERATION_TIMEOUT: Duration = Duration::from_secs(30);
+pub const DEFAULT_OPERATION_TIMEOUT: Duration = Duration::from_secs(30);
 const METRICS_UPDATE_INTERVAL: Duration = Duration::from_secs(1);
 
 #[derive(Error, Debug)]
@@ -39,7 +39,7 @@ pub enum ActorOperation {
         response_tx: oneshot::Sender<Result<Vec<ChainEvent>, ActorError>>,
     },
     GetMetrics {
-        response_tx: oneshot::Sender<Result<crate::metrics::ActorMetrics, ActorError>>,
+        response_tx: oneshot::Sender<Result<ActorMetrics, ActorError>>,
     },
     Shutdown {
         response_tx: oneshot::Sender<Result<(), ActorError>>,
@@ -67,7 +67,7 @@ impl ActorExecutor {
         // Get memory usage from wasm instance
         let memory_size = self.actor.get_memory_size();
         
-        // Get operation queue size
+        // Get operation queue size - note that capacity() returns Option<usize>
         let queue_size = self.operation_rx.capacity().unwrap_or(0);
         
         self.metrics.update_resource_usage(memory_size, queue_size).await;
@@ -97,8 +97,8 @@ impl ActorExecutor {
                     // If shutdown was initiated, only process Shutdown operations
                     if self.shutdown_initiated {
                         if !matches!(op, ActorOperation::Shutdown { .. }) {
-                            if let Some(tx) = self.get_response_tx(op) {
-                                let _ = tx.send(Err(ActorError::ShuttingDown));
+                            if let ActorOperation::HandleEvent { response_tx, .. } = op {
+                                let _ = response_tx.send(Err(ActorError::ShuttingDown));
                             }
                             continue;
                         }
@@ -111,12 +111,16 @@ impl ActorExecutor {
                             self.actor.handle_event(event.clone()).await
                                 .map_err(|e| ActorError::Internal(e))
                         },
-                        ActorOperation::GetState { .. } => {
+                        ActorOperation::GetState { response_tx } => {
                             debug!("Getting actor state");
+                            let state = self.actor.actor_state.clone();
+                            let _ = response_tx.send(Ok(state));
                             Ok(())
                         },
-                        ActorOperation::GetChain { .. } => {
+                        ActorOperation::GetChain { response_tx } => {
                             debug!("Getting actor chain");
+                            let chain = self.actor.actor_store.get_chain();
+                            let _ = response_tx.send(Ok(chain));
                             Ok(())
                         },
                         ActorOperation::GetMetrics { response_tx } => {
@@ -136,21 +140,6 @@ impl ActorExecutor {
                     // Record operation metrics
                     let duration = start_time.elapsed();
                     self.metrics.record_operation(duration, result.is_ok()).await;
-
-                    // Send response
-                    match op {
-                        ActorOperation::HandleEvent { response_tx, .. } => {
-                            let _ = response_tx.send(result);
-                        },
-                        ActorOperation::GetState { response_tx } => {
-                            let _ = response_tx.send(Ok(self.actor.actor_state.clone()));
-                        },
-                        ActorOperation::GetChain { response_tx } => {
-                            let chain = self.actor.actor_store.get_chain();
-                            let _ = response_tx.send(Ok(chain));
-                        },
-                        _ => {}
-                    }
                 }
                 
                 else => {
@@ -166,19 +155,15 @@ impl ActorExecutor {
     
     async fn cleanup(&mut self) {
         // Add any necessary cleanup code here
-        // For example:
-        // - Save final state
-        // - Close connections
-        // - Final metrics snapshot
+        info!("Performing final cleanup");
+        
+        // Save chain state if needed
+        if let Err(e) = self.actor.save_chain().await {
+            error!("Failed to save chain during cleanup: {}", e);
+        }
+        
+        // Log final metrics
         let final_metrics = self.metrics.get_metrics().await;
         info!("Final metrics at shutdown: {:?}", final_metrics);
-    }
-    
-    fn get_response_tx(&self, op: ActorOperation) -> Option<oneshot::Sender<Result<(), ActorError>>> {
-        match op {
-            ActorOperation::HandleEvent { response_tx, .. } => Some(response_tx),
-            ActorOperation::Shutdown { response_tx } => Some(response_tx),
-            _ => None,
-        }
     }
 }
