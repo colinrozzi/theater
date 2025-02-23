@@ -1,7 +1,7 @@
+use serde::Serialize;
 use std::sync::Arc;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime};
 use tokio::sync::RwLock;
-use serde::{Serialize, Deserialize};
 
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct OperationMetrics {
@@ -48,7 +48,7 @@ impl Default for ActorMetrics {
 
 mod timestamp_serde {
     use serde::{Deserialize, Deserializer, Serializer};
-    use std::time::{SystemTime, UNIX_EPOCH, Duration};
+    use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
     pub fn serialize<S>(time: &SystemTime, serializer: S) -> Result<S::Ok, S::Error>
     where
@@ -61,6 +61,7 @@ mod timestamp_serde {
         serializer.serialize_u64(timestamp)
     }
 
+    #[allow(unused)]
     pub fn deserialize<'de, D>(deserializer: D) -> Result<SystemTime, D::Error>
     where
         D: Deserializer<'de>,
@@ -72,7 +73,7 @@ mod timestamp_serde {
 
 mod option_timestamp_serde {
     use serde::{Deserialize, Deserializer, Serializer};
-    use std::time::{SystemTime, UNIX_EPOCH, Duration};
+    use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
     pub fn serialize<S>(time: &Option<SystemTime>, serializer: S) -> Result<S::Ok, S::Error>
     where
@@ -80,16 +81,14 @@ mod option_timestamp_serde {
     {
         match time {
             Some(t) => {
-                let timestamp = t
-                    .duration_since(UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_secs();
+                let timestamp = t.duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
                 serializer.serialize_some(&timestamp)
             }
             None => serializer.serialize_none(),
         }
     }
 
+    #[allow(unused)]
     pub fn deserialize<'de, D>(deserializer: D) -> Result<Option<SystemTime>, D::Error>
     where
         D: Deserializer<'de>,
@@ -110,6 +109,7 @@ mod duration_serde {
         serializer.serialize_u64(duration.as_nanos() as u64)
     }
 
+    #[allow(unused)]
     pub fn deserialize<'de, D>(deserializer: D) -> Result<Duration, D::Error>
     where
         D: Deserializer<'de>,
@@ -133,6 +133,7 @@ mod option_duration_serde {
         }
     }
 
+    #[allow(unused)]
     pub fn deserialize<'de, D>(deserializer: D) -> Result<Option<Duration>, D::Error>
     where
         D: Deserializer<'de>,

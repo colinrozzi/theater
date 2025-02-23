@@ -1,5 +1,5 @@
-use crate::actor_handle::ActorHandle;
 use crate::actor_executor::ActorError;
+use crate::actor_handle::ActorHandle;
 use crate::config::FileSystemHandlerConfig;
 use crate::wasm::Event;
 use anyhow::Result;
@@ -8,7 +8,7 @@ use std::fs::File;
 use std::io::{BufReader, Read, Write};
 use std::path::{Path, PathBuf};
 use thiserror::Error;
-use tracing::{info, error};
+use tracing::{error, info};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 enum FileSystemCommand {
@@ -36,19 +36,20 @@ enum FileSystemResponse {
 pub enum FileSystemError {
     #[error("Path error: {0}")]
     PathError(String),
-    
+
     #[error("IO error: {0}")]
     IoError(#[from] std::io::Error),
-    
+
     #[error("Actor error: {0}")]
     ActorError(#[from] ActorError),
-    
+
     #[error("Serialization error: {0}")]
     SerializationError(#[from] serde_json::Error),
 }
 
 pub struct FileSystemHost {
     path: PathBuf,
+    #[allow(dead_code)]
     actor_handle: ActorHandle,
 }
 
@@ -75,7 +76,10 @@ impl FileSystemHost {
         Ok(())
     }
 
-    async fn handle_command(&self, cmd: FileSystemCommand) -> Result<FileSystemResponse, FileSystemError> {
+    async fn handle_command(
+        &self,
+        cmd: FileSystemCommand,
+    ) -> Result<FileSystemResponse, FileSystemError> {
         match cmd {
             FileSystemCommand::ReadFile { path } => {
                 let file_path = self.path.join(Path::new(&path));
@@ -163,10 +167,13 @@ impl FileSystemHost {
         }
     }
 
-    async fn process_filesystem_event(&self, command: FileSystemCommand) -> Result<(), FileSystemError> {
+    async fn process_filesystem_event(
+        &self,
+        command: FileSystemCommand,
+    ) -> Result<(), FileSystemError> {
         // Handle the command
         let response = self.handle_command(command).await?;
-        
+
         // Create event with response
         let event = Event {
             event_type: "filesystem-response".to_string(),

@@ -8,6 +8,7 @@ use thiserror::Error;
 use tracing::{error, info};
 
 pub struct SupervisorHost {
+    #[allow(dead_code)]
     actor_handle: ActorHandle,
 }
 
@@ -64,4 +65,3 @@ impl SupervisorHost {
         Ok(())
     }
 }
-

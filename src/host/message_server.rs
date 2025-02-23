@@ -1,7 +1,5 @@
 use crate::actor_executor::ActorError;
 use crate::actor_handle::ActorHandle;
-use crate::config::MessageServerConfig;
-use crate::id::TheaterId;
 use crate::messages::{ActorMessage, ActorRequest, ActorSend, TheaterCommand};
 use crate::wasm::Event;
 use anyhow::Result;
@@ -12,6 +10,7 @@ use tracing::{error, info};
 
 pub struct MessageServerHost {
     mailbox_rx: Receiver<ActorMessage>,
+    #[allow(dead_code)]
     theater_tx: Sender<TheaterCommand>,
     actor_handle: ActorHandle,
 }
@@ -95,4 +94,3 @@ impl MessageServerHost {
         Ok(())
     }
 }
-
