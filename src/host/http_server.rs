@@ -1,5 +1,6 @@
-use crate::actor_handle::ActorHandle;
 use crate::actor_executor::ActorError;
+use crate::actor_handle::ActorHandle;
+use crate::actor_runtime::WrappedActor;
 use crate::config::HttpServerHandlerConfig;
 use crate::wasm::Event;
 use anyhow::Result;
@@ -14,12 +15,13 @@ use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use thiserror::Error;
-use tracing::{info, error};
+use tracing::{error, info};
 
 #[derive(Clone)]
 pub struct HttpServerHost {
     port: u16,
     actor_handle: ActorHandle,
+    wrapped_actor: WrappedActor,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -41,19 +43,24 @@ pub struct HttpResponse {
 pub enum HttpServerError {
     #[error("Handler error: {0}")]
     HandlerError(String),
-    
+
     #[error("Actor error: {0}")]
     ActorError(#[from] ActorError),
-    
+
     #[error("Serialization error: {0}")]
     SerializationError(#[from] serde_json::Error),
 }
 
 impl HttpServerHost {
-    pub fn new(config: HttpServerHandlerConfig, actor_handle: ActorHandle) -> Self {
+    pub fn new(
+        config: HttpServerHandlerConfig,
+        actor_handle: ActorHandle,
+        wrapped_actor: WrappedActor,
+    ) -> Self {
         Self {
             port: config.port,
             actor_handle,
+            wrapped_actor,
         }
     }
 
@@ -63,6 +70,13 @@ impl HttpServerHost {
 
     pub async fn add_exports(&self) -> Result<()> {
         info!("Adding exports to http-server");
+        let mut actor = self.wrapped_actor.inner().lock().unwrap();
+        let handle_request_export = actor
+            .find_export("ntwk:theater/http-server-host", "handle-request")
+            .expect("Could not find export ntwk:theater/http-server-host.handle-request");
+        actor
+            .exports
+            .insert("handle-request".to_string(), handle_request_export);
         Ok(())
     }
 

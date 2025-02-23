@@ -1,5 +1,5 @@
-use crate::id::TheaterId;
 use crate::chain::ChainEvent;
+use crate::id::TheaterId;
 use crate::Result;
 use std::path::PathBuf;
 use tokio::sync::oneshot;
@@ -107,3 +107,4 @@ pub enum ActorStatus {
     Stopped,
     Failed,
 }
+

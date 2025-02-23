@@ -1,10 +1,11 @@
-use crate::actor_handle::ActorHandle;
 use crate::actor_executor::ActorError;
+use crate::actor_handle::ActorHandle;
+use crate::actor_runtime::WrappedActor;
 use crate::config::WebSocketServerHandlerConfig;
 use crate::wasm::Event;
 use anyhow::Result;
 use axum::{
-    extract::ws::{Message, self},
+    extract::ws::{self, Message},
     extract::State,
     extract::WebSocketUpgrade,
     response::Response,
@@ -50,13 +51,13 @@ pub struct WebSocketResponse {
 pub enum WebSocketError {
     #[error("Connection error: {0}")]
     ConnectionError(String),
-    
+
     #[error("Message processing error: {0}")]
     ProcessingError(String),
-    
+
     #[error("Actor error: {0}")]
     ActorError(#[from] ActorError),
-    
+
     #[error("Serialization error: {0}")]
     SerializationError(#[from] serde_json::Error),
 }
@@ -76,23 +77,38 @@ pub struct WebSocketServerHost {
     port: u16,
     actor_handle: ActorHandle,
     connections: Arc<RwLock<HashMap<u64, ConnectionContext>>>,
+    wrapped_actor: WrappedActor,
 }
 
 impl WebSocketServerHost {
-    pub fn new(config: WebSocketServerHandlerConfig, actor_handle: ActorHandle) -> Self {
+    pub fn new(
+        config: WebSocketServerHandlerConfig,
+        actor_handle: ActorHandle,
+        wrapped_actor: WrappedActor,
+    ) -> Self {
         Self {
             port: config.port,
             actor_handle,
             connections: Arc::new(RwLock::new(HashMap::new())),
+            wrapped_actor,
         }
     }
 
     pub async fn setup_host_functions(&self) -> Result<()> {
+        info!("Setting up websocket server host functions");
         Ok(())
     }
 
     pub async fn add_exports(&self) -> Result<()> {
         info!("Adding exports to websocket-server");
+        let mut actor = self.wrapped_actor.inner().lock().unwrap();
+        let handle_message_export = actor
+            .find_export("ntwk:theater/websocket-server", "handle-message")
+            .expect("Could not find handle-message export");
+        actor.exports.insert(
+            "handle-message".to_string(),
+            handle_message_export.clone().into(),
+        );
         Ok(())
     }
 
@@ -176,7 +192,8 @@ impl WebSocketServerHost {
         let connect_msg = serde_json::json!({
             "type": "connect",
             "connection_id": connection_id
-        }).to_string();
+        })
+        .to_string();
 
         message_sender
             .send(IncomingMessage {
@@ -246,9 +263,7 @@ impl WebSocketServerHost {
         if let Some(connection) = connections.read().await.get(&msg.connection_id) {
             for response_msg in response.messages {
                 let ws_msg = match response_msg.ty {
-                    MessageType::Text => {
-                        response_msg.text.map(|t| Message::Text(t.into()))
-                    }
+                    MessageType::Text => response_msg.text.map(|t| Message::Text(t.into())),
                     MessageType::Binary => response_msg.data.map(|d| Message::Binary(d.into())),
                     MessageType::Close => Some(Message::Close(None)),
                     MessageType::Ping => Some(Message::Ping(Vec::new().into())),

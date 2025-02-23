@@ -3,10 +3,9 @@ use crate::host::http_client::HttpClientHost;
 use crate::host::http_server::HttpServerHost;
 use crate::host::message_server::MessageServerHost;
 use crate::host::runtime::RuntimeHost;
-use crate::host::websocket_server::WebSocketServerHost;
-use crate::Result;
-
 use crate::host::supervisor::SupervisorHost;
+use crate::host::websocket_server::WebSocketServerHost;
+use anyhow::Result;
 
 pub enum Handler {
     MessageServer(MessageServerHost),
@@ -21,60 +20,47 @@ pub enum Handler {
 impl Handler {
     pub async fn start(&mut self) -> Result<()> {
         match self {
-            Handler::MessageServer(handler) => handler.start().await,
-            Handler::HttpServer(handler) => handler.start().await,
-            Handler::FileSystem(handler) => handler.start().await,
-            Handler::HttpClient(handler) => handler.start().await,
-            Handler::Runtime(handler) => handler.start().await,
-            Handler::WebSocketServer(handler) => handler.start().await,
-            Handler::Supervisor(handler) => handler.start().await,
+            Handler::MessageServer(h) => h.start().await,
+            Handler::HttpServer(h) => h.start().await,
+            Handler::FileSystem(h) => h.start().await,
+            Handler::HttpClient(h) => h.start().await,
+            Handler::Runtime(h) => h.start().await,
+            Handler::WebSocketServer(h) => h.start().await,
+            Handler::Supervisor(h) => h.start().await,
         }
     }
 
-    pub fn name(&self) -> String {
+    pub async fn setup_host_functions(&self) -> Result<()> {
         match self {
-            Handler::MessageServer(_) => "message-server".to_string(),
-            Handler::HttpServer(_) => "http-server".to_string(),
-            Handler::FileSystem(_) => "filesystem".to_string(),
-            Handler::HttpClient(_) => "http-client".to_string(),
-            Handler::Runtime(_) => "runtime".to_string(),
-            Handler::WebSocketServer(_) => "websocket-server".to_string(),
-            Handler::Supervisor(_) => "supervisor".to_string(),
+            Handler::MessageServer(h) => Ok(h
+                .setup_host_functions()
+                .await
+                .expect("Error setting up message server host functions")),
+            Handler::HttpServer(h) => Ok(h
+                .setup_host_functions()
+                .await
+                .expect("Error setting up http server host functions")),
+            Handler::FileSystem(h) => Ok(h
+                .setup_host_functions()
+                .await
+                .expect("Error setting up filesystem host functions")),
+            Handler::HttpClient(h) => Ok(h
+                .setup_host_functions()
+                .await
+                .expect("Error setting up http client host functions")),
+            Handler::Runtime(h) => Ok(h
+                .setup_host_functions()
+                .await
+                .expect("Error setting up runtime host functions")),
+            Handler::WebSocketServer(h) => Ok(h
+                .setup_host_functions()
+                .await
+                .expect("Error setting up websocket server host functions")),
+            Handler::Supervisor(h) => Ok(h
+                .setup_host_functions()
+                .await
+                .expect("Error setting up supervisor host functions")),
         }
-    }
-
-    pub async fn setup_host_function(&self) -> Result<()> {
-        match self {
-            Handler::MessageServer(handler) => handler
-                .setup_host_functions()
-                .await
-                .expect("could not setup host functions for message server"),
-            Handler::HttpServer(handler) => handler
-                .setup_host_functions()
-                .await
-                .expect("could not setup host functions for http server"),
-            Handler::FileSystem(handler) => handler
-                .setup_host_functions()
-                .await
-                .expect("could not setup host functions for filesystem"),
-            Handler::HttpClient(handler) => handler
-                .setup_host_functions()
-                .await
-                .expect("could not setup host functions for http client"),
-            Handler::Runtime(handler) => handler
-                .setup_host_functions()
-                .await
-                .expect("could not setup host functions for runtime"),
-            Handler::WebSocketServer(handler) => handler
-                .setup_host_functions()
-                .await
-                .expect("could not setup host functions for websocket server"),
-            Handler::Supervisor(handler) => handler
-                .setup_host_functions()
-                .await
-                .expect("could not setup host functions for supervisor"),
-        }
-        Ok(())
     }
 
     pub async fn add_exports(&self) -> Result<()> {
@@ -82,31 +68,44 @@ impl Handler {
             Handler::MessageServer(handler) => Ok(handler
                 .add_exports()
                 .await
-                .expect("could not add exports for message server")),
+                .expect("Error adding exports to message server")),
             Handler::HttpServer(handler) => Ok(handler
                 .add_exports()
                 .await
-                .expect("could not add exports for http server")),
+                .expect("Error adding exports to http server")),
             Handler::FileSystem(handler) => Ok(handler
                 .add_exports()
                 .await
-                .expect("could not add exports for filesystem")),
+                .expect("Error adding exports to filesystem")),
             Handler::HttpClient(handler) => Ok(handler
                 .add_exports()
                 .await
-                .expect("could not add exports for http client")),
+                .expect("Error adding exports to http client")),
             Handler::Runtime(handler) => Ok(handler
                 .add_exports()
                 .await
-                .expect("could not add exports for runtime")),
+                .expect("Error adding exports to runtime")),
             Handler::WebSocketServer(handler) => Ok(handler
                 .add_exports()
                 .await
-                .expect("could not add exports for websocket server")),
+                .expect("Error adding exports to websocket server")),
             Handler::Supervisor(handler) => Ok(handler
                 .add_exports()
                 .await
-                .expect("could not add exports for supervisor")),
+                .expect("Error adding exports to supervisor")),
+        }
+    }
+
+    pub fn name(&self) -> &str {
+        match self {
+            Handler::MessageServer(_) => "message-server",
+            Handler::HttpServer(_) => "http-server",
+            Handler::FileSystem(_) => "filesystem",
+            Handler::HttpClient(_) => "http-client",
+            Handler::Runtime(_) => "runtime",
+            Handler::WebSocketServer(_) => "websocket-server",
+            Handler::Supervisor(_) => "supervisor",
         }
     }
 }
+

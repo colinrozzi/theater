@@ -15,6 +15,7 @@ use crate::store::ActorStore;
 use crate::wasm::WasmActor;
 use crate::Result;
 use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc::{self, Receiver, Sender};
 use tokio::time::timeout;
 use tracing::{error, info, warn};
@@ -22,7 +23,7 @@ use tracing::{error, info, warn};
 const SHUTDOWN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
 pub struct RuntimeData {
-    pub actor: WasmActor,
+    pub wrapped_actor: WrappedActor,
     pub operation_rx: mpsc::Receiver<ActorOperation>,
 }
 
@@ -39,6 +40,29 @@ pub struct ActorRuntime {
     handler_tasks: Vec<tokio::task::JoinHandle<()>>,
     executor_task: tokio::task::JoinHandle<()>,
     actor_handle: ActorHandle,
+}
+
+#[derive(Clone)]
+pub struct WrappedActor {
+    pub actor: Arc<Mutex<WasmActor>>,
+}
+
+impl WrappedActor {
+    pub fn new(actor: WasmActor) -> Self {
+        Self {
+            actor: Arc::new(Mutex::new(actor)),
+        }
+    }
+
+    pub fn inner(&self) -> &Arc<Mutex<WasmActor>> {
+        &self.actor
+    }
+
+    pub fn take_actor(&self) -> Option<WasmActor> {
+        Arc::try_unwrap(self.actor.clone())
+            .ok()
+            .and_then(|mutex| mutex.into_inner().ok())
+    }
 }
 
 impl ActorRuntime {
@@ -73,6 +97,7 @@ impl ActorRuntime {
 
         let store = ActorStore::new(id.clone(), theater_tx.clone());
         let actor = WasmActor::new(config, store, &theater_tx).await?;
+        let wrapped_actor = WrappedActor::new(actor);
 
         // Create channels for the executor
         let (operation_tx, operation_rx) = mpsc::channel(32);
@@ -86,6 +111,7 @@ impl ActorRuntime {
             actor_mailbox,
             theater_tx.clone(),
             actor_handle.clone(),
+            wrapped_actor.clone(),
         )));
 
         for handler_config in &config.handlers {
@@ -93,30 +119,44 @@ impl ActorRuntime {
                 HandlerConfig::MessageServer(_) => {
                     panic!("MessageServer handler is already added")
                 }
-                HandlerConfig::HttpServer(config) => {
-                    Handler::HttpServer(HttpServerHost::new(config.clone(), actor_handle.clone()))
+                HandlerConfig::HttpServer(config) => Handler::HttpServer(HttpServerHost::new(
+                    config.clone(),
+                    actor_handle.clone(),
+                    wrapped_actor.clone(),
+                )),
+                HandlerConfig::FileSystem(config) => Handler::FileSystem(FileSystemHost::new(
+                    config.clone(),
+                    actor_handle.clone(),
+                    wrapped_actor.clone(),
+                )),
+                HandlerConfig::HttpClient(config) => Handler::HttpClient(HttpClientHost::new(
+                    config.clone(),
+                    actor_handle.clone(),
+                    wrapped_actor.clone(),
+                )),
+                HandlerConfig::Runtime(config) => Handler::Runtime(RuntimeHost::new(
+                    config.clone(),
+                    actor_handle.clone(),
+                    wrapped_actor.clone(),
+                )),
+                HandlerConfig::WebSocketServer(config) => {
+                    Handler::WebSocketServer(WebSocketServerHost::new(
+                        config.clone(),
+                        actor_handle.clone(),
+                        wrapped_actor.clone(),
+                    ))
                 }
-                HandlerConfig::FileSystem(config) => {
-                    Handler::FileSystem(FileSystemHost::new(config.clone(), actor_handle.clone()))
-                }
-                HandlerConfig::HttpClient(config) => {
-                    Handler::HttpClient(HttpClientHost::new(config.clone(), actor_handle.clone()))
-                }
-                HandlerConfig::Runtime(config) => {
-                    Handler::Runtime(RuntimeHost::new(config.clone(), actor_handle.clone()))
-                }
-                HandlerConfig::WebSocketServer(config) => Handler::WebSocketServer(
-                    WebSocketServerHost::new(config.clone(), actor_handle.clone()),
-                ),
-                HandlerConfig::Supervisor(config) => {
-                    Handler::Supervisor(SupervisorHost::new(config.clone(), actor_handle.clone()))
-                }
+                HandlerConfig::Supervisor(config) => Handler::Supervisor(SupervisorHost::new(
+                    config.clone(),
+                    actor_handle.clone(),
+                    wrapped_actor.clone(),
+                )),
             };
             handlers.push(handler);
         }
 
         let runtime_data = Some(RuntimeData {
-            actor,
+            wrapped_actor,
             operation_rx,
         });
 
@@ -137,22 +177,16 @@ impl ActorRuntime {
             .take()
             .expect("Runtime data should be available");
 
-        // Create and spawn executor
-        let mut executor = ActorExecutor::new(runtime_data.actor, runtime_data.operation_rx);
-
         // Clone handle for the runtime
         let actor_handle = components.actor_handle.clone();
 
-        let executor_task = tokio::spawn(async move {
-            executor.run().await;
-        });
         {
             for handler in &components.handlers {
                 info!(
                     "Setting up host functions for handler: {:?}",
                     handler.name()
                 );
-                handler.setup_host_function().await.expect(
+                handler.setup_host_functions().await.expect(
                     format!(
                         "Failed to setup host functions for handler: {:?}",
                         handler.name()
@@ -165,6 +199,18 @@ impl ActorRuntime {
                 );
             }
         }
+
+        let actor = runtime_data
+            .wrapped_actor
+            .take_actor()
+            .expect("Failed to take actor from wrapped actor");
+
+        // Create and spawn executor
+        let mut executor = ActorExecutor::new(actor, runtime_data.operation_rx);
+
+        let executor_task = tokio::spawn(async move {
+            executor.run().await;
+        });
 
         let mut handler_tasks = Vec::new();
         // Start all handlers
