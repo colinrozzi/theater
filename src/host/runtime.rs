@@ -15,7 +15,6 @@ use wasmtime::StoreContextMut;
 #[derive(Clone)]
 pub struct RuntimeHost {
     actor_handle: ActorHandle,
-    wrapped_actor: WrappedActor,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -64,20 +63,13 @@ pub enum RuntimeError {
 }
 
 impl RuntimeHost {
-    pub fn new(
-        _config: RuntimeHostConfig,
-        actor_handle: ActorHandle,
-        wrapped_actor: WrappedActor,
-    ) -> Self {
-        Self {
-            actor_handle,
-            wrapped_actor,
-        }
+    pub fn new(_config: RuntimeHostConfig, actor_handle: ActorHandle) -> Self {
+        Self { actor_handle }
     }
 
-    pub async fn setup_host_functions(&self) -> Result<()> {
+    pub async fn setup_host_functions(&self, wrapped_actor: WrappedActor) -> Result<()> {
         info!("Setting up runtime host functions");
-        let mut actor = self.wrapped_actor.inner().lock().unwrap();
+        let mut actor = wrapped_actor.inner().lock().unwrap();
         let name = actor.name.clone();
         let mut interface = actor
             .linker
@@ -125,8 +117,15 @@ impl RuntimeHost {
         Ok(())
     }
 
-    pub async fn add_exports(&self) -> Result<()> {
-        info!("No exports needed for runtime");
+    pub async fn add_exports(&self, wrapped_actor: WrappedActor) -> Result<()> {
+        info!("Adding exports for runtime host");
+
+        let mut actor = wrapped_actor.inner().lock().unwrap();
+        let init_export = actor
+            .find_export("ntwk:theater/actor", "init")
+            .expect("Could not get export for init");
+        actor.exports.insert("init".to_string(), init_export);
+
         Ok(())
     }
 

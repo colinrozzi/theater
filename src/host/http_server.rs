@@ -21,7 +21,6 @@ use tracing::{error, info};
 pub struct HttpServerHost {
     port: u16,
     actor_handle: ActorHandle,
-    wrapped_actor: WrappedActor,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -52,27 +51,22 @@ pub enum HttpServerError {
 }
 
 impl HttpServerHost {
-    pub fn new(
-        config: HttpServerHandlerConfig,
-        actor_handle: ActorHandle,
-        wrapped_actor: WrappedActor,
-    ) -> Self {
+    pub fn new(config: HttpServerHandlerConfig, actor_handle: ActorHandle) -> Self {
         Self {
             port: config.port,
             actor_handle,
-            wrapped_actor,
         }
     }
 
-    pub async fn setup_host_functions(&self) -> Result<()> {
+    pub async fn setup_host_functions(&self, _wrapped_actor: WrappedActor) -> Result<()> {
         Ok(())
     }
 
-    pub async fn add_exports(&self) -> Result<()> {
+    pub async fn add_exports(&self, wrapped_actor: WrappedActor) -> Result<()> {
         info!("Adding exports to http-server");
-        let mut actor = self.wrapped_actor.inner().lock().unwrap();
+        let mut actor = wrapped_actor.inner().lock().unwrap();
         let handle_request_export = actor
-            .find_export("ntwk:theater/http-server-host", "handle-request")
+            .find_export("ntwk:theater/http-server", "handle-request")
             .expect("Could not find export ntwk:theater/http-server-host.handle-request");
         actor
             .exports

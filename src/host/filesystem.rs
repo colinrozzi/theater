@@ -55,26 +55,20 @@ pub struct FileSystemHost {
     path: PathBuf,
     #[allow(dead_code)]
     actor_handle: ActorHandle,
-    wrapped_actor: WrappedActor,
 }
 
 impl FileSystemHost {
-    pub fn new(
-        config: FileSystemHandlerConfig,
-        actor_handle: ActorHandle,
-        wrapped_actor: WrappedActor,
-    ) -> Self {
+    pub fn new(config: FileSystemHandlerConfig, actor_handle: ActorHandle) -> Self {
         Self {
             path: config.path,
             actor_handle,
-            wrapped_actor,
         }
     }
 
-    pub async fn setup_host_functions(&self) -> Result<()> {
+    pub async fn setup_host_functions(&self, wrapped_actor: WrappedActor) -> Result<()> {
         info!("Setting up filesystem host functions");
 
-        let mut actor = self.wrapped_actor.inner().lock().unwrap();
+        let mut actor = wrapped_actor.inner().lock().unwrap();
         let mut interface = actor
             .linker
             .instance("ntwk:theater/filesystem")
@@ -317,7 +311,7 @@ impl FileSystemHost {
         Ok(())
     }
 
-    pub async fn add_exports(&self) -> Result<()> {
+    pub async fn add_exports(&self, _wrapped_actor: WrappedActor) -> Result<()> {
         info!("No exports needed for filesystem");
         Ok(())
     }

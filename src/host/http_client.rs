@@ -16,7 +16,6 @@ use tracing::{info, error};
 #[derive(Clone)]
 pub struct HttpClientHost {
     actor_handle: ActorHandle,
-    wrapped_actor: WrappedActor,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, ComponentType, Lift, Lower)]
@@ -26,7 +25,6 @@ pub struct HttpRequest {
     uri: String,
     headers: Vec<(String, String)>,
     body: Option<Vec<u8>>,
-    request_id: String,  // Added for tracking requests
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, ComponentType, Lift, Lower)]
@@ -35,7 +33,6 @@ pub struct HttpResponse {
     status: u16,
     headers: Vec<(String, String)>,
     body: Option<Vec<u8>>,
-    request_id: String,  // Added to match responses with requests
 }
 
 #[derive(Error, Debug)]
@@ -57,13 +54,13 @@ pub enum HttpClientError {
 }
 
 impl HttpClientHost {
-    pub fn new(_config: HttpClientHandlerConfig, actor_handle: ActorHandle, wrapped_actor: WrappedActor) -> Self {
-        Self { actor_handle, wrapped_actor }
+    pub fn new(_config: HttpClientHandlerConfig, actor_handle: ActorHandle) -> Self {
+        Self { actor_handle}
     }
 
-    pub async fn setup_host_functions(&self) -> Result<()> {
+    pub async fn setup_host_functions(&self, wrapped_actor: WrappedActor) -> Result<()> {
         info!("Setting up http client host functions");
-        let mut actor = self.wrapped_actor.inner().lock().unwrap();
+        let mut actor = wrapped_actor.inner().lock().unwrap();
 
  let mut interface = actor
             .linker
@@ -119,7 +116,6 @@ impl HttpClientHost {
                                 status,
                                 headers,
                                 body,
-                                request_id: req_clone.request_id,
                             };
                             
                             // Record the response
@@ -139,7 +135,7 @@ impl HttpClientHost {
         Ok(())
     }
 
-    pub async fn add_exports(&self) -> Result<()> {
+    pub async fn add_exports(&self, _wrapped_actor: WrappedActor) -> Result<()> {
         Ok(())
     }
 
@@ -186,7 +182,6 @@ impl HttpClientHost {
                 })
                 .collect(),
             body: response.bytes().await.ok().map(|b| b.to_vec()),
-            request_id: request.request_id,
         };
 
         Ok(response)

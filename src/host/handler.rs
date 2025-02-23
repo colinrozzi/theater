@@ -1,3 +1,4 @@
+use crate::actor_runtime::WrappedActor;
 use crate::host::filesystem::FileSystemHost;
 use crate::host::http_client::HttpClientHost;
 use crate::host::http_server::HttpServerHost;
@@ -30,67 +31,67 @@ impl Handler {
         }
     }
 
-    pub async fn setup_host_functions(&self) -> Result<()> {
+    pub async fn setup_host_functions(&self, wrapped_actor: WrappedActor) -> Result<()> {
         match self {
             Handler::MessageServer(h) => Ok(h
-                .setup_host_functions()
+                .setup_host_functions(wrapped_actor)
                 .await
                 .expect("Error setting up message server host functions")),
             Handler::HttpServer(h) => Ok(h
-                .setup_host_functions()
+                .setup_host_functions(wrapped_actor)
                 .await
                 .expect("Error setting up http server host functions")),
             Handler::FileSystem(h) => Ok(h
-                .setup_host_functions()
+                .setup_host_functions(wrapped_actor)
                 .await
                 .expect("Error setting up filesystem host functions")),
             Handler::HttpClient(h) => Ok(h
-                .setup_host_functions()
+                .setup_host_functions(wrapped_actor)
                 .await
                 .expect("Error setting up http client host functions")),
             Handler::Runtime(h) => Ok(h
-                .setup_host_functions()
+                .setup_host_functions(wrapped_actor)
                 .await
                 .expect("Error setting up runtime host functions")),
             Handler::WebSocketServer(h) => Ok(h
-                .setup_host_functions()
+                .setup_host_functions(wrapped_actor)
                 .await
                 .expect("Error setting up websocket server host functions")),
             Handler::Supervisor(h) => Ok(h
-                .setup_host_functions()
+                .setup_host_functions(wrapped_actor)
                 .await
                 .expect("Error setting up supervisor host functions")),
         }
     }
 
-    pub async fn add_exports(&self) -> Result<()> {
+    pub async fn add_exports(&self, wrapped_actor: WrappedActor) -> Result<()> {
         match self {
             Handler::MessageServer(handler) => Ok(handler
-                .add_exports()
+                .add_exports(wrapped_actor)
                 .await
                 .expect("Error adding exports to message server")),
             Handler::HttpServer(handler) => Ok(handler
-                .add_exports()
+                .add_exports(wrapped_actor)
                 .await
                 .expect("Error adding exports to http server")),
             Handler::FileSystem(handler) => Ok(handler
-                .add_exports()
+                .add_exports(wrapped_actor)
                 .await
                 .expect("Error adding exports to filesystem")),
             Handler::HttpClient(handler) => Ok(handler
-                .add_exports()
+                .add_exports(wrapped_actor)
                 .await
                 .expect("Error adding exports to http client")),
             Handler::Runtime(handler) => Ok(handler
-                .add_exports()
+                .add_exports(wrapped_actor)
                 .await
                 .expect("Error adding exports to runtime")),
             Handler::WebSocketServer(handler) => Ok(handler
-                .add_exports()
+                .add_exports(wrapped_actor)
                 .await
                 .expect("Error adding exports to websocket server")),
             Handler::Supervisor(handler) => Ok(handler
-                .add_exports()
+                .add_exports(wrapped_actor)
                 .await
                 .expect("Error adding exports to supervisor")),
         }
@@ -108,4 +109,3 @@ impl Handler {
         }
     }
 }
-

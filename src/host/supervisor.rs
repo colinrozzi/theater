@@ -19,7 +19,6 @@ use tracing::{error, info};
 pub struct SupervisorHost {
     #[allow(dead_code)]
     actor_handle: ActorHandle,
-    wrapped_actor: WrappedActor,
 }
 
 #[derive(Error, Debug)]
@@ -45,18 +44,16 @@ impl SupervisorHost {
     pub fn new(
         _config: SupervisorHostConfig,
         actor_handle: ActorHandle,
-        wrapped_actor: WrappedActor,
     ) -> Self {
         Self {
             actor_handle,
-            wrapped_actor,
         }
     }
 
-    pub async fn setup_host_functions(&self) -> Result<()> {
+    pub async fn setup_host_functions(&self, wrapped_actor: WrappedActor) -> Result<()> {
         info!("Setting up host functions for supervisor");
 
-        let mut actor = self.wrapped_actor.inner().lock().unwrap();
+        let mut actor = wrapped_actor.inner().lock().unwrap();
         let mut interface = actor.linker.instance("ntwk:theater/supervisor").expect("Could not instantiate ntwk:theater/supervisor");
 
                 // spawn-child implementation
@@ -300,7 +297,7 @@ impl SupervisorHost {
         Ok(())
     }
 
-    pub async fn add_exports(&self) -> Result<()> {
+    pub async fn add_exports(&self, _wrapped_actor: WrappedActor) -> Result<()> {
         info!("Adding exports for supervisor");
         Ok(())
     }

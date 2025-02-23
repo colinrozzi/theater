@@ -58,8 +58,8 @@ impl WrappedActor {
         &self.actor
     }
 
-    pub fn take_actor(&self) -> Option<WasmActor> {
-        Arc::try_unwrap(self.actor.clone())
+    pub fn take_actor(self) -> Option<WasmActor> {
+        Arc::try_unwrap(self.actor)
             .ok()
             .and_then(|mutex| mutex.into_inner().ok())
     }
@@ -111,7 +111,6 @@ impl ActorRuntime {
             actor_mailbox,
             theater_tx.clone(),
             actor_handle.clone(),
-            wrapped_actor.clone(),
         )));
 
         for handler_config in &config.handlers {
@@ -119,38 +118,24 @@ impl ActorRuntime {
                 HandlerConfig::MessageServer(_) => {
                     panic!("MessageServer handler is already added")
                 }
-                HandlerConfig::HttpServer(config) => Handler::HttpServer(HttpServerHost::new(
-                    config.clone(),
-                    actor_handle.clone(),
-                    wrapped_actor.clone(),
-                )),
-                HandlerConfig::FileSystem(config) => Handler::FileSystem(FileSystemHost::new(
-                    config.clone(),
-                    actor_handle.clone(),
-                    wrapped_actor.clone(),
-                )),
-                HandlerConfig::HttpClient(config) => Handler::HttpClient(HttpClientHost::new(
-                    config.clone(),
-                    actor_handle.clone(),
-                    wrapped_actor.clone(),
-                )),
-                HandlerConfig::Runtime(config) => Handler::Runtime(RuntimeHost::new(
-                    config.clone(),
-                    actor_handle.clone(),
-                    wrapped_actor.clone(),
-                )),
-                HandlerConfig::WebSocketServer(config) => {
-                    Handler::WebSocketServer(WebSocketServerHost::new(
-                        config.clone(),
-                        actor_handle.clone(),
-                        wrapped_actor.clone(),
-                    ))
+                HandlerConfig::HttpServer(config) => {
+                    Handler::HttpServer(HttpServerHost::new(config.clone(), actor_handle.clone()))
                 }
-                HandlerConfig::Supervisor(config) => Handler::Supervisor(SupervisorHost::new(
-                    config.clone(),
-                    actor_handle.clone(),
-                    wrapped_actor.clone(),
-                )),
+                HandlerConfig::FileSystem(config) => {
+                    Handler::FileSystem(FileSystemHost::new(config.clone(), actor_handle.clone()))
+                }
+                HandlerConfig::HttpClient(config) => {
+                    Handler::HttpClient(HttpClientHost::new(config.clone(), actor_handle.clone()))
+                }
+                HandlerConfig::Runtime(config) => {
+                    Handler::Runtime(RuntimeHost::new(config.clone(), actor_handle.clone()))
+                }
+                HandlerConfig::WebSocketServer(config) => Handler::WebSocketServer(
+                    WebSocketServerHost::new(config.clone(), actor_handle.clone()),
+                ),
+                HandlerConfig::Supervisor(config) => {
+                    Handler::Supervisor(SupervisorHost::new(config.clone(), actor_handle.clone()))
+                }
             };
             handlers.push(handler);
         }
@@ -186,17 +171,23 @@ impl ActorRuntime {
                     "Setting up host functions for handler: {:?}",
                     handler.name()
                 );
-                handler.setup_host_functions().await.expect(
-                    format!(
-                        "Failed to setup host functions for handler: {:?}",
-                        handler.name()
-                    )
-                    .as_str(),
-                );
+                handler
+                    .setup_host_functions(runtime_data.wrapped_actor.clone())
+                    .await
+                    .expect(
+                        format!(
+                            "Failed to setup host functions for handler: {:?}",
+                            handler.name()
+                        )
+                        .as_str(),
+                    );
                 info!("Adding exports for handler: {:?}", handler.name());
-                handler.add_exports().await.expect(
-                    format!("Failed to add exports for handler: {:?}", handler.name()).as_str(),
-                );
+                handler
+                    .add_exports(runtime_data.wrapped_actor.clone())
+                    .await
+                    .expect(
+                        format!("Failed to add exports for handler: {:?}", handler.name()).as_str(),
+                    );
             }
         }
 

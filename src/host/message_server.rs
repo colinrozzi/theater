@@ -17,7 +17,6 @@ pub struct MessageServerHost {
     mailbox_rx: Receiver<ActorMessage>,
     theater_tx: Sender<TheaterCommand>,
     actor_handle: ActorHandle,
-    wrapped_actor: WrappedActor,
 }
 
 #[derive(Error, Debug)]
@@ -43,20 +42,18 @@ impl MessageServerHost {
         mailbox_rx: Receiver<ActorMessage>,
         theater_tx: Sender<TheaterCommand>,
         actor_handle: ActorHandle,
-        wrapped_actor: WrappedActor,
     ) -> Self {
         Self {
             mailbox_rx,
             theater_tx,
             actor_handle,
-            wrapped_actor,
         }
     }
 
-    pub async fn setup_host_functions(&self) -> Result<()> {
+    pub async fn setup_host_functions(&self, wrapped_actor: WrappedActor) -> Result<()> {
         info!("Setting up message server host functions");
 
-        let mut actor = self.wrapped_actor.inner().lock().unwrap();
+        let mut actor = wrapped_actor.inner().lock().unwrap();
         let mut interface = actor
             .linker
             .instance("ntwk:theater/message-server-host")
@@ -168,9 +165,9 @@ impl MessageServerHost {
         Ok(())
     }
 
-    pub async fn add_exports(&self) -> Result<()> {
+    pub async fn add_exports(&self, wrapped_actor: WrappedActor) -> Result<()> {
         info!("Adding exports to message-server");
-        let mut actor = self.wrapped_actor.inner().lock().unwrap();
+        let mut actor = wrapped_actor.inner().lock().unwrap();
         let handle_send = actor
             .find_export("ntwk:theater/message-server-client", "handle-send")
             .expect("Failed to find export ntwk:theater/message-server-client/handle-send");
@@ -220,4 +217,3 @@ impl MessageServerHost {
         Ok(())
     }
 }
-
