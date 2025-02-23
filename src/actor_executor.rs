@@ -7,7 +7,7 @@ use tracing::{debug, error, info};
 use wasmtime::component::Val;
 
 use crate::metrics::{ActorMetrics, MetricsCollector};
-use crate::wasm::WasmActor;
+use crate::wasm::ActorInstance;
 use crate::ChainEvent;
 
 pub const DEFAULT_OPERATION_TIMEOUT: Duration = Duration::from_secs(30);
@@ -39,8 +39,8 @@ pub enum ActorOperation {
     // Handler function calls are type-safe
     CallFunction {
         name: String,
-        params: Vec<Val>,
-        response_tx: oneshot::Sender<Result<Vec<Val>, ActorError>>,
+        params: Vec<u8>,
+        response_tx: oneshot::Sender<Result<Vec<u8>, ActorError>>,
     },
     GetMetrics {
         response_tx: oneshot::Sender<Result<ActorMetrics, ActorError>>,
@@ -57,16 +57,19 @@ pub enum ActorOperation {
 }
 
 pub struct ActorExecutor {
-    actor: WasmActor,
+    actor_instance: ActorInstance,
     operation_rx: mpsc::Receiver<ActorOperation>,
     metrics: MetricsCollector,
     shutdown_initiated: bool,
 }
 
 impl ActorExecutor {
-    pub fn new(actor: WasmActor, operation_rx: mpsc::Receiver<ActorOperation>) -> Self {
+    pub fn new(
+        actor_instance: ActorInstance,
+        operation_rx: mpsc::Receiver<ActorOperation>,
+    ) -> Self {
         Self {
-            actor,
+            actor_instance,
             operation_rx,
             metrics: MetricsCollector::new(),
             shutdown_initiated: false,
@@ -74,23 +77,18 @@ impl ActorExecutor {
     }
 
     // Execute a type-safe function call
-    async fn execute_call(
-        &mut self,
-        name: String,
-        params: Vec<Val>,
-    ) -> Result<Vec<Val>, ActorError> {
+    async fn execute_call(&mut self, name: String, params: Vec<u8>) -> Result<Vec<u8>, ActorError> {
         // Validate the function exists
-        if !self.actor.has_function(&name) {
+        if !self.actor_instance.has_function(&name) {
             return Err(ActorError::FunctionNotFound(name));
         }
 
         let start = Instant::now();
 
-        let mut results = [Val::S32(0)];
         // Execute the call
-        let _success = self
-            .actor
-            .call_func_raw(&name, params.as_slice(), &mut results)
+        let results = self
+            .actor_instance
+            .call_function(&name, params)
             .await
             .map_err(ActorError::Internal)?;
 
@@ -98,7 +96,7 @@ impl ActorExecutor {
         let duration = start.elapsed();
         self.metrics.record_operation(duration, true).await;
 
-        Ok(results.to_vec())
+        Ok(results)
     }
 
     async fn update_resource_metrics(&self) {

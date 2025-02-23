@@ -3,6 +3,7 @@ use crate::actor_handle::ActorHandle;
 use crate::actor_runtime::WrappedActor;
 use crate::config::RuntimeHostConfig;
 use crate::host::host_wrapper::HostFunctionBoundary;
+use crate::wasm::ActorComponent;
 use crate::wasm::Event;
 use crate::ActorStore;
 use anyhow::Result;
@@ -67,11 +68,10 @@ impl RuntimeHost {
         Self { actor_handle }
     }
 
-    pub async fn setup_host_functions(&self, wrapped_actor: WrappedActor) -> Result<()> {
+    pub async fn setup_host_functions(&self, mut actor_component: ActorComponent) -> Result<()> {
         info!("Setting up runtime host functions");
-        let mut actor = wrapped_actor.inner().lock().unwrap();
-        let name = actor.name.clone();
-        let mut interface = actor
+        let name = actor_component.name.clone();
+        let mut interface = actor_component
             .linker
             .instance("ntwk:theater/runtime")
             .expect("Could not instantiate ntwk:theater/runtime");
@@ -117,15 +117,9 @@ impl RuntimeHost {
         Ok(())
     }
 
-    pub async fn add_exports(&self, wrapped_actor: WrappedActor) -> Result<()> {
+    pub async fn add_exports(&self, mut actor_component: ActorComponent) -> Result<()> {
         info!("Adding exports for runtime host");
-
-        let mut actor = wrapped_actor.inner().lock().unwrap();
-        let init_export = actor
-            .find_export("ntwk:theater/actor", "init")
-            .expect("Could not get export for init");
-        actor.exports.insert("init".to_string(), init_export);
-
+        actor_component.add_export("ntwk:theater/actor", "init");
         Ok(())
     }
 

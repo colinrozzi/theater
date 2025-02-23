@@ -1,8 +1,9 @@
 use crate::actor_executor::ActorError;
 use crate::actor_handle::ActorHandle;
-use crate::actor_runtime::WrappedActor;
 use crate::config::FileSystemHandlerConfig;
 use crate::host::host_wrapper::HostFunctionBoundary;
+use crate::wasm::ActorComponent;
+use crate::wasm::ActorInstance;
 use crate::ActorStore;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
@@ -64,11 +65,10 @@ impl FileSystemHost {
         }
     }
 
-    pub async fn setup_host_functions(&self, wrapped_actor: WrappedActor) -> Result<()> {
+    pub async fn setup_host_functions(&self, mut actor_component: ActorComponent) -> Result<()> {
         info!("Setting up filesystem host functions");
 
-        let mut actor = wrapped_actor.inner().lock().unwrap();
-        let mut interface = actor
+        let mut interface = actor_component
             .linker
             .instance("ntwk:theater/filesystem")
             .expect("could not instantiate ntwk:theater/filesystem");
@@ -310,8 +310,13 @@ impl FileSystemHost {
         Ok(())
     }
 
-    pub async fn add_exports(&self, _wrapped_actor: WrappedActor) -> Result<()> {
+    pub async fn add_exports(&self, _actor_component: ActorComponent) -> Result<()> {
         info!("No exports needed for filesystem");
+        Ok(())
+    }
+
+    pub async fn add_funcs(&self, _actor_instance: ActorInstance) -> Result<()> {
+        info!("No functions needed for filesystem");
         Ok(())
     }
 

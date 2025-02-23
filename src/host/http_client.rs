@@ -1,10 +1,10 @@
 use crate::actor_handle::ActorHandle;
 use wasmtime::component::{Lift, Lower, ComponentType};
 use crate::actor_executor::ActorError;
-use crate::actor_runtime::WrappedActor;
 use crate::config::HttpClientHandlerConfig;
 use crate::host::host_wrapper::HostFunctionBoundary;
 use crate::store::ActorStore;
+use crate::wasm::{ActorComponent, ActorInstance};
 use std::future::Future;
 use anyhow::Result;
 use reqwest::Method;
@@ -57,11 +57,10 @@ impl HttpClientHost {
         Self { actor_handle}
     }
 
-    pub async fn setup_host_functions(&self, wrapped_actor: WrappedActor) -> Result<()> {
+    pub async fn setup_host_functions(&self, mut actor_component: ActorComponent) -> Result<()> {
         info!("Setting up http client host functions");
-        let mut actor = wrapped_actor.inner().lock().unwrap();
 
- let mut interface = actor
+ let mut interface = actor_component
             .linker
             .instance("ntwk:theater/http-client")
             .expect("could not instantiate ntwk:theater/http-client");
@@ -134,7 +133,11 @@ impl HttpClientHost {
         Ok(())
     }
 
-    pub async fn add_exports(&self, _wrapped_actor: WrappedActor) -> Result<()> {
+    pub async fn add_exports(&self, _actor_component: ActorComponent) -> Result<()> {
+        Ok(())
+    }
+
+    pub async fn add_functions(&self, _actor_instance: ActorInstance) -> Result<()> {
         Ok(())
     }
 

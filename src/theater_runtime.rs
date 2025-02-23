@@ -7,9 +7,9 @@ use crate::Result;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::path::PathBuf;
-use tokio::sync::{mpsc, oneshot};
 use tokio::sync::mpsc::Receiver;
 use tokio::sync::mpsc::Sender;
+use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
 use tracing::{debug, error, info, warn};
 
@@ -54,7 +54,10 @@ impl TheaterRuntime {
         while let Some(cmd) = self.theater_rx.recv().await {
             debug!("Runtime received command: {:?}", cmd.to_log());
             match cmd {
-                TheaterCommand::ListChildren { parent_id, response_tx } => {
+                TheaterCommand::ListChildren {
+                    parent_id,
+                    response_tx,
+                } => {
                     debug!("Getting children for actor: {:?}", parent_id);
                     if let Some(proc) = self.actors.get(&parent_id) {
                         let children = proc.children.iter().cloned().collect();
@@ -63,7 +66,10 @@ impl TheaterRuntime {
                         let _ = response_tx.send(Vec::new());
                     }
                 }
-                TheaterCommand::RestartActor { actor_id, response_tx } => {
+                TheaterCommand::RestartActor {
+                    actor_id,
+                    response_tx,
+                } => {
                     debug!("Restarting actor: {:?}", actor_id);
                     match self.restart_actor(actor_id).await {
                         Ok(_) => {
@@ -74,7 +80,10 @@ impl TheaterRuntime {
                         }
                     }
                 }
-                TheaterCommand::GetChildState { child_id, response_tx } => {
+                TheaterCommand::GetChildState {
+                    child_id,
+                    response_tx,
+                } => {
                     debug!("Getting state for actor: {:?}", child_id);
                     match self.get_actor_state(child_id).await {
                         Ok(state) => {
@@ -85,7 +94,10 @@ impl TheaterRuntime {
                         }
                     }
                 }
-                TheaterCommand::GetChildEvents { child_id, response_tx } => {
+                TheaterCommand::GetChildEvents {
+                    child_id,
+                    response_tx,
+                } => {
                     debug!("Getting events for actor: {:?}", child_id);
                     match self.get_actor_events(child_id).await {
                         Ok(events) => {
@@ -222,15 +234,14 @@ impl TheaterRuntime {
 
         let manifest_path_clone = manifest_path.clone();
         let actor_runtime_process = tokio::spawn(async move {
+            let actor_id = TheaterId::generate();
             debug!("Initializing actor runtime");
-            let components = ActorRuntime::from_file(manifest_path_clone, theater_tx, mailbox_rx)
-                .await
-                .unwrap();
-            let actor_id = components.id.clone();
-            debug!("Actor components initialized with ID: {:?}", actor_id);
-            response_tx.send(actor_id).unwrap();
             debug!("Starting actor runtime");
-            ActorRuntime::start(components).await.unwrap()
+            response_tx.send(actor_id).unwrap();
+            let components =
+                ActorRuntime::start(actor_id, manifest_path_clone, theater_tx, mailbox_rx)
+                    .await
+                    .unwrap();
         });
 
         match response_rx.await {
@@ -322,11 +333,11 @@ impl TheaterRuntime {
 
     async fn restart_actor(&mut self, actor_id: TheaterId) -> Result<()> {
         debug!("Starting actor restart process for: {:?}", actor_id);
-        
+
         // Get the actor's info before stopping it
         let (manifest_path, parent_id) = if let Some(proc) = self.actors.get(&actor_id) {
             let manifest = proc.manifest_path.clone();
-            
+
             // Find the parent ID
             let parent_id = self.actors.iter().find_map(|(id, proc)| {
                 if proc.children.contains(&actor_id) {
@@ -335,7 +346,7 @@ impl TheaterRuntime {
                     None
                 }
             });
-            
+
             (manifest, parent_id)
         } else {
             return Err(anyhow::anyhow!("Actor not found"));
@@ -353,11 +364,14 @@ impl TheaterRuntime {
     async fn get_actor_state(&self, actor_id: TheaterId) -> Result<Vec<u8>> {
         if let Some(proc) = self.actors.get(&actor_id) {
             // Send a message to get the actor's state
-            let (tx, rx): (oneshot::Sender<Vec<u8>>, oneshot::Receiver<Vec<u8>>) = oneshot::channel();
-            proc.mailbox_tx.send(ActorMessage::Request(ActorRequest {
-                response_tx: tx,
-                data: Vec::new(), // Empty data for state request
-            })).await?;
+            let (tx, rx): (oneshot::Sender<Vec<u8>>, oneshot::Receiver<Vec<u8>>) =
+                oneshot::channel();
+            proc.mailbox_tx
+                .send(ActorMessage::Request(ActorRequest {
+                    response_tx: tx,
+                    data: Vec::new(), // Empty data for state request
+                }))
+                .await?;
 
             match rx.await {
                 Ok(state) => Ok(state),
@@ -371,17 +385,18 @@ impl TheaterRuntime {
     async fn get_actor_events(&self, actor_id: TheaterId) -> Result<Vec<ChainEvent>> {
         if let Some(proc) = self.actors.get(&actor_id) {
             // Send a message to get the actor's event history
-            let (tx, rx): (oneshot::Sender<Vec<u8>>, oneshot::Receiver<Vec<u8>>) = oneshot::channel();
-            proc.mailbox_tx.send(ActorMessage::Request(ActorRequest {
-                response_tx: tx,
-                data: Vec::new(), // Empty data for events request
-            })).await?;
+            let (tx, rx): (oneshot::Sender<Vec<u8>>, oneshot::Receiver<Vec<u8>>) =
+                oneshot::channel();
+            proc.mailbox_tx
+                .send(ActorMessage::Request(ActorRequest {
+                    response_tx: tx,
+                    data: Vec::new(), // Empty data for events request
+                }))
+                .await?;
 
             match rx.await {
-                Ok(events_data) => {
-                    serde_json::from_slice(&events_data)
-                        .map_err(|e| anyhow::anyhow!("Failed to deserialize events: {}", e))
-                }
+                Ok(events_data) => serde_json::from_slice(&events_data)
+                    .map_err(|e| anyhow::anyhow!("Failed to deserialize events: {}", e)),
                 Err(e) => Err(anyhow::anyhow!("Failed to receive events: {}", e)),
             }
         } else {
@@ -389,4 +404,3 @@ impl TheaterRuntime {
         }
     }
 }
-

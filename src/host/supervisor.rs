@@ -1,4 +1,5 @@
 use crate::actor_executor::ActorError;
+use crate::wasm::ActorComponent;
 use crate::host::host_wrapper::HostFunctionBoundary;
 use crate::messages::TheaterCommand;
 use crate::store::ActorStore;
@@ -50,11 +51,10 @@ impl SupervisorHost {
         }
     }
 
-    pub async fn setup_host_functions(&self, wrapped_actor: WrappedActor) -> Result<()> {
+    pub async fn setup_host_functions(&self, mut actor_component: ActorComponent) -> Result<()> {
         info!("Setting up host functions for supervisor");
 
-        let mut actor = wrapped_actor.inner().lock().unwrap();
-        let mut interface = actor.linker.instance("ntwk:theater/supervisor").expect("Could not instantiate ntwk:theater/supervisor");
+        let mut interface = actor_component.linker.instance("ntwk:theater/supervisor").expect("Could not instantiate ntwk:theater/supervisor");
 
                 // spawn-child implementation
         let boundary = HostFunctionBoundary::new("ntwk:theater/supervisor", "spawn");
@@ -297,7 +297,7 @@ impl SupervisorHost {
         Ok(())
     }
 
-    pub async fn add_exports(&self, _wrapped_actor: WrappedActor) -> Result<()> {
+    pub async fn add_exports(&self, _actor_component: ActorComponent) -> Result<()> {
         info!("Adding exports for supervisor");
         Ok(())
     }

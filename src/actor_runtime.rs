@@ -1,5 +1,4 @@
 use crate::actor_executor::{ActorExecutor, ActorOperation};
-use crate::actor_handle::ActorHandle;
 use crate::config::{HandlerConfig, ManifestConfig};
 use crate::host::filesystem::FileSystemHost;
 use crate::host::handler::Handler;
@@ -12,9 +11,8 @@ use crate::host::websocket_server::WebSocketServerHost;
 use crate::id::TheaterId;
 use crate::messages::{ActorMessage, TheaterCommand};
 use crate::store::ActorStore;
-use crate::wasm::WasmActor;
+use crate::wasm::{ActorComponent, WasmActor};
 use crate::Result;
-use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc::{self, Receiver, Sender};
 use tokio::time::timeout;
@@ -66,36 +64,93 @@ impl WrappedActor {
 }
 
 impl ActorRuntime {
-    pub async fn from_file(
-        manifest_path: PathBuf,
-        theater_tx: Sender<TheaterCommand>,
-        actor_mailbox: Receiver<ActorMessage>,
-    ) -> Result<RuntimeComponents> {
-        // Load manifest config
-        let config = ManifestConfig::from_file(&manifest_path)?;
-        let runtime = Self::new(&config, theater_tx, actor_mailbox).await?;
-        Ok(runtime)
-    }
-
-    pub async fn new(
+    pub async fn start(
+        id: TheaterId,
         config: &ManifestConfig,
         theater_tx: Sender<TheaterCommand>,
         actor_mailbox: Receiver<ActorMessage>,
-    ) -> Result<RuntimeComponents> {
-        Self::init_components(config, theater_tx, actor_mailbox).await
-    }
+    ) -> Result<Self> {
+        let mut handlers = Vec::new();
 
-    async fn init_components(
-        config: &ManifestConfig,
-        theater_tx: Sender<TheaterCommand>,
-        actor_mailbox: Receiver<ActorMessage>,
-    ) -> Result<RuntimeComponents> {
-        let id = TheaterId::generate();
+        handlers.push(Handler::MessageServer(MessageServerHost::new(
+            actor_mailbox,
+            theater_tx.clone(),
+        )));
 
-        let span = tracing::info_span!("actor", actor_id = %id, actor_name = %config.name);
-        let _enter = span.enter();
+        for handler_config in &config.handlers {
+            let handler = match handler_config {
+                HandlerConfig::MessageServer(_) => {
+                    panic!("MessageServer handler is already added")
+                }
+                HandlerConfig::HttpServer(config) => {
+                    Handler::HttpServer(HttpServerHost::new(config.clone()))
+                }
+                HandlerConfig::FileSystem(config) => {
+                    Handler::FileSystem(FileSystemHost::new(config.clone()))
+                }
+                HandlerConfig::HttpClient(config) => {
+                    Handler::HttpClient(HttpClientHost::new(config.clone()))
+                }
+                HandlerConfig::Runtime(config) => {
+                    Handler::Runtime(RuntimeHost::new(config.clone()))
+                }
+                HandlerConfig::WebSocketServer(config) => {
+                    Handler::WebSocketServer(WebSocketServerHost::new(config.clone()))
+                }
+                HandlerConfig::Supervisor(config) => {
+                    Handler::Supervisor(SupervisorHost::new(config.clone()))
+                }
+            };
+            handlers.push(handler);
+        }
 
         let store = ActorStore::new(id.clone(), theater_tx.clone());
+        let actor_component = ActorComponent::new(config, store.clone()).await.expect(
+            format!(
+                "Failed to create actor component for actor: {:?}",
+                config.name
+            )
+            .as_str(),
+        );
+
+        // Add the host functions to the linker of the actor
+        {
+            for handler in &handlers {
+                info!(
+                    "Setting up host functions for handler: {:?}",
+                    handler.name()
+                );
+                handler.setup_host_functions(actor_component).await.expect(
+                    format!(
+                        "Failed to setup host functions for handler: {:?}",
+                        handler.name()
+                    )
+                    .as_str(),
+                );
+                handler.add_exports(actor_component).await.expect(
+                    format!("Failed to add exports for handler: {:?}", handler.name()).as_str(),
+                );
+            }
+        }
+
+        let actor_instance = actor_component
+            .instantiate()
+            .await
+            .expect("Failed to instantiate actor");
+
+        {
+            for handler in &handlers {
+                info!("Creating functions for handler: {:?}", handler.name());
+                handler.add_functions(actor_instance).await.expect(
+                    format!(
+                        "Failed to create functions for handler: {:?}",
+                        handler.name()
+                    )
+                    .as_str(),
+                );
+            }
+        }
+
         let actor = WasmActor::new(config, store, &theater_tx).await?;
         let wrapped_actor = WrappedActor::new(actor);
 
@@ -105,91 +160,21 @@ impl ActorRuntime {
         // Create actor handle
         let actor_handle = ActorHandle::new(operation_tx);
 
-        let mut handlers = Vec::new();
-
-        handlers.push(Handler::MessageServer(MessageServerHost::new(
-            actor_mailbox,
-            theater_tx.clone(),
-            actor_handle.clone(),
-        )));
-
-        for handler_config in &config.handlers {
-            let handler = match handler_config {
-                HandlerConfig::MessageServer(_) => {
-                    panic!("MessageServer handler is already added")
-                }
-                HandlerConfig::HttpServer(config) => {
-                    Handler::HttpServer(HttpServerHost::new(config.clone(), actor_handle.clone()))
-                }
-                HandlerConfig::FileSystem(config) => {
-                    Handler::FileSystem(FileSystemHost::new(config.clone(), actor_handle.clone()))
-                }
-                HandlerConfig::HttpClient(config) => {
-                    Handler::HttpClient(HttpClientHost::new(config.clone(), actor_handle.clone()))
-                }
-                HandlerConfig::Runtime(config) => {
-                    Handler::Runtime(RuntimeHost::new(config.clone(), actor_handle.clone()))
-                }
-                HandlerConfig::WebSocketServer(config) => Handler::WebSocketServer(
-                    WebSocketServerHost::new(config.clone(), actor_handle.clone()),
-                ),
-                HandlerConfig::Supervisor(config) => {
-                    Handler::Supervisor(SupervisorHost::new(config.clone(), actor_handle.clone()))
-                }
-            };
-            handlers.push(handler);
-        }
-
         let runtime_data = Some(RuntimeData {
             wrapped_actor,
             operation_rx,
         });
 
-        Ok(RuntimeComponents {
+        let components = RuntimeComponents {
             id,
             name: config.name.clone(),
             actor_handle,
             handlers,
             runtime_data,
-        })
-    }
-
-    // Fixing the executor mutability issue
-    pub async fn start(mut components: RuntimeComponents) -> Result<Self> {
-        // Take the runtime data, which includes actor and operation_rx
-        let runtime_data = components
-            .runtime_data
-            .take()
-            .expect("Runtime data should be available");
+        };
 
         // Clone handle for the runtime
         let actor_handle = components.actor_handle.clone();
-
-        {
-            for handler in &components.handlers {
-                info!(
-                    "Setting up host functions for handler: {:?}",
-                    handler.name()
-                );
-                handler
-                    .setup_host_functions(runtime_data.wrapped_actor.clone())
-                    .await
-                    .expect(
-                        format!(
-                            "Failed to setup host functions for handler: {:?}",
-                            handler.name()
-                        )
-                        .as_str(),
-                    );
-                info!("Adding exports for handler: {:?}", handler.name());
-                handler
-                    .add_exports(runtime_data.wrapped_actor.clone())
-                    .await
-                    .expect(
-                        format!("Failed to add exports for handler: {:?}", handler.name()).as_str(),
-                    );
-            }
-        }
 
         let actor = runtime_data
             .wrapped_actor

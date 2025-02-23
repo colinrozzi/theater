@@ -2,6 +2,7 @@ use crate::actor_executor::ActorError;
 use crate::actor_handle::ActorHandle;
 use crate::actor_runtime::WrappedActor;
 use crate::config::HttpServerHandlerConfig;
+use crate::wasm::{ActorComponent, ActorInstance};
 use anyhow::Result;
 use axum::{
     extract::State,
@@ -10,6 +11,7 @@ use axum::{
     routing::any,
     Router,
 };
+use wasmtime::component::{Lift, Lower, ComponentType};
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -22,7 +24,8 @@ pub struct HttpServerHost {
     actor_handle: ActorHandle,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, ComponentType, Lift, Lower)]
+#[component(record)]
 pub struct HttpRequest {
     method: String,
     uri: String,
@@ -30,7 +33,8 @@ pub struct HttpRequest {
     body: Option<Vec<u8>>,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, ComponentType, Lift, Lower)]
+#[component(record)]
 pub struct HttpResponse {
     status: u16,
     headers: Vec<(String, String)>,
@@ -50,28 +54,26 @@ pub enum HttpServerError {
 }
 
 impl HttpServerHost {
-    pub fn new(config: HttpServerHandlerConfig, actor_handle: ActorHandle) -> Self {
+    pub fn new(config: HttpServerHandlerConfig, ActorHandle) -> Self {
         Self {
             port: config.port,
             actor_handle,
         }
     }
 
-    pub async fn setup_host_functions(&self, _wrapped_actor: WrappedActor) -> Result<()> {
+    pub async fn setup_host_functions(&self, _actor_component: ActorComponent) -> Result<()> {
         Ok(())
     }
 
-    pub async fn add_exports(&self, wrapped_actor: WrappedActor) -> Result<()> {
+    pub async fn add_exports(&self, mut actor_component: ActorComponent) -> Result<()> {
         info!("Adding exports to http-server");
-        let mut actor = wrapped_actor.inner().lock().unwrap();
-        let handle_request_export = actor
-            .find_export("ntwk:theater/http-server", "handle-request")
-            .expect("Could not find export ntwk:theater/http-server-host.handle-request");
-        actor.exports.insert(
-            "ntwk:theater/http-server.handle-request".to_string(),
-            handle_request_export,
-        );
+        actor_component
+            .add_export("ntwk:theater/http-server", "handle-request");
         Ok(())
+    }
+
+    pub async fn add_functions(&self, mut actor_instance: ActorInstance) -> Result<()> {
+        actor_instance.register_function::<(HttpRequest,), (HttpResponse,)>("ntwk:theater/http-server.handle-request")
     }
 
     pub async fn start(&self) -> Result<()> {

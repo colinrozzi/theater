@@ -1,16 +1,19 @@
 use anyhow::Result;
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
-use serde_json::json;
 use std::collections::HashMap;
 use std::fmt::Debug;
+use std::future::Future;
+use std::pin::Pin;
 use thiserror::Error;
-use tokio::sync::mpsc::Sender;
-use wasmtime::component::Val;
-use wasmtime::component::{Component, ComponentExportIndex, ComponentType, Lift, Linker, Lower};
+use wasmtime::component::TypedFunc;
+use wasmtime::component::{
+    Component, ComponentExportIndex, ComponentNamedList, ComponentType, Instance, Lift, Linker,
+    Lower,
+};
 use wasmtime::{Engine, Store};
 
 use crate::config::ManifestConfig;
-use crate::messages::TheaterCommand;
 use crate::store::ActorStore;
 use tracing::{error, info};
 
@@ -57,25 +60,16 @@ pub struct MemoryStats {
     pub num_chain_events: usize,
 }
 
-/// WebAssembly actor implementation
-pub struct WasmActor {
+pub struct ActorComponent {
     pub name: String,
-    component: Component,
+    pub component: Component,
+    pub actor_store: ActorStore,
     pub linker: Linker<ActorStore>,
     pub exports: HashMap<String, ComponentExportIndex>,
-    pub store: Store<ActorStore>,
-    pub actor_store: ActorStore,
-    pub actor_state: ActorState,
-    theater_tx: Sender<TheaterCommand>,
-    init_data: Option<Vec<u8>>,
 }
 
-impl WasmActor {
-    pub async fn new(
-        config: &ManifestConfig,
-        actor_store: ActorStore,
-        theater_tx: &Sender<TheaterCommand>,
-    ) -> Result<Self> {
+impl ActorComponent {
+    pub async fn new(config: &ManifestConfig, actor_store: ActorStore) -> Result<Self> {
         // Load WASM component
         let engine = Engine::new(wasmtime::Config::new().async_support(true))?;
         info!(
@@ -92,100 +86,16 @@ impl WasmActor {
                 ),
             })?;
 
-        // Load initialization data
-        let init_data = config.load_init_data().map_err(|e| WasmError::WasmError {
-            context: "init data loading",
-            message: format!("Failed to load init data: {}", e),
-        })?;
-
         let component = Component::new(&engine, &wasm_bytes)?;
         let linker = Linker::new(&engine);
-        let store = Store::new(&engine, actor_store.clone());
 
-        let actor = WasmActor {
+        Ok(ActorComponent {
             name: config.name.clone(),
             component,
+            actor_store,
             linker,
             exports: HashMap::new(),
-            store,
-            actor_store,
-            actor_state: vec![],
-            theater_tx: theater_tx.clone(),
-            init_data,
-        };
-
-        Ok(actor)
-    }
-
-    pub async fn init(&mut self) -> Result<()> {
-        info!("Initializing actor with init data");
-        info!("Init data: {:?}", self.init_data);
-
-        // Record init event
-        if let Some(init_data) = self.init_data.clone() {
-            self.actor_store
-                .record_event("init".into(), init_data.clone());
-        }
-
-        match self
-            .call_func::<(Option<Json>,), (ActorState,)>("init", (self.init_data.clone(),))
-            .await
-        {
-            Ok(init_state_bytes) => {
-                self.actor_state = init_state_bytes.0.clone();
-                self.actor_store
-                    .record_event("initial_state".into(), init_state_bytes.0);
-                Ok(())
-            }
-            Err(e) => {
-                error!("Failed to initialize actor: {}", e);
-                Err(e)
-            }
-        }
-    }
-
-    pub fn get_state(&self) -> ActorState {
-        self.actor_state.clone()
-    }
-
-    pub async fn handle_event(&mut self, event: Event) -> Result<()> {
-        info!("handling event");
-        info!("Event details: {:#?}", event);
-        info!(
-            "Current actor state {}",
-            serde_json::to_string(&json!(self.actor_state)).expect("Failed to serialize state")
-        );
-
-        // Record incoming event
-        let event_data = serde_json::to_vec(&event)?;
-        let chain_event = self
-            .actor_store
-            .record_event("handle_event".into(), event_data);
-
-        let new_state = self
-            .call_func::<(Event, ActorState), (ActorState,)>(
-                "handle",
-                (event, self.actor_state.clone()),
-            )
-            .await
-            .expect("Failed to call handle function");
-
-        // Record state update
-        self.actor_store
-            .record_event("state_update".into(), new_state.0.clone());
-
-        self.actor_state = new_state.0;
-
-        // Notify theater of the new event
-        self.theater_tx
-            .send(TheaterCommand::NewEvent {
-                actor_id: self.actor_store.id.clone(),
-                event: chain_event,
-            })
-            .await
-            .expect("Failed to send new event to theater");
-
-        Ok(())
+        })
     }
 
     pub fn find_export(
@@ -208,156 +118,143 @@ impl WasmActor {
         Ok(export)
     }
 
-    pub fn has_function(&self, export_name: &str) -> bool {
-        self.exports.contains_key(export_name)
+    pub fn add_export(&mut self, interface_name: &str, export_name: &str) {
+        let export = self
+            .find_export(interface_name, export_name)
+            .expect("Failed to find export");
+        self.exports
+            .insert(format!("{}.{}", interface_name, export_name), export);
     }
 
-    pub async fn save_chain(&self) -> Result<()> {
-        let chain_path = format!("chain/{}.json", self.name);
-        self.actor_store
-            .save_chain(std::path::Path::new(&chain_path))?;
-        Ok(())
-    }
+    pub async fn instantiate(self) -> Result<ActorInstance> {
+        let engine = Engine::new(wasmtime::Config::new().async_support(true))?;
+        let mut store = Store::new(&engine, self.actor_store.clone());
 
-    pub async fn call_func<T, U>(&mut self, export_name: &str, args: T) -> Result<U>
-    where
-        T: wasmtime::component::Lower
-            + wasmtime::component::ComponentNamedList
-            + Send
-            + Sync
-            + Serialize
-            + Debug,
-        U: wasmtime::component::Lift
-            + wasmtime::component::ComponentNamedList
-            + Send
-            + Sync
-            + Serialize
-            + Debug
-            + Clone,
-    {
         let instance = self
             .linker
-            .instantiate_async(&mut self.store, &self.component)
+            .instantiate_async(&mut store, &self.component)
             .await
             .map_err(|e| WasmError::WasmError {
                 context: "instantiation",
                 message: e.to_string(),
             })?;
 
-        info!("Calling function: {}", export_name);
-        info!("Existing exports: {:?}", self.exports);
-        let index = self
-            .exports
-            .get(export_name)
-            .ok_or_else(|| WasmError::WasmError {
-                context: "function lookup",
-                message: format!("Function {} not found", export_name),
-            })?;
+        Ok(ActorInstance {
+            actor_component: self,
+            engine,
+            instance,
+            store,
+            functions: HashMap::new(),
+        })
+    }
+}
 
-        let func =
-            instance
-                .get_func(&mut self.store, *index)
-                .ok_or_else(|| WasmError::WasmError {
-                    context: "function access",
-                    message: format!("Failed to get function {}", export_name),
-                })?;
+pub struct TypedComponentFunction<P, R>
+where
+    P: ComponentType + Lower + DeserializeOwned + Send + Sync,
+    R: ComponentType + Lift + Serialize + Send + Sync,
+{
+    func: TypedFunc<(Vec<u8>, P), (Vec<u8>, R)>,
+}
 
-        info!("Function details:");
-        info!("  - Name: {}", export_name);
-        info!("  - Function details: {:?}", func);
-        info!("  - Param types raw: {:?}", func.params(&mut self.store));
-        info!("  - Result types raw: {:?}", func.results(&mut self.store));
-        info!("  - Generic type T: {}", std::any::type_name::<T>());
-        info!("  - Generic type U: {}", std::any::type_name::<U>());
+impl<P, R> TypedComponentFunction<P, R>
+where
+    P: ComponentType + Lower + DeserializeOwned + Send + Sync,
+    R: ComponentType + Lift + Serialize + Send + Sync,
+{
+    pub fn new(store: &mut Store<ActorStore>, instance: &Instance, name: &str) -> Result<Self> {
+        let func = instance.get_typed_func::<(Vec<u8>, P), (Vec<u8>, R)>(store, name)?;
+        Ok(Self { func })
+    }
+}
 
-        let typed =
-            func.typed::<T, U>(&mut self.store)
-                .map_err(|e| WasmError::GetFuncTypedError {
-                    context: "function type",
-                    func_name: export_name.to_string(),
-                    expected_params: format!("{:?}", func.params(&self.store)),
-                    expected_result: format!("{:?}", func.results(&self.store)),
-                    err: e,
-                })?;
+pub trait ComponentFunction: Send + Sync {
+    fn call_func<'a>(
+        &'a self,
+        store: &'a mut Store<ActorStore>,
+        state: Vec<u8>,
+        params: Vec<u8>,
+    ) -> Pin<Box<dyn Future<Output = Result<(Vec<u8>, Vec<u8>)>> + Send + 'a>>;
+}
 
-        let result =
-            typed
-                .call_async(&mut self.store, args)
-                .await
-                .map_err(|e| WasmError::WasmError {
-                    context: "function call",
-                    message: e.to_string(),
-                })?;
+impl<P, R> ComponentFunction for TypedComponentFunction<P, R>
+where
+    P: ComponentType
+        + Lower
+        + DeserializeOwned
+        + ComponentNamedList
+        + Send
+        + Sync
+        + Serialize
+        + Debug
+        + Clone,
+    R: ComponentType + Lift + Serialize + ComponentNamedList + Send + Sync + Serialize + Debug,
+{
+    fn call_func<'a>(
+        &'a self,
+        store: &'a mut Store<ActorStore>,
+        state: Vec<u8>,
+        params: Vec<u8>,
+    ) -> Pin<Box<dyn Future<Output = Result<(Vec<u8>, Vec<u8>)>> + Send + 'a>> {
+        Box::pin(async move {
+            let params: P = serde_json::from_slice(&params)?;
+            let (new_state, result) = self.func.call_async(store, (state, params)).await?;
+            let result_bytes = serde_json::to_vec(&result)?;
+            Ok((new_state, result_bytes))
+        })
+    }
+}
 
-        info!("Function call result: {:?}", result);
+pub struct ActorInstance {
+    pub actor_component: ActorComponent,
+    pub engine: Engine,
+    pub instance: Instance,
+    pub store: Store<ActorStore>,
+    pub functions: HashMap<String, Box<dyn ComponentFunction>>,
+}
 
-        // Record function call result
-        if let Ok(result_data) = serde_json::to_vec(&result) {
-            self.actor_store
-                .record_event(format!("function_call_{}", export_name), result_data);
-        }
-
-        info!("Function call complete");
-
-        Ok(result)
+impl ActorInstance {
+    pub fn register_function<P, R>(&mut self, name: &str) -> Result<()>
+    where
+        P: ComponentType
+            + Lower
+            + DeserializeOwned
+            + ComponentNamedList
+            + Send
+            + Sync
+            + Serialize
+            + Debug
+            + Clone
+            + 'static,
+        R: ComponentType
+            + Lift
+            + Serialize
+            + ComponentNamedList
+            + Send
+            + Sync
+            + Serialize
+            + Debug
+            + 'static,
+    {
+        let func = TypedComponentFunction::<P, R>::new(&mut self.store, &self.instance, name)?;
+        self.functions.insert(name.to_string(), Box::new(func));
+        Ok(())
     }
 
-    pub async fn call_func_raw(
+    pub fn has_function(&self, name: &str) -> bool {
+        self.functions.contains_key(name)
+    }
+
+    pub async fn call_function(
         &mut self,
-        export_name: &str,
-        params: &[Val],
-        results: &mut [Val],
-    ) -> Result<()> {
-        let instance = self
-            .linker
-            .instantiate_async(&mut self.store, &self.component)
-            .await
-            .expect("Failed to instantiate actor");
-
-        let index = self
-            .exports
-            .get(export_name)
-            .expect("Function not found in exports");
-
-        let func = instance
-            .get_func(&mut self.store, *index)
-            .expect("Failed to get function");
-
-        func.call_async(&mut self.store, params, results).await
-    }
-
-    // New methods for memory tracking
-    pub fn get_memory_size(&self) -> usize {
-        // Get the size of the actor state
-        let state_size = self.actor_state.len();
-
-        // Get the size of exports table
-        let exports_size = self.exports.len() * std::mem::size_of::<ComponentExportIndex>();
-
-        // Get the size of the store's data
-        let store_size = self
-            .actor_store
-            .get_chain()
-            .iter()
-            .map(|event| event.data.len())
-            .sum::<usize>();
-
-        // Sum up all memory usage
-        state_size + exports_size + store_size
-    }
-
-    pub fn get_memory_stats(&self) -> MemoryStats {
-        MemoryStats {
-            state_size: self.actor_state.len(),
-            exports_table_size: self.exports.len() * std::mem::size_of::<ComponentExportIndex>(),
-            store_size: self
-                .actor_store
-                .get_chain()
-                .iter()
-                .map(|event| event.data.len())
-                .sum::<usize>(),
-            num_exports: self.exports.len(),
-            num_chain_events: self.actor_store.get_chain().len(),
-        }
+        name: &str,
+        state: Vec<u8>,
+        params: Vec<u8>,
+    ) -> Result<(Vec<u8>, Vec<u8>)> {
+        let func = self
+            .functions
+            .get(name)
+            .expect("Function not found in functions table");
+        func.call_func(&mut self.store, state, params).await
     }
 }

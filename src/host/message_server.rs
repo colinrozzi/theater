@@ -4,7 +4,7 @@ use crate::actor_runtime::WrappedActor;
 use crate::host::host_wrapper::HostFunctionBoundary;
 use crate::messages::{ActorMessage, ActorRequest, ActorSend, TheaterCommand};
 use crate::store::ActorStore;
-use crate::wasm::Event;
+use crate::wasm::{ActorComponent, Event};
 use crate::TheaterId;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
@@ -50,11 +50,10 @@ impl MessageServerHost {
         }
     }
 
-    pub async fn setup_host_functions(&self, wrapped_actor: WrappedActor) -> Result<()> {
+    pub async fn setup_host_functions(&self, mut actor_component: ActorComponent) -> Result<()> {
         info!("Setting up message server host functions");
 
-        let mut actor = wrapped_actor.inner().lock().unwrap();
-        let mut interface = actor
+        let mut interface = actor_component
             .linker
             .instance("ntwk:theater/message-server-host")
             .expect("Could not instantiate ntwk:theater/message-server-host");
@@ -165,19 +164,10 @@ impl MessageServerHost {
         Ok(())
     }
 
-    pub async fn add_exports(&self, wrapped_actor: WrappedActor) -> Result<()> {
+    pub async fn add_exports(&self, mut actor_component: ActorComponent) -> Result<()> {
         info!("Adding exports to message-server");
-        let mut actor = wrapped_actor.inner().lock().unwrap();
-        let handle_send = actor
-            .find_export("ntwk:theater/message-server-client", "handle-send")
-            .expect("Failed to find export ntwk:theater/message-server-client/handle-send");
-        actor.exports.insert("handle-send".to_string(), handle_send);
-        let handle_request = actor
-            .find_export("ntwk:theater/message-server-client", "handle-request")
-            .expect("Failed to find export ntwk:theater/message-server-client/handle-request");
-        actor
-            .exports
-            .insert("handle-request".to_string(), handle_request);
+        actor_component.add_export("ntwk:theater/message-server-client", "handle-send");
+        actor_component.add_export("ntwk:theater/message-server-client", "handle-request");
         Ok(())
     }
 

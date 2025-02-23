@@ -2,6 +2,7 @@ use crate::actor_executor::ActorError;
 use crate::actor_handle::ActorHandle;
 use crate::actor_runtime::WrappedActor;
 use crate::config::WebSocketServerHandlerConfig;
+use crate::wasm::ActorComponent;
 use crate::wasm::Event;
 use anyhow::Result;
 use axum::{
@@ -88,21 +89,14 @@ impl WebSocketServerHost {
         }
     }
 
-    pub async fn setup_host_functions(&self, _wrapped_actor: WrappedActor) -> Result<()> {
+    pub async fn setup_host_functions(&self, _actor_component: ActorComponent) -> Result<()> {
         info!("Setting up websocket server host functions");
         Ok(())
     }
 
-    pub async fn add_exports(&self, wrapped_actor: WrappedActor) -> Result<()> {
+    pub async fn add_exports(&self, mut actor_component: ActorComponent) -> Result<()> {
         info!("Adding exports to websocket-server");
-        let mut actor = wrapped_actor.inner().lock().unwrap();
-        let handle_message_export = actor
-            .find_export("ntwk:theater/websocket-server", "handle-message")
-            .expect("Could not find handle-message export");
-        actor.exports.insert(
-            "handle-message".to_string(),
-            handle_message_export.clone().into(),
-        );
+        actor_component.add_export("ntwk:theater/websocket-server", "handle-message");
         Ok(())
     }
 
