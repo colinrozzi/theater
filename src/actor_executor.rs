@@ -34,13 +34,13 @@ impl ActorExecutor {
 
     pub async fn run(&mut self) {
         info!("Actor executor starting");
-        
+
         // Initialize the actor
         self.actor.init().await;
-        
+
         while let Some(op) = self.operation_rx.recv().await {
             debug!("Processing actor operation");
-            
+
             match op {
                 ActorOperation::HandleEvent { event, response_tx } => {
                     debug!("Handling event: {:?}", event);
@@ -49,19 +49,20 @@ impl ActorExecutor {
                         error!("Error handling event: {}", e);
                     }
                     let _ = response_tx.send(result);
-                },
+                }
                 ActorOperation::GetState { response_tx } => {
                     debug!("Getting actor state");
                     let _ = response_tx.send(Ok(self.actor.actor_state.clone()));
-                },
+                }
                 ActorOperation::GetChain { response_tx } => {
                     debug!("Getting actor chain");
                     let chain = self.actor.actor_store.get_chain();
                     let _ = response_tx.send(Ok(chain));
-                },
+                }
             }
         }
-        
+
         info!("Actor executor shutting down");
     }
 }
+
