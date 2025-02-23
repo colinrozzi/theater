@@ -2,7 +2,6 @@ use crate::actor_executor::ActorError;
 use crate::actor_handle::ActorHandle;
 use crate::actor_runtime::WrappedActor;
 use crate::config::HttpServerHandlerConfig;
-use crate::wasm::Event;
 use anyhow::Result;
 use axum::{
     extract::State,
@@ -68,9 +67,10 @@ impl HttpServerHost {
         let handle_request_export = actor
             .find_export("ntwk:theater/http-server", "handle-request")
             .expect("Could not find export ntwk:theater/http-server-host.handle-request");
-        actor
-            .exports
-            .insert("handle-request".to_string(), handle_request_export);
+        actor.exports.insert(
+            "ntwk:theater/http-server.handle-request".to_string(),
+            handle_request_export,
+        );
         Ok(())
     }
 
@@ -130,38 +130,12 @@ impl HttpServerHost {
             http_request.method, http_request.uri
         );
 
-        // Create event for request handling
-        let event = match Self::create_request_event(&http_request) {
-            Ok(event) => event,
-            Err(e) => {
-                error!("Failed to create request event: {}", e);
-                return Response::builder()
-                    .status(StatusCode::INTERNAL_SERVER_ERROR)
-                    .body("Failed to process request".into())
-                    .unwrap_or_default();
-            }
-        };
-
-        // Handle the event
-        if let Err(e) = actor_handle.handle_event(event).await {
-            error!("Failed to handle request: {}", e);
-            return Response::builder()
-                .status(StatusCode::INTERNAL_SERVER_ERROR)
-                .body("Failed to process request".into())
-                .unwrap_or_default();
-        }
-
-        // Get the updated state which should contain our response
-        let state = match actor_handle.get_state().await {
-            Ok(state) => state,
-            Err(e) => {
-                error!("Failed to get state after request: {}", e);
-                return Response::builder()
-                    .status(StatusCode::INTERNAL_SERVER_ERROR)
-                    .body("Failed to process request".into())
-                    .unwrap_or_default();
-            }
-        };
+        let results = actor_handle
+            .call_function(
+                "ntwk:theater/http-server.handle-request".to_string(),
+                vec![http_request.into()],
+            )
+            .await;
 
         // Deserialize response from state
         let http_response: HttpResponse = match serde_json::from_slice(&state) {
@@ -196,14 +170,5 @@ impl HttpServerHost {
         } else {
             response.body(Vec::new().into()).unwrap_or_default()
         }
-    }
-
-    fn create_request_event(request: &HttpRequest) -> Result<Event, HttpServerError> {
-        let data = serde_json::to_vec(request)?;
-        Ok(Event {
-            event_type: "handle-request".to_string(),
-            parent: None,
-            data,
-        })
     }
 }

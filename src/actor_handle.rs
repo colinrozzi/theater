@@ -1,6 +1,7 @@
 use anyhow::Result;
 use tokio::sync::{mpsc, oneshot};
 use tokio::time::timeout;
+use wasmtime::component::Val;
 
 use crate::actor_executor::{ActorError, ActorOperation, DEFAULT_OPERATION_TIMEOUT};
 use crate::chain::ChainEvent;
@@ -17,12 +18,17 @@ impl ActorHandle {
         Self { operation_tx }
     }
 
-    pub async fn handle_event(&self, event: Event) -> Result<(), ActorError> {
+    pub async fn call_function(
+        &self,
+        name: String,
+        params: Vec<Val>,
+    ) -> Result<Vec<Val>, ActorError> {
         let (tx, rx) = oneshot::channel();
 
         self.operation_tx
-            .send(ActorOperation::HandleEvent {
-                event,
+            .send(ActorOperation::CallFunction {
+                name,
+                params,
                 response_tx: tx,
             })
             .await

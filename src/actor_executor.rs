@@ -1,16 +1,10 @@
 use anyhow::Result;
-use serde::Serialize;
-use std::any::Any;
 use std::fmt::Debug;
-use std::future::Future;
-use std::marker::PhantomData;
-use std::pin::Pin;
 use thiserror::Error;
 use tokio::sync::{mpsc, oneshot};
 use tokio::time::{Duration, Instant};
 use tracing::{debug, error, info};
-use wasmtime::component::ComponentType;
-use wasmtime::component::{ComponentNamedList, Lift, Lower};
+use wasmtime::component::Val;
 
 use crate::metrics::{ActorMetrics, MetricsCollector};
 use crate::wasm::WasmActor;
@@ -40,37 +34,13 @@ pub enum ActorError {
     Internal(#[from] anyhow::Error),
 }
 
-// Represents a function call to the WebAssembly component
-pub struct HandlerFunctionCall<P, R>
-where
-    P: ComponentType,
-    R: ComponentType,
-{
-    pub function_name: String,
-    pub parameters: P,
-    _phantom: PhantomData<R>,
-}
-
-impl<P, R> HandlerFunctionCall<P, R>
-where
-    P: ComponentType,
-    R: ComponentType,
-{
-    pub fn new(function_name: String, parameters: P) -> Self {
-        Self {
-            function_name,
-            parameters,
-            _phantom: PhantomData,
-        }
-    }
-}
-
 // Different types of operations the executor can handle
 pub enum ActorOperation {
     // Handler function calls are type-safe
     CallFunction {
-        call: Box<dyn std::any::Any + Send>,
-        response_tx: oneshot::Sender<Result<Box<dyn std::any::Any + Send>, ActorError>>,
+        name: String,
+        params: Vec<Val>,
+        response_tx: oneshot::Sender<Result<Vec<Val>, ActorError>>,
     },
     GetMetrics {
         response_tx: oneshot::Sender<Result<ActorMetrics, ActorError>>,
@@ -80,6 +50,9 @@ pub enum ActorOperation {
     },
     GetChain {
         response_tx: oneshot::Sender<Result<Vec<ChainEvent>, ActorError>>,
+    },
+    GetState {
+        response_tx: oneshot::Sender<Result<Vec<u8>, ActorError>>,
     },
 }
 
@@ -101,40 +74,23 @@ impl ActorExecutor {
     }
 
     // Execute a type-safe function call
-    async fn execute_call<P, R>(&mut self, call: HandlerFunctionCall<P, R>) -> Result<R, ActorError>
-    where
-        P: ComponentType
-            + ComponentNamedList
-            + Lift
-            + Lower
-            + Clone
-            + Debug
-            + Serialize
-            + Sync
-            + Send
-            + 'static,
-        R: ComponentType
-            + ComponentNamedList
-            + Lift
-            + Lower
-            + Clone
-            + Debug
-            + Serialize
-            + Sync
-            + Send
-            + 'static,
-    {
+    async fn execute_call(
+        &mut self,
+        name: String,
+        params: Vec<Val>,
+    ) -> Result<Vec<Val>, ActorError> {
         // Validate the function exists
-        if !self.actor.has_function(&call.function_name) {
-            return Err(ActorError::FunctionNotFound(call.function_name));
+        if !self.actor.has_function(&name) {
+            return Err(ActorError::FunctionNotFound(name));
         }
 
         let start = Instant::now();
 
+        let mut results = [Val::S32(0)];
         // Execute the call
-        let result = self
+        let _success = self
             .actor
-            .call_func(&call.function_name, call.parameters)
+            .call_func_raw(&name, params.as_slice(), &mut results)
             .await
             .map_err(ActorError::Internal)?;
 
@@ -142,7 +98,7 @@ impl ActorExecutor {
         let duration = start.elapsed();
         self.metrics.record_operation(duration, true).await;
 
-        Ok(result)
+        Ok(results.to_vec())
     }
 
     async fn update_resource_metrics(&self) {
@@ -185,28 +141,30 @@ impl ActorExecutor {
                             ActorOperation::GetMetrics { response_tx } => {
                                 let _ = response_tx.send(Err(ActorError::ShuttingDown));
                             }
+                            ActorOperation::GetChain { response_tx } => {
+                                let _ = response_tx.send(Err(ActorError::ShuttingDown));
+                            }
+                            ActorOperation::GetState { response_tx } => {
+                                let _ = response_tx.send(Err(ActorError::ShuttingDown));
+                            }
                         }
                         continue;
                     }
 
                     match op {
-                        ActorOperation::CallFunction { call, response_tx } => {
-                            // Downcast the boxed call to its concrete type
-                            let result = if let Ok(call) = call.downcast::<HandlerFunctionCall<_, _>>() {
-                                match self.execute_call(*call).await {
-                                    Ok(result) => {
-                                        // Box the result for sending back
-                                        Ok(Box::new(result) as Box<dyn std::any::Any + Send>)
+                        ActorOperation::CallFunction { name, params, response_tx } => {
+                            match self.execute_call(name, params).await {
+                                Ok(result) => {
+                                    if let Err(e) = response_tx.send(Ok(result)) {
+                                        error!("Failed to send function call response: {:?}", e);
                                     }
-                                    Err(e) => Err(e),
                                 }
-                            } else {
-                                Err(ActorError::TypeMismatch("Invalid function call type".to_string()))
-                            };
-
-                            if let Err(e) = response_tx.send(result) {
-                                error!("Failed to send function call response: {:?}", e);
-                            }
+                                Err(e) => {
+                                    if let Err(e) = response_tx.send(Err(e)) {
+                                        error!("Failed to send function call response: {:?}", e);
+                                    }
+                                }
+                }
                         }
 
                         ActorOperation::GetMetrics { response_tx } => {
@@ -215,6 +173,21 @@ impl ActorExecutor {
                                 error!("Failed to send metrics: {:?}", e);
                             }
                         }
+
+                        ActorOperation::GetChain { response_tx } => {
+                            let chain = self.actor.actor_store.get_chain();
+                            if let Err(e) = response_tx.send(Ok(chain)) {
+                                error!("Failed to send chain: {:?}", e);
+                            }
+                        }
+
+                        ActorOperation::GetState { response_tx } => {
+                            let state = self.actor.get_state();
+                            if let Err(e) = response_tx.send(Ok(state)) {
+                                error!("Failed to send state: {:?}", e);
+                            }
+                        }
+
 
                         ActorOperation::Shutdown { response_tx } => {
                             info!("Processing shutdown request");
@@ -242,46 +215,5 @@ impl ActorExecutor {
         // Log final metrics
         let final_metrics = self.metrics.get_metrics().await;
         info!("Final metrics at shutdown: {:?}", final_metrics);
-    }
-}
-
-// Example handler implementation
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    // Example of how a handler would use this
-    struct ExampleHandler {
-        executor_tx: mpsc::Sender<ActorOperation>,
-    }
-
-    impl ExampleHandler {
-        async fn call_function<P, R>(
-            &self,
-            call: HandlerFunctionCall<P, R>,
-        ) -> Result<R, ActorError>
-        where
-            P: ComponentType + Send + 'static,
-            R: ComponentType + Send + 'static,
-        {
-            let (tx, rx) = oneshot::channel();
-
-            let boxed_call = Box::new(call);
-
-            self.executor_tx
-                .send(ActorOperation::CallFunction {
-                    call: boxed_call,
-                    response_tx: tx,
-                })
-                .await
-                .map_err(|_| ActorError::ChannelClosed)?;
-
-            let result = rx.await.map_err(|_| ActorError::ChannelClosed)??;
-
-            result
-                .downcast::<R>()
-                .map(|b| *b)
-                .map_err(|_| ActorError::TypeMismatch("Unexpected return type".to_string()))
-        }
     }
 }

@@ -3,7 +3,6 @@ use crate::actor_handle::ActorHandle;
 use crate::actor_runtime::WrappedActor;
 use crate::config::FileSystemHandlerConfig;
 use crate::host::host_wrapper::HostFunctionBoundary;
-use crate::wasm::Event;
 use crate::ActorStore;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
@@ -410,25 +409,5 @@ impl FileSystemHost {
                 Ok(FileSystemResponse::PathExists(Ok(path.exists())))
             }
         }
-    }
-
-    async fn process_filesystem_event(
-        &self,
-        command: FileSystemCommand,
-    ) -> Result<(), FileSystemError> {
-        // Handle the command
-        let response = self.handle_command(command).await?;
-
-        // Create event with response
-        let event = Event {
-            event_type: "filesystem-response".to_string(),
-            parent: None,
-            data: serde_json::to_vec(&response)?,
-        };
-
-        // Send event to actor
-        self.actor_handle.handle_event(event).await?;
-
-        Ok(())
     }
 }

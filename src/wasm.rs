@@ -5,6 +5,7 @@ use std::collections::HashMap;
 use std::fmt::Debug;
 use thiserror::Error;
 use tokio::sync::mpsc::Sender;
+use wasmtime::component::Val;
 use wasmtime::component::{Component, ComponentExportIndex, ComponentType, Lift, Linker, Lower};
 use wasmtime::{Engine, Store};
 
@@ -141,6 +142,10 @@ impl WasmActor {
                 Err(e)
             }
         }
+    }
+
+    pub fn get_state(&self) -> ActorState {
+        self.actor_state.clone()
     }
 
     pub async fn handle_event(&mut self, event: Event) -> Result<()> {
@@ -295,6 +300,30 @@ impl WasmActor {
         info!("Function call complete");
 
         Ok(result)
+    }
+
+    pub async fn call_func_raw(
+        &mut self,
+        export_name: &str,
+        params: &[Val],
+        results: &mut [Val],
+    ) -> Result<()> {
+        let instance = self
+            .linker
+            .instantiate_async(&mut self.store, &self.component)
+            .await
+            .expect("Failed to instantiate actor");
+
+        let index = self
+            .exports
+            .get(export_name)
+            .expect("Function not found in exports");
+
+        let func = instance
+            .get_func(&mut self.store, *index)
+            .expect("Failed to get function");
+
+        func.call_async(&mut self.store, params, results).await
     }
 
     // New methods for memory tracking

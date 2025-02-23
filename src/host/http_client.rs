@@ -4,7 +4,6 @@ use crate::actor_executor::ActorError;
 use crate::actor_runtime::WrappedActor;
 use crate::config::HttpClientHandlerConfig;
 use crate::host::host_wrapper::HostFunctionBoundary;
-use crate::wasm::Event;
 use crate::store::ActorStore;
 use std::future::Future;
 use anyhow::Result;
@@ -185,28 +184,5 @@ impl HttpClientHost {
         };
 
         Ok(response)
-    }
-
-    pub async fn process_http_event(&self, request: HttpRequest) -> Result<(), HttpClientError> {
-        // Handle the request
-        let response = match self.handle_request(request).await {
-            Ok(response) => response,
-            Err(e) => {
-                error!("HTTP request failed: {}", e);
-                return Err(e);
-            }
-        };
-        
-        // Create event with response
-        let event = Event {
-            event_type: "http-response".to_string(),
-            parent: None,
-            data: serde_json::to_vec(&response)?,
-        };
-
-        // Send event to actor
-        self.actor_handle.handle_event(event).await?;
-
-        Ok(())
     }
 }
