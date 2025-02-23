@@ -203,6 +203,10 @@ impl WasmActor {
         Ok(export)
     }
 
+    pub fn has_function(&self, export_name: &str) -> bool {
+        self.exports.contains_key(export_name)
+    }
+
     pub async fn save_chain(&self) -> Result<()> {
         let chain_path = format!("chain/{}.json", self.name);
         self.actor_store
