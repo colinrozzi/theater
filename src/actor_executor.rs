@@ -28,10 +28,6 @@ pub enum ActorError {
 
 #[derive(Debug)]
 pub enum ActorOperation {
-    HandleEvent {
-        event: Event,
-        response_tx: oneshot::Sender<Result<(), ActorError>>,
-    },
     GetState {
         response_tx: oneshot::Sender<Result<Vec<u8>, ActorError>>,
     },
@@ -53,8 +49,18 @@ pub struct ActorExecutor {
     shutdown_initiated: bool,
 }
 
+pub struct ActorCall<Input, Output> {
+    pub function_name: String,
+    pub input: Input,
+    pub response_tx: oneshot::Sender<Result<Output, ActorError>>,
+}
+
 impl ActorExecutor {
-    pub fn new(actor: WasmActor, operation_rx: mpsc::Receiver<ActorOperation>) -> Self {
+    pub fn new(
+        actor: WasmActor,
+        operation_rx: mpsc::Receiver<ActorOperation>,
+        execution_rx: mpsc::Receiver<ActorCall<Input, Output>>,
+    ) -> Self {
         Self {
             actor,
             operation_rx,
