@@ -174,7 +174,7 @@ where
     P: ComponentNamedList,
     R: ComponentNamedList,
 {
-    func: TypedFunc<(Option<Vec<u8>>, P), (Option<Vec<u8>>, R)>,
+    func: TypedFunc<P, R>,
 }
 
 impl<P, R> TypedComponentFunction<P, R>
@@ -196,7 +196,7 @@ where
 
         // Convert the Func to a TypedFunc with the correct signature
         let typed_func = func
-            .typed::<(Option<Vec<u8>>, P), (Option<Vec<u8>>, R)>(store)
+            .typed::<P, R>(store)
             .map_err(|e| WasmError::WasmError {
                 context: "function typing",
                 message: format!("Failed to type function: {}", e),
@@ -205,25 +205,20 @@ where
         Ok(TypedComponentFunction { func: typed_func })
     }
 
-    pub async fn call_func(
-        &self,
-        store: &mut Store<ActorStore>,
-        state: Option<Vec<u8>>,
-        params: P,
-    ) -> Result<(Option<Vec<u8>>, R)> {
-        let result = self
-            .func
-            .call_async(store, (state, params))
-            .await
-            .map_err(|e| WasmError::WasmError {
-                context: "function call",
-                message: e.to_string(),
-            })?;
+    pub async fn call_func(&self, store: &mut Store<ActorStore>, params: P) -> Result<R> {
+        let result =
+            self.func
+                .call_async(store, params)
+                .await
+                .map_err(|e| WasmError::WasmError {
+                    context: "function call",
+                    message: e.to_string(),
+                })?;
         Ok(result)
     }
 }
 
-impl<P, R> TypedFunction for TypedComponentFunction<P, R>
+impl<P, R> TypedFunction<P, R> for TypedComponentFunction<P, R>
 where
     P: ComponentNamedList + Lower + Sync + Send + 'static + for<'de> Deserialize<'de>,
     R: ComponentNamedList + Lift + Sync + Send + 'static + Serialize,
@@ -231,42 +226,46 @@ where
     fn call_func<'a>(
         &'a self,
         store: &'a mut Store<ActorStore>,
-        state: Option<Vec<u8>>,
-        params: Vec<u8>,
-    ) -> Pin<Box<dyn Future<Output = Result<(Option<Vec<u8>>, Vec<u8>)>> + Send + 'a>> {
+        params: P,
+    ) -> Pin<Box<dyn Future<Output = Result<R>> + Send + 'a>> {
         Box::pin(async move {
             // This is a simplified conversion - you'll need to implement actual conversion logic
             // from Vec<u8> to P and from R to Vec<u8> based on your serialization format
-            let params_deserialized: P = serde_json::from_slice(&params)
-                .map_err(|e| anyhow::anyhow!("Failed to deserialize params: {}", e))?;
 
-            let (new_state, result) = self.call_func(store, state, params_deserialized).await?;
-
-            let result_serialized = serde_json::to_vec(&result)
-                .map_err(|e| anyhow::anyhow!("Failed to serialize result: {}", e))?;
-
-            Ok((new_state, result_serialized))
+            let results = self.call_func(store, params).await?;
+            Ok(results)
         })
     }
 }
 
-pub trait TypedFunction: Send + Sync + 'static {
+pub trait TypedFunction<P, R>: Send + Sync + 'static
+where
+    P: ComponentNamedList + Lower + Sync + Send + 'static + for<'de> Deserialize<'de>,
+    R: ComponentNamedList + Lift + Sync + Send + 'static + Serialize,
+{
     fn call_func<'a>(
         &'a self,
         store: &'a mut Store<ActorStore>,
-        state: Option<Vec<u8>>,
-        params: Vec<u8>,
-    ) -> Pin<Box<dyn Future<Output = Result<(Option<Vec<u8>>, Vec<u8>)>> + Send + 'a>>;
+        params: P,
+    ) -> Pin<Box<dyn Future<Output = Result<R>> + Send + 'a>>;
 }
 
-pub struct ActorInstance {
+pub struct ActorInstance<P, R>
+where
+    P: ComponentNamedList + Lower + Sync + Send + 'static + for<'de> Deserialize<'de>,
+    R: ComponentNamedList + Lift + Sync + Send + 'static + Serialize,
+{
     pub actor_component: ActorComponent,
     pub instance: Instance,
     pub store: Store<ActorStore>,
-    pub functions: HashMap<String, Box<dyn TypedFunction>>,
+    pub functions: HashMap<String, Box<dyn TypedFunction<P, R>>>,
 }
 
-impl ActorInstance {
+impl<P, R> ActorInstance
+where
+    P: ComponentNamedList + Lower + Sync + Send + 'static + for<'de> Deserialize<'de>,
+    R: ComponentNamedList + Lift + Sync + Send + 'static + Serialize,
+{
     pub fn register_function<P, R>(&mut self, interface: &str, function_name: &str) -> Result<()>
     where
         P: ComponentType + Lower + ComponentNamedList + Send + Sync + 'static,
@@ -296,16 +295,15 @@ impl ActorInstance {
         self.functions.contains_key(name)
     }
 
-    pub async fn call_function(
-        &mut self,
-        name: &str,
-        state: Option<Vec<u8>>,
-        params: Vec<u8>,
-    ) -> Result<(Option<Vec<u8>>, Vec<u8>)> {
+    pub async fn call_function<P, R>(&mut self, name: &str, params: P) -> Result<R>
+    where
+        P: ComponentNamedList + Lower + Sync + Send + 'static + for<'de> Deserialize<'de>,
+        R: ComponentNamedList + Lift + Sync + Send + 'static + Serialize,
+    {
         let func = self
             .functions
             .get(name)
             .expect("Function not found in functions table");
-        func.call_func(&mut self.store, state, params).await
+        func.call_func(&mut self.store, params).await
     }
 }
