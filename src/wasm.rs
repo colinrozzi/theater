@@ -1,5 +1,5 @@
 use anyhow::Result;
-use serde::de::DeserializeOwned;
+// use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt::Debug;
@@ -108,7 +108,7 @@ impl ActorComponent {
             "Finding export: {} from interface: {}",
             export_name, interface_name
         );
-        let (interface_component_item, interface_component_export_index) = self
+        let (_interface_component_item, interface_component_export_index) = self
             .component
             .export_index(None, interface_name)
             .expect(format!("Failed to find interface export: {}", interface_name).as_str());
@@ -179,8 +179,8 @@ where
 
 impl<P, R> TypedComponentFunction<P, R>
 where
-    P: ComponentNamedList + Lower + Sync + Send,
-    R: ComponentNamedList + Lift + Sync + Send,
+    P: ComponentNamedList + Lower + Sync + Send + 'static,
+    R: ComponentNamedList + Lift + Sync + Send + 'static,
 {
     pub fn new(
         store: &mut Store<ActorStore>,
@@ -188,12 +188,21 @@ where
         export_index: ComponentExportIndex,
     ) -> Result<Self> {
         let func = instance
-            .get_func(store, export_index)
-            .map_err(|e| WasmError::WasmError {
+            .get_func(&mut *store, export_index)
+            .ok_or_else(|| WasmError::WasmError {
                 context: "function retrieval",
-                message: e.to_string(),
+                message: "Function not found".to_string(),
             })?;
-        Ok(TypedComponentFunction { func })
+
+        // Convert the Func to a TypedFunc with the correct signature
+        let typed_func = func
+            .typed::<(Option<Vec<u8>>, P), (Option<Vec<u8>>, R)>(store)
+            .map_err(|e| WasmError::WasmError {
+                context: "function typing",
+                message: format!("Failed to type function: {}", e),
+            })?;
+
+        Ok(TypedComponentFunction { func: typed_func })
     }
 
     pub async fn call_func(
@@ -214,29 +223,56 @@ where
     }
 }
 
-pub trait TypedFunction {
-    fn call_func(
-        &self,
-        store: &mut Store<ActorStore>,
+impl<P, R> TypedFunction for TypedComponentFunction<P, R>
+where
+    P: ComponentNamedList + Lower + Sync + Send + 'static + for<'de> Deserialize<'de>,
+    R: ComponentNamedList + Lift + Sync + Send + 'static + Serialize,
+{
+    fn call_func<'a>(
+        &'a self,
+        store: &'a mut Store<ActorStore>,
         state: Option<Vec<u8>>,
-        params: dyn ComponentNamedList + Lower,
-    ) -> Pin<
-        Box<dyn Future<Output = Result<(Option<Vec<u8>>, dyn ComponentNamedList + Lift)>> + Send>,
-    >;
+        params: Vec<u8>,
+    ) -> Pin<Box<dyn Future<Output = Result<(Option<Vec<u8>>, Vec<u8>)>> + Send + 'a>> {
+        Box::pin(async move {
+            // This is a simplified conversion - you'll need to implement actual conversion logic
+            // from Vec<u8> to P and from R to Vec<u8> based on your serialization format
+            let params_deserialized: P = serde_json::from_slice(&params)
+                .map_err(|e| anyhow::anyhow!("Failed to deserialize params: {}", e))?;
+
+            let (new_state, result) = self.call_func(store, state, params_deserialized).await?;
+
+            let result_serialized = serde_json::to_vec(&result)
+                .map_err(|e| anyhow::anyhow!("Failed to serialize result: {}", e))?;
+
+            Ok((new_state, result_serialized))
+        })
+    }
+}
+
+pub trait TypedFunction: Send + Sync + 'static {
+    fn call_func<'a>(
+        &'a self,
+        store: &'a mut Store<ActorStore>,
+        state: Option<Vec<u8>>,
+        params: Vec<u8>,
+    ) -> Pin<Box<dyn Future<Output = Result<(Option<Vec<u8>>, Vec<u8>)>> + Send + 'a>>;
 }
 
 pub struct ActorInstance {
     pub actor_component: ActorComponent,
     pub instance: Instance,
     pub store: Store<ActorStore>,
-    pub functions: HashMap<String, dyn TypedFunction>,
+    pub functions: HashMap<String, Box<dyn TypedFunction>>,
 }
 
 impl ActorInstance {
     pub fn register_function<P, R>(&mut self, interface: &str, function_name: &str) -> Result<()>
     where
-        P: ComponentType + Lower + ComponentNamedList + 'static,
-        R: ComponentType + Lift + ComponentNamedList + 'static,
+        P: ComponentType + Lower + ComponentNamedList + Send + Sync + 'static,
+        R: ComponentType + Lift + ComponentNamedList + Send + Sync + 'static,
+        for<'de> P: Deserialize<'de>,
+        R: Serialize,
     {
         let export_index = self
             .actor_component
@@ -264,8 +300,8 @@ impl ActorInstance {
         &mut self,
         name: &str,
         state: Option<Vec<u8>>,
-        params: impl ComponentNamedList,
-    ) -> Result<(Option<Vec<u8>>, impl ComponentNamedList)> {
+        params: Vec<u8>,
+    ) -> Result<(Option<Vec<u8>>, Vec<u8>)> {
         let func = self
             .functions
             .get(name)
