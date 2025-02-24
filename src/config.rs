@@ -12,7 +12,7 @@ pub struct ManifestConfig {
     pub name: String,
     pub component_path: PathBuf,
     #[serde(default)]
-    pub init_data: Option<PathBuf>,
+    pub init_state: Option<PathBuf>,
     #[serde(default)]
     pub interface: InterfacesConfig,
     #[serde(default)]
@@ -127,8 +127,8 @@ impl ManifestConfig {
         &self.interface.implements
     }
 
-    pub fn load_init_data(&self) -> anyhow::Result<Option<Vec<u8>>> {
-        match &self.init_data {
+    pub fn load_init_state(&self) -> anyhow::Result<Option<Vec<u8>>> {
+        match &self.init_state {
             Some(path) => {
                 let data = std::fs::read(path)?;
                 Ok(Some(data))

@@ -1,9 +1,7 @@
 use crate::actor_executor::ActorError;
 use crate::actor_handle::ActorHandle;
-use crate::actor_runtime::WrappedActor;
 use crate::config::WebSocketServerHandlerConfig;
-use crate::wasm::ActorComponent;
-use crate::wasm::Event;
+use crate::wasm::{ActorComponent, ActorInstance};
 use anyhow::Result;
 use axum::{
     extract::ws::{self, Message},
@@ -23,27 +21,37 @@ use tokio::sync::mpsc;
 use tokio::sync::Mutex;
 use tokio::sync::RwLock;
 use tracing::{error, info};
+use wasmtime::component::{ComponentType, Lift, Lower};
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, ComponentType, Lift, Lower)]
+#[component(variant)]
 pub enum MessageType {
+    #[component(name = "text")]
     Text,
+    #[component(name = "binary")]
     Binary,
+    #[component(name = "connect")]
     Connect,
+    #[component(name = "close")]
     Close,
+    #[component(name = "ping")]
     Ping,
+    #[component(name = "pong")]
     Pong,
+    #[component(name = "other")]
     Other(String),
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, ComponentType, Lift, Lower)]
+#[component(record)]
 pub struct WebSocketMessage {
     ty: MessageType,
     data: Option<Vec<u8>>,
     text: Option<String>,
-    connection_id: u64,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, ComponentType, Lift, Lower)]
+#[component(record)]
 pub struct WebSocketResponse {
     messages: Vec<WebSocketMessage>,
 }
@@ -76,31 +84,35 @@ struct ConnectionContext {
 
 pub struct WebSocketServerHost {
     port: u16,
-    actor_handle: ActorHandle,
     connections: Arc<RwLock<HashMap<u64, ConnectionContext>>>,
 }
 
 impl WebSocketServerHost {
-    pub fn new(config: WebSocketServerHandlerConfig, actor_handle: ActorHandle) -> Self {
+    pub fn new(config: WebSocketServerHandlerConfig) -> Self {
         Self {
             port: config.port,
-            actor_handle,
             connections: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
-    pub async fn setup_host_functions(&self, _actor_component: ActorComponent) -> Result<()> {
+    pub async fn setup_host_functions(&self, _actor_component: &mut ActorComponent) -> Result<()> {
         info!("Setting up websocket server host functions");
         Ok(())
     }
 
-    pub async fn add_exports(&self, mut actor_component: ActorComponent) -> Result<()> {
+    pub async fn add_exports(&self, actor_component: &mut ActorComponent) -> Result<()> {
         info!("Adding exports to websocket-server");
         actor_component.add_export("ntwk:theater/websocket-server", "handle-message");
         Ok(())
     }
 
-    pub async fn start(&mut self) -> Result<()> {
+    pub async fn add_functions(&self, actor_instance: &mut ActorInstance) -> Result<()> {
+        actor_instance.register_function::<(WebSocketMessage,), (WebSocketResponse,)>(
+            "ntwk:theater/websocket-server.handle-message",
+        )
+    }
+
+    pub async fn start(&mut self, actor_handle: ActorHandle) -> Result<()> {
         let (message_sender, mut message_receiver) = mpsc::channel(100);
 
         let app = Router::new()
@@ -112,7 +124,7 @@ impl WebSocketServerHost {
         let listener = tokio::net::TcpListener::bind(&addr).await?;
 
         // Start message processing
-        let actor_handle = self.actor_handle.clone();
+        let actor_handle = actor_handle.clone();
         let connections = self.connections.clone();
 
         tokio::spawn(async move {
@@ -228,24 +240,17 @@ impl WebSocketServerHost {
                 Message::Text(ref t) => Some(t.to_string()),
                 _ => None,
             },
-            connection_id: msg.connection_id,
         };
 
-        // Create event for message handling
-        let event = Event {
-            event_type: "handle-message".to_string(),
-            parent: None,
-            data: serde_json::to_vec(&component_msg)?,
-        };
-
-        // Handle the event
-        actor_handle.handle_event(event).await?;
-
-        // Get the updated state which should contain our response
-        let state = actor_handle.get_state().await?;
+        let raw_response = actor_handle
+            .call_function(
+                "handle-message".to_string(),
+                serde_json::to_vec(&component_msg)?,
+            )
+            .await?;
 
         // Deserialize response
-        let response: WebSocketResponse = serde_json::from_slice(&state)?;
+        let response: WebSocketResponse = serde_json::from_slice(&raw_response)?;
 
         // Send responses
         if let Some(connection) = connections.read().await.get(&msg.connection_id) {

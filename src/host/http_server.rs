@@ -1,6 +1,5 @@
 use crate::actor_executor::ActorError;
 use crate::actor_handle::ActorHandle;
-use crate::actor_runtime::WrappedActor;
 use crate::config::HttpServerHandlerConfig;
 use crate::wasm::{ActorComponent, ActorInstance};
 use anyhow::Result;
@@ -11,17 +10,16 @@ use axum::{
     routing::any,
     Router,
 };
-use wasmtime::component::{Lift, Lower, ComponentType};
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use thiserror::Error;
 use tracing::{error, info};
+use wasmtime::component::{ComponentType, Lift, Lower};
 
 #[derive(Clone)]
 pub struct HttpServerHost {
     port: u16,
-    actor_handle: ActorHandle,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, ComponentType, Lift, Lower)]
@@ -54,33 +52,31 @@ pub enum HttpServerError {
 }
 
 impl HttpServerHost {
-    pub fn new(config: HttpServerHandlerConfig, ActorHandle) -> Self {
-        Self {
-            port: config.port,
-            actor_handle,
-        }
+    pub fn new(config: HttpServerHandlerConfig) -> Self {
+        Self { port: config.port }
     }
 
-    pub async fn setup_host_functions(&self, _actor_component: ActorComponent) -> Result<()> {
+    pub async fn setup_host_functions(&self, _actor_component: &mut ActorComponent) -> Result<()> {
         Ok(())
     }
 
-    pub async fn add_exports(&self, mut actor_component: ActorComponent) -> Result<()> {
+    pub async fn add_exports(&self, actor_component: &mut ActorComponent) -> Result<()> {
         info!("Adding exports to http-server");
-        actor_component
-            .add_export("ntwk:theater/http-server", "handle-request");
+        actor_component.add_export("ntwk:theater/http-server", "handle-request");
         Ok(())
     }
 
-    pub async fn add_functions(&self, mut actor_instance: ActorInstance) -> Result<()> {
-        actor_instance.register_function::<(HttpRequest,), (HttpResponse,)>("ntwk:theater/http-server.handle-request")
+    pub async fn add_functions(&self, actor_instance: &mut ActorInstance) -> Result<()> {
+        actor_instance.register_function::<(HttpRequest,), (HttpResponse,)>(
+            "ntwk:theater/http-server.handle-request",
+        )
     }
 
-    pub async fn start(&self) -> Result<()> {
+    pub async fn start(&self, actor_handle: ActorHandle) -> Result<()> {
         let app = Router::new()
             .route("/", any(Self::handle_request))
             .route("/{*wildcard}", any(Self::handle_request))
-            .with_state(Arc::new(self.actor_handle.clone()));
+            .with_state(Arc::new(actor_handle.clone()));
         let addr = SocketAddr::from(([127, 0, 0, 1], self.port));
         info!("Starting http server on port {}", self.port);
         let listener = tokio::net::TcpListener::bind(&addr).await?;
@@ -135,12 +131,13 @@ impl HttpServerHost {
         let results = actor_handle
             .call_function(
                 "ntwk:theater/http-server.handle-request".to_string(),
-                vec![http_request.into()],
+                serde_json::to_vec(&http_request).expect("Failed to serialize request"),
             )
-            .await;
+            .await
+            .expect("Failed to call function");
 
         // Deserialize response from state
-        let http_response: HttpResponse = match serde_json::from_slice(&state) {
+        let http_response: HttpResponse = match serde_json::from_slice(&results) {
             Ok(response) => response,
             Err(e) => {
                 error!("Failed to deserialize response: {}", e);

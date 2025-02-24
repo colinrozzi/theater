@@ -10,6 +10,7 @@ pub struct ActorStore {
     pub id: TheaterId,
     pub theater_tx: Sender<TheaterCommand>,
     pub chain: Arc<Mutex<StateChain>>,
+    pub state: Option<Vec<u8>>,
 }
 
 impl ActorStore {
@@ -18,7 +19,24 @@ impl ActorStore {
             id,
             theater_tx,
             chain: Arc::new(Mutex::new(StateChain::new())),
+            state: Some(vec![]),
         }
+    }
+
+    pub fn get_id(&self) -> TheaterId {
+        self.id.clone()
+    }
+
+    pub fn get_theater_tx(&self) -> Sender<TheaterCommand> {
+        self.theater_tx.clone()
+    }
+
+    pub fn get_state(&self) -> Option<Vec<u8>> {
+        self.state.clone()
+    }
+
+    pub fn set_state(&mut self, state: Option<Vec<u8>>) {
+        self.state = state;
     }
 
     pub fn record_event(&self, event_type: String, data: Vec<u8>) -> ChainEvent {
@@ -34,10 +52,6 @@ impl ActorStore {
     pub fn get_last_event(&self) -> Option<ChainEvent> {
         let chain = self.chain.lock().unwrap();
         chain.get_last_event().cloned()
-    }
-
-    pub fn get_current_state(&self) -> Option<Vec<u8>> {
-        self.get_last_event().map(|e| e.data)
     }
 
     pub fn get_all_events(&self) -> Vec<ChainEvent> {

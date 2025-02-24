@@ -21,8 +21,8 @@ impl ActorHandle {
     pub async fn call_function(
         &self,
         name: String,
-        params: Vec<Val>,
-    ) -> Result<Vec<Val>, ActorError> {
+        params: Vec<u8>,
+    ) -> Result<Vec<u8>, ActorError> {
         let (tx, rx) = oneshot::channel();
 
         self.operation_tx
@@ -40,7 +40,7 @@ impl ActorHandle {
         }
     }
 
-    pub async fn get_state(&self) -> Result<Vec<u8>, ActorError> {
+    pub async fn get_state(&self) -> Result<Option<Vec<u8>>, ActorError> {
         let (tx, rx) = oneshot::channel();
 
         self.operation_tx

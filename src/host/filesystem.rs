@@ -10,7 +10,9 @@ use serde::{Deserialize, Serialize};
 use std::fs::File;
 use std::io::{BufReader, Read, Write};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use thiserror::Error;
+use tokio::sync::Mutex;
 use tracing::{error, info};
 use wasmtime::StoreContextMut;
 
@@ -53,19 +55,14 @@ pub enum FileSystemError {
 
 pub struct FileSystemHost {
     path: PathBuf,
-    #[allow(dead_code)]
-    actor_handle: ActorHandle,
 }
 
 impl FileSystemHost {
-    pub fn new(config: FileSystemHandlerConfig, actor_handle: ActorHandle) -> Self {
-        Self {
-            path: config.path,
-            actor_handle,
-        }
+    pub fn new(config: FileSystemHandlerConfig) -> Self {
+        Self { path: config.path }
     }
 
-    pub async fn setup_host_functions(&self, mut actor_component: ActorComponent) -> Result<()> {
+    pub async fn setup_host_functions(&self, actor_component: &mut ActorComponent) -> Result<()> {
         info!("Setting up filesystem host functions");
 
         let mut interface = actor_component
@@ -310,17 +307,17 @@ impl FileSystemHost {
         Ok(())
     }
 
-    pub async fn add_exports(&self, _actor_component: ActorComponent) -> Result<()> {
+    pub async fn add_exports(&self, _actor_component: &mut ActorComponent) -> Result<()> {
         info!("No exports needed for filesystem");
         Ok(())
     }
 
-    pub async fn add_funcs(&self, _actor_instance: ActorInstance) -> Result<()> {
+    pub async fn add_functions(&self, _actor_instance: &mut ActorInstance) -> Result<()> {
         info!("No functions needed for filesystem");
         Ok(())
     }
 
-    pub async fn start(&self) -> Result<()> {
+    pub async fn start(&self, _actor_handle: ActorHandle) -> Result<()> {
         info!("FILESYSTEM starting on path {:?}", self.path);
         Ok(())
     }

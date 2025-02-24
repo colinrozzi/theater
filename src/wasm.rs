@@ -154,7 +154,7 @@ where
     P: ComponentType + Lower + DeserializeOwned + Send + Sync,
     R: ComponentType + Lift + Serialize + Send + Sync,
 {
-    func: TypedFunc<(Vec<u8>, P), (Vec<u8>, R)>,
+    func: TypedFunc<(Option<Vec<u8>>, P), (Option<Vec<u8>>, R)>,
 }
 
 impl<P, R> TypedComponentFunction<P, R>
@@ -163,7 +163,8 @@ where
     R: ComponentType + Lift + Serialize + Send + Sync,
 {
     pub fn new(store: &mut Store<ActorStore>, instance: &Instance, name: &str) -> Result<Self> {
-        let func = instance.get_typed_func::<(Vec<u8>, P), (Vec<u8>, R)>(store, name)?;
+        let func =
+            instance.get_typed_func::<(Option<Vec<u8>>, P), (Option<Vec<u8>>, R)>(store, name)?;
         Ok(Self { func })
     }
 }
@@ -172,9 +173,9 @@ pub trait ComponentFunction: Send + Sync {
     fn call_func<'a>(
         &'a self,
         store: &'a mut Store<ActorStore>,
-        state: Vec<u8>,
+        state: Option<Vec<u8>>,
         params: Vec<u8>,
-    ) -> Pin<Box<dyn Future<Output = Result<(Vec<u8>, Vec<u8>)>> + Send + 'a>>;
+    ) -> Pin<Box<dyn Future<Output = Result<(Option<Vec<u8>>, Vec<u8>)>> + Send + 'a>>;
 }
 
 impl<P, R> ComponentFunction for TypedComponentFunction<P, R>
@@ -193,9 +194,9 @@ where
     fn call_func<'a>(
         &'a self,
         store: &'a mut Store<ActorStore>,
-        state: Vec<u8>,
+        state: Option<Vec<u8>>,
         params: Vec<u8>,
-    ) -> Pin<Box<dyn Future<Output = Result<(Vec<u8>, Vec<u8>)>> + Send + 'a>> {
+    ) -> Pin<Box<dyn Future<Output = Result<(Option<Vec<u8>>, Vec<u8>)>> + Send + 'a>> {
         Box::pin(async move {
             let params: P = serde_json::from_slice(&params)?;
             let (new_state, result) = self.func.call_async(store, (state, params)).await?;
@@ -248,9 +249,9 @@ impl ActorInstance {
     pub async fn call_function(
         &mut self,
         name: &str,
-        state: Vec<u8>,
+        state: Option<Vec<u8>>,
         params: Vec<u8>,
-    ) -> Result<(Vec<u8>, Vec<u8>)> {
+    ) -> Result<(Option<Vec<u8>>, Vec<u8>)> {
         let func = self
             .functions
             .get(name)

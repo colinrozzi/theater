@@ -16,9 +16,10 @@ pub mod theater_runtime;
 pub mod theater_server;
 mod wasm;
 
+pub use chain::{ChainEvent, StateChain};
 pub use config::{HandlerConfig, HttpServerHandlerConfig, ManifestConfig, MessageServerConfig};
 pub use id::TheaterId;
+pub use metrics::{ActorMetrics, MetricsCollector, OperationStats};
 pub use store::ActorStore;
-pub use wasm::{WasmActor, WasmError, MemoryStats};
-pub use chain::{StateChain, ChainEvent};
-pub use metrics::{ActorMetrics, OperationStats, MetricsCollector};
+pub use wasm::{MemoryStats, WasmError};
+

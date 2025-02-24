@@ -36,7 +36,6 @@ pub enum ActorError {
 
 // Different types of operations the executor can handle
 pub enum ActorOperation {
-    // Handler function calls are type-safe
     CallFunction {
         name: String,
         params: Vec<u8>,
@@ -52,7 +51,7 @@ pub enum ActorOperation {
         response_tx: oneshot::Sender<Result<Vec<ChainEvent>, ActorError>>,
     },
     GetState {
-        response_tx: oneshot::Sender<Result<Vec<u8>, ActorError>>,
+        response_tx: oneshot::Sender<Result<Option<Vec<u8>>, ActorError>>,
     },
 }
 
@@ -85,12 +84,16 @@ impl ActorExecutor {
 
         let start = Instant::now();
 
+        let state = self.actor_instance.store.data().get_state();
+
         // Execute the call
-        let results = self
+        let (new_state, results) = self
             .actor_instance
-            .call_function(&name, params)
+            .call_function(&name, state, params)
             .await
             .map_err(ActorError::Internal)?;
+
+        self.actor_instance.store.data_mut().set_state(new_state);
 
         // Record metrics
         let duration = start.elapsed();
@@ -99,31 +102,11 @@ impl ActorExecutor {
         Ok(results)
     }
 
-    async fn update_resource_metrics(&self) {
-        let memory_size = self.actor.get_memory_size();
-        let queue_size = self.operation_rx.capacity();
-        self.metrics
-            .update_resource_usage(memory_size, queue_size)
-            .await;
-    }
-
     pub async fn run(&mut self) {
         info!("Actor executor starting");
 
-        // Initialize the actor
-        if let Err(e) = self.actor.init().await {
-            error!("Failed to initialize actor: {}", e);
-            return;
-        }
-
-        let mut metrics_interval = tokio::time::interval(METRICS_UPDATE_INTERVAL);
-
         loop {
             tokio::select! {
-                _ = metrics_interval.tick() => {
-                    self.update_resource_metrics().await;
-                }
-
                 Some(op) = self.operation_rx.recv() => {
                     debug!("Processing actor operation");
 
@@ -173,14 +156,14 @@ impl ActorExecutor {
                         }
 
                         ActorOperation::GetChain { response_tx } => {
-                            let chain = self.actor.actor_store.get_chain();
+                            let chain = self.actor_instance.store.data().get_chain();
                             if let Err(e) = response_tx.send(Ok(chain)) {
                                 error!("Failed to send chain: {:?}", e);
                             }
                         }
 
                         ActorOperation::GetState { response_tx } => {
-                            let state = self.actor.get_state();
+                            let state = self.actor_instance.store.data().get_state();
                             if let Err(e) = response_tx.send(Ok(state)) {
                                 error!("Failed to send state: {:?}", e);
                             }

@@ -1,22 +1,18 @@
 use crate::actor_executor::ActorError;
 use crate::actor_handle::ActorHandle;
-use crate::actor_runtime::WrappedActor;
 use crate::config::RuntimeHostConfig;
 use crate::host::host_wrapper::HostFunctionBoundary;
 use crate::wasm::ActorComponent;
-use crate::wasm::Event;
+use crate::wasm::ActorInstance;
 use crate::ActorStore;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
-use std::time::{SystemTime, UNIX_EPOCH};
 use thiserror::Error;
-use tracing::{error, info, warn};
+use tracing::{error, info};
 use wasmtime::StoreContextMut;
 
 #[derive(Clone)]
-pub struct RuntimeHost {
-    actor_handle: ActorHandle,
-}
+pub struct RuntimeHost {}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum RuntimeCommand {
@@ -32,7 +28,7 @@ pub enum RuntimeCommand {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum RuntimeResponse {
     Log(Result<(), String>),
-    State(Result<Vec<u8>, String>),
+    State(Result<Option<Vec<u8>>, String>),
     Metrics(Result<RuntimeMetrics, String>),
 }
 
@@ -64,11 +60,11 @@ pub enum RuntimeError {
 }
 
 impl RuntimeHost {
-    pub fn new(_config: RuntimeHostConfig, actor_handle: ActorHandle) -> Self {
-        Self { actor_handle }
+    pub fn new(_config: RuntimeHostConfig) -> Self {
+        Self {}
     }
 
-    pub async fn setup_host_functions(&self, mut actor_component: ActorComponent) -> Result<()> {
+    pub async fn setup_host_functions(&self, actor_component: &mut ActorComponent) -> Result<()> {
         info!("Setting up runtime host functions");
         let name = actor_component.name.clone();
         let mut interface = actor_component
@@ -117,95 +113,18 @@ impl RuntimeHost {
         Ok(())
     }
 
-    pub async fn add_exports(&self, mut actor_component: ActorComponent) -> Result<()> {
+    pub async fn add_exports(&self, actor_component: &mut ActorComponent) -> Result<()> {
         info!("Adding exports for runtime host");
         actor_component.add_export("ntwk:theater/actor", "init");
         Ok(())
     }
 
-    pub async fn start(&self) -> Result<()> {
+    pub async fn add_functions(&self, actor_instance: &mut ActorInstance) -> Result<()> {
+        actor_instance.register_function::<(), ()>("ntwk:theater/actor.init")
+    }
+
+    pub async fn start(&self, _actor_handle: ActorHandle) -> Result<()> {
         info!("Runtime host starting");
-        Ok(())
-    }
-
-    async fn handle_command(
-        &self,
-        command: RuntimeCommand,
-    ) -> Result<RuntimeResponse, RuntimeError> {
-        match command {
-            RuntimeCommand::Log {
-                level,
-                message,
-                timestamp,
-            } => {
-                let log_event = format!(
-                    "[{}] [{}] {}",
-                    timestamp,
-                    match level {
-                        LogLevel::Debug => "DEBUG",
-                        LogLevel::Info => "INFO",
-                        LogLevel::Warning => "WARN",
-                        LogLevel::Error => "ERROR",
-                    },
-                    message
-                );
-
-                match level {
-                    LogLevel::Debug => info!("{}", log_event),
-                    LogLevel::Info => info!("{}", log_event),
-                    LogLevel::Warning => warn!("{}", log_event),
-                    LogLevel::Error => error!("{}", log_event),
-                }
-
-                Ok(RuntimeResponse::Log(Ok(())))
-            }
-
-            RuntimeCommand::GetState => {
-                let state = self
-                    .actor_handle
-                    .get_state()
-                    .await
-                    .map_err(|e| RuntimeError::RuntimeError(e.to_string()))?;
-                Ok(RuntimeResponse::State(Ok(state)))
-            }
-
-            RuntimeCommand::GetMetrics => {
-                let metrics = self
-                    .actor_handle
-                    .get_metrics()
-                    .await
-                    .map_err(|e| RuntimeError::RuntimeError(e.to_string()))?;
-
-                let runtime_metrics = RuntimeMetrics {
-                    memory_usage: metrics.resource_metrics.memory_usage,
-                    total_operations: metrics.operation_metrics.total_operations,
-                    uptime_seconds: metrics.uptime_secs,
-                };
-
-                Ok(RuntimeResponse::Metrics(Ok(runtime_metrics)))
-            }
-        }
-    }
-
-    pub async fn process_runtime_event(&self, command: RuntimeCommand) -> Result<(), RuntimeError> {
-        let timestamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs();
-
-        // Handle the command
-        let response = self.handle_command(command).await?;
-
-        // Create event with response
-        let event = Event {
-            event_type: "runtime-response".to_string(),
-            parent: None,
-            data: serde_json::to_vec(&response)?,
-        };
-
-        // Send event to actor
-        self.actor_handle.handle_event(event).await?;
-
         Ok(())
     }
 }

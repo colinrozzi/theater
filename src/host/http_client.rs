@@ -14,7 +14,6 @@ use tracing::{info, error};
 
 #[derive(Clone)]
 pub struct HttpClientHost {
-    actor_handle: ActorHandle,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, ComponentType, Lift, Lower)]
@@ -53,11 +52,11 @@ pub enum HttpClientError {
 }
 
 impl HttpClientHost {
-    pub fn new(_config: HttpClientHandlerConfig, actor_handle: ActorHandle) -> Self {
-        Self { actor_handle}
+    pub fn new(_config: HttpClientHandlerConfig) -> Self {
+        Self { }
     }
 
-    pub async fn setup_host_functions(&self, mut actor_component: ActorComponent) -> Result<()> {
+    pub async fn setup_host_functions(&self, actor_component: &mut ActorComponent) -> Result<()> {
         info!("Setting up http client host functions");
 
  let mut interface = actor_component
@@ -133,15 +132,15 @@ impl HttpClientHost {
         Ok(())
     }
 
-    pub async fn add_exports(&self, _actor_component: ActorComponent) -> Result<()> {
+    pub async fn add_exports(&self, _actor_component: &mut ActorComponent) -> Result<()> {
         Ok(())
     }
 
-    pub async fn add_functions(&self, _actor_instance: ActorInstance) -> Result<()> {
+    pub async fn add_functions(&self, _actor_instance: &mut ActorInstance) -> Result<()> {
         Ok(())
     }
 
-    pub async fn start(&self) -> Result<()> {
+    pub async fn start(&self, _actor_handle: ActorHandle) -> Result<()> {
         Ok(())
     }
 

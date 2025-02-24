@@ -3,6 +3,7 @@ use crate::chain::ChainEvent;
 use crate::id::TheaterId;
 use crate::messages::{ActorMessage, ActorRequest, ActorSend, ActorStatus, TheaterCommand};
 use crate::wasm::Event;
+use crate::ManifestConfig;
 use crate::Result;
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -237,11 +238,12 @@ impl TheaterRuntime {
             let actor_id = TheaterId::generate();
             debug!("Initializing actor runtime");
             debug!("Starting actor runtime");
-            response_tx.send(actor_id).unwrap();
-            let components =
-                ActorRuntime::start(actor_id, manifest_path_clone, theater_tx, mailbox_rx)
-                    .await
-                    .unwrap();
+            response_tx.send(actor_id.clone()).unwrap();
+            let manifest =
+                ManifestConfig::from_file(&manifest_path_clone).expect("Failed to load manifest");
+            ActorRuntime::start(actor_id, &manifest, theater_tx, mailbox_rx)
+                .await
+                .unwrap()
         });
 
         match response_rx.await {

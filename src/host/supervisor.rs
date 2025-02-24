@@ -9,17 +9,14 @@ use tokio::sync::oneshot;
 use std::future::Future;
 use wasmtime::StoreContextMut;
 use crate::actor_handle::ActorHandle;
-use crate::actor_runtime::WrappedActor;
 use crate::config::SupervisorHostConfig;
-use crate::wasm::Event;
+use crate::wasm::{ ActorInstance};
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tracing::{error, info};
 
 pub struct SupervisorHost {
-    #[allow(dead_code)]
-    actor_handle: ActorHandle,
 }
 
 #[derive(Error, Debug)]
@@ -44,14 +41,12 @@ struct SupervisorEvent {
 impl SupervisorHost {
     pub fn new(
         _config: SupervisorHostConfig,
-        actor_handle: ActorHandle,
     ) -> Self {
         Self {
-            actor_handle,
         }
     }
 
-    pub async fn setup_host_functions(&self, mut actor_component: ActorComponent) -> Result<()> {
+    pub async fn setup_host_functions(&self, actor_component: &mut ActorComponent) -> Result<()> {
         info!("Setting up host functions for supervisor");
 
         let mut interface = actor_component.linker.instance("ntwk:theater/supervisor").expect("Could not instantiate ntwk:theater/supervisor");
@@ -297,27 +292,18 @@ impl SupervisorHost {
         Ok(())
     }
 
-    pub async fn add_exports(&self, _actor_component: ActorComponent) -> Result<()> {
+    pub async fn add_exports(&self, _actor_component: &mut ActorComponent) -> Result<()> {
         info!("Adding exports for supervisor");
         Ok(())
     }
 
-    pub async fn start(&self) -> Result<()> {
-        info!("Starting supervisor host");
+    pub async fn add_functions(&self, _actor_instance: &mut ActorInstance) -> Result<()> {
+        info!("Adding functions for supervisor");
         Ok(())
     }
 
-    async fn handle_supervisor_event(&self, event: SupervisorEvent) -> Result<(), SupervisorError> {
-        // Create event for actor
-        let event = Event {
-            event_type: event.event_type.clone(),
-            parent: None,
-            data: serde_json::to_vec(&event)?,
-        };
-
-        // Send event to actor
-        self.actor_handle.handle_event(event).await?;
-
+    pub async fn start(&self, _actor_handle: ActorHandle) -> Result<()> {
+        info!("Starting supervisor host");
         Ok(())
     }
 }

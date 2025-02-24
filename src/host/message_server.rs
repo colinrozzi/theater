@@ -1,10 +1,9 @@
 use crate::actor_executor::ActorError;
 use crate::actor_handle::ActorHandle;
-use crate::actor_runtime::WrappedActor;
 use crate::host::host_wrapper::HostFunctionBoundary;
 use crate::messages::{ActorMessage, ActorRequest, ActorSend, TheaterCommand};
 use crate::store::ActorStore;
-use crate::wasm::{ActorComponent, Event};
+use crate::wasm::{ActorComponent, ActorInstance};
 use crate::TheaterId;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
@@ -16,7 +15,6 @@ use tracing::{error, info};
 pub struct MessageServerHost {
     mailbox_rx: Receiver<ActorMessage>,
     theater_tx: Sender<TheaterCommand>,
-    actor_handle: ActorHandle,
 }
 
 #[derive(Error, Debug)]
@@ -38,19 +36,14 @@ struct MessageEvent {
 }
 
 impl MessageServerHost {
-    pub fn new(
-        mailbox_rx: Receiver<ActorMessage>,
-        theater_tx: Sender<TheaterCommand>,
-        actor_handle: ActorHandle,
-    ) -> Self {
+    pub fn new(mailbox_rx: Receiver<ActorMessage>, theater_tx: Sender<TheaterCommand>) -> Self {
         Self {
             mailbox_rx,
             theater_tx,
-            actor_handle,
         }
     }
 
-    pub async fn setup_host_functions(&self, mut actor_component: ActorComponent) -> Result<()> {
+    pub async fn setup_host_functions(&self, actor_component: &mut ActorComponent) -> Result<()> {
         info!("Setting up message server host functions");
 
         let mut interface = actor_component
@@ -164,43 +157,46 @@ impl MessageServerHost {
         Ok(())
     }
 
-    pub async fn add_exports(&self, mut actor_component: ActorComponent) -> Result<()> {
+    pub async fn add_exports(&self, actor_component: &mut ActorComponent) -> Result<()> {
         info!("Adding exports to message-server");
         actor_component.add_export("ntwk:theater/message-server-client", "handle-send");
         actor_component.add_export("ntwk:theater/message-server-client", "handle-request");
         Ok(())
     }
 
-    pub async fn start(&mut self) -> Result<()> {
+    pub async fn add_functions(&self, actor_instance: &mut ActorInstance) -> Result<()> {
+        actor_instance.register_function::<(Vec<u8>,), ()>(
+            "ntwk:theater/message-server-client.handle-send",
+        )?;
+        actor_instance.register_function::<(Vec<u8>,), (Vec<u8>,)>(
+            "ntwk:theater/message-server-client.handle-request",
+        )?;
+        Ok(())
+    }
+
+    pub async fn start(&mut self, actor_handle: ActorHandle) -> Result<()> {
         info!("Starting message server");
         while let Some(msg) = self.mailbox_rx.recv().await {
-            let _ = self.process_message(msg).await;
+            let _ = self.process_message(msg, actor_handle.clone()).await;
         }
         Ok(())
     }
 
-    async fn process_message(&self, msg: ActorMessage) -> Result<(), MessageServerError> {
+    async fn process_message(
+        &self,
+        msg: ActorMessage,
+        actor_handle: ActorHandle,
+    ) -> Result<(), MessageServerError> {
         match msg {
             ActorMessage::Send(ActorSend { data }) => {
-                let event = Event {
-                    event_type: "handle-send".to_string(),
-                    parent: None,
-                    data,
-                };
-
-                self.actor_handle.handle_event(event).await?;
+                actor_handle
+                    .call_function("handle-send".to_string(), data)
+                    .await?;
             }
             ActorMessage::Request(ActorRequest { response_tx, data }) => {
-                let event = Event {
-                    event_type: "handle-request".to_string(),
-                    parent: None,
-                    data,
-                };
-
-                self.actor_handle.handle_event(event).await?;
-
-                // Get the response from the state
-                let response = self.actor_handle.get_state().await?;
+                let response = actor_handle
+                    .call_function("handle-request".to_string(), data)
+                    .await?;
                 let _ = response_tx.send(response);
             }
         }

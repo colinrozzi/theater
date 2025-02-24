@@ -1,4 +1,5 @@
-use crate::actor_executor::{ActorExecutor, ActorOperation};
+use crate::actor_executor::ActorExecutor;
+use crate::actor_handle::ActorHandle;
 use crate::config::{HandlerConfig, ManifestConfig};
 use crate::host::filesystem::FileSystemHost;
 use crate::host::handler::Handler;
@@ -11,56 +12,20 @@ use crate::host::websocket_server::WebSocketServerHost;
 use crate::id::TheaterId;
 use crate::messages::{ActorMessage, TheaterCommand};
 use crate::store::ActorStore;
-use crate::wasm::{ActorComponent, WasmActor};
+use crate::wasm::ActorComponent;
 use crate::Result;
 use std::sync::{Arc, Mutex};
-use tokio::sync::mpsc::{self, Receiver, Sender};
+use tokio::sync::mpsc::{Receiver, Sender};
+use tokio::task::JoinHandle;
 use tokio::time::timeout;
-use tracing::{error, info, warn};
+use tracing::{info, warn};
 
 const SHUTDOWN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
-pub struct RuntimeData {
-    pub wrapped_actor: WrappedActor,
-    pub operation_rx: mpsc::Receiver<ActorOperation>,
-}
-
-pub struct RuntimeComponents {
-    pub id: TheaterId,
-    pub name: String,
-    pub actor_handle: ActorHandle,
-    handlers: Vec<Handler>,
-    pub runtime_data: Option<RuntimeData>,
-}
-
 pub struct ActorRuntime {
     pub actor_id: TheaterId,
-    handler_tasks: Vec<tokio::task::JoinHandle<()>>,
-    executor_task: tokio::task::JoinHandle<()>,
-    actor_handle: ActorHandle,
-}
-
-#[derive(Clone)]
-pub struct WrappedActor {
-    pub actor: Arc<Mutex<WasmActor>>,
-}
-
-impl WrappedActor {
-    pub fn new(actor: WasmActor) -> Self {
-        Self {
-            actor: Arc::new(Mutex::new(actor)),
-        }
-    }
-
-    pub fn inner(&self) -> &Arc<Mutex<WasmActor>> {
-        &self.actor
-    }
-
-    pub fn take_actor(self) -> Option<WasmActor> {
-        Arc::try_unwrap(self.actor)
-            .ok()
-            .and_then(|mutex| mutex.into_inner().ok())
-    }
+    handler_tasks: Vec<JoinHandle<()>>,
+    actor_executor_task: JoinHandle<()>,
 }
 
 impl ActorRuntime {
@@ -105,7 +70,7 @@ impl ActorRuntime {
         }
 
         let store = ActorStore::new(id.clone(), theater_tx.clone());
-        let actor_component = ActorComponent::new(config, store.clone()).await.expect(
+        let mut actor_component = ActorComponent::new(config, store.clone()).await.expect(
             format!(
                 "Failed to create actor component for actor: {:?}",
                 config.name
@@ -120,20 +85,23 @@ impl ActorRuntime {
                     "Setting up host functions for handler: {:?}",
                     handler.name()
                 );
-                handler.setup_host_functions(actor_component).await.expect(
-                    format!(
-                        "Failed to setup host functions for handler: {:?}",
-                        handler.name()
-                    )
-                    .as_str(),
-                );
-                handler.add_exports(actor_component).await.expect(
+                handler
+                    .setup_host_functions(&mut actor_component)
+                    .await
+                    .expect(
+                        format!(
+                            "Failed to setup host functions for handler: {:?}",
+                            handler.name()
+                        )
+                        .as_str(),
+                    );
+                handler.add_exports(&mut actor_component).await.expect(
                     format!("Failed to add exports for handler: {:?}", handler.name()).as_str(),
                 );
             }
         }
 
-        let actor_instance = actor_component
+        let mut actor_instance = actor_component
             .instantiate()
             .await
             .expect("Failed to instantiate actor");
@@ -141,7 +109,7 @@ impl ActorRuntime {
         {
             for handler in &handlers {
                 info!("Creating functions for handler: {:?}", handler.name());
-                handler.add_functions(actor_instance).await.expect(
+                handler.add_functions(&mut actor_instance).await.expect(
                     format!(
                         "Failed to create functions for handler: {:?}",
                         handler.name()
@@ -151,74 +119,38 @@ impl ActorRuntime {
             }
         }
 
-        let actor = WasmActor::new(config, store, &theater_tx).await?;
-        let wrapped_actor = WrappedActor::new(actor);
+        let (operation_tx, operation_rx) = tokio::sync::mpsc::channel(100);
 
-        // Create channels for the executor
-        let (operation_tx, operation_rx) = mpsc::channel(32);
-
-        // Create actor handle
         let actor_handle = ActorHandle::new(operation_tx);
 
-        let runtime_data = Some(RuntimeData {
-            wrapped_actor,
-            operation_rx,
-        });
+        let mut handler_tasks: Vec<JoinHandle<()>> = Vec::new();
 
-        let components = RuntimeComponents {
-            id,
-            name: config.name.clone(),
-            actor_handle,
-            handlers,
-            runtime_data,
-        };
-
-        // Clone handle for the runtime
-        let actor_handle = components.actor_handle.clone();
-
-        let actor = runtime_data
-            .wrapped_actor
-            .take_actor()
-            .expect("Failed to take actor from wrapped actor");
-
-        // Create and spawn executor
-        let mut executor = ActorExecutor::new(actor, runtime_data.operation_rx);
-
-        let executor_task = tokio::spawn(async move {
-            executor.run().await;
-        });
-
-        let mut handler_tasks = Vec::new();
-        // Start all handlers
-        info!("Starting handlers");
-        for mut handler in components.handlers {
-            let task = tokio::spawn(async move {
-                if let Err(e) = handler.start().await {
-                    error!("Handler failed: {}", e);
+        for mut handler in handlers {
+            info!("Starting handler: {:?}", handler.name());
+            let actor_handle = actor_handle.clone();
+            let handler_task = tokio::spawn(async move {
+                if let Err(e) = handler.start(actor_handle).await {
+                    warn!("Handler failed: {:?}", e);
                 }
             });
-            handler_tasks.push(task);
+            handler_tasks.push(handler_task);
         }
 
-        info!("Actor runtime started");
+        let init_state = config.load_init_state().expect("Failed to load init state");
+        actor_instance.store.data_mut().set_state(init_state);
 
-        Ok(Self {
-            actor_id: components.id,
+        let mut actor_executor = ActorExecutor::new(actor_instance, operation_rx);
+        let executor_task = tokio::spawn(async move { actor_executor.run().await });
+
+        Ok(ActorRuntime {
+            actor_id: id.clone(),
             handler_tasks,
-            executor_task,
-            actor_handle,
+            actor_executor_task: executor_task,
         })
     }
 
     pub async fn stop(&mut self) -> Result<()> {
         info!("Initiating actor runtime shutdown");
-
-        // First, try to shutdown the actor gracefully
-        match timeout(SHUTDOWN_TIMEOUT, self.actor_handle.shutdown()).await {
-            Ok(Ok(_)) => info!("Actor shutdown completed successfully"),
-            Ok(Err(e)) => warn!("Actor shutdown completed with error: {}", e),
-            Err(_) => warn!("Actor shutdown timed out"),
-        }
 
         // Stop all handlers
         for task in self.handler_tasks.drain(..) {
@@ -226,7 +158,7 @@ impl ActorRuntime {
         }
 
         // Finally abort the executor if it's still running
-        self.executor_task.abort();
+        self.actor_executor_task.abort();
 
         info!("Actor runtime shutdown complete");
         Ok(())
