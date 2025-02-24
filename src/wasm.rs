@@ -11,6 +11,10 @@ use wasmtime::component::{
     Component, ComponentExportIndex, ComponentNamedList, ComponentType, Instance, Lift, Linker,
     Lower,
 };
+
+// This was our attempt to extend ComponentNamedList, but it cannot be made
+// into a trait object (object-safe) because it has associated consts and functions
+// without self parameters. We're taking a different approach now.
 use wasmtime::{Engine, Store};
 
 use crate::config::ManifestConfig;
@@ -218,6 +222,29 @@ where
     }
 }
 
+impl<P, R> TypedFunctionAny for TypedComponentFunction<P, R>
+where
+    P: ComponentNamedList + Lower + Sync + Send + 'static + for<'de> Deserialize<'de>,
+    R: ComponentNamedList + Lift + Sync + Send + 'static + Serialize,
+{
+    fn call_func_raw<'a>(
+        &'a self,
+        store: &'a mut Store<ActorStore>,
+        params: Vec<u8>,
+    ) -> Pin<Box<dyn Future<Output = Result<Vec<u8>>> + Send + 'a>> {
+        Box::pin(async move {
+            // Deserialize params from JSON to P
+            let typed_params: P = serde_json::from_slice(&params)?;
+
+            let results = self.call_func(store, typed_params).await?;
+
+            // Serialize results to JSON
+            let serialized = serde_json::to_vec(&results)?;
+            Ok(serialized)
+        })
+    }
+}
+
 impl<P, R> TypedFunction<P, R> for TypedComponentFunction<P, R>
 where
     P: ComponentNamedList + Lower + Sync + Send + 'static + for<'de> Deserialize<'de>,
@@ -229,16 +256,21 @@ where
         params: P,
     ) -> Pin<Box<dyn Future<Output = Result<R>> + Send + 'a>> {
         Box::pin(async move {
-            // This is a simplified conversion - you'll need to implement actual conversion logic
-            // from Vec<u8> to P and from R to Vec<u8> based on your serialization format
-
-            let results = self.call_func(store, params).await?;
+            let results = self.func.call_async(store, params).await?;
             Ok(results)
         })
     }
 }
 
-pub trait TypedFunction<P, R>: Send + Sync + 'static
+pub trait TypedFunctionAny: Send + Sync + 'static {
+    fn call_func_raw<'a>(
+        &'a self,
+        store: &'a mut Store<ActorStore>,
+        params: Vec<u8>,
+    ) -> Pin<Box<dyn Future<Output = Result<Vec<u8>>> + Send + 'a>>;
+}
+
+pub trait TypedFunction<P, R>: TypedFunctionAny + Send + Sync + 'static
 where
     P: ComponentNamedList + Lower + Sync + Send + 'static + for<'de> Deserialize<'de>,
     R: ComponentNamedList + Lift + Sync + Send + 'static + Serialize,
@@ -250,28 +282,20 @@ where
     ) -> Pin<Box<dyn Future<Output = Result<R>> + Send + 'a>>;
 }
 
-pub struct ActorInstance<P, R>
-where
-    P: ComponentNamedList + Lower + Sync + Send + 'static + for<'de> Deserialize<'de>,
-    R: ComponentNamedList + Lift + Sync + Send + 'static + Serialize,
-{
+pub struct ActorInstance {
     pub actor_component: ActorComponent,
     pub instance: Instance,
     pub store: Store<ActorStore>,
-    pub functions: HashMap<String, Box<dyn TypedFunction<P, R>>>,
+    pub functions: HashMap<String, Box<dyn TypedFunctionAny>>,
 }
 
-impl<P, R> ActorInstance
-where
-    P: ComponentNamedList + Lower + Sync + Send + 'static + for<'de> Deserialize<'de>,
-    R: ComponentNamedList + Lift + Sync + Send + 'static + Serialize,
-{
-    pub fn register_function<P, R>(&mut self, interface: &str, function_name: &str) -> Result<()>
+impl ActorInstance {
+    pub fn register_function<T, U>(&mut self, interface: &str, function_name: &str) -> Result<()>
     where
-        P: ComponentType + Lower + ComponentNamedList + Send + Sync + 'static,
-        R: ComponentType + Lift + ComponentNamedList + Send + Sync + 'static,
-        for<'de> P: Deserialize<'de>,
-        R: Serialize,
+        T: ComponentType + Lower + ComponentNamedList + Send + Sync + 'static,
+        U: ComponentType + Lift + ComponentNamedList + Send + Sync + 'static,
+        for<'de> T: Deserialize<'de>,
+        U: Serialize,
     {
         let export_index = self
             .actor_component
@@ -286,8 +310,11 @@ where
         );
         let name = format!("{}:{}", interface, function_name);
         let func =
-            TypedComponentFunction::<P, R>::new(&mut self.store, &self.instance, export_index)?;
-        self.functions.insert(name.to_string(), Box::new(func));
+            TypedComponentFunction::<T, U>::new(&mut self.store, &self.instance, export_index)?;
+        self.functions.insert(
+            name.to_string(),
+            Box::new(func) as Box<dyn TypedFunctionAny>,
+        );
         Ok(())
     }
 
@@ -295,15 +322,16 @@ where
         self.functions.contains_key(name)
     }
 
-    pub async fn call_function<P, R>(&mut self, name: &str, params: P) -> Result<R>
-    where
-        P: ComponentNamedList + Lower + Sync + Send + 'static + for<'de> Deserialize<'de>,
-        R: ComponentNamedList + Lift + Sync + Send + 'static + Serialize,
-    {
+    pub async fn call_function(&mut self, name: &str, params: Vec<u8>) -> Result<Vec<u8>> {
+        // This version uses serialized parameters and results
         let func = self
             .functions
             .get(name)
-            .expect("Function not found in functions table");
-        func.call_func(&mut self.store, params).await
+            .ok_or_else(|| anyhow::anyhow!("Function not found: {}", name))?;
+
+        // Call the function with raw parameters
+        let result = func.call_func_raw(&mut self.store, params).await?;
+
+        Ok(result)
     }
 }

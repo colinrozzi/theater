@@ -74,7 +74,7 @@ impl ActorExecutor {
         }
     }
 
-    // Execute a type-safe function call
+    // Execute a function call with serialized params/results
     async fn execute_call(&mut self, name: String, params: Vec<u8>) -> Result<Vec<u8>, ActorError> {
         // Validate the function exists
         if !self.actor_instance.has_function(&name) {
@@ -83,16 +83,12 @@ impl ActorExecutor {
 
         let start = Instant::now();
 
-        let state = self.actor_instance.store.data().get_state();
-
         // Execute the call
-        let (new_state, results) = self
+        let results = self
             .actor_instance
-            .call_function(&name, state, params)
+            .call_function(&name, params)
             .await
             .map_err(ActorError::Internal)?;
-
-        self.actor_instance.store.data_mut().set_state(new_state);
 
         // Record metrics
         let duration = start.elapsed();
@@ -144,7 +140,7 @@ impl ActorExecutor {
                                         error!("Failed to send function call response: {:?}", e);
                                     }
                                 }
-                }
+                            }
                         }
 
                         ActorOperation::GetMetrics { response_tx } => {

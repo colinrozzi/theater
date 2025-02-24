@@ -237,15 +237,12 @@ impl WebSocketServerHost {
             },
         };
 
-        let raw_response = actor_handle
-            .call_function(
+        let response = actor_handle
+            .call_function::<WebSocketMessage, WebSocketResponse>(
                 "handle-message".to_string(),
-                serde_json::to_vec(&component_msg)?,
+                component_msg,
             )
             .await?;
-
-        // Deserialize response
-        let response: WebSocketResponse = serde_json::from_slice(&raw_response)?;
 
         // Send responses
         if let Some(connection) = connections.read().await.get(&msg.connection_id) {

@@ -123,25 +123,17 @@ impl HttpServerHost {
             http_request.method, http_request.uri
         );
 
+        // Call function and serialize/deserialize
         let results = actor_handle
-            .call_function(
+            .call_function::<(HttpRequest,), (HttpResponse,)>(
                 "ntwk:theater/http-server.handle-request".to_string(),
-                serde_json::to_vec(&http_request).expect("Failed to serialize request"),
+                (http_request,)
             )
             .await
+            .map(|(response,)| response)  // Extract the response from the tuple
             .expect("Failed to call function");
-
-        // Deserialize response from state
-        let http_response: HttpResponse = match serde_json::from_slice(&results) {
-            Ok(response) => response,
-            Err(e) => {
-                error!("Failed to deserialize response: {}", e);
-                return Response::builder()
-                    .status(StatusCode::INTERNAL_SERVER_ERROR)
-                    .body("Failed to process response".into())
-                    .unwrap_or_default();
-            }
-        };
+            
+        let http_response = results;
 
         // Convert HttpResponse to axum Response
         let mut response = Response::builder()

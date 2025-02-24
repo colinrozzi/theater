@@ -189,12 +189,12 @@ impl MessageServerHost {
         match msg {
             ActorMessage::Send(ActorSend { data }) => {
                 actor_handle
-                    .call_function("handle-send".to_string(), data)
+                    .call_function_raw("handle-send".to_string(), data)
                     .await?;
             }
             ActorMessage::Request(ActorRequest { response_tx, data }) => {
                 let response = actor_handle
-                    .call_function("handle-request".to_string(), data)
+                    .call_function_raw("handle-request".to_string(), data)
                     .await?;
                 let _ = response_tx.send(response);
             }

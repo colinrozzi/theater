@@ -1,4 +1,5 @@
 use anyhow::Result;
+use serde::{Deserialize, Serialize};
 use tokio::sync::{mpsc, oneshot};
 use tokio::time::timeout;
 
@@ -16,13 +17,38 @@ impl ActorHandle {
         Self { operation_tx }
     }
 
-    pub async fn call_function(
+    // Generic typed function call that handles serialization
+    pub async fn call_function<P, R>(
+        &self,
+        name: String,
+        params: P,
+    ) -> Result<R, ActorError>
+    where
+        P: Serialize,
+        R: for<'de> Deserialize<'de>,
+    {
+        // Serialize the params to send through the channel
+        let serialized_params = serde_json::to_vec(&params)
+            .map_err(|e| ActorError::Internal(e.into()))?;
+        
+        // Call the raw function
+        let result_bytes = self.call_function_raw(name, serialized_params).await?;
+        
+        // Deserialize the result
+        let result: R = serde_json::from_slice(&result_bytes)
+            .map_err(|e| ActorError::Internal(e.into()))?;
+            
+        Ok(result)
+    }
+    
+    // Base implementation that works with raw bytes
+    pub async fn call_function_raw(
         &self,
         name: String,
         params: Vec<u8>,
     ) -> Result<Vec<u8>, ActorError> {
         let (tx, rx) = oneshot::channel();
-
+        
         self.operation_tx
             .send(ActorOperation::CallFunction {
                 name,
@@ -31,10 +57,10 @@ impl ActorHandle {
             })
             .await
             .map_err(|_| ActorError::ChannelClosed)?;
-
+            
         match timeout(DEFAULT_OPERATION_TIMEOUT, rx).await {
             Ok(result) => result.map_err(|_| ActorError::ChannelClosed)?,
-            Err(_) => Err(ActorError::OperationTimeout(DEFAULT_OPERATION_TIMEOUT)),
+            Err(_) => return Err(ActorError::OperationTimeout(DEFAULT_OPERATION_TIMEOUT)),
         }
     }
 
