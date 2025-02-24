@@ -1,12 +1,10 @@
 use anyhow::Result;
 use tokio::sync::{mpsc, oneshot};
 use tokio::time::timeout;
-use wasmtime::component::Val;
 
 use crate::actor_executor::{ActorError, ActorOperation, DEFAULT_OPERATION_TIMEOUT};
 use crate::chain::ChainEvent;
 use crate::metrics::ActorMetrics;
-use crate::wasm::Event;
 
 #[derive(Clone)]
 pub struct ActorHandle {

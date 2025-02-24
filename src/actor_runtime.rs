@@ -14,10 +14,8 @@ use crate::messages::{ActorMessage, TheaterCommand};
 use crate::store::ActorStore;
 use crate::wasm::ActorComponent;
 use crate::Result;
-use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc::{Receiver, Sender};
 use tokio::task::JoinHandle;
-use tokio::time::timeout;
 use tracing::{info, warn};
 
 const SHUTDOWN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
@@ -95,9 +93,6 @@ impl ActorRuntime {
                         )
                         .as_str(),
                     );
-                handler.add_exports(&mut actor_component).await.expect(
-                    format!("Failed to add exports for handler: {:?}", handler.name()).as_str(),
-                );
             }
         }
 
@@ -109,13 +104,16 @@ impl ActorRuntime {
         {
             for handler in &handlers {
                 info!("Creating functions for handler: {:?}", handler.name());
-                handler.add_functions(&mut actor_instance).await.expect(
-                    format!(
-                        "Failed to create functions for handler: {:?}",
-                        handler.name()
-                    )
-                    .as_str(),
-                );
+                handler
+                    .add_export_functions(&mut actor_instance)
+                    .await
+                    .expect(
+                        format!(
+                            "Failed to create functions for handler: {:?}",
+                            handler.name()
+                        )
+                        .as_str(),
+                    );
             }
         }
 

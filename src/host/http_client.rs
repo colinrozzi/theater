@@ -132,11 +132,7 @@ impl HttpClientHost {
         Ok(())
     }
 
-    pub async fn add_exports(&self, _actor_component: &mut ActorComponent) -> Result<()> {
-        Ok(())
-    }
-
-    pub async fn add_functions(&self, _actor_instance: &mut ActorInstance) -> Result<()> {
+    pub async fn add_export_functions(&self, _actor_instance: &mut ActorInstance) -> Result<()> {
         Ok(())
     }
 

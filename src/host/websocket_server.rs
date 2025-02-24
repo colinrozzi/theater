@@ -100,15 +100,10 @@ impl WebSocketServerHost {
         Ok(())
     }
 
-    pub async fn add_exports(&self, actor_component: &mut ActorComponent) -> Result<()> {
-        info!("Adding exports to websocket-server");
-        actor_component.add_export("ntwk:theater/websocket-server", "handle-message");
-        Ok(())
-    }
-
-    pub async fn add_functions(&self, actor_instance: &mut ActorInstance) -> Result<()> {
+    pub async fn add_export_functions(&self, actor_instance: &mut ActorInstance) -> Result<()> {
         actor_instance.register_function::<(WebSocketMessage,), (WebSocketResponse,)>(
-            "ntwk:theater/websocket-server.handle-message",
+            "ntwk:theater/websocket-server",
+            "handle-message",
         )
     }
 

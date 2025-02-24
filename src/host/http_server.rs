@@ -60,15 +60,10 @@ impl HttpServerHost {
         Ok(())
     }
 
-    pub async fn add_exports(&self, actor_component: &mut ActorComponent) -> Result<()> {
-        info!("Adding exports to http-server");
-        actor_component.add_export("ntwk:theater/http-server", "handle-request");
-        Ok(())
-    }
-
-    pub async fn add_functions(&self, actor_instance: &mut ActorInstance) -> Result<()> {
+    pub async fn add_export_functions(&self, actor_instance: &mut ActorInstance) -> Result<()> {
         actor_instance.register_function::<(HttpRequest,), (HttpResponse,)>(
-            "ntwk:theater/http-server.handle-request",
+            "ntwk:theater/http-server",
+            "handle-request",
         )
     }
 

@@ -8,7 +8,6 @@ use crate::host::supervisor::SupervisorHost;
 use crate::host::websocket_server::WebSocketServerHost;
 use crate::wasm::{ActorComponent, ActorInstance};
 use anyhow::Result;
-use std::sync::{Arc, Mutex};
 
 pub enum Handler {
     MessageServer(MessageServerHost),
@@ -84,67 +83,34 @@ impl Handler {
         }
     }
 
-    pub async fn add_exports(&self, actor_component: &mut ActorComponent) -> Result<()> {
+    pub async fn add_export_functions(&self, actor_instance: &mut ActorInstance) -> Result<()> {
         match self {
             Handler::MessageServer(handler) => Ok(handler
-                .add_exports(actor_component)
-                .await
-                .expect("Error adding exports to message server")),
-            Handler::HttpServer(handler) => Ok(handler
-                .add_exports(actor_component)
-                .await
-                .expect("Error adding exports to http server")),
-            Handler::FileSystem(handler) => Ok(handler
-                .add_exports(actor_component)
-                .await
-                .expect("Error adding exports to filesystem")),
-            Handler::HttpClient(handler) => Ok(handler
-                .add_exports(actor_component)
-                .await
-                .expect("Error adding exports to http client")),
-            Handler::Runtime(handler) => Ok(handler
-                .add_exports(actor_component)
-                .await
-                .expect("Error adding exports to runtime")),
-            Handler::WebSocketServer(handler) => Ok(handler
-                .add_exports(actor_component)
-                .await
-                .expect("Error adding exports to websocket server")),
-            Handler::Supervisor(handler) => Ok(handler
-                .add_exports(actor_component)
-                .await
-                .expect("Error adding exports to supervisor")),
-        }
-    }
-
-    pub async fn add_functions(&self, actor_instance: &mut ActorInstance) -> Result<()> {
-        match self {
-            Handler::MessageServer(handler) => Ok(handler
-                .add_functions(actor_instance)
+                .add_export_functions(actor_instance)
                 .await
                 .expect("Error adding functions to message server")),
             Handler::HttpServer(handler) => Ok(handler
-                .add_functions(actor_instance)
+                .add_export_functions(actor_instance)
                 .await
                 .expect("Error adding functions to http server")),
             Handler::FileSystem(handler) => Ok(handler
-                .add_functions(actor_instance)
+                .add_export_functions(actor_instance)
                 .await
                 .expect("Error adding functions to filesystem")),
             Handler::HttpClient(handler) => Ok(handler
-                .add_functions(actor_instance)
+                .add_export_functions(actor_instance)
                 .await
                 .expect("Error adding functions to http client")),
             Handler::Runtime(handler) => Ok(handler
-                .add_functions(actor_instance)
+                .add_export_functions(actor_instance)
                 .await
                 .expect("Error adding functions to runtime")),
             Handler::WebSocketServer(handler) => Ok(handler
-                .add_functions(actor_instance)
+                .add_export_functions(actor_instance)
                 .await
                 .expect("Error adding functions to websocket server")),
             Handler::Supervisor(handler) => Ok(handler
-                .add_functions(actor_instance)
+                .add_export_functions(actor_instance)
                 .await
                 .expect("Error adding functions to supervisor")),
         }

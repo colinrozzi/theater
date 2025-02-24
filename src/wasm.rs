@@ -16,6 +16,7 @@ use wasmtime::{Engine, Store};
 use crate::config::ManifestConfig;
 use crate::store::ActorStore;
 use tracing::{error, info};
+use wasmtime::component::types::ComponentItem;
 
 pub type Json = Vec<u8>;
 
@@ -27,8 +28,6 @@ pub struct Event {
     pub parent: Option<u64>,
     pub data: Json,
 }
-
-pub type ActorState = Vec<u8>;
 
 #[derive(Error, Debug)]
 pub enum WasmError {
@@ -65,6 +64,7 @@ pub struct ActorComponent {
     pub component: Component,
     pub actor_store: ActorStore,
     pub linker: Linker<ActorStore>,
+    pub engine: Engine,
     pub exports: HashMap<String, ComponentExportIndex>,
 }
 
@@ -94,41 +94,62 @@ impl ActorComponent {
             component,
             actor_store,
             linker,
+            engine,
             exports: HashMap::new(),
         })
     }
 
-    pub fn find_export(
+    pub fn find_function_export(
         &mut self,
         interface_name: &str,
         export_name: &str,
-    ) -> Result<ComponentExportIndex> {
+    ) -> Result<ComponentExportIndex, WasmError> {
         info!(
             "Finding export: {} from interface: {}",
             export_name, interface_name
         );
-        let (_, instance) = self
+        let (interface_component_item, interface_component_export_index) = self
             .component
             .export_index(None, interface_name)
             .expect(format!("Failed to find interface export: {}", interface_name).as_str());
-        let (_, export) = self
+        info!("Found interface export: {}", interface_name);
+        let (func_component_item, func_component_export_index) = self
             .component
-            .export_index(Some(&instance), export_name)
+            .export_index(Some(&interface_component_export_index), export_name)
             .expect(format!("Failed to find export: {}", export_name).as_str());
-        Ok(export)
-    }
+        match func_component_item {
+            ComponentItem::ComponentFunc(component_func) => {
+                info!("Found export: {}", export_name);
+                let params = component_func.params();
+                for param in params {
+                    info!("Param: {:?}", param);
+                }
+                let results = component_func.results();
+                for result in results {
+                    info!("Result: {:?}", result);
+                }
 
-    pub fn add_export(&mut self, interface_name: &str, export_name: &str) {
-        let export = self
-            .find_export(interface_name, export_name)
-            .expect("Failed to find export");
-        self.exports
-            .insert(format!("{}.{}", interface_name, export_name), export);
+                Ok(func_component_export_index)
+            }
+            _ => {
+                error!(
+                    "Export {} is not a function, it is a {:?}",
+                    export_name, func_component_item
+                );
+
+                Err(WasmError::WasmError {
+                    context: "export type",
+                    message: format!(
+                        "Export {} is not a function, it is a {:?}",
+                        export_name, func_component_item
+                    ),
+                })
+            }
+        }
     }
 
     pub async fn instantiate(self) -> Result<ActorInstance> {
-        let engine = Engine::new(wasmtime::Config::new().async_support(true))?;
-        let mut store = Store::new(&engine, self.actor_store.clone());
+        let mut store = Store::new(&self.engine, self.actor_store.clone());
 
         let instance = self
             .linker
@@ -141,12 +162,22 @@ impl ActorComponent {
 
         Ok(ActorInstance {
             actor_component: self,
-            engine,
             instance,
             store,
             functions: HashMap::new(),
         })
     }
+}
+
+pub trait WithState {
+    type Params: ComponentType + Lower + Lift + DeserializeOwned + Send + Sync + ComponentNamedList;
+}
+
+impl<P> WithState for P
+where
+    P: ComponentType + Lower + Lift + DeserializeOwned + Send + Sync + ComponentNamedList,
+{
+    type Params = (Option<Vec<u8>>, P);
 }
 
 pub struct TypedComponentFunction<P, R>
@@ -157,14 +188,17 @@ where
     func: TypedFunc<(Option<Vec<u8>>, P), (Option<Vec<u8>>, R)>,
 }
 
-impl<P, R> TypedComponentFunction<P, R>
+impl<P: WithState, R: WithState> TypedComponentFunction<P, R>
 where
     P: ComponentType + Lower + DeserializeOwned + Send + Sync,
     R: ComponentType + Lift + Serialize + Send + Sync,
 {
-    pub fn new(store: &mut Store<ActorStore>, instance: &Instance, name: &str) -> Result<Self> {
-        let func =
-            instance.get_typed_func::<(Option<Vec<u8>>, P), (Option<Vec<u8>>, R)>(store, name)?;
+    pub fn new(
+        store: &mut Store<ActorStore>,
+        instance: &Instance,
+        export_index: ComponentExportIndex,
+    ) -> Result<Self> {
+        let func = instance.get_typed_func::<P::Params, R::Params>(store, export_index)?;
         Ok(Self { func })
     }
 }
@@ -208,14 +242,13 @@ where
 
 pub struct ActorInstance {
     pub actor_component: ActorComponent,
-    pub engine: Engine,
     pub instance: Instance,
     pub store: Store<ActorStore>,
     pub functions: HashMap<String, Box<dyn ComponentFunction>>,
 }
 
 impl ActorInstance {
-    pub fn register_function<P, R>(&mut self, name: &str) -> Result<()>
+    pub fn register_function<P, R>(&mut self, interface: &str, function_name: &str) -> Result<()>
     where
         P: ComponentType
             + Lower
@@ -237,7 +270,20 @@ impl ActorInstance {
             + Debug
             + 'static,
     {
-        let func = TypedComponentFunction::<P, R>::new(&mut self.store, &self.instance, name)?;
+        let export_index = self
+            .actor_component
+            .find_function_export(interface, function_name)
+            .map_err(|e| {
+                error!("Failed to find function export: {}", e);
+                e
+            })?;
+        info!(
+            "Found function: {}:{} with export index: {:?}",
+            interface, function_name, export_index
+        );
+        let name = format!("{}:{}", interface, function_name);
+        let func =
+            TypedComponentFunction::<P, R>::new(&mut self.store, &self.instance, export_index)?;
         self.functions.insert(name.to_string(), Box::new(func));
         Ok(())
     }

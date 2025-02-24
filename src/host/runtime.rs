@@ -113,14 +113,8 @@ impl RuntimeHost {
         Ok(())
     }
 
-    pub async fn add_exports(&self, actor_component: &mut ActorComponent) -> Result<()> {
-        info!("Adding exports for runtime host");
-        actor_component.add_export("ntwk:theater/actor", "init");
-        Ok(())
-    }
-
-    pub async fn add_functions(&self, actor_instance: &mut ActorInstance) -> Result<()> {
-        actor_instance.register_function::<(), ()>("ntwk:theater/actor.init")
+    pub async fn add_export_functions(&self, actor_instance: &mut ActorInstance) -> Result<()> {
+        actor_instance.register_function::<(), ()>("ntwk:theater/actor", "init")
     }
 
     pub async fn start(&self, _actor_handle: ActorHandle) -> Result<()> {

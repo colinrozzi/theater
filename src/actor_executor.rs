@@ -4,7 +4,6 @@ use thiserror::Error;
 use tokio::sync::{mpsc, oneshot};
 use tokio::time::{Duration, Instant};
 use tracing::{debug, error, info};
-use wasmtime::component::Val;
 
 use crate::metrics::{ActorMetrics, MetricsCollector};
 use crate::wasm::ActorInstance;

@@ -157,20 +157,19 @@ impl MessageServerHost {
         Ok(())
     }
 
-    pub async fn add_exports(&self, actor_component: &mut ActorComponent) -> Result<()> {
-        info!("Adding exports to message-server");
-        actor_component.add_export("ntwk:theater/message-server-client", "handle-send");
-        actor_component.add_export("ntwk:theater/message-server-client", "handle-request");
-        Ok(())
-    }
-
-    pub async fn add_functions(&self, actor_instance: &mut ActorInstance) -> Result<()> {
-        actor_instance.register_function::<(Vec<u8>,), ()>(
-            "ntwk:theater/message-server-client.handle-send",
-        )?;
-        actor_instance.register_function::<(Vec<u8>,), (Vec<u8>,)>(
-            "ntwk:theater/message-server-client.handle-request",
-        )?;
+    pub async fn add_export_functions(&self, actor_instance: &mut ActorInstance) -> Result<()> {
+        actor_instance
+            .register_function::<(Vec<u8>,), ()>(
+                "ntwk:theater/message-server-client",
+                "handle-send",
+            )
+            .expect("Failed to register handle-send function");
+        actor_instance
+            .register_function::<(Vec<u8>,), (Vec<u8>,)>(
+                "ntwk:theater/message-server-client",
+                "handle-request",
+            )
+            .expect("Failed to register handle-request function");
         Ok(())
     }
 

@@ -10,9 +10,7 @@ use serde::{Deserialize, Serialize};
 use std::fs::File;
 use std::io::{BufReader, Read, Write};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use thiserror::Error;
-use tokio::sync::Mutex;
 use tracing::{error, info};
 use wasmtime::StoreContextMut;
 
@@ -307,12 +305,7 @@ impl FileSystemHost {
         Ok(())
     }
 
-    pub async fn add_exports(&self, _actor_component: &mut ActorComponent) -> Result<()> {
-        info!("No exports needed for filesystem");
-        Ok(())
-    }
-
-    pub async fn add_functions(&self, _actor_instance: &mut ActorInstance) -> Result<()> {
+    pub async fn add_export_functions(&self, _actor_instance: &mut ActorInstance) -> Result<()> {
         info!("No functions needed for filesystem");
         Ok(())
     }
