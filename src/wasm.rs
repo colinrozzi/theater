@@ -169,106 +169,74 @@ impl ActorComponent {
     }
 }
 
-pub trait WithState {
-    type Params: ComponentType + Lower + Lift + DeserializeOwned + Send + Sync + ComponentNamedList;
-}
-
-impl<P> WithState for P
-where
-    P: ComponentType + Lower + Lift + DeserializeOwned + Send + Sync + ComponentNamedList,
-{
-    type Params = (Option<Vec<u8>>, P);
-}
-
 pub struct TypedComponentFunction<P, R>
 where
-    P: ComponentType + Lower + DeserializeOwned + Send + Sync,
-    R: ComponentType + Lift + Serialize + Send + Sync,
+    P: ComponentNamedList,
+    R: ComponentNamedList,
 {
     func: TypedFunc<(Option<Vec<u8>>, P), (Option<Vec<u8>>, R)>,
 }
 
-impl<P: WithState, R: WithState> TypedComponentFunction<P, R>
+impl<P, R> TypedComponentFunction<P, R>
 where
-    P: ComponentType + Lower + DeserializeOwned + Send + Sync,
-    R: ComponentType + Lift + Serialize + Send + Sync,
+    P: ComponentNamedList + Lower + Sync + Send,
+    R: ComponentNamedList + Lift + Sync + Send,
 {
     pub fn new(
         store: &mut Store<ActorStore>,
         instance: &Instance,
         export_index: ComponentExportIndex,
     ) -> Result<Self> {
-        let func = instance.get_typed_func::<P::Params, R::Params>(store, export_index)?;
-        Ok(Self { func })
+        let func = instance
+            .get_func(store, export_index)
+            .map_err(|e| WasmError::WasmError {
+                context: "function retrieval",
+                message: e.to_string(),
+            })?;
+        Ok(TypedComponentFunction { func })
+    }
+
+    pub async fn call_func(
+        &self,
+        store: &mut Store<ActorStore>,
+        state: Option<Vec<u8>>,
+        params: P,
+    ) -> Result<(Option<Vec<u8>>, R)> {
+        let result = self
+            .func
+            .call_async(store, (state, params))
+            .await
+            .map_err(|e| WasmError::WasmError {
+                context: "function call",
+                message: e.to_string(),
+            })?;
+        Ok(result)
     }
 }
 
-pub trait ComponentFunction: Send + Sync {
-    fn call_func<'a>(
-        &'a self,
-        store: &'a mut Store<ActorStore>,
+pub trait TypedFunction {
+    fn call_func(
+        &self,
+        store: &mut Store<ActorStore>,
         state: Option<Vec<u8>>,
-        params: Vec<u8>,
-    ) -> Pin<Box<dyn Future<Output = Result<(Option<Vec<u8>>, Vec<u8>)>> + Send + 'a>>;
-}
-
-impl<P, R> ComponentFunction for TypedComponentFunction<P, R>
-where
-    P: ComponentType
-        + Lower
-        + DeserializeOwned
-        + ComponentNamedList
-        + Send
-        + Sync
-        + Serialize
-        + Debug
-        + Clone,
-    R: ComponentType + Lift + Serialize + ComponentNamedList + Send + Sync + Serialize + Debug,
-{
-    fn call_func<'a>(
-        &'a self,
-        store: &'a mut Store<ActorStore>,
-        state: Option<Vec<u8>>,
-        params: Vec<u8>,
-    ) -> Pin<Box<dyn Future<Output = Result<(Option<Vec<u8>>, Vec<u8>)>> + Send + 'a>> {
-        Box::pin(async move {
-            let params: P = serde_json::from_slice(&params)?;
-            let (new_state, result) = self.func.call_async(store, (state, params)).await?;
-            let result_bytes = serde_json::to_vec(&result)?;
-            Ok((new_state, result_bytes))
-        })
-    }
+        params: dyn ComponentNamedList + Lower,
+    ) -> Pin<
+        Box<dyn Future<Output = Result<(Option<Vec<u8>>, dyn ComponentNamedList + Lift)>> + Send>,
+    >;
 }
 
 pub struct ActorInstance {
     pub actor_component: ActorComponent,
     pub instance: Instance,
     pub store: Store<ActorStore>,
-    pub functions: HashMap<String, Box<dyn ComponentFunction>>,
+    pub functions: HashMap<String, dyn TypedFunction>,
 }
 
 impl ActorInstance {
     pub fn register_function<P, R>(&mut self, interface: &str, function_name: &str) -> Result<()>
     where
-        P: ComponentType
-            + Lower
-            + DeserializeOwned
-            + ComponentNamedList
-            + Send
-            + Sync
-            + Serialize
-            + Debug
-            + Clone
-            + 'static,
-        R: ComponentType
-            + Lift
-            + Serialize
-            + ComponentNamedList
-            + Send
-            + Sync
-            + Serialize
-            + Debug
-            + 'static,
+        P: ComponentType + Lower + ComponentNamedList + 'static,
+        R: ComponentType + Lift + ComponentNamedList + 'static,
     {
         let export_index = self
             .actor_component
@@ -296,8 +264,8 @@ impl ActorInstance {
         &mut self,
         name: &str,
         state: Option<Vec<u8>>,
-        params: Vec<u8>,
-    ) -> Result<(Option<Vec<u8>>, Vec<u8>)> {
+        params: impl ComponentNamedList,
+    ) -> Result<(Option<Vec<u8>>, impl ComponentNamedList)> {
         let func = self
             .functions
             .get(name)
