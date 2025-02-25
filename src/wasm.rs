@@ -169,12 +169,125 @@ impl ActorComponent {
     }
 }
 
+pub struct ActorInstance {
+    pub actor_component: ActorComponent,
+    pub instance: Instance,
+    pub store: Store<ActorStore>,
+    pub functions: HashMap<String, Box<dyn TypedFunction>>,
+}
+
+impl ActorInstance {
+    pub fn has_function(&self, name: &str) -> bool {
+        self.functions.contains_key(name)
+    }
+
+    pub async fn call_function(
+        &mut self,
+        name: &str,
+        state: Option<Vec<u8>>,
+        params: Vec<u8>,
+    ) -> Result<(Option<Vec<u8>>, Vec<u8>)> {
+        let func = self
+            .functions
+            .get(name)
+            .expect("Function not found in functions table");
+        func.call_func(&mut self.store, state, params).await
+    }
+
+    pub fn register_function<P, R>(&mut self, interface: &str, function_name: &str) -> Result<()>
+    where
+        P: ComponentType + Lower + ComponentNamedList + Send + Sync + 'static,
+        R: ComponentType + Lift + ComponentNamedList + Send + Sync + 'static,
+        for<'de> P: Deserialize<'de>,
+        R: Serialize,
+    {
+        let export_index = self
+            .actor_component
+            .find_function_export(interface, function_name)
+            .map_err(|e| {
+                error!("Failed to find function export: {}", e);
+                e
+            })?;
+        info!(
+            "Found function: {}.{} with export index: {:?}",
+            interface, function_name, export_index
+        );
+        let name = format!("{}.{}", interface, function_name);
+        let func =
+            TypedComponentFunction::<P, R>::new(&mut self.store, &self.instance, export_index)?;
+        self.functions.insert(name.to_string(), Box::new(func));
+        Ok(())
+    }
+
+    pub fn register_function_no_params<R>(
+        &mut self,
+        interface: &str,
+        function_name: &str,
+    ) -> Result<()>
+    where
+        R: ComponentType + Lift + ComponentNamedList + Send + Sync + 'static,
+        R: Serialize,
+    {
+        let export_index = self
+            .actor_component
+            .find_function_export(interface, function_name)?;
+        let name = format!("{}.{}", interface, function_name);
+        let func = TypedComponentFunctionNoParams::<R>::new(
+            &mut self.store,
+            &self.instance,
+            export_index,
+        )?;
+        self.functions.insert(name.to_string(), Box::new(func));
+        Ok(())
+    }
+
+    pub fn register_function_no_result<P>(
+        &mut self,
+        interface: &str,
+        function_name: &str,
+    ) -> Result<()>
+    where
+        P: ComponentType + Lower + ComponentNamedList + Send + Sync + 'static,
+        for<'de> P: Deserialize<'de>,
+    {
+        let export_index = self
+            .actor_component
+            .find_function_export(interface, function_name)?;
+        let name = format!("{}.{}", interface, function_name);
+        let func = TypedComponentFunctionNoResult::<P>::new(
+            &mut self.store,
+            &self.instance,
+            export_index,
+        )?;
+        self.functions.insert(name.to_string(), Box::new(func));
+        Ok(())
+    }
+
+    pub fn register_function_no_params_no_result(
+        &mut self,
+        interface: &str,
+        function_name: &str,
+    ) -> Result<()> {
+        let export_index = self
+            .actor_component
+            .find_function_export(interface, function_name)?;
+        let name = format!("{}.{}", interface, function_name);
+        let func = TypedComponentFunctionNoParamsNoResult::new(
+            &mut self.store,
+            &self.instance,
+            export_index,
+        )?;
+        self.functions.insert(name.to_string(), Box::new(func));
+        Ok(())
+    }
+}
+
 pub struct TypedComponentFunction<P, R>
 where
     P: ComponentNamedList,
     R: ComponentNamedList,
 {
-    func: TypedFunc<(Option<Vec<u8>>, P), (Option<Vec<u8>>, R)>,
+    func: TypedFunc<(Option<Vec<u8>>, P), ((Option<Vec<u8>>, R),)>,
 }
 
 impl<P, R> TypedComponentFunction<P, R>
@@ -196,10 +309,9 @@ where
 
         // Convert the Func to a TypedFunc with the correct signature
         let typed_func = func
-            .typed::<(Option<Vec<u8>>, P), (Option<Vec<u8>>, R)>(store)
-            .map_err(|e| WasmError::WasmError {
-                context: "function typing",
-                message: format!("Failed to type function: {}", e),
+            .typed::<(Option<Vec<u8>>, P), ((Option<Vec<u8>>, R),)>(store)
+            .inspect_err(|e| {
+                error!("Failed to get typed function: {}", e);
             })?;
 
         Ok(TypedComponentFunction { func: typed_func })
@@ -219,8 +331,17 @@ where
                 context: "function call",
                 message: e.to_string(),
             })?;
-        Ok(result)
+        Ok(result.0)
     }
+}
+
+pub trait TypedFunction: Send + Sync + 'static {
+    fn call_func<'a>(
+        &'a self,
+        store: &'a mut Store<ActorStore>,
+        state: Option<Vec<u8>>,
+        params: Vec<u8>,
+    ) -> Pin<Box<dyn Future<Output = Result<(Option<Vec<u8>>, Vec<u8>)>> + Send + 'a>>;
 }
 
 impl<P, R> TypedFunction for TypedComponentFunction<P, R>
@@ -250,62 +371,203 @@ where
     }
 }
 
-pub trait TypedFunction: Send + Sync + 'static {
+pub struct TypedComponentFunctionNoParams<R>
+where
+    R: ComponentNamedList,
+{
+    func: TypedFunc<(Option<Vec<u8>>,), ((Option<Vec<u8>>, R),)>,
+}
+
+impl<R> TypedComponentFunctionNoParams<R>
+where
+    R: ComponentNamedList + Lift + Sync + Send + 'static,
+{
+    pub fn new(
+        store: &mut Store<ActorStore>,
+        instance: &Instance,
+        export_index: ComponentExportIndex,
+    ) -> Result<Self> {
+        let func = instance
+            .get_func(&mut *store, export_index)
+            .ok_or_else(|| WasmError::WasmError {
+                context: "function retrieval",
+                message: "Function not found".to_string(),
+            })?;
+
+        let typed_func = func
+            .typed::<(Option<Vec<u8>>,), ((Option<Vec<u8>>, R),)>(store)
+            .inspect_err(|e| {
+                error!("Failed to get typed function: {}", e);
+            })?;
+
+        Ok(TypedComponentFunctionNoParams { func: typed_func })
+    }
+
+    pub async fn call_func(
+        &self,
+        store: &mut Store<ActorStore>,
+        state: Option<Vec<u8>>,
+    ) -> Result<(Option<Vec<u8>>, R)> {
+        let result =
+            self.func
+                .call_async(store, (state,))
+                .await
+                .map_err(|e| WasmError::WasmError {
+                    context: "function call",
+                    message: e.to_string(),
+                })?;
+        Ok(result.0)
+    }
+}
+
+impl<R> TypedFunction for TypedComponentFunctionNoParams<R>
+where
+    R: ComponentNamedList + Lift + Sync + Send + 'static + Serialize,
+{
+    fn call_func<'a>(
+        &'a self,
+        store: &'a mut Store<ActorStore>,
+        state: Option<Vec<u8>>,
+        _params: Vec<u8>, // Ignore params
+    ) -> Pin<Box<dyn Future<Output = Result<(Option<Vec<u8>>, Vec<u8>)>> + Send + 'a>> {
+        Box::pin(async move {
+            let (new_state, result) = self.call_func(store, state).await?;
+
+            let result_serialized = serde_json::to_vec(&result)
+                .map_err(|e| anyhow::anyhow!("Failed to serialize result: {}", e))?;
+
+            Ok((new_state, result_serialized))
+        })
+    }
+}
+
+pub struct TypedComponentFunctionNoResult<P>
+where
+    P: ComponentNamedList,
+{
+    func: TypedFunc<(Option<Vec<u8>>, P), ((Option<Vec<u8>>,),)>,
+}
+
+impl<P> TypedComponentFunctionNoResult<P>
+where
+    P: ComponentNamedList + Lower + Sync + Send + 'static,
+{
+    pub fn new(
+        store: &mut Store<ActorStore>,
+        instance: &Instance,
+        export_index: ComponentExportIndex,
+    ) -> Result<Self> {
+        let func = instance
+            .get_func(&mut *store, export_index)
+            .ok_or_else(|| WasmError::WasmError {
+                context: "function retrieval",
+                message: "Function not found".to_string(),
+            })?;
+
+        let typed_func = func
+            .typed::<(Option<Vec<u8>>, P), ((Option<Vec<u8>>,),)>(store)
+            .inspect_err(|e| {
+                error!("Failed to get typed function: {}", e);
+            })?;
+
+        Ok(TypedComponentFunctionNoResult { func: typed_func })
+    }
+
+    pub async fn call_func(
+        &self,
+        store: &mut Store<ActorStore>,
+        state: Option<Vec<u8>>,
+        params: P,
+    ) -> Result<Option<Vec<u8>>> {
+        let result = self
+            .func
+            .call_async(store, (state, params))
+            .await
+            .map_err(|e| WasmError::WasmError {
+                context: "function call",
+                message: e.to_string(),
+            })?;
+        Ok(result.0 .0)
+    }
+}
+
+impl<P> TypedFunction for TypedComponentFunctionNoResult<P>
+where
+    P: ComponentNamedList + Lower + Sync + Send + 'static + for<'de> Deserialize<'de>,
+{
     fn call_func<'a>(
         &'a self,
         store: &'a mut Store<ActorStore>,
         state: Option<Vec<u8>>,
         params: Vec<u8>,
-    ) -> Pin<Box<dyn Future<Output = Result<(Option<Vec<u8>>, Vec<u8>)>> + Send + 'a>>;
+    ) -> Pin<Box<dyn Future<Output = Result<(Option<Vec<u8>>, Vec<u8>)>> + Send + 'a>> {
+        Box::pin(async move {
+            let params_deserialized: P = serde_json::from_slice(&params)
+                .map_err(|e| anyhow::anyhow!("Failed to deserialize params: {}", e))?;
+
+            let new_state = self.call_func(store, state, params_deserialized).await?;
+
+            // Return empty Vec<u8> as result
+            Ok((new_state, Vec::new()))
+        })
+    }
 }
 
-pub struct ActorInstance {
-    pub actor_component: ActorComponent,
-    pub instance: Instance,
-    pub store: Store<ActorStore>,
-    pub functions: HashMap<String, Box<dyn TypedFunction>>,
+pub struct TypedComponentFunctionNoParamsNoResult {
+    func: TypedFunc<(Option<Vec<u8>>,), ((Option<Vec<u8>>,),)>,
 }
 
-impl ActorInstance {
-    pub fn register_function<P, R>(&mut self, interface: &str, function_name: &str) -> Result<()>
-    where
-        P: ComponentType + Lower + ComponentNamedList + Send + Sync + 'static,
-        R: ComponentType + Lift + ComponentNamedList + Send + Sync + 'static,
-        for<'de> P: Deserialize<'de>,
-        R: Serialize,
-    {
-        let export_index = self
-            .actor_component
-            .find_function_export(interface, function_name)
-            .map_err(|e| {
-                error!("Failed to find function export: {}", e);
-                e
+impl TypedComponentFunctionNoParamsNoResult {
+    pub fn new(
+        store: &mut Store<ActorStore>,
+        instance: &Instance,
+        export_index: ComponentExportIndex,
+    ) -> Result<Self> {
+        let func = instance
+            .get_func(&mut *store, export_index)
+            .ok_or_else(|| WasmError::WasmError {
+                context: "function retrieval",
+                message: "Function not found".to_string(),
             })?;
-        info!(
-            "Found function: {}:{} with export index: {:?}",
-            interface, function_name, export_index
-        );
-        let name = format!("{}:{}", interface, function_name);
-        let func =
-            TypedComponentFunction::<P, R>::new(&mut self.store, &self.instance, export_index)?;
-        self.functions.insert(name.to_string(), Box::new(func));
-        Ok(())
+
+        let typed_func = func
+            .typed::<(Option<Vec<u8>>,), ((Option<Vec<u8>>,),)>(store)
+            .inspect_err(|e| {
+                error!("Failed to get typed function: {}", e);
+            })?;
+
+        Ok(TypedComponentFunctionNoParamsNoResult { func: typed_func })
     }
 
-    pub fn has_function(&self, name: &str) -> bool {
-        self.functions.contains_key(name)
-    }
-
-    pub async fn call_function(
-        &mut self,
-        name: &str,
+    pub async fn call_func(
+        &self,
+        store: &mut Store<ActorStore>,
         state: Option<Vec<u8>>,
-        params: Vec<u8>,
-    ) -> Result<(Option<Vec<u8>>, Vec<u8>)> {
-        let func = self
-            .functions
-            .get(name)
-            .expect("Function not found in functions table");
-        func.call_func(&mut self.store, state, params).await
+    ) -> Result<Option<Vec<u8>>> {
+        let result =
+            self.func
+                .call_async(store, (state,))
+                .await
+                .map_err(|e| WasmError::WasmError {
+                    context: "function call",
+                    message: e.to_string(),
+                })?;
+        Ok(result.0 .0)
+    }
+}
+
+impl TypedFunction for TypedComponentFunctionNoParamsNoResult {
+    fn call_func<'a>(
+        &'a self,
+        store: &'a mut Store<ActorStore>,
+        state: Option<Vec<u8>>,
+        _params: Vec<u8>, // Ignore params
+    ) -> Pin<Box<dyn Future<Output = Result<(Option<Vec<u8>>, Vec<u8>)>> + Send + 'a>> {
+        Box::pin(async move {
+            let new_state = self.call_func(store, state).await?;
+
+            // Return empty Vec<u8> as result
+            Ok((new_state, Vec::new()))
+        })
     }
 }

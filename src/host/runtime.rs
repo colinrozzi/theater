@@ -114,7 +114,7 @@ impl RuntimeHost {
     }
 
     pub async fn add_export_functions(&self, actor_instance: &mut ActorInstance) -> Result<()> {
-        actor_instance.register_function::<(), ()>("ntwk:theater/actor", "init")
+        actor_instance.register_function_no_result::<(String,)>("ntwk:theater/actor", "init")
     }
 
     pub async fn start(&self, _actor_handle: ActorHandle) -> Result<()> {

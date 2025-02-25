@@ -121,6 +121,20 @@ impl ActorRuntime {
 
         let actor_handle = ActorHandle::new(operation_tx);
 
+        let init_state = config.load_init_state().expect("Failed to load init state");
+        actor_instance.store.data_mut().set_state(init_state);
+
+        let mut actor_executor = ActorExecutor::new(actor_instance, operation_rx);
+        let executor_task = tokio::spawn(async move { actor_executor.run().await });
+
+        actor_handle
+            .call_function(
+                "ntwk:theater/actor.init".to_string(),
+                serde_json::to_vec(&(id.to_string(),))?,
+            )
+            .await
+            .expect("Failed to call init function");
+
         let mut handler_tasks: Vec<JoinHandle<()>> = Vec::new();
 
         for mut handler in handlers {
@@ -133,12 +147,6 @@ impl ActorRuntime {
             });
             handler_tasks.push(handler_task);
         }
-
-        let init_state = config.load_init_state().expect("Failed to load init state");
-        actor_instance.store.data_mut().set_state(init_state);
-
-        let mut actor_executor = ActorExecutor::new(actor_instance, operation_rx);
-        let executor_task = tokio::spawn(async move { actor_executor.run().await });
 
         Ok(ActorRuntime {
             actor_id: id.clone(),

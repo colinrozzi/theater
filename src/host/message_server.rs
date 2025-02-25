@@ -159,7 +159,7 @@ impl MessageServerHost {
 
     pub async fn add_export_functions(&self, actor_instance: &mut ActorInstance) -> Result<()> {
         actor_instance
-            .register_function::<(Vec<u8>,), ()>(
+            .register_function_no_result::<(Vec<u8>,)>(
                 "ntwk:theater/message-server-client",
                 "handle-send",
             )

@@ -22,7 +22,7 @@ interface http-server {
     use types.{state};
     use http-types.{http-request, http-response};
 
-    handle-request: func(req: http-request, state: state) -> tuple<http-response, state>;
+    handle-request: func(state: state, tuple<http-request>) -> tuple<state, tuple<http-response>>;
 }
 
 interface http-client {

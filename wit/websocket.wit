@@ -37,5 +37,5 @@ interface websocket-server {
     }
 
     /// Called for each event on the WebSocket (connections, messages, disconnections)
-    handle-message: func(message: websocket-message, state: list<u8>) -> tuple<list<u8>, websocket-response>;
+    handle-message: func(state: state, params: tuple<websocket-message>) -> tuple<state, tuple<websocket-response>>;
 }

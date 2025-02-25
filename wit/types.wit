@@ -4,7 +4,7 @@ package ntwk:theater;
 interface types {
     /// Generic message type as bytes that can be serialized/deserialized
     type json = list<u8>;
-    type state = list<u8>;
+    type state = option<list<u8>>;
 
     type actor-id = string;
 
