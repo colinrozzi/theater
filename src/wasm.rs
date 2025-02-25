@@ -573,7 +573,7 @@ where
             match self.call_func(store, state, params_deserialized).await {
                 Ok((new_state,)) => {
                     // Return empty Vec<u8> as result
-                    Ok((new_state, Vec::new()))
+                    Ok((new_state, serde_json::to_vec(&()).unwrap()))
                 }
                 Err(e) => Err(anyhow::anyhow!("Failed to call function: {}", e)),
             }

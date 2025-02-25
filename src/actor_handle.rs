@@ -1,7 +1,9 @@
 use anyhow::Result;
+use wasmtime::component::{ComponentNamedList, ComponentType, Lift, Lower};
+
 use tokio::sync::{mpsc, oneshot};
 use tokio::time::timeout;
-use tracing::error;
+use tracing::{error, info};
 
 use crate::actor_executor::{ActorError, ActorOperation, DEFAULT_OPERATION_TIMEOUT};
 use crate::chain::ChainEvent;
@@ -17,12 +19,23 @@ impl ActorHandle {
         Self { operation_tx }
     }
 
-    pub async fn call_function(
-        &self,
-        name: String,
-        params: Vec<u8>,
-    ) -> Result<Vec<u8>, ActorError> {
+    pub async fn call_function<P, R>(&self, name: String, params: P) -> Result<R, ActorError>
+    where
+        P: ComponentType + Lower + ComponentNamedList + Send + Sync + 'static + serde::Serialize,
+        R: ComponentType
+            + Lift
+            + ComponentNamedList
+            + Send
+            + Sync
+            + 'static
+            + serde::de::DeserializeOwned,
+    {
         let (tx, rx) = oneshot::channel();
+
+        let params = serde_json::to_vec(&params).map_err(|e| {
+            error!("Failed to serialize params: {}", e);
+            ActorError::SerializationError
+        })?;
 
         self.operation_tx
             .send(ActorOperation::CallFunction {
@@ -37,14 +50,23 @@ impl ActorHandle {
             })?;
 
         match timeout(DEFAULT_OPERATION_TIMEOUT, rx).await {
-            Ok(result) => result.map_err(|e| {
-                error!("Channel closed while waiting for response: {:?}", e);
-                ActorError::ChannelClosed
-            })?,
+            Ok(result) => match result {
+                Ok(result) => {
+                    let res = serde_json::from_slice::<R>(&result.unwrap()).map_err(|e| {
+                        error!("Failed to deserialize response: {}", e);
+                        ActorError::SerializationError
+                    })?;
+                    Ok(res)
+                }
+                Err(e) => {
+                    error!("Channel closed while waiting for response: {:?}", e);
+                    return Err(ActorError::ChannelClosed);
+                }
+            },
             Err(_) => {
                 error!("Operation timed out after {:?}", DEFAULT_OPERATION_TIMEOUT);
                 Err(ActorError::OperationTimeout(DEFAULT_OPERATION_TIMEOUT))
-            },
+            }
         }
     }
 
@@ -61,13 +83,19 @@ impl ActorHandle {
 
         match timeout(DEFAULT_OPERATION_TIMEOUT, rx).await {
             Ok(result) => result.map_err(|e| {
-                error!("Channel closed while waiting for GetState response: {:?}", e);
+                error!(
+                    "Channel closed while waiting for GetState response: {:?}",
+                    e
+                );
                 ActorError::ChannelClosed
             })?,
             Err(_) => {
-                error!("GetState operation timed out after {:?}", DEFAULT_OPERATION_TIMEOUT);
+                error!(
+                    "GetState operation timed out after {:?}",
+                    DEFAULT_OPERATION_TIMEOUT
+                );
                 Err(ActorError::OperationTimeout(DEFAULT_OPERATION_TIMEOUT))
-            },
+            }
         }
     }
 
@@ -84,13 +112,19 @@ impl ActorHandle {
 
         match timeout(DEFAULT_OPERATION_TIMEOUT, rx).await {
             Ok(result) => result.map_err(|e| {
-                error!("Channel closed while waiting for GetChain response: {:?}", e);
+                error!(
+                    "Channel closed while waiting for GetChain response: {:?}",
+                    e
+                );
                 ActorError::ChannelClosed
             })?,
             Err(_) => {
-                error!("GetChain operation timed out after {:?}", DEFAULT_OPERATION_TIMEOUT);
+                error!(
+                    "GetChain operation timed out after {:?}",
+                    DEFAULT_OPERATION_TIMEOUT
+                );
                 Err(ActorError::OperationTimeout(DEFAULT_OPERATION_TIMEOUT))
-            },
+            }
         }
     }
 
@@ -107,13 +141,19 @@ impl ActorHandle {
 
         match timeout(DEFAULT_OPERATION_TIMEOUT, rx).await {
             Ok(result) => result.map_err(|e| {
-                error!("Channel closed while waiting for GetMetrics response: {:?}", e);
+                error!(
+                    "Channel closed while waiting for GetMetrics response: {:?}",
+                    e
+                );
                 ActorError::ChannelClosed
             })?,
             Err(_) => {
-                error!("GetMetrics operation timed out after {:?}", DEFAULT_OPERATION_TIMEOUT);
+                error!(
+                    "GetMetrics operation timed out after {:?}",
+                    DEFAULT_OPERATION_TIMEOUT
+                );
                 Err(ActorError::OperationTimeout(DEFAULT_OPERATION_TIMEOUT))
-            },
+            }
         }
     }
 
@@ -130,13 +170,19 @@ impl ActorHandle {
 
         match timeout(DEFAULT_OPERATION_TIMEOUT, rx).await {
             Ok(result) => result.map_err(|e| {
-                error!("Channel closed while waiting for Shutdown response: {:?}", e);
+                error!(
+                    "Channel closed while waiting for Shutdown response: {:?}",
+                    e
+                );
                 ActorError::ChannelClosed
             })?,
             Err(_) => {
-                error!("Shutdown operation timed out after {:?}", DEFAULT_OPERATION_TIMEOUT);
+                error!(
+                    "Shutdown operation timed out after {:?}",
+                    DEFAULT_OPERATION_TIMEOUT
+                );
                 Err(ActorError::OperationTimeout(DEFAULT_OPERATION_TIMEOUT))
-            },
+            }
         }
     }
 }

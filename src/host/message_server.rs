@@ -189,14 +189,20 @@ impl MessageServerHost {
         match msg {
             ActorMessage::Send(ActorSend { data }) => {
                 actor_handle
-                    .call_function("handle-send".to_string(), data)
+                    .call_function::<(Vec<u8>,), ()>(
+                        "ntwk:theater/message-server-client.handle-send".to_string(),
+                        (data,),
+                    )
                     .await?;
             }
             ActorMessage::Request(ActorRequest { response_tx, data }) => {
                 let response = actor_handle
-                    .call_function("handle-request".to_string(), data)
+                    .call_function::<(Vec<u8>,), (Vec<u8>,)>(
+                        "ntwk:theater/message-server-client.handle-request".to_string(),
+                        (data,),
+                    )
                     .await?;
-                let _ = response_tx.send(response);
+                let _ = response_tx.send(response.0);
             }
         }
         Ok(())

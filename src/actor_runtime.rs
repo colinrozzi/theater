@@ -128,9 +128,9 @@ impl ActorRuntime {
         let executor_task = tokio::spawn(async move { actor_executor.run().await });
 
         actor_handle
-            .call_function(
+            .call_function::<(String,), ()>(
                 "ntwk:theater/actor.init".to_string(),
-                serde_json::to_vec(&(id.to_string(),))?,
+                (id.to_string(),),
             )
             .await
             .expect("Failed to call init function");

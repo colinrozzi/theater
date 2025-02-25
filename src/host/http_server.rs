@@ -124,32 +124,26 @@ impl HttpServerHost {
         );
 
         let results = match actor_handle
-            .call_function(
+            .call_function::<(HttpRequest,), (HttpResponse,)>(
                 "ntwk:theater/http-server.handle-request".to_string(),
-                serde_json::to_vec(&(http_request,)).expect("Failed to serialize request as tuple"),
+                (http_request,),
             )
-            .await {
-                Ok(result) => result,
-                Err(e) => {
-                    error!("Failed to call http-server.handle-request function: {}", e);
-                    return Response::builder()
-                        .status(StatusCode::INTERNAL_SERVER_ERROR)
-                        .body(format!("Error calling actor: {}", e).into())
-                        .unwrap_or_default();
-                }
-            };
-
-        // Deserialize response from state
-        let http_response: HttpResponse = match serde_json::from_slice(&results) {
-            Ok(response) => response,
+            .await
+        {
+            Ok(result) => result,
             Err(e) => {
-                error!("Failed to deserialize response: {}, response content: {}", e, String::from_utf8_lossy(&results));
+                error!("Failed to call http-server.handle-request function: {}", e);
                 return Response::builder()
                     .status(StatusCode::INTERNAL_SERVER_ERROR)
-                    .body(format!("Failed to process response: {}", e).into())
+                    .body(format!("Error calling actor: {}", e).into())
                     .unwrap_or_default();
             }
         };
+
+        info!("Received response from actor");
+        info!("Response: {:?}", results);
+
+        let http_response = results.0;
 
         // Convert HttpResponse to axum Response
         let mut response = Response::builder()

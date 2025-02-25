@@ -238,14 +238,14 @@ impl WebSocketServerHost {
         };
 
         let raw_response = actor_handle
-            .call_function(
-                "handle-message".to_string(),
-                serde_json::to_vec(&component_msg)?,
+            .call_function::<(WebSocketMessage,), (WebSocketResponse,)>(
+                "ntwk:theater/websocket-server.handle-message".to_string(),
+                (component_msg,),
             )
             .await?;
 
         // Deserialize response
-        let response: WebSocketResponse = serde_json::from_slice(&raw_response)?;
+        let response = raw_response.0;
 
         // Send responses
         if let Some(connection) = connections.read().await.get(&msg.connection_id) {

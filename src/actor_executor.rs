@@ -31,6 +31,9 @@ pub enum ActorError {
 
     #[error("Internal error: {0}")]
     Internal(#[from] anyhow::Error),
+
+    #[error("Serialization error")]
+    SerializationError,
 }
 
 // Different types of operations the executor can handle
