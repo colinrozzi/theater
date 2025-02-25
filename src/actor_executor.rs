@@ -3,7 +3,7 @@ use std::fmt::Debug;
 use thiserror::Error;
 use tokio::sync::{mpsc, oneshot};
 use tokio::time::{Duration, Instant};
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
 
 use crate::metrics::{ActorMetrics, MetricsCollector};
 use crate::wasm::ActorInstance;
@@ -75,23 +75,44 @@ impl ActorExecutor {
     }
 
     // Execute a type-safe function call
-    async fn execute_call(&mut self, name: String, params: Vec<u8>) -> Result<Vec<u8>, ActorError> {
+    async fn execute_call(
+        &mut self,
+        name: &String,
+        params: Vec<u8>,
+    ) -> Result<Vec<u8>, ActorError> {
         // Validate the function exists
         if !self.actor_instance.has_function(&name) {
-            return Err(ActorError::FunctionNotFound(name));
+            error!("Function '{}' not found in actor", name);
+            return Err(ActorError::FunctionNotFound(name.to_string()));
         }
 
         let start = Instant::now();
 
         let state = self.actor_instance.store.data().get_state();
+        debug!(
+            "Executing call to function '{}' with state size: {:?}",
+            name,
+            state.as_ref().map(|s| s.len()).unwrap_or(0)
+        );
 
         // Execute the call
-        let (new_state, results) = self
+        let (new_state, results) = match self
             .actor_instance
             .call_function(&name, state, params)
             .await
-            .map_err(ActorError::Internal)?;
+        {
+            Ok(result) => result,
+            Err(e) => {
+                error!("Failed to execute function '{}': {}", name, e);
+                return Err(ActorError::Internal(e));
+            }
+        };
 
+        debug!(
+            "Call to '{}' completed, new state size: {:?}",
+            name,
+            new_state.as_ref().map(|s| s.len()).unwrap_or(0)
+        );
         self.actor_instance.store.data_mut().set_state(new_state);
 
         // Record metrics
@@ -133,46 +154,60 @@ impl ActorExecutor {
 
                     match op {
                         ActorOperation::CallFunction { name, params, response_tx } => {
-                            match self.execute_call(name, params).await {
+                            match self.execute_call(&name, params).await {
                                 Ok(result) => {
                                     if let Err(e) = response_tx.send(Ok(result)) {
-                                        error!("Failed to send function call response: {:?}", e);
+                                        error!("Failed to send function call response for operation '{}': {:?}", name, e);
                                     }
                                 }
                                 Err(e) => {
-                                    if let Err(e) = response_tx.send(Err(e)) {
-                                        error!("Failed to send function call response: {:?}", e);
+                                    error!("Operation '{}' failed with error: {:?}", name, e);
+                                    if let Err(send_err) = response_tx.send(Err(e)) {
+                                        error!("Failed to send function call error response for operation '{}': {:?}", name, send_err);
                                     }
                                 }
                 }
                         }
 
                         ActorOperation::GetMetrics { response_tx } => {
+                            debug!("Processing GetMetrics operation");
                             let metrics = self.metrics.get_metrics().await;
                             if let Err(e) = response_tx.send(Ok(metrics)) {
-                                error!("Failed to send metrics: {:?}", e);
+                                error!("Failed to send metrics response: {:?}", e);
                             }
+                            debug!("GetMetrics operation completed");
                         }
 
                         ActorOperation::GetChain { response_tx } => {
+                            debug!("Processing GetChain operation");
                             let chain = self.actor_instance.store.data().get_chain();
+                            debug!("Retrieved chain with {} events", chain.len());
                             if let Err(e) = response_tx.send(Ok(chain)) {
-                                error!("Failed to send chain: {:?}", e);
+                                error!("Failed to send chain response: {:?}", e);
                             }
+                            debug!("GetChain operation completed");
                         }
 
                         ActorOperation::GetState { response_tx } => {
+                            debug!("Processing GetState operation");
                             let state = self.actor_instance.store.data().get_state();
+                            debug!("Retrieved state with size: {:?}", state.as_ref().map(|s| s.len()).unwrap_or(0));
                             if let Err(e) = response_tx.send(Ok(state)) {
-                                error!("Failed to send state: {:?}", e);
+                                error!("Failed to send state response: {:?}", e);
                             }
+                            debug!("GetState operation completed");
                         }
 
 
                         ActorOperation::Shutdown { response_tx } => {
                             info!("Processing shutdown request");
                             self.shutdown_initiated = true;
-                            let _ = response_tx.send(Ok(()));
+                            if let Err(e) = response_tx.send(Ok(())) {
+                                error!("Failed to send shutdown confirmation: {:?}", e);
+                            } else {
+                                info!("Shutdown confirmation sent successfully");
+                            }
+                            info!("Breaking from operation loop to begin shutdown process");
                             break;
                         }
                     }
