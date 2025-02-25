@@ -38,7 +38,7 @@ pub enum ActorOperation {
     CallFunction {
         name: String,
         params: Vec<u8>,
-        response_tx: oneshot::Sender<Result<Vec<u8>, ActorError>>,
+        response_tx: oneshot::Sender<Result<FunctionResponse, ActorError>>,
     },
     GetMetrics {
         response_tx: oneshot::Sender<Result<ActorMetrics, ActorError>>,
@@ -52,6 +52,11 @@ pub enum ActorOperation {
     GetState {
         response_tx: oneshot::Sender<Result<Option<Vec<u8>>, ActorError>>,
     },
+}
+
+pub struct FunctionResponse {
+    pub result: Result<Vec<u8>, ActorError>,
+    pub state_update_tx: mpsc::Sender<Option<Option<Vec<u8>>>>,
 }
 
 pub struct ActorExecutor {
@@ -97,6 +102,33 @@ impl ActorExecutor {
         Ok(results)
     }
 
+    // Call a function on the actor instance
+    async fn call_function(
+        &mut self,
+        name: String,
+        params: Vec<u8>,
+        response_tx: oneshot::Sender<Result<FunctionResponse, ActorError>>,
+    ) {
+        let result = self.execute_call(name, params).await;
+
+        // Send the result back
+        let (state_update_tx, mut state_update_rx) = mpsc::channel(1);
+        let response = FunctionResponse {
+            result,
+            state_update_tx,
+        };
+        let _ = response_tx.send(Ok(response));
+
+        // Wait for state updates
+        let state_update = state_update_rx.recv().await;
+        if let Some(state) = state_update {
+            self.actor_instance
+                .store
+                .data_mut()
+                .set_state(state.unwrap());
+        }
+    }
+
     pub async fn run(&mut self) {
         info!("Actor executor starting");
 
@@ -129,18 +161,7 @@ impl ActorExecutor {
 
                     match op {
                         ActorOperation::CallFunction { name, params, response_tx } => {
-                            match self.execute_call(name, params).await {
-                                Ok(result) => {
-                                    if let Err(e) = response_tx.send(Ok(result)) {
-                                        error!("Failed to send function call response: {:?}", e);
-                                    }
-                                }
-                                Err(e) => {
-                                    if let Err(e) = response_tx.send(Err(e)) {
-                                        error!("Failed to send function call response: {:?}", e);
-                                    }
-                                }
-                            }
+                            self.call_function(name, params, response_tx).await;
                         }
 
                         ActorOperation::GetMetrics { response_tx } => {
