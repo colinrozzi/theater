@@ -287,7 +287,7 @@ where
     P: ComponentNamedList,
     R: ComponentNamedList,
 {
-    func: TypedFunc<(Option<Vec<u8>>, P), (Result<((Option<Vec<u8>>, R),), String>,)>,
+    func: TypedFunc<(Option<Vec<u8>>, P), (Result<(Option<Vec<u8>>, R), String>,)>,
 }
 
 impl<P, R> TypedComponentFunction<P, R>
@@ -309,7 +309,7 @@ where
 
         // Convert the Func to a TypedFunc with the correct signature
         let typed_func = func
-            .typed::<(Option<Vec<u8>>, P), (Result<((Option<Vec<u8>>, R),), String>,)>(store)
+            .typed::<(Option<Vec<u8>>, P), (Result<(Option<Vec<u8>>, R), String>,)>(store)
             .inspect_err(|e| {
                 error!("Failed to get typed function: {}", e);
             })?;
@@ -322,7 +322,7 @@ where
         store: &mut Store<ActorStore>,
         state: Option<Vec<u8>>,
         params: P,
-    ) -> Result<((Option<Vec<u8>>, R),), String> {
+    ) -> Result<(Option<Vec<u8>>, R), String> {
         let result = self
             .func
             .call_async(store, (state, params))
@@ -359,7 +359,7 @@ where
                 .map_err(|e| anyhow::anyhow!("Failed to deserialize params: {}", e))?;
 
             match self.call_func(store, state, params_deserialized).await {
-                Ok(((new_state, result),)) => {
+                Ok((new_state, result)) => {
                     let result_serialized = serde_json::to_vec(&result)
                         .map_err(|e| anyhow::anyhow!("Failed to serialize result: {}", e))?;
 
@@ -375,7 +375,7 @@ pub struct TypedComponentFunctionNoParams<R>
 where
     R: ComponentNamedList,
 {
-    func: TypedFunc<(Option<Vec<u8>>,), Result<((Option<Vec<u8>>, R),), String>>,
+    func: TypedFunc<(Option<Vec<u8>>,), (Result<((Option<Vec<u8>>, R),), String>,)>,
 }
 
 impl<R> TypedComponentFunctionNoParams<R>
@@ -395,7 +395,7 @@ where
             })?;
 
         let typed_func = func
-            .typed::<(Option<Vec<u8>>,), ((Option<Vec<u8>>, R),)>(store)
+            .typed::<(Option<Vec<u8>>,), (Result<((Option<Vec<u8>>, R),), String>,)>(store)
             .inspect_err(|e| {
                 error!("Failed to get typed function: {}", e);
             })?;
@@ -407,16 +407,13 @@ where
         &self,
         store: &mut Store<ActorStore>,
         state: Option<Vec<u8>>,
-    ) -> Result<(Option<Vec<u8>>, R)> {
-        let result =
-            self.func
-                .call_async(store, (state,))
-                .await
-                .map_err(|e| WasmError::WasmError {
-                    context: "function call",
-                    message: e.to_string(),
-                })?;
-        Ok(result.0)
+    ) -> Result<((Option<Vec<u8>>, R),), String> {
+        let result = self
+            .func
+            .call_async(store, (state,))
+            .await
+            .expect("Failed to call function");
+        result.0
     }
 }
 
@@ -431,12 +428,15 @@ where
         _params: Vec<u8>, // Ignore params
     ) -> Pin<Box<dyn Future<Output = Result<(Option<Vec<u8>>, Vec<u8>)>> + Send + 'a>> {
         Box::pin(async move {
-            let (new_state, result) = self.call_func(store, state).await?;
+            match self.call_func(store, state).await {
+                Ok(((new_state, result),)) => {
+                    let result_serialized = serde_json::to_vec(&result)
+                        .map_err(|e| anyhow::anyhow!("Failed to serialize result: {}", e))?;
 
-            let result_serialized = serde_json::to_vec(&result)
-                .map_err(|e| anyhow::anyhow!("Failed to serialize result: {}", e))?;
-
-            Ok((new_state, result_serialized))
+                    Ok((new_state, result_serialized))
+                }
+                Err(e) => Err(anyhow::anyhow!("Failed to call function: {}", e)),
+            }
         })
     }
 }
@@ -445,7 +445,7 @@ pub struct TypedComponentFunctionNoResult<P>
 where
     P: ComponentNamedList,
 {
-    func: TypedFunc<(Option<Vec<u8>>, P), ((Option<Vec<u8>>,),)>,
+    func: TypedFunc<(Option<Vec<u8>>, P), (Result<(Option<Vec<u8>>,), String>,)>,
 }
 
 impl<P> TypedComponentFunctionNoResult<P>
@@ -465,7 +465,7 @@ where
             })?;
 
         let typed_func = func
-            .typed::<(Option<Vec<u8>>, P), ((Option<Vec<u8>>,),)>(store)
+            .typed::<(Option<Vec<u8>>, P), (Result<(Option<Vec<u8>>,), String>,)>(store)
             .inspect_err(|e| {
                 error!("Failed to get typed function: {}", e);
             })?;
@@ -478,16 +478,13 @@ where
         store: &mut Store<ActorStore>,
         state: Option<Vec<u8>>,
         params: P,
-    ) -> Result<Option<Vec<u8>>> {
+    ) -> Result<(Option<Vec<u8>>,), String> {
         let result = self
             .func
             .call_async(store, (state, params))
             .await
-            .map_err(|e| WasmError::WasmError {
-                context: "function call",
-                message: e.to_string(),
-            })?;
-        Ok(result.0 .0)
+            .expect("Failed to call function");
+        result.0
     }
 }
 
@@ -505,16 +502,19 @@ where
             let params_deserialized: P = serde_json::from_slice(&params)
                 .map_err(|e| anyhow::anyhow!("Failed to deserialize params: {}", e))?;
 
-            let new_state = self.call_func(store, state, params_deserialized).await?;
-
-            // Return empty Vec<u8> as result
-            Ok((new_state, Vec::new()))
+            match self.call_func(store, state, params_deserialized).await {
+                Ok((new_state,)) => {
+                    // Return empty Vec<u8> as result
+                    Ok((new_state, Vec::new()))
+                }
+                Err(e) => Err(anyhow::anyhow!("Failed to call function: {}", e)),
+            }
         })
     }
 }
 
 pub struct TypedComponentFunctionNoParamsNoResult {
-    func: TypedFunc<(Option<Vec<u8>>,), ((Option<Vec<u8>>,),)>,
+    func: TypedFunc<(Option<Vec<u8>>,), (Result<((Option<Vec<u8>>,),), String>,)>,
 }
 
 impl TypedComponentFunctionNoParamsNoResult {
@@ -531,7 +531,7 @@ impl TypedComponentFunctionNoParamsNoResult {
             })?;
 
         let typed_func = func
-            .typed::<(Option<Vec<u8>>,), ((Option<Vec<u8>>,),)>(store)
+            .typed::<(Option<Vec<u8>>,), (Result<((Option<Vec<u8>>,),), String>,)>(store)
             .inspect_err(|e| {
                 error!("Failed to get typed function: {}", e);
             })?;
@@ -543,16 +543,13 @@ impl TypedComponentFunctionNoParamsNoResult {
         &self,
         store: &mut Store<ActorStore>,
         state: Option<Vec<u8>>,
-    ) -> Result<Option<Vec<u8>>> {
-        let result =
-            self.func
-                .call_async(store, (state,))
-                .await
-                .map_err(|e| WasmError::WasmError {
-                    context: "function call",
-                    message: e.to_string(),
-                })?;
-        Ok(result.0 .0)
+    ) -> Result<((Option<Vec<u8>>,),), String> {
+        let result = self
+            .func
+            .call_async(store, (state,))
+            .await
+            .expect("Failed to call function");
+        result.0
     }
 }
 
@@ -564,10 +561,13 @@ impl TypedFunction for TypedComponentFunctionNoParamsNoResult {
         _params: Vec<u8>, // Ignore params
     ) -> Pin<Box<dyn Future<Output = Result<(Option<Vec<u8>>, Vec<u8>)>> + Send + 'a>> {
         Box::pin(async move {
-            let new_state = self.call_func(store, state).await?;
-
-            // Return empty Vec<u8> as result
-            Ok((new_state, Vec::new()))
+            match self.call_func(store, state).await {
+                Ok(((new_state,),)) => {
+                    // Return empty Vec<u8> as result
+                    Ok((new_state, Vec::new()))
+                }
+                Err(e) => Err(anyhow::anyhow!("Failed to call function: {}", e)),
+            }
         })
     }
 }
