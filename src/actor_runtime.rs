@@ -124,8 +124,8 @@ impl ActorRuntime {
         let init_state = config.load_init_state().expect("Failed to load init state");
         actor_instance.store.data_mut().set_state(init_state);
 
-        let mut actor_executor = ActorExecutor::new(actor_instance, operation_rx);
-        let executor_task = tokio::spawn(async move { actor_executor.run().await });
+        let executor_task =
+            tokio::spawn(async move { ActorExecutor::start(actor_instance, operation_rx).await });
 
         actor_handle
             .call_function(

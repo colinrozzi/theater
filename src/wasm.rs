@@ -108,15 +108,20 @@ impl ActorComponent {
             "Finding export: {} from interface: {}",
             export_name, interface_name
         );
-        let (_interface_component_item, interface_component_export_index) = match self
-            .component
-            .export_index(None, interface_name) {
+        let (_interface_component_item, interface_component_export_index) =
+            match self.component.export_index(None, interface_name) {
                 Some(export) => export,
                 None => {
-                    error!("Interface '{}' not found in component exports", interface_name);
+                    error!(
+                        "Interface '{}' not found in component exports",
+                        interface_name
+                    );
                     return Err(WasmError::WasmError {
                         context: "find_function_export",
-                        message: format!("Interface '{}' not found in component exports", interface_name),
+                        message: format!(
+                            "Interface '{}' not found in component exports",
+                            interface_name
+                        ),
                     });
                 }
             };
@@ -124,16 +129,23 @@ impl ActorComponent {
 
         let (func_component_item, func_component_export_index) = match self
             .component
-            .export_index(Some(&interface_component_export_index), export_name) {
-                Some(export) => export,
-                None => {
-                    error!("Function '{}' not found in interface '{}'", export_name, interface_name);
-                    return Err(WasmError::WasmError {
-                        context: "find_function_export",
-                        message: format!("Function '{}' not found in interface '{}'", export_name, interface_name),
-                    });
-                }
-            };
+            .export_index(Some(&interface_component_export_index), export_name)
+        {
+            Some(export) => export,
+            None => {
+                error!(
+                    "Function '{}' not found in interface '{}'",
+                    export_name, interface_name
+                );
+                return Err(WasmError::WasmError {
+                    context: "find_function_export",
+                    message: format!(
+                        "Function '{}' not found in interface '{}'",
+                        export_name, interface_name
+                    ),
+                });
+            }
+        };
         match func_component_item {
             ComponentItem::ComponentFunc(component_func) => {
                 info!("Found export: {}", export_name);
@@ -190,7 +202,7 @@ pub struct ActorInstance {
     pub actor_component: ActorComponent,
     pub instance: Instance,
     pub store: Store<ActorStore>,
-    pub functions: HashMap<String, Box<dyn TypedFunction>>,
+    pub functions: HashMap<String, Box<dyn TypedFunctionInfo>>,
 }
 
 impl ActorInstance {
@@ -204,14 +216,21 @@ impl ActorInstance {
         state: Option<Vec<u8>>,
         params: Vec<u8>,
     ) -> Result<(Option<Vec<u8>>, Vec<u8>)> {
-        let func = match self.functions.get(name) {
+        let func_info = match self.functions.get(name) {
             Some(f) => f,
             None => {
-                error!("Function '{}' not found in functions table. Available functions: {:?}", 
-                       name, self.functions.keys().collect::<Vec<_>>());
-                return Err(anyhow::anyhow!("Function '{}' not found in functions table", name));
+                error!(
+                    "Function '{}' not found in functions table. Available functions: {:?}",
+                    name,
+                    self.functions.keys().collect::<Vec<_>>()
+                );
+                return Err(anyhow::anyhow!(
+                    "Function '{}' not found in functions table",
+                    name
+                ));
             }
         };
+        let func = func_info.create(&mut self.store, &self.instance);
         func.call_func(&mut self.store, state, params).await
     }
 
@@ -234,8 +253,7 @@ impl ActorInstance {
             interface, function_name, export_index
         );
         let name = format!("{}.{}", interface, function_name);
-        let func =
-            TypedComponentFunction::<P, R>::new(&mut self.store, &self.instance, export_index)?;
+        let func = TypedComponentFunctionInfo::<P, R>::new(export_index)?;
         self.functions.insert(name.to_string(), Box::new(func));
         Ok(())
     }
@@ -253,11 +271,7 @@ impl ActorInstance {
             .actor_component
             .find_function_export(interface, function_name)?;
         let name = format!("{}.{}", interface, function_name);
-        let func = TypedComponentFunctionNoParams::<R>::new(
-            &mut self.store,
-            &self.instance,
-            export_index,
-        )?;
+        let func = TypedComponentFunctionNoParamsInfo::<R>::new(export_index)?;
         self.functions.insert(name.to_string(), Box::new(func));
         Ok(())
     }
@@ -275,11 +289,7 @@ impl ActorInstance {
             .actor_component
             .find_function_export(interface, function_name)?;
         let name = format!("{}.{}", interface, function_name);
-        let func = TypedComponentFunctionNoResult::<P>::new(
-            &mut self.store,
-            &self.instance,
-            export_index,
-        )?;
+        let func = TypedComponentFunctionNoResultInfo::<P>::new(export_index)?;
         self.functions.insert(name.to_string(), Box::new(func));
         Ok(())
     }
@@ -293,13 +303,126 @@ impl ActorInstance {
             .actor_component
             .find_function_export(interface, function_name)?;
         let name = format!("{}.{}", interface, function_name);
-        let func = TypedComponentFunctionNoParamsNoResult::new(
-            &mut self.store,
-            &self.instance,
-            export_index,
-        )?;
+        let func = TypedComponentFunctionNoParamsNoResultInfo::new(export_index)?;
         self.functions.insert(name.to_string(), Box::new(func));
         Ok(())
+    }
+}
+
+pub trait TypedFunctionInfo {
+    fn create(&self, store: &mut Store<ActorStore>, instance: &Instance) -> Box<dyn TypedFunction>;
+}
+
+pub struct TypedComponentFunctionInfo<P, R>
+where
+    P: ComponentNamedList,
+    R: ComponentNamedList,
+{
+    export_index: ComponentExportIndex,
+    _phantom: std::marker::PhantomData<(P, R)>,
+}
+
+impl<P, R> TypedComponentFunctionInfo<P, R>
+where
+    P: ComponentNamedList + Lower + Sync + Send + 'static,
+    R: ComponentNamedList + Lift + Sync + Send + 'static,
+{
+    pub fn new(export_index: ComponentExportIndex) -> Result<Self> {
+        Ok(TypedComponentFunctionInfo {
+            export_index,
+            _phantom: std::marker::PhantomData,
+        })
+    }
+}
+
+impl<P, R> TypedFunctionInfo for TypedComponentFunctionInfo<P, R>
+where
+    P: ComponentNamedList + Lower + Sync + Send + 'static + for<'de> Deserialize<'de>,
+    R: ComponentNamedList + Lift + Sync + Send + 'static + Serialize,
+{
+    fn create(&self, store: &mut Store<ActorStore>, instance: &Instance) -> Box<dyn TypedFunction> {
+        Box::new(TypedComponentFunction::<P, R>::new(store, instance, self.export_index).unwrap())
+    }
+}
+
+pub struct TypedComponentFunctionNoParamsInfo<R>
+where
+    R: ComponentNamedList,
+{
+    export_index: ComponentExportIndex,
+    _phantom: std::marker::PhantomData<R>,
+}
+
+impl<R> TypedComponentFunctionNoParamsInfo<R>
+where
+    R: ComponentNamedList + Lift + Sync + Send + 'static,
+{
+    pub fn new(export_index: ComponentExportIndex) -> Result<Self> {
+        Ok(TypedComponentFunctionNoParamsInfo {
+            export_index,
+            _phantom: std::marker::PhantomData,
+        })
+    }
+}
+
+impl<R> TypedFunctionInfo for TypedComponentFunctionNoParamsInfo<R>
+where
+    R: ComponentNamedList + Lift + Sync + Send + 'static + Serialize,
+{
+    fn create(&self, store: &mut Store<ActorStore>, instance: &Instance) -> Box<dyn TypedFunction> {
+        Box::new(
+            TypedComponentFunctionNoParams::<R>::new(store, instance, self.export_index).unwrap(),
+        )
+    }
+}
+
+pub struct TypedComponentFunctionNoResultInfo<P>
+where
+    P: ComponentNamedList,
+{
+    export_index: ComponentExportIndex,
+    _phantom: std::marker::PhantomData<P>,
+}
+
+impl<P> TypedComponentFunctionNoResultInfo<P>
+where
+    P: ComponentNamedList + Lower + Sync + Send + 'static,
+{
+    pub fn new(export_index: ComponentExportIndex) -> Result<Self> {
+        Ok(TypedComponentFunctionNoResultInfo {
+            export_index,
+            _phantom: std::marker::PhantomData,
+        })
+    }
+}
+
+impl<P> TypedFunctionInfo for TypedComponentFunctionNoResultInfo<P>
+where
+    P: ComponentNamedList + Lower + Sync + Send + 'static + for<'de> Deserialize<'de>,
+{
+    fn create(&self, store: &mut Store<ActorStore>, instance: &Instance) -> Box<dyn TypedFunction> {
+        Box::new(
+            TypedComponentFunctionNoResult::<P>::new(store, instance, self.export_index).unwrap(),
+        )
+    }
+}
+
+pub struct TypedComponentFunctionNoParamsNoResultInfo {
+    export_index: ComponentExportIndex,
+}
+
+impl TypedComponentFunctionNoParamsNoResultInfo {
+    pub fn new(export_index: ComponentExportIndex) -> Result<Self> {
+        Ok(TypedComponentFunctionNoParamsNoResultInfo { export_index })
+    }
+}
+
+impl TypedFunctionInfo for TypedComponentFunctionNoParamsNoResultInfo {
+    fn create(&self, store: &mut Store<ActorStore>, instance: &Instance) -> Box<dyn TypedFunction> {
+        Box::new(
+            TypedComponentFunctionNoParamsNoResult::new(store, instance, self.export_index)
+                .unwrap(),
+        )
     }
 }
 
@@ -577,7 +700,10 @@ impl TypedComponentFunctionNoParamsNoResult {
         let result = match self.func.call_async(store, (state,)).await {
             Ok(res) => res,
             Err(e) => {
-                let error_msg = format!("Failed to call WebAssembly function (no params, no result): {}", e);
+                let error_msg = format!(
+                    "Failed to call WebAssembly function (no params, no result): {}",
+                    e
+                );
                 error!("{}", error_msg);
                 return Err(error_msg);
             }

@@ -122,6 +122,14 @@ impl ActorExecutor {
         Ok(results)
     }
 
+    pub async fn start(
+        actor_instance: ActorInstance,
+        operation_rx: mpsc::Receiver<ActorOperation>,
+    ) {
+        let mut executor = ActorExecutor::new(actor_instance, operation_rx);
+        executor.run().await;
+    }
+
     pub async fn run(&mut self) {
         info!("Actor executor starting");
 
