@@ -108,15 +108,20 @@ impl ActorComponent {
             "Finding export: {} from interface: {}",
             export_name, interface_name
         );
-        let (_interface_component_item, interface_component_export_index) = match self
-            .component
-            .export_index(None, interface_name) {
+        let (_interface_component_item, interface_component_export_index) =
+            match self.component.export_index(None, interface_name) {
                 Some(export) => export,
                 None => {
-                    error!("Interface '{}' not found in component exports", interface_name);
+                    error!(
+                        "Interface '{}' not found in component exports",
+                        interface_name
+                    );
                     return Err(WasmError::WasmError {
                         context: "find_function_export",
-                        message: format!("Interface '{}' not found in component exports", interface_name),
+                        message: format!(
+                            "Interface '{}' not found in component exports",
+                            interface_name
+                        ),
                     });
                 }
             };
@@ -124,16 +129,23 @@ impl ActorComponent {
 
         let (func_component_item, func_component_export_index) = match self
             .component
-            .export_index(Some(&interface_component_export_index), export_name) {
-                Some(export) => export,
-                None => {
-                    error!("Function '{}' not found in interface '{}'", export_name, interface_name);
-                    return Err(WasmError::WasmError {
-                        context: "find_function_export",
-                        message: format!("Function '{}' not found in interface '{}'", export_name, interface_name),
-                    });
-                }
-            };
+            .export_index(Some(&interface_component_export_index), export_name)
+        {
+            Some(export) => export,
+            None => {
+                error!(
+                    "Function '{}' not found in interface '{}'",
+                    export_name, interface_name
+                );
+                return Err(WasmError::WasmError {
+                    context: "find_function_export",
+                    message: format!(
+                        "Function '{}' not found in interface '{}'",
+                        export_name, interface_name
+                    ),
+                });
+            }
+        };
         match func_component_item {
             ComponentItem::ComponentFunc(component_func) => {
                 info!("Found export: {}", export_name);
@@ -207,9 +219,15 @@ impl ActorInstance {
         let func = match self.functions.get(name) {
             Some(f) => f,
             None => {
-                error!("Function '{}' not found in functions table. Available functions: {:?}", 
-                       name, self.functions.keys().collect::<Vec<_>>());
-                return Err(anyhow::anyhow!("Function '{}' not found in functions table", name));
+                error!(
+                    "Function '{}' not found in functions table. Available functions: {:?}",
+                    name,
+                    self.functions.keys().collect::<Vec<_>>()
+                );
+                return Err(anyhow::anyhow!(
+                    "Function '{}' not found in functions table",
+                    name
+                ));
             }
         };
         func.call_func(&mut self.store, state, params).await
@@ -344,15 +362,21 @@ where
         state: Option<Vec<u8>>,
         params: P,
     ) -> Result<(Option<Vec<u8>>, R), String> {
-        let result = match self.func.call_async(store, (state, params)).await {
-            Ok(res) => res,
+        match self.func.call_async(&mut *store, (state, params)).await {
+            Ok(res) => match self.func.post_return_async(store).await {
+                Ok(_) => res.0,
+                Err(e) => {
+                    let error_msg = format!("Failed to post return: {}", e);
+                    error!("{}", error_msg);
+                    return Err(error_msg);
+                }
+            },
             Err(e) => {
                 let error_msg = format!("Failed to call WebAssembly function: {}", e);
                 error!("{}", error_msg);
                 return Err(error_msg);
             }
-        };
-        result.0
+        }
     }
 }
 
@@ -432,8 +456,15 @@ where
         store: &mut Store<ActorStore>,
         state: Option<Vec<u8>>,
     ) -> Result<((Option<Vec<u8>>, R),), String> {
-        let result = match self.func.call_async(store, (state,)).await {
-            Ok(res) => res,
+        let result = match self.func.call_async(&mut *store, (state,)).await {
+            Ok(res) => match self.func.post_return_async(store).await {
+                Ok(_) => res,
+                Err(e) => {
+                    let error_msg = format!("Failed to post return: {}", e);
+                    error!("{}", error_msg);
+                    return Err(error_msg);
+                }
+            },
             Err(e) => {
                 let error_msg = format!("Failed to call WebAssembly function (no params): {}", e);
                 error!("{}", error_msg);
@@ -506,8 +537,15 @@ where
         state: Option<Vec<u8>>,
         params: P,
     ) -> Result<(Option<Vec<u8>>,), String> {
-        let result = match self.func.call_async(store, (state, params)).await {
-            Ok(res) => res,
+        let result = match self.func.call_async(&mut *store, (state, params)).await {
+            Ok(res) => match self.func.post_return_async(store).await {
+                Ok(_) => res,
+                Err(e) => {
+                    let error_msg = format!("Failed to post return: {}", e);
+                    error!("{}", error_msg);
+                    return Err(error_msg);
+                }
+            },
             Err(e) => {
                 let error_msg = format!("Failed to call WebAssembly function (no result): {}", e);
                 error!("{}", error_msg);
@@ -574,10 +612,20 @@ impl TypedComponentFunctionNoParamsNoResult {
         store: &mut Store<ActorStore>,
         state: Option<Vec<u8>>,
     ) -> Result<((Option<Vec<u8>>,),), String> {
-        let result = match self.func.call_async(store, (state,)).await {
-            Ok(res) => res,
+        let result = match self.func.call_async(&mut *store, (state,)).await {
+            Ok(res) => match self.func.post_return_async(store).await {
+                Ok(_) => res,
+                Err(e) => {
+                    let error_msg = format!("Failed to post return: {}", e);
+                    error!("{}", error_msg);
+                    return Err(error_msg);
+                }
+            },
             Err(e) => {
-                let error_msg = format!("Failed to call WebAssembly function (no params, no result): {}", e);
+                let error_msg = format!(
+                    "Failed to call WebAssembly function (no params, no result): {}",
+                    e
+                );
                 error!("{}", error_msg);
                 return Err(error_msg);
             }
