@@ -2,6 +2,8 @@ package ntwk:theater;
 
 /// Interface for handling WebSocket connections and messages
 interface websocket-server {
+    use types.{state};
+
     /// The type of WebSocket message/event
     variant message-type {
         /// A text message
@@ -37,5 +39,5 @@ interface websocket-server {
     }
 
     /// Called for each event on the WebSocket (connections, messages, disconnections)
-    handle-message: func(state: state, params: tuple<websocket-message>) -> tuple<state, tuple<websocket-response>>;
+    handle-message: func(state: state, params: tuple<websocket-message>) -> result<tuple<state, tuple<websocket-response>>, string>;
 }
