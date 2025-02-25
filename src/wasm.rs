@@ -211,7 +211,7 @@ impl ActorInstance {
     }
 
     pub async fn call_function(
-        &mut self,
+        self,
         name: &str,
         state: Option<Vec<u8>>,
         params: Vec<u8>,
@@ -230,8 +230,8 @@ impl ActorInstance {
                 ));
             }
         };
-        let func = func_info.create(&mut self.store, &self.instance);
-        func.call_func(&mut self.store, state, params).await
+        let func = func_info.create(self.store, &self.instance);
+        func.call_func(self.store, state, params).await
     }
 
     pub fn register_function<P, R>(&mut self, interface: &str, function_name: &str) -> Result<()>
@@ -309,8 +309,8 @@ impl ActorInstance {
     }
 }
 
-pub trait TypedFunctionInfo {
-    fn create(&self, store: &mut Store<ActorStore>, instance: &Instance) -> Box<dyn TypedFunction>;
+pub trait TypedFunctionInfo: Send {
+    fn create(&self, store: Store<ActorStore>, instance: &Instance) -> Box<dyn TypedFunction>;
 }
 
 pub struct TypedComponentFunctionInfo<P, R>
@@ -463,7 +463,7 @@ where
 
     pub async fn call_func(
         &self,
-        store: &mut Store<ActorStore>,
+        store: Store<ActorStore>,
         state: Option<Vec<u8>>,
         params: P,
     ) -> Result<(Option<Vec<u8>>, R), String> {
@@ -475,6 +475,7 @@ where
                 return Err(error_msg);
             }
         };
+        self.func.post_return_async(store).await;
         result.0
     }
 }
@@ -482,7 +483,7 @@ where
 pub trait TypedFunction: Send + Sync + 'static {
     fn call_func<'a>(
         &'a self,
-        store: &'a mut Store<ActorStore>,
+        store: Store<ActorStore>,
         state: Option<Vec<u8>>,
         params: Vec<u8>,
     ) -> Pin<Box<dyn Future<Output = Result<(Option<Vec<u8>>, Vec<u8>)>> + Send + 'a>>;

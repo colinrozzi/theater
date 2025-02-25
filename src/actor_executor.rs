@@ -3,7 +3,7 @@ use std::fmt::Debug;
 use thiserror::Error;
 use tokio::sync::{mpsc, oneshot};
 use tokio::time::{Duration, Instant};
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info};
 
 use crate::metrics::{ActorMetrics, MetricsCollector};
 use crate::wasm::ActorInstance;
