@@ -27,7 +27,8 @@ pub fn get_registry_path() -> Option<PathBuf> {
     if let Ok(path) = env::var("THEATER_REGISTRY") {
         let path = PathBuf::from(path);
         if path.exists() {
-            return Some(path);
+            println!("Found registry path in env: {:?}", path);
+            return Some(fs::canonicalize(&path).unwrap_or(path));
         }
     }
 
@@ -35,20 +36,23 @@ pub fn get_registry_path() -> Option<PathBuf> {
     if let Some(home) = dirs::home_dir() {
         let home_registry = home.join(".theater/registry");
         if home_registry.exists() {
-            return Some(home_registry);
+            println!("Found registry in home dir: {:?}", home_registry);
+            return Some(fs::canonicalize(&home_registry).unwrap_or(home_registry));
         }
     }
 
     // Look for local registry
     let local_registry = PathBuf::from("./registry");
     if local_registry.exists() {
-        return Some(local_registry);
+        println!("Found local registry: {:?}", local_registry);
+        return Some(fs::canonicalize(&local_registry).unwrap_or(local_registry));
     }
 
     // Project-relative registry
     let project_registry = PathBuf::from("../registry");
     if project_registry.exists() {
-        return Some(project_registry);
+        println!("Found project-relative registry: {:?}", project_registry);
+        return Some(fs::canonicalize(&project_registry).unwrap_or(project_registry));
     }
 
     // If no registry found
@@ -79,27 +83,30 @@ pub struct ActorIndexEntry {
 
 /// Initialize a new registry
 pub fn init_registry(path: &Path) -> Result<()> {
-    // Create registry directory structure
-    fs::create_dir_all(path)?;
-    fs::create_dir_all(path.join("components"))?;
-    fs::create_dir_all(path.join("manifests"))?;
-    fs::create_dir_all(path.join("cache"))?;
+    // Get absolute path for the registry
+    let registry_path = fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
 
-    // Create default config
+    // Create registry directory structure
+    fs::create_dir_all(&registry_path)?;
+    fs::create_dir_all(registry_path.join("components"))?;
+    fs::create_dir_all(registry_path.join("manifests"))?;
+    fs::create_dir_all(registry_path.join("cache"))?;
+
+    // Create default config with absolute paths
     let config = RegistryConfig {
         name: "theater-registry".to_string(),
         description: "Actor registry for Theater runtime".to_string(),
         version: "0.1.0".to_string(),
-        component_dir: path.join("components"),
-        manifest_dir: path.join("manifests"),
-        cache_dir: path.join("cache"),
+        component_dir: registry_path.join("components"),
+        manifest_dir: registry_path.join("manifests"),
+        cache_dir: registry_path.join("cache"),
         default_version_strategy: "latest".to_string(),
         actor_search_paths: vec![PathBuf::from("../actors")],
     };
 
     // Write config.toml
     let config_str = toml::to_string(&config)?;
-    fs::write(path.join("config.toml"), config_str)?;
+    fs::write(registry_path.join("config.toml"), config_str)?;
 
     // Create empty index
     let index = serde_json::json!({
@@ -108,15 +115,19 @@ pub fn init_registry(path: &Path) -> Result<()> {
     });
 
     let index_str = toml::to_string(&index)?;
-    fs::write(path.join("index.toml"), index_str)?;
+    fs::write(registry_path.join("index.toml"), index_str)?;
 
-    info!("Registry initialized at {:?}", path);
+    info!("Registry initialized at {:?}", registry_path);
     Ok(())
 }
 
 /// List actors in the registry
 pub fn list_actors(registry_path: &Path) -> Result<Vec<ActorIndexEntry>> {
-    let index_path = registry_path.join("index.toml");
+    // Get absolute path for the registry
+    let registry_abs_path =
+        fs::canonicalize(registry_path).unwrap_or_else(|_| registry_path.to_path_buf());
+
+    let index_path = registry_abs_path.join("index.toml");
 
     if !index_path.exists() {
         return Err(

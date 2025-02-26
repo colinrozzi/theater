@@ -46,10 +46,11 @@ fn resolve_direct_actor_path(path: &Path) -> Result<(PathBuf, PathBuf), Registry
     let manifest_str = fs::read_to_string(path).map_err(|_| {
         RegistryError::NotFound(format!("Actor manifest not found: {:?}", path)).into()
     })?;
-    let manifest: Value = toml::from_str(&manifest_str).map_err(|e| {
+    let mut manifest: Value = toml::from_str(&manifest_str).map_err(|e| {
         RegistryError::InvalidFormat(format!("Invalid actor manifest: {:?}", e)).into()
     })?;
 
+    // Extract component path and convert to absolute if needed
     let component_path = if let Some(component) = manifest.get("component_path") {
         if let Some(component_str) = component.as_str() {
             let component_path = PathBuf::from(component_str);
@@ -57,7 +58,7 @@ fn resolve_direct_actor_path(path: &Path) -> Result<(PathBuf, PathBuf), Registry
             // If component path is relative, resolve it relative to manifest directory
             if !component_path.is_absolute() {
                 if let Some(parent) = path.parent() {
-                    parent.join(component_path)
+                    parent.join(&component_path)
                 } else {
                     component_path
                 }
@@ -75,8 +76,55 @@ fn resolve_direct_actor_path(path: &Path) -> Result<(PathBuf, PathBuf), Registry
         )
         .into());
     };
+    
+    // Create a temporary manifest with absolute component path
+    debug!("Original component path: {:?}", component_path);
+    if let Some(component_val) = manifest.get_mut("component_path") {
+        *component_val = toml::Value::String(component_path.to_string_lossy().to_string());
+        debug!("Updated component path to absolute: {}", component_path.to_string_lossy());
+    }
+    
+    // Also update init_state to absolute path if it exists
+    if let Some(init_state_val) = manifest.get_mut("init_state") {
+        if let Some(init_state_str) = init_state_val.as_str() {
+            let init_state_path = PathBuf::from(init_state_str);
+            if !init_state_path.is_absolute() {
+                if let Some(parent) = path.parent() {
+                    let abs_init_path = parent.join(&init_state_path);
+                    debug!("Updating init_state from {} to {}", init_state_str, abs_init_path.display());
+                    *init_state_val = toml::Value::String(abs_init_path.to_string_lossy().to_string());
+                }
+            }
+        }
+    }
+    
+    // Create a temporary directory for the modified manifest
+    let temp_dir = std::env::temp_dir().join("theater_registry");
+    fs::create_dir_all(&temp_dir).map_err(|e| {
+        RegistryError::RegistryError(format!("Failed to create temp directory: {}", e)).into()
+    })?;
+    
+    // Write the modified manifest to a temporary file
+    let actor_name = manifest.get("name")
+        .and_then(|n| n.as_str())
+        .unwrap_or("unknown");
+        
+    let actor_version = manifest.get("version")
+        .and_then(|v| v.as_str())
+        .unwrap_or("0.0.0");
+        
+    let temp_manifest_path = temp_dir.join(format!("{}-{}-direct.toml", actor_name, actor_version));
+    let modified_manifest_str = toml::to_string(&manifest).map_err(|e| {
+        RegistryError::RegistryError(format!("Failed to serialize manifest: {}", e)).into()
+    })?;
+    
+    fs::write(&temp_manifest_path, modified_manifest_str).map_err(|e| {
+        RegistryError::RegistryError(format!("Failed to write temporary manifest: {}", e)).into()
+    })?;
+    
+    debug!("Created temporary manifest with absolute paths at {:?}", temp_manifest_path);
 
-    Ok((path.to_path_buf(), component_path))
+    Ok((temp_manifest_path, component_path))
 }
 
 /// Parse an actor reference into name and version
@@ -184,15 +232,28 @@ fn resolve_registry_actor(
     };
 
     // Construct paths to manifest and component
-    let manifest_path = PathBuf::from(manifest_dir)
+    let manifest_rel_path = PathBuf::from(manifest_dir)
         .join(&name)
         .join(&version_to_use)
         .join("actor.toml");
 
-    let component_path = PathBuf::from(component_dir)
+    let component_rel_path = PathBuf::from(component_dir)
         .join(&name)
         .join(&version_to_use)
         .join(format!("{}.wasm", name));
+    
+    // Convert to absolute paths
+    let manifest_path = if manifest_rel_path.is_absolute() {
+        manifest_rel_path
+    } else {
+        registry_path.join(&manifest_rel_path)
+    };
+
+    let component_path = if component_rel_path.is_absolute() {
+        component_rel_path
+    } else {
+        registry_path.join(&component_rel_path)
+    };
 
     // Verify files exist
     if !manifest_path.exists() {
@@ -207,21 +268,70 @@ fn resolve_registry_actor(
         );
     }
 
-    debug!(
-        "Resolved actor '{}:{}' to manifest {:?} and component {:?}",
-        name, version_to_use, manifest_path, component_path
-    );
-
-    Ok((manifest_path, component_path))
+    // Now we need to create a temporary manifest with absolute paths for component_path
+    // Read the original manifest
+    let manifest_str = fs::read_to_string(&manifest_path).map_err(|_| {
+        RegistryError::NotFound(format!("Failed to read manifest file: {:?}", manifest_path)).into()
+    })?;
+    
+    // Parse the manifest
+    let mut manifest: toml::Value = toml::from_str(&manifest_str).map_err(|e| {
+        RegistryError::InvalidFormat(format!("Invalid manifest format: {}", e)).into()
+    })?;
+    
+    // Update component_path to absolute path
+    debug!("Original manifest path: {:?}", manifest_path);
+    debug!("Original component path from registry: {:?}", component_path);
+    if let Some(component_path_val) = manifest.get_mut("component_path") {
+        *component_path_val = toml::Value::String(component_path.to_string_lossy().to_string());
+        debug!("Updated component path to: {}", component_path.to_string_lossy());
+    }
+    
+    // Also update init_state to absolute path if it exists
+    if let Some(init_state_val) = manifest.get_mut("init_state") {
+        if let Some(init_state_str) = init_state_val.as_str() {
+            let init_state_path = PathBuf::from(init_state_str);
+            if !init_state_path.is_absolute() {
+                let abs_init_path = manifest_path.parent()
+                    .unwrap_or(Path::new("."))
+                    .join(&init_state_path);
+                debug!("Updating init_state from {} to {}", init_state_str, abs_init_path.display());
+                *init_state_val = toml::Value::String(abs_init_path.to_string_lossy().to_string());
+            }
+        }
+    }
+    
+    // Create a temporary directory for the modified manifest
+    let temp_dir = std::env::temp_dir().join("theater_registry");
+    fs::create_dir_all(&temp_dir).map_err(|e| {
+        RegistryError::RegistryError(format!("Failed to create temp directory: {}", e)).into()
+    })?;
+    
+    // Write the modified manifest to a temporary file
+    let temp_manifest_path = temp_dir.join(format!("{}-{}-actor.toml", name, version_to_use));
+    let modified_manifest_str = toml::to_string(&manifest).map_err(|e| {
+        RegistryError::RegistryError(format!("Failed to serialize manifest: {}", e)).into()
+    })?;
+    
+    fs::write(&temp_manifest_path, modified_manifest_str).map_err(|e| {
+        RegistryError::RegistryError(format!("Failed to write temporary manifest: {}", e)).into()
+    })?;
+    
+    debug!("Created temporary manifest with absolute paths at {:?}", temp_manifest_path);
+    
+    Ok((temp_manifest_path, component_path))
 }
 
 /// Helper to extract path from config
 fn extract_path_from_config(config: &Value, key: &str) -> Result<String> {
-    config
+    // Get the path from config
+    let path_str = config
         .get(key)
         .and_then(|v| v.as_str())
         .map(|s| s.to_string())
         .ok_or_else(|| {
             RegistryError::InvalidFormat(format!("{} not found in registry config", key)).into()
-        })
+        })?;
+    
+    Ok(path_str)
 }
