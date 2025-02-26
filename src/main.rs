@@ -14,7 +14,7 @@ struct Args {
     address: SocketAddr,
 
     /// logging level
-    #[arg(short, long, default_value = "debug")]
+    #[arg(short, long, default_value = "info")]
     log_level: String,
 
     /// log directory
