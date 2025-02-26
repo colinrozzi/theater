@@ -2,6 +2,7 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use sha1::{Digest, Sha1};
 use std::path::Path;
+use std::fmt;
 use wasmtime::component::{ComponentType, Lift, Lower};
 
 #[derive(Debug, Clone, Serialize, Deserialize, ComponentType, Lift, Lower)]
@@ -14,6 +15,61 @@ pub struct ChainEvent {
     pub event_type: String,
     pub data: Vec<u8>,
     pub timestamp: u64,
+}
+
+impl fmt::Display for ChainEvent {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // Helper to format hash bytes as hex string
+        fn format_hash(hash: &[u8]) -> String {
+            hash.iter().map(|b| format!("{:02x}", b)).collect::<String>()
+        }
+        
+        // Format the timestamp as a human-readable date
+        let datetime = chrono::DateTime::from_timestamp(self.timestamp as i64, 0)
+            .unwrap_or_else(|| chrono::DateTime::UNIX_EPOCH);
+        let formatted_time = datetime.format("%Y-%m-%d %H:%M:%S").to_string();
+        
+        // Format hash as short hex string (first 7 characters)
+        let hash_str = format_hash(&self.hash);
+        let short_hash = if hash_str.len() > 7 {
+            &hash_str[0..7]
+        } else {
+            &hash_str
+        };
+        
+        // Format parent hash if it exists
+        let parent_str = match &self.parent_hash {
+            Some(ph) => {
+                let ph_str = format_hash(ph);
+                if ph_str.len() > 7 {
+                    format!("(parent: {}...)", &ph_str[0..7])
+                } else {
+                    format!("(parent: {})", ph_str)
+                }
+            },
+            None => "(root)".to_string(),
+        };
+        
+        // Format data preview if it's text, otherwise show byte length
+        let data_preview = if let Ok(text) = std::str::from_utf8(&self.data) {
+            let preview = if text.len() > 30 {
+                format!("{}...", &text[0..27])
+            } else {
+                text.to_string()
+            };
+            format!("'{}'", preview)
+        } else {
+            format!("{} bytes", self.data.len())
+        };
+        
+        write!(f, "Event[{}...] {} {} at {} {}", 
+            short_hash,
+            parent_str,
+            self.event_type,
+            formatted_time,
+            data_preview
+        )
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

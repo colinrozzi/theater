@@ -10,6 +10,7 @@ use futures::stream::StreamExt;
 use indicatif::{ProgressBar, ProgressStyle};
 use std::path::PathBuf;
 use std::time::Duration;
+use tokio::fs;
 use tokio::net::TcpStream;
 use tokio_util::codec::{Framed, LengthDelimitedCodec};
 
@@ -238,41 +239,484 @@ async fn inspect_actor(id_opt: Option<String>, address: &str) -> Result<()> {
     println!("{}", style("Theater Actor Inspector").bold().cyan());
 
     let actor_id = select_actor(id_opt, address).await?;
-
-    // For now, until server support is added, we'll just display the existing
-    // actor information we can get from list command
     let mut framed = connect_to_server(address).await?;
-
-    // We'll use ListActors to get basic information
-    let command = ManagementCommand::ListActors;
-    let cmd_bytes = serde_json::to_vec(&command)?;
-    framed.send(Bytes::from(cmd_bytes)).await?;
 
     println!(
         "{} Fetching details for actor {}",
         style("INFO:").blue().bold(),
-        style(actor_id.clone()).green() // Fixed: Added .clone()
+        style(actor_id.clone()).green()
     );
+
+    // Get actor status
+    let command = ManagementCommand::GetActorStatus {
+        id: actor_id.clone(),
+    };
+    let cmd_bytes = serde_json::to_vec(&command)?;
+    framed.send(Bytes::from(cmd_bytes)).await?;
+
+    let actor_status;
+    if let Some(Ok(data)) = framed.next().await {
+        let response: ManagementResponse = serde_json::from_slice(&data)?;
+
+        match response {
+            ManagementResponse::ActorStatus { id: _, status } => {
+                actor_status = Some(status);
+            }
+            ManagementResponse::Error { message } => {
+                println!("{} {}", style("Error:").red().bold(), message);
+                return Ok(());
+            }
+            _ => {
+                println!(
+                    "{} Unexpected response from server",
+                    style("Error:").red().bold()
+                );
+                return Ok(());
+            }
+        }
+    } else {
+        println!(
+            "{} No response received from server",
+            style("Error:").red().bold()
+        );
+        return Ok(());
+    }
+
+    // Get actor state
+    let command = ManagementCommand::GetActorState {
+        id: actor_id.clone(),
+    };
+    let cmd_bytes = serde_json::to_vec(&command)?;
+    framed.send(Bytes::from(cmd_bytes)).await?;
+
+    let mut state_size = None;
+    if let Some(Ok(data)) = framed.next().await {
+        let response: ManagementResponse = serde_json::from_slice(&data)?;
+
+        match response {
+            ManagementResponse::ActorState { id: _, state } => {
+                state_size = state.map(|s| s.len());
+            }
+            ManagementResponse::Error { message } => {
+                println!("{} {}", style("Error:").red().bold(), message);
+            }
+            _ => {
+                println!(
+                    "{} Unexpected response from server",
+                    style("Error:").red().bold()
+                );
+            }
+        }
+    }
+
+    // Get actor metrics
+    let command = ManagementCommand::GetActorMetrics {
+        id: actor_id.clone(),
+    };
+    let cmd_bytes = serde_json::to_vec(&command)?;
+    framed.send(Bytes::from(cmd_bytes)).await?;
+
+    let mut metrics = None;
+    if let Some(Ok(data)) = framed.next().await {
+        let response: ManagementResponse = serde_json::from_slice(&data)?;
+
+        match response {
+            ManagementResponse::ActorMetrics { id: _, metrics: m } => {
+                metrics = Some(m);
+            }
+            ManagementResponse::Error { message } => {
+                println!("{} {}", style("Error:").red().bold(), message);
+            }
+            _ => {
+                println!(
+                    "{} Unexpected response from server",
+                    style("Error:").red().bold()
+                );
+            }
+        }
+    }
+
+    // Get actor events count
+    let command = ManagementCommand::GetActorEvents {
+        id: actor_id.clone(),
+    };
+    let cmd_bytes = serde_json::to_vec(&command)?;
+    framed.send(Bytes::from(cmd_bytes)).await?;
+
+    let mut events_count = None;
+    if let Some(Ok(data)) = framed.next().await {
+        let response: ManagementResponse = serde_json::from_slice(&data)?;
+
+        match response {
+            ManagementResponse::ActorEvents { id: _, events } => {
+                events_count = Some(events.len());
+            }
+            ManagementResponse::Error { message } => {
+                println!("{} {}", style("Error:").red().bold(), message);
+            }
+            _ => {
+                println!(
+                    "{} Unexpected response from server",
+                    style("Error:").red().bold()
+                );
+            }
+        }
+    }
+
+    // Display gathered information
+    println!("\n{}", style("Actor Details").bold().underlined());
+    println!("ID:           {}", style(&actor_id).green());
+
+    if let Some(status) = actor_status {
+        println!("Status:       {}", style(format!("{:?}", status)).yellow());
+    } else {
+        println!("Status:       {}", style("Unknown").dim());
+    }
+
+    if let Some(size) = state_size {
+        println!("State Size:   {} bytes", style(size).yellow());
+    } else {
+        println!("State:        {}", style("None").dim());
+    }
+
+    if let Some(count) = events_count {
+        println!("Event Count:  {}", style(count).yellow());
+    }
+
+    if let Some(m) = metrics {
+        println!("\n{}", style("Actor Metrics").bold().underlined());
+        match serde_json::to_string_pretty(&m) {
+            Ok(pretty) => {
+                for line in pretty.lines() {
+                    println!("  {}", line);
+                }
+            }
+            Err(_) => {
+                println!("  {}", style("Failed to format metrics").dim());
+            }
+        }
+    }
+
+    Ok(())
+}
+
+async fn restart_actor(id_opt: Option<String>, address: &str) -> Result<()> {
+    println!("{}", style("Theater Actor Restart").bold().cyan());
+
+    let actor_id = select_actor(id_opt, address).await?;
+    let mut framed = connect_to_server(address).await?;
+
+    println!(
+        "{} Restarting actor {}",
+        style("INFO:").blue().bold(),
+        style(actor_id.clone()).green()
+    );
+
+    let spinner = ProgressBar::new_spinner();
+    spinner.set_style(
+        ProgressStyle::default_spinner()
+            .tick_chars("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏")
+            .template("{spinner:.green} {msg}")
+            .expect("Invalid spinner template"),
+    );
+    spinner.set_message("Restarting actor...");
+    spinner.enable_steady_tick(Duration::from_millis(80));
+
+    // Send restart command
+    let command = ManagementCommand::RestartActor {
+        id: actor_id.clone(),
+    };
+    let cmd_bytes = serde_json::to_vec(&command)?;
+    framed.send(Bytes::from(cmd_bytes)).await?;
 
     if let Some(Ok(data)) = framed.next().await {
         let response: ManagementResponse = serde_json::from_slice(&data)?;
 
         match response {
-            ManagementResponse::ActorList { actors } => {
-                if !actors.contains(&actor_id) {
+            ManagementResponse::Restarted { id } => {
+                spinner.finish_with_message(format!(
+                    "Actor {} restarted successfully",
+                    style(id).green()
+                ));
+            }
+            ManagementResponse::Error { message } => {
+                spinner.finish_with_message(format!("{}", style("Restart failed").red()));
+                println!("{} {}", style("Error:").red().bold(), message);
+            }
+            _ => {
+                spinner.finish_with_message(format!("{}", style("Unexpected response").red()));
+                println!(
+                    "{} Unexpected response from server",
+                    style("Error:").red().bold()
+                );
+            }
+        }
+    } else {
+        spinner.finish_with_message(format!("{}", style("No response from server").red()));
+        println!(
+            "{} No response received from server",
+            style("Error:").red().bold()
+        );
+    }
+
+    Ok(())
+}
+
+async fn view_actor_logs(
+    id_opt: Option<String>,
+    lines: usize,
+    follow: bool,
+    address: &str,
+) -> Result<()> {
+    println!("{}", style("Theater Actor Logs").bold().cyan());
+
+    let actor_id = select_actor(id_opt, address).await?;
+    let mut framed = connect_to_server(address).await?;
+
+    println!(
+        "{} Fetching logs for actor {}",
+        style("INFO:").blue().bold(),
+        style(actor_id.clone()).green()
+    );
+
+    // Get historical events first
+    let command = ManagementCommand::GetActorEvents {
+        id: actor_id.clone(),
+    };
+    let cmd_bytes = serde_json::to_vec(&command)?;
+    framed.send(Bytes::from(cmd_bytes)).await?;
+
+    let events;
+    if let Some(Ok(data)) = framed.next().await {
+        let response: ManagementResponse = serde_json::from_slice(&data)?;
+
+        match response {
+            ManagementResponse::ActorEvents {
+                id: _,
+                events: actor_events,
+            } => {
+                events = actor_events;
+            }
+            ManagementResponse::Error { message } => {
+                println!("{} {}", style("Error:").red().bold(), message);
+                return Ok(());
+            }
+            _ => {
+                println!(
+                    "{} Unexpected response from server",
+                    style("Error:").red().bold()
+                );
+                return Ok(());
+            }
+        }
+    } else {
+        println!(
+            "{} No response received from server",
+            style("Error:").red().bold()
+        );
+        return Ok(());
+    }
+
+    // Display the latest events first, up to the requested number of lines
+    let event_count = events.len();
+    let start_idx = if event_count > lines {
+        event_count - lines
+    } else {
+        0
+    };
+
+    println!("\n{}", style("Actor Event Log").bold().underlined());
+
+    if event_count == 0 {
+        println!("No events recorded for this actor");
+    } else {
+        println!(
+            "Showing {} of {} total events",
+            style(event_count.min(lines)).yellow(),
+            style(event_count).yellow()
+        );
+
+        for (i, event) in events.iter().skip(start_idx).enumerate() {
+            // Format the event nicely
+            let timestamp = chrono::Local::now().format("%Y-%m-%d %H:%M:%S");
+            let event_type = format!("{}", event);
+
+            println!(
+                "[{}] {}: {}",
+                style(timestamp).dim(),
+                style(i + 1).blue(),
+                event_type
+            );
+        }
+    }
+
+    // If follow mode is enabled, subscribe to new events
+    if follow {
+        println!(
+            "\n{} Following new events. Press Ctrl+C to stop.",
+            style("INFO:").blue().bold()
+        );
+
+        // Subscribe to actor events
+        let command = ManagementCommand::SubscribeToActor {
+            id: actor_id.clone(),
+        };
+        let cmd_bytes = serde_json::to_vec(&command)?;
+        framed.send(Bytes::from(cmd_bytes)).await?;
+
+        let mut subscription_id = None;
+        if let Some(Ok(data)) = framed.next().await {
+            let response: ManagementResponse = serde_json::from_slice(&data)?;
+
+            match response {
+                ManagementResponse::Subscribed {
+                    id: _,
+                    subscription_id: sub_id,
+                } => {
+                    subscription_id = Some(sub_id);
+                }
+                _ => {
                     println!(
-                        "{} Actor not found: {}",
-                        style("Error:").red().bold(),
-                        style(&actor_id).red()
+                        "{} Failed to subscribe to events",
+                        style("Error:").red().bold()
                     );
                     return Ok(());
                 }
+            }
+        }
 
-                // Until we have the ActorDetails command, display a placeholder
-                println!("\n{}", style("Actor Details").bold().underlined());
-                println!("ID:           {}", style(&actor_id).green());
-                println!("Status:       {}", style("Running").yellow());
-                println!("\nNOTE: For more detailed information, server support for actor inspection needs to be implemented.");
+        // Listen for events until user presses Ctrl+C
+        let mut event_counter = events.len();
+        loop {
+            tokio::select! {
+                Some(Ok(data)) = framed.next() => {
+                    let response: ManagementResponse = serde_json::from_slice(&data)?;
+
+                    if let ManagementResponse::ActorEvent { id: _, event } = response {
+                        event_counter += 1;
+                        let timestamp = chrono::Local::now().format("%Y-%m-%d %H:%M:%S");
+                        let event_type = format!("{:?}", event);
+
+                        println!(
+                            "[{}] {}: {}",
+                            style(timestamp).dim(),
+                            style(event_counter).blue(),
+                            event_type
+                        );
+                    }
+                },
+                _ = tokio::signal::ctrl_c() => {
+                    println!("\n{} Stopping event subscription", style("INFO:").blue().bold());
+
+                    // Unsubscribe if we have a subscription ID
+                    if let Some(sub_id) = subscription_id {
+                        let command = ManagementCommand::UnsubscribeFromActor {
+                            id: actor_id.clone(),
+                            subscription_id: sub_id,
+                        };
+                        let cmd_bytes = serde_json::to_vec(&command)?;
+                        framed.send(Bytes::from(cmd_bytes)).await?;
+                    }
+
+                    break;
+                }
+            }
+        }
+    }
+
+    Ok(())
+}
+
+async fn view_actor_state(
+    id_opt: Option<String>,
+    export: Option<PathBuf>,
+    format: &str,
+    address: &str,
+) -> Result<()> {
+    println!("{}", style("Theater Actor State").bold().cyan());
+
+    let actor_id = select_actor(id_opt, address).await?;
+    let mut framed = connect_to_server(address).await?;
+
+    println!(
+        "{} Fetching state for actor {}",
+        style("INFO:").blue().bold(),
+        style(actor_id.clone()).green()
+    );
+
+    // Get actor state
+    let command = ManagementCommand::GetActorState {
+        id: actor_id.clone(),
+    };
+    let cmd_bytes = serde_json::to_vec(&command)?;
+    framed.send(Bytes::from(cmd_bytes)).await?;
+
+    if let Some(Ok(data)) = framed.next().await {
+        let response: ManagementResponse = serde_json::from_slice(&data)?;
+
+        match response {
+            ManagementResponse::ActorState {
+                id: _,
+                state: Some(state_bytes),
+            } => {
+                // Try to parse the state as JSON
+                let state_json = match serde_json::from_slice::<serde_json::Value>(&state_bytes) {
+                    Ok(json) => json,
+                    Err(_) => {
+                        // If not valid JSON, just show as raw data size
+                        println!("\n{}", style("Raw State Data").bold().underlined());
+                        println!("Size: {} bytes", style(state_bytes.len()).yellow());
+                        println!(
+                            "\nState is binary data (not JSON). Use export option to save to file."
+                        );
+
+                        // Export if requested
+                        if let Some(path) = export {
+                            fs::write(&path, &state_bytes).await?;
+                            println!(
+                                "\n{} State exported to {}",
+                                style("✓").green().bold(),
+                                style(path.display()).green()
+                            );
+                        }
+
+                        return Ok(());
+                    }
+                };
+
+                // Format based on user preference
+                let formatted_state = match format.to_lowercase().as_str() {
+                    "json" => serde_json::to_string_pretty(&state_json)?,
+                    "yaml" => serde_yaml::to_string(&state_json)?,
+                    "toml" => {
+                        println!(
+                            "{} TOML format not fully supported, using JSON",
+                            style("Note:").yellow().bold()
+                        );
+                        serde_json::to_string_pretty(&state_json)?
+                    }
+                    _ => serde_json::to_string_pretty(&state_json)?,
+                };
+
+                // Display the state
+                println!("\n{}", style("Actor State").bold().underlined());
+                println!("{}", formatted_state);
+
+                // Export if requested
+                if let Some(path) = export {
+                    fs::write(&path, formatted_state).await?;
+                    println!(
+                        "\n{} State exported to {}",
+                        style("✓").green().bold(),
+                        style(path.display()).green()
+                    );
+                }
+            }
+            ManagementResponse::ActorState { id: _, state: None } => {
+                println!(
+                    "\n{} Actor has no state data",
+                    style("Note:").yellow().bold()
+                );
             }
             ManagementResponse::Error { message } => {
                 println!("{} {}", style("Error:").red().bold(), message);
@@ -290,156 +734,6 @@ async fn inspect_actor(id_opt: Option<String>, address: &str) -> Result<()> {
             style("Error:").red().bold()
         );
     }
-
-    Ok(())
-}
-
-async fn restart_actor(id_opt: Option<String>, address: &str) -> Result<()> {
-    println!("{}", style("Theater Actor Restart").bold().cyan());
-
-    let actor_id = select_actor(id_opt, address).await?;
-
-    // For now, without extended server support, we can emulate restart by stopping and starting
-    let mut framed = connect_to_server(address).await?;
-
-    // First, get the manifest information by listing the actors
-    // Note: This is a placeholder. In the real implementation, we would get manifest from the server
-    println!(
-        "{} To restart actor {}, we need the manifest (not yet implemented)",
-        style("Note:").yellow().bold(),
-        style(actor_id.clone()).green() // Fixed: Added .clone()
-    );
-
-    println!(
-        "{} For now, we can only stop the actor",
-        style("Note:").yellow().bold()
-    );
-
-    // Stop actor
-    let command = ManagementCommand::StopActor {
-        id: actor_id.clone(),
-    }; // Fixed: Added .clone()
-    let cmd_bytes = serde_json::to_vec(&command)?;
-    framed.send(Bytes::from(cmd_bytes)).await?;
-
-    if let Some(Ok(data)) = framed.next().await {
-        let response: ManagementResponse = serde_json::from_slice(&data)?;
-
-        match response {
-            ManagementResponse::ActorStopped { id } => {
-                println!(
-                    "{} Actor {} stopped successfully",
-                    style("✓").green().bold(),
-                    style(id).yellow()
-                );
-            }
-            ManagementResponse::Error { message } => {
-                println!("{} {}", style("Error:").red().bold(), message);
-                return Ok(());
-            }
-            _ => {
-                println!(
-                    "{} Unexpected response from server",
-                    style("Error:").red().bold()
-                );
-                return Ok(());
-            }
-        }
-    }
-
-    println!(
-        "\n{} When server support is added, the actor will also be restarted automatically.",
-        style("Note:").yellow().bold()
-    );
-
-    Ok(())
-}
-
-async fn view_actor_logs(
-    id_opt: Option<String>,
-    lines: usize,
-    follow: bool,
-    address: &str,
-) -> Result<()> {
-    println!("{}", style("Theater Actor Logs").bold().cyan());
-
-    let actor_id = select_actor(id_opt, address).await?;
-
-    println!(
-        "{} This feature requires server-side support for actor logs",
-        style("Note:").yellow().bold()
-    );
-
-    println!(
-        "Would fetch last {} lines of logs for actor {}",
-        lines,
-        style(actor_id).green()
-    );
-
-    if follow {
-        println!("Would also follow log updates in real time");
-    }
-
-    // Placeholder for future implementation
-    println!("\n{}", style("Sample Log Format:").bold().underlined());
-    println!(
-        "[{}] {} Actor initialized",
-        style("2023-02-26 12:34:56").dim(),
-        style("INFO").blue().bold()
-    );
-    println!(
-        "[{}] {} State updated: version=2",
-        style("2023-02-26 12:35:01").dim(),
-        style("INFO").blue().bold()
-    );
-    println!(
-        "[{}] {} Received message type='test'",
-        style("2023-02-26 12:35:10").dim(),
-        style("DEBUG").dim()
-    );
-
-    Ok(())
-}
-
-async fn view_actor_state(
-    id_opt: Option<String>,
-    export: Option<PathBuf>,
-    format: &str,
-    address: &str,
-) -> Result<()> {
-    println!("{}", style("Theater Actor State").bold().cyan());
-
-    let actor_id = select_actor(id_opt, address).await?;
-
-    println!(
-        "{} This feature requires server-side support for accessing actor state",
-        style("Note:").yellow().bold()
-    );
-
-    println!(
-        "Would fetch state for actor {} in {} format",
-        style(actor_id).green(),
-        style(format).yellow()
-    );
-
-    if let Some(path) = export {
-        println!("Would export state to: {}", style(path.display()).green());
-    }
-
-    // Placeholder for future implementation
-    println!("\n{}", style("Sample State Format:").bold().underlined());
-
-    let example_state = r#"{
-  "counter": 42,
-  "lastUpdated": "2023-02-26T12:34:56Z",
-  "status": "running",
-  "data": {
-    "key1": "value1",
-    "key2": "value2"
-  }
-}"#;
-
-    println!("{}", example_state);
 
     Ok(())
 }
@@ -475,31 +769,147 @@ async fn call_actor(
     };
 
     // Validate that payload is valid JSON
-    match serde_json::from_str::<serde_json::Value>(&payload_data) {
-        Ok(_) => {
-            // JSON is valid
-        }
+    let json_value = match serde_json::from_str::<serde_json::Value>(&payload_data) {
+        Ok(value) => value,
         Err(e) => {
             return Err(anyhow::anyhow!("Invalid JSON payload: {}", e));
         }
-    }
+    };
 
-    println!(
-        "{} This feature requires server-side support for calling actor methods",
-        style("Note:").yellow().bold()
+    // Determine whether this is a request (expects response) or a send (fire-and-forget)
+    let is_request = method.to_lowercase().starts_with("get")
+        || method.to_lowercase().contains("request")
+        || method.to_lowercase().contains("query");
+
+    // Create a message that includes the method name and payload
+    let mut message = std::collections::HashMap::new();
+    message.insert(
+        "method".to_string(),
+        serde_json::Value::String(method.to_string()),
+    );
+    message.insert("payload".to_string(), json_value);
+
+    // Serialize the message
+    let message_bytes = serde_json::to_vec(&message)?;
+
+    // Connect to server
+    let mut framed = connect_to_server(address).await?;
+
+    let spinner = ProgressBar::new_spinner();
+    spinner.set_style(
+        ProgressStyle::default_spinner()
+            .tick_chars("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏")
+            .template("{spinner:.green} {msg}")
+            .expect("Invalid spinner template"),
     );
 
-    println!(
-        "Would call method {} on actor {} with payload:",
-        style(method).yellow(),
-        style(actor_id).green()
-    );
+    if is_request {
+        spinner.set_message(format!("Requesting '{}' from actor...", method));
+        spinner.enable_steady_tick(Duration::from_millis(80));
 
-    // Try to pretty-print the payload
-    if let Ok(json) = serde_json::from_str::<serde_json::Value>(&payload_data) {
-        println!("{}", serde_json::to_string_pretty(&json)?);
+        // Send request command
+        let command = ManagementCommand::RequestActorMessage {
+            id: actor_id.clone(),
+            data: message_bytes,
+        };
+        let cmd_bytes = serde_json::to_vec(&command)?;
+        framed.send(Bytes::from(cmd_bytes)).await?;
+
+        if let Some(Ok(data)) = framed.next().await {
+            let response: ManagementResponse = serde_json::from_slice(&data)?;
+
+            match response {
+                ManagementResponse::RequestedMessage {
+                    id: _,
+                    message: response_bytes,
+                } => {
+                    spinner.finish_with_message(format!(
+                        "Received response from actor's '{}' method",
+                        style(method).green()
+                    ));
+
+                    // Try to parse response as JSON
+                    match serde_json::from_slice::<serde_json::Value>(&response_bytes) {
+                        Ok(json) => {
+                            println!("\n{}", style("Response:").bold().underlined());
+                            println!("{}", serde_json::to_string_pretty(&json)?);
+                        }
+                        Err(_) => {
+                            println!("\n{}", style("Raw Response:").bold().underlined());
+                            println!("Size: {} bytes", style(response_bytes.len()).yellow());
+
+                            // If small enough, show as string
+                            if response_bytes.len() < 1000 {
+                                if let Ok(text) = String::from_utf8(response_bytes.clone()) {
+                                    println!("\nContent: {}", text);
+                                }
+                            } else {
+                                println!("\nBinary data too large to display");
+                            }
+                        }
+                    }
+                }
+                ManagementResponse::Error { message } => {
+                    spinner.finish_with_message(format!("{}", style("Request failed").red()));
+                    println!("{} {}", style("Error:").red().bold(), message);
+                }
+                _ => {
+                    spinner.finish_with_message(format!("{}", style("Unexpected response").red()));
+                    println!(
+                        "{} Unexpected response from server",
+                        style("Error:").red().bold()
+                    );
+                }
+            }
+        } else {
+            spinner.finish_with_message(format!("{}", style("No response from server").red()));
+            println!(
+                "{} No response received from server",
+                style("Error:").red().bold()
+            );
+        }
     } else {
-        println!("{}", payload_data);
+        // Send message (fire-and-forget)
+        spinner.set_message(format!("Sending '{}' to actor...", method));
+        spinner.enable_steady_tick(Duration::from_millis(80));
+
+        // Send message command
+        let command = ManagementCommand::SendActorMessage {
+            id: actor_id.clone(),
+            data: message_bytes,
+        };
+        let cmd_bytes = serde_json::to_vec(&command)?;
+        framed.send(Bytes::from(cmd_bytes)).await?;
+
+        if let Some(Ok(data)) = framed.next().await {
+            let response: ManagementResponse = serde_json::from_slice(&data)?;
+
+            match response {
+                ManagementResponse::SentMessage { id: _ } => {
+                    spinner.finish_with_message(format!(
+                        "Message '{}' sent successfully to actor",
+                        style(method).green()
+                    ));
+                }
+                ManagementResponse::Error { message } => {
+                    spinner.finish_with_message(format!("{}", style("Send failed").red()));
+                    println!("{} {}", style("Error:").red().bold(), message);
+                }
+                _ => {
+                    spinner.finish_with_message(format!("{}", style("Unexpected response").red()));
+                    println!(
+                        "{} Unexpected response from server",
+                        style("Error:").red().bold()
+                    );
+                }
+            }
+        } else {
+            spinner.finish_with_message(format!("{}", style("No response from server").red()));
+            println!(
+                "{} No response received from server",
+                style("Error:").red().bold()
+            );
+        }
     }
 
     Ok(())
