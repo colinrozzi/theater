@@ -8,6 +8,7 @@ A WebAssembly actor system that enables state management, verification, and flex
 
 - **Actor State Management**: Actors maintain verifiable state with complete history
 - **Hash Chain Verification**: All state changes are recorded in a verifiable hash chain
+- **Secure Actor Identification**: Cryptographically secure UUID-based identification system
 - **Multiple Interface Types**: Support for:
   - Actor-to-actor messaging
   - HTTP server capabilities
@@ -19,7 +20,7 @@ A WebAssembly actor system that enables state management, verification, and flex
 
 - [Why Theater](docs/why-theater.md) - Core concepts and motivation
 - [Making Changes](docs/making-changes.md) - Guide for contributing changes
-- [Current Changes](changes/in-progress.md) - Overview of work in progress
+- [Current Changes](/changes/in-progress.md) - Overview of work in progress
 
 # Supervision System
 

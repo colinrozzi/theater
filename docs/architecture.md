@@ -2,55 +2,79 @@
 
 ## Core Components
 
-Each actor in Theater is a WebAssembly component that follows a simple but powerful pattern:
-- Accepts JSON messages and state
-- Returns new state and response messages
-- Creates hash chain entries for state transitions
+Theater is built around a WebAssembly-based actor system with several key components working together:
 
-This uniformity enables powerful composition patterns while keeping the system comprehensible. By using JSON for both messages and state, Theater avoids complex serialization issues and makes debugging straightforward.
+### TheaterRuntime
+
+The `TheaterRuntime` is the central orchestrator responsible for:
+- Managing all actor lifecycles (spawn, stop, restart)
+- Routing messages between actors
+- Maintaining parent-child supervision hierarchies
+- Propagating events through the system
+
+### ActorRuntime
+
+Each actor is managed by an `ActorRuntime` that:
+- Loads and initializes the WebAssembly component
+- Sets up handlers based on manifest configuration
+- Manages the actor's state chain
+- Processes incoming messages and routes them to appropriate handlers
+
+### ActorExecutor
+
+The `ActorExecutor` provides the execution environment for WebAssembly actors:
+- Executes WebAssembly functions with proper state management
+- Ensures all state transitions are recorded in the hash chain
+- Collects metrics on actor performance
+- Handles cleanup during actor shutdown
+
+### StateChain
+
+The `StateChain` implements a verifiable history of all state transitions:
+- Each state change is recorded as a chain event
+- Events are cryptographically linked via SHA-1 hashing
+- Complete history can be verified for tampering
+- Supports persistence to disk and reloading
 
 ## Message Flow
 
 ```
-Sender -> JSON Message -> Actor
-Actor -> (Current State + Message) -> Handler
-Handler -> (New State + Response) -> Hash Chain Entry
-Hash Chain Entry -> Response -> Sender
+Sender -> ActorMessage -> ActorRuntime -> ActorExecutor
+    -> (Current State + Message) -> WebAssembly Handler
+    -> (New State + Response) -> StateChain
+    -> Response -> Sender
 ```
 
-### Example Flow
+All messages flow through the actor runtime, which:
+1. Receives messages via its mailbox
+2. Routes to appropriate handler based on message type
+3. Updates state chain with results
+4. Returns responses to sender
+5. Propagates events to parent actors when necessary
 
-Consider a simple counter actor:
+### Message Types
 
-```json
-// Initial state
-{
-  "count": 0
-}
+Theater supports several types of messages:
 
-// Incoming message
-{
-  "type": "increment",
-  "amount": 5
-}
+1. **Actor Requests** (synchronous):
+   - Sender expects a response
+   - Actor processes message and returns result
+   - State changes are recorded in hash chain
 
-// New state
-{
-  "count": 5
-}
+2. **Actor Sends** (asynchronous):
+   - Fire-and-forget messages
+   - No response expected
+   - State changes still recorded in hash chain
 
-// Response message
-{
-  "type": "increment_complete",
-  "new_count": 5
-}
-```
+3. **HTTP Requests** (via HTTP server handler):
+   - Incoming HTTP requests are converted to actor messages
+   - Responses are converted back to HTTP responses
+   - All interactions recorded in hash chain
 
-Each transition creates a hash chain entry containing:
-- The previous state hash
-- The incoming message
-- The new state
-- A timestamp
+4. **Management Commands**:
+   - Control messages for actor lifecycle
+   - Handled by TheaterRuntime
+   - Include spawn, stop, restart operations
 
 ## Supervision Tree
 
@@ -65,22 +89,25 @@ Parent actors serve as supervisors with several key responsibilities:
 - Spawning child actors with specific configurations
 - Receiving lifecycle notifications (started, stopped, crashed)
 - Managing child restarts and shutdowns
-- Verifying children's state transitions
-- Handling escalated errors
+- Accessing children's state and event history
 
-### Lifecycle Management
+### Supervision Interface
 
-When a parent spawns a child actor:
-1. Parent receives the child's actor ID and management interface
-2. Child startup is verified through the hash chain
-3. Parent begins receiving lifecycle events
-4. Parent can monitor child state transitions
+The WIT interface for supervision enables parent actors to:
+```
+- spawn: Create new child actors
+- list-children: List all child actor IDs
+- stop-child: Stop a specific child actor
+- restart-child: Restart a failed or stopped child
+- get-child-state: Access the state of a child
+- get-child-events: Retrieve the event history of a child
+```
 
-If a child crashes:
-1. Parent receives crash notification with error details
-2. Parent can inspect child's state history through hash chain
-3. Parent decides whether to restart child with same or modified state
-4. All decisions are recorded in parent's own hash chain
+Each supervisor operation is handled by the Theater runtime, which:
+1. Receives the command from the parent
+2. Performs the requested operation
+3. Updates both parent and child state as needed
+4. Returns results or events to the parent
 
 ## State Management
 
@@ -92,67 +119,125 @@ Message1 + State0 -> State1 -> Hash1
 Message2 + State1 -> State2 -> Hash2
 ```
 
-The hash chain ensures:
+The `StateChain` implementation ensures:
 - Complete audit trail of all state changes
 - Ability to replay any sequence of events
 - Cross-machine verification of state
-- Deterministic debugging of issues
+- SHA-1 based cryptographic linking of events
+
+## WebAssembly Component Model
+
+Theater leverages the WebAssembly Component Model for actors:
+- Each actor is a WebAssembly component with defined interfaces
+- Interfaces are specified using the WebAssembly Interface Type (WIT) format
+- The host provides capabilities to components through well-defined interfaces
+- Common types ensure interoperability between host and components
+
+### Core WIT Interfaces
+
+Theater defines several key interfaces in WIT:
+
+1. **actor.wit**:
+   ```wit
+   interface actor {
+       use types.{state};
+       init: func(state: state, params: tuple<string>) -> result<tuple<state>, string>;
+   }
+   ```
+
+2. **message-server.wit**:
+   ```wit
+   interface message-server-client {
+       use types.{json, event};
+       handle-send: func(state: option<json>, params: tuple<json>) -> result<tuple<option<json>>, string>;
+       handle-request: func(state: option<json>, params: tuple<json>) -> result<tuple<option<json>, tuple<json>>, string>;
+   }
+   ```
+
+3. **supervisor.wit**:
+   ```wit
+   interface supervisor {
+       spawn: func(manifest: string) -> result<string, string>;
+       list-children: func() -> list<string>;
+       stop-child: func(child-id: string) -> result<_, string>;
+       restart-child: func(child-id: string) -> result<_, string>;
+       get-child-state: func(child-id: string) -> result<list<u8>, string>;
+       get-child-events: func(child-id: string) -> result<list<chain-event>, string>;
+   }
+   ```
 
 ## HTTP Integration
 
-Theater provides built-in HTTP capabilities:
-- Actors can expose HTTP endpoints
-- HTTP requests/responses are transformed into actor messages
-- State changes from HTTP interactions are recorded in hash chain
-- Multiple actors can share HTTP interfaces
+Theater provides built-in HTTP capabilities through:
 
-Example HTTP handler configuration:
+1. **HTTP Server Handler**:
+   - Actors can expose HTTP endpoints
+   - HTTP requests convert to actor messages
+   - Responses convert back to HTTP responses
+   - All interactions recorded in state chain
+
+2. **HTTP Client Interface**:
+   - Actors can make HTTP requests to external services
+   - Request/response pairs are recorded in state chain
+   - Error handling follows actor model patterns
+
+Configuration example:
 ```toml
 [[handlers]]
-type = "Http"
+type = "http-server"
 config = { port = 8080 }
-
-[[handlers]]
-type = "Http-server"
-config = { port = 8081 }
 ```
 
 ## Cross-Actor Communication
 
 Actors communicate through:
-1. Direct message passing (same host)
-2. HTTP endpoints (remote actors)
-3. Custom interface implementations
 
-All communications:
-- Use the JSON message format
-- Create hash chain entries
-- Can be verified and replayed
-- Maintain parent-child relationships
+1. **Message Server**:
+   - Direct message passing between actors
+   - Supports both request/response and one-way messages
+   - All communications recorded in state chain
+   - Message format is JSON (serialized to bytes)
+
+2. **Supervision Tree**:
+   - Parent-child communication
+   - Lifecycle events and monitoring
+   - Access to child state and events
+
+## Management Interface
+
+The `TheaterServer` provides an external management interface:
+- TCP socket for command/control
+- Actor lifecycle management (start/stop/list)
+- Event subscription system
+- Status monitoring
+
+Commands include:
+- `StartActor`: Spawn a new actor from manifest
+- `StopActor`: Terminate a running actor
+- `ListActors`: Enumerate all running actors
+- `SubscribeToActor`: Receive event notifications from actor
+- `UnsubscribeFromActor`: Stop receiving event notifications
 
 ## Design Philosophy
 
 Theater's architecture follows several key principles:
 
-1. **Simplicity Over Complexity**
-   - One message format (JSON)
-   - One state format (JSON)
-   - One primary interface pattern
+1. **Verifiable State**
+   - All state changes are recorded in hash chains
+   - Complete history can be verified and replayed
+   - Cryptographic linking prevents tampering
 
-2. **Verifiable Everything**
-   - All state changes create hash chain entries
-   - All parent-child relationships are tracked
-   - All communications can be replayed
-
-3. **Debuggability First**
-   - Complete state history available
-   - Deterministic replay of any sequence
+2. **Supervision Hierarchy**
    - Clear parent-child relationships
-   - Structured error handling
+   - Robust error handling and recovery
+   - Distributed responsibility
 
-4. **Flexible Composition**
-   - Actors can implement multiple interfaces
-   - HTTP integration built-in
-   - Extensible handler system
+3. **Component-Based Design**
+   - WebAssembly components with clean interfaces
+   - Isolation through WebAssembly sandboxing
+   - Interoperability through standard interface types
 
-This architecture enables Theater to provide robust actor-based systems while maintaining clarity and debuggability - key features that are often missing in distributed systems.
+4. **Flexible Handlers**
+   - Multiple handler types (message, HTTP, etc.)
+   - Consistent interface patterns
+   - Extensible for new capabilities

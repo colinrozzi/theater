@@ -1,322 +1,386 @@
 # Interface System
 
-Theater's interface system enables actors to expose and consume functionality while maintaining verifiable state transitions and simple JSON messaging.
+Theater's interface system is built on the WebAssembly Component Model and WebAssembly Interface Types (WIT), providing a type-safe and flexible way for actors to expose and consume functionality while maintaining verifiable state transitions.
 
-## Core Interface
+## WebAssembly Interface Types (WIT)
 
-Every actor implements a core initialization interface:
+Theater defines its interfaces using WIT, providing a language-agnostic way to describe component interfaces. The core WIT files are located in the `wit/` directory:
 
-```rust
-fn init() -> String
+### Core Interfaces
+
+1. **actor.wit** - Basic actor interface:
+```wit
+interface actor {
+    use types.{state};
+    
+    init: func(state: state, params: tuple<string>) -> result<tuple<state>, string>;
+}
 ```
 
-This creates the initial state for the actor. Additional functionality like message handling can be added through optional interfaces.
+2. **message-server.wit** - Message handling interface:
+```wit
+interface message-server-client {
+    use types.{json, event};
 
-## Message Handler Interface
+    handle-send: func(state: option<json>, params: tuple<json>) -> result<tuple<option<json>>, string>;
+    handle-request: func(state: option<json>, params: tuple<json>) -> result<tuple<option<json>, tuple<json>>, string>;
+}
 
-Actors can optionally implement the message-server-client interface to handle messages:
+interface message-server-host {
+    use types.{json, actor-id};
 
-```rust
-fn handle(event: Event, state: &str) -> String
+    send: func(actor-id: actor-id, msg: json) -> result<_, string>;
+    request: func(actor-id: actor-id, msg: json) -> result<json, string>;
+}
 ```
 
-This interface:
-- Takes an event and current state
-- Returns new state
-- Is tracked in the hash chain
-- Enables actor-to-actor communication
+3. **http.wit** - HTTP server and client interfaces:
+```wit
+interface http-server {
+    use types.{state};
+    use http-types.{http-request, http-response};
 
-## Interface Types
+    handle-request: func(state: state, params: tuple<http-request>) -> result<tuple<state, tuple<http-response>>, string>;
+}
 
-### Actor-to-Actor
+interface http-client {
+    use types.{json};
+    use http-types.{http-request, http-response};
+
+    send-http: func(req: http-request) -> result<http-response, string>;
+}
+```
+
+4. **supervisor.wit** - Parent-child supervision:
+```wit
+interface supervisor {
+    spawn: func(manifest: string) -> result<string, string>;
+    list-children: func() -> list<string>;
+    stop-child: func(child-id: string) -> result<_, string>;
+    restart-child: func(child-id: string) -> result<_, string>;
+    get-child-state: func(child-id: string) -> result<list<u8>, string>;
+    get-child-events: func(child-id: string) -> result<list<chain-event>, string>;
+    // ...
+}
+```
+
+5. **types.wit** - Common data types:
+```wit
+interface types {
+    type json = list<u8>;
+    type state = option<list<u8>>;
+    type actor-id = string;
+    // ...
+}
+```
+
+## Handler System
+
+Theater uses a handler system to connect actor interfaces with their implementations:
+
+### Handler Types
+
+The current implementation includes several handler types:
+
+1. **Message Server Handler**:
+   - Handles direct actor-to-actor messaging
+   - Supports both request/response and one-way sends
+   - Serializes messages as JSON bytes
+
+2. **HTTP Server Handler**:
+   - Exposes actor functionality via HTTP endpoints
+   - Converts HTTP requests to actor messages
+   - Transforms responses back to HTTP
+
+3. **Supervisor Handler**:
+   - Enables parent-child supervision
+   - Provides lifecycle management functions
+   - Access to child state and events
+
+### Handler Configuration
+
+Handlers are configured in actor manifests:
+
 ```toml
-[interface]
-implements = [
-    "ntwk:simple-actor/actor",
-    "ntwk:theater/message-server-client"
-]
-requires = []
+name = "my-actor"
+component_path = "my_actor.wasm"
 
+# Message server handler
 [[handlers]]
 type = "message-server"
 config = { port = 8080 }
-```
+interface = "ntwk:theater/message-server-client"
 
-Note: The message-server interface is optional. Only implement it if your actor needs to handle messages.
-
-Basic message pattern:
-```json
-// Input Message
-{
-  "type": "request",
-  "action": "increment",
-  "payload": {
-    "amount": 5
-  }
-}
-
-// Response
-{
-  "type": "response",
-  "status": "success",
-  "payload": {
-    "new_count": 5
-  }
-}
-```
-
-### HTTP Server
-```toml
+# HTTP server handler
 [[handlers]]
-type = "Http-server"
+type = "http-server"
+config = { port = 8081 }
+
+# Supervisor handler
+[[handlers]]
+type = "supervisor"
+config = {}
+```
+
+## Message Flow
+
+### Actor-to-Actor Messaging
+
+1. **Send Message** (one-way):
+   - Sender actor calls `message-server-host::send`
+   - Message is routed through TheaterRuntime
+   - Recipient actor's `handle-send` is called
+   - State is updated and recorded in hash chain
+   - No response is returned to sender
+
+2. **Request Message** (request/response):
+   - Sender actor calls `message-server-host::request`
+   - Message is routed through TheaterRuntime
+   - Recipient actor's `handle-request` is called
+   - State is updated and recorded in hash chain
+   - Response is returned to sender
+
+### HTTP Integration
+
+1. **Incoming HTTP Request**:
+   - HTTP request arrives at server
+   - Request is converted to `http-request` struct
+   - Actor's `handle-request` function is called
+   - Response is converted back to HTTP and returned
+
+2. **Outgoing HTTP Request**:
+   - Actor calls `http-client::send-http`
+   - Request is made to external service
+   - Response is returned to actor
+   - Interaction is recorded in hash chain
+
+## Interface Implementation
+
+Actors implement interfaces through WebAssembly components:
+
+### Required Component Structure
+
+A Theater actor component must:
+1. Implement required interfaces (based on handlers)
+2. Export interface functions with correct signatures
+3. Handle state consistently
+4. Process messages according to interface specifications
+
+### Example Actor Implementation
+
+```rust
+use theater_sdk::{actor, message_server};
+
+struct CounterActor;
+
+#[actor::export]
+impl actor::Actor for CounterActor {
+    fn init(state: Option<Vec<u8>>, params: (String,)) -> Result<(Option<Vec<u8>>,), String> {
+        // Initialize with either existing state or new state
+        let state = state.unwrap_or_else(|| {
+            let initial_state = serde_json::json!({ "count": 0 });
+            serde_json::to_vec(&initial_state).unwrap()
+        });
+        
+        Ok((Some(state),))
+    }
+}
+
+#[message_server::export]
+impl message_server::MessageServerClient for CounterActor {
+    fn handle_send(
+        state: Option<Vec<u8>>,
+        params: (Vec<u8>,)
+    ) -> Result<(Option<Vec<u8>>,), String> {
+        // Process one-way message
+        // ...
+        Ok((new_state,))
+    }
+    
+    fn handle_request(
+        state: Option<Vec<u8>>,
+        params: (Vec<u8>,)
+    ) -> Result<(Option<Vec<u8>>, (Vec<u8>,)), String> {
+        // Process request/response message
+        // ...
+        Ok((new_state, (response,)))
+    }
+}
+```
+
+## Working with State
+
+The interface system consistently handles state:
+
+1. **State Representation**:
+   - State is represented as `Option<Vec<u8>>` (optional bytes)
+   - Typically contains serialized JSON or other format
+   - State is passed to and from interface functions
+
+2. **State Updates**:
+   - Functions return new state
+   - Changes are recorded in hash chain
+   - State is available for inspection and verification
+
+3. **State Access**:
+   - Current state is provided to interface functions
+   - Functions can modify state by returning new version
+   - Parent actors can access child state via supervision
+
+## Actor Manifest
+
+The manifest connects interfaces to implementations:
+
+```toml
+name = "counter-actor"
+component_path = "counter.wasm"
+
+# Interfaces implemented by this actor
+[interface]
+implements = [
+    "ntwk:theater/actor",
+    "ntwk:theater/message-server-client",
+    "ntwk:theater/http-server"
+]
+
+# Interfaces required by this actor
+requires = [
+    "ntwk:theater/message-server-host"
+]
+
+# Message server handler
+[[handlers]]
+type = "message-server"
+config = {}
+
+# HTTP server handler
+[[handlers]]
+type = "http-server"
 config = { port = 8080 }
-```
-
-HTTP requests transform into messages:
-```json
-// POST /api/v1/counter
-{
-  "type": "http_request",
-  "method": "POST",
-  "path": "/api/v1/counter",
-  "body": {
-    "amount": 5
-  }
-}
-```
-
-### HTTP Client
-```toml
-[[handlers]]
-type = "Http-client"
-config = { base_url = "http://api.example.com" }
-```
-
-Outgoing HTTP becomes messages:
-```json
-{
-  "type": "http_client_request",
-  "method": "GET",
-  "path": "/api/v1/data",
-  "headers": {
-    "Accept": "application/json"
-  }
-}
 ```
 
 ## Interface Composition
 
-Actors can implement multiple interfaces:
+Theater's interface system is designed for composition, allowing actors to:
 
-```toml
-[interface]
-implements = [
-  "ntwk:simple-actor/actor",
-  "ntwk:simple-actor/http-server",
-  "ntwk:simple-actor/metrics"
-]
-requires = [
-  "ntwk:simple-actor/http-client"
-]
-```
+1. **Implement Multiple Interfaces**:
+   - Core actor functionality
+   - Message handling
+   - HTTP serving
+   - Custom functionality
 
-Each interface:
-- Maintains hash chain integrity
-- Uses consistent JSON format
-- Can be independently verified
+2. **Depend on Host Interfaces**:
+   - Message sending
+   - HTTP client
+   - Supervision
+   - File system access
 
-## Message Routing
+3. **Combine Interface Types**:
+   - One interface can extend another
+   - Interfaces can share common types
+   - Versioning through interface namespaces
 
-Theater automatically routes messages:
+Each interface maintains state chain integrity while providing a specific capability.
 
-```
-HTTP Request -> HTTP Handler -> Actor Message -> State Change
-     ↑                                              ↓
-Response    <-     JSON     <- Handler Result <- Hash Chain
-```
+## Message Structure
 
-All transitions are:
-- Recorded in hash chain
-- Verifiable end-to-end
-- Consistently formatted
+While the interface system is flexible, messages typically follow a standard structure:
 
-## Interface Extensions
-
-Custom interfaces use the same pattern:
-
-```rust
-// Define interface
-pub trait CustomInterface {
-    fn handle_custom(&self, message: &str) -> String;
-}
-
-// Implement for actor
-impl CustomInterface for MyActor {
-    fn handle_custom(&self, message: &str) -> String {
-        // Handle message, update state, return response
-    }
+```json
+{
+  "type": "request_type",
+  "action": "specific_operation",
+  "payload": {
+    "param1": "value1",
+    "param2": 42
+  },
+  "metadata": {
+    "timestamp": "2025-02-26T12:34:56Z",
+    "request_id": "req-123456"
+  }
 }
 ```
 
-Registration in manifest:
-```toml
-[interface]
-implements = ["my:custom/interface"]
-```
+Responses typically include:
 
-## Best Practices
-
-1. **Interface Design**
-   - Keep interfaces focused
-   - Use clear message types
-   - Consider error cases
-   - Document behavior
-
-2. **Message Structure**
-   - Consistent type field
-   - Clear action names
-   - Structured payloads
-   - Error responses
-
-3. **HTTP Integration**
-   - RESTful endpoints
-   - Clear status codes
-   - Structured errors
-   - Request validation
-
-4. **Testing**
-   - Test each interface
-   - Verify state changes
-   - Check error handling
-   - Validate hash chain
-
-## Example: Multi-Interface Actor
-
-```rust
-// Actor implementing multiple interfaces
-struct MultiActor {
-    state: String
+```json
+{
+  "type": "response",
+  "status": "success",
+  "payload": {
+    "result": "value"
+  },
+  "metadata": {
+    "timestamp": "2025-02-26T12:34:57Z",
+    "request_id": "req-123456"
+  }
 }
-
-impl Actor for MultiActor {
-    fn init(&self) -> String {
-        // Initialize actor state
-        "{}".to_string()
-    }
-}
-
-impl MessageServerClient for MultiActor {
-    fn handle(&self, event: Event, state: &str) -> String {
-        // Handle incoming messages
-        // Return new state
-    }
-}
-
-impl HttpServer for MultiActor {
-    fn handle_request(&self, req: Request) -> Response {
-        // Handle HTTP requests
-    }
-}
-
-impl Metrics for MultiActor {
-    fn collect_metrics(&self) -> String {
-        // Expose metrics
-    }
-}
-```
-
-Configuration:
-```toml
-name = "multi-actor"
-component_path = "multi_actor.wasm"
-
-[interface]
-implements = [
-  "ntwk:simple-actor/actor",
-  "ntwk:theater/message-server-client",
-  "ntwk:simple-actor/http-server",
-  "ntwk:simple-actor/metrics"
-]
-
-[[handlers]]
-type = "Http-server"
-config = { port = 8080 }
-
-[[handlers]]
-type = "Metrics"
-config = { path = "/metrics" }
 ```
 
 ## Debugging Interfaces
 
-Theater provides tools for interface debugging:
+Theater provides several mechanisms for debugging interfaces:
 
-1. Message Tracing:
-```json
-{
-  "type": "trace_request",
-  "interface": "http-server",
-  "timestamp": "2025-01-14T10:00:00Z",
-  "messages": [
-    {
-      "direction": "in",
-      "message": { /* ... */ }
-    },
-    {
-      "direction": "out",
-      "message": { /* ... */ }
-    }
-  ]
-}
-```
+1. **Tracing**:
+   - All interface calls are logged
+   - State transitions are recorded
+   - Message flow can be traced end-to-end
 
-2. Interface Verification:
-```json
-{
-  "type": "verify_interface",
-  "interface": "ntwk:simple-actor/actor",
-  "checks": [
-    {
-      "name": "message_format",
-      "status": "passed"
-    },
-    {
-      "name": "state_transitions",
-      "status": "passed"
-    }
-  ]
-}
-```
+2. **Interface Inspection**:
+   - WIT interfaces can be introspected
+   - Available functions can be listed
+   - Type checking for message formats
 
-3. State Impact Analysis:
-```json
-{
-  "type": "state_impact",
-  "interface": "http-server",
-  "path": "/api/v1/counter",
-  "affects": [
-    "count",
-    "last_updated"
-  ]
-}
-```
+3. **State Verification**:
+   - Hash chain can be verified at any point
+   - State history can be examined
+   - State transitions can be replayed
 
-## Security Considerations
+## Custom Interface Development
 
-1. **Interface Isolation**
-   - Separate concerns
-   - Validate inputs
-   - Handle errors
-   - Rate limit
+Creating new interfaces requires:
 
-2. **State Access**
-   - Control mutations
-   - Validate changes
-   - Audit access
-   - Version state
+1. **WIT Definition**:
+   - Define interface functions and types
+   - Document expected behavior
+   - Specify state handling patterns
 
-3. **HTTP Security**
-   - Use HTTPS
-   - Validate routes
-   - Check methods
-   - Sanitize inputs
+2. **Handler Implementation**:
+   - Create handler in Theater runtime
+   - Connect WIT interface to actor
+   - Handle message routing correctly
+
+3. **Actor Implementation**:
+   - Implement interface functions
+   - Handle state properly
+   - Process messages according to spec
+
+## Best Practices
+
+1. **Interface Design**
+   - Keep interfaces focused on single responsibility
+   - Use clear, descriptive function names
+   - Document expected behavior
+   - Provide meaningful error messages
+   - Consider versioning strategy
+
+2. **Message Design**
+   - Use consistent type field for categorization
+   - Include action field for specific operations
+   - Structure payloads logically
+   - Add metadata for debugging
+   - Handle errors consistently
+
+3. **State Management**
+   - Keep state serializable
+   - Handle state transitions atomically
+   - Validate state after changes
+   - Consider state size impacts
+   - Test state rollback scenarios
+
+4. **Security Considerations**
+   - Validate all input messages
+   - Sanitize data crossing interface boundaries
+   - Control access to sensitive interfaces
+   - Verify state integrity frequently
+   - Test for message injection risks

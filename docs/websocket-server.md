@@ -1,85 +1,50 @@
-# WebSocket Server Guide
+# WebSocket Server in Theater
 
-This guide explains how to use WebSocket capabilities in Theater actors. WebSockets enable bidirectional communication between clients and your actor, making them perfect for real-time applications.
+WebSockets provide a bidirectional communication channel between clients and Theater actors, enabling real-time applications. This documentation explains the current implementation and usage patterns.
 
-## Basic Concepts
+## WebSocket Interface
 
-The WebSocket server implementation in Theater allows actors to:
-- Handle incoming WebSocket connections
-- Receive messages from clients
-- Send messages back to specific clients
-- Maintain persistent connections
+The WebSocket interface in Theater is defined in `wit/websocket.wit`:
 
-## Actor Implementation
+```wit
+package ntwk:theater;
 
-To implement WebSocket functionality in your actor, you need to:
-
-1. Implement the `handle-message` function from the `ntwk:theater/websocket-server` interface
-2. Handle different message types (text, binary, connect, close)
-3. Return responses when needed
-
-### Example Implementation
-
-```rust
-use serde::{Deserialize, Serialize};
-use bindings::exports::ntwk::theater::websocket_server::Guest;
-use bindings::ntwk::theater::types::Json;
-
-struct Component;
-
-impl Guest for Component {
-    fn handle_message(msg: WebSocketMessage, state: Json) -> (Json, WebSocketResponse) {
-        // Parse current state
-        let mut current_state: State = serde_json::from_slice(&state).unwrap();
-        
-        // Handle different message types
-        match msg.message_type.as_str() {
-            "connect" => {
-                // Handle new connection
-                let response = WebSocketResponse {
-                    messages: vec![WebSocketMessage {
-                        message_type: "text".to_string(),
-                        text: Some("Welcome!".to_string()),
-                        data: None,
-                    }],
-                };
-                (state, response)
-            },
-            "text" => {
-                // Handle text message
-                if let Some(text) = msg.text {
-                    // Process text message...
-                    let response = WebSocketMessage {
-                        message_type: "text".to_string(),
-                        text: Some("Received your message!".to_string()),
-                        data: None,
-                    };
-                    (state, WebSocketResponse { messages: vec![response] })
-                } else {
-                    (state, WebSocketResponse { messages: vec![] })
-                }
-            },
-            "close" => {
-                // Handle connection close
-                (state, WebSocketResponse { messages: vec![] })
-            },
-            _ => (state, WebSocketResponse { messages: vec![] }),
-        }
+interface websocket-types {
+    enum message-type {
+        text,
+        binary,
+        ping,
+        pong,
+        close,
+        connect,
     }
+
+    record websocket-message {
+        ty: message-type,
+        text: option<string>,
+        data: option<list<u8>>,
+    }
+
+    record websocket-response {
+        messages: list<websocket-message>,
+    }
+}
+
+interface websocket-server {
+    use types.{state};
+    use websocket-types.{websocket-message, websocket-response};
+
+    handle-message: func(state: state, params: tuple<websocket-message>) -> result<tuple<state, tuple<websocket-response>>, string>;
 }
 ```
 
-## Message Types
+This interface defines:
+- Message types (text, binary, ping, pong, connect, close)
+- Message structure with optional text and binary data
+- Response structure for sending messages back to clients
+- Handler function for processing incoming messages
 
-The WebSocket interface supports several message types:
-
-- `text`: Text messages (JSON or plain text)
-- `binary`: Binary data
-- `connect`: Sent when a new client connects
-- `close`: Sent when a client disconnects
-- `ping`/`pong`: Connection keep-alive messages
-
-## Configuration
+## Handler Configuration
 
 To enable WebSocket functionality in your actor, add the handler to your manifest:
 
@@ -89,109 +54,429 @@ type = "websocket-server"
 config = { port = 8080 }
 ```
 
-## Best Practices
+Configuration options include:
+- `port`: The port to listen on for WebSocket connections
+- `path`: (Optional) The base path for WebSocket connections (default: "/")
+- `max_connections`: (Optional) Maximum number of concurrent connections
 
-1. **Handle Connection Events**
-   - Always handle the `connect` message type
-   - Send a welcome message to new connections
-   - Clean up resources on `close` messages
+## Implementing WebSocket Actors
 
-2. **Message Processing**
-   - Keep message processing quick and non-blocking
-   - Handle all message types appropriately
-   - Validate incoming messages
-
-3. **Error Handling**
-   - Handle malformed messages gracefully
-   - Provide meaningful error responses
-   - Log errors for debugging
-
-## Example: Chat Room Actor
-
-Here's a complete example of a chat room actor:
+### Basic Implementation
 
 ```rust
-use serde::{Deserialize, Serialize};
-use bindings::exports::ntwk::theater::websocket_server::Guest;
-use bindings::ntwk::theater::types::Json;
+use theater_sdk::{websocket_server};
+use serde::{Serialize, Deserialize};
 
 #[derive(Serialize, Deserialize)]
-struct ChatState {
-    connected_users: Vec<String>,
-    messages: Vec<ChatMessage>,
+struct EchoState {
+    connection_count: u32,
+    message_count: u32,
 }
 
-#[derive(Serialize, Deserialize)]
-struct ChatMessage {
-    user: String,
-    content: String,
-    timestamp: String,
-}
+struct EchoActor;
 
-struct Component;
-
-impl Guest for Component {
-    fn handle_message(msg: WebSocketMessage, state: Json) -> (Json, WebSocketResponse) {
-        let mut chat_state: ChatState = serde_json::from_slice(&state).unwrap();
+#[websocket_server::export]
+impl websocket_server::WebSocketServer for EchoActor {
+    fn handle_message(
+        state: Option<Vec<u8>>,
+        params: (WebSocketMessage,)
+    ) -> Result<(Option<Vec<u8>>, (WebSocketResponse,)), String> {
+        // Extract message and state
+        let message = params.0;
+        let mut actor_state: EchoState = match state {
+            Some(bytes) => serde_json::from_slice(&bytes)
+                .map_err(|e| format!("Failed to deserialize state: {}", e))?,
+            None => EchoState { connection_count: 0, message_count: 0 },
+        };
         
-        match msg.message_type.as_str() {
-            "connect" => {
-                // Send chat history to new user
-                let history = serde_json::to_string(&chat_state.messages).unwrap();
+        // Handle message based on type
+        match message.ty {
+            MessageType::Connect => {
+                // New client connection
+                actor_state.connection_count += 1;
+                
+                // Create welcome message
                 let response = WebSocketResponse {
                     messages: vec![WebSocketMessage {
-                        message_type: "text".to_string(),
-                        text: Some(history),
+                        ty: MessageType::Text,
+                        text: Some(format!("Welcome! You are connection #{}", 
+                            actor_state.connection_count)),
                         data: None,
                     }],
                 };
-                (serde_json::to_vec(&chat_state).unwrap(), response)
+                
+                // Update state and return response
+                let new_state = serde_json::to_vec(&actor_state)
+                    .map_err(|e| format!("Failed to serialize state: {}", e))?;
+                Ok((Some(new_state), (response,)))
             },
-            "text" => {
-                if let Some(text) = msg.text {
-                    // Broadcast message to all clients
-                    let new_message = ChatMessage {
-                        user: "anonymous".to_string(),
-                        content: text,
-                        timestamp: chrono::Utc::now().to_string(),
-                    };
-                    
-                    chat_state.messages.push(new_message);
-                    
-                    let broadcast = serde_json::to_string(&chat_state.messages).unwrap();
-                    let response = WebSocketResponse {
-                        messages: vec![WebSocketMessage {
-                            message_type: "text".to_string(),
-                            text: Some(broadcast),
-                            data: None,
-                        }],
-                    };
-                    (serde_json::to_vec(&chat_state).unwrap(), response)
+            
+            MessageType::Text => {
+                // Echo text message back to client
+                actor_state.message_count += 1;
+                
+                let response_text = if let Some(text) = message.text {
+                    format!("Echo: {}", text)
                 } else {
-                    (state, WebSocketResponse { messages: vec![] })
-                }
+                    "Received empty text message".to_string()
+                };
+                
+                let response = WebSocketResponse {
+                    messages: vec![WebSocketMessage {
+                        ty: MessageType::Text,
+                        text: Some(response_text),
+                        data: None,
+                    }],
+                };
+                
+                let new_state = serde_json::to_vec(&actor_state)
+                    .map_err(|e| format!("Failed to serialize state: {}", e))?;
+                Ok((Some(new_state), (response,)))
             },
-            _ => (state, WebSocketResponse { messages: vec![] }),
+            
+            MessageType::Binary => {
+                // Echo binary message back to client
+                actor_state.message_count += 1;
+                
+                let response = WebSocketResponse {
+                    messages: vec![WebSocketMessage {
+                        ty: MessageType::Binary,
+                        text: None,
+                        data: message.data.clone(),
+                    }],
+                };
+                
+                let new_state = serde_json::to_vec(&actor_state)
+                    .map_err(|e| format!("Failed to serialize state: {}", e))?;
+                Ok((Some(new_state), (response,)))
+            },
+            
+            MessageType::Close => {
+                // Client disconnected
+                if actor_state.connection_count > 0 {
+                    actor_state.connection_count -= 1;
+                }
+                
+                let new_state = serde_json::to_vec(&actor_state)
+                    .map_err(|e| format!("Failed to serialize state: {}", e))?;
+                Ok((Some(new_state), (WebSocketResponse { messages: vec![] },)))
+            },
+            
+            // Handle other message types
+            _ => Ok((state, (WebSocketResponse { messages: vec![] },)))
         }
     }
 }
 ```
 
-## Testing WebSocket Actors
+### Message Handling
 
-You can test your WebSocket actor using tools like `websocat` or browser-based WebSocket clients:
+The `handle_message` function processes incoming WebSocket messages:
 
-```bash
-# Using websocat
-websocat ws://localhost:8080/ws
+1. Message Types:
+   - `Connect`: Sent when a new client connects
+   - `Text`: Text messages (often JSON)
+   - `Binary`: Binary data messages
+   - `Ping`/`Pong`: Connection keep-alive messages
+   - `Close`: Sent when a client disconnects
+
+2. Response Structure:
+   ```rust
+   WebSocketResponse {
+       messages: Vec<WebSocketMessage>
+   }
+   ```
+   - You can send multiple messages in a single response
+   - Messages can be of different types
+   - Responses are directed to the client that sent the message
+
+### State Management
+
+WebSocket actors maintain state just like other actors:
+
+1. **State Persistence**:
+   - State is passed to `handle_message`
+   - Function returns new state
+   - All state transitions recorded in hash chain
+
+2. **Connection Management**:
+   - Theater tracks WebSocket connections internally
+   - Connections are associated with the actor instance
+   - Actors don't need to maintain connection lists
+
+## Advanced Patterns
+
+### Chat Room Example
+
+```rust
+use theater_sdk::{websocket_server};
+use serde::{Serialize, Deserialize};
+
+#[derive(Serialize, Deserialize)]
+struct ChatState {
+    messages: Vec<ChatMessage>,
+    user_count: u32,
+}
+
+#[derive(Serialize, Deserialize)]
+struct ChatMessage {
+    username: String,
+    content: String,
+    timestamp: u64,
+}
+
+struct ChatActor;
+
+#[websocket_server::export]
+impl websocket_server::WebSocketServer for ChatActor {
+    fn handle_message(
+        state: Option<Vec<u8>>,
+        params: (WebSocketMessage,)
+    ) -> Result<(Option<Vec<u8>>, (WebSocketResponse,)), String> {
+        // Initialize or extract state
+        let mut chat_state = match state {
+            Some(bytes) => serde_json::from_slice::<ChatState>(&bytes)
+                .map_err(|e| format!("Failed to deserialize state: {}", e))?,
+            None => ChatState {
+                messages: Vec::new(),
+                user_count: 0,
+            },
+        };
+        
+        let message = params.0;
+        
+        match message.ty {
+            MessageType::Connect => {
+                // User connected
+                chat_state.user_count += 1;
+                
+                // Send chat history to new user
+                let welcome = WebSocketMessage {
+                    ty: MessageType::Text,
+                    text: Some(format!("Welcome! There are {} users online.", 
+                        chat_state.user_count)),
+                    data: None,
+                };
+                
+                let history = serde_json::to_string(&chat_state.messages)
+                    .map_err(|e| format!("Failed to serialize history: {}", e))?;
+                    
+                let history_msg = WebSocketMessage {
+                    ty: MessageType::Text,
+                    text: Some(history),
+                    data: None,
+                };
+                
+                let response = WebSocketResponse {
+                    messages: vec![welcome, history_msg],
+                };
+                
+                let new_state = serde_json::to_vec(&chat_state)
+                    .map_err(|e| format!("Failed to serialize state: {}", e))?;
+                    
+                Ok((Some(new_state), (response,)))
+            },
+            
+            MessageType::Text => {
+                // Process chat message
+                if let Some(text) = message.text {
+                    // Parse message (assuming JSON format)
+                    let new_message: Result<ChatMessage, _> = serde_json::from_str(&text);
+                    
+                    match new_message {
+                        Ok(msg) => {
+                            // Add message to history
+                            chat_state.messages.push(msg);
+                            
+                            // Broadcast to all users
+                            let broadcast = serde_json::to_string(&chat_state.messages)
+                                .map_err(|e| format!("Failed to serialize messages: {}", e))?;
+                                
+                            let broadcast_msg = WebSocketMessage {
+                                ty: MessageType::Text,
+                                text: Some(broadcast),
+                                data: None,
+                            };
+                            
+                            let response = WebSocketResponse {
+                                messages: vec![broadcast_msg],
+                            };
+                            
+                            let new_state = serde_json::to_vec(&chat_state)
+                                .map_err(|e| format!("Failed to serialize state: {}", e))?;
+                                
+                            Ok((Some(new_state), (response,)))
+                        },
+                        Err(e) => {
+                            // Send error to user
+                            let error_msg = WebSocketMessage {
+                                ty: MessageType::Text,
+                                text: Some(format!("Error parsing message: {}", e)),
+                                data: None,
+                            };
+                            
+                            let response = WebSocketResponse {
+                                messages: vec![error_msg],
+                            };
+                            
+                            Ok((state, (response,)))
+                        }
+                    }
+                } else {
+                    // Empty message
+                    Ok((state, (WebSocketResponse { messages: vec![] },)))
+                }
+            },
+            
+            MessageType::Close => {
+                // User disconnected
+                if chat_state.user_count > 0 {
+                    chat_state.user_count -= 1;
+                }
+                
+                let new_state = serde_json::to_vec(&chat_state)
+                    .map_err(|e| format!("Failed to serialize state: {}", e))?;
+                    
+                Ok((Some(new_state), (WebSocketResponse { messages: vec![] },)))
+            },
+            
+            // Handle other message types
+            _ => Ok((state, (WebSocketResponse { messages: vec![] },)))
+        }
+    }
+}
 ```
 
-Or using JavaScript in the browser:
+### Broadcasting to All Clients
+
+Currently, WebSocket responses are sent only to the client that initiated the request. To implement broadcasting, messages must be stored in the actor state and sent to each client individually as they connect or send messages.
+
+In a future enhancement, Theater may support explicit broadcasting capabilities.
+
+## Client-Side Integration
+
+To connect to a Theater WebSocket actor from a web browser:
 
 ```javascript
-const ws = new WebSocket('ws://localhost:8080/ws');
-ws.onmessage = (event) => {
-    console.log('Received:', event.data);
-};
-ws.send('Hello!');
+// Connect to WebSocket server
+const socket = new WebSocket('ws://localhost:8080/');
+
+// Handle connection open
+socket.addEventListener('open', (event) => {
+    console.log('Connected to Theater WebSocket');
+    
+    // Send a message
+    const message = {
+        username: 'User123',
+        content: 'Hello, Theater!',
+        timestamp: Date.now()
+    };
+    
+    socket.send(JSON.stringify(message));
+});
+
+// Handle incoming messages
+socket.addEventListener('message', (event) => {
+    console.log('Received message:', event.data);
+    
+    try {
+        // Parse JSON messages
+        const data = JSON.parse(event.data);
+        // Process data...
+    } catch (e) {
+        // Handle text messages
+        console.log('Received text message:', event.data);
+    }
+});
+
+// Handle connection close
+socket.addEventListener('close', (event) => {
+    console.log('Connection closed:', event.code, event.reason);
+});
+
+// Handle errors
+socket.addEventListener('error', (event) => {
+    console.error('WebSocket error:', event);
+});
 ```
+
+## Testing WebSocket Actors
+
+You can test your WebSocket actors using:
+
+1. **Command-line Tools**:
+   ```bash
+   # Using websocat
+   websocat ws://localhost:8080/
+   
+   # Using wscat
+   wscat -c ws://localhost:8080/
+   ```
+
+2. **Browser Dev Tools**:
+   - Create a simple HTML page with WebSocket client code
+   - Use browser console to interact with the WebSocket
+
+3. **Postman or Insomnia**:
+   - These API tools support WebSocket connections
+   - Allow sending and receiving formatted messages
+
+## Best Practices
+
+### Performance Considerations
+
+1. **Message Size**:
+   - Keep messages small and focused
+   - Consider compression for large payloads
+   - Batch small messages when appropriate
+
+2. **State Management**:
+   - Limit message history size
+   - Implement pagination for large datasets
+   - Consider pruning old messages
+
+3. **Connection Handling**:
+   - Implement heartbeat mechanisms
+   - Handle reconnection gracefully
+   - Monitor connection count
+
+### Security Best Practices
+
+1. **Input Validation**:
+   - Validate all incoming messages
+   - Sanitize user input
+   - Check message size and format
+
+2. **Authentication**:
+   - Implement token-based authentication
+   - Validate credentials on connection
+   - Enforce access control
+
+3. **Rate Limiting**:
+   - Limit message frequency
+   - Protect against DoS attacks
+   - Monitor abusive patterns
+
+## Future Enhancements
+
+Future versions of Theater's WebSocket implementation may include:
+
+1. **Direct Broadcasting**:
+   - Built-in support for sending to all clients
+   - Targeted messaging to specific clients
+   - Room/channel abstractions
+
+2. **Binary Message Optimization**:
+   - Improved handling of large binary payloads
+   - Streaming support for binary data
+   - Compression options
+
+3. **Connection Management**:
+   - More detailed connection lifecycle events
+   - Connection metadata and context
+   - Advanced monitoring capabilities
+
+4. **Protocol Extensions**:
+   - Support for WebSocket subprotocols
+   - Custom protocol negotiation
+   - Integration with other protocols

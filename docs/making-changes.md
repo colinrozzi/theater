@@ -6,12 +6,12 @@ This document outlines the process for making changes to the Theater project. We
 
 1. **Create a Proposal**
    - All significant changes start with a proposal
-   - Create a new markdown file in `changes/proposals/`
+   - Create a new markdown file in `/changes/proposals/`
    - Use the format: `YYYY-MM-DD-brief-description.md`
    - Follow the proposal template structure (see below)
 
 2. **Update In-Progress List**
-   - Add your proposal to `changes/in-progress.md`
+   - Add your proposal to `/changes/in-progress.md`
    - Include the proposal file name and a brief description
 
 3. **Work on the Change**
@@ -52,7 +52,7 @@ This document outlines the process for making changes to the Theater project. We
 
 ## Example
 
-See `changes/proposals/2025-01-29-random-id-system.md` for an example of a completed change proposal.
+See [`/changes/proposals/2025-01-29-random-id-system.md`](/changes/proposals/2025-01-29-random-id-system.md) for an example of a completed change proposal.
 
 ## Tips for Good Change Documentation
 

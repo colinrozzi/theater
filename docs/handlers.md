@@ -1,278 +1,352 @@
-# Theater Handler System Guide
+# Theater Handler System
 
-The Theater handler system provides a flexible way for actors to interact with the outside world. Each handler type provides specific capabilities while maintaining the core principles of state tracking and verification.
+Handlers are the primary way actors interact with the outside world and with each other in Theater. Each handler type provides specific capabilities while maintaining the state tracking and verification that are core to Theater's design.
 
-## Available Handlers
+## Current Handler Implementation
 
-Theater currently supports these handler types:
+The handler system is implemented in Theater's core and configured through actor manifests. The current implementation provides several handler types:
 
-1. **WebSocket Server**
-   - Real-time bidirectional communication
-   - Connection management
-   - Multiple message types
+### Message Server Handler
 
-2. **HTTP Server**
-   - REST API endpoints
-   - Static file serving
-   - Request/response handling
-
-3. **Message Server**
-   - Simple message passing
-   - JSON message format
-   - HTTP transport
-
-4. **HTTP Client**
-   - External API calls
-   - Request configuration
-   - Response handling
-
-5. **FileSystem**
-   - File reading/writing
-   - Directory management
-   - Asset serving
-
-6. **Runtime**
-   - Core actor operations
-   - Logging
-   - Actor spawning
-   - Chain access
-
-## Handler Configuration
-
-Handlers are configured in the actor's manifest file:
+The message server handler enables actor-to-actor communication:
 
 ```toml
 [[handlers]]
-type = "websocket-server"
+type = "message-server"
+config = {}
+interface = "ntwk:theater/message-server-client"
+```
+
+This handler:
+- Enables actors to receive messages from other actors
+- Supports both one-way (send) and request-response patterns
+- Uses JSON serialized as bytes for message interchange
+- Records all interactions in the state chain
+
+The handler works with two functions from the message-server-client interface:
+
+```wit
+handle-send: func(state: option<json>, params: tuple<json>) -> result<tuple<option<json>>, string>;
+handle-request: func(state: option<json>, params: tuple<json>) -> result<tuple<option<json>, tuple<json>>, string>;
+```
+
+### HTTP Server Handler
+
+The HTTP server handler exposes actor functionality via HTTP:
+
+```toml
+[[handlers]]
+type = "http-server"
 config = { port = 8080 }
+```
+
+This handler:
+- Creates an HTTP server on the specified port
+- Routes HTTP requests to the actor
+- Converts HTTP requests/responses to/from actor messages
+- Records all interactions in the state chain
+
+The handler works with the http-server interface:
+
+```wit
+handle-request: func(state: state, params: tuple<http-request>) -> result<tuple<state, tuple<http-response>>, string>;
+```
+
+### Supervisor Handler
+
+The supervisor handler enables parent-child actor relationships:
+
+```toml
+[[handlers]]
+type = "supervisor"
+config = {}
+```
+
+This handler:
+- Allows the actor to spawn and manage child actors
+- Provides access to child state and events
+- Enables the supervision tree pattern
+- Records all supervision actions in the state chain
+
+The handler implements the supervisor interface (see `supervisor.wit`).
+
+## Handler Configuration
+
+Handlers are configured in the actor's manifest file (TOML format):
+
+```toml
+name = "my-actor"
+component_path = "my_actor.wasm"
+
+[[handlers]]
+type = "message-server"
+config = {}
 
 [[handlers]]
 type = "http-server"
-config = { port = 8081 }
+config = { port = 8080 }
 
 [[handlers]]
-type = "filesystem"
-config = { path = "assets" }
+type = "supervisor"
+config = {}
 ```
 
-## WebSocket Server Handler
+Each handler has:
+- `type`: The handler type identifier
+- `config`: Handler-specific configuration
+- Optional `interface`: The WIT interface this handler implements
 
-The WebSocket handler provides real-time bidirectional communication.
+## Handler Registration and Initialization
 
-### Features
-- Connection management per client
-- Binary and text message support
-- Ping/pong handling
-- Connection lifecycle events
+When an actor is loaded, Theater:
 
-### Implementation Example
+1. Reads the manifest configuration
+2. For each handler:
+   - Creates the handler instance
+   - Configures it with the specified options
+   - Registers it with the actor runtime
+   - Sets up any necessary resources (sockets, etc.)
 
-```rust
-use bindings::exports::ntwk::theater::websocket_server::Guest as WebSocketGuest;
-use bindings::ntwk::theater::websocket_server::*;
-use serde::{Deserialize, Serialize};
-
-#[derive(Serialize, Deserialize)]
-struct ChatState {
-    messages: Vec<ChatMessage>,
-    users: HashMap<String, UserStatus>,
-}
-
-impl WebSocketGuest for Component {
-    fn handle_message(msg: WebSocketMessage, state: Json) -> (Json, WebSocketResponse) {
-        let mut chat_state: ChatState = serde_json::from_slice(&state).unwrap();
-        
-        match msg.ty {
-            MessageType::Connect => {
-                // Handle new connection...
-                WebSocketResponse {
-                    messages: vec![WebSocketMessage {
-                        ty: MessageType::Text,
-                        text: Some("Welcome!".to_string()),
-                        data: None,
-                    }]
-                }
-            },
-            MessageType::Text => {
-                if let Some(text) = msg.text {
-                    // Process chat message...
-                }
-                // Broadcast to all clients...
-                WebSocketResponse { messages: broadcast_messages }
-            },
-            MessageType::Close => {
-                // Handle disconnection...
-                WebSocketResponse { messages: vec![] }
-            },
-            _ => WebSocketResponse { messages: vec![] }
-        }
-    }
-}
-```
-
-## HTTP Server Handler
-
-The HTTP handler enables REST APIs and static file serving.
-
-### Features
-- Route handling
-- Query parameters
-- Request body parsing
-- Static file serving
-- Custom headers
-
-### Implementation Example
+Handler initialization is part of the actor initialization process:
 
 ```rust
-use bindings::exports::ntwk::theater::http_server::Guest as HttpGuest;
-use bindings::ntwk::theater::http_server::*;
-
-impl HttpGuest for Component {
-    fn handle_request(req: HttpRequest, state: Json) -> (HttpResponse, Json) {
-        match (req.method.as_str(), req.path.as_str()) {
-            ("GET", "/api/users") => {
-                let users = get_users_from_state(&state);
-                (HttpResponse {
-                    status: 200,
-                    headers: vec![
-                        ("Content-Type".to_string(), "application/json".to_string())
-                    ],
-                    body: Some(serde_json::to_vec(&users).unwrap()),
-                }, state)
-            },
-            ("POST", "/api/users") => {
-                if let Some(body) = req.body {
-                    let new_user: User = serde_json::from_slice(&body)?;
-                    let new_state = add_user_to_state(new_user, state);
-                    // ...
-                }
+// From actor_runtime.rs
+pub async fn start(
+    actor_id: TheaterId,
+    manifest: &ManifestConfig,
+    runtime_tx: mpsc::Sender<TheaterCommand>,
+    mailbox_rx: mpsc::Receiver<ActorMessage>,
+) -> Result<()> {
+    // Initialize actor instance
+    let instance = ActorInstance::new(actor_id.clone(), manifest).await?;
+    
+    // Initialize handlers from manifest
+    for handler_config in &manifest.handlers {
+        match handler_config.type_.as_str() {
+            "message-server" => {
+                // Initialize message server handler
                 // ...
             },
-            // Static file serving
-            ("GET", path) if path.starts_with("/static/") => {
-                serve_static_file(path, state)
+            "http-server" => {
+                // Initialize HTTP server handler
+                // ...
             },
-            _ => (HttpResponse {
-                status: 404,
-                headers: vec![],
-                body: None,
-            }, state)
+            "supervisor" => {
+                // Initialize supervisor handler
+                // ...
+            },
+            _ => {
+                return Err(anyhow::anyhow!("Unknown handler type"));
+            }
         }
     }
+    
+    // Start actor runtime
+    // ...
 }
 ```
 
-## Message Server Handler
+## Message Flow Through Handlers
 
-The message server provides simple message passing between actors.
+### Message Server Handler Flow
 
-### Features
-- JSON message format
-- HTTP transport
-- State management
-- Error handling
+1. Incoming message arrives via ActorMessage
+2. Runtime routes message to message-server handler
+3. Handler extracts message data
+4. Handler calls actor's handle-send or handle-request function
+5. Actor processes message and returns new state (and response for requests)
+6. State change is recorded in hash chain
+7. Response (if any) is returned to sender
 
-### Implementation Example
+### HTTP Server Handler Flow
+
+1. HTTP request arrives at the server
+2. Server converts request to http-request format
+3. Handler calls actor's handle-request function
+4. Actor processes request and returns new state and response
+5. State change is recorded in hash chain
+6. Response is converted back to HTTP and sent to client
+
+### Supervisor Handler Flow
+
+1. Actor invokes a supervisor function
+2. Handler converts call to appropriate TheaterCommand
+3. Command is sent to TheaterRuntime
+4. Runtime performs the requested operation
+5. Result is returned to actor
+6. State changes are recorded in hash chain
+
+## Handler Implementation Details
+
+### Message Server Handler
 
 ```rust
-use bindings::exports::ntwk::theater::message_server::Guest as MessageGuest;
-use bindings::ntwk::theater::message_server::*;
+// Pseudo-implementation
+pub struct MessageServerHandler {
+    instance: ActorInstance,
+}
 
-impl MessageGuest for Component {
-    fn handle(msg: Message, state: Json) -> (Json, Message) {
-        let mut current_state: State = serde_json::from_slice(&state).unwrap();
+impl MessageServerHandler {
+    pub async fn new(instance: ActorInstance) -> Self {
+        Self { instance }
+    }
+    
+    pub async fn handle_send(&self, data: Vec<u8>) -> Result<()> {
+        // Get current state
+        let state = self.instance.store.data().get_state();
         
-        match msg.message_type.as_str() {
-            "update" => {
-                // Process update message...
-                let response = Message {
-                    message_type: "update_complete".to_string(),
-                    data: serde_json::to_vec(&result).unwrap(),
-                };
-                (serde_json::to_vec(&current_state).unwrap(), response)
-            },
-            _ => (state, Message::error("Unknown message type"))
-        }
+        // Call actor's handle-send function
+        let (new_state, _) = self.instance
+            .call_function("handle-send", state, data)
+            .await?;
+        
+        // Update state
+        self.instance.store.data_mut().set_state(new_state);
+        Ok(())
+    }
+    
+    pub async fn handle_request(&self, data: Vec<u8>) -> Result<Vec<u8>> {
+        // Get current state
+        let state = self.instance.store.data().get_state();
+        
+        // Call actor's handle-request function
+        let (new_state, response) = self.instance
+            .call_function("handle-request", state, data)
+            .await?;
+        
+        // Update state
+        self.instance.store.data_mut().set_state(new_state);
+        Ok(response)
     }
 }
 ```
 
-## Handler Best Practices
+### HTTP Server Handler
 
-1. **State Management**
-   - Keep handler state updates atomic
-   - Validate state after updates
-   - Handle serialization errors
-   - Include state metadata
+```rust
+// Pseudo-implementation
+pub struct HttpServerHandler {
+    instance: ActorInstance,
+    port: u16,
+    server: Option<Server>,
+}
 
-2. **Error Handling**
+impl HttpServerHandler {
+    pub async fn new(instance: ActorInstance, config: HttpServerConfig) -> Self {
+        Self {
+            instance,
+            port: config.port,
+            server: None,
+        }
+    }
+    
+    pub async fn start(&mut self) -> Result<()> {
+        // Create HTTP server
+        let addr = SocketAddr::from(([127, 0, 0, 1], self.port));
+        
+        // Set up routes
+        let instance = self.instance.clone();
+        let app = Router::new()
+            .route("/*path", get(move |req| handle_request(instance.clone(), req)))
+            .route("/*path", post(move |req| handle_request(instance.clone(), req)))
+            // Add other HTTP methods...
+            
+        // Start server
+        self.server = Some(axum::Server::bind(&addr)
+            .serve(app.into_make_service()));
+            
+        Ok(())
+    }
+    
+    async fn handle_request(instance: ActorInstance, req: Request) -> Response {
+        // Convert HTTP request to WIT http-request
+        let wit_req = convert_request(req);
+        
+        // Get current state
+        let state = instance.store.data().get_state();
+        
+        // Call actor's handle-request function
+        let (new_state, wit_resp) = instance
+            .call_function("handle-request", state, wit_req)
+            .await?;
+            
+        // Update state
+        instance.store.data_mut().set_state(new_state);
+        
+        // Convert WIT response to HTTP response
+        convert_response(wit_resp)
+    }
+}
+```
+
+## Custom Handler Development
+
+To develop a new handler for Theater:
+
+1. **Define the WIT Interface**:
+   - Create a new `.wit` file defining the interface
+   - Specify functions and types
+   - Document behavior
+
+2. **Implement the Handler in Theater**:
+   - Add handler type to configuration parser
+   - Create handler implementation
+   - Connect to actor runtime
+
+3. **Add Handler Registration**:
+   - Update actor runtime to recognize new handler
+   - Implement handler initialization
+   - Connect to WIT interface
+
+## Best Practices
+
+### Handler Configuration
+
+1. **Port Configuration**:
+   - Use different ports for different handlers
+   - Consider configurable port ranges
+   - Document port usage
+
+2. **Resource Limits**:
+   - Specify resource limits in configuration
+   - Consider memory and connection limits
+   - Set appropriate timeouts
+
+3. **Interface Versions**:
+   - Specify interface versions explicitly
+   - Maintain backward compatibility
+   - Document breaking changes
+
+### Handler Usage
+
+1. **Message Patterns**:
+   - Use clear message types
+   - Implement consistent error handling
+   - Document message formats
+
+2. **HTTP Endpoints**:
+   - Follow RESTful conventions
    - Use appropriate status codes
-   - Return error messages
-   - Log errors with context
-   - Maintain state consistency
+   - Document API behavior
 
-3. **WebSocket Handling**
-   - Track connections properly
-   - Handle disconnects gracefully
-   - Implement heartbeat/ping
-   - Manage broadcast efficiently
-
-4. **HTTP Patterns**
-   - Use REST conventions
-   - Validate request data
-   - Set proper headers
-   - Handle all methods
-
-5. **Message Patterns**
-   - Validate message format
-   - Include message context
-   - Handle all message types
-   - Provide clear responses
+3. **Supervision Patterns**:
+   - Design clear supervision hierarchies
+   - Define restart strategies
+   - Document parent-child relationships
 
 ## Security Considerations
 
-1. **Input Validation**
-   - Validate all input data
-   - Sanitize file paths
-   - Check message sizes
-   - Validate JSON structure
+1. **Input Validation**:
+   - Validate all incoming messages
+   - Sanitize HTTP input
+   - Check message size and format
 
-2. **Resource Management**
-   - Limit concurrent connections
-   - Handle timeouts
-   - Manage memory usage
-   - Clean up resources
+2. **Resource Protection**:
+   - Implement rate limiting
+   - Protect against DoS attacks
+   - Monitor resource usage
 
-3. **Error Exposure**
-   - Limit error details
-   - Log sensitive errors
-   - Use appropriate codes
-   - Sanitize responses
-
-## Performance Tips
-
-1. **WebSocket**
-   - Batch messages when possible
-   - Use binary for large data
-   - Implement backpressure
-   - Monitor connection count
-
-2. **HTTP Server**
-   - Cache static files
-   - Use appropriate status codes
-   - Compress responses
-   - Implement timeouts
-
-3. **Message Server**
-   - Batch related changes
-   - Monitor message size
-   - Handle backpressure
-   - Track message patterns
-
-## Debugging Handlers
-
-1. Use the runtime log function
-2. Monitor state changes
-3. Track message patterns
-4. Check chain entries
-5. Validate responses
+3. **Access Control**:
+   - Consider authentication for handlers
+   - Implement authorization checks
+   - Document security requirements

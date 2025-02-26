@@ -1,275 +1,256 @@
 # State Management & Hash Chains
 
-Theater's state management system provides cryptographic verification of all state transitions while maintaining simplicity and debuggability.
+Theater's state management system provides cryptographic verification of all state transitions while maintaining simplicity and debuggability. This document describes the current implementation and planned enhancements.
 
-## Core Concepts
+## Current Implementation
 
-### Hash Chain Structure
+The `StateChain` struct in `chain/mod.rs` forms the foundation of the state management system, providing:
+
+1. **Event Chain Structure**:
+   - Each event is cryptographically linked to its predecessor
+   - SHA-1 is used as the hashing algorithm
+   - Every event contains:
+     - Hash: SHA-1 hash of the event
+     - Parent Hash: Reference to previous event (or None for initial event)
+     - Event Type: String identifier for the operation
+     - Data: Serialized event data as bytes
+     - Timestamp: When the event occurred
+
+2. **Chain Verification**:
+   - The `verify()` method validates the entire chain integrity
+   - Each event hash is recomputed and compared to stored hash
+   - Any tampering with past events will break the chain
+
+3. **Core Operations**:
+   - `add_event()`: Record new events in the chain
+   - `get_last_event()`: Retrieve the most recent event
+   - `get_events()`: Access the complete event history
+   - `save_to_file()`: Persist chain to disk
+   - `load_from_file()`: Restore chain from disk
+
+### StateChain Structure
+
+In code, the `StateChain` implementation looks like:
+
+```rust
+pub struct StateChain {
+    events: Vec<ChainEvent>,
+    current_hash: Option<Vec<u8>>,
+}
+
+pub struct ChainEvent {
+    pub hash: Vec<u8>,
+    pub parent_hash: Option<Vec<u8>>,
+    pub event_type: String,
+    pub data: Vec<u8>,
+    pub timestamp: u64,
+}
+```
+
+The `ChainEvent` struct directly maps to the WIT interface definition, ensuring compatibility between host and WebAssembly components.
+
+### Hash Chain Visualization
 
 ```
-State0 (Initial) ─────> Hash0
+Event0 (Initial) ─────> Hash0 = SHA1(Data0)
        ↓
-Message1 + State0 ───> State1 ─────> Hash1
+Event1 + Hash0 ───────> Hash1 = SHA1(Hash0 + Data1)
                          ↓
-Message2 + State1 ───> State2 ─────> Hash2
+Event2 + Hash1 ───────> Hash2 = SHA1(Hash1 + Data2)
 ```
 
-Each hash chain entry contains:
-- Parent hash reference
-- Current state snapshot
-- Message that triggered transition
-- Timestamp
-- Actor metadata
+Each event's hash is computed using:
+1. The previous event's hash (if any)
+2. The current event's data
 
-### JSON State Format
+This creates a tamper-evident chain where modifying any past event would invalidate all subsequent hashes.
 
-All state in Theater is JSON, making it:
-- Human readable
-- Easy to debug
-- Simple to serialize
-- Language agnostic
+### Actor State Management
 
-Example state evolution:
+For actors, state is managed through a cycle of:
 
-```json
-// Initial State (Hash0)
-{
-  "count": 0,
-  "last_updated": "2025-01-14T10:00:00Z"
-}
+1. **State Storage**:
+   - Actor instance stores state as optional bytes
+   - State is typically serialized JSON or other format
+   - State can be empty (None) for stateless actors
 
-// Message1
-{
-  "type": "increment",
-  "amount": 5
-}
+2. **Function Execution**:
+   - Current state is passed to WebAssembly function
+   - Function processes input and returns new state
+   - State updates are recorded in hash chain
 
-// State1 (Hash1)
-{
-  "count": 5,
-  "last_updated": "2025-01-14T10:00:01Z"
-}
+3. **State Retrieval**:
+   - Latest state can be accessed from actor
+   - Complete event history is available for inspection
+   - Parent actors can access child state via supervision interface
 
-// Message2
-{
-  "type": "multiply",
-  "factor": 2
-}
+Example from `actor_executor.rs`:
 
-// State2 (Hash2)
-{
-  "count": 10,
-  "last_updated": "2025-01-14T10:00:02Z"
-}
+```rust
+// Execute the call with current state
+let (new_state, results) = self.actor_instance.call_function(&name, state, params).await?;
+
+// Update stored state
+self.actor_instance.store.data_mut().set_state(new_state);
 ```
 
-## Verification Process
+## Working with State
 
-Any state can be verified through:
+### Adding Events
 
-1. Hash Chain Validation:
-```json
-{
-  "hash": "hash2",
-  "parent_hash": "hash1",
-  "state": {
-    "count": 10,
-    "last_updated": "2025-01-14T10:00:02Z"
-  },
-  "message": {
-    "type": "multiply",
-    "factor": 2
-  },
-  "timestamp": "2025-01-14T10:00:02Z",
-  "actor_id": "counter-123"
-}
+To add a new event to the chain:
+
+```rust
+// Create event and update chain
+let event = chain.add_event("increment".to_string(), increment_data);
 ```
 
-2. State Replay:
-- Start with initial state
-- Apply each message in sequence
-- Verify generated hashes match
-- Compare final state
+This automatically:
+1. Computes the new hash based on previous state
+2. Records timestamp and event metadata
+3. Adds the event to the chain
+4. Updates the current hash pointer
 
-3. Cross-Machine Verification:
-- Share hash chain entries
-- Independently replay state transitions
-- Compare hash results
-- Verify state consistency
+### Verifying Chain Integrity
 
-## State Transitions
+The entire chain can be verified with:
 
-### Basic Transition
-```json
-{
-  "type": "state_transition",
-  "old_state_hash": "hash1",
-  "message": {
-    "type": "increment",
-    "amount": 5
-  },
-  "new_state": {
-    "count": 15,
-    "last_updated": "2025-01-14T10:00:03Z"
-  },
-  "new_state_hash": "hash3"
-}
+```rust
+// Check if chain is valid
+let is_valid = chain.verify();
 ```
 
-### Compound State Changes
-Multiple changes can be atomic:
-```json
-{
-  "type": "compound_transition",
-  "old_state_hash": "hash3",
-  "messages": [
-    {
-      "type": "increment",
-      "amount": 5
-    },
-    {
-      "type": "multiply",
-      "factor": 2
-    }
-  ],
-  "new_state": {
-    "count": 40,
-    "last_updated": "2025-01-14T10:00:04Z"
-  },
-  "new_state_hash": "hash4"
-}
+This recalculates all hashes and ensures:
+1. Each event's stored hash matches its computed hash
+2. Parent hash references form an unbroken chain
+3. No events have been tampered with or reordered
+
+### Accessing Event History
+
+Complete event history is available:
+
+```rust
+// Get all events
+let events = chain.get_events();
+
+// Get most recent event
+let last_event = chain.get_last_event();
 ```
 
-## State History
+This enables:
+- Inspection of state transitions
+- Debugging of state-related issues
+- Verification of specific events
 
-Theater maintains complete state history:
+### Persistence
 
-1. Direct Access:
-```json
-{
-  "type": "state_request",
-  "hash": "hash2",
-  "response": {
-    "state": {
-      "count": 10,
-      "last_updated": "2025-01-14T10:00:02Z"
-    },
-    "metadata": {
-      "actor_id": "counter-123",
-      "timestamp": "2025-01-14T10:00:02Z"
-    }
-  }
+Chains can be saved and loaded:
+
+```rust
+// Save chain to disk
+chain.save_to_file(path)?;
+
+// Load chain from disk
+let loaded_chain = StateChain::load_from_file(path)?;
+```
+
+This facilitates:
+- Persistence across restarts
+- Chain migration between systems
+- Backup and restore operations
+
+## Integration with Actor Model
+
+The state chain is deeply integrated with Theater's actor model:
+
+1. **Actor Initialization**:
+   - Initial state is empty or loaded from storage
+   - First event is "init" with initial parameters
+   - Chain is established with actor creation
+
+2. **Message Handling**:
+   - Each message creates a new event
+   - State transitions are recorded in chain
+   - Responses include new state reference
+
+3. **Supervision**:
+   - Parent actors can access child state chains
+   - State verification occurs during supervision
+   - Chain events propagate through supervision tree
+
+4. **Actor Shutdown**:
+   - Final state is recorded in chain
+   - Chain may be persisted for later use
+   - Completed chains can be archived or analyzed
+
+## WebAssembly Interface
+
+The WIT interface for chains looks like:
+
+```wit
+record chain-event {
+    hash: list<u8>,
+    parent-hash: option<list<u8>>,
+    event-type: string,
+    data: list<u8>,
+    timestamp: u64
 }
 ```
 
-2. History Traversal:
-```json
-{
-  "type": "history_request",
-  "start_hash": "hash4",
-  "end_hash": "hash2",
-  "transitions": [
-    {
-      "hash": "hash4",
-      "parent": "hash3",
-      "state": { /* ... */ }
-    },
-    {
-      "hash": "hash3",
-      "parent": "hash2",
-      "state": { /* ... */ }
-    }
-  ]
-}
-```
-
-## Advanced Features
-
-### Time Travel Debugging
-```json
-{
-  "type": "debug_request",
-  "target_hash": "hash2",
-  "replay": true,
-  "breakpoints": [
-    {
-      "condition": "state.count > 8",
-      "actions": ["pause", "log"]
-    }
-  ]
-}
-```
-
-### State Merkle Proofs
-Prove properties about state history:
-```json
-{
-  "type": "proof_request",
-  "property": "count_never_negative",
-  "start_hash": "hash0",
-  "end_hash": "hash4",
-  "proof": {
-    "type": "merkle",
-    "root": "hash4",
-    "path": [ /* merkle proof elements */ ],
-    "verified": true
-  }
-}
-```
-
-### Cross-Actor State Verification
-```json
-{
-  "type": "cross_verify",
-  "actors": ["counter-123", "counter-456"],
-  "property": "counts_match",
-  "timestamp": "2025-01-14T10:00:04Z",
-  "verified": true
-}
-```
+This allows WebAssembly components to:
+- Receive and process chain events
+- Create properly formatted events
+- Maintain compatibility with host chain implementation
 
 ## Best Practices
 
 1. **State Design**
-   - Keep state minimal
-   - Use flat structures when possible
-   - Include timestamps for ordering
-   - Consider queryability
+   - Keep state minimal and focused
+   - Use structured formats (JSON, MessagePack, etc.)
+   - Include metadata for easier debugging
+   - Consider versioning for schema evolution
 
-2. **Message Design**
-   - Make messages self-contained
-   - Include operation type
-   - Add context for debugging
-   - Consider idempotency
+2. **Event Types**
+   - Use descriptive event type names
+   - Follow consistent naming patterns
+   - Document event type meanings
+   - Consider event type registries for complex systems
 
-3. **Hash Chain Management**
-   - Regular verification
-   - Prune old history when safe
-   - Backup important states
+3. **Chain Management**
+   - Verify chains regularly
    - Monitor chain growth
+   - Implement appropriate retention policies
+   - Backup important chains
 
-4. **Debugging Strategy**
-   - Use time travel debugging
-   - Verify state at key points
-   - Track state dependencies
-   - Monitor transition patterns
+4. **Performance Considerations**
+   - Monitor chain length in long-running actors
+   - Consider state snapshots for large histories
+   - Profile hash computation overhead
+   - Optimize serialization formats
 
-## Performance Considerations
+## Planned Enhancements
 
-1. **State Size**
-   - Keep states compact
-   - Consider partial updates
-   - Use appropriate data structures
-   - Monitor growth over time
+Future versions of Theater will expand the state management system with:
 
-2. **Hash Chain Growth**
-   - Implement pruning strategies
-   - Archive old states
-   - Monitor chain length
-   - Consider state snapshots
+1. **Advanced Verification**:
+   - Merkle tree-based verification for efficient proofs
+   - Cross-actor state verification protocols
+   - State invariant checking and enforcement
 
-3. **Verification Overhead**
-   - Batch verifications
-   - Cache frequent states
-   - Use incremental verification
-   - Balance frequency vs security
+2. **Debugging Tools**:
+   - Time travel debugging through chain traversal
+   - Event visualization and analysis
+   - Anomaly detection in state transitions
+   - Comparison tools for chain divergence
+
+3. **Performance Optimizations**:
+   - Chain pruning and compression
+   - Partial chain verification
+   - Optimized hash algorithms
+   - Incremental state updates
+
+4. **Distribution Features**:
+   - Chain replication across nodes
+   - Consensus protocols for shared chains
+   - Partial chain synchronization
+   - Federated chain verification
