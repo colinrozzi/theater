@@ -1,6 +1,6 @@
-use super::{get_registry_path, init_registry, list_actors};
+use super::{init_registry, list_actors, RegistryError};
+use crate::Result;
 use log::{debug, info, warn};
-use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
@@ -26,14 +26,16 @@ pub fn cmd_update_registry(path: &Path) -> Result<()> {
                 .map(PathBuf::from)
                 .collect::<Vec<_>>()
         } else {
-            return Err(crate::error::Error::InvalidFormat(
+            return Err(RegistryError::InvalidFormat(
                 "actor_search_paths is not an array".to_string(),
-            ));
+            )
+            .into());
         }
     } else {
-        return Err(crate::error::Error::InvalidFormat(
+        return Err(RegistryError::InvalidFormat(
             "actor_search_paths not found in config".to_string(),
-        ));
+        )
+        .into());
     };
 
     // Get component and manifest directories
@@ -200,10 +202,11 @@ fn process_actor(
         );
     } else {
         warn!("Component not found: {:?}", src_component_path);
-        return Err(crate::error::Error::NotFound(format!(
+        return Err(RegistryError::NotFound(format!(
             "Component not found: {:?}",
             src_component_path
-        )));
+        ))
+        .into());
     }
 
     // Create modified manifest with relative paths
@@ -304,10 +307,11 @@ pub fn cmd_register_actor(actor_path: &Path, registry_path: &Path) -> Result<()>
     };
 
     if !manifest_path.exists() {
-        return Err(crate::error::Error::NotFound(format!(
+        return Err(RegistryError::NotFound(format!(
             "Actor manifest not found: {:?}",
             manifest_path
-        )));
+        ))
+        .into());
     }
 
     // Read the manifest
@@ -318,16 +322,12 @@ pub fn cmd_register_actor(actor_path: &Path, registry_path: &Path) -> Result<()>
     let name = manifest
         .get("name")
         .and_then(|n| n.as_str())
-        .ok_or_else(|| {
-            crate::error::Error::InvalidFormat("name not found in manifest".to_string())
-        })?;
+        .ok_or_else(|| RegistryError::InvalidFormat("name not found in manifest".to_string()))?;
 
     let version = manifest
         .get("version")
         .and_then(|v| v.as_str())
-        .ok_or_else(|| {
-            crate::error::Error::InvalidFormat("version not found in manifest".to_string())
-        })?;
+        .ok_or_else(|| RegistryError::InvalidFormat("version not found in manifest".to_string()))?;
 
     let description = manifest
         .get("description")
@@ -338,7 +338,7 @@ pub fn cmd_register_actor(actor_path: &Path, registry_path: &Path) -> Result<()>
         .get("component_path")
         .and_then(|c| c.as_str())
         .ok_or_else(|| {
-            crate::error::Error::InvalidFormat("component_path not found in manifest".to_string())
+            RegistryError::InvalidFormat("component_path not found in manifest".to_string())
         })?;
 
     // Load config

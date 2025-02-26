@@ -1,0 +1,8 @@
+name = "theater-registry"
+description = "Actor registry for Theater runtime"
+version = "0.1.0"
+component_dir = "./components"
+manifest_dir = "./manifests"
+cache_dir = "./cache"
+default_version_strategy = "latest"
+actor_search_paths = ["../actors"]

@@ -35,17 +35,20 @@ pub fn resolve_actor_reference(
 }
 
 /// Resolve a direct path to an actor manifest
-fn resolve_direct_actor_path(path: &Path) -> Result<(PathBuf, PathBuf)> {
+fn resolve_direct_actor_path(path: &Path) -> Result<(PathBuf, PathBuf), RegistryError> {
     if !path.exists() {
-        return Err(Error::NotFound(format!(
-            "Actor manifest not found: {:?}",
-            path
-        )));
+        return Err(
+            RegistryError::NotFound(format!("Actor manifest not found: {:?}", path)).into(),
+        );
     }
 
     // Read manifest to extract component path
-    let manifest_str = fs::read_to_string(path)?;
-    let manifest: Value = toml::from_str(&manifest_str)?;
+    let manifest_str = fs::read_to_string(path).map_err(|_| {
+        RegistryError::NotFound(format!("Actor manifest not found: {:?}", path)).into()
+    })?;
+    let manifest: Value = toml::from_str(&manifest_str).map_err(|e| {
+        RegistryError::InvalidFormat(format!("Invalid actor manifest: {:?}", e)).into()
+    })?;
 
     let component_path = if let Some(component) = manifest.get("component_path") {
         if let Some(component_str) = component.as_str() {
@@ -62,14 +65,15 @@ fn resolve_direct_actor_path(path: &Path) -> Result<(PathBuf, PathBuf)> {
                 component_path
             }
         } else {
-            return Err(Error::InvalidFormat(
-                "component_path is not a string".to_string(),
-            ));
+            return Err(
+                RegistryError::InvalidFormat("component_path is not a string".to_string()).into(),
+            );
         }
     } else {
-        return Err(Error::InvalidFormat(
+        return Err(RegistryError::InvalidFormat(
             "component_path not found in manifest".to_string(),
-        ));
+        )
+        .into());
     };
 
     Ok((path.to_path_buf(), component_path))
@@ -89,40 +93,58 @@ fn parse_actor_reference(reference: &str) -> (String, Option<String>) {
 }
 
 /// Resolve an actor using the registry
-fn resolve_registry_actor(reference: &str, registry_path: &Path) -> Result<(PathBuf, PathBuf)> {
+fn resolve_registry_actor(
+    reference: &str,
+    registry_path: &Path,
+) -> Result<(PathBuf, PathBuf), RegistryError> {
     // Parse the reference
     let (name, version) = parse_actor_reference(reference);
 
     // Get paths to components and manifests
     let config_path = registry_path.join("config.toml");
-    let config_str = fs::read_to_string(&config_path)
-        .map_err(|_| Error::NotFound(format!("Registry config not found: {:?}", config_path)))?;
+    let config_str = fs::read_to_string(&config_path).map_err(|_| {
+        RegistryError::NotFound(format!("Registry config not found: {:?}", config_path)).into()
+    })?;
 
-    let config: Value = toml::from_str(&config_str)?;
+    let config: Value = toml::from_str(&config_str).map_err(|e| {
+        RegistryError::InvalidFormat(format!("Invalid registry config: {:?}", e)).into()
+    })?;
 
     // Extract directories from config
-    let manifest_dir = extract_path_from_config(&config, "manifest_dir")?;
-    let component_dir = extract_path_from_config(&config, "component_dir")?;
+    let manifest_dir = extract_path_from_config(&config, "manifest_dir").map_err(|e| {
+        warn!("Error extracting manifest_dir from config: {:?}", e);
+        RegistryError::InvalidFormat("Invalid registry config".to_string()).into()
+    })?;
+    let component_dir = extract_path_from_config(&config, "component_dir").map_err(|e| {
+        warn!("Error extracting component_dir from config: {:?}", e);
+        RegistryError::InvalidFormat("Invalid registry config".to_string()).into()
+    })?;
 
     // Load the index to get version info
     let index_path = registry_path.join("index.toml");
-    let index_str = fs::read_to_string(&index_path)
-        .map_err(|_| Error::NotFound(format!("Registry index not found: {:?}", index_path)))?;
+    let index_str = fs::read_to_string(&index_path).map_err(|_| {
+        RegistryError::NotFound(format!("Registry index not found: {:?}", index_path)).into()
+    })?;
 
-    let index: Value = toml::from_str(&index_str)?;
+    let index: Value = toml::from_str(&index_str).map_err(|e| {
+        RegistryError::InvalidFormat(format!("Invalid registry index: {:?}", e)).into()
+    })?;
 
     // Find the actor in the index
     let actors = index
         .get("actors")
         .and_then(|a| a.as_array())
         .ok_or_else(|| {
-            Error::InvalidFormat("actors list not found in registry index".to_string())
+            RegistryError::InvalidFormat("actors list not found in registry index".to_string())
+                .into()
         })?;
 
     let actor = actors
         .iter()
         .find(|a| a.get("name").and_then(|n| n.as_str()) == Some(&name))
-        .ok_or_else(|| Error::NotFound(format!("Actor '{}' not found in registry", name)))?;
+        .ok_or_else(|| {
+            RegistryError::NotFound(format!("Actor '{}' not found in registry", name)).into()
+        })?;
 
     // Determine which version to use
     let version_to_use = match version {
@@ -132,16 +154,18 @@ fn resolve_registry_actor(reference: &str, registry_path: &Path) -> Result<(Path
                 .get("versions")
                 .and_then(|v| v.as_array())
                 .ok_or_else(|| {
-                    Error::InvalidFormat("versions list not found for actor".to_string())
+                    RegistryError::InvalidFormat("versions list not found for actor".to_string())
+                        .into()
                 })?;
 
             let version_exists = versions.iter().any(|ver| ver.as_str() == Some(&v));
 
             if !version_exists {
-                return Err(Error::NotFound(format!(
+                return Err(RegistryError::NotFound(format!(
                     "Version '{}' not found for actor '{}'",
                     v, name
-                )));
+                ))
+                .into());
             }
 
             v
@@ -152,7 +176,8 @@ fn resolve_registry_actor(reference: &str, registry_path: &Path) -> Result<(Path
                 .get("latest")
                 .and_then(|l| l.as_str())
                 .ok_or_else(|| {
-                    Error::InvalidFormat("latest version not found for actor".to_string())
+                    RegistryError::InvalidFormat("latest version not found for actor".to_string())
+                        .into()
                 })?
                 .to_string()
         }
@@ -171,17 +196,15 @@ fn resolve_registry_actor(reference: &str, registry_path: &Path) -> Result<(Path
 
     // Verify files exist
     if !manifest_path.exists() {
-        return Err(Error::NotFound(format!(
-            "Manifest not found: {:?}",
-            manifest_path
-        )));
+        return Err(
+            RegistryError::NotFound(format!("Manifest not found: {:?}", manifest_path)).into(),
+        );
     }
 
     if !component_path.exists() {
-        return Err(Error::NotFound(format!(
-            "Component not found: {:?}",
-            component_path
-        )));
+        return Err(
+            RegistryError::NotFound(format!("Component not found: {:?}", component_path)).into(),
+        );
     }
 
     debug!(
@@ -198,5 +221,7 @@ fn extract_path_from_config(config: &Value, key: &str) -> Result<String> {
         .get(key)
         .and_then(|v| v.as_str())
         .map(|s| s.to_string())
-        .ok_or_else(|| Error::InvalidFormat(format!("{} not found in registry config", key)))
+        .ok_or_else(|| {
+            RegistryError::InvalidFormat(format!("{} not found in registry config", key)).into()
+        })
 }

@@ -225,11 +225,13 @@ async fn start_actor(manifest: Option<PathBuf>, address: &str) -> Result<()> {
             if path.is_relative() {
                 // First check if this is an actor name reference
                 let path_str = path.to_string_lossy().to_string();
-                if !path_str.contains("/") && !path_str.contains("\\") && 
-                   !(path_str.ends_with(".toml") || path_str.ends_with(".wasm")) {
+                if !path_str.contains("/")
+                    && !path_str.contains("\\")
+                    && !(path_str.ends_with(".toml") || path_str.ends_with(".wasm"))
+                {
                     // This might be an actor name reference (e.g., "chat" or "chat:0.1.0")
                     let registry_path = crate::registry::get_registry_path();
-                    
+
                     if let Some(reg_path) = &registry_path {
                         println!(
                             "{} Trying to resolve actor reference '{}' using registry at {}",
@@ -237,9 +239,12 @@ async fn start_actor(manifest: Option<PathBuf>, address: &str) -> Result<()> {
                             style(&path_str).yellow(),
                             style(reg_path.display()).dim()
                         );
-                        
-                        match crate::registry::resolver::resolve_actor_reference(&path_str, registry_path.as_deref()) {
-                            Ok((resolved_path, component_path)) => {
+
+                        match crate::registry::resolver::resolve_actor_reference(
+                            &path_str,
+                            registry_path.as_deref(),
+                        ) {
+                            Ok((resolved_path, _component_path)) => {
                                 println!(
                                     "{} Resolved actor reference '{}' to {}",
                                     style("INFO:").blue().bold(),
@@ -247,7 +252,7 @@ async fn start_actor(manifest: Option<PathBuf>, address: &str) -> Result<()> {
                                     style(resolved_path.display()).green()
                                 );
                                 resolved_path
-                            },
+                            }
                             Err(e) => {
                                 println!(
                                     "{} Failed to resolve actor reference '{}': {}",
@@ -255,7 +260,7 @@ async fn start_actor(manifest: Option<PathBuf>, address: &str) -> Result<()> {
                                     style(&path_str).yellow(),
                                     e
                                 );
-                                
+
                                 // Fallback to treating as a relative path
                                 match std::env::current_dir() {
                                     Ok(current_dir) => {
@@ -269,7 +274,10 @@ async fn start_actor(manifest: Option<PathBuf>, address: &str) -> Result<()> {
                                         abs_path
                                     }
                                     Err(e) => {
-                                        return Err(anyhow::anyhow!("Failed to get current directory: {}", e))
+                                        return Err(anyhow::anyhow!(
+                                            "Failed to get current directory: {}",
+                                            e
+                                        ))
                                     }
                                 }
                             }
@@ -280,7 +288,7 @@ async fn start_actor(manifest: Option<PathBuf>, address: &str) -> Result<()> {
                             style("INFO:").blue().bold(),
                             style(&path_str).yellow()
                         );
-                        
+
                         // Resolve relative path as normal
                         match std::env::current_dir() {
                             Ok(current_dir) => {
@@ -294,7 +302,10 @@ async fn start_actor(manifest: Option<PathBuf>, address: &str) -> Result<()> {
                                 abs_path
                             }
                             Err(e) => {
-                                return Err(anyhow::anyhow!("Failed to get current directory: {}", e))
+                                return Err(anyhow::anyhow!(
+                                    "Failed to get current directory: {}",
+                                    e
+                                ))
                             }
                         }
                     }
@@ -334,12 +345,10 @@ async fn start_actor(manifest: Option<PathBuf>, address: &str) -> Result<()> {
                         );
                         default_manifest
                     } else {
-                        return Err(anyhow::anyhow!("No manifest file provided and no default 'actor.toml' found in current directory"))
+                        return Err(anyhow::anyhow!("No manifest file provided and no default 'actor.toml' found in current directory"));
                     }
                 }
-                Err(e) => {
-                    return Err(anyhow::anyhow!("Failed to get current directory: {}", e))
-                }
+                Err(e) => return Err(anyhow::anyhow!("Failed to get current directory: {}", e)),
             }
         }
     };

@@ -1,0 +1,7 @@
+last_updated = "2025-02-26T22:46:35.112292+00:00"
+
+[[actors]]
+description = "chat actor for LLM chat application"
+latest = "0.1.0"
+name = "chat"
+versions = ["0.1.0"]

@@ -10,12 +10,14 @@ use thiserror::Error;
 pub enum RegistryError {
     #[error("Registry not found: {0}")]
     NotFound(String),
+    #[error("Invalid format: {0}")]
+    InvalidFormat(String),
     #[error("Registry error: {0}")]
     RegistryError(String),
 }
 
 pub mod cli;
-mod resolver;
+pub mod resolver;
 
 pub use resolver::resolve_actor_reference;
 
@@ -117,10 +119,9 @@ pub fn list_actors(registry_path: &Path) -> Result<Vec<ActorIndexEntry>> {
     let index_path = registry_path.join("index.toml");
 
     if !index_path.exists() {
-        return Err(RegistryError::NotFound(format!(
-            "Registry index not found: {:?}",
-            index_path
-        )));
+        return Err(
+            RegistryError::NotFound(format!("Registry index not found: {:?}", index_path)).into(),
+        );
     }
 
     let index_str = fs::read_to_string(index_path)?;
