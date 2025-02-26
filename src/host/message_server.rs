@@ -196,12 +196,14 @@ impl MessageServerHost {
                     .await?;
             }
             ActorMessage::Request(ActorRequest { response_tx, data }) => {
+                info!("Got request: {:?}", data);
                 let response = actor_handle
                     .call_function::<(Vec<u8>,), (Vec<u8>,)>(
                         "ntwk:theater/message-server-client.handle-request".to_string(),
                         (data,),
                     )
                     .await?;
+                info!("Got response: {:?}", response);
                 let _ = response_tx.send(response.0);
             }
         }
