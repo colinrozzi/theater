@@ -219,24 +219,101 @@ async fn select_actor(id_opt: Option<String>, address: &str) -> Result<TheaterId
 
 // Implementation of basic actor commands reusing existing functionality
 async fn start_actor(manifest: Option<PathBuf>, address: &str) -> Result<()> {
-    // Convert relative path to absolute path based on current directory
-    let absolute_manifest = match manifest {
+    // Try to resolve manifest path or actor reference
+    let resolved_manifest = match manifest {
         Some(path) => {
             if path.is_relative() {
-                // Get the current directory and join with the relative path
-                match std::env::current_dir() {
-                    Ok(current_dir) => {
-                        let abs_path = current_dir.join(&path);
+                // First check if this is an actor name reference
+                let path_str = path.to_string_lossy().to_string();
+                if !path_str.contains("/") && !path_str.contains("\\") && 
+                   !(path_str.ends_with(".toml") || path_str.ends_with(".wasm")) {
+                    // This might be an actor name reference (e.g., "chat" or "chat:0.1.0")
+                    let registry_path = crate::registry::get_registry_path();
+                    
+                    if let Some(reg_path) = &registry_path {
                         println!(
-                            "{} Resolving relative path {} to {}",
+                            "{} Trying to resolve actor reference '{}' using registry at {}",
                             style("INFO:").blue().bold(),
-                            style(path.display()).dim(),
-                            style(abs_path.display()).green()
+                            style(&path_str).yellow(),
+                            style(reg_path.display()).dim()
                         );
-                        abs_path
+                        
+                        match crate::registry::resolver::resolve_actor_reference(&path_str, registry_path.as_deref()) {
+                            Ok((resolved_path, component_path)) => {
+                                println!(
+                                    "{} Resolved actor reference '{}' to {}",
+                                    style("INFO:").blue().bold(),
+                                    style(&path_str).yellow(),
+                                    style(resolved_path.display()).green()
+                                );
+                                resolved_path
+                            },
+                            Err(e) => {
+                                println!(
+                                    "{} Failed to resolve actor reference '{}': {}",
+                                    style("WARN:").yellow().bold(),
+                                    style(&path_str).yellow(),
+                                    e
+                                );
+                                
+                                // Fallback to treating as a relative path
+                                match std::env::current_dir() {
+                                    Ok(current_dir) => {
+                                        let abs_path = current_dir.join(&path);
+                                        println!(
+                                            "{} Treating as relative path, resolving {} to {}",
+                                            style("INFO:").blue().bold(),
+                                            style(path.display()).dim(),
+                                            style(abs_path.display()).green()
+                                        );
+                                        abs_path
+                                    }
+                                    Err(e) => {
+                                        return Err(anyhow::anyhow!("Failed to get current directory: {}", e))
+                                    }
+                                }
+                            }
+                        }
+                    } else {
+                        println!(
+                            "{} No registry found, treating '{}' as a relative path",
+                            style("INFO:").blue().bold(),
+                            style(&path_str).yellow()
+                        );
+                        
+                        // Resolve relative path as normal
+                        match std::env::current_dir() {
+                            Ok(current_dir) => {
+                                let abs_path = current_dir.join(&path);
+                                println!(
+                                    "{} Resolving relative path {} to {}",
+                                    style("INFO:").blue().bold(),
+                                    style(path.display()).dim(),
+                                    style(abs_path.display()).green()
+                                );
+                                abs_path
+                            }
+                            Err(e) => {
+                                return Err(anyhow::anyhow!("Failed to get current directory: {}", e))
+                            }
+                        }
                     }
-                    Err(e) => {
-                        return Err(anyhow::anyhow!("Failed to get current directory: {}", e))
+                } else {
+                    // Regular relative path
+                    match std::env::current_dir() {
+                        Ok(current_dir) => {
+                            let abs_path = current_dir.join(&path);
+                            println!(
+                                "{} Resolving relative path {} to {}",
+                                style("INFO:").blue().bold(),
+                                style(path.display()).dim(),
+                                style(abs_path.display()).green()
+                            );
+                            abs_path
+                        }
+                        Err(e) => {
+                            return Err(anyhow::anyhow!("Failed to get current directory: {}", e))
+                        }
                     }
                 }
             } else {
@@ -244,13 +321,33 @@ async fn start_actor(manifest: Option<PathBuf>, address: &str) -> Result<()> {
                 path
             }
         }
-        None => Err(anyhow::anyhow!("No manifest file provided"))?,
+        None => {
+            // If no manifest provided, check if there's a default actor in current directory
+            match std::env::current_dir() {
+                Ok(dir) => {
+                    let default_manifest = dir.join("actor.toml");
+                    if default_manifest.exists() {
+                        println!(
+                            "{} No manifest specified, using default {}",
+                            style("INFO:").blue().bold(),
+                            style(default_manifest.display()).green()
+                        );
+                        default_manifest
+                    } else {
+                        return Err(anyhow::anyhow!("No manifest file provided and no default 'actor.toml' found in current directory"))
+                    }
+                }
+                Err(e) => {
+                    return Err(anyhow::anyhow!("Failed to get current directory: {}", e))
+                }
+            }
+        }
     };
 
-    // Pass the absolute path to the legacy command
+    // Pass the resolved path to the legacy command
     super::legacy::execute_command(
         super::legacy::Commands::Start {
-            manifest: Some(absolute_manifest),
+            manifest: Some(resolved_manifest),
         },
         address,
     )

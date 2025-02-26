@@ -13,6 +13,7 @@ pub mod logging;
 pub mod messages;
 pub mod metrics;
 pub mod router;
+pub mod registry;
 mod store;
 pub mod theater_runtime;
 pub mod theater_server;

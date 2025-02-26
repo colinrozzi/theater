@@ -4,6 +4,7 @@ pub mod manifest;
 pub mod system;
 pub mod dev;
 pub mod legacy;
+pub mod registry;
 
 use clap::{Parser, Subcommand};
 
@@ -89,4 +90,8 @@ pub enum Commands {
     /// Development utilities
     #[command(subcommand)]
     Dev(dev::DevCommands),
+    
+    /// Manage actor registry
+    #[command(subcommand)]
+    Registry(registry::RegistryCommands),
 }

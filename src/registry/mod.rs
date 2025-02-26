@@ -1,12 +1,21 @@
-use crate::error::{Error, Result};
-use log::{debug, info, warn};
-use std::path::{Path, PathBuf};
-use std::fs;
-use std::env;
+use crate::Result;
+use log::info;
 use serde::{Deserialize, Serialize};
+use std::env;
+use std::fs;
+use std::path::{Path, PathBuf};
+use thiserror::Error;
 
-mod resolver;
+#[derive(Error, Debug)]
+pub enum RegistryError {
+    #[error("Registry not found: {0}")]
+    NotFound(String),
+    #[error("Registry error: {0}")]
+    RegistryError(String),
+}
+
 pub mod cli;
+mod resolver;
 
 pub use resolver::resolve_actor_reference;
 
@@ -19,7 +28,7 @@ pub fn get_registry_path() -> Option<PathBuf> {
             return Some(path);
         }
     }
-    
+
     // Try default locations
     if let Some(home) = dirs::home_dir() {
         let home_registry = home.join(".theater/registry");
@@ -27,19 +36,19 @@ pub fn get_registry_path() -> Option<PathBuf> {
             return Some(home_registry);
         }
     }
-    
+
     // Look for local registry
     let local_registry = PathBuf::from("./registry");
     if local_registry.exists() {
         return Some(local_registry);
     }
-    
+
     // Project-relative registry
     let project_registry = PathBuf::from("../registry");
     if project_registry.exists() {
         return Some(project_registry);
     }
-    
+
     // If no registry found
     None
 }
@@ -73,7 +82,7 @@ pub fn init_registry(path: &Path) -> Result<()> {
     fs::create_dir_all(path.join("components"))?;
     fs::create_dir_all(path.join("manifests"))?;
     fs::create_dir_all(path.join("cache"))?;
-    
+
     // Create default config
     let config = RegistryConfig {
         name: "theater-registry".to_string(),
@@ -85,20 +94,20 @@ pub fn init_registry(path: &Path) -> Result<()> {
         default_version_strategy: "latest".to_string(),
         actor_search_paths: vec![PathBuf::from("../actors")],
     };
-    
+
     // Write config.toml
     let config_str = toml::to_string(&config)?;
     fs::write(path.join("config.toml"), config_str)?;
-    
+
     // Create empty index
     let index = serde_json::json!({
         "last_updated": chrono::Utc::now().to_rfc3339(),
         "actors": []
     });
-    
+
     let index_str = toml::to_string(&index)?;
     fs::write(path.join("index.toml"), index_str)?;
-    
+
     info!("Registry initialized at {:?}", path);
     Ok(())
 }
@@ -106,14 +115,17 @@ pub fn init_registry(path: &Path) -> Result<()> {
 /// List actors in the registry
 pub fn list_actors(registry_path: &Path) -> Result<Vec<ActorIndexEntry>> {
     let index_path = registry_path.join("index.toml");
-    
+
     if !index_path.exists() {
-        return Err(Error::NotFound(format!("Registry index not found: {:?}", index_path)));
+        return Err(RegistryError::NotFound(format!(
+            "Registry index not found: {:?}",
+            index_path
+        )));
     }
-    
+
     let index_str = fs::read_to_string(index_path)?;
     let index: toml::Value = toml::from_str(&index_str)?;
-    
+
     if let Some(actors) = index.get("actors") {
         if let Some(actors_array) = actors.as_array() {
             let entries: Result<Vec<ActorIndexEntry>> = actors_array
@@ -124,10 +136,10 @@ pub fn list_actors(registry_path: &Path) -> Result<Vec<ActorIndexEntry>> {
                     Ok(entry)
                 })
                 .collect();
-            
+
             return entries;
         }
     }
-    
+
     Ok(vec![])
 }

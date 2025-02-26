@@ -1,7 +1,7 @@
 use anyhow::Result;
 use console::style;
 use theater::cli::{Args, Commands};
-use theater::cli::{actor, manifest, system, dev};
+use theater::cli::{actor, manifest, system, dev, registry};
 use clap::Parser;
 
 #[tokio::main]
@@ -96,6 +96,9 @@ async fn main() -> Result<()> {
         Commands::Dev(cmd) => {
             let args = dev::DevArgs { command: cmd };
             dev::handle_dev_command(args).await?;
+        },
+        Commands::Registry(cmd) => {
+            registry::handle_registry_command(&cmd)?
         },
     }
 
