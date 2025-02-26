@@ -2,17 +2,17 @@ use anyhow::Result;
 use console::style;
 use serde::{Deserialize, Serialize};
 use sha1::{Digest, Sha1};
-use std::path::Path;
 use std::fmt;
+use std::path::Path;
 use std::sync::mpsc;
 use wasmtime::component::{ComponentType, Lift, Lower};
 
-use crate::events::ChainEventData;
+use crate::events::filesystem::FilesystemEvent;
 use crate::events::http::HttpEvent;
 use crate::events::message::MessageEvent;
-use crate::events::filesystem::FilesystemEvent;
 use crate::events::runtime::RuntimeEvent;
 use crate::events::supervisor::SupervisorEvent;
+use crate::events::ChainEventData;
 
 #[derive(Debug, Clone, Serialize, Deserialize, ComponentType, Lift, Lower)]
 #[component(record)]
@@ -31,17 +31,17 @@ pub struct ChainEvent {
 impl ChainEvent {
     /// Create a new event from a typed event data object
     pub fn new<T: ChainEventData>(
-        event_data: T, 
-        parent_hash: Option<Vec<u8>>
+        event_data: T,
+        parent_hash: Option<Vec<u8>>,
     ) -> Result<Self, serde_json::Error> {
         let data = event_data.to_json()?;
         let event_type = event_data.event_type().to_string();
         let description = Some(event_data.description());
-        
+
         // Hash calculation will be done in add_event
         // This is just a placeholder
         let hash = Vec::new();
-        
+
         Ok(Self {
             hash,
             parent_hash,
@@ -54,7 +54,7 @@ impl ChainEvent {
             description,
         })
     }
-    
+
     /// Try to parse the event data as a specific event type
     pub fn parse_data<T: ChainEventData>(&self) -> Result<T, serde_json::Error> {
         serde_json::from_slice(&self.data)
@@ -67,15 +67,19 @@ impl fmt::Display for ChainEvent {
         let datetime = chrono::DateTime::from_timestamp(self.timestamp as i64, 0)
             .unwrap_or_else(|| chrono::DateTime::UNIX_EPOCH);
         let formatted_time = datetime.format("%Y-%m-%d %H:%M:%S%.3f").to_string();
-        
+
         // Format hash as short hex string (first 7 characters)
-        let hash_str = self.hash.iter().map(|b| format!("{:02x}", b)).collect::<String>();
+        let hash_str = self
+            .hash
+            .iter()
+            .map(|b| format!("{:02x}", b))
+            .collect::<String>();
         let short_hash = if hash_str.len() > 7 {
             &hash_str[0..7]
         } else {
             &hash_str
         };
-        
+
         // Format parent hash if it exists
         let parent_str = match &self.parent_hash {
             Some(ph) => {
@@ -85,10 +89,10 @@ impl fmt::Display for ChainEvent {
                 } else {
                     format!("(parent: {})", ph_str)
                 }
-            },
+            }
             None => "(root)".to_string(),
         };
-        
+
         // Use the description if available
         let content = if let Some(desc) = &self.description {
             desc.clone()
@@ -122,8 +126,10 @@ impl fmt::Display for ChainEvent {
                 format!("{} bytes of binary data", self.data.len())
             }
         };
-        
-        write!(f, "[{}] Event[{}] {} {} {}", 
+
+        write!(
+            f,
+            "[{}] Event[{}] {} {} {}",
             formatted_time,
             short_hash,
             parent_str,
@@ -151,64 +157,82 @@ impl StateChain {
     }
 
     /// Add a typed event to the chain
-    pub fn add_typed_event<T: ChainEventData>(&mut self, event_data: T) -> Result<ChainEvent, serde_json::Error> {
+    pub fn add_typed_event<T: ChainEventData>(
+        &mut self,
+        event_data: T,
+    ) -> Result<ChainEvent, serde_json::Error> {
         let event = ChainEvent::new(event_data, self.current_hash.clone())?;
         self.finalize_and_store_event(event)
     }
-    
+
     /// Internal method to finalize event (add hash) and store it
-    fn finalize_and_store_event(&mut self, mut event: ChainEvent) -> Result<ChainEvent, serde_json::Error> {
+    fn finalize_and_store_event(
+        &mut self,
+        mut event: ChainEvent,
+    ) -> Result<ChainEvent, serde_json::Error> {
         let mut hasher = Sha1::new();
-        
+
         // Hash previous state + event data
         if let Some(prev_hash) = &self.current_hash {
             hasher.update(prev_hash);
         }
         hasher.update(&event.data);
-        
+
         // Set the hash
         event.hash = hasher.finalize().to_vec();
-        
+
         // Store the event
         self.events.push(event.clone());
         self.current_hash = Some(event.hash.clone());
-        
+
         // Notify runtime if callback is set
         if let Some(callback) = &self.event_callback {
             if let Err(err) = callback.send(event.clone()) {
                 tracing::warn!("Failed to notify runtime of event: {}", err);
             }
         }
-        
+
         Ok(event)
     }
-    
+
     // Convenience methods for specific event types
-    
+
     pub fn add_http_event(&mut self, event: HttpEvent) -> Result<ChainEvent, serde_json::Error> {
         self.add_typed_event(event)
     }
-    
-    pub fn add_message_event(&mut self, event: MessageEvent) -> Result<ChainEvent, serde_json::Error> {
+
+    pub fn add_message_event(
+        &mut self,
+        event: MessageEvent,
+    ) -> Result<ChainEvent, serde_json::Error> {
         self.add_typed_event(event)
     }
-    
-    pub fn add_filesystem_event(&mut self, event: FilesystemEvent) -> Result<ChainEvent, serde_json::Error> {
+
+    pub fn add_filesystem_event(
+        &mut self,
+        event: FilesystemEvent,
+    ) -> Result<ChainEvent, serde_json::Error> {
         self.add_typed_event(event)
     }
-    
-    pub fn add_runtime_event(&mut self, event: RuntimeEvent) -> Result<ChainEvent, serde_json::Error> {
+
+    pub fn add_runtime_event(
+        &mut self,
+        event: RuntimeEvent,
+    ) -> Result<ChainEvent, serde_json::Error> {
         self.add_typed_event(event)
     }
-    
-    pub fn add_supervisor_event(&mut self, event: SupervisorEvent) -> Result<ChainEvent, serde_json::Error> {
+
+    pub fn add_supervisor_event(
+        &mut self,
+        event: SupervisorEvent,
+    ) -> Result<ChainEvent, serde_json::Error> {
         self.add_typed_event(event)
     }
-    
+
     // Legacy method for backward compatibility
     pub fn add_event(&mut self, event_type: String, data: Vec<u8>) -> ChainEvent {
-        let mut event = ChainEvent {
-            hash: Vec::new(),  // Will be set below
+        let event = ChainEvent {
+            hash: Vec::new(), // Will be set below
             parent_hash: self.current_hash.clone(),
             event_type,
             data,
@@ -218,7 +242,7 @@ impl StateChain {
                 .as_secs(),
             description: None,
         };
-        
+
         // No error handling for backward compatibility
         match self.finalize_and_store_event(event) {
             Ok(e) => e,
