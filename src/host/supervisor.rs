@@ -227,7 +227,7 @@ impl SupervisorHost {
                         
                         let (response_tx, response_rx) = oneshot::channel();
                         match theater_tx
-                            .send(TheaterCommand::GetChildState {
+                            .send(TheaterCommand::GetActorState {
                                 child_id: child_id.parse()?,
                                 response_tx,
                             })
@@ -264,7 +264,7 @@ impl SupervisorHost {
                         
                         let (response_tx, response_rx) = oneshot::channel();
                         match theater_tx
-                            .send(TheaterCommand::GetChildEvents {
+                            .send(TheaterCommand::GetActorEvents {
                                 child_id: child_id.parse()?,
                                 response_tx,
                             })

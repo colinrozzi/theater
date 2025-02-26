@@ -84,7 +84,7 @@ impl TheaterRuntime {
                         }
                     }
                 }
-                TheaterCommand::GetChildState {
+                TheaterCommand::GetActorState {
                     child_id,
                     response_tx,
                 } => {
@@ -98,7 +98,7 @@ impl TheaterRuntime {
                         }
                     }
                 }
-                TheaterCommand::GetChildEvents {
+                TheaterCommand::GetActorEvents {
                     child_id,
                     response_tx,
                 } => {

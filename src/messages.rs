@@ -40,11 +40,11 @@ pub enum TheaterCommand {
         actor_id: TheaterId,
         response_tx: oneshot::Sender<Result<()>>,
     },
-    GetChildState {
+    GetActorState {
         child_id: TheaterId,
         response_tx: oneshot::Sender<Result<Option<Vec<u8>>>>,
     },
-    GetChildEvents {
+    GetActorEvents {
         child_id: TheaterId,
         response_tx: oneshot::Sender<Result<Vec<ChainEvent>>>,
     },
@@ -79,11 +79,11 @@ impl TheaterCommand {
             TheaterCommand::RestartActor { actor_id, .. } => {
                 format!("RestartActor: {:?}", actor_id)
             }
-            TheaterCommand::GetChildState { child_id, .. } => {
-                format!("GetChildState: {:?}", child_id)
+            TheaterCommand::GetActorState { child_id, .. } => {
+                format!("GetActorState: {:?}", child_id)
             }
-            TheaterCommand::GetChildEvents { child_id, .. } => {
-                format!("GetChildEvents: {:?}", child_id)
+            TheaterCommand::GetActorEvents { child_id, .. } => {
+                format!("GetActorEvents: {:?}", child_id)
             }
             TheaterCommand::GetActorMetrics { actor_id, .. } => {
                 format!("GetActorMetrics: {:?}", actor_id)
