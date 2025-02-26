@@ -341,11 +341,76 @@ pub async fn execute_command(command: Commands, address: &str) -> Result<()> {
                     ManagementResponse::Error { message } => {
                         println!("{} {}", style("Error:").red().bold(), message);
                     }
-                    _ => {
+                    ManagementResponse::RequestedMessage { id, message } => {
                         println!(
-                            "{} Unexpected response type from server",
-                            style("Warning:").yellow().bold()
+                            "{} Message for actor {}",
+                            style("✉").green().bold(),
+                            style(id).yellow()
                         );
+
+                        if let Ok(json) = serde_json::to_string_pretty(&message) {
+                            // Indent the JSON output
+                            for line in json.lines() {
+                                println!("  {}", line);
+                            }
+                            println!();
+                        } else {
+                            println!("  Data: {:?}\n", message);
+                        }
+                    }
+                    ManagementResponse::ActorMetrics { id, metrics } => {
+                        println!(
+                            "{} Metrics for actor {}",
+                            style("📊").green().bold(),
+                            style(id).yellow()
+                        );
+
+                        if let Ok(json) = serde_json::to_string_pretty(&metrics) {
+                            // Indent the JSON output
+                            for line in json.lines() {
+                                println!("  {}", line);
+                            }
+                            println!();
+                        } else {
+                            println!("  Data: {:?}\n", metrics);
+                        }
+                    }
+                    ManagementResponse::ActorStatus { id, status } => {
+                        println!(
+                            "{} Status for actor {}",
+                            style("📈").green().bold(),
+                            style(id).yellow()
+                        );
+
+                        if let Ok(json) = serde_json::to_string_pretty(&status) {
+                            // Indent the JSON output
+                            for line in json.lines() {
+                                println!("  {}", line);
+                            }
+                            println!();
+                        } else {
+                            println!("  Data: {:?}\n", status);
+                        }
+                    }
+                    ManagementResponse::ActorState { id, state } => {
+                        println!(
+                            "{} State for actor {}",
+                            style("📦").green().bold(),
+                            style(id).yellow()
+                        );
+
+                        if let Ok(json) = serde_json::to_string_pretty(&state) {
+                            // Indent the JSON output
+                            for line in json.lines() {
+                                println!("  {}", line);
+                            }
+                            println!();
+                        } else {
+                            println!("  Data: {:?}\n", state);
+                        }
+                    }
+                    _ => {
+                        println!("Received response: {:?}", response);
                     }
                 }
             }

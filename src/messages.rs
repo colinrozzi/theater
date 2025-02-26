@@ -2,6 +2,7 @@ use crate::chain::ChainEvent;
 use crate::id::TheaterId;
 use crate::metrics::ActorMetrics;
 use crate::Result;
+use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use tokio::sync::oneshot;
 
@@ -41,11 +42,11 @@ pub enum TheaterCommand {
         response_tx: oneshot::Sender<Result<()>>,
     },
     GetActorState {
-        child_id: TheaterId,
+        actor_id: TheaterId,
         response_tx: oneshot::Sender<Result<Option<Vec<u8>>>>,
     },
     GetActorEvents {
-        child_id: TheaterId,
+        actor_id: TheaterId,
         response_tx: oneshot::Sender<Result<Vec<ChainEvent>>>,
     },
     GetActorMetrics {
@@ -79,11 +80,11 @@ impl TheaterCommand {
             TheaterCommand::RestartActor { actor_id, .. } => {
                 format!("RestartActor: {:?}", actor_id)
             }
-            TheaterCommand::GetActorState { child_id, .. } => {
-                format!("GetActorState: {:?}", child_id)
+            TheaterCommand::GetActorState { actor_id, .. } => {
+                format!("GetActorState: {:?}", actor_id)
             }
-            TheaterCommand::GetActorEvents { child_id, .. } => {
-                format!("GetActorEvents: {:?}", child_id)
+            TheaterCommand::GetActorEvents { actor_id, .. } => {
+                format!("GetActorEvents: {:?}", actor_id)
             }
             TheaterCommand::GetActorMetrics { actor_id, .. } => {
                 format!("GetActorMetrics: {:?}", actor_id)
@@ -109,7 +110,7 @@ pub enum ActorMessage {
     Send(ActorSend),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ActorStatus {
     Running,
     Stopped,

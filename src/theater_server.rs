@@ -1,3 +1,4 @@
+use crate::messages::{ActorMessage, ActorRequest, ActorSend, ActorStatus};
 use crate::ChainEvent;
 use anyhow::Result;
 use bytes::Bytes;
@@ -33,6 +34,29 @@ pub enum ManagementCommand {
         id: TheaterId,
         subscription_id: Uuid,
     },
+    SendActorMessage {
+        id: TheaterId,
+        data: Vec<u8>,
+    },
+    RequestActorMessage {
+        id: TheaterId,
+        data: Vec<u8>,
+    },
+    GetActorStatus {
+        id: TheaterId,
+    },
+    RestartActor {
+        id: TheaterId,
+    },
+    GetActorState {
+        id: TheaterId,
+    },
+    GetActorEvents {
+        id: TheaterId,
+    },
+    GetActorMetrics {
+        id: TheaterId,
+    },
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -59,6 +83,32 @@ pub enum ManagementResponse {
     },
     Error {
         message: String,
+    },
+    RequestedMessage {
+        id: TheaterId,
+        message: Vec<u8>,
+    },
+    SentMessage {
+        id: TheaterId,
+    },
+    ActorStatus {
+        id: TheaterId,
+        status: ActorStatus,
+    },
+    Restarted {
+        id: TheaterId,
+    },
+    ActorState {
+        id: TheaterId,
+        state: Option<Vec<u8>>,
+    },
+    ActorEvents {
+        id: TheaterId,
+        events: Vec<ChainEvent>,
+    },
+    ActorMetrics {
+        id: TheaterId,
+        metrics: serde_json::Value,
     },
 }
 
@@ -287,6 +337,114 @@ impl TheaterServer {
                         });
 
                     ManagementResponse::Unsubscribed { id }
+                }
+                ManagementCommand::SendActorMessage { id, data } => {
+                    info!("Sending message to actor: {:?}", id);
+                    runtime_tx
+                        .send(TheaterCommand::SendMessage {
+                            actor_id: id.clone(),
+                            actor_message: ActorMessage::Send(ActorSend { data: data.clone() }),
+                        })
+                        .await?;
+
+                    ManagementResponse::SentMessage { id }
+                }
+                ManagementCommand::RequestActorMessage { id, data } => {
+                    info!("Requesting message from actor: {:?}", id);
+                    let (cmd_tx, cmd_rx) = tokio::sync::oneshot::channel();
+                    runtime_tx
+                        .send(TheaterCommand::SendMessage {
+                            actor_id: id.clone(),
+                            actor_message: ActorMessage::Request(ActorRequest {
+                                data: data.clone(),
+                                response_tx: cmd_tx,
+                            }),
+                        })
+                        .await?;
+
+                    let response = cmd_rx.await?;
+                    ManagementResponse::RequestedMessage {
+                        id,
+                        message: response,
+                    }
+                }
+                ManagementCommand::GetActorStatus { id } => {
+                    info!("Getting status for actor: {:?}", id);
+                    let (cmd_tx, cmd_rx) = tokio::sync::oneshot::channel();
+                    runtime_tx
+                        .send(TheaterCommand::GetActorStatus {
+                            actor_id: id.clone(),
+                            response_tx: cmd_tx,
+                        })
+                        .await?;
+
+                    let status = cmd_rx.await?;
+                    ManagementResponse::ActorStatus {
+                        id,
+                        status: status?,
+                    }
+                }
+                ManagementCommand::RestartActor { id } => {
+                    info!("Restarting actor: {:?}", id);
+                    let (cmd_tx, cmd_rx) = tokio::sync::oneshot::channel();
+                    runtime_tx
+                        .send(TheaterCommand::RestartActor {
+                            actor_id: id.clone(),
+                            response_tx: cmd_tx,
+                        })
+                        .await?;
+
+                    match cmd_rx.await? {
+                        Ok(_) => ManagementResponse::Restarted { id },
+                        Err(e) => ManagementResponse::Error {
+                            message: format!("Failed to restart actor: {}", e),
+                        },
+                    }
+                }
+                ManagementCommand::GetActorState { id } => {
+                    info!("Getting state for actor: {:?}", id);
+                    let (cmd_tx, cmd_rx) = tokio::sync::oneshot::channel();
+                    runtime_tx
+                        .send(TheaterCommand::GetActorState {
+                            actor_id: id.clone(),
+                            response_tx: cmd_tx,
+                        })
+                        .await?;
+
+                    let state = cmd_rx.await?;
+                    ManagementResponse::ActorState { id, state: state? }
+                }
+                ManagementCommand::GetActorEvents { id } => {
+                    info!("Getting events for actor: {:?}", id);
+                    let (cmd_tx, cmd_rx) = tokio::sync::oneshot::channel();
+                    runtime_tx
+                        .send(TheaterCommand::GetActorEvents {
+                            actor_id: id.clone(),
+                            response_tx: cmd_tx,
+                        })
+                        .await?;
+
+                    let events = cmd_rx.await?;
+                    ManagementResponse::ActorEvents {
+                        id,
+                        events: events?,
+                    }
+                }
+                ManagementCommand::GetActorMetrics { id } => {
+                    info!("Getting metrics for actor: {:?}", id);
+                    let (cmd_tx, cmd_rx) = tokio::sync::oneshot::channel();
+                    runtime_tx
+                        .send(TheaterCommand::GetActorMetrics {
+                            actor_id: id.clone(),
+                            response_tx: cmd_tx,
+                        })
+                        .await?;
+
+                    let metrics = cmd_rx.await?;
+                    ManagementResponse::ActorMetrics {
+                        id,
+                        metrics: serde_json::to_value(metrics?)?,
+                    }
                 }
             };
 

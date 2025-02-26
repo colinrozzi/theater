@@ -85,11 +85,11 @@ impl TheaterRuntime {
                     }
                 }
                 TheaterCommand::GetActorState {
-                    child_id,
+                    actor_id,
                     response_tx,
                 } => {
-                    debug!("Getting state for actor: {:?}", child_id);
-                    match self.get_actor_state(child_id).await {
+                    debug!("Getting state for actor: {:?}", actor_id);
+                    match self.get_actor_state(actor_id).await {
                         Ok(state) => {
                             let _ = response_tx.send(Ok(state));
                         }
@@ -99,11 +99,11 @@ impl TheaterRuntime {
                     }
                 }
                 TheaterCommand::GetActorEvents {
-                    child_id,
+                    actor_id,
                     response_tx,
                 } => {
-                    debug!("Getting events for actor: {:?}", child_id);
-                    match self.get_actor_events(child_id).await {
+                    debug!("Getting events for actor: {:?}", actor_id);
+                    match self.get_actor_events(actor_id).await {
                         Ok(events) => {
                             let _ = response_tx.send(Ok(events));
                         }

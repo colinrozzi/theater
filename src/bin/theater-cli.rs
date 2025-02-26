@@ -1,6 +1,5 @@
 use anyhow::Result;
 use console::style;
-use tracing::info;
 use theater::cli::{Args, Commands};
 use theater::cli::{actor, manifest, system, dev};
 use clap::Parser;
