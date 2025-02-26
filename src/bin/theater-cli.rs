@@ -2,7 +2,7 @@ use anyhow::Result;
 use bytes::Bytes;
 use clap::{Parser, Subcommand};
 use console::style;
-use dialoguer::{theme::ColorfulTheme, Confirm, Input, Select};
+use dialoguer::{theme::ColorfulTheme, Input, Select};
 use futures::sink::SinkExt;
 use futures::stream::StreamExt;
 use indicatif::{ProgressBar, ProgressStyle};
@@ -14,7 +14,7 @@ use tokio::net::TcpStream;
 use tokio::signal;
 use tokio::time::sleep;
 use tokio_util::codec::{Framed, LengthDelimitedCodec};
-use tracing::{debug, error, info};
+use tracing::{debug, error};
 
 #[derive(Parser)]
 #[command(
@@ -123,9 +123,10 @@ async fn run_interactive_mode(address: &str) -> Result<()> {
 
         match selection {
             0 => {
-                let manifest = Input::<PathBuf>::new()
+                let manifest_str = Input::<String>::new()
                     .with_prompt("Enter manifest path")
                     .interact_text()?;
+                let manifest = PathBuf::from(manifest_str);
                 
                 execute_command(Commands::Start { manifest: Some(manifest) }, address).await?;
             }
@@ -248,10 +249,10 @@ async fn execute_command(command: Commands, address: &str) -> Result<()> {
             let manifest_path = match manifest {
                 Some(path) => path,
                 None => {
-                    let path = Input::<PathBuf>::new()
+                    let path_str = Input::<String>::new()
                         .with_prompt("Enter manifest path")
                         .interact_text()?;
-                    path
+                    PathBuf::from(path_str)
                 }
             };
 
