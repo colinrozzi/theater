@@ -50,7 +50,27 @@ pub async fn run_interactive_mode(address: &str) -> Result<()> {
                 let manifest_str = Input::<String>::new()
                     .with_prompt("Enter manifest path")
                     .interact_text()?;
-                let manifest = PathBuf::from(manifest_str);
+                let path = PathBuf::from(manifest_str);
+                
+                // Convert relative path to absolute
+                let manifest = if path.is_relative() {
+                    match std::env::current_dir() {
+                        Ok(current_dir) => {
+                            let abs_path = current_dir.join(&path);
+                            println!("{} Resolving relative path {} to {}", 
+                                style("INFO:").blue().bold(),
+                                style(path.display()).dim(),
+                                style(abs_path.display()).green());
+                            abs_path
+                        },
+                        Err(e) => {
+                            println!("{} {}", style("Error:").red().bold(), e);
+                            continue;
+                        }
+                    }
+                } else {
+                    path
+                };
 
                 execute_command(
                     Commands::Start {
@@ -182,7 +202,24 @@ pub async fn execute_command(command: Commands, address: &str) -> Result<()> {
                     let path_str = Input::<String>::new()
                         .with_prompt("Enter manifest path")
                         .interact_text()?;
-                    PathBuf::from(path_str)
+                    let path = PathBuf::from(path_str);
+                    
+                    // Convert relative path to absolute
+                    if path.is_relative() {
+                        match std::env::current_dir() {
+                            Ok(current_dir) => {
+                                let abs_path = current_dir.join(&path);
+                                println!("{} Resolving relative path {} to {}", 
+                                    style("INFO:").blue().bold(),
+                                    style(path.display()).dim(),
+                                    style(abs_path.display()).green());
+                                abs_path
+                            },
+                            Err(e) => return Err(anyhow::anyhow!("Failed to get current directory: {}", e))
+                        }
+                    } else {
+                        path
+                    }
                 }
             };
 

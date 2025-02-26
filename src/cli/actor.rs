@@ -219,7 +219,42 @@ async fn select_actor(id_opt: Option<String>, address: &str) -> Result<TheaterId
 
 // Implementation of basic actor commands reusing existing functionality
 async fn start_actor(manifest: Option<PathBuf>, address: &str) -> Result<()> {
-    super::legacy::execute_command(super::legacy::Commands::Start { manifest }, address).await
+    // Convert relative path to absolute path based on current directory
+    let absolute_manifest = match manifest {
+        Some(path) => {
+            if path.is_relative() {
+                // Get the current directory and join with the relative path
+                match std::env::current_dir() {
+                    Ok(current_dir) => {
+                        let abs_path = current_dir.join(&path);
+                        println!(
+                            "{} Resolving relative path {} to {}",
+                            style("INFO:").blue().bold(),
+                            style(path.display()).dim(),
+                            style(abs_path.display()).green()
+                        );
+                        abs_path
+                    }
+                    Err(e) => {
+                        return Err(anyhow::anyhow!("Failed to get current directory: {}", e))
+                    }
+                }
+            } else {
+                // Already absolute
+                path
+            }
+        }
+        None => Err(anyhow::anyhow!("No manifest file provided"))?,
+    };
+
+    // Pass the absolute path to the legacy command
+    super::legacy::execute_command(
+        super::legacy::Commands::Start {
+            manifest: Some(absolute_manifest),
+        },
+        address,
+    )
+    .await
 }
 
 async fn stop_actor(id: Option<String>, address: &str) -> Result<()> {
