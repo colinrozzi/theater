@@ -1,0 +1,16 @@
+# Message Handler Actor Template
+name = "message-handler-actor"
+component_path = "message-handler.wasm"
+
+[interface]
+implements = "ntwk:message-actor/message-actor"
+requires = []
+
+# Message server capability
+[[handlers]]
+type = "message-server"
+config = { port = 9090 }
+
+[logging]
+level = "info"
+chain_events = true

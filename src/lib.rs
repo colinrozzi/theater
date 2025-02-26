@@ -4,6 +4,7 @@ pub mod actor_executor;
 pub mod actor_handle;
 pub mod actor_runtime;
 pub mod chain;
+pub mod cli;
 pub mod config;
 pub mod host;
 pub mod id;
@@ -22,4 +23,3 @@ pub use id::TheaterId;
 pub use metrics::{ActorMetrics, MetricsCollector, OperationStats};
 pub use store::ActorStore;
 pub use wasm::{MemoryStats, WasmError};
-
