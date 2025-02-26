@@ -6,6 +6,7 @@ pub mod actor_runtime;
 pub mod chain;
 pub mod cli;
 pub mod config;
+pub mod events;
 pub mod host;
 pub mod id;
 pub mod logging;
