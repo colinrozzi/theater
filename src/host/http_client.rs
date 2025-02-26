@@ -139,48 +139,4 @@ impl HttpClientHost {
     pub async fn start(&self, _actor_handle: ActorHandle) -> Result<()> {
         Ok(())
     }
-
-    async fn handle_request(&self, request: HttpRequest) -> Result<HttpResponse, HttpClientError> {
-        let client = reqwest::Client::new();
-        
-        // Parse HTTP method
-        let method = Method::from_bytes(request.method.as_bytes())
-            .map_err(|_| HttpClientError::InvalidMethod(request.method.clone()))?;
-        
-        // Build request
-        let mut http_request = client.request(method, request.uri.clone());
-        
-        // Add headers
-        for (key, value) in request.headers.iter() {
-            http_request = http_request.header(key, value);
-        }
-        
-        // Add body if present
-        if let Some(body) = request.body.as_ref() {
-            http_request = http_request.body(body.clone());
-        }
-        
-        info!("Sending {} request to {}", request.method, request.uri);
-
-        // Send request
-        let response = http_request.send().await?;
-        
-        // Build response
-        let response = HttpResponse {
-            status: response.status().as_u16(),
-            headers: response
-                .headers()
-                .iter()
-                .map(|(key, value)| {
-                    (
-                        key.as_str().to_string(),
-                        value.to_str().unwrap_or_default().to_string(),
-                    )
-                })
-                .collect(),
-            body: response.bytes().await.ok().map(|b| b.to_vec()),
-        };
-
-        Ok(response)
-    }
 }

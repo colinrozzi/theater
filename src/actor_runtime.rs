@@ -1,4 +1,5 @@
 use crate::actor_executor::ActorExecutor;
+use crate::actor_executor::ActorOperation;
 use crate::actor_handle::ActorHandle;
 use crate::config::{HandlerConfig, ManifestConfig};
 use crate::host::filesystem::FileSystemHost;
@@ -18,6 +19,7 @@ use tokio::sync::mpsc::{Receiver, Sender};
 use tokio::task::JoinHandle;
 use tracing::{info, warn};
 
+#[allow(dead_code)]
 const SHUTDOWN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
 pub struct ActorRuntime {
@@ -32,6 +34,8 @@ impl ActorRuntime {
         config: &ManifestConfig,
         theater_tx: Sender<TheaterCommand>,
         actor_mailbox: Receiver<ActorMessage>,
+        operation_rx: Receiver<ActorOperation>,
+        operation_tx: Sender<ActorOperation>,
     ) -> Result<Self> {
         let mut handlers = Vec::new();
 
@@ -116,8 +120,6 @@ impl ActorRuntime {
                     );
             }
         }
-
-        let (operation_tx, operation_rx) = tokio::sync::mpsc::channel(100);
 
         let actor_handle = ActorHandle::new(operation_tx);
 

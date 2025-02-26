@@ -10,7 +10,7 @@ use std::future::Future;
 use wasmtime::StoreContextMut;
 use crate::actor_handle::ActorHandle;
 use crate::config::SupervisorHostConfig;
-use crate::wasm::{ ActorInstance};
+use crate::wasm::ActorInstance;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -217,7 +217,7 @@ impl SupervisorHost {
                 "get-child-state",
                 move |mut ctx: StoreContextMut<'_, ActorStore>,
                       (child_id,): (String,)|
-                      -> Box<dyn Future<Output = Result<(Result<Vec<u8>, String>,)>> + Send> {
+                      -> Box<dyn Future<Output = Result<(Result<Option<Vec<u8>>, String>,)>> + Send> {
                     let store = ctx.data_mut();
                     let theater_tx = store.theater_tx.clone();
                     let boundary = boundary.clone();

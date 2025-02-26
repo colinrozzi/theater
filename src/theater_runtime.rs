@@ -1,7 +1,9 @@
+use crate::actor_executor::{ActorError, ActorOperation};
 use crate::actor_runtime::ActorRuntime;
 use crate::chain::ChainEvent;
 use crate::id::TheaterId;
-use crate::messages::{ActorMessage, ActorRequest, ActorSend, ActorStatus, TheaterCommand};
+use crate::messages::{ActorMessage, ActorSend, ActorStatus, TheaterCommand};
+use crate::metrics::ActorMetrics;
 use crate::wasm::Event;
 use crate::ManifestConfig;
 use crate::Result;
@@ -25,6 +27,7 @@ pub struct ActorProcess {
     pub actor_id: TheaterId,
     pub process: JoinHandle<ActorRuntime>,
     pub mailbox_tx: mpsc::Sender<ActorMessage>,
+    pub operation_tx: mpsc::Sender<ActorOperation>,
     pub children: HashSet<TheaterId>,
     pub status: ActorStatus,
     pub manifest_path: PathBuf,
@@ -206,6 +209,20 @@ impl TheaterRuntime {
                         error!("Failed tk send actor status: {:?}", e);
                     }
                 }
+                TheaterCommand::GetActorMetrics {
+                    actor_id,
+                    response_tx,
+                } => {
+                    debug!("Getting metrics for actor: {:?}", actor_id);
+                    match self.get_actor_metrics(actor_id).await {
+                        Ok(metrics) => {
+                            let _ = response_tx.send(Ok(metrics));
+                        }
+                        Err(e) => {
+                            let _ = response_tx.send(Err(e));
+                        }
+                    }
+                }
             };
         }
         info!("Theater runtime shutting down");
@@ -231,9 +248,11 @@ impl TheaterRuntime {
         // start the actor in a new process
         let (response_tx, response_rx) = tokio::sync::oneshot::channel();
         let (mailbox_tx, mailbox_rx) = mpsc::channel(100);
+        let (operation_tx, operation_rx) = mpsc::channel(100);
         let theater_tx = self.theater_tx.clone();
 
         let manifest_path_clone = manifest_path.clone();
+        let actor_operation_tx = operation_tx.clone();
         let actor_runtime_process = tokio::spawn(async move {
             let actor_id = TheaterId::generate();
             debug!("Initializing actor runtime");
@@ -241,9 +260,16 @@ impl TheaterRuntime {
             response_tx.send(actor_id.clone()).unwrap();
             let manifest =
                 ManifestConfig::from_file(&manifest_path_clone).expect("Failed to load manifest");
-            ActorRuntime::start(actor_id, &manifest, theater_tx, mailbox_rx)
-                .await
-                .unwrap()
+            ActorRuntime::start(
+                actor_id,
+                &manifest,
+                theater_tx,
+                mailbox_rx,
+                operation_rx,
+                actor_operation_tx,
+            )
+            .await
+            .unwrap()
         });
 
         match response_rx.await {
@@ -256,6 +282,7 @@ impl TheaterRuntime {
                     actor_id: actor_id.clone(),
                     process: actor_runtime_process,
                     mailbox_tx,
+                    operation_tx,
                     children: HashSet::new(),
                     status: ActorStatus::Running,
                     manifest_path: manifest_path.clone(),
@@ -363,20 +390,19 @@ impl TheaterRuntime {
         Ok(())
     }
 
-    async fn get_actor_state(&self, actor_id: TheaterId) -> Result<Vec<u8>> {
+    async fn get_actor_state(&self, actor_id: TheaterId) -> Result<Option<Vec<u8>>> {
         if let Some(proc) = self.actors.get(&actor_id) {
             // Send a message to get the actor's state
-            let (tx, rx): (oneshot::Sender<Vec<u8>>, oneshot::Receiver<Vec<u8>>) =
-                oneshot::channel();
-            proc.mailbox_tx
-                .send(ActorMessage::Request(ActorRequest {
-                    response_tx: tx,
-                    data: Vec::new(), // Empty data for state request
-                }))
+            let (tx, rx): (
+                oneshot::Sender<Result<Option<Vec<u8>>, ActorError>>,
+                oneshot::Receiver<Result<Option<Vec<u8>>, ActorError>>,
+            ) = oneshot::channel();
+            proc.operation_tx
+                .send(ActorOperation::GetState { response_tx: tx })
                 .await?;
 
             match rx.await {
-                Ok(state) => Ok(state),
+                Ok(state) => Ok(state?),
                 Err(e) => Err(anyhow::anyhow!("Failed to receive state: {}", e)),
             }
         } else {
@@ -386,20 +412,38 @@ impl TheaterRuntime {
 
     async fn get_actor_events(&self, actor_id: TheaterId) -> Result<Vec<ChainEvent>> {
         if let Some(proc) = self.actors.get(&actor_id) {
-            // Send a message to get the actor's event history
-            let (tx, rx): (oneshot::Sender<Vec<u8>>, oneshot::Receiver<Vec<u8>>) =
-                oneshot::channel();
-            proc.mailbox_tx
-                .send(ActorMessage::Request(ActorRequest {
-                    response_tx: tx,
-                    data: Vec::new(), // Empty data for events request
-                }))
+            // Send a message to get the actor's events
+            let (tx, rx): (
+                oneshot::Sender<Result<Vec<ChainEvent>, ActorError>>,
+                oneshot::Receiver<Result<Vec<ChainEvent>, ActorError>>,
+            ) = oneshot::channel();
+            proc.operation_tx
+                .send(ActorOperation::GetChain { response_tx: tx })
                 .await?;
 
             match rx.await {
-                Ok(events_data) => serde_json::from_slice(&events_data)
-                    .map_err(|e| anyhow::anyhow!("Failed to deserialize events: {}", e)),
+                Ok(events) => Ok(events?),
                 Err(e) => Err(anyhow::anyhow!("Failed to receive events: {}", e)),
+            }
+        } else {
+            Err(anyhow::anyhow!("Actor not found"))
+        }
+    }
+
+    async fn get_actor_metrics(&self, actor_id: TheaterId) -> Result<ActorMetrics> {
+        if let Some(proc) = self.actors.get(&actor_id) {
+            // Send a message to get the actor's metrics
+            let (tx, rx): (
+                oneshot::Sender<Result<ActorMetrics, ActorError>>,
+                oneshot::Receiver<Result<ActorMetrics, ActorError>>,
+            ) = oneshot::channel();
+            proc.operation_tx
+                .send(ActorOperation::GetMetrics { response_tx: tx })
+                .await?;
+
+            match rx.await {
+                Ok(metrics) => Ok(metrics?),
+                Err(e) => Err(anyhow::anyhow!("Failed to receive metrics: {}", e)),
             }
         } else {
             Err(anyhow::anyhow!("Actor not found"))

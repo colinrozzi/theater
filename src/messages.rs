@@ -1,5 +1,6 @@
 use crate::chain::ChainEvent;
 use crate::id::TheaterId;
+use crate::metrics::ActorMetrics;
 use crate::Result;
 use std::path::PathBuf;
 use tokio::sync::oneshot;
@@ -41,11 +42,15 @@ pub enum TheaterCommand {
     },
     GetChildState {
         child_id: TheaterId,
-        response_tx: oneshot::Sender<Result<Vec<u8>>>,
+        response_tx: oneshot::Sender<Result<Option<Vec<u8>>>>,
     },
     GetChildEvents {
         child_id: TheaterId,
         response_tx: oneshot::Sender<Result<Vec<ChainEvent>>>,
+    },
+    GetActorMetrics {
+        actor_id: TheaterId,
+        response_tx: oneshot::Sender<Result<ActorMetrics>>,
     },
 }
 
@@ -80,6 +85,9 @@ impl TheaterCommand {
             TheaterCommand::GetChildEvents { child_id, .. } => {
                 format!("GetChildEvents: {:?}", child_id)
             }
+            TheaterCommand::GetActorMetrics { actor_id, .. } => {
+                format!("GetActorMetrics: {:?}", actor_id)
+            }
         }
     }
 }
@@ -107,4 +115,3 @@ pub enum ActorStatus {
     Stopped,
     Failed,
 }
-

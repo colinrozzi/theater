@@ -3,13 +3,14 @@ use std::fmt::Debug;
 use thiserror::Error;
 use tokio::sync::{mpsc, oneshot};
 use tokio::time::{Duration, Instant};
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info};
 
 use crate::metrics::{ActorMetrics, MetricsCollector};
 use crate::wasm::ActorInstance;
 use crate::ChainEvent;
 
 pub const DEFAULT_OPERATION_TIMEOUT: Duration = Duration::from_secs(30);
+#[allow(dead_code)]
 const METRICS_UPDATE_INTERVAL: Duration = Duration::from_secs(1);
 
 #[derive(Error, Debug)]

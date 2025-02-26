@@ -3,7 +3,7 @@ use wasmtime::component::{ComponentNamedList, ComponentType, Lift, Lower};
 
 use tokio::sync::{mpsc, oneshot};
 use tokio::time::timeout;
-use tracing::{error, info};
+use tracing::error;
 
 use crate::actor_executor::{ActorError, ActorOperation, DEFAULT_OPERATION_TIMEOUT};
 use crate::chain::ChainEvent;
