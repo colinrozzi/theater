@@ -1,4 +1,5 @@
 use crate::chain::ChainEvent;
+use crate::config::ManifestSource;
 use crate::id::TheaterId;
 use crate::metrics::ActorMetrics;
 use crate::Result;
@@ -9,7 +10,7 @@ use tokio::sync::oneshot;
 #[derive(Debug)]
 pub enum TheaterCommand {
     SpawnActor {
-        manifest_path: PathBuf,
+        manifest: ManifestSource,
         response_tx: oneshot::Sender<Result<TheaterId>>,
         parent_id: Option<TheaterId>,
     },
@@ -58,8 +59,11 @@ pub enum TheaterCommand {
 impl TheaterCommand {
     pub fn to_log(&self) -> String {
         match self {
-            TheaterCommand::SpawnActor { manifest_path, .. } => {
-                format!("SpawnActor: {}", manifest_path.display())
+            TheaterCommand::SpawnActor { manifest, .. } => {
+                match manifest {
+                    ManifestSource::Path(path) => format!("SpawnActor from path: {}", path.display()),
+                    ManifestSource::Content(_) => "SpawnActor from string content".to_string(),
+                }
             }
             TheaterCommand::StopActor { actor_id, .. } => {
                 format!("StopActor: {:?}", actor_id)

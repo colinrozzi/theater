@@ -1,4 +1,44 @@
-use crate::id::TheaterId;
+// Implementation of starting an actor from a string manifest
+async fn start_actor_from_string(content: Option<String>, address: &str) -> Result<()> {
+    // Try to resolve manifest content
+    let manifest_content = match content {
+        Some(content) => content,
+        None => {
+            // Prompt for manifest content
+            let content = Input::<String>::new()
+                .with_prompt("Enter TOML manifest content")
+                .interact_text()?;
+            
+            if content.trim().is_empty() {
+                return Err(anyhow::anyhow!("Empty manifest content provided"));
+            }
+
+            content
+        }
+    };
+
+    // Validate that it's valid TOML before sending to the server
+    match toml::from_str::<toml::Value>(&manifest_content) {
+        Ok(_) => {
+            println!(
+                "{} Manifest content validated as valid TOML",
+                style("INFO:").blue().bold()
+            );
+        }
+        Err(e) => {
+            return Err(anyhow::anyhow!("Invalid TOML content: {}", e));
+        }
+    }
+
+    // Pass the manifest content to the legacy command
+    super::legacy::execute_command(
+        super::legacy::Commands::StartFromString {
+            manifest: manifest_content,
+        },
+        address,
+    )
+    .await
+}use crate::id::TheaterId;
 use crate::theater_server::{ManagementCommand, ManagementResponse};
 use anyhow::Result;
 use bytes::Bytes;
@@ -31,6 +71,12 @@ pub enum ActorCommands {
         /// Path to the actor manifest
         #[arg(value_name = "MANIFEST")]
         manifest: Option<PathBuf>,
+    },
+    /// Start a new actor from a manifest string
+    StartFromString {
+        /// TOML content for the manifest
+        #[arg(value_name = "CONTENT")]
+        content: Option<String>,
     },
     /// Stop an actor
     Stop {
@@ -113,6 +159,7 @@ pub enum ActorCommands {
 pub async fn handle_actor_command(args: ActorArgs) -> Result<()> {
     match &args.command {
         ActorCommands::Start { manifest } => start_actor(manifest.clone(), &args.address).await,
+        ActorCommands::StartFromString { content } => start_actor_from_string(content.clone(), &args.address).await,
         ActorCommands::Stop { id } => stop_actor(id.clone(), &args.address).await,
         ActorCommands::List { detailed } => list_actors(*detailed, &args.address).await,
         ActorCommands::Subscribe { id } => subscribe_to_actor(id.clone(), &args.address).await,

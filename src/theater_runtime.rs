@@ -5,7 +5,7 @@ use crate::id::TheaterId;
 use crate::messages::{ActorMessage, ActorSend, ActorStatus, TheaterCommand};
 use crate::metrics::ActorMetrics;
 use crate::wasm::Event;
-use crate::ManifestConfig;
+use crate::{ManifestConfig, config::ManifestSource};
 use crate::Result;
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -30,7 +30,8 @@ pub struct ActorProcess {
     pub operation_tx: mpsc::Sender<ActorOperation>,
     pub children: HashSet<TheaterId>,
     pub status: ActorStatus,
-    pub manifest_path: PathBuf,
+    pub manifest_source: ManifestSource,
+    pub manifest_content: String,
 }
 
 impl TheaterRuntime {
@@ -113,15 +114,15 @@ impl TheaterRuntime {
                     }
                 }
                 TheaterCommand::SpawnActor {
-                    manifest_path,
+                    manifest,
                     parent_id,
                     response_tx,
                 } => {
                     debug!(
                         "Processing SpawnActor command for manifest: {:?}",
-                        manifest_path
+                        manifest
                     );
-                    match self.spawn_actor(manifest_path.clone(), parent_id).await {
+                    match self.spawn_actor(manifest.clone(), parent_id).await {
                         Ok(actor_id) => {
                             info!("Successfully spawned actor: {:?}", actor_id);
                             if let Err(e) = response_tx.send(Ok(actor_id.clone())) {
@@ -132,7 +133,7 @@ impl TheaterRuntime {
                             }
                         }
                         Err(e) => {
-                            error!("Failed to spawn actor from {:?}: {}", manifest_path, e);
+                            error!("Failed to spawn actor: {}", e);
                             if let Err(send_err) = response_tx.send(Err(e)) {
                                 error!("Failed to send error response: {:?}", send_err);
                             }
@@ -231,19 +232,29 @@ impl TheaterRuntime {
 
     async fn spawn_actor(
         &mut self,
-        manifest_path: PathBuf,
+        manifest_source: ManifestSource,
         parent_id: Option<TheaterId>,
     ) -> Result<TheaterId> {
-        debug!(
-            "Starting actor spawn process from manifest: {:?}",
-            manifest_path
-        );
+        debug!("Starting actor spawn process");
 
-        // Check if manifest exists
-        if !manifest_path.exists() {
-            error!("Manifest file does not exist: {:?}", manifest_path);
-            return Err(anyhow::anyhow!("Manifest file does not exist"));
-        }
+        // Load the manifest content and create the manifest config
+        let (manifest_content, manifest) = match &manifest_source {
+            ManifestSource::Path(path) => {
+                // Check if manifest exists
+                if !path.exists() {
+                    error!("Manifest file does not exist: {:?}", path);
+                    return Err(anyhow::anyhow!("Manifest file does not exist"));
+                }
+                
+                let content = std::fs::read_to_string(path)?;
+                let config = ManifestConfig::from_file(path)?;
+                (content, config)
+            },
+            ManifestSource::Content(content) => {
+                let config = ManifestConfig::from_string(content)?;
+                (content.clone(), config)
+            },
+        };
 
         // start the actor in a new process
         let (response_tx, response_rx) = tokio::sync::oneshot::channel();
@@ -251,18 +262,16 @@ impl TheaterRuntime {
         let (operation_tx, operation_rx) = mpsc::channel(100);
         let theater_tx = self.theater_tx.clone();
 
-        let manifest_path_clone = manifest_path.clone();
+        let manifest_clone = manifest.clone();
         let actor_operation_tx = operation_tx.clone();
         let actor_runtime_process = tokio::spawn(async move {
             let actor_id = TheaterId::generate();
             debug!("Initializing actor runtime");
             debug!("Starting actor runtime");
             response_tx.send(actor_id.clone()).unwrap();
-            let manifest =
-                ManifestConfig::from_file(&manifest_path_clone).expect("Failed to load manifest");
             ActorRuntime::start(
                 actor_id,
-                &manifest,
+                &manifest_clone,
                 theater_tx,
                 mailbox_rx,
                 operation_rx,
@@ -285,7 +294,8 @@ impl TheaterRuntime {
                     operation_tx,
                     children: HashSet::new(),
                     status: ActorStatus::Running,
-                    manifest_path: manifest_path.clone(),
+                    manifest_source: manifest_source.clone(),
+                    manifest_content: manifest_content.clone(),
                 };
 
                 if let Some(parent_id) = parent_id {
@@ -364,8 +374,8 @@ impl TheaterRuntime {
         debug!("Starting actor restart process for: {:?}", actor_id);
 
         // Get the actor's info before stopping it
-        let (manifest_path, parent_id) = if let Some(proc) = self.actors.get(&actor_id) {
-            let manifest = proc.manifest_path.clone();
+        let (manifest_source, parent_id) = if let Some(proc) = self.actors.get(&actor_id) {
+            let manifest = proc.manifest_source.clone();
 
             // Find the parent ID
             let parent_id = self.actors.iter().find_map(|(id, proc)| {
@@ -385,7 +395,7 @@ impl TheaterRuntime {
         self.stop_actor(actor_id).await?;
 
         // Spawn it again
-        self.spawn_actor(manifest_path, parent_id).await?;
+        self.spawn_actor(manifest_source, parent_id).await?;
 
         Ok(())
     }

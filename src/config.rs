@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ComponentConfig {
@@ -8,11 +8,24 @@ pub struct ComponentConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum ManifestSource {
+    Path(PathBuf),
+    Content(String),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum InitialStateSource {
+    Path(PathBuf),
+    Json(String),
+    Remote(String), // For future use with URLs
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ManifestConfig {
     pub name: String,
     pub component_path: PathBuf,
     #[serde(default)]
-    pub init_state: Option<PathBuf>,
+    pub init_state: Option<InitialStateSource>,
     #[serde(default)]
     pub interface: InterfacesConfig,
     #[serde(default)]
@@ -113,9 +126,37 @@ pub struct FileSystemHandlerConfig {
 pub struct HttpClientHandlerConfig {}
 
 impl ManifestConfig {
-    pub fn from_file<P: AsRef<std::path::Path>>(path: P) -> anyhow::Result<Self> {
-        let content = std::fs::read_to_string(path)?;
-        let config: ManifestConfig = toml::from_str(&content)?;
+    pub fn from_string(content: &str) -> anyhow::Result<Self> {
+        let mut config: ManifestConfig = toml::from_str(content)?;
+        
+        // Convert legacy init_state format if needed
+        if let Some(init_state) = &config.init_state {
+            if let InitialStateSource::Path(path) = init_state {
+                if !path.exists() && !path.is_absolute() {
+                    // Try to resolve the path relative to the current directory
+                    let current_dir = std::env::current_dir()?;
+                    let full_path = current_dir.join(path);
+                    if full_path.exists() {
+                        config.init_state = Some(InitialStateSource::Path(full_path));
+                    }
+                }
+            }
+        }
+        
+        Ok(config)
+    }
+    
+    pub fn from_file<P: AsRef<Path>>(path: P) -> anyhow::Result<Self> {
+        let content = std::fs::read_to_string(&path)?;
+        let mut config = Self::from_string(&content)?;
+        
+        // Make component_path relative to manifest path if it's not absolute
+        if !config.component_path.is_absolute() {
+            if let Some(parent) = path.as_ref().parent() {
+                config.component_path = parent.join(&config.component_path);
+            }
+        }
+        
         Ok(config)
     }
 
@@ -129,10 +170,19 @@ impl ManifestConfig {
 
     pub fn load_init_state(&self) -> anyhow::Result<Option<Vec<u8>>> {
         match &self.init_state {
-            Some(path) => {
+            Some(InitialStateSource::Path(path)) => {
                 let data = std::fs::read(path)?;
                 Ok(Some(data))
-            }
+            },
+            Some(InitialStateSource::Json(json_str)) => {
+                // Validate the JSON string is proper JSON
+                serde_json::from_str::<serde_json::Value>(json_str)?;
+                Ok(Some(json_str.as_bytes().to_vec()))
+            },
+            Some(InitialStateSource::Remote(url)) => {
+                // Placeholder for future implementation
+                Err(anyhow::anyhow!("Remote state sources not yet implemented"))
+            },
             None => Ok(None),
         }
     }

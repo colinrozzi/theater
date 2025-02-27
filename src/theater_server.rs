@@ -17,11 +17,18 @@ use uuid::Uuid;
 use crate::id::TheaterId;
 use crate::messages::TheaterCommand;
 use crate::theater_runtime::TheaterRuntime;
+use crate::config::ManifestSource;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub enum ManagementCommand {
     StartActor {
         manifest: PathBuf,
+    },
+    StartActorFromString {
+        manifest: String,
+    },
+    GetActorManifest {
+        id: TheaterId,
     },
     StopActor {
         id: TheaterId,
@@ -63,6 +70,10 @@ pub enum ManagementCommand {
 pub enum ManagementResponse {
     ActorStarted {
         id: TheaterId,
+    },
+    ActorManifest {
+        id: TheaterId,
+        manifest: String,
     },
     ActorStopped {
         id: TheaterId,
@@ -223,12 +234,12 @@ impl TheaterServer {
 
             let response = match cmd {
                 ManagementCommand::StartActor { manifest } => {
-                    info!("Starting actor from manifest: {:?}", manifest);
+                    info!("Starting actor from manifest path: {:?}", manifest);
                     let (cmd_tx, cmd_rx) = tokio::sync::oneshot::channel();
                     debug!("Sending SpawnActor command to runtime");
                     match runtime_tx
                         .send(TheaterCommand::SpawnActor {
-                            manifest_path: manifest.clone(),
+                            manifest: ManifestSource::Path(manifest.clone()),
                             response_tx: cmd_tx,
                             parent_id: None,
                         })
@@ -263,6 +274,57 @@ impl TheaterServer {
                                 message: format!("Failed to send spawn command: {}", e),
                             }
                         }
+                    }
+                }
+                ManagementCommand::StartActorFromString { manifest } => {
+                    info!("Starting actor from manifest string");
+                    let (cmd_tx, cmd_rx) = tokio::sync::oneshot::channel();
+                    debug!("Sending SpawnActor from string command to runtime");
+                    match runtime_tx
+                        .send(TheaterCommand::SpawnActor {
+                            manifest: ManifestSource::Content(manifest.clone()),
+                            response_tx: cmd_tx,
+                            parent_id: None,
+                        })
+                        .await
+                    {
+                        Ok(_) => {
+                            debug!("SpawnActor command sent to runtime, awaiting response");
+                            match cmd_rx.await {
+                                Ok(result) => match result {
+                                    Ok(actor_id) => {
+                                        info!("Actor started with ID: {:?}", actor_id);
+                                        ManagementResponse::ActorStarted { id: actor_id }
+                                    }
+                                    Err(e) => {
+                                        error!("Runtime failed to start actor: {}", e);
+                                        ManagementResponse::Error {
+                                            message: format!("Failed to start actor: {}", e),
+                                        }
+                                    }
+                                },
+                                Err(e) => {
+                                    error!("Failed to receive spawn response: {}", e);
+                                    ManagementResponse::Error {
+                                        message: format!("Failed to receive spawn response: {}", e),
+                                    }
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            error!("Failed to send SpawnActor command: {}", e);
+                            ManagementResponse::Error {
+                                message: format!("Failed to send spawn command: {}", e),
+                            }
+                        }
+                    }
+                }
+                ManagementCommand::GetActorManifest { id } => {
+                    info!("Getting manifest for actor: {:?}", id);
+                    // This would need to be a new command in TheaterRuntime, but for now let's just return an error
+                    // TODO: Add GetActorManifest command to TheaterCommand and implement handling in TheaterRuntime
+                    ManagementResponse::Error {
+                        message: "GetActorManifest not yet implemented".to_string()
                     }
                 }
                 ManagementCommand::StopActor { id } => {

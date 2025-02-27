@@ -18,6 +18,7 @@ use tracing::{debug, error};
 // Legacy commands that match the original CLI structure
 pub enum Commands {
     Start { manifest: Option<PathBuf> },
+    StartFromString { manifest: String },
     Stop { id: Option<String> },
     List { detailed: bool },
     Subscribe { id: Option<String> },
@@ -229,6 +230,13 @@ pub async fn execute_command(command: Commands, address: &str) -> Result<()> {
                 manifest: manifest_path,
             }
         }
+        Commands::StartFromString { manifest } => {
+            spinner.set_message("Starting actor from manifest string");
+
+            ManagementCommand::StartActorFromString {
+                manifest: manifest.clone(),
+            }
+        },
         Commands::Stop { id } => {
             let actor_id = match id {
                 Some(id_str) => id_str.parse()?,
