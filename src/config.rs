@@ -128,7 +128,7 @@ pub struct HttpClientHandlerConfig {}
 impl ManifestConfig {
     pub fn from_string(content: &str) -> anyhow::Result<Self> {
         let mut config: ManifestConfig = toml::from_str(content)?;
-        
+
         // Convert legacy init_state format if needed
         if let Some(init_state) = &config.init_state {
             if let InitialStateSource::Path(path) = init_state {
@@ -142,21 +142,21 @@ impl ManifestConfig {
                 }
             }
         }
-        
+
         Ok(config)
     }
-    
+
     pub fn from_file<P: AsRef<Path>>(path: P) -> anyhow::Result<Self> {
         let content = std::fs::read_to_string(&path)?;
         let mut config = Self::from_string(&content)?;
-        
+
         // Make component_path relative to manifest path if it's not absolute
         if !config.component_path.is_absolute() {
             if let Some(parent) = path.as_ref().parent() {
                 config.component_path = parent.join(&config.component_path);
             }
         }
-        
+
         Ok(config)
     }
 
@@ -173,16 +173,16 @@ impl ManifestConfig {
             Some(InitialStateSource::Path(path)) => {
                 let data = std::fs::read(path)?;
                 Ok(Some(data))
-            },
+            }
             Some(InitialStateSource::Json(json_str)) => {
                 // Validate the JSON string is proper JSON
                 serde_json::from_str::<serde_json::Value>(json_str)?;
                 Ok(Some(json_str.as_bytes().to_vec()))
-            },
+            }
             Some(InitialStateSource::Remote(url)) => {
                 // Placeholder for future implementation
                 Err(anyhow::anyhow!("Remote state sources not yet implemented"))
-            },
+            }
             None => Ok(None),
         }
     }

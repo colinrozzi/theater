@@ -14,10 +14,10 @@ use tokio_util::codec::{Framed, LengthDelimitedCodec};
 use tracing::{debug, error, info};
 use uuid::Uuid;
 
+use crate::config::ManifestSource;
 use crate::id::TheaterId;
 use crate::messages::TheaterCommand;
 use crate::theater_runtime::TheaterRuntime;
-use crate::config::ManifestSource;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub enum ManagementCommand {
@@ -319,14 +319,6 @@ impl TheaterServer {
                         }
                     }
                 }
-                ManagementCommand::GetActorManifest { id } => {
-                    info!("Getting manifest for actor: {:?}", id);
-                    // This would need to be a new command in TheaterRuntime, but for now let's just return an error
-                    // TODO: Add GetActorManifest command to TheaterCommand and implement handling in TheaterRuntime
-                    ManagementResponse::Error {
-                        message: "GetActorManifest not yet implemented".to_string()
-                    }
-                }
                 ManagementCommand::StopActor { id } => {
                     info!("Stopping actor: {:?}", id);
                     let (cmd_tx, cmd_rx) = tokio::sync::oneshot::channel();
@@ -506,6 +498,23 @@ impl TheaterServer {
                     ManagementResponse::ActorMetrics {
                         id,
                         metrics: serde_json::to_value(metrics?)?,
+                    }
+                }
+                ManagementCommand::GetActorManifest { id } => {
+                    info!("Getting manifest for actor: {:?}", id);
+                    let (cmd_tx, cmd_rx) = tokio::sync::oneshot::channel();
+                    runtime_tx
+                        .send(TheaterCommand::GetActorManifest {
+                            actor_id: id.clone(),
+                            response_tx: cmd_tx,
+                        })
+                        .await?;
+
+                    match cmd_rx.await? {
+                        Ok(manifest) => ManagementResponse::ActorManifest { id, manifest },
+                        Err(e) => ManagementResponse::Error {
+                            message: format!("Failed to get actor manifest: {}", e),
+                        },
                     }
                 }
             };

@@ -1,44 +1,4 @@
-// Implementation of starting an actor from a string manifest
-async fn start_actor_from_string(content: Option<String>, address: &str) -> Result<()> {
-    // Try to resolve manifest content
-    let manifest_content = match content {
-        Some(content) => content,
-        None => {
-            // Prompt for manifest content
-            let content = Input::<String>::new()
-                .with_prompt("Enter TOML manifest content")
-                .interact_text()?;
-            
-            if content.trim().is_empty() {
-                return Err(anyhow::anyhow!("Empty manifest content provided"));
-            }
-
-            content
-        }
-    };
-
-    // Validate that it's valid TOML before sending to the server
-    match toml::from_str::<toml::Value>(&manifest_content) {
-        Ok(_) => {
-            println!(
-                "{} Manifest content validated as valid TOML",
-                style("INFO:").blue().bold()
-            );
-        }
-        Err(e) => {
-            return Err(anyhow::anyhow!("Invalid TOML content: {}", e));
-        }
-    }
-
-    // Pass the manifest content to the legacy command
-    super::legacy::execute_command(
-        super::legacy::Commands::StartFromString {
-            manifest: manifest_content,
-        },
-        address,
-    )
-    .await
-}use crate::id::TheaterId;
+use crate::id::TheaterId;
 use crate::theater_server::{ManagementCommand, ManagementResponse};
 use anyhow::Result;
 use bytes::Bytes;
@@ -159,7 +119,9 @@ pub enum ActorCommands {
 pub async fn handle_actor_command(args: ActorArgs) -> Result<()> {
     match &args.command {
         ActorCommands::Start { manifest } => start_actor(manifest.clone(), &args.address).await,
-        ActorCommands::StartFromString { content } => start_actor_from_string(content.clone(), &args.address).await,
+        ActorCommands::StartFromString { content } => {
+            start_actor_from_string(content.clone(), &args.address).await
+        }
         ActorCommands::Stop { id } => stop_actor(id.clone(), &args.address).await,
         ActorCommands::List { detailed } => list_actors(*detailed, &args.address).await,
         ActorCommands::Subscribe { id } => subscribe_to_actor(id.clone(), &args.address).await,
@@ -404,6 +366,39 @@ async fn start_actor(manifest: Option<PathBuf>, address: &str) -> Result<()> {
     super::legacy::execute_command(
         super::legacy::Commands::Start {
             manifest: Some(resolved_manifest),
+        },
+        address,
+    )
+    .await
+}
+
+// Implementation of starting an actor from a string manifest
+async fn start_actor_from_string(content: Option<String>, address: &str) -> Result<()> {
+    // Try to resolve manifest content
+    let manifest_content = match content {
+        Some(content) => content,
+        None => {
+            return Err(anyhow::anyhow!("No manifest content provided"));
+        }
+    };
+
+    // Validate that it's valid TOML before sending to the server
+    match toml::from_str::<toml::Value>(&manifest_content) {
+        Ok(_) => {
+            println!(
+                "{} Manifest content validated as valid TOML",
+                style("INFO:").blue().bold()
+            );
+        }
+        Err(e) => {
+            return Err(anyhow::anyhow!("Invalid TOML content: {}", e));
+        }
+    }
+
+    // Pass the manifest content to the legacy command
+    super::legacy::execute_command(
+        super::legacy::Commands::StartFromString {
+            manifest: manifest_content,
         },
         address,
     )
@@ -815,117 +810,6 @@ async fn view_actor_logs(
     Ok(())
 }
 
-async fn view_actor_state(
-    id_opt: Option<String>,
-    export: Option<PathBuf>,
-    format: &str,
-    address: &str,
-) -> Result<()> {
-    println!("{}", style("Theater Actor State").bold().cyan());
-
-    let actor_id = select_actor(id_opt, address).await?;
-    let mut framed = connect_to_server(address).await?;
-
-    println!(
-        "{} Fetching state for actor {}",
-        style("INFO:").blue().bold(),
-        style(actor_id.clone()).green()
-    );
-
-    // Get actor state
-    let command = ManagementCommand::GetActorState {
-        id: actor_id.clone(),
-    };
-    let cmd_bytes = serde_json::to_vec(&command)?;
-    framed.send(Bytes::from(cmd_bytes)).await?;
-
-    if let Some(Ok(data)) = framed.next().await {
-        let response: ManagementResponse = serde_json::from_slice(&data)?;
-
-        match response {
-            ManagementResponse::ActorState {
-                id: _,
-                state: Some(state_bytes),
-            } => {
-                // Try to parse the state as JSON
-                let state_json = match serde_json::from_slice::<serde_json::Value>(&state_bytes) {
-                    Ok(json) => json,
-                    Err(_) => {
-                        // If not valid JSON, just show as raw data size
-                        println!("\n{}", style("Raw State Data").bold().underlined());
-                        println!("Size: {} bytes", style(state_bytes.len()).yellow());
-                        println!(
-                            "\nState is binary data (not JSON). Use export option to save to file."
-                        );
-
-                        // Export if requested
-                        if let Some(path) = export {
-                            fs::write(&path, &state_bytes).await?;
-                            println!(
-                                "\n{} State exported to {}",
-                                style("✓").green().bold(),
-                                style(path.display()).green()
-                            );
-                        }
-
-                        return Ok(());
-                    }
-                };
-
-                // Format based on user preference
-                let formatted_state = match format.to_lowercase().as_str() {
-                    "json" => serde_json::to_string_pretty(&state_json)?,
-                    "yaml" => serde_yaml::to_string(&state_json)?,
-                    "toml" => {
-                        println!(
-                            "{} TOML format not fully supported, using JSON",
-                            style("Note:").yellow().bold()
-                        );
-                        serde_json::to_string_pretty(&state_json)?
-                    }
-                    _ => serde_json::to_string_pretty(&state_json)?,
-                };
-
-                // Display the state
-                println!("\n{}", style("Actor State").bold().underlined());
-                println!("{}", formatted_state);
-
-                // Export if requested
-                if let Some(path) = export {
-                    fs::write(&path, formatted_state).await?;
-                    println!(
-                        "\n{} State exported to {}",
-                        style("✓").green().bold(),
-                        style(path.display()).green()
-                    );
-                }
-            }
-            ManagementResponse::ActorState { id: _, state: None } => {
-                println!(
-                    "\n{} Actor has no state data",
-                    style("Note:").yellow().bold()
-                );
-            }
-            ManagementResponse::Error { message } => {
-                println!("{} {}", style("Error:").red().bold(), message);
-            }
-            _ => {
-                println!(
-                    "{} Unexpected response from server",
-                    style("Error:").red().bold()
-                );
-            }
-        }
-    } else {
-        println!(
-            "{} No response received from server",
-            style("Error:").red().bold()
-        );
-    }
-
-    Ok(())
-}
-
 async fn call_actor(
     id_opt: Option<String>,
     method: &str,
@@ -1098,6 +982,117 @@ async fn call_actor(
                 style("Error:").red().bold()
             );
         }
+    }
+
+    Ok(())
+}
+
+async fn view_actor_state(
+    id_opt: Option<String>,
+    export: Option<PathBuf>,
+    format: &str,
+    address: &str,
+) -> Result<()> {
+    println!("{}", style("Theater Actor State").bold().cyan());
+
+    let actor_id = select_actor(id_opt, address).await?;
+    let mut framed = connect_to_server(address).await?;
+
+    println!(
+        "{} Fetching state for actor {}",
+        style("INFO:").blue().bold(),
+        style(actor_id.clone()).green()
+    );
+
+    // Get actor state
+    let command = ManagementCommand::GetActorState {
+        id: actor_id.clone(),
+    };
+    let cmd_bytes = serde_json::to_vec(&command)?;
+    framed.send(Bytes::from(cmd_bytes)).await?;
+
+    if let Some(Ok(data)) = framed.next().await {
+        let response: ManagementResponse = serde_json::from_slice(&data)?;
+
+        match response {
+            ManagementResponse::ActorState {
+                id: _,
+                state: Some(state_bytes),
+            } => {
+                // Try to parse the state as JSON
+                let state_json = match serde_json::from_slice::<serde_json::Value>(&state_bytes) {
+                    Ok(json) => json,
+                    Err(_) => {
+                        // If not valid JSON, just show as raw data size
+                        println!("\n{}", style("Raw State Data").bold().underlined());
+                        println!("Size: {} bytes", style(state_bytes.len()).yellow());
+                        println!(
+                            "\nState is binary data (not JSON). Use export option to save to file."
+                        );
+
+                        // Export if requested
+                        if let Some(path) = export {
+                            fs::write(&path, &state_bytes).await?;
+                            println!(
+                                "\n{} State exported to {}",
+                                style("✓").green().bold(),
+                                style(path.display()).green()
+                            );
+                        }
+
+                        return Ok(());
+                    }
+                };
+
+                // Format based on user preference
+                let formatted_state = match format.to_lowercase().as_str() {
+                    "json" => serde_json::to_string_pretty(&state_json)?,
+                    "yaml" => serde_yaml::to_string(&state_json)?,
+                    "toml" => {
+                        println!(
+                            "{} TOML format not fully supported, using JSON",
+                            style("Note:").yellow().bold()
+                        );
+                        serde_json::to_string_pretty(&state_json)?
+                    }
+                    _ => serde_json::to_string_pretty(&state_json)?,
+                };
+
+                // Display the state
+                println!("\n{}", style("Actor State").bold().underlined());
+                println!("{}", formatted_state);
+
+                // Export if requested
+                if let Some(path) = export {
+                    fs::write(&path, formatted_state).await?;
+                    println!(
+                        "\n{} State exported to {}",
+                        style("✓").green().bold(),
+                        style(path.display()).green()
+                    );
+                }
+            }
+            ManagementResponse::ActorState { id: _, state: None } => {
+                println!(
+                    "\n{} Actor has no state data",
+                    style("Note:").yellow().bold()
+                );
+            }
+            ManagementResponse::Error { message } => {
+                println!("{} {}", style("Error:").red().bold(), message);
+            }
+            _ => {
+                println!(
+                    "{} Unexpected response from server",
+                    style("Error:").red().bold()
+                );
+            }
+        }
+    } else {
+        println!(
+            "{} No response received from server",
+            style("Error:").red().bold()
+        );
     }
 
     Ok(())

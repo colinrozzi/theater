@@ -1,6 +1,6 @@
 use crate::config::{
-    HandlerConfig, HttpServerHandlerConfig, InterfacesConfig, LoggingConfig, ManifestConfig,
-    MessageServerConfig, SupervisorHostConfig, WebSocketServerHandlerConfig,
+    HandlerConfig, HttpServerHandlerConfig, InitialStateSource, InterfacesConfig, LoggingConfig,
+    ManifestConfig, MessageServerConfig, SupervisorHostConfig, WebSocketServerHandlerConfig,
 };
 use anyhow::Result;
 use clap::{Args, Subcommand};
@@ -188,7 +188,7 @@ async fn create_manifest(
             .default("initial_state.json".to_string())
             .interact()?;
 
-        manifest.init_state = Some(PathBuf::from(state_path));
+        manifest.init_state = Some(InitialStateSource::Path(PathBuf::from(state_path)));
     } else {
         manifest.init_state = None;
     }
@@ -371,8 +371,8 @@ async fn validate_manifest(manifest_path: PathBuf) -> Result<()> {
             }
 
             // Check initial state if specified
-            if let Some(path) = config.init_state {
-                if !Path::new(&path).exists() {
+            if let Some(InitialStateSource::Path(path)) = &config.init_state {
+                if !path.exists() {
                     issues.push(format!("Initial state file not found: {}", path.display()));
                 }
             }

@@ -5,8 +5,8 @@ use crate::id::TheaterId;
 use crate::messages::{ActorMessage, ActorSend, ActorStatus, TheaterCommand};
 use crate::metrics::ActorMetrics;
 use crate::wasm::Event;
-use crate::{ManifestConfig, config::ManifestSource};
 use crate::Result;
+use crate::{config::ManifestSource, ManifestConfig};
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -118,10 +118,7 @@ impl TheaterRuntime {
                     parent_id,
                     response_tx,
                 } => {
-                    debug!(
-                        "Processing SpawnActor command for manifest: {:?}",
-                        manifest
-                    );
+                    debug!("Processing SpawnActor command for manifest: {:?}", manifest);
                     match self.spawn_actor(manifest.clone(), parent_id).await {
                         Ok(actor_id) => {
                             info!("Successfully spawned actor: {:?}", actor_id);
@@ -224,6 +221,20 @@ impl TheaterRuntime {
                         }
                     }
                 }
+                TheaterCommand::GetActorManifest {
+                    actor_id,
+                    response_tx,
+                } => {
+                    debug!("Getting manifest for actor: {:?}", actor_id);
+                    match self.get_actor_manifest(actor_id).await {
+                        Ok(manifest) => {
+                            let _ = response_tx.send(Ok(manifest));
+                        }
+                        Err(e) => {
+                            let _ = response_tx.send(Err(e));
+                        }
+                    }
+                }
             };
         }
         info!("Theater runtime shutting down");
@@ -245,15 +256,15 @@ impl TheaterRuntime {
                     error!("Manifest file does not exist: {:?}", path);
                     return Err(anyhow::anyhow!("Manifest file does not exist"));
                 }
-                
+
                 let content = std::fs::read_to_string(path)?;
                 let config = ManifestConfig::from_file(path)?;
                 (content, config)
-            },
+            }
             ManifestSource::Content(content) => {
                 let config = ManifestConfig::from_string(content)?;
                 (content.clone(), config)
-            },
+            }
         };
 
         // start the actor in a new process
@@ -455,6 +466,16 @@ impl TheaterRuntime {
                 Ok(metrics) => Ok(metrics?),
                 Err(e) => Err(anyhow::anyhow!("Failed to receive metrics: {}", e)),
             }
+        } else {
+            Err(anyhow::anyhow!("Actor not found"))
+        }
+    }
+
+    async fn get_actor_manifest(&self, actor_id: TheaterId) -> Result<String> {
+        debug!("Retrieving manifest for actor: {:?}", actor_id);
+        if let Some(proc) = self.actors.get(&actor_id) {
+            // Return stored manifest content
+            Ok(proc.manifest_content.clone())
         } else {
             Err(anyhow::anyhow!("Actor not found"))
         }

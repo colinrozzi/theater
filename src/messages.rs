@@ -54,17 +54,19 @@ pub enum TheaterCommand {
         actor_id: TheaterId,
         response_tx: oneshot::Sender<Result<ActorMetrics>>,
     },
+    GetActorManifest {
+        actor_id: TheaterId,
+        response_tx: oneshot::Sender<Result<String>>,
+    },
 }
 
 impl TheaterCommand {
     pub fn to_log(&self) -> String {
         match self {
-            TheaterCommand::SpawnActor { manifest, .. } => {
-                match manifest {
-                    ManifestSource::Path(path) => format!("SpawnActor from path: {}", path.display()),
-                    ManifestSource::Content(_) => "SpawnActor from string content".to_string(),
-                }
-            }
+            TheaterCommand::SpawnActor { manifest, .. } => match manifest {
+                ManifestSource::Path(path) => format!("SpawnActor from path: {}", path.display()),
+                ManifestSource::Content(_) => "SpawnActor from string content".to_string(),
+            },
             TheaterCommand::StopActor { actor_id, .. } => {
                 format!("StopActor: {:?}", actor_id)
             }
@@ -92,6 +94,9 @@ impl TheaterCommand {
             }
             TheaterCommand::GetActorMetrics { actor_id, .. } => {
                 format!("GetActorMetrics: {:?}", actor_id)
+            }
+            TheaterCommand::GetActorManifest { actor_id, .. } => {
+                format!("GetActorManifest: {:?}", actor_id)
             }
         }
     }
