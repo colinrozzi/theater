@@ -73,11 +73,4 @@ impl ActorStore {
         chain.save_to_file(path)?;
         Ok(())
     }
-
-    pub fn load_chain(&self, path: &std::path::Path) -> anyhow::Result<()> {
-        let chain = StateChain::load_from_file(path)?;
-        let mut current_chain = self.chain.lock().unwrap();
-        *current_chain = chain;
-        Ok(())
-    }
 }

@@ -141,7 +141,7 @@ impl fmt::Display for ChainEvent {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct StateChain {
     events: Vec<ChainEvent>,
     current_hash: Option<Vec<u8>>,
@@ -203,7 +203,8 @@ impl StateChain {
         let head_label = format!("{}:chain-head", self.actor_id);
 
         // Set new head
-        self.content_store
+        let _ = self
+            .content_store
             .replace_at_label(head_label, content_ref.clone())
             .await;
 
@@ -347,12 +348,6 @@ impl StateChain {
         let json = serde_json::to_string_pretty(self)?;
         std::fs::write(path, json)?;
         Ok(())
-    }
-
-    pub fn load_from_file(path: &Path) -> Result<Self> {
-        let json = std::fs::read_to_string(path)?;
-        let chain: StateChain = serde_json::from_str(&json)?;
-        Ok(chain)
     }
 
     pub fn get_last_event(&self) -> Option<&ChainEvent> {
