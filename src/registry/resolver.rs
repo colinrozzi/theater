@@ -126,7 +126,7 @@ fn resolve_direct_actor_path(path: &Path) -> Result<(PathBuf, PathBuf), Registry
     // Create a temporary directory for the modified manifest
     let temp_dir = std::env::temp_dir().join("theater_registry");
     fs::create_dir_all(&temp_dir).map_err(|e| {
-        RegistryError::RegistryError(format!("Failed to create temp directory: {}", e)).into()
+        RegistryError::RegistryError(format!("Failed to create temp directory: {}", e))
     })?;
 
     // Write the modified manifest to a temporary file
@@ -142,11 +142,11 @@ fn resolve_direct_actor_path(path: &Path) -> Result<(PathBuf, PathBuf), Registry
 
     let temp_manifest_path = temp_dir.join(format!("{}-{}-direct.toml", actor_name, actor_version));
     let modified_manifest_str = toml::to_string(&manifest).map_err(|e| {
-        RegistryError::RegistryError(format!("Failed to serialize manifest: {}", e)).into()
+        RegistryError::RegistryError(format!("Failed to serialize manifest: {}", e))
     })?;
 
     fs::write(&temp_manifest_path, modified_manifest_str).map_err(|e| {
-        RegistryError::RegistryError(format!("Failed to write temporary manifest: {}", e)).into()
+        RegistryError::RegistryError(format!("Failed to write temporary manifest: {}", e))
     })?;
 
     debug!(
@@ -284,31 +284,31 @@ fn resolve_registry_actor(
     // Get paths to components and manifests
     let config_path = registry_path.join("config.toml");
     let config_str = fs::read_to_string(&config_path).map_err(|_| {
-        RegistryError::NotFound(format!("Registry config not found: {:?}", config_path)).into()
+        RegistryError::NotFound(format!("Registry config not found: {:?}", config_path))
     })?;
 
     let config: Value = toml::from_str(&config_str).map_err(|e| {
-        RegistryError::InvalidFormat(format!("Invalid registry config: {:?}", e)).into()
+        RegistryError::InvalidFormat(format!("Invalid registry config: {:?}", e))
     })?;
 
     // Extract directories from config
     let manifest_dir = extract_path_from_config(&config, "manifest_dir").map_err(|e| {
         warn!("Error extracting manifest_dir from config: {:?}", e);
-        RegistryError::InvalidFormat("Invalid registry config".to_string()).into()
+        RegistryError::InvalidFormat("Invalid registry config".to_string())
     })?;
     let component_dir = extract_path_from_config(&config, "component_dir").map_err(|e| {
         warn!("Error extracting component_dir from config: {:?}", e);
-        RegistryError::InvalidFormat("Invalid registry config".to_string()).into()
+        RegistryError::InvalidFormat("Invalid registry config".to_string())
     })?;
 
     // Load the index to get version info
     let index_path = registry_path.join("index.toml");
     let index_str = fs::read_to_string(&index_path).map_err(|_| {
-        RegistryError::NotFound(format!("Registry index not found: {:?}", index_path)).into()
+        RegistryError::NotFound(format!("Registry index not found: {:?}", index_path))
     })?;
 
     let index: Value = toml::from_str(&index_str).map_err(|e| {
-        RegistryError::InvalidFormat(format!("Invalid registry index: {:?}", e)).into()
+        RegistryError::InvalidFormat(format!("Invalid registry index: {:?}", e))
     })?;
 
     // Find the actor in the index
@@ -317,14 +317,14 @@ fn resolve_registry_actor(
         .and_then(|a| a.as_array())
         .ok_or_else(|| {
             RegistryError::InvalidFormat("actors list not found in registry index".to_string())
-                .into()
+
         })?;
 
     let actor = actors
         .iter()
         .find(|a| a.get("name").and_then(|n| n.as_str()) == Some(&name))
         .ok_or_else(|| {
-            RegistryError::NotFound(format!("Actor '{}' not found in registry", name)).into()
+            RegistryError::NotFound(format!("Actor '{}' not found in registry", name))
         })?;
 
     // Determine which version to use
@@ -336,7 +336,7 @@ fn resolve_registry_actor(
                 .and_then(|v| v.as_array())
                 .ok_or_else(|| {
                     RegistryError::InvalidFormat("versions list not found for actor".to_string())
-                        .into()
+
                 })?;
 
             let version_exists = versions.iter().any(|ver| ver.as_str() == Some(&v));
@@ -358,7 +358,7 @@ fn resolve_registry_actor(
                 .and_then(|l| l.as_str())
                 .ok_or_else(|| {
                     RegistryError::InvalidFormat("latest version not found for actor".to_string())
-                        .into()
+
                 })?
                 .to_string()
         }
@@ -404,12 +404,12 @@ fn resolve_registry_actor(
     // Now we need to create a temporary manifest with absolute paths for component_path
     // Read the original manifest
     let manifest_str = fs::read_to_string(&manifest_path).map_err(|_| {
-        RegistryError::NotFound(format!("Failed to read manifest file: {:?}", manifest_path)).into()
+        RegistryError::NotFound(format!("Failed to read manifest file: {:?}", manifest_path))
     })?;
 
     // Parse the manifest
     let mut manifest: toml::Value = toml::from_str(&manifest_str).map_err(|e| {
-        RegistryError::InvalidFormat(format!("Invalid manifest format: {}", e)).into()
+        RegistryError::InvalidFormat(format!("Invalid manifest format: {}", e))
     })?;
 
     // Update component_path to absolute path
@@ -448,17 +448,17 @@ fn resolve_registry_actor(
     // Create a temporary directory for the modified manifest
     let temp_dir = std::env::temp_dir().join("theater_registry");
     fs::create_dir_all(&temp_dir).map_err(|e| {
-        RegistryError::RegistryError(format!("Failed to create temp directory: {}", e)).into()
+        RegistryError::RegistryError(format!("Failed to create temp directory: {}", e))
     })?;
 
     // Write the modified manifest to a temporary file
     let temp_manifest_path = temp_dir.join(format!("{}-{}-actor.toml", name, version_to_use));
     let modified_manifest_str = toml::to_string(&manifest).map_err(|e| {
-        RegistryError::RegistryError(format!("Failed to serialize manifest: {}", e)).into()
+        RegistryError::RegistryError(format!("Failed to serialize manifest: {}", e))
     })?;
 
     fs::write(&temp_manifest_path, modified_manifest_str).map_err(|e| {
-        RegistryError::RegistryError(format!("Failed to write temporary manifest: {}", e)).into()
+        RegistryError::RegistryError(format!("Failed to write temporary manifest: {}", e))
     })?;
 
     debug!(

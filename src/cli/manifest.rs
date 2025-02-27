@@ -94,7 +94,7 @@ async fn create_manifest(
         // Create a basic default manifest
         ManifestConfig {
             name: String::new(),
-            component_path: PathBuf::new(),
+            component_source: crate::config::ComponentSource::Path(PathBuf::new()),
             init_state: None,
             interface: InterfacesConfig::default(),
             handlers: Vec::new(),
@@ -121,7 +121,7 @@ async fn create_manifest(
     };
 
     // Component path
-    manifest.component_path = match component {
+    manifest.component_source = match component {
         Some(p) => p,
         None => {
             let default = if !manifest.component_path.as_os_str().is_empty() {

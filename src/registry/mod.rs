@@ -53,19 +53,6 @@ pub fn get_registry_path() -> Option<PathBuf> {
     None
 }
 
-/// Registry configuration
-#[derive(Debug, Serialize, Deserialize)]
-pub struct RegistryConfig {
-    pub name: String,
-    pub description: String,
-    pub version: String,
-    pub component_dir: PathBuf,
-    pub manifest_dir: PathBuf,
-    pub cache_dir: PathBuf,
-    pub default_version_strategy: String,
-    pub actor_search_paths: Vec<PathBuf>,
-}
-
 /// Actor index entry in the registry
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ActorIndexEntry {

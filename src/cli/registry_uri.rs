@@ -1,9 +1,8 @@
-use crate::registry::{RegistryManager, ResourceType};
 use crate::Result;
 use clap::{Args, Subcommand};
 use std::path::PathBuf;
 
-#[derive(Args)]
+#[derive(Args, Subcommand)]
 pub struct RegistryUriArgs {
     #[command(subcommand)]
     pub command: RegistryUriCommand,

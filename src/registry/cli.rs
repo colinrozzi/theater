@@ -1,4 +1,6 @@
-use super::{init_registry, list_actors, RegistryError, RegistryConfig, RegistryManager, ResourceType, RegistryUri, RegistryLocation};
+use super::{init_registry, list_actors, RegistryError};
+use super::types::{RegistryConfig, RegistryManager, ResourceType, RegistryLocation};
+use super::uri::RegistryUri;
 use crate::Result;
 use log::{debug, info, warn};
 use std::fs;
