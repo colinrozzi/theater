@@ -162,6 +162,69 @@ impl ContentStoreImpl {
         Ok(())
     }
 
+    async fn replace_content_at_label(&self, label: &str, content: Vec<u8>) -> Result<ContentRef> {
+        let content_ref = ContentRef::from_content(&content);
+        let path = content_ref.to_path(&self.base_path);
+
+        // Create parent directories if they don't exist
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)
+                .await
+                .context("Failed to create parent directories")?;
+        }
+
+        // Write content to file
+        let mut file = fs::File::create(&path)
+            .await
+            .context("Failed to create content file")?;
+        file.write_all(&content)
+            .await
+            .context("Failed to write content")?;
+        debug!("Stored content with hash: {}", content_ref.hash());
+
+        // Replace label with new content
+        let label_path = self.label_path(label);
+        let content = content_ref.hash();
+
+        fs::write(&label_path, content)
+            .await
+            .context("Failed to write label file")?;
+
+        debug!("Replaced content in label '{}'", label);
+
+        Ok(content_ref)
+    }
+
+    async fn replace_at_label(&self, label: &str, content_ref: &ContentRef) -> Result<()> {
+        // Ensure content exists before labeling
+        if !self.exists(content_ref).await {
+            return Err(anyhow::anyhow!(
+                "Content does not exist: {}",
+                content_ref.hash()
+            ));
+        }
+
+        let label_path = self.label_path(label);
+
+        // Create parent directories if they don't exist
+        if let Some(parent) = label_path.parent() {
+            fs::create_dir_all(parent)
+                .await
+                .context("Failed to create label parent directories")?;
+        }
+
+        // Write updated refs to label file
+        let content = content_ref.hash();
+
+        fs::write(&label_path, content)
+            .await
+            .context("Failed to write label file")?;
+
+        debug!("Replaced content in label '{}'", label);
+
+        Ok(())
+    }
+
     /// Get content references by label
     async fn get_by_label(&self, label: &str) -> Result<Vec<ContentRef>> {
         let label_path = self.label_path(label);
@@ -372,6 +435,16 @@ pub enum StoreOperation {
         content: Vec<u8>,
         resp: oneshot::Sender<Result<ContentRef>>,
     },
+    ReplaceContentAtLabel {
+        label: String,
+        content: Vec<u8>,
+        resp: oneshot::Sender<Result<ContentRef>>,
+    },
+    ReplaceAtLabel {
+        label: String,
+        content_ref: ContentRef,
+        resp: oneshot::Sender<Result<()>>,
+    },
 
     // Utility operations
     ListLabels {
@@ -391,7 +464,7 @@ pub enum StoreOperation {
 }
 
 /// Client handle to interact with the content store
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct ContentStore {
     sender: mpsc::Sender<StoreOperation>,
 }
@@ -564,6 +637,44 @@ impl ContentStore {
         resp_rx.await.context("PutAtLabel operation failed")?
     }
 
+    /// Put content at a label, replacing any existing content
+    pub async fn replace_content_at_label(
+        &self,
+        label: String,
+        content: Vec<u8>,
+    ) -> Result<ContentRef> {
+        let (resp_tx, resp_rx) = oneshot::channel();
+
+        self.sender
+            .send(StoreOperation::ReplaceContentAtLabel {
+                label,
+                content,
+                resp: resp_tx,
+            })
+            .await
+            .context("Failed to send replace_content_at_label operation")?;
+
+        resp_rx
+            .await
+            .context("ReplaceContentAtLabel operation failed")?
+    }
+
+    /// Replace content at a label with a specific content reference
+    pub async fn replace_at_label(&self, label: String, content_ref: ContentRef) -> Result<()> {
+        let (resp_tx, resp_rx) = oneshot::channel();
+
+        self.sender
+            .send(StoreOperation::ReplaceAtLabel {
+                label,
+                content_ref,
+                resp: resp_tx,
+            })
+            .await
+            .context("Failed to send replace_at_label operation")?;
+
+        resp_rx.await.context("ReplaceAtLabel operation failed")?
+    }
+
     /// List all labels
     pub async fn list_labels(&self) -> Result<Vec<String>> {
         let (resp_tx, resp_rx) = oneshot::channel();
@@ -698,6 +809,32 @@ async fn run_store(base_path: PathBuf, mut receiver: mpsc::Receiver<StoreOperati
                         let _ = resp.send(Err(e));
                     }
                 }
+            }
+
+            StoreOperation::ReplaceContentAtLabel {
+                label,
+                content,
+                resp,
+            } => {
+                // Implement the combined operation directly in the worker
+                // to avoid unnecessary message passing
+                match store.replace_content_at_label(&label, content).await {
+                    Ok(content_ref) => {
+                        let _ = resp.send(Ok(content_ref));
+                    }
+                    Err(e) => {
+                        let _ = resp.send(Err(e));
+                    }
+                }
+            }
+
+            StoreOperation::ReplaceAtLabel {
+                label,
+                content_ref,
+                resp,
+            } => {
+                let result = store.replace_at_label(&label, &content_ref).await;
+                let _ = resp.send(result);
             }
 
             StoreOperation::ListLabels { resp } => {

@@ -4,6 +4,7 @@ use crate::chain::ChainEvent;
 use crate::id::TheaterId;
 use crate::messages::{ActorMessage, ActorSend, ActorStatus, TheaterCommand};
 use crate::metrics::ActorMetrics;
+use crate::store::ContentStore;
 use crate::wasm::Event;
 use crate::ManifestConfig;
 use crate::Result;
@@ -21,6 +22,7 @@ pub struct TheaterRuntime {
     pub theater_tx: Sender<TheaterCommand>,
     theater_rx: Receiver<TheaterCommand>,
     event_subscribers: Vec<mpsc::Sender<(TheaterId, ChainEvent)>>,
+    content_store: ContentStore,
 }
 
 pub struct ActorProcess {
@@ -38,11 +40,15 @@ impl TheaterRuntime {
         theater_tx: Sender<TheaterCommand>,
         theater_rx: Receiver<TheaterCommand>,
     ) -> Result<Self> {
+        let store_path = PathBuf::from("store");
+        let content_store = ContentStore::start(store_path);
+
         Ok(Self {
             theater_tx,
             theater_rx,
             actors: HashMap::new(),
             event_subscribers: Vec::new(),
+            content_store,
         })
     }
 
@@ -253,6 +259,7 @@ impl TheaterRuntime {
 
         let manifest_path_clone = manifest_path.clone();
         let actor_operation_tx = operation_tx.clone();
+        let content_store = self.content_store.clone();
         let actor_runtime_process = tokio::spawn(async move {
             let actor_id = TheaterId::generate();
             debug!("Initializing actor runtime");
@@ -267,6 +274,7 @@ impl TheaterRuntime {
                 mailbox_rx,
                 operation_rx,
                 actor_operation_tx,
+                content_store.clone(),
             )
             .await
             .unwrap()
@@ -448,5 +456,29 @@ impl TheaterRuntime {
         } else {
             Err(anyhow::anyhow!("Actor not found"))
         }
+    }
+
+    pub fn content_store(&self) -> &ContentStore {
+        &self.content_store
+    }
+
+    pub fn content_store_mut(&mut self) -> &mut ContentStore {
+        &mut self.content_store
+    }
+
+    pub async fn stop(&mut self) -> Result<()> {
+        info!("Initiating theater runtime shutdown");
+
+        // Stop all actors
+        for actor_id in self.actors.keys().cloned().collect::<Vec<_>>() {
+            self.stop_actor(actor_id).await?;
+        }
+
+        if let Err(e) = self.content_store.shutdown().await {
+            error!("Failed to shut down content store: {}", e);
+        }
+
+        info!("Theater runtime shutdown complete");
+        Ok(())
     }
 }

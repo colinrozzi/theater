@@ -13,6 +13,8 @@ use crate::events::message::MessageEvent;
 use crate::events::runtime::RuntimeEvent;
 use crate::events::supervisor::SupervisorEvent;
 use crate::events::ChainEventData;
+use crate::store::ContentStore;
+use crate::TheaterId;
 
 #[derive(Debug, Clone, Serialize, Deserialize, ComponentType, Lift, Lower)]
 #[component(record)]
@@ -145,24 +147,73 @@ pub struct StateChain {
     current_hash: Option<Vec<u8>>,
     #[serde(skip)]
     event_callback: Option<mpsc::Sender<ChainEvent>>,
+    #[serde(skip)]
+    content_store: ContentStore,
+    actor_id: TheaterId,
 }
 
 impl StateChain {
-    pub fn new() -> Self {
+    pub fn new(actor_id: TheaterId, content_store: ContentStore) -> Self {
         Self {
             events: Vec::new(),
             current_hash: None,
             event_callback: None,
+            content_store,
+            actor_id,
         }
     }
 
     /// Add a typed event to the chain
-    pub fn add_typed_event<T: ChainEventData>(
+    pub async fn add_typed_event<T: ChainEventData>(
         &mut self,
         event_data: T,
     ) -> Result<ChainEvent, serde_json::Error> {
-        let event = ChainEvent::new(event_data, self.current_hash.clone())?;
-        self.finalize_and_store_event(event)
+        // Create initial event structure without hash
+        let mut event = ChainEvent {
+            hash: Vec::new(), // Will be set after storage
+            parent_hash: self.current_hash.clone(),
+            event_type: event_data.event_type().to_string(),
+            data: event_data.to_json()?,
+            timestamp: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs(),
+            description: Some(event_data.description()),
+        };
+
+        // Store the event data in the content store
+        let serialized_event = serde_json::to_vec(&event)?;
+        let content_ref = self.content_store.store(serialized_event).await.unwrap();
+
+        // Get the hash from ContentRef and use it as the event hash
+        let hash_bytes = hex::decode(content_ref.hash()).unwrap();
+        event.hash = hash_bytes.clone();
+
+        // Now that we have the hash, store the updated event in memory
+        self.events.push(event.clone());
+        self.current_hash = Some(event.hash.clone());
+
+        // Notify runtime if callback is set
+        if let Some(callback) = &self.event_callback {
+            if let Err(err) = callback.send(event.clone()) {
+                tracing::warn!("Failed to notify runtime of event: {}", err);
+            }
+        }
+        // Update chain head
+        let head_label = format!("{}:chain-head", self.actor_id);
+
+        // Set new head
+        self.content_store
+            .replace_at_label(head_label, content_ref.clone())
+            .await;
+
+        tracing::debug!(
+            "Stored event {} in content store for actor {}",
+            content_ref.hash(),
+            self.actor_id
+        );
+
+        Ok(event)
     }
 
     /// Internal method to finalize event (add hash) and store it
@@ -197,36 +248,39 @@ impl StateChain {
 
     // Convenience methods for specific event types
 
-    pub fn add_http_event(&mut self, event: HttpEvent) -> Result<ChainEvent, serde_json::Error> {
-        self.add_typed_event(event)
+    pub async fn add_http_event(
+        &mut self,
+        event: HttpEvent,
+    ) -> Result<ChainEvent, serde_json::Error> {
+        self.add_typed_event(event).await
     }
 
-    pub fn add_message_event(
+    pub async fn add_message_event(
         &mut self,
         event: MessageEvent,
     ) -> Result<ChainEvent, serde_json::Error> {
-        self.add_typed_event(event)
+        self.add_typed_event(event).await
     }
 
-    pub fn add_filesystem_event(
+    pub async fn add_filesystem_event(
         &mut self,
         event: FilesystemEvent,
     ) -> Result<ChainEvent, serde_json::Error> {
-        self.add_typed_event(event)
+        self.add_typed_event(event).await
     }
 
-    pub fn add_runtime_event(
+    pub async fn add_runtime_event(
         &mut self,
         event: RuntimeEvent,
     ) -> Result<ChainEvent, serde_json::Error> {
-        self.add_typed_event(event)
+        self.add_typed_event(event).await
     }
 
-    pub fn add_supervisor_event(
+    pub async fn add_supervisor_event(
         &mut self,
         event: SupervisorEvent,
     ) -> Result<ChainEvent, serde_json::Error> {
-        self.add_typed_event(event)
+        self.add_typed_event(event).await
     }
 
     // Legacy method for backward compatibility
