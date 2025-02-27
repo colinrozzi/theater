@@ -1,7 +1,7 @@
 use anyhow::Result;
 use console::style;
 use theater::cli::{Args, Commands};
-use theater::cli::{actor, manifest, system, dev, registry};
+use theater::cli::{actor, manifest, system, dev, registry, registry_uri};
 use clap::Parser;
 
 #[tokio::main]
@@ -99,6 +99,9 @@ async fn main() -> Result<()> {
         },
         Commands::Registry(cmd) => {
             registry::handle_registry_command(&cmd)?
+        },
+        Commands::RegistryUri(args) => {
+            registry_uri::handle_registry_uri_command(&args)?
         },
     }
 

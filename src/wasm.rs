@@ -69,19 +69,19 @@ pub struct ActorComponent {
 }
 
 impl ActorComponent {
-    pub async fn new(config: &ManifestConfig, actor_store: ActorStore) -> Result<Self> {
+    pub async fn new(component_path: &std::path::Path, actor_store: ActorStore) -> Result<Self> {
         // Load WASM component
         let engine = Engine::new(wasmtime::Config::new().async_support(true))?;
         info!(
             "Loading WASM component from: {}",
-            config.component_path.display()
+            component_path.display()
         );
         let wasm_bytes =
-            std::fs::read(&config.component_path).map_err(|e| WasmError::WasmError {
+            std::fs::read(component_path).map_err(|e| WasmError::WasmError {
                 context: "component loading",
                 message: format!(
                     "Failed to load WASM component from {}: {}",
-                    config.component_path.display(),
+                    component_path.display(),
                     e
                 ),
             })?;
@@ -90,7 +90,7 @@ impl ActorComponent {
         let linker = Linker::new(&engine);
 
         Ok(ActorComponent {
-            name: config.name.clone(),
+            name: component_path.file_stem().unwrap_or_default().to_string_lossy().to_string(),
             component,
             actor_store,
             linker,

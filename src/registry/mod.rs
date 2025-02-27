@@ -4,21 +4,15 @@ use serde::{Deserialize, Serialize};
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
-use thiserror::Error;
-
-#[derive(Error, Debug)]
-pub enum RegistryError {
-    #[error("Registry not found: {0}")]
-    NotFound(String),
-    #[error("Invalid format: {0}")]
-    InvalidFormat(String),
-    #[error("Registry error: {0}")]
-    RegistryError(String),
-}
 
 pub mod cli;
 pub mod resolver;
+pub mod uri;
+pub mod types;
 
+// Re-export key types
+pub use uri::{RegistryUri, ResourceType, AddressingType};
+pub use types::{Registry, RegistryManager, RegistryConfig, Resource, ResourceInfo, RegistryError};
 pub use resolver::resolve_actor_reference;
 
 /// Get the registry path from configuration or environment

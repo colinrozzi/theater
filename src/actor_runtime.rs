@@ -72,7 +72,14 @@ impl ActorRuntime {
         }
 
         let store = ActorStore::new(id.clone(), theater_tx.clone());
-        let mut actor_component = ActorComponent::new(config, store.clone()).await.expect(
+        let component_path = config.get_component_path().expect(
+            format!(
+                "Failed to get component path for actor: {:?}",
+                config.name
+            )
+            .as_str(),
+        );
+        let mut actor_component = ActorComponent::new(&component_path, store.clone()).await.expect(
             format!(
                 "Failed to create actor component for actor: {:?}",
                 config.name

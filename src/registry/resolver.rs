@@ -1,4 +1,4 @@
-use crate::registry::RegistryError;
+use crate::registry::{RegistryError, RegistryManager, RegistryUri, ResourceType};
 use crate::Result;
 use log::{debug, warn};
 use std::fs;
@@ -11,10 +11,29 @@ use toml::Value;
 /// - Direct paths: "/path/to/actor.toml"
 /// - Registry names: "chat" (latest version)
 /// - Versioned names: "chat:0.1.0" (specific version)
+/// - Registry URIs: "registry::manifests/chat/v1.0.0/actor.toml"
 pub fn resolve_actor_reference(
     reference: &str,
     registry_path: Option<&Path>,
+    registry_manager: Option<&RegistryManager>,
 ) -> Result<(PathBuf, PathBuf), RegistryError> {
+    // Check if reference is a registry URI
+    if reference.starts_with("registry::") || reference.starts_with("registry@") {
+        debug!("Using registry URI reference: {}", reference);
+        
+        // Ensure we have a registry manager
+        let registry_mgr = match registry_manager {
+            Some(rm) => rm,
+            None => {
+                return Err(RegistryError::RegistryError(
+                    "Registry manager required for URI resolution".to_string(),
+                ));
+            }
+        };
+        
+        return resolve_uri_actor_reference(reference, registry_mgr);
+    }
+    
     // Check if reference is a direct path
     let reference_path = Path::new(reference);
     if reference_path.exists() && reference_path.is_file() {
@@ -149,6 +168,109 @@ fn parse_actor_reference(reference: &str) -> (String, Option<String>) {
     } else {
         (reference.to_string(), None)
     }
+}
+
+/// Resolve an actor reference from a registry URI
+fn resolve_uri_actor_reference(
+    uri_str: &str,
+    registry_manager: &RegistryManager,
+) -> Result<(PathBuf, PathBuf), RegistryError> {
+    // Parse the URI
+    let uri = RegistryUri::parse(uri_str).map_err(|e| {
+        RegistryError::InvalidFormat(format!("Invalid registry URI: {}", e))
+    })?;
+
+    // Resolve the manifest using the registry manager
+    let manifest_resource = registry_manager.resolve(uri_str)?;
+    
+    // Create a temporary directory for the manifest
+    let temp_dir = std::env::temp_dir().join("theater_registry");
+    std::fs::create_dir_all(&temp_dir).map_err(|e| {
+        RegistryError::RegistryError(format!("Failed to create temp directory: {}", e))
+    })?;
+    
+    // Parse the manifest to extract component path
+    let manifest_str = std::str::from_utf8(&manifest_resource.content)
+        .map_err(|_| RegistryError::InvalidFormat("Invalid UTF-8 in manifest".to_string()))?;
+
+    let mut manifest: Value = toml::from_str(manifest_str).map_err(|e| {
+        RegistryError::InvalidFormat(format!("Invalid manifest format: {}", e))
+    })?;
+    
+    // Extract actor details
+    let actor_name = manifest
+        .get("name")
+        .and_then(|n| n.as_str())
+        .unwrap_or("unknown");
+
+    let actor_version = manifest
+        .get("version")
+        .and_then(|v| v.as_str())
+        .unwrap_or("0.0.0");
+    
+    // Check if component_path is a registry URI
+    let component_path = if let Some(component_path_val) = manifest.get("component_path") {
+        if let Some(component_path_str) = component_path_val.as_str() {
+            if component_path_str.starts_with("registry::") {
+                // This is a registry URI, resolve it
+                let component_resource = registry_manager.resolve(component_path_str)?;
+                
+                // Write component to a temporary file
+                let temp_component_path = temp_dir.join(format!("{}-{}.wasm", actor_name, actor_version));
+                std::fs::write(&temp_component_path, &component_resource.content).map_err(|e| {
+                    RegistryError::RegistryError(format!("Failed to write component: {}", e))
+                })?;
+                
+                // Update the manifest with the temporary component path
+                if let Some(component_val) = manifest.get_mut("component_path") {
+                    *component_val = toml::Value::String(temp_component_path.to_string_lossy().to_string());
+                }
+                
+                temp_component_path
+            } else {
+                // This is a regular path
+                PathBuf::from(component_path_str)
+            }
+        } else {
+            return Err(RegistryError::InvalidFormat("component_path is not a string".to_string()));
+        }
+    } else {
+        return Err(RegistryError::InvalidFormat("component_path not found in manifest".to_string()));
+    };
+    
+    // Also handle init_state if it's a registry URI
+    if let Some(init_state_val) = manifest.get_mut("init_state") {
+        if let Some(init_state_str) = init_state_val.as_str() {
+            if init_state_str.starts_with("registry::") {
+                // This is a registry URI, resolve it
+                let init_state_resource = registry_manager.resolve(init_state_str)?;
+                
+                // Write state to a temporary file
+                let temp_state_path = temp_dir.join(format!("{}-{}-state.json", actor_name, actor_version));
+                std::fs::write(&temp_state_path, &init_state_resource.content).map_err(|e| {
+                    RegistryError::RegistryError(format!("Failed to write init state: {}", e))
+                })?;
+                
+                // Update the manifest
+                *init_state_val = toml::Value::String(temp_state_path.to_string_lossy().to_string());
+            }
+        }
+    }
+    
+    // Write the temporary manifest
+    let temp_manifest_path = temp_dir.join(format!("{}-{}-registry.toml", actor_name, actor_version));
+    let modified_manifest_str = toml::to_string(&manifest).map_err(|e| {
+        RegistryError::RegistryError(format!("Failed to serialize manifest: {}", e))
+    })?;
+    
+    std::fs::write(&temp_manifest_path, &modified_manifest_str).map_err(|e| {
+        RegistryError::RegistryError(format!("Failed to write temporary manifest: {}", e))
+    })?;
+    
+    debug!("Created temporary files from registry URI:\n  Manifest: {:?}\n  Component: {:?}", 
+           temp_manifest_path, component_path);
+    
+    Ok((temp_manifest_path, component_path))
 }
 
 /// Resolve an actor using the registry

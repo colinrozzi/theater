@@ -5,6 +5,7 @@ pub mod system;
 pub mod dev;
 pub mod legacy;
 pub mod registry;
+pub mod registry_uri;
 
 use clap::{Parser, Subcommand};
 
@@ -91,7 +92,11 @@ pub enum Commands {
     #[command(subcommand)]
     Dev(dev::DevCommands),
     
-    /// Manage actor registry
+    /// Manage actor registry (legacy)
     #[command(subcommand)]
     Registry(registry::RegistryCommands),
+    
+    /// Manage registry with URI support
+    #[command(subcommand)]
+    RegistryUri(registry_uri::RegistryUriArgs),
 }

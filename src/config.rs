@@ -8,9 +8,16 @@ pub struct ComponentConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum ComponentSource {
+    Path(PathBuf),
+    Registry(String), // Registry URI
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ManifestSource {
     Path(PathBuf),
     Content(String),
+    Registry(String), // Registry URI
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -18,12 +25,14 @@ pub enum InitialStateSource {
     Path(PathBuf),
     Json(String),
     Remote(String), // For future use with URLs
+    Registry(String), // Registry URI
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ManifestConfig {
     pub name: String,
-    pub component_path: PathBuf,
+    #[serde(alias = "component_path")]
+    pub component_source: ComponentSource,
     #[serde(default)]
     pub init_state: Option<InitialStateSource>,
     #[serde(default)]
@@ -150,10 +159,12 @@ impl ManifestConfig {
         let content = std::fs::read_to_string(&path)?;
         let mut config = Self::from_string(&content)?;
 
-        // Make component_path relative to manifest path if it's not absolute
-        if !config.component_path.is_absolute() {
-            if let Some(parent) = path.as_ref().parent() {
-                config.component_path = parent.join(&config.component_path);
+        // Make component_path relative to manifest path if it's path-based and not absolute
+        if let ComponentSource::Path(component_path) = &config.component_source {
+            if !component_path.is_absolute() {
+                if let Some(parent) = path.as_ref().parent() {
+                    config.component_source = ComponentSource::Path(parent.join(component_path));
+                }
             }
         }
 
@@ -183,7 +194,67 @@ impl ManifestConfig {
                 // Placeholder for future implementation
                 Err(anyhow::anyhow!("Remote state sources not yet implemented"))
             }
+            Some(InitialStateSource::Registry(_uri)) => {
+                // This will be handled by the registry_manager before this method is called
+                // The URI will be resolved to a temporary file and the path updated
+                Err(anyhow::anyhow!("Registry state sources must be resolved before loading"))
+            }
             None => Ok(None),
+        }
+    }
+
+    pub fn resolve_resources(&mut self, registry_manager: &crate::registry::RegistryManager) -> anyhow::Result<()> {
+        // Resolve component source if it's a registry URI
+        if let ComponentSource::Registry(uri) = &self.component_source {
+            let resource = registry_manager.resolve(uri)?;
+            
+            // Create a temporary file for the component
+            let temp_dir = std::env::temp_dir().join("theater_registry");
+            std::fs::create_dir_all(&temp_dir)?;
+            
+            let file_extension = if resource.content_type == "application/wasm" {
+                ".wasm"
+            } else {
+                ".bin"
+            };
+            
+            let temp_path = temp_dir.join(format!("{}-component{}", self.name, file_extension));
+            std::fs::write(&temp_path, &resource.content)?;
+            
+            // Update the component source
+            self.component_source = ComponentSource::Path(temp_path);
+        }
+        
+        // Resolve init_state if it's a registry URI
+        if let Some(InitialStateSource::Registry(uri)) = &self.init_state {
+            let resource = registry_manager.resolve(uri)?;
+            
+            // Create a temporary file for the state
+            let temp_dir = std::env::temp_dir().join("theater_registry");
+            std::fs::create_dir_all(&temp_dir)?;
+            
+            let file_extension = if resource.content_type == "application/json" {
+                ".json"
+            } else {
+                ".state"
+            };
+            
+            let temp_path = temp_dir.join(format!("{}-state{}", self.name, file_extension));
+            std::fs::write(&temp_path, &resource.content)?;
+            
+            // Update the init_state
+            self.init_state = Some(InitialStateSource::Path(temp_path));
+        }
+        
+        Ok(())
+    }
+    
+    pub fn get_component_path(&self) -> anyhow::Result<PathBuf> {
+        match &self.component_source {
+            ComponentSource::Path(path) => Ok(path.clone()),
+            ComponentSource::Registry(uri) => {
+                Err(anyhow::anyhow!("Registry component source must be resolved before getting path: {}", uri))
+            }
         }
     }
 
