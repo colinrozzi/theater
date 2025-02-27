@@ -1,5 +1,5 @@
 use crate::config::{
-    HandlerConfig, HttpServerHandlerConfig, InitialStateSource, InterfacesConfig, LoggingConfig,
+    ComponentSource, HandlerConfig, HttpServerHandlerConfig, InitialStateSource, InterfacesConfig, LoggingConfig,
     ManifestConfig, MessageServerConfig, SupervisorHostConfig, WebSocketServerHandlerConfig,
 };
 use anyhow::Result;
@@ -94,7 +94,7 @@ async fn create_manifest(
         // Create a basic default manifest
         ManifestConfig {
             name: String::new(),
-            component_source: crate::config::ComponentSource::Path(PathBuf::new()),
+            component_source: ComponentSource::Path(PathBuf::new()),
             init_state: None,
             interface: InterfacesConfig::default(),
             handlers: Vec::new(),
@@ -122,20 +122,19 @@ async fn create_manifest(
 
     // Component path
     manifest.component_source = match component {
-        Some(p) => p,
+        Some(p) => ComponentSource::Path(p),
         None => {
-            let default = if !manifest.component_path.as_os_str().is_empty() {
-                manifest.component_path.clone()
-            } else {
-                PathBuf::from(format!("{}.wasm", manifest.name))
+            let default_path = match &manifest.component_source {
+                ComponentSource::Path(path) if !path.as_os_str().is_empty() => path.clone(),
+                _ => PathBuf::from(format!("{}.wasm", manifest.name)),
             };
 
             let path_str: String = Input::with_theme(&ColorfulTheme::default())
                 .with_prompt("WASM component path")
-                .default(default.to_string_lossy().to_string())
+                .default(default_path.to_string_lossy().to_string())
                 .interact()?;
 
-            PathBuf::from(path_str)
+            ComponentSource::Path(PathBuf::from(path_str))
         }
     };
 
@@ -363,11 +362,13 @@ async fn validate_manifest(manifest_path: PathBuf) -> Result<()> {
             let mut issues = Vec::new();
 
             // Check component path
-            if !Path::new(&config.component_path).exists() {
-                issues.push(format!(
-                    "Component file not found: {}",
-                    config.component_path.display()
-                ));
+            if let ComponentSource::Path(path) = &config.component_source {
+                if !path.exists() {
+                    issues.push(format!(
+                        "Component file not found: {}",
+                        path.display()
+                    ));
+                }
             }
 
             // Check initial state if specified
@@ -414,7 +415,13 @@ async fn validate_manifest(manifest_path: PathBuf) -> Result<()> {
                 // Show summary
                 println!("\n{}", style("Manifest Summary:").bold().underlined());
                 println!("Actor Name: {}", style(&config.name).green());
-                println!("Component: {}", config.component_path.display());
+                
+                if let ComponentSource::Path(path) = &config.component_source {
+                    println!("Component: {}", path.display());
+                } else if let ComponentSource::Registry(uri) = &config.component_source {
+                    println!("Component: {}", uri);
+                }
+                
                 println!("Interface: {}", config.interface.implements);
 
                 if !config.interface.requires.is_empty() {

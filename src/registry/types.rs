@@ -26,6 +26,10 @@ pub enum RegistryError {
     IoError(#[from] std::io::Error),
     #[error("Resource exists: {0}")]
     ResourceExists(String),
+    #[error("JSON error: {0}")]
+    JsonError(#[from] serde_json::Error),
+    #[error("WalkDir error: {0}")]
+    WalkDirError(#[from] walkdir::Error),
 }
 
 /// Resource structure representing a resolved resource from a registry

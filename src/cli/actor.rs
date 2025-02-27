@@ -252,6 +252,7 @@ async fn start_actor(manifest: Option<PathBuf>, address: &str) -> Result<()> {
                         match crate::registry::resolver::resolve_actor_reference(
                             &path_str,
                             registry_path.as_deref(),
+                            None, // Registry manager not needed for file-based paths
                         ) {
                             Ok((resolved_path, _component_path)) => {
                                 println!(

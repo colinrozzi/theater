@@ -1,3 +1,4 @@
+use crate::registry::{ResourceType};
 use crate::Result;
 use clap::{Args, Subcommand};
 use std::path::PathBuf;

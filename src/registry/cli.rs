@@ -404,13 +404,9 @@ pub fn cmd_publish_component(
     let component_binary = fs::read(component_path)?;
 
     // Determine the component name
-    let component_name = name.unwrap_or_else(|| {
-        component_path
-            .file_stem()
-            .unwrap_or_default()
-            .to_string_lossy()
-            .to_string()
-    });
+    let component_name = name.unwrap_or_else(|| 
+        component_path.file_stem().unwrap_or_default().to_string_lossy().to_string()
+    );
 
     // Publish the component
     let resource_info = registry_manager.publish_component(
@@ -447,13 +443,9 @@ pub fn cmd_publish_manifest(
     let _: toml::Value = toml::from_str(&manifest_content)?;
 
     // Determine the manifest name
-    let manifest_name = name.unwrap_or_else(|| {
-        manifest_path
-            .file_stem()
-            .unwrap_or_default()
-            .to_string_lossy()
-            .to_string()
-    });
+    let manifest_name = name.unwrap_or_else(|| 
+        manifest_path.file_stem().unwrap_or_default().to_string_lossy().to_string()
+    );
 
     // Publish the manifest
     let resource_info = registry_manager.publish_manifest(

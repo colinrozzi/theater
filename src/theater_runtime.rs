@@ -264,6 +264,11 @@ impl TheaterRuntime {
                 let config = ManifestConfig::from_string(content)?;
                 (content.clone(), config)
             }
+            ManifestSource::Registry(uri) => {
+                // For now, just return an error since we haven't implemented registry resolution yet
+                error!("Registry URI manifest source not yet implemented: {}", uri);
+                return Err(anyhow::anyhow!("Registry URI manifest source not yet implemented"));
+            }
         };
 
         // start the actor in a new process

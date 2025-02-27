@@ -65,6 +65,7 @@ impl TheaterCommand {
             TheaterCommand::SpawnActor { manifest, .. } => match manifest {
                 ManifestSource::Path(path) => format!("SpawnActor from path: {}", path.display()),
                 ManifestSource::Content(_) => "SpawnActor from string content".to_string(),
+                &ManifestSource::Registry(_) => "SpawnActor from registry".to_string(),
             },
             TheaterCommand::StopActor { actor_id, .. } => {
                 format!("StopActor: {:?}", actor_id)

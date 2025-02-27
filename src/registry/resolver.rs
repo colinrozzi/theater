@@ -197,39 +197,48 @@ fn resolve_uri_actor_reference(
         RegistryError::InvalidFormat(format!("Invalid manifest format: {}", e))
     })?;
     
-    // Extract actor details
-    let actor_name = manifest
-        .get("name")
-        .and_then(|n| n.as_str())
-        .unwrap_or("unknown");
-
-    let actor_version = manifest
-        .get("version")
-        .and_then(|v| v.as_str())
-        .unwrap_or("0.0.0");
+    // Create variables to hold actor name and version for later use
+    let actor_name: String;
+    let actor_version: String;
     
-    // Check if component_path is a registry URI
-    let component_path = if let Some(component_path_val) = manifest.get("component_path") {
+    {
+        // Extract actor details in a separate scope
+        let name = manifest
+            .get("name")
+            .and_then(|n| n.as_str())
+            .unwrap_or("unknown");
+        actor_name = name.to_string();
+
+        let version = manifest
+            .get("version")
+            .and_then(|v| v.as_str())
+            .unwrap_or("0.0.0");
+        actor_version = version.to_string();
+    }
+    
+    // Separately handle component_path resolution
+    let component_path;
+    let mut temp_component_path = None;
+    
+    // First check if component_path is a registry URI
+    if let Some(component_path_val) = manifest.get("component_path") {
         if let Some(component_path_str) = component_path_val.as_str() {
             if component_path_str.starts_with("registry::") {
                 // This is a registry URI, resolve it
                 let component_resource = registry_manager.resolve(component_path_str)?;
                 
                 // Write component to a temporary file
-                let temp_component_path = temp_dir.join(format!("{}-{}.wasm", actor_name, actor_version));
-                std::fs::write(&temp_component_path, &component_resource.content).map_err(|e| {
+                let comp_path = temp_dir.join(format!("{}-{}.wasm", actor_name, actor_version));
+                std::fs::write(&comp_path, &component_resource.content).map_err(|e| {
                     RegistryError::RegistryError(format!("Failed to write component: {}", e))
                 })?;
                 
-                // Update the manifest with the temporary component path
-                if let Some(component_val) = manifest.get_mut("component_path") {
-                    *component_val = toml::Value::String(temp_component_path.to_string_lossy().to_string());
-                }
-                
-                temp_component_path
+                // Save for later update
+                temp_component_path = Some(comp_path.clone());
+                component_path = comp_path;
             } else {
                 // This is a regular path
-                PathBuf::from(component_path_str)
+                component_path = PathBuf::from(component_path_str);
             }
         } else {
             return Err(RegistryError::InvalidFormat("component_path is not a string".to_string()));
@@ -238,21 +247,42 @@ fn resolve_uri_actor_reference(
         return Err(RegistryError::InvalidFormat("component_path not found in manifest".to_string()));
     };
     
-    // Also handle init_state if it's a registry URI
-    if let Some(init_state_val) = manifest.get_mut("init_state") {
+    // Now update component_path in the manifest if needed
+    if let Some(path) = temp_component_path {
+        if let Some(component_val) = manifest.get_mut("component_path") {
+            *component_val = toml::Value::String(path.to_string_lossy().to_string());
+        }
+    }
+    
+    // Separately handle init_state update
+    let mut init_state_updated = false;
+    let mut temp_state_path = None;
+    
+    // First check if init_state exists and is a registry URI
+    if let Some(init_state_val) = manifest.get("init_state") {
         if let Some(init_state_str) = init_state_val.as_str() {
             if init_state_str.starts_with("registry::") {
                 // This is a registry URI, resolve it
                 let init_state_resource = registry_manager.resolve(init_state_str)?;
                 
                 // Write state to a temporary file
-                let temp_state_path = temp_dir.join(format!("{}-{}-state.json", actor_name, actor_version));
-                std::fs::write(&temp_state_path, &init_state_resource.content).map_err(|e| {
+                let state_path = temp_dir.join(format!("{}-{}-state.json", actor_name, actor_version));
+                std::fs::write(&state_path, &init_state_resource.content).map_err(|e| {
                     RegistryError::RegistryError(format!("Failed to write init state: {}", e))
                 })?;
                 
-                // Update the manifest
-                *init_state_val = toml::Value::String(temp_state_path.to_string_lossy().to_string());
+                // Remember the path for later update
+                temp_state_path = Some(state_path);
+                init_state_updated = true;
+            }
+        }
+    }
+    
+    // Now update init_state if we resolved it
+    if init_state_updated {
+        if let Some(path) = temp_state_path {
+            if let Some(init_state_val) = manifest.get_mut("init_state") {
+                *init_state_val = toml::Value::String(path.to_string_lossy().to_string());
             }
         }
     }
