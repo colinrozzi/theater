@@ -13,8 +13,8 @@ use wasmtime::component::{
 };
 use wasmtime::{Engine, Store};
 
+use crate::actor_store::ActorStore;
 use crate::config::ManifestConfig;
-use crate::store::ActorStore;
 use tracing::{error, info};
 use wasmtime::component::types::ComponentItem;
 

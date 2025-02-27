@@ -2,7 +2,7 @@ use crate::actor_executor::ActorError;
 use crate::wasm::ActorComponent;
 use crate::host::host_wrapper::HostFunctionBoundary;
 use crate::messages::TheaterCommand;
-use crate::store::ActorStore;
+use crate::actor_store::ActorStore;
 use crate::ChainEvent;
 use std::path::PathBuf;
 use tokio::sync::oneshot;

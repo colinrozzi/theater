@@ -1,6 +1,7 @@
 use crate::actor_executor::ActorExecutor;
 use crate::actor_executor::ActorOperation;
 use crate::actor_handle::ActorHandle;
+use crate::actor_store::ActorStore;
 use crate::config::{HandlerConfig, ManifestConfig};
 use crate::host::filesystem::FileSystemHost;
 use crate::host::handler::Handler;
@@ -12,7 +13,6 @@ use crate::host::supervisor::SupervisorHost;
 use crate::host::websocket_server::WebSocketServerHost;
 use crate::id::TheaterId;
 use crate::messages::{ActorMessage, TheaterCommand};
-use crate::store::ActorStore;
 use crate::wasm::ActorComponent;
 use crate::Result;
 use tokio::sync::mpsc::{Receiver, Sender};

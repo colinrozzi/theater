@@ -3,7 +3,7 @@ use wasmtime::component::{Lift, Lower, ComponentType};
 use crate::actor_executor::ActorError;
 use crate::config::HttpClientHandlerConfig;
 use crate::host::host_wrapper::HostFunctionBoundary;
-use crate::store::ActorStore;
+use crate::actor_store::ActorStore;
 use crate::wasm::{ActorComponent, ActorInstance};
 use std::future::Future;
 use anyhow::Result;

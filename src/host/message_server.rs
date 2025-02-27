@@ -1,8 +1,8 @@
 use crate::actor_executor::ActorError;
 use crate::actor_handle::ActorHandle;
+use crate::actor_store::ActorStore;
 use crate::host::host_wrapper::HostFunctionBoundary;
 use crate::messages::{ActorMessage, ActorRequest, ActorSend, TheaterCommand};
-use crate::store::ActorStore;
 use crate::wasm::{ActorComponent, ActorInstance};
 use crate::TheaterId;
 use anyhow::Result;
