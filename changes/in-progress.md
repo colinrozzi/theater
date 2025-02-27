@@ -6,6 +6,7 @@ This document tracks changes that are currently in progress for the Theater proj
 
 | Date | Change | Description | Status |
 |------|--------|-------------|--------|
+| 2025-02-26 | Registry | Use registry as the core manager of actor components, manifests, and initial state | Proposal|
 
 ## Recently Completed Changes
 

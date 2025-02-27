@@ -179,7 +179,7 @@ impl ManifestConfig {
                 serde_json::from_str::<serde_json::Value>(json_str)?;
                 Ok(Some(json_str.as_bytes().to_vec()))
             }
-            Some(InitialStateSource::Remote(url)) => {
+            Some(InitialStateSource::Remote(_url)) => {
                 // Placeholder for future implementation
                 Err(anyhow::anyhow!("Remote state sources not yet implemented"))
             }
