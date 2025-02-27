@@ -1,11 +1,11 @@
+use super::types::{RegistryConfig, RegistryLocation, RegistryManager};
+use super::uri::{RegistryUri, ResourceType};
 use super::{init_registry, list_actors, RegistryError};
-use super::types::{RegistryConfig, RegistryManager, ResourceType, RegistryLocation};
-use super::uri::RegistryUri;
 use crate::Result;
 use log::{debug, info, warn};
+use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::collections::HashMap;
 use walkdir::WalkDir;
 
 /// Initialize a new registry
@@ -327,7 +327,10 @@ pub fn cmd_create_registry_config(path: &Path) -> Result<()> {
     fs::create_dir_all(path.join("registry/manifests"))?;
     fs::create_dir_all(path.join("registry/states"))?;
 
-    info!("Registry configuration created at {:?}", path.join("registry-config.toml"));
+    info!(
+        "Registry configuration created at {:?}",
+        path.join("registry-config.toml")
+    );
     Ok(())
 }
 
@@ -361,7 +364,8 @@ pub fn cmd_list_registry_resources(
                 return Err(RegistryError::InvalidFormat(format!(
                     "Invalid resource type: {}",
                     rt_str
-                )).into())
+                ))
+                .into())
             }
         }
     } else {
@@ -369,18 +373,15 @@ pub fn cmd_list_registry_resources(
     };
 
     // List resources
-    let resources = registry_manager.list_resources(registry_name, resource_type.as_ref(), category)?;
+    let resources =
+        registry_manager.list_resources(registry_name, resource_type.as_ref(), category)?;
 
     println!("Resources in registry:");
     if resources.is_empty() {
         println!("  No resources found");
     } else {
         for resource in resources {
-            println!(
-                "  {} ({} bytes)",
-                resource.uri,
-                resource.metadata.size
-            );
+            println!("  {} ({} bytes)", resource.uri, resource.metadata.size);
             if let Some((algo, digest)) = &resource.metadata.hash {
                 println!("    Hash: {}:{}", algo, digest);
             }
@@ -403,10 +404,13 @@ pub fn cmd_publish_component(
     // Read the component file
     let component_binary = fs::read(component_path)?;
 
+    let fallback_name = component_path
+        .file_stem()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .to_string();
     // Determine the component name
-    let component_name = name.unwrap_or_else(|| 
-        component_path.file_stem().unwrap_or_default().to_string_lossy().to_string()
-    );
+    let component_name = name.unwrap_or_else(|| &fallback_name);
 
     // Publish the component
     let resource_info = registry_manager.publish_component(
@@ -442,10 +446,14 @@ pub fn cmd_publish_manifest(
     // Parse the manifest to validate it
     let _: toml::Value = toml::from_str(&manifest_content)?;
 
+    let fallback_name = manifest_path
+        .file_stem()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .to_string();
+
     // Determine the manifest name
-    let manifest_name = name.unwrap_or_else(|| 
-        manifest_path.file_stem().unwrap_or_default().to_string_lossy().to_string()
-    );
+    let manifest_name = name.unwrap_or_else(|| &fallback_name);
 
     // Publish the manifest
     let resource_info = registry_manager.publish_manifest(

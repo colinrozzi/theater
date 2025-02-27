@@ -1,4 +1,4 @@
-use crate::registry::{RegistryError, RegistryManager, RegistryUri, ResourceType};
+use crate::registry::{RegistryError, RegistryManager, RegistryUri};
 use crate::Result;
 use log::{debug, warn};
 use std::fs;
@@ -176,7 +176,7 @@ fn resolve_uri_actor_reference(
     registry_manager: &RegistryManager,
 ) -> Result<(PathBuf, PathBuf), RegistryError> {
     // Parse the URI
-    let uri = RegistryUri::parse(uri_str).map_err(|e| {
+    let _uri = RegistryUri::parse(uri_str).map_err(|e| {
         RegistryError::InvalidFormat(format!("Invalid registry URI: {}", e))
     })?;
 

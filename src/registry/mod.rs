@@ -73,16 +73,19 @@ pub fn init_registry(path: &Path) -> Result<()> {
     fs::create_dir_all(registry_path.join("manifests"))?;
     fs::create_dir_all(registry_path.join("cache"))?;
 
-    // Create default config with absolute paths
-    let config = RegistryConfig {
-        name: "theater-registry".to_string(),
-        description: "Actor registry for Theater runtime".to_string(),
-        version: "0.1.0".to_string(),
-        component_dir: registry_path.join("components"),
-        manifest_dir: registry_path.join("manifests"),
-        cache_dir: registry_path.join("cache"),
-        default_version_strategy: "latest".to_string(),
-        actor_search_paths: vec![PathBuf::from("../actors")],
+    // Create default config with filesystem registry
+    let mut locations = std::collections::HashMap::new();
+    locations.insert(
+        "local".to_string(),
+        types::RegistryLocation::FileSystem {
+            path: registry_path.clone()
+        },
+    );
+    
+    let config = types::RegistryConfig {
+        default: "local".to_string(),
+        locations,
+        aliases: std::collections::HashMap::new(),
     };
 
     // Write config.toml

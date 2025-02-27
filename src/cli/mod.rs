@@ -98,5 +98,5 @@ pub enum Commands {
     
     /// Manage registry with URI support
     #[command(subcommand)]
-    RegistryUri(registry_uri::RegistryUriArgs),
+    RegistryUri(registry_uri::RegistryUriCommand),
 }
