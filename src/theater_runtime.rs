@@ -9,7 +9,6 @@ use crate::Result;
 use crate::{config::ManifestSource, ManifestConfig};
 use std::collections::HashMap;
 use std::collections::HashSet;
-use std::path::PathBuf;
 use tokio::sync::mpsc::Receiver;
 use tokio::sync::mpsc::Sender;
 use tokio::sync::{mpsc, oneshot};

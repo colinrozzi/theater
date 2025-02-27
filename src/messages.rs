@@ -4,7 +4,6 @@ use crate::id::TheaterId;
 use crate::metrics::ActorMetrics;
 use crate::Result;
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
 use tokio::sync::oneshot;
 
 #[derive(Debug)]
