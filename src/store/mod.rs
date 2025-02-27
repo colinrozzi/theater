@@ -3,7 +3,6 @@
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use sha1::{Digest, Sha1};
-use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use tokio::fs;
 use tokio::io::AsyncWriteExt;
