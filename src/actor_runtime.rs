@@ -9,6 +9,7 @@ use crate::host::http_client::HttpClientHost;
 use crate::host::http_server::HttpServerHost;
 use crate::host::message_server::MessageServerHost;
 use crate::host::runtime::RuntimeHost;
+use crate::host::store::StoreHost;
 use crate::host::supervisor::SupervisorHost;
 use crate::host::websocket_server::WebSocketServerHost;
 use crate::id::TheaterId;
@@ -68,6 +69,9 @@ impl ActorRuntime {
                 }
                 HandlerConfig::Supervisor(config) => {
                     Handler::Supervisor(SupervisorHost::new(config.clone()))
+                }
+                HandlerConfig::Store(config) => {
+                    Handler::Store(StoreHost::new(config.clone(), content_store.clone()))
                 }
             };
             handlers.push(handler);

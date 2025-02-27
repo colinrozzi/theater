@@ -4,6 +4,7 @@ use crate::host::http_client::HttpClientHost;
 use crate::host::http_server::HttpServerHost;
 use crate::host::message_server::MessageServerHost;
 use crate::host::runtime::RuntimeHost;
+use crate::host::store::StoreHost;
 use crate::host::supervisor::SupervisorHost;
 use crate::host::websocket_server::WebSocketServerHost;
 use crate::wasm::{ActorComponent, ActorInstance};
@@ -17,6 +18,7 @@ pub enum Handler {
     Runtime(RuntimeHost),
     WebSocketServer(WebSocketServerHost),
     Supervisor(SupervisorHost),
+    Store(StoreHost),
 }
 
 impl Handler {
@@ -47,6 +49,7 @@ impl Handler {
                 .start(actor_handle)
                 .await
                 .expect("Error starting supervisor")),
+            Handler::Store(h) => Ok(h.start(actor_handle).await.expect("Error starting store")),
         }
     }
 
@@ -80,6 +83,10 @@ impl Handler {
                 .setup_host_functions(actor_component)
                 .await
                 .expect("Error setting up supervisor host functions")),
+            Handler::Store(h) => Ok(h
+                .setup_host_functions(actor_component)
+                .await
+                .expect("Error setting up store host functions")),
         }
     }
 
@@ -113,6 +120,10 @@ impl Handler {
                 .add_export_functions(actor_instance)
                 .await
                 .expect("Error adding functions to supervisor")),
+            Handler::Store(handler) => Ok(handler
+                .add_export_functions(actor_instance)
+                .await
+                .expect("Error adding functions to store")),
         }
     }
 
@@ -125,6 +136,7 @@ impl Handler {
             Handler::Runtime(_) => "runtime",
             Handler::WebSocketServer(_) => "websocket-server",
             Handler::Supervisor(_) => "supervisor",
+            Handler::Store(_) => "store",
         }
     }
 }

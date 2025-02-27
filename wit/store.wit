@@ -1,0 +1,47 @@
+package ntwk:theater;
+
+interface store {
+    /// Reference to content in the store
+    type content-ref = record {
+        hash: string,
+    };
+
+    /// Store content and return its ContentRef
+    store: func(content: list<u8>) -> result<content-ref, string>;
+    
+    /// Retrieve content by its reference
+    get: func(content-ref: content-ref) -> result<list<u8>, string>;
+    
+    /// Check if content exists
+    exists: func(content-ref: content-ref) -> result<bool, string>;
+    
+    /// Attach a label to content
+    label: func(label: string, content-ref: content-ref) -> result<_, string>;
+    
+    /// Get content references by label
+    get-by-label: func(label: string) -> result<list<content-ref>, string>;
+    
+    /// Remove a label
+    remove-label: func(label: string) -> result<_, string>;
+    
+    /// Remove a specific content reference from a label
+    remove-from-label: func(label: string, content-ref: content-ref) -> result<_, string>;
+    
+    /// Store content and immediately label it
+    put-at-label: func(label: string, content: list<u8>) -> result<content-ref, string>;
+    
+    /// Put content at a label, replacing any existing content
+    replace-content-at-label: func(label: string, content: list<u8>) -> result<content-ref, string>;
+    
+    /// Replace content at a label with a specific content reference
+    replace-at-label: func(label: string, content-ref: content-ref) -> result<_, string>;
+    
+    /// List all labels
+    list-labels: func() -> result<list<string>, string>;
+    
+    /// List all content references
+    list-all-content: func() -> result<list<content-ref>, string>;
+    
+    /// Calculate total size of all content
+    calculate-total-size: func() -> result<u64, string>;
+}

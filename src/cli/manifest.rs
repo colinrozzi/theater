@@ -443,6 +443,7 @@ async fn validate_manifest(manifest_path: PathBuf) -> Result<()> {
                             }
                             HandlerConfig::HttpClient(_) => println!("  - HTTP Client"),
                             HandlerConfig::Runtime(_) => println!("  - Runtime"),
+                            HandlerConfig::Store(_) => println!("  - Store"),
                         }
                     }
                 }
@@ -530,6 +531,7 @@ async fn list_templates(detailed: bool) -> Result<()> {
                     HandlerConfig::FileSystem(_) => handler_types.push("File System"),
                     HandlerConfig::HttpClient(_) => handler_types.push("HTTP Client"),
                     HandlerConfig::Runtime(_) => handler_types.push("Runtime"),
+                    HandlerConfig::Store(_) => handler_types.push("Store"),
                 }
             }
 

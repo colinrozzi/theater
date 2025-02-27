@@ -81,6 +81,8 @@ pub enum HandlerConfig {
     WebSocketServer(WebSocketServerHandlerConfig),
     #[serde(rename = "supervisor")]
     Supervisor(SupervisorHostConfig),
+    #[serde(rename = "store")]
+    Store(StoreHandlerConfig),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -111,6 +113,9 @@ pub struct FileSystemHandlerConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HttpClientHandlerConfig {}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StoreHandlerConfig {}
 
 impl ManifestConfig {
     pub fn from_file<P: AsRef<std::path::Path>>(path: P) -> anyhow::Result<Self> {
