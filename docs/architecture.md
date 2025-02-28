@@ -36,6 +36,15 @@ The `StateChain` implements a verifiable history of all state transitions:
 - Complete history can be verified for tampering
 - Supports persistence to disk and reloading
 
+### ContentStore
+
+The `ContentStore` provides a content-addressable storage system for actors and the runtime:
+- Stores data using SHA-1 hash-based identifiers
+- Provides label-based organization and retrieval
+- Ensures efficient deduplication of identical content
+- Integrated with state management for persistence
+- See [Store System](store/README.md) for details
+
 ## Message Flow
 
 ```

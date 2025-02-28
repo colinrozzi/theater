@@ -144,7 +144,7 @@ This enables:
 
 ### Persistence
 
-Chains can be saved and loaded:
+Chains can be saved and loaded using the [Store System](store/README.md) for content-addressable storage:
 
 ```rust
 // Save chain to disk

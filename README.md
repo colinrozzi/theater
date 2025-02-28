@@ -8,6 +8,7 @@ A WebAssembly actor system that enables state management, verification, and flex
 
 - **Actor State Management**: Actors maintain verifiable state with complete history
 - **Hash Chain Verification**: All state changes are recorded in a verifiable hash chain
+- **Content-Addressable Storage**: Built-in store system for efficient data persistence and sharing
 - **Secure Actor Identification**: Cryptographically secure UUID-based identification system
 - **Multiple Interface Types**: Support for:
   - Actor-to-actor messaging
@@ -19,6 +20,7 @@ A WebAssembly actor system that enables state management, verification, and flex
 ## Documentation
 
 - [Why Theater](docs/why-theater.md) - Core concepts and motivation
+- [Store System](docs/store/README.md) - Content-addressable storage documentation
 - [Making Changes](docs/making-changes.md) - Guide for contributing changes
 - [Current Changes](/changes/in-progress.md) - Overview of work in progress
 

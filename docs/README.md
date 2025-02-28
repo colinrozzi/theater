@@ -7,6 +7,7 @@
 ## Core Concepts
 - [Actor System Architecture](architecture.md) - Core components and message flow
 - [State Management & Hash Chains](state-management.md) - Verifiable state transitions
+- [Store System](store/README.md) - Content-addressable storage for actors
 - [Actor ID System](actor-ids.md) - UUID-based identification system
 - [Supervision Model](supervision.md) - Actor lifecycle and error handling
 - [Interface System](interface-system.md) - Actor interfaces and message handling
@@ -28,6 +29,7 @@
 - [Troubleshooting Guide](troubleshooting.md) - Common issues and solutions
 
 ## Recent Updates
+- **February 2025**: Added complete store system documentation with examples and patterns
 - **February 2025**: Updated architecture documentation with detailed component descriptions
 - **February 2025**: Enhanced state management documentation with implementation details
 - **February 2025**: Expanded supervision documentation with pattern examples
