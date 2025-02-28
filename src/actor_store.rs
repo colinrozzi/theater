@@ -1,4 +1,5 @@
 use crate::chain::{ChainEvent, StateChain};
+use crate::events::ChainEventData;
 use crate::id::TheaterId;
 use crate::messages::TheaterCommand;
 use crate::store::ContentStore;
@@ -46,9 +47,12 @@ impl ActorStore {
         self.state = state;
     }
 
-    pub fn record_event(&self, event_type: String, data: Vec<u8>) -> ChainEvent {
+    pub async fn record_event(&self, event_data: ChainEventData) -> ChainEvent {
         let mut chain = self.chain.lock().unwrap();
-        chain.add_event(event_type, data)
+        chain
+            .add_typed_event(event_data)
+            .await
+            .expect("Failed to record event")
     }
 
     pub fn verify_chain(&self) -> bool {

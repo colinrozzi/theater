@@ -1,3 +1,4 @@
+use crate::events::ChainEventData;
 use crate::ActorStore;
 use anyhow::Result;
 use serde::Serialize;
@@ -20,32 +21,9 @@ impl HostFunctionBoundary {
     pub fn wrap<Args, Return, F>(
         &self,
         store: &mut StoreContextMut<'_, ActorStore>,
-        args: Args,
-        f: F,
-    ) -> Result<Return>
-    where
-        Args: Serialize + Clone,
-        Return: Serialize + Clone,
-        F: FnOnce(Args) -> Result<Return>,
-    {
-        // Record outbound call
-        let args_json = serde_json::to_vec(&args)?;
-        store.data_mut().record_event(
-            format!("{}/{}_call", self.interface_name, self.function_name),
-            args_json,
-        );
-
-        // Execute the host function
-        let result = f(args)?;
-
-        // Record the return value
-        let result_json = serde_json::to_vec(&result)?;
-        store.data_mut().record_event(
-            format!("{}/{}_return", self.interface_name, self.function_name),
-            result_json,
-        );
-
-        Ok(result)
+        event_data: ChainEventData,
+    ) -> Result<()> {
+        store.data_mut().record_event(event_data);
+        Ok(())
     }
 }
-

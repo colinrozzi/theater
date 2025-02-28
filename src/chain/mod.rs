@@ -30,38 +30,7 @@ pub struct ChainEvent {
     pub description: Option<String>,
 }
 
-impl ChainEvent {
-    /// Create a new event from a typed event data object
-    pub fn new<T: ChainEventData>(
-        event_data: T,
-        parent_hash: Option<Vec<u8>>,
-    ) -> Result<Self, serde_json::Error> {
-        let data = event_data.to_json()?;
-        let event_type = event_data.event_type().to_string();
-        let description = Some(event_data.description());
-
-        // Hash calculation will be done in add_event
-        // This is just a placeholder
-        let hash = Vec::new();
-
-        Ok(Self {
-            hash,
-            parent_hash,
-            event_type,
-            data,
-            timestamp: std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_secs(),
-            description,
-        })
-    }
-
-    /// Try to parse the event data as a specific event type
-    pub fn parse_data<T: ChainEventData>(&self) -> Result<T, serde_json::Error> {
-        serde_json::from_slice(&self.data)
-    }
-}
+impl ChainEvent {}
 
 impl fmt::Display for ChainEvent {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -164,22 +133,12 @@ impl StateChain {
     }
 
     /// Add a typed event to the chain
-    pub async fn add_typed_event<T: ChainEventData>(
+    pub async fn add_typed_event(
         &mut self,
-        event_data: T,
+        event_data: ChainEventData,
     ) -> Result<ChainEvent, serde_json::Error> {
         // Create initial event structure without hash
-        let mut event = ChainEvent {
-            hash: Vec::new(), // Will be set after storage
-            parent_hash: self.current_hash.clone(),
-            event_type: event_data.event_type().to_string(),
-            data: event_data.to_json()?,
-            timestamp: std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_secs(),
-            description: Some(event_data.description()),
-        };
+        let mut event = event_data.to_chain_event(self.current_hash.clone());
 
         // Store the event data in the content store
         let serialized_event = serde_json::to_vec(&event)?;
@@ -245,77 +204,6 @@ impl StateChain {
         }
 
         Ok(event)
-    }
-
-    // Convenience methods for specific event types
-
-    pub async fn add_http_event(
-        &mut self,
-        event: HttpEvent,
-    ) -> Result<ChainEvent, serde_json::Error> {
-        self.add_typed_event(event).await
-    }
-
-    pub async fn add_message_event(
-        &mut self,
-        event: MessageEvent,
-    ) -> Result<ChainEvent, serde_json::Error> {
-        self.add_typed_event(event).await
-    }
-
-    pub async fn add_filesystem_event(
-        &mut self,
-        event: FilesystemEvent,
-    ) -> Result<ChainEvent, serde_json::Error> {
-        self.add_typed_event(event).await
-    }
-
-    pub async fn add_runtime_event(
-        &mut self,
-        event: RuntimeEvent,
-    ) -> Result<ChainEvent, serde_json::Error> {
-        self.add_typed_event(event).await
-    }
-
-    pub async fn add_supervisor_event(
-        &mut self,
-        event: SupervisorEvent,
-    ) -> Result<ChainEvent, serde_json::Error> {
-        self.add_typed_event(event).await
-    }
-
-    // Legacy method for backward compatibility
-    pub fn add_event(&mut self, event_type: String, data: Vec<u8>) -> ChainEvent {
-        let event = ChainEvent {
-            hash: Vec::new(), // Will be set below
-            parent_hash: self.current_hash.clone(),
-            event_type,
-            data,
-            timestamp: std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_secs(),
-            description: None,
-        };
-
-        // No error handling for backward compatibility
-        match self.finalize_and_store_event(event) {
-            Ok(e) => e,
-            Err(err) => {
-                tracing::error!("Error storing event: {}", err);
-                ChainEvent {
-                    hash: Vec::new(),
-                    parent_hash: self.current_hash.clone(),
-                    event_type: "error".to_string(),
-                    data: Vec::new(),
-                    timestamp: std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .unwrap()
-                        .as_secs(),
-                    description: Some(format!("Error storing event: {}", err)),
-                }
-            }
-        }
     }
 
     pub fn verify(&self) -> bool {

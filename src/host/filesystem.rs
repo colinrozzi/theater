@@ -1,6 +1,8 @@
 use crate::actor_executor::ActorError;
 use crate::actor_handle::ActorHandle;
 use crate::config::FileSystemHandlerConfig;
+use crate::events::filesystem::FilesystemEventData;
+use crate::events::{ChainEventData, EventData};
 use crate::host::host_wrapper::HostFunctionBoundary;
 use crate::wasm::ActorComponent;
 use crate::wasm::ActorInstance;
@@ -76,24 +78,62 @@ impl FileSystemHost {
             move |mut ctx: StoreContextMut<'_, ActorStore>,
                   (file_path,): (String,)|
                   -> Result<(Result<Vec<u8>, String>,)> {
-                boundary.wrap(&mut ctx, (file_path.clone(),), |(file_path,)| {
-                    let file_path = allowed_path.join(Path::new(&file_path));
-                    info!("Reading file {:?}", file_path);
+                ctx.data_mut().record_event(ChainEventData {
+                    event_type: "ntwk:theater/filesystem/read-file".to_string(),
+                    data: EventData::Filesystem(FilesystemEventData::FileReadCall {
+                        path: file_path.clone(),
+                    }),
+                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                    description: Some(format!("Read file {:?}", file_path)),
+                });
+                let file_path = allowed_path.join(Path::new(&file_path));
+                info!("Reading file {:?}", file_path);
 
-                    let file = match File::open(&file_path) {
-                        Ok(f) => f,
-                        Err(e) => return Ok((Err(e.to_string()),)),
-                    };
-
-                    let mut reader = BufReader::new(file);
-                    let mut contents = Vec::new();
-                    if let Err(e) = reader.read_to_end(&mut contents) {
+                let file = match File::open(&file_path) {
+                    Ok(f) => f,
+                    Err(e) => {
+                        ctx.data_mut().record_event(ChainEventData {
+                            event_type: "ntwk:theater/filesystem/read-file".to_string(),
+                            data: EventData::Filesystem(FilesystemEventData::Error {
+                                operation: "open".to_string(),
+                                path: file_path.to_string_lossy().to_string(),
+                                message: e.to_string(),
+                            }),
+                            timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                            description: Some(format!("Error opening file {:?}", file_path)),
+                        });
                         return Ok((Err(e.to_string()),));
                     }
+                };
 
-                    info!("File read successfully");
-                    Ok((Ok(contents),))
-                })
+                let mut reader = BufReader::new(file);
+                let mut contents = Vec::new();
+                if let Err(e) = reader.read_to_end(&mut contents) {
+                    ctx.data_mut().record_event(ChainEventData {
+                        event_type: "ntwk:theater/filesystem/read-file".to_string(),
+                        data: EventData::Filesystem(FilesystemEventData::Error {
+                            operation: "read".to_string(),
+                            path: file_path.to_string_lossy().to_string(),
+                            message: e.to_string(),
+                        }),
+                        timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                        description: Some(format!("Error reading file {:?}", file_path)),
+                    });
+                    return Ok((Err(e.to_string()),));
+                }
+
+                ctx.data_mut().record_event(ChainEventData {
+                    event_type: "ntwk:theater/filesystem/read-file".to_string(),
+                    data: EventData::Filesystem(FilesystemEventData::FileReadResult {
+                        bytes_read: contents.len(),
+                        success: true,
+                    }),
+                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                    description: Some(format!("Read file {:?}", file_path)),
+                });
+
+                info!("File read successfully");
+                Ok((Ok(contents),))
             },
         );
 
