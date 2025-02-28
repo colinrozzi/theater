@@ -1,5 +1,4 @@
 use anyhow::Result;
-// use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt::Debug;
@@ -72,19 +71,11 @@ impl ActorComponent {
     pub async fn new(config: &ManifestConfig, actor_store: ActorStore) -> Result<Self> {
         // Load WASM component
         let engine = Engine::new(wasmtime::Config::new().async_support(true))?;
-        info!(
-            "Loading WASM component from: {}",
-            config.component_path.display()
-        );
-        let wasm_bytes =
-            std::fs::read(&config.component_path).map_err(|e| WasmError::WasmError {
-                context: "component loading",
-                message: format!(
-                    "Failed to load WASM component from {}: {}",
-                    config.component_path.display(),
-                    e
-                ),
-            })?;
+        info!("Loading WASM component from: {}", config.component_path);
+        let wasm_bytes = actor_store
+            .content_store
+            .resolve_reference(&config.component_path)
+            .await?;
 
         let component = Component::new(&engine, &wasm_bytes)?;
         let linker = Linker::new(&engine);

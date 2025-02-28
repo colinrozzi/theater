@@ -10,9 +10,9 @@ pub struct ComponentConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ManifestConfig {
     pub name: String,
-    pub component_path: PathBuf,
+    pub component_path: String,
     #[serde(default)]
-    pub init_state: Option<PathBuf>,
+    pub init_state: Option<String>,
     #[serde(default)]
     pub interface: InterfacesConfig,
     #[serde(default)]
@@ -122,6 +122,20 @@ impl ManifestConfig {
         let content = std::fs::read_to_string(path)?;
         let config: ManifestConfig = toml::from_str(&content)?;
         Ok(config)
+    }
+
+    pub fn from_str(content: &str) -> anyhow::Result<Self> {
+        let config: ManifestConfig = toml::from_str(content)?;
+        Ok(config)
+    }
+
+    pub fn from_vec(content: Vec<u8>) -> anyhow::Result<Self> {
+        let config: ManifestConfig = toml::from_str(&String::from_utf8(content)?)?;
+        Ok(config)
+    }
+
+    pub fn name(&self) -> &str {
+        &self.name
     }
 
     pub fn implements_interface(&self, interface_name: &str) -> bool {

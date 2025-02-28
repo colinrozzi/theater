@@ -725,6 +725,35 @@ impl ContentStore {
         resp_rx.await.context("Shutdown operation failed")?;
         Ok(())
     }
+
+    pub async fn resolve_reference(&self, reference: &str) -> Result<Vec<u8>> {
+        if reference.starts_with("store:") {
+            if reference.starts_with("store:hash:") {
+                // Direct hash reference
+                let hash = reference.strip_prefix("store:hash:").unwrap();
+                let content_ref = ContentRef::new(hash.to_string());
+                self.get(content_ref).await
+            } else {
+                // Label reference
+                let label = reference.strip_prefix("store:").unwrap().to_string();
+                let refs = self.get_by_label(label.clone()).await?;
+
+                match refs.len() {
+                    0 => Err(anyhow::anyhow!("No content found with label: {}", label)),
+                    1 => self.get(refs[0].clone()).await,
+                    _ => Err(anyhow::anyhow!(
+                        "Ambiguous label reference, multiple matches found: {}",
+                        label
+                    )),
+                }
+            }
+        } else {
+            // Regular file path
+            Ok(tokio::fs::read(reference)
+                .await
+                .expect(format!("Failed to read file: {}", reference).as_str()))
+        }
+    }
 }
 
 /// Run the content store in its own thread

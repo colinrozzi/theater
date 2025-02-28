@@ -6,7 +6,6 @@ use futures::sink::SinkExt;
 use futures::stream::StreamExt;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
-use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{mpsc, Mutex};
@@ -21,7 +20,7 @@ use crate::theater_runtime::TheaterRuntime;
 #[derive(Debug, Serialize, Deserialize)]
 pub enum ManagementCommand {
     StartActor {
-        manifest: PathBuf,
+        manifest: String,
     },
     StopActor {
         id: TheaterId,

@@ -7,7 +7,6 @@ use dialoguer::{theme::ColorfulTheme, Input, Select};
 use futures::sink::SinkExt;
 use futures::stream::StreamExt;
 use indicatif::{ProgressBar, ProgressStyle};
-use std::path::PathBuf;
 use std::time::Duration;
 use tokio::net::TcpStream;
 use tokio::signal;
@@ -17,7 +16,7 @@ use tracing::{debug, error};
 
 // Legacy commands that match the original CLI structure
 pub enum Commands {
-    Start { manifest: Option<PathBuf> },
+    Start { manifest: Option<String> },
     Stop { id: Option<String> },
     List { detailed: bool },
     Subscribe { id: Option<String> },
@@ -50,31 +49,10 @@ pub async fn run_interactive_mode(address: &str) -> Result<()> {
                 let manifest_str = Input::<String>::new()
                     .with_prompt("Enter manifest path")
                     .interact_text()?;
-                let path = PathBuf::from(manifest_str);
-                
-                // Convert relative path to absolute
-                let manifest = if path.is_relative() {
-                    match std::env::current_dir() {
-                        Ok(current_dir) => {
-                            let abs_path = current_dir.join(&path);
-                            println!("{} Resolving relative path {} to {}", 
-                                style("INFO:").blue().bold(),
-                                style(path.display()).dim(),
-                                style(abs_path.display()).green());
-                            abs_path
-                        },
-                        Err(e) => {
-                            println!("{} {}", style("Error:").red().bold(), e);
-                            continue;
-                        }
-                    }
-                } else {
-                    path
-                };
 
                 execute_command(
                     Commands::Start {
-                        manifest: Some(manifest),
+                        manifest: Some(manifest_str),
                     },
                     address,
                 )
@@ -199,27 +177,8 @@ pub async fn execute_command(command: Commands, address: &str) -> Result<()> {
             let manifest_path = match manifest {
                 Some(path) => path,
                 None => {
-                    let path_str = Input::<String>::new()
-                        .with_prompt("Enter manifest path")
-                        .interact_text()?;
-                    let path = PathBuf::from(path_str);
-                    
-                    // Convert relative path to absolute
-                    if path.is_relative() {
-                        match std::env::current_dir() {
-                            Ok(current_dir) => {
-                                let abs_path = current_dir.join(&path);
-                                println!("{} Resolving relative path {} to {}", 
-                                    style("INFO:").blue().bold(),
-                                    style(path.display()).dim(),
-                                    style(abs_path.display()).green());
-                                abs_path
-                            },
-                            Err(e) => return Err(anyhow::anyhow!("Failed to get current directory: {}", e))
-                        }
-                    } else {
-                        path
-                    }
+                    // Error
+                    return Err(anyhow::anyhow!("No manifest path provided"));
                 }
             };
 

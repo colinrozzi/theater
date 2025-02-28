@@ -12,6 +12,7 @@ pub struct ActorStore {
     pub theater_tx: Sender<TheaterCommand>,
     pub chain: Arc<Mutex<StateChain>>,
     pub state: Option<Vec<u8>>,
+    pub content_store: ContentStore,
 }
 
 impl ActorStore {
@@ -23,8 +24,9 @@ impl ActorStore {
         Self {
             id: id.clone(),
             theater_tx,
-            chain: Arc::new(Mutex::new(StateChain::new(id, content_store))),
+            chain: Arc::new(Mutex::new(StateChain::new(id, content_store.clone()))),
             state: Some(vec![]),
+            content_store,
         }
     }
 

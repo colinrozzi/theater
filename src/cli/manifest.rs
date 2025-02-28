@@ -33,7 +33,7 @@ pub enum ManifestCommands {
 
         /// Path to the WASM component
         #[arg(short, long)]
-        component: Option<PathBuf>,
+        component: Option<String>,
     },
 
     /// Validate a manifest file
@@ -67,7 +67,7 @@ async fn create_manifest(
     output: Option<PathBuf>,
     template: Option<PathBuf>,
     name: Option<String>,
-    component: Option<PathBuf>,
+    component: Option<String>,
 ) -> Result<()> {
     // Header
     println!("{}", style("Theater Actor Manifest Creator").bold().cyan());
@@ -94,7 +94,7 @@ async fn create_manifest(
         // Create a basic default manifest
         ManifestConfig {
             name: String::new(),
-            component_path: PathBuf::new(),
+            component_path: String::new(),
             init_state: None,
             interface: InterfacesConfig::default(),
             handlers: Vec::new(),
@@ -124,18 +124,8 @@ async fn create_manifest(
     manifest.component_path = match component {
         Some(p) => p,
         None => {
-            let default = if !manifest.component_path.as_os_str().is_empty() {
-                manifest.component_path.clone()
-            } else {
-                PathBuf::from(format!("{}.wasm", manifest.name))
-            };
-
-            let path_str: String = Input::with_theme(&ColorfulTheme::default())
-                .with_prompt("WASM component path")
-                .default(default.to_string_lossy().to_string())
-                .interact()?;
-
-            PathBuf::from(path_str)
+            // error
+            Err(anyhow::anyhow!("Component path is required"))?
         }
     };
 
@@ -188,7 +178,7 @@ async fn create_manifest(
             .default("initial_state.json".to_string())
             .interact()?;
 
-        manifest.init_state = Some(PathBuf::from(state_path));
+        manifest.init_state = Some(state_path);
     } else {
         manifest.init_state = None;
     }
@@ -366,14 +356,14 @@ async fn validate_manifest(manifest_path: PathBuf) -> Result<()> {
             if !Path::new(&config.component_path).exists() {
                 issues.push(format!(
                     "Component file not found: {}",
-                    config.component_path.display()
+                    config.component_path
                 ));
             }
 
             // Check initial state if specified
             if let Some(path) = config.init_state {
                 if !Path::new(&path).exists() {
-                    issues.push(format!("Initial state file not found: {}", path.display()));
+                    issues.push(format!("Initial state file not found: {}", path));
                 }
             }
 
@@ -414,7 +404,7 @@ async fn validate_manifest(manifest_path: PathBuf) -> Result<()> {
                 // Show summary
                 println!("\n{}", style("Manifest Summary:").bold().underlined());
                 println!("Actor Name: {}", style(&config.name).green());
-                println!("Component: {}", config.component_path.display());
+                println!("Component: {}", config.component_path);
                 println!("Interface: {}", config.interface.implements);
 
                 if !config.interface.requires.is_empty() {

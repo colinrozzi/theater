@@ -32,7 +32,7 @@ pub struct ActorProcess {
     pub operation_tx: mpsc::Sender<ActorOperation>,
     pub children: HashSet<TheaterId>,
     pub status: ActorStatus,
-    pub manifest_path: PathBuf,
+    pub manifest_path: String,
 }
 
 impl TheaterRuntime {
@@ -237,7 +237,7 @@ impl TheaterRuntime {
 
     async fn spawn_actor(
         &mut self,
-        manifest_path: PathBuf,
+        manifest_path: String,
         parent_id: Option<TheaterId>,
     ) -> Result<TheaterId> {
         debug!(
@@ -245,11 +245,11 @@ impl TheaterRuntime {
             manifest_path
         );
 
-        // Check if manifest exists
-        if !manifest_path.exists() {
-            error!("Manifest file does not exist: {:?}", manifest_path);
-            return Err(anyhow::anyhow!("Manifest file does not exist"));
-        }
+        let manifest_str = self
+            .content_store
+            .resolve_reference(manifest_path.as_str())
+            .await?;
+        let manifest = ManifestConfig::from_vec(manifest_str)?;
 
         // start the actor in a new process
         let (response_tx, response_rx) = tokio::sync::oneshot::channel();
@@ -257,7 +257,6 @@ impl TheaterRuntime {
         let (operation_tx, operation_rx) = mpsc::channel(100);
         let theater_tx = self.theater_tx.clone();
 
-        let manifest_path_clone = manifest_path.clone();
         let actor_operation_tx = operation_tx.clone();
         let content_store = self.content_store.clone();
         let actor_runtime_process = tokio::spawn(async move {
@@ -265,8 +264,6 @@ impl TheaterRuntime {
             debug!("Initializing actor runtime");
             debug!("Starting actor runtime");
             response_tx.send(actor_id.clone()).unwrap();
-            let manifest =
-                ManifestConfig::from_file(&manifest_path_clone).expect("Failed to load manifest");
             ActorRuntime::start(
                 actor_id,
                 &manifest,

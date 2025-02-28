@@ -30,7 +30,7 @@ pub enum ActorCommands {
     Start {
         /// Path to the actor manifest
         #[arg(value_name = "MANIFEST")]
-        manifest: Option<PathBuf>,
+        manifest: Option<String>,
     },
     /// Stop an actor
     Stop {
@@ -143,7 +143,7 @@ pub async fn handle_actor_command(args: ActorArgs) -> Result<()> {
 }
 
 /// Connect to the theater server
-async fn connect_to_server(address: &str) -> Result<Framed<TcpStream, LengthDelimitedCodec>> {
+pub async fn connect_to_server(address: &str) -> Result<Framed<TcpStream, LengthDelimitedCodec>> {
     let spinner = ProgressBar::new_spinner();
     spinner.set_style(
         ProgressStyle::default_spinner()
@@ -218,32 +218,10 @@ async fn select_actor(id_opt: Option<String>, address: &str) -> Result<TheaterId
 }
 
 // Implementation of basic actor commands reusing existing functionality
-async fn start_actor(manifest: Option<PathBuf>, address: &str) -> Result<()> {
+async fn start_actor(manifest: Option<String>, address: &str) -> Result<()> {
     // Convert relative path to absolute path based on current directory
     let absolute_manifest = match manifest {
-        Some(path) => {
-            if path.is_relative() {
-                // Get the current directory and join with the relative path
-                match std::env::current_dir() {
-                    Ok(current_dir) => {
-                        let abs_path = current_dir.join(&path);
-                        println!(
-                            "{} Resolving relative path {} to {}",
-                            style("INFO:").blue().bold(),
-                            style(path.display()).dim(),
-                            style(abs_path.display()).green()
-                        );
-                        abs_path
-                    }
-                    Err(e) => {
-                        return Err(anyhow::anyhow!("Failed to get current directory: {}", e))
-                    }
-                }
-            } else {
-                // Already absolute
-                path
-            }
-        }
+        Some(path) => path,
         None => Err(anyhow::anyhow!("No manifest file provided"))?,
     };
 

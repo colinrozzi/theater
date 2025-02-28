@@ -4,6 +4,7 @@ pub mod manifest;
 pub mod system;
 pub mod dev;
 pub mod legacy;
+pub mod store;
 
 use clap::{Parser, Subcommand};
 
@@ -30,7 +31,7 @@ pub enum Commands {
     Start {
         /// Path to the actor manifest
         #[arg(value_name = "MANIFEST")]
-        manifest: Option<std::path::PathBuf>,
+        manifest: Option<String>,
         
         /// Address of the theater server
         #[arg(short, long, default_value = "127.0.0.1:9000")]
@@ -89,4 +90,8 @@ pub enum Commands {
     /// Development utilities
     #[command(subcommand)]
     Dev(dev::DevCommands),
+
+    /// Content-addressed store operations
+    #[command(subcommand)]
+    Store(store::StoreCommands),
 }

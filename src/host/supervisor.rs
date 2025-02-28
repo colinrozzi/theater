@@ -4,7 +4,6 @@ use crate::host::host_wrapper::HostFunctionBoundary;
 use crate::messages::TheaterCommand;
 use crate::actor_store::ActorStore;
 use crate::ChainEvent;
-use std::path::PathBuf;
 use tokio::sync::oneshot;
 use std::future::Future;
 use wasmtime::StoreContextMut;
@@ -70,7 +69,7 @@ impl SupervisorHost {
                         let (response_tx, response_rx) = oneshot::channel();
                         match theater_tx
                             .send(TheaterCommand::SpawnActor {
-                                manifest_path: PathBuf::from(manifest),
+                                manifest_path: manifest,
                                 response_tx,
                                 parent_id: Some(parent_id),
                             })
