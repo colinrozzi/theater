@@ -54,7 +54,7 @@ pub enum TheaterCommand {
     },
     StoreOperation {
         command: StoreCommand,
-        response_tx: oneshot::Sender<StoreResponse>,
+        response_tx: oneshot::Sender<Result<StoreResponse>>,
     },
 }
 

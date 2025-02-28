@@ -5,7 +5,6 @@ pub mod actor_handle;
 pub mod actor_runtime;
 pub mod actor_store;
 pub mod chain;
-pub mod cli;
 pub mod config;
 pub mod events;
 pub mod host;

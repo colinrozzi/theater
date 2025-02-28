@@ -2,8 +2,11 @@ use crate::actor_executor::{ActorError, ActorOperation};
 use crate::actor_runtime::ActorRuntime;
 use crate::chain::ChainEvent;
 use crate::id::TheaterId;
-use crate::messages::{ActorMessage, ActorSend, ActorStatus, TheaterCommand};
+use crate::messages::{
+    ActorMessage, ActorSend, ActorStatus, StoreCommand, StoreResponse, TheaterCommand,
+};
 use crate::metrics::ActorMetrics;
+use crate::store::ContentRef;
 use crate::store::ContentStore;
 use crate::wasm::Event;
 use crate::ManifestConfig;
@@ -229,6 +232,21 @@ impl TheaterRuntime {
                         }
                     }
                 }
+                TheaterCommand::StoreOperation {
+                    command,
+                    response_tx,
+                } => {
+                    debug!("Processing store operation: {:?}", command);
+                    match self.handle_store_command(command).await {
+                        Ok(response) => {
+                            let _ = response_tx.send(Ok(response));
+                        }
+                        Err(e) => {
+                            error!("Failed to process store operation: {}", e);
+                            let _ = response_tx.send(Err(e));
+                        }
+                    }
+                }
             };
         }
         info!("Theater runtime shutting down");
@@ -245,11 +263,17 @@ impl TheaterRuntime {
             manifest_path
         );
 
-        let manifest_str = self
-            .content_store
-            .resolve_reference(manifest_path.as_str())
-            .await?;
-        let manifest = ManifestConfig::from_vec(manifest_str)?;
+        // check if the manifest is a valid path OR starts with store:
+        let manifest: ManifestConfig;
+        if manifest_path.starts_with("store:") || PathBuf::from(manifest_path.clone()).exists() {
+            let manifest_bytes = self
+                .content_store
+                .resolve_reference(manifest_path.as_str())
+                .await?;
+            manifest = ManifestConfig::from_vec(manifest_bytes)?;
+        } else {
+            manifest = ManifestConfig::from_str(manifest_path.as_str())?;
+        };
 
         // start the actor in a new process
         let (response_tx, response_rx) = tokio::sync::oneshot::channel();
@@ -477,5 +501,80 @@ impl TheaterRuntime {
 
         info!("Theater runtime shutdown complete");
         Ok(())
+    }
+
+    pub async fn handle_store_command(&mut self, command: StoreCommand) -> Result<StoreResponse> {
+        match command {
+            StoreCommand::Get { content_ref } => {
+                let content = self
+                    .content_store
+                    .get(ContentRef::from_str(&content_ref))
+                    .await?;
+                Ok(StoreResponse::Content(content))
+            }
+            StoreCommand::Store { content } => {
+                let content_ref = self.content_store.store(content).await?;
+                Ok(StoreResponse::ContentRef(content_ref.hash().to_string()))
+            }
+            StoreCommand::Exists { content_ref } => {
+                let exists = self
+                    .content_store
+                    .exists(ContentRef::from_str(&content_ref))
+                    .await?;
+                Ok(StoreResponse::Exists(exists))
+            }
+            StoreCommand::GetByLabel { label } => {
+                let content_refs = self.content_store.get_by_label(label).await?;
+                Ok(StoreResponse::ContentRefs(
+                    content_refs
+                        .into_iter()
+                        .map(|r| r.hash().to_string())
+                        .collect(),
+                ))
+            }
+            StoreCommand::Label { label, content_ref } => {
+                self.content_store
+                    .label(label, ContentRef::from_str(&content_ref))
+                    .await?;
+                Ok(StoreResponse::ContentRef(content_ref))
+            }
+            StoreCommand::RemoveLabel { label } => {
+                self.content_store.remove_label(label).await?;
+                Ok(StoreResponse::Labels(Vec::new()))
+            }
+            StoreCommand::RemoveFromLabel { label, content_ref } => {
+                self.content_store
+                    .remove_from_label(label, ContentRef::from_str(&content_ref))
+                    .await?;
+                Ok(StoreResponse::ContentRef(content_ref))
+            }
+            StoreCommand::ReplaceAtLabel { label, content_ref } => {
+                self.content_store
+                    .replace_at_label(label, ContentRef::from_str(&content_ref))
+                    .await?;
+                Ok(StoreResponse::ContentRef(content_ref))
+            }
+            StoreCommand::PutAtLabel { label, content } => {
+                self.content_store.put_at_label(label, content).await?;
+                Ok(StoreResponse::Success)
+            }
+            StoreCommand::ListLabels => {
+                let labels = self.content_store.list_labels().await?;
+                Ok(StoreResponse::Labels(labels))
+            }
+            StoreCommand::ListAllContent => {
+                let content_refs = self.content_store.list_all_content().await?;
+                Ok(StoreResponse::ContentRefs(
+                    content_refs
+                        .into_iter()
+                        .map(|r| r.hash().to_string())
+                        .collect(),
+                ))
+            }
+            StoreCommand::CalculateTotalSize => {
+                let size = self.content_store.calculate_total_size().await?;
+                Ok(StoreResponse::Size(size))
+            }
+        }
     }
 }

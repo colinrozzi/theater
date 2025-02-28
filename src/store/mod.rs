@@ -21,6 +21,10 @@ impl ContentRef {
         Self { hash }
     }
 
+    pub fn from_str(hash: &str) -> Self {
+        Self::new(hash.to_string())
+    }
+
     /// Get the hash as a string
     pub fn hash(&self) -> &str {
         &self.hash
