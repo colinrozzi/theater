@@ -1,14 +1,12 @@
 target/*
-node_modules/*
 .next/*
 notes/*
 chain/*
 examples/*
-tools/chain-viewer/.next/*
-tools/chain-viewer/node_modules/*
 logs/*
 .aider*
 .env
 !.gitignore
 dir-rep.xml
 debug.log
+/store

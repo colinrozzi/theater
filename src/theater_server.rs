@@ -1,4 +1,6 @@
-use crate::messages::{ActorMessage, ActorRequest, ActorSend, ActorStatus};
+use crate::messages::{
+    ActorMessage, ActorRequest, ActorSend, ActorStatus, StoreCommand, StoreResponse,
+};
 use crate::ChainEvent;
 use anyhow::Result;
 use bytes::Bytes;
@@ -56,6 +58,9 @@ pub enum ManagementCommand {
     GetActorMetrics {
         id: TheaterId,
     },
+    StoreCommand {
+        command: StoreCommand,
+    },
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -108,6 +113,9 @@ pub enum ManagementResponse {
     ActorMetrics {
         id: TheaterId,
         metrics: serde_json::Value,
+    },
+    StoreResponse {
+        response: StoreResponse,
     },
 }
 
@@ -443,6 +451,21 @@ impl TheaterServer {
                     ManagementResponse::ActorMetrics {
                         id,
                         metrics: serde_json::to_value(metrics?)?,
+                    }
+                }
+                ManagementCommand::StoreCommand { command } => {
+                    info!("Sending store command: {:?}", command);
+                    let (cmd_tx, cmd_rx) = tokio::sync::oneshot::channel();
+                    runtime_tx
+                        .send(TheaterCommand::StoreOperation {
+                            command,
+                            response_tx: cmd_tx,
+                        })
+                        .await?;
+
+                    let response = cmd_rx.await?;
+                    ManagementResponse::StoreResponse {
+                        response: response?,
                     }
                 }
             };

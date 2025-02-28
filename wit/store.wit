@@ -2,9 +2,9 @@ package ntwk:theater;
 
 interface store {
     /// Reference to content in the store
-    type content-ref = record {
+    record content-ref {
         hash: string,
-    };
+    }
 
     /// Store content and return its ContentRef
     store: func(content: list<u8>) -> result<content-ref, string>;

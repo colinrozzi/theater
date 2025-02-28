@@ -153,9 +153,8 @@ impl StateChain {
                 tracing::warn!("Failed to notify runtime of event: {}", err);
             }
         }
-        // Update chain head
-        let head_label = format!("{}:chain-head", self.actor_id);
 
+        let head_label = format!("{}:chain-head", self.actor_id);
         let content_store = self.content_store.clone();
         let prev_content_ref = content_ref.clone();
         tokio::spawn(async move {
@@ -167,7 +166,10 @@ impl StateChain {
                     stored_content_ref.hash()
                 );
             }
-            let _ = content_store.replace_at_label(head_label, stored_content_ref);
+            // Update chain head
+            let _ = content_store
+                .replace_at_label(head_label, stored_content_ref)
+                .await;
         });
 
         tracing::debug!(
