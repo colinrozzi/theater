@@ -47,11 +47,10 @@ impl ActorStore {
         self.state = state;
     }
 
-    pub async fn record_event(&self, event_data: ChainEventData) -> ChainEvent {
+    pub fn record_event(&self, event_data: ChainEventData) -> ChainEvent {
         let mut chain = self.chain.lock().unwrap();
         chain
             .add_typed_event(event_data)
-            .await
             .expect("Failed to record event")
     }
 

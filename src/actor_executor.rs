@@ -5,6 +5,7 @@ use tokio::sync::{mpsc, oneshot};
 use tokio::time::{Duration, Instant};
 use tracing::{debug, error, info};
 
+use crate::events::ChainEventData;
 use crate::metrics::{ActorMetrics, MetricsCollector};
 use crate::wasm::ActorInstance;
 use crate::ChainEvent;
@@ -99,14 +100,60 @@ impl ActorExecutor {
             state.as_ref().map(|s| s.len()).unwrap_or(0)
         );
 
+        self.actor_instance
+            .store
+            .data_mut()
+            .record_event(ChainEventData {
+                event_type: "wasm".to_string(),
+                timestamp: start.elapsed().as_secs(),
+                description: None,
+                data: crate::events::EventData::Wasm(
+                    crate::events::wasm::WasmEventData::WasmCall {
+                        function_name: name.clone(),
+                        params: params.clone(),
+                    },
+                ),
+            });
+
         // Execute the call
         let (new_state, results) = match self
             .actor_instance
             .call_function(&name, state, params)
             .await
         {
-            Ok(result) => result,
+            Ok(result) => {
+                self.actor_instance
+                    .store
+                    .data_mut()
+                    .record_event(ChainEventData {
+                        event_type: "wasm".to_string(),
+                        timestamp: start.elapsed().as_secs(),
+                        description: None,
+                        data: crate::events::EventData::Wasm(
+                            crate::events::wasm::WasmEventData::WasmResult {
+                                function_name: name.clone(),
+                                result: result.clone(),
+                            },
+                        ),
+                    });
+                result
+            }
             Err(e) => {
+                self.actor_instance
+                    .store
+                    .data_mut()
+                    .record_event(ChainEventData {
+                        event_type: "wasm".to_string(),
+                        timestamp: start.elapsed().as_secs(),
+                        description: None,
+                        data: crate::events::EventData::Wasm(
+                            crate::events::wasm::WasmEventData::WasmError {
+                                function_name: name.clone(),
+                                message: e.to_string(),
+                            },
+                        ),
+                    });
+
                 error!("Failed to execute function '{}': {}", name, e);
                 return Err(ActorError::Internal(e));
             }

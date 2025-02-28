@@ -2,23 +2,49 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum RuntimeEventData {
-    Startup {
+    // Actor lifecycle events
+    InitCall {
+        params: String,
+    },
+    InitResult {
+        success: bool,
+    },
+
+    // Runtime lifecycle events
+    StartupCall {
         config_summary: String,
     },
-    Shutdown {
+    StartupResult {
+        success: bool,
+    },
+
+    ShutdownCall {
         reason: String,
     },
-    StateChange {
+    ShutdownResult {
+        success: bool,
+    },
+
+    // State change events
+    StateChangeCall {
         old_state: String,
         new_state: String,
     },
-    Error {
-        message: String,
-        context: Option<String>,
+    StateChangeResult {
+        success: bool,
     },
+
+    // Log events (these don't typically have call/result pairs)
     Log {
         level: String,
         message: String,
+    },
+
+    // Error events
+    Error {
+        operation: String,
+        message: String,
+        context: Option<String>,
     },
 }
 

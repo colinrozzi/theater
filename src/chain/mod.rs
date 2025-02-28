@@ -7,13 +7,8 @@ use std::path::Path;
 use std::sync::mpsc;
 use wasmtime::component::{ComponentType, Lift, Lower};
 
-use crate::events::filesystem::FilesystemEvent;
-use crate::events::http::HttpEvent;
-use crate::events::message::MessageEvent;
-use crate::events::runtime::RuntimeEvent;
-use crate::events::supervisor::SupervisorEvent;
 use crate::events::ChainEventData;
-use crate::store::ContentStore;
+use crate::store::{ContentRef, ContentStore};
 use crate::TheaterId;
 
 #[derive(Debug, Clone, Serialize, Deserialize, ComponentType, Lift, Lower)]
@@ -133,7 +128,7 @@ impl StateChain {
     }
 
     /// Add a typed event to the chain
-    pub async fn add_typed_event(
+    pub fn add_typed_event(
         &mut self,
         event_data: ChainEventData,
     ) -> Result<ChainEvent, serde_json::Error> {
@@ -142,7 +137,7 @@ impl StateChain {
 
         // Store the event data in the content store
         let serialized_event = serde_json::to_vec(&event)?;
-        let content_ref = self.content_store.store(serialized_event).await.unwrap();
+        let content_ref = ContentRef::from_content(&serialized_event);
 
         // Get the hash from ContentRef and use it as the event hash
         let hash_bytes = hex::decode(content_ref.hash()).unwrap();
@@ -161,47 +156,25 @@ impl StateChain {
         // Update chain head
         let head_label = format!("{}:chain-head", self.actor_id);
 
-        // Set new head
-        let _ = self
-            .content_store
-            .replace_at_label(head_label, content_ref.clone())
-            .await;
+        let content_store = self.content_store.clone();
+        let prev_content_ref = content_ref.clone();
+        tokio::spawn(async move {
+            let stored_content_ref = content_store.store(serialized_event).await.unwrap();
+            if stored_content_ref.hash() != prev_content_ref.hash() {
+                tracing::error!(
+                    "Content store hash mismatch: expected {}, got {}",
+                    prev_content_ref.hash(),
+                    stored_content_ref.hash()
+                );
+            }
+            let _ = content_store.replace_at_label(head_label, stored_content_ref);
+        });
 
         tracing::debug!(
             "Stored event {} in content store for actor {}",
             content_ref.hash(),
             self.actor_id
         );
-
-        Ok(event)
-    }
-
-    /// Internal method to finalize event (add hash) and store it
-    fn finalize_and_store_event(
-        &mut self,
-        mut event: ChainEvent,
-    ) -> Result<ChainEvent, serde_json::Error> {
-        let mut hasher = Sha1::new();
-
-        // Hash previous state + event data
-        if let Some(prev_hash) = &self.current_hash {
-            hasher.update(prev_hash);
-        }
-        hasher.update(&event.data);
-
-        // Set the hash
-        event.hash = hasher.finalize().to_vec();
-
-        // Store the event
-        self.events.push(event.clone());
-        self.current_hash = Some(event.hash.clone());
-
-        // Notify runtime if callback is set
-        if let Some(callback) = &self.event_callback {
-            if let Err(err) = callback.send(event.clone()) {
-                tracing::warn!("Failed to notify runtime of event: {}", err);
-            }
-        }
 
         Ok(event)
     }

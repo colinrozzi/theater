@@ -1,10 +1,10 @@
 use crate::actor_executor::ActorError;
 use crate::actor_handle::ActorHandle;
+use crate::actor_store::ActorStore;
 use crate::config::RuntimeHostConfig;
-use crate::host::host_wrapper::HostFunctionBoundary;
-use crate::wasm::ActorComponent;
-use crate::wasm::ActorInstance;
-use crate::ActorStore;
+use crate::events::runtime::RuntimeEventData;
+use crate::events::{ChainEventData, EventData};
+use crate::wasm::{ActorComponent, ActorInstance};
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -72,28 +72,43 @@ impl RuntimeHost {
             .instance("ntwk:theater/runtime")
             .expect("Could not instantiate ntwk:theater/runtime");
 
-        let boundary = HostFunctionBoundary::new("ntwk:theater/runtime", "log");
         interface
             .func_wrap(
                 "log",
                 move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore>, (msg,): (String,)| {
                     let id = ctx.data().id.clone();
-                    info!("[ACTOR] [{}] [{}] {}", id, name, msg);
 
-                    // Record the log message in the chain
-                    let _ = boundary.wrap(&mut ctx, msg.clone(), |_| Ok(()));
+                    // Record log call event
+                    ctx.data_mut().record_event(ChainEventData {
+                        event_type: "ntwk:theater/runtime/log".to_string(),
+                        data: EventData::Runtime(RuntimeEventData::Log {
+                            level: "info".to_string(),
+                            message: msg.clone(),
+                        }),
+                        timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                        description: Some(format!("Actor log: {}", msg)),
+                    });
+
+                    info!("[ACTOR] [{}] [{}] {}", id, name, msg);
                     Ok(())
                 },
             )
             .expect("Failed to wrap log function");
 
-        let boundary = HostFunctionBoundary::new("ntwk:theater/runtime", "get-state");
         interface
             .func_wrap(
                 "get-state",
                 move |mut ctx: StoreContextMut<'_, ActorStore>, ()| -> Result<(Vec<u8>,)> {
-                    // Record the state request
-                    let _ = boundary.wrap(&mut ctx, "state_request", |_| Ok(()));
+                    // Record state request call event
+                    ctx.data_mut().record_event(ChainEventData {
+                        event_type: "ntwk:theater/runtime/get-state".to_string(),
+                        data: EventData::Runtime(RuntimeEventData::StateChangeCall {
+                            old_state: "unknown".to_string(),
+                            new_state: "requested".to_string(),
+                        }),
+                        timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                        description: Some("Get state request".to_string()),
+                    });
 
                     // Return current state
                     let state = ctx
@@ -102,13 +117,49 @@ impl RuntimeHost {
                         .map(|e| e.data.clone())
                         .unwrap_or_default();
 
-                    // Record the response
-                    let _ = boundary.wrap(&mut ctx, state.clone(), |_| Ok(()));
+                    // Record state request result event
+                    ctx.data_mut().record_event(ChainEventData {
+                        event_type: "ntwk:theater/runtime/get-state".to_string(),
+                        data: EventData::Runtime(RuntimeEventData::StateChangeResult {
+                            success: true,
+                        }),
+                        timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                        description: Some(format!("State retrieved: {} bytes", state.len())),
+                    });
 
                     Ok((state,))
                 },
             )
             .expect("Failed to wrap get-state function");
+
+        interface
+            .func_wrap(
+                "init",
+                move |mut ctx: StoreContextMut<'_, ActorStore>,
+                      (params,): (String,)|
+                      -> Result<()> {
+                    // Record init call event
+                    ctx.data_mut().record_event(ChainEventData {
+                        event_type: "ntwk:theater/runtime/init".to_string(),
+                        data: EventData::Runtime(RuntimeEventData::InitCall {
+                            params: params.clone(),
+                        }),
+                        timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                        description: Some(format!("Actor initialization with params: {}", params)),
+                    });
+
+                    // Record init result event
+                    ctx.data_mut().record_event(ChainEventData {
+                        event_type: "ntwk:theater/runtime/init".to_string(),
+                        data: EventData::Runtime(RuntimeEventData::InitResult { success: true }),
+                        timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                        description: Some("Actor initialization successful".to_string()),
+                    });
+
+                    Ok(())
+                },
+            )
+            .expect("Failed to wrap init function");
 
         Ok(())
     }

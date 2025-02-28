@@ -18,16 +18,20 @@ pub enum EventData {
     Message(message::MessageEventData),
     Runtime(runtime::RuntimeEventData),
     Supervisor(supervisor::SupervisorEventData),
+    Store(store::StoreEventData),
+    Wasm(wasm::WasmEventData),
 }
 
 impl ChainEventData {
     /// The event type identifier
+    #[allow(dead_code)]
     fn event_type(&self) -> String {
         let event_type = self.event_type.clone();
         event_type
     }
 
     /// Human-readable description of the event
+    #[allow(dead_code)]
     fn description(&self) -> String {
         match &self.description {
             Some(desc) => desc.clone(),
@@ -36,6 +40,7 @@ impl ChainEventData {
     }
 
     /// Convert to JSON
+    #[allow(dead_code)]
     fn to_json(&self) -> Result<Vec<u8>, serde_json::Error> {
         serde_json::to_vec(self)
     }
@@ -52,9 +57,10 @@ impl ChainEventData {
     }
 }
 
-// Import specific event modules
 pub mod filesystem;
 pub mod http;
 pub mod message;
 pub mod runtime;
+pub mod store;
 pub mod supervisor;
+pub mod wasm;
