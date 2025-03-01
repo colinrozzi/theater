@@ -121,7 +121,7 @@ impl ContentStoreImpl {
         self.base_path.join("labels").join(label)
     }
 
-    /// Attach a label to content
+    /// Attach a label to content (replaces any existing content at that label)
     async fn label(&self, label: &str, content_ref: &ContentRef) -> Result<()> {
         // Ensure content exists before labeling
         if !self.exists(content_ref).await {
@@ -140,28 +140,12 @@ impl ContentStoreImpl {
                 .context("Failed to create label parent directories")?;
         }
 
-        // Read existing content refs for this label
-        let mut refs = self.get_by_label(label).await.unwrap_or_default();
+        // Write the single content ref hash to the label file
+        fs::write(&label_path, content_ref.hash())
+            .await
+            .context("Failed to write label file")?;
 
-        // Add new content ref if it doesn't already exist
-        if !refs.contains(content_ref) {
-            refs.push(content_ref.clone());
-
-            // Write updated refs to label file
-            let content = refs.iter().map(|r| r.hash()).collect::<Vec<_>>().join("\n");
-
-            fs::write(&label_path, content)
-                .await
-                .context("Failed to write label file")?;
-
-            debug!("Added content {} to label '{}'", content_ref.hash(), label);
-        } else {
-            debug!(
-                "Content {} already in label '{}'",
-                content_ref.hash(),
-                label
-            );
-        }
+        debug!("Set content {} for label '{}'", content_ref.hash(), label);
 
         Ok(())
     }
@@ -229,13 +213,13 @@ impl ContentStoreImpl {
         Ok(())
     }
 
-    /// Get content references by label
-    async fn get_by_label(&self, label: &str) -> Result<Vec<ContentRef>> {
+    /// Get content reference by label
+    async fn get_by_label(&self, label: &str) -> Result<Option<ContentRef>> {
         let label_path = self.label_path(label);
 
-        // If label doesn't exist, return empty vec
+        // If label doesn't exist, return None
         if !fs::try_exists(&label_path).await.unwrap_or(false) {
-            return Ok(Vec::new());
+            return Ok(None);
         }
 
         // Read and parse label file
@@ -243,13 +227,14 @@ impl ContentStoreImpl {
             .await
             .context("Failed to read label file")?;
 
-        let refs = content
-            .lines()
-            .filter(|line| !line.trim().is_empty())
-            .map(|line| ContentRef::new(line.trim().to_string()))
-            .collect();
-
-        Ok(refs)
+        let content_hash = content.trim();
+        if content_hash.is_empty() {
+            return Ok(None);
+        }
+        
+        // Return a single content reference
+        let content_ref = ContentRef::new(content_hash.to_string());
+        Ok(Some(content_ref))
     }
 
     /// Remove a label
@@ -272,6 +257,7 @@ impl ContentStoreImpl {
     }
 
     /// Remove a specific content reference from a label
+    /// If the content reference matches the one at the label, the label is removed
     async fn remove_from_label(&self, label: &str, content_ref: &ContentRef) -> Result<()> {
         let label_path = self.label_path(label);
 
@@ -281,49 +267,20 @@ impl ContentStoreImpl {
             return Ok(());
         }
 
-        // Read and parse label file
+        // Read the current content ref from the label file
         let content = fs::read_to_string(&label_path)
             .await
             .context("Failed to read label file")?;
-
-        let mut refs: Vec<ContentRef> = content
-            .lines()
-            .filter(|line| !line.trim().is_empty())
-            .map(|line| ContentRef::new(line.trim().to_string()))
-            .collect();
-
-        // Remove content ref if it exists
-        let original_len = refs.len();
-        refs.retain(|r| r != content_ref);
-
-        // If content ref was found and removed, write updated label file
-        if refs.len() != original_len {
-            if refs.is_empty() {
-                // If no more refs, remove the label file
-                fs::remove_file(&label_path)
-                    .await
-                    .context("Failed to remove empty label file")?;
-                debug!("Removed empty label: {}", label);
-            } else {
-                // Write updated refs to label file
-                let content = refs.iter().map(|r| r.hash()).collect::<Vec<_>>().join("\n");
-
-                fs::write(&label_path, content)
-                    .await
-                    .context("Failed to write updated label file")?;
-
-                debug!(
-                    "Removed content {} from label '{}'",
-                    content_ref.hash(),
-                    label
-                );
-            }
+        let current_hash = content.trim();
+        
+        // If the current content ref matches the one we want to remove, remove the label
+        if current_hash == content_ref.hash() {
+            fs::remove_file(&label_path)
+                .await
+                .context("Failed to remove label file")?;
+            debug!("Removed label '{}' that pointed to content {}", label, content_ref.hash());
         } else {
-            debug!(
-                "Content not found in label '{}': {}",
-                label,
-                content_ref.hash()
-            );
+            debug!("Label '{}' does not point to content {}", label, content_ref.hash());
         }
 
         Ok(())
@@ -423,7 +380,7 @@ pub enum StoreOperation {
     },
     GetByLabel {
         label: String,
-        resp: oneshot::Sender<Result<Vec<ContentRef>>>,
+        resp: oneshot::Sender<Result<Option<ContentRef>>>,
     },
     RemoveLabel {
         label: String,
@@ -579,8 +536,8 @@ impl ContentStore {
         resp_rx.await.context("Label operation failed")?
     }
 
-    /// Get content references by label
-    pub async fn get_by_label(&self, label: String) -> Result<Vec<ContentRef>> {
+    /// Get content reference by label
+    pub async fn get_by_label(&self, label: String) -> Result<Option<ContentRef>> {
         let (resp_tx, resp_rx) = oneshot::channel();
 
         self.sender
@@ -740,15 +697,11 @@ impl ContentStore {
             } else {
                 // Label reference
                 let label = reference.strip_prefix("store:").unwrap().to_string();
-                let refs = self.get_by_label(label.clone()).await?;
+                let content_ref_opt = self.get_by_label(label.clone()).await?;
 
-                match refs.len() {
-                    0 => Err(anyhow::anyhow!("No content found with label: {}", label)),
-                    1 => self.get(refs[0].clone()).await,
-                    _ => Err(anyhow::anyhow!(
-                        "Ambiguous label reference, multiple matches found: {}",
-                        label
-                    )),
+                match content_ref_opt {
+                    Some(content_ref) => self.get(content_ref).await,
+                    None => Err(anyhow::anyhow!("No content found with label: {}", label)),
                 }
             }
         } else {

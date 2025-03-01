@@ -18,8 +18,8 @@ interface store {
     /// Attach a label to content
     label: func(label: string, content-ref: content-ref) -> result<_, string>;
     
-    /// Get content references by label
-    get-by-label: func(label: string) -> result<list<content-ref>, string>;
+    /// Get content reference by label
+    get-by-label: func(label: string) -> result<option<content-ref>, string>;
     
     /// Remove a label
     remove-label: func(label: string) -> result<_, string>;

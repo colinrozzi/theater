@@ -314,7 +314,7 @@ impl StoreHost {
         interface.func_wrap_async(
             "get-by-label",
             move |mut ctx: StoreContextMut<'_, ActorStore>, (label,): (String,)| 
-                -> Box<dyn Future<Output = Result<(Result<Vec<ContentRefWit>, String>,)>> + Send> {
+                -> Box<dyn Future<Output = Result<(Result<Option<ContentRefWit>, String>,)>> + Send> {
                 // Record get-by-label call event
                 ctx.data_mut().record_event(ChainEventData {
                     event_type: "ntwk:theater/store/get-by-label".to_string(),
@@ -322,7 +322,7 @@ impl StoreHost {
                         label: label.clone(),
                     }),
                     timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                    description: Some(format!("Getting content references by label: {}", label)),
+                    description: Some(format!("Getting content reference by label: {}", label)),
                 });
                 
                 let store = store_clone.clone();
@@ -331,31 +331,29 @@ impl StoreHost {
                 Box::new(async move {
                     // Perform the operation
                     match store.get_by_label(label).await {
-                        Ok(content_refs) => {
-                            debug!("Content references by label retrieved successfully");
+                        Ok(content_ref_opt) => {
+                            debug!("Content reference by label retrieved successfully");
                             
-                            // Convert the Rust ContentRef to ContentRefWit
-                            let content_refs_wit: Vec<ContentRefWit> = content_refs
-                                .into_iter()
-                                .map(ContentRefWit::from)
-                                .collect();
+                            // Convert the Rust ContentRef to ContentRefWit if present
+                            let content_ref_wit_opt = content_ref_opt.map(ContentRefWit::from);
+                            let refs_count = if content_ref_wit_opt.is_some() { 1 } else { 0 };
                             
                             // Record get-by-label result event
                             ctx.data_mut().record_event(ChainEventData {
                                 event_type: "ntwk:theater/store/get-by-label".to_string(),
                                 data: EventData::Store(StoreEventData::GetByLabelResult {
                                     label: label_clone.clone(),
-                                    refs_count: content_refs_wit.len(),
+                                    refs_count,
                                     success: true,
                                 }),
                                 timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                                description: Some(format!("Successfully retrieved {} content references for label '{}'", content_refs_wit.len(), label_clone)),
+                                description: Some(format!("Successfully retrieved {} content reference for label '{}'", refs_count, label_clone)),
                             });
                             
-                            Ok((Ok(content_refs_wit),))
+                            Ok((Ok(content_ref_wit_opt),))
                         },
                         Err(e) => {
-                            error!("Error retrieving content references by label: {}", e);
+                            error!("Error retrieving content reference by label: {}", e);
                             
                             // Record get-by-label error event
                             ctx.data_mut().record_event(ChainEventData {
@@ -365,7 +363,7 @@ impl StoreHost {
                                     message: e.to_string(),
                                 }),
                                 timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                                description: Some(format!("Error retrieving content references for label '{}': {}", label_clone, e)),
+                                description: Some(format!("Error retrieving content reference for label '{}': {}", label_clone, e)),
                             });
                             
                             Ok((Err(e.to_string()),))
