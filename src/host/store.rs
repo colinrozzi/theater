@@ -433,69 +433,6 @@ impl StoreHost {
             },
         )?;
 
-        // Remove from label function
-        let store_clone = self.store.clone();
-
-        interface.func_wrap_async(
-            "remove-from-label",
-            move |mut ctx: StoreContextMut<'_, ActorStore>, (label, content_ref): (String, ContentRefWit)| 
-                -> Box<dyn Future<Output = Result<(Result<(), String>,)>> + Send> {
-                // Record remove-from-label call event
-                ctx.data_mut().record_event(ChainEventData {
-                    event_type: "ntwk:theater/store/remove-from-label".to_string(),
-                    data: EventData::Store(StoreEventData::RemoveFromLabelCall {
-                        label: label.clone(),
-                        hash: content_ref.hash.clone(),
-                    }),
-                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                    description: Some(format!("Removing content with hash {} from label: {}", content_ref.hash, label)),
-                });
-                
-                let store = store_clone.clone();
-                let label_clone = label.clone();
-                let hash = content_ref.hash.clone();
-                
-                Box::new(async move {
-                    // Perform the operation
-                    match store.remove_from_label(label, RustContentRef::from(content_ref)).await {
-                        Ok(_) => {
-                            debug!("Content removed from label successfully");
-                            
-                            // Record remove-from-label result event
-                            ctx.data_mut().record_event(ChainEventData {
-                                event_type: "ntwk:theater/store/remove-from-label".to_string(),
-                                data: EventData::Store(StoreEventData::RemoveFromLabelResult {
-                                    label: label_clone.clone(),
-                                    hash: hash.clone(),
-                                    success: true,
-                                }),
-                                timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                                description: Some(format!("Successfully removed content with hash {} from label '{}'", hash, label_clone)),
-                            });
-                            
-                            Ok((Ok(()),))
-                        },
-                        Err(e) => {
-                            error!("Error removing content from label: {}", e);
-                            
-                            // Record remove-from-label error event
-                            ctx.data_mut().record_event(ChainEventData {
-                                event_type: "ntwk:theater/store/remove-from-label".to_string(),
-                                data: EventData::Store(StoreEventData::Error {
-                                    operation: "remove-from-label".to_string(),
-                                    message: e.to_string(),
-                                }),
-                                timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                                description: Some(format!("Error removing content with hash {} from label '{}': {}", hash, label_clone, e)),
-                            });
-                            
-                            Ok((Err(e.to_string()),))
-                        }
-                    }
-                })
-            },
-        )?;
-
         // Put at label function
         let store_clone = self.store.clone();
 
@@ -862,7 +799,7 @@ impl StoreHost {
             },
         )?;
 
-        // You would implement all the other store functions following the same pattern
+        info!("Store host functions set up successfully");
 
         Ok(())
     }

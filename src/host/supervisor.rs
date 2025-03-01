@@ -238,6 +238,120 @@ impl SupervisorHost {
             )
             .expect("Failed to wrap list-children function");
 
+        // restart-child implementation
+        let _ = interface
+            .func_wrap_async(
+                "restart-child",
+                move |mut ctx: StoreContextMut<'_, ActorStore>,
+                      (child_id,): (String,)|
+                      -> Box<dyn Future<Output = Result<(Result<(), String>,)>> + Send> {
+                    // Record restart child call event
+                    ctx.data_mut().record_event(ChainEventData {
+                        event_type: "ntwk:theater/supervisor/restart-child".to_string(),
+                        data: EventData::Supervisor(SupervisorEventData::RestartChildCall {
+                            child_id: child_id.clone(),
+                        }),
+                        timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                        description: Some(format!("Restarting child: {}", child_id)),
+                    });
+                    
+                    let store = ctx.data_mut();
+                    let theater_tx = store.theater_tx.clone();
+                    let child_id_clone = child_id.clone();
+
+                    Box::new(async move {
+                        let (response_tx, response_rx) = oneshot::channel();
+                        match theater_tx
+                            .send(TheaterCommand::RestartActor {
+                                actor_id: match child_id.parse() {
+                                    Ok(id) => id,
+                                    Err(e) => {
+                                        // Record error event
+                                        ctx.data_mut().record_event(ChainEventData {
+                                            event_type: "ntwk:theater/supervisor/restart-child".to_string(),
+                                            data: EventData::Supervisor(SupervisorEventData::Error {
+                                                operation: "restart-child".to_string(),
+                                                child_id: Some(child_id_clone.clone()),
+                                                message: e.to_string(),
+                                            }),
+                                            timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                                            description: Some(format!("Failed to parse child ID: {}", e)),
+                                        });
+                                        
+                                        return Ok((Err(format!("Invalid child ID: {}", e)),));
+                                    }
+                                },
+                                response_tx,
+                            })
+                            .await
+                        {
+                            Ok(_) => match response_rx.await {
+                                Ok(Ok(())) => {
+                                    // Record restart child result event
+                                    ctx.data_mut().record_event(ChainEventData {
+                                        event_type: "ntwk:theater/supervisor/restart-child".to_string(),
+                                        data: EventData::Supervisor(SupervisorEventData::RestartChildResult {
+                                            child_id: child_id_clone.clone(),
+                                            success: true,
+                                        }),
+                                        timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                                        description: Some(format!("Successfully restarted child: {}", child_id_clone)),
+                                    });
+                                    
+                                    Ok((Ok(()),))
+                                }
+                                Ok(Err(e)) => {
+                                    // Record restart child error event
+                                    ctx.data_mut().record_event(ChainEventData {
+                                        event_type: "ntwk:theater/supervisor/restart-child".to_string(),
+                                        data: EventData::Supervisor(SupervisorEventData::Error {
+                                            operation: "restart-child".to_string(),
+                                            child_id: Some(child_id_clone.clone()),
+                                            message: e.to_string(),
+                                        }),
+                                        timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                                        description: Some(format!("Failed to restart child: {}", e)),
+                                    });
+                                    
+                                    Ok((Err(e.to_string()),))
+                                }
+                                Err(e) => {
+                                    // Record restart child error event
+                                    ctx.data_mut().record_event(ChainEventData {
+                                        event_type: "ntwk:theater/supervisor/restart-child".to_string(),
+                                        data: EventData::Supervisor(SupervisorEventData::Error {
+                                            operation: "restart-child".to_string(),
+                                            child_id: Some(child_id_clone.clone()),
+                                            message: e.to_string(),
+                                        }),
+                                        timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                                        description: Some(format!("Failed to receive restart response: {}", e)),
+                                    });
+                                    
+                                    Ok((Err(format!("Failed to receive restart response: {}", e)),))
+                                }
+                            },
+                            Err(e) => {
+                                // Record restart child error event
+                                ctx.data_mut().record_event(ChainEventData {
+                                    event_type: "ntwk:theater/supervisor/restart-child".to_string(),
+                                    data: EventData::Supervisor(SupervisorEventData::Error {
+                                        operation: "restart-child".to_string(),
+                                        child_id: Some(child_id_clone.clone()),
+                                        message: e.to_string(),
+                                    }),
+                                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                                    description: Some(format!("Failed to send restart command: {}", e)),
+                                });
+                                
+                                Ok((Err(format!("Failed to send restart command: {}", e)),))
+                            }
+                        }
+                    })
+                },
+            )
+            .expect("Failed to wrap restart-child function");
+            
         // stop-child implementation
         let _ = interface
             .func_wrap_async(
