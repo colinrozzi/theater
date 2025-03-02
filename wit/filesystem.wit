@@ -1,6 +1,7 @@
 package ntwk:theater;
 
 interface filesystem {
+    // Basic file operations
     read-file: func(path: string) -> result<list<u8>, string>;
     write-file: func(path: string, content: string) -> result<_, string>;
     list-files: func(path: string) -> result<list<string>, string>;
@@ -8,4 +9,8 @@ interface filesystem {
     create-dir: func(path: string) -> result<_, string>;
     delete-dir: func(path: string) -> result<_, string>;
     path-exists: func(path: string) -> result<bool, string>;
+    
+    // Command execution functions
+    execute-command: func(dir: string, command: string, args: list<string>) -> result<string, string>;
+    execute-nix-command: func(dir: string, command: string) -> result<string, string>;
 }
