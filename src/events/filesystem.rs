@@ -71,6 +71,23 @@ pub enum FilesystemEventData {
         path: String,
         message: String,
     },
+
+    // Command events
+    CommandExecuted {
+        directory: String,
+        command: String,
+        args: Vec<String>,
+    },
+    NixCommandExecuted {
+        directory: String,
+        command: String,
+    },
+    CommandCompleted {
+        success: bool,
+        stdout: String,
+        stderr: String,
+        exit_code: i32,
+    },
 }
 
 pub struct FilesystemEvent {

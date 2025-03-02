@@ -108,7 +108,9 @@ pub struct MessageServerConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FileSystemHandlerConfig {
-    pub path: PathBuf,
+    pub path: Option<PathBuf>,
+    pub new_dir: Option<bool>,
+    pub allowed_commands: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
