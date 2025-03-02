@@ -112,6 +112,7 @@ pub struct StateChain {
     #[serde(skip)]
     event_callback: Option<mpsc::Sender<ChainEvent>>,
     #[serde(skip)]
+    #[allow(dead_code)]
     content_store: ContentStore,
     actor_id: TheaterId,
 }
@@ -154,9 +155,14 @@ impl StateChain {
             }
         }
 
+        // I am removing storing the events in the content store for now because they are
+        // accumulating too quickly. I need to build out the store local to each actor to store its
+        // event that is cleaned up when the actor dies.
+        /*
         let head_label = format!("{}:chain-head", self.actor_id);
         let content_store = self.content_store.clone();
         let prev_content_ref = content_ref.clone();
+
         tokio::spawn(async move {
             let stored_content_ref = content_store.store(serialized_event).await.unwrap();
             if stored_content_ref.hash() != prev_content_ref.hash() {
@@ -171,6 +177,7 @@ impl StateChain {
                 .replace_at_label(head_label, stored_content_ref)
                 .await;
         });
+        */
 
         tracing::debug!(
             "Stored event {} in content store for actor {}",
