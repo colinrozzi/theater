@@ -9,6 +9,7 @@ use tokio::sync::oneshot;
 pub enum TheaterCommand {
     SpawnActor {
         manifest_path: String,
+        init_bytes: Option<Vec<u8>>,
         response_tx: oneshot::Sender<Result<TheaterId>>,
         parent_id: Option<TheaterId>,
     },

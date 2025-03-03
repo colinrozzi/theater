@@ -236,6 +236,7 @@ impl TheaterServer {
                     match runtime_tx
                         .send(TheaterCommand::SpawnActor {
                             manifest_path: manifest.clone(),
+                            init_bytes: None,
                             response_tx: cmd_tx,
                             parent_id: None,
                         })

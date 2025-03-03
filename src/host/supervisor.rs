@@ -54,7 +54,7 @@ impl SupervisorHost {
             .func_wrap_async(
                 "spawn",
                 move |mut ctx: StoreContextMut<'_, ActorStore>,
-                      (manifest,): (String,)|
+                      (manifest, init_bytes): (String, Option<Vec<u8>>)|
                       -> Box<dyn Future<Output = Result<(Result<String, String>,)>> + Send> {
                     // Record spawn child call event
                     ctx.data_mut().record_event(ChainEventData {
@@ -75,6 +75,7 @@ impl SupervisorHost {
                         match theater_tx
                             .send(TheaterCommand::SpawnActor {
                                 manifest_path: manifest,
+                                init_bytes,
                                 response_tx,
                                 parent_id: Some(parent_id),
                             })

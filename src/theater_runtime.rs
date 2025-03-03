@@ -123,6 +123,7 @@ impl TheaterRuntime {
                 }
                 TheaterCommand::SpawnActor {
                     manifest_path,
+                    init_bytes,
                     parent_id,
                     response_tx,
                 } => {
@@ -130,7 +131,10 @@ impl TheaterRuntime {
                         "Processing SpawnActor command for manifest: {:?}",
                         manifest_path
                     );
-                    match self.spawn_actor(manifest_path.clone(), parent_id).await {
+                    match self
+                        .spawn_actor(manifest_path.clone(), init_bytes, parent_id)
+                        .await
+                    {
                         Ok(actor_id) => {
                             info!("Successfully spawned actor: {:?}", actor_id);
                             if let Err(e) = response_tx.send(Ok(actor_id.clone())) {
@@ -256,6 +260,7 @@ impl TheaterRuntime {
     async fn spawn_actor(
         &mut self,
         manifest_path: String,
+        init_bytes: Option<Vec<u8>>,
         parent_id: Option<TheaterId>,
     ) -> Result<TheaterId> {
         debug!(
@@ -291,6 +296,7 @@ impl TheaterRuntime {
             ActorRuntime::start(
                 actor_id,
                 &manifest,
+                init_bytes,
                 theater_tx,
                 mailbox_rx,
                 operation_rx,
@@ -413,8 +419,12 @@ impl TheaterRuntime {
         // Stop the actor
         self.stop_actor(actor_id).await?;
 
+        // THIS IS WRONG!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+        // we need to rethink how the restart works. is this even the place to have it? How should
+        // we handle the state? I don't know.
+
         // Spawn it again
-        self.spawn_actor(manifest_path, parent_id).await?;
+        self.spawn_actor(manifest_path, None, parent_id).await?;
 
         Ok(())
     }

@@ -34,6 +34,7 @@ impl ActorRuntime {
     pub async fn start(
         id: TheaterId,
         config: &ManifestConfig,
+        init_bytes: Option<Vec<u8>>,
         theater_tx: Sender<TheaterCommand>,
         actor_mailbox: Receiver<ActorMessage>,
         operation_rx: Receiver<ActorOperation>,
@@ -129,7 +130,15 @@ impl ActorRuntime {
 
         let actor_handle = ActorHandle::new(operation_tx);
 
-        let init_state = config.load_init_state().expect("Failed to load init state");
+        let init_state;
+        info!("Loading init state for actor: {:?}", id);
+        if let Some(init_bytes) = init_bytes {
+            info!("init bytes found: {:?}", init_bytes);
+            init_state = Some(init_bytes);
+        } else {
+            init_state = config.load_init_state().expect("Failed to load init state");
+            info!("config init state found: {:?}", init_state);
+        }
         actor_instance.store.data_mut().set_state(init_state);
 
         let mut actor_executor = ActorExecutor::new(actor_instance, operation_rx);
