@@ -3,6 +3,7 @@
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use sha1::{Digest, Sha1};
+use std::future::Future;
 use std::path::{Path, PathBuf};
 use tokio::fs;
 use tokio::io::AsyncWriteExt;
@@ -294,39 +295,56 @@ impl ContentStoreImpl {
         Ok(())
     }
 
-    /// List all labels
+    /// List all labels recursively, including nested directories
+    /// Returns paths relative to the labels directory
     async fn list_labels(&self) -> Result<Vec<String>> {
         let labels_dir = self.base_path.join("labels");
-
-        info!("Listing labels in directory: {:?}", labels_dir);
 
         // Ensure labels directory exists
         if !fs::try_exists(&labels_dir).await.unwrap_or(false) {
             return Ok(Vec::new());
         }
 
-        let mut entries = fs::read_dir(&labels_dir)
-            .await
-            .context("Failed to read labels directory")?;
+        let mut result = Vec::new();
+        self.collect_labels_recursive(&labels_dir, &labels_dir, &mut result)
+            .await?;
 
-        info!("Reading labels from directory");
+        Ok(result)
+    }
 
-        let mut labels = Vec::new();
-        while let Some(entry) = entries.next_entry().await? {
-            info!("Found entry: {:?}", entry);
-            if let Ok(file_type) = entry.file_type().await {
-                info!("File type: {:?}", file_type);
-                if file_type.is_file() {
-                    info!("File type is file");
-                    if let Some(name) = entry.file_name().to_str() {
-                        info!("File name: {}", name);
-                        labels.push(name.to_string());
+    /// Helper method to recursively collect labels
+    fn collect_labels_recursive<'a>(
+        &'a self,
+        base_path: &'a Path,
+        current_path: &'a Path,
+        result: &'a mut Vec<String>,
+    ) -> std::pin::Pin<Box<dyn Future<Output = Result<()>> + Send + 'a>> {
+        Box::pin(async move {
+            let mut entries = fs::read_dir(current_path)
+                .await
+                .with_context(|| format!("Failed to read directory: {:?}", current_path))?;
+
+            while let Some(entry) = entries.next_entry().await? {
+                let path = entry.path();
+
+                if let Ok(file_type) = entry.file_type().await {
+                    if file_type.is_file() {
+                        // It's a file/label, so add it to our results
+                        if let Some(rel_path) = path.strip_prefix(base_path).ok() {
+                            if let Some(rel_path_str) = rel_path.to_str() {
+                                result.push(rel_path_str.to_string());
+                            }
+                        }
+                    } else if file_type.is_dir() {
+                        // It's a directory, so recursively collect labels from it
+                        self.collect_labels_recursive(base_path, &path, result)
+                            .await?;
                     }
                 }
             }
-        }
 
-        Ok(labels)
+            Ok(())
+        })
     }
 
     /// List all content references in the store

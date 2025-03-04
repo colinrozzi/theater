@@ -82,6 +82,7 @@ impl FileSystemHost {
                 path = PathBuf::from(config.path.unwrap());
             }
         }
+        info!("Filesystem host path: {:?}", path);
         Self {
             path,
             allowed_commands: config.allowed_commands,
@@ -208,6 +209,7 @@ impl FileSystemHost {
 
                 let file_path = allowed_path.join(Path::new(&file_path));
                 info!("Writing file {:?}", file_path);
+                info!("Base path: {:?}", allowed_path);
 
                 match File::create(&file_path) {
                     Ok(mut file) => match file.write_all(contents.as_bytes()) {
@@ -727,7 +729,7 @@ async fn execute_command(
             "--command",
             "bash",
             "-c",
-            "cargo build --target wasm32-unknown-unknown --release",
+            "cargo component build --target wasm32-unknown-unknown --release",
         ]
     {
         return Ok(CommandResult::Error {
