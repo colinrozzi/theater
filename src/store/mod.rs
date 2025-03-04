@@ -231,7 +231,7 @@ impl ContentStoreImpl {
         if content_hash.is_empty() {
             return Ok(None);
         }
-        
+
         // Return a single content reference
         let content_ref = ContentRef::new(content_hash.to_string());
         Ok(Some(content_ref))
@@ -272,15 +272,23 @@ impl ContentStoreImpl {
             .await
             .context("Failed to read label file")?;
         let current_hash = content.trim();
-        
+
         // If the current content ref matches the one we want to remove, remove the label
         if current_hash == content_ref.hash() {
             fs::remove_file(&label_path)
                 .await
                 .context("Failed to remove label file")?;
-            debug!("Removed label '{}' that pointed to content {}", label, content_ref.hash());
+            debug!(
+                "Removed label '{}' that pointed to content {}",
+                label,
+                content_ref.hash()
+            );
         } else {
-            debug!("Label '{}' does not point to content {}", label, content_ref.hash());
+            debug!(
+                "Label '{}' does not point to content {}",
+                label,
+                content_ref.hash()
+            );
         }
 
         Ok(())
@@ -289,6 +297,8 @@ impl ContentStoreImpl {
     /// List all labels
     async fn list_labels(&self) -> Result<Vec<String>> {
         let labels_dir = self.base_path.join("labels");
+
+        info!("Listing labels in directory: {:?}", labels_dir);
 
         // Ensure labels directory exists
         if !fs::try_exists(&labels_dir).await.unwrap_or(false) {
@@ -299,11 +309,17 @@ impl ContentStoreImpl {
             .await
             .context("Failed to read labels directory")?;
 
+        info!("Reading labels from directory");
+
         let mut labels = Vec::new();
         while let Some(entry) = entries.next_entry().await? {
+            info!("Found entry: {:?}", entry);
             if let Ok(file_type) = entry.file_type().await {
+                info!("File type: {:?}", file_type);
                 if file_type.is_file() {
+                    info!("File type is file");
                     if let Some(name) = entry.file_name().to_str() {
+                        info!("File name: {}", name);
                         labels.push(name.to_string());
                     }
                 }
