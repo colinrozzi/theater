@@ -78,7 +78,8 @@ impl ActorRuntime {
             handlers.push(handler);
         }
 
-        let actor_store = ActorStore::new(id.clone(), theater_tx.clone());
+        let actor_handle = ActorHandle::new(operation_tx.clone());
+        let actor_store = ActorStore::new(id.clone(), theater_tx.clone(), actor_handle.clone());
         let mut actor_component = ActorComponent::new(config, actor_store).await.expect(
             format!(
                 "Failed to create actor component for actor: {:?}",
@@ -128,7 +129,7 @@ impl ActorRuntime {
             }
         }
 
-        let actor_handle = ActorHandle::new(operation_tx);
+        // Actor handle already created above
 
         let init_state;
         info!("Loading init state for actor: {:?}", id);

@@ -91,7 +91,7 @@ pub fn is_valid_host(host: &str) -> bool {
 
 pub fn is_valid_method(method: &str) -> bool {
     matches!(
-        method.as_str(),
+        method,
         "GET" | "POST" | "PUT" | "DELETE" | "PATCH" | "HEAD" | "OPTIONS" | "TRACE" | "CONNECT"
     )
 }

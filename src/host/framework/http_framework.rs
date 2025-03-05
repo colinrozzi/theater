@@ -5,19 +5,18 @@ use crate::events::{ChainEventData, EventData};
 use crate::wasm::{ActorComponent, ActorInstance};
 
 use anyhow::Result;
-use serde::{Deserialize, Serialize};
+
 use std::collections::HashMap;
 use std::future::Future;
-use std::net::SocketAddr;
+
 use std::sync::{
     atomic::{AtomicU64, Ordering},
     Arc,
 };
 use thiserror::Error;
 use tokio::sync::{mpsc, RwLock};
-use tokio::task::JoinHandle;
-use tracing::{debug, error, info, warn};
-use wasmtime::component::{ComponentType, Lift, Lower};
+use tracing::{error, info};
+
 
 use super::handlers::{HandlerConfig, HandlerRegistry, HandlerType};
 use super::server_instance::ServerInstance;
@@ -180,7 +179,7 @@ impl HttpFramework {
                   (server_id,): (u64,)|
                   -> Box<dyn Future<Output = Result<(Result<u16, String>,)>> + Send> {
                 let servers_clone = servers_clone.clone();
-                let actor_handle = ctx.data().get_actor_handle().clone();
+                let actor_handle = ctx.data().actor_handle.clone();
 
                 Box::new(async move {
                     let mut servers = servers_clone.write().await;
@@ -418,7 +417,10 @@ impl HttpFramework {
                     // Verify server exists and add route
                     let mut servers = servers_clone.write().await;
                     if let Some(server) = servers.get_mut(&server_id) {
-                        server.add_route(route_id, path.clone(), method.clone(), handler_id)
+                        match server.add_route(route_id, path.clone(), method.clone(), handler_id).await {
+                            Ok(_) => Ok(()),
+                            Err(e) => Err(e.to_string())
+                        }
                     } else {
                         Err(format!("Server not found: {}", server_id))
                     }
@@ -476,7 +478,9 @@ impl HttpFramework {
                         if server.has_route(route_id) {
                             found = true;
                             server_id = *id;
-                            server.remove_route(route_id)?;
+                            if let Err(e) = server.remove_route(route_id) {
+                                return Err(e.to_string());
+                            }
                             break;
                         }
                     }
@@ -550,7 +554,10 @@ impl HttpFramework {
                     // Verify server exists and add middleware
                     let mut servers = servers_clone.write().await;
                     if let Some(server) = servers.get_mut(&server_id) {
-                        server.add_middleware(middleware_id, path.clone(), handler_id)
+                        match server.add_middleware(middleware_id, path.clone(), handler_id) {
+                            Ok(_) => Ok(()),
+                            Err(e) => Err(e.to_string())
+                        }
                     } else {
                         Err(format!("Server not found: {}", server_id))
                     }
@@ -607,7 +614,9 @@ impl HttpFramework {
                         if server.has_middleware(middleware_id) {
                             found = true;
                             server_id = *id;
-                            server.remove_middleware(middleware_id)?;
+                            if let Err(e) = server.remove_middleware(middleware_id) {
+                                return Err(e.to_string());
+                            }
                             break;
                         }
                     }
@@ -712,12 +721,15 @@ impl HttpFramework {
                     // Enable WebSocket on server
                     let mut servers = servers_clone.write().await;
                     if let Some(server) = servers.get_mut(&server_id) {
-                        server.enable_websocket(
+                        match server.enable_websocket(
                             path.clone(),
                             connect_handler_id,
                             message_handler_id,
                             disconnect_handler_id,
-                        )
+                        ) {
+                            Ok(_) => Ok(()),
+                            Err(e) => Err(e.to_string())
+                        }
                     } else {
                         Err(format!("Server not found: {}", server_id))
                     }
@@ -768,7 +780,10 @@ impl HttpFramework {
                     let mut servers = servers_clone.write().await;
 
                     if let Some(server) = servers.get_mut(&server_id) {
-                        server.disable_websocket(&path)
+                        match server.disable_websocket(&path) {
+                            Ok(_) => Ok(()),
+                            Err(e) => Err(e.to_string())
+                        }
                     } else {
                         Err(format!("Server not found: {}", server_id))
                     }

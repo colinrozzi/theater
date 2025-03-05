@@ -1,26 +1,25 @@
 use crate::actor_handle::ActorHandle;
 use anyhow::{anyhow, Result};
 use axum::{
-    extract::{Path, State, WebSocketUpgrade},
-    http::{HeaderMap, HeaderName, HeaderValue, Method, Request, StatusCode},
+    extract::{State, WebSocketUpgrade},
+    http::{HeaderName, HeaderValue, Request, StatusCode},
     response::Response,
-    routing::{any, get, MethodRouter},
+    routing::{any, get},
     Router,
 };
 use futures::{SinkExt, StreamExt};
-use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
-use thiserror::Error;
 use tokio::sync::{mpsc, RwLock};
 use tokio::task::JoinHandle;
-use tracing::{debug, error, info, warn};
+use tracing::{error, info};
 
-use super::handlers::{HandlerRegistry, HandlerType};
+
 use super::types::*;
 
 // Route configuration
+#[derive(Clone)]
 pub struct RouteConfig {
     pub id: u64,
     pub path: String,
@@ -29,6 +28,7 @@ pub struct RouteConfig {
 }
 
 // Middleware configuration
+#[derive(Clone)]
 pub struct MiddlewareConfig {
     pub id: u64,
     pub path: String,
@@ -37,6 +37,7 @@ pub struct MiddlewareConfig {
 }
 
 // WebSocket configuration
+#[derive(Clone)]
 pub struct WebSocketConfig {
     pub path: String,
     pub connect_handler_id: Option<u64>,
@@ -56,7 +57,7 @@ pub struct ServerInstance {
     routes: HashMap<u64, RouteConfig>,
     middlewares: HashMap<u64, MiddlewareConfig>,
     websockets: HashMap<String, WebSocketConfig>,
-    active_ws_connections: Arc<RwLock<HashMap<u64, WebSocketConnection>>>,
+    pub active_ws_connections: Arc<RwLock<HashMap<u64, WebSocketConnection>>>,
     server_handle: Option<JoinHandle<()>>,
     listener: Option<Arc<tokio::net::TcpListener>>,
     port: u16,
@@ -231,7 +232,7 @@ impl ServerInstance {
             info!("Server starting on {}", actual_addr);
             
             // Use Axum's serve function with our router
-            if let Err(e) = axum::serve(listener_clone.as_ref(), router.into_make_service()).await {
+            if let Err(e) = axum::serve(&*listener_clone, router).await {
                 error!("Server error: {}", e);
             }
             
@@ -461,7 +462,7 @@ impl ServerInstance {
             // Upgrade the connection
             ws.on_upgrade(move |socket| async move {
                 // Handle the WebSocket connection
-                Self::handle_websocket_connection(state, socket, connection_id, path, query, config.clone()).await;
+                Self::handle_websocket_connection(state, socket, connection_id, path, query, config).await;
             })
         } else {
             // No WebSocket configured for this path
@@ -504,7 +505,7 @@ impl ServerInstance {
                 match message.ty {
                     MessageType::Text => {
                         if let Some(text) = message.text {
-                            if let Err(e) = ws_sender.send(axum::extract::ws::Message::Text(text)).await {
+                            if let Err(e) = ws_sender.send(axum::extract::ws::Message::Text(text.into())).await {
                                 error!("Error sending WebSocket text message: {}", e);
                                 break;
                             }
@@ -512,7 +513,7 @@ impl ServerInstance {
                     },
                     MessageType::Binary => {
                         if let Some(data) = message.data {
-                            if let Err(e) = ws_sender.send(axum::extract::ws::Message::Binary(data)).await {
+                            if let Err(e) = ws_sender.send(axum::extract::ws::Message::Binary(data.into())).await {
                                 error!("Error sending WebSocket binary message: {}", e);
                                 break;
                             }
@@ -523,13 +524,13 @@ impl ServerInstance {
                         break;
                     },
                     MessageType::Ping => {
-                        if let Err(e) = ws_sender.send(axum::extract::ws::Message::Ping(vec![])).await {
+                        if let Err(e) = ws_sender.send(axum::extract::ws::Message::Ping(vec![].into())).await {
                             error!("Error sending WebSocket ping: {}", e);
                             break;
                         }
                     },
                     MessageType::Pong => {
-                        if let Err(e) = ws_sender.send(axum::extract::ws::Message::Pong(vec![])).await {
+                        if let Err(e) = ws_sender.send(axum::extract::ws::Message::Pong(vec![].into())).await {
                             error!("Error sending WebSocket pong: {}", e);
                             break;
                         }
@@ -547,11 +548,11 @@ impl ServerInstance {
                         axum::extract::ws::Message::Text(text) => WebSocketMessage {
                             ty: MessageType::Text,
                             data: None,
-                            text: Some(text),
+                            text: Some(text.to_string()),
                         },
                         axum::extract::ws::Message::Binary(data) => WebSocketMessage {
                             ty: MessageType::Binary,
-                            data: Some(data),
+                            data: Some(data.to_vec()),
                             text: None,
                         },
                         axum::extract::ws::Message::Close(_) => {

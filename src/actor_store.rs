@@ -1,3 +1,4 @@
+use crate::actor_handle::ActorHandle;
 use crate::chain::{ChainEvent, StateChain};
 use crate::events::ChainEventData;
 use crate::id::TheaterId;
@@ -12,15 +13,17 @@ pub struct ActorStore {
     pub theater_tx: Sender<TheaterCommand>,
     pub chain: Arc<Mutex<StateChain>>,
     pub state: Option<Vec<u8>>,
+    pub actor_handle: ActorHandle,
 }
 
 impl ActorStore {
-    pub fn new(id: TheaterId, theater_tx: Sender<TheaterCommand>) -> Self {
+    pub fn new(id: TheaterId, theater_tx: Sender<TheaterCommand>, actor_handle: ActorHandle) -> Self {
         Self {
             id: id.clone(),
             theater_tx,
             chain: Arc::new(Mutex::new(StateChain::new(id))),
             state: Some(vec![]),
+            actor_handle,
         }
     }
 
