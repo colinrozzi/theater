@@ -3,7 +3,9 @@
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use sha1::{Digest, Sha1};
+use std::fs as std_fs;
 use std::future::Future;
+use std::io::Write as StdWrite;
 use std::path::{Path, PathBuf};
 use tokio::fs;
 use tokio::io::AsyncWriteExt;
@@ -110,6 +112,30 @@ impl ContentStore {
                 .context("Failed to create content file")?;
             file.write_all(&content)
                 .await
+                .context("Failed to write content")?;
+            debug!("Stored content with hash: {}", content_ref.hash());
+        } else {
+            debug!("Content already exists: {}", content_ref.hash());
+        }
+
+        Ok(content_ref)
+    }
+
+    /// Store content synchronously and return its ContentRef
+    pub fn store_sync(&self, content: Vec<u8>) -> Result<ContentRef> {
+        let content_ref = ContentRef::from_content(&content);
+        let path = content_ref.to_path(&self.base_path);
+
+        // Check if content already exists
+        if !std_fs::exists(&path).unwrap_or(false) {
+            // Create parent directories if they don't exist
+            if let Some(parent) = path.parent() {
+                std_fs::create_dir_all(parent).context("Failed to create parent directories")?;
+            }
+
+            // Write content to file synchronously
+            let mut file = std_fs::File::create(&path).context("Failed to create content file")?;
+            file.write_all(&content)
                 .context("Failed to write content")?;
             debug!("Stored content with hash: {}", content_ref.hash());
         } else {
