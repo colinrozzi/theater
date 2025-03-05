@@ -17,7 +17,6 @@ use thiserror::Error;
 use tokio::sync::RwLock;
 use tracing::{error, info};
 
-
 use super::handlers::{HandlerConfig, HandlerRegistry, HandlerType};
 use super::server_instance::ServerInstance;
 use super::types::*;
@@ -401,7 +400,7 @@ impl HttpFramework {
                 if !is_valid_method(&method) {
                     return Ok((Err(format!("Invalid HTTP method: {}", method)),));
                 }
-                
+
                 // Clone values before moving to async context
                 let path_clone = path.clone();
                 let method_clone = method.clone();
@@ -422,9 +421,17 @@ impl HttpFramework {
                     // Verify server exists and add route
                     let mut servers = servers_clone.write().await;
                     if let Some(server) = servers.get_mut(&server_id) {
-                        match server.add_route(route_id, path_clone.clone(), method_clone.clone(), handler_id).await {
+                        match server
+                            .add_route(
+                                route_id,
+                                path_clone.clone(),
+                                method_clone.clone(),
+                                handler_id,
+                            )
+                            .await
+                        {
                             Ok(_) => Ok(()),
-                            Err(e) => Err(e.to_string())
+                            Err(e) => Err(e.to_string()),
                         }
                     } else {
                         Err(format!("Server not found: {}", server_id))
@@ -435,6 +442,9 @@ impl HttpFramework {
                 let result = tokio::task::block_in_place(|| {
                     tokio::runtime::Handle::current().block_on(current_task)
                 })?;
+
+                let path_clone = path.clone();
+                let method_clone = method.clone();
 
                 match result {
                     Ok(_) => {
@@ -542,7 +552,7 @@ impl HttpFramework {
                 if !path.starts_with('/') {
                     return Ok((Err("Path must start with /".to_string()),));
                 }
-                
+
                 // Clone values before moving to async context
                 let path_clone = path.clone();
 
@@ -564,7 +574,7 @@ impl HttpFramework {
                     if let Some(server) = servers.get_mut(&server_id) {
                         match server.add_middleware(middleware_id, path_clone.clone(), handler_id) {
                             Ok(_) => Ok(()),
-                            Err(e) => Err(e.to_string())
+                            Err(e) => Err(e.to_string()),
                         }
                     } else {
                         Err(format!("Server not found: {}", server_id))
@@ -575,6 +585,8 @@ impl HttpFramework {
                 let result = tokio::task::block_in_place(|| {
                     tokio::runtime::Handle::current().block_on(current_task)
                 })?;
+
+                let path_clone = path.clone();
 
                 match result {
                     Ok(_) => {
@@ -685,7 +697,7 @@ impl HttpFramework {
                 if !path.starts_with('/') {
                     return Ok((Err("Path must start with /".to_string()),));
                 }
-                
+
                 // Clone values before moving to async context
                 let path_clone = path.clone();
 
@@ -739,7 +751,7 @@ impl HttpFramework {
                             disconnect_handler_id,
                         ) {
                             Ok(_) => Ok(()),
-                            Err(e) => Err(e.to_string())
+                            Err(e) => Err(e.to_string()),
                         }
                     } else {
                         Err(format!("Server not found: {}", server_id))
@@ -750,6 +762,8 @@ impl HttpFramework {
                 let result = tokio::task::block_in_place(|| {
                     tokio::runtime::Handle::current().block_on(current_task)
                 })?;
+
+                let path_clone = path.clone();
 
                 match result {
                     Ok(_) => {
@@ -785,6 +799,7 @@ impl HttpFramework {
                   (server_id, path): (u64, String)|
                   -> Result<(Result<(), String>,)> {
                 let servers_clone = servers_clone.clone();
+                let path_clone = path.clone();
 
                 // Capture the current execution context
                 let current_task = tokio::task::spawn(async move {
@@ -793,7 +808,7 @@ impl HttpFramework {
                     if let Some(server) = servers.get_mut(&server_id) {
                         match server.disable_websocket(&path_clone) {
                             Ok(_) => Ok(()),
-                            Err(e) => Err(e.to_string())
+                            Err(e) => Err(e.to_string()),
                         }
                     } else {
                         Err(format!("Server not found: {}", server_id))
@@ -804,6 +819,8 @@ impl HttpFramework {
                 let result = tokio::task::block_in_place(|| {
                     tokio::runtime::Handle::current().block_on(current_task)
                 })?;
+
+                let path_clone = path.clone();
 
                 match result {
                     Ok(_) => {
@@ -836,6 +853,7 @@ impl HttpFramework {
                   (server_id, connection_id, message): (u64, u64, WebSocketMessage)|
                   -> Result<(Result<(), String>,)> {
                 let servers_clone = servers_clone.clone();
+                let message_clone = message.clone();
 
                 // Capture the current execution context
                 let current_task = tokio::task::spawn(async move {
@@ -846,7 +864,6 @@ impl HttpFramework {
 
                         if let Some(connection) = connections.get(&connection_id) {
                             // Try to send the message
-                            let message_clone = message.clone();
                             match connection.sender.send(message_clone).await {
                                 Ok(_) => Ok(()),
                                 Err(e) => Err(format!("Failed to send WebSocket message: {}", e)),
@@ -864,6 +881,8 @@ impl HttpFramework {
                     tokio::runtime::Handle::current().block_on(current_task)
                 })?;
 
+                let message_clone = message.clone();
+
                 match result {
                     Ok(_) => {
                         // Record event
@@ -877,8 +896,8 @@ impl HttpFramework {
                             MessageType::Other(ref s) => s,
                         };
 
-                        let message_size = message.data.as_ref().map_or(0, |d| d.len())
-                            + message.text.as_ref().map_or(0, |t| t.len());
+                        let message_size = message_clone.data.as_ref().map_or(0, |d| d.len())
+                            + message_clone.text.as_ref().map_or(0, |t| t.len());
 
                         ctx.data_mut().record_event(ChainEventData {
                             event_type: "http-framework/send-websocket-message".to_string(),

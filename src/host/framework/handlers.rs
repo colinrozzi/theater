@@ -58,11 +58,16 @@ impl HandlerRegistry {
         // to properly update the handler type
         if let Some(handler) = self.handlers.get(&handler_id) {
             // Just a check to indicate we would only update under these conditions
-            if handler.handler_type == HandlerType::Unknown || handler.handler_type == handler_type {
+            if handler.handler_type == HandlerType::Unknown || handler.handler_type == handler_type
+            {
                 // We would update here if we had proper mutability
                 // For now, let's just log that we accept this change
-                tracing::debug!("Would change handler {} type from {:?} to {:?}", 
-                    handler_id, handler.handler_type, handler_type);
+                tracing::debug!(
+                    "Would change handler {} type from {:?} to {:?}",
+                    handler_id,
+                    handler.handler_type,
+                    handler_type
+                );
             }
         }
     }
