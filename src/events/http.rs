@@ -2,7 +2,88 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum HttpEventData {
-    // Request handling events
+    // HTTP framework server lifecycle events
+    ServerCreate {
+        server_id: u64,
+        host: String,
+        port: u16,
+        with_tls: bool,
+    },
+    ServerStart {
+        server_id: u64,
+        port: u16,
+    },
+    ServerStop {
+        server_id: u64,
+    },
+    ServerDestroy {
+        server_id: u64,
+    },
+    
+    // HTTP framework route events
+    RouteAdd {
+        route_id: u64,
+        server_id: u64,
+        path: String,
+        method: String,
+        handler_id: u64,
+    },
+    RouteRemove {
+        route_id: u64,
+        server_id: u64,
+    },
+    
+    // HTTP framework middleware events
+    MiddlewareAdd {
+        middleware_id: u64,
+        server_id: u64,
+        path: String,
+        handler_id: u64,
+    },
+    MiddlewareRemove {
+        middleware_id: u64,
+        server_id: u64,
+    },
+    
+    // HTTP framework WebSocket events
+    WebSocketEnable {
+        server_id: u64,
+        path: String,
+        connect_handler_id: Option<u64>,
+        message_handler_id: u64,
+        disconnect_handler_id: Option<u64>,
+    },
+    WebSocketDisable {
+        server_id: u64,
+        path: String,
+    },
+    WebSocketConnect {
+        server_id: u64,
+        connection_id: u64,
+        path: String,
+    },
+    WebSocketDisconnect {
+        server_id: u64,
+        connection_id: u64,
+    },
+    WebSocketMessage {
+        server_id: u64,
+        connection_id: u64,
+        message_type: String,
+        message_size: usize,
+    },
+    
+    // HTTP framework handler events
+    HandlerRegister {
+        handler_id: u64,
+        name: String,
+    },
+    HandlerInvoke {
+        handler_id: u64,
+        handler_type: String,
+    },
+    
+    // Original Request handling events
     HttpRequestCall {
         method: String,
         path: String,

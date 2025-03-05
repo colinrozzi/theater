@@ -75,6 +75,8 @@ pub enum HandlerConfig {
     FileSystem(FileSystemHandlerConfig),
     #[serde(rename = "http-client")]
     HttpClient(HttpClientHandlerConfig),
+    #[serde(rename = "http-framework")]
+    HttpFramework(HttpFrameworkHandlerConfig),
     #[serde(rename = "runtime")]
     Runtime(RuntimeHostConfig),
     #[serde(rename = "websocket-server")]
@@ -118,6 +120,9 @@ pub struct HttpClientHandlerConfig {}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StoreHandlerConfig {}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HttpFrameworkHandlerConfig {}
 
 impl ManifestConfig {
     pub fn from_file<P: AsRef<std::path::Path>>(path: P) -> anyhow::Result<Self> {

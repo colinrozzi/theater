@@ -1,0 +1,32 @@
+package ntwk:theater;
+
+/// Types used for WebSocket communication
+interface websocket-types {
+    /// The type of WebSocket message/event
+    variant message-type {
+        /// A text message
+        text,
+        /// A binary message
+        binary,
+        /// A new connection was established
+        connect,
+        /// The connection was closed
+        close,
+        /// A ping message (for keep-alive)
+        ping,
+        /// A pong message (response to ping)
+        pong,
+        /// Any other message type
+        other(string),
+    }
+
+    /// Represents a message sent or received over a WebSocket connection
+    record websocket-message {
+        /// The type of the message
+        ty: message-type,
+        /// Binary data payload (used for binary messages)
+        data: option<list<u8>>,
+        /// Text payload (used for text messages)
+        text: option<string>,
+    }
+}

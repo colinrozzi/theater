@@ -1,5 +1,6 @@
 use crate::actor_handle::ActorHandle;
 use crate::host::filesystem::FileSystemHost;
+use crate::host::framework::HttpFramework;
 use crate::host::http_client::HttpClientHost;
 use crate::host::http_server::HttpServerHost;
 use crate::host::message_server::MessageServerHost;
@@ -15,6 +16,7 @@ pub enum Handler {
     HttpServer(HttpServerHost),
     FileSystem(FileSystemHost),
     HttpClient(HttpClientHost),
+    HttpFramework(HttpFramework),  // New handler for our HTTP Framework
     Runtime(RuntimeHost),
     WebSocketServer(WebSocketServerHost),
     Supervisor(SupervisorHost),
@@ -40,6 +42,10 @@ impl Handler {
                 .start(actor_handle)
                 .await
                 .expect("Error starting http client")),
+            Handler::HttpFramework(_) => {
+                // The HTTP Framework doesn't need a start method as servers are started on demand
+                Ok(())
+            },
             Handler::Runtime(h) => Ok(h.start(actor_handle).await.expect("Error starting runtime")),
             Handler::WebSocketServer(h) => Ok(h
                 .start(actor_handle)
@@ -71,6 +77,10 @@ impl Handler {
                 .setup_host_functions(actor_component)
                 .await
                 .expect("Error setting up http client host functions")),
+            Handler::HttpFramework(h) => Ok(h
+                .setup_host_functions(actor_component)
+                .await
+                .expect("Error setting up http framework host functions")),
             Handler::Runtime(h) => Ok(h
                 .setup_host_functions(actor_component)
                 .await
@@ -108,6 +118,11 @@ impl Handler {
                 .add_export_functions(actor_instance)
                 .await
                 .expect("Error adding functions to http client")),
+            Handler::HttpFramework(_) => {
+                // The HTTP Framework doesn't need to add export functions
+                // It's entirely host-side and the actor calls into it
+                Ok(())
+            },
             Handler::Runtime(handler) => Ok(handler
                 .add_export_functions(actor_instance)
                 .await
@@ -133,6 +148,7 @@ impl Handler {
             Handler::HttpServer(_) => "http-server",
             Handler::FileSystem(_) => "filesystem",
             Handler::HttpClient(_) => "http-client",
+            Handler::HttpFramework(_) => "http-framework",
             Handler::Runtime(_) => "runtime",
             Handler::WebSocketServer(_) => "websocket-server",
             Handler::Supervisor(_) => "supervisor",

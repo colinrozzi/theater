@@ -4,6 +4,7 @@ use crate::actor_handle::ActorHandle;
 use crate::actor_store::ActorStore;
 use crate::config::{HandlerConfig, ManifestConfig};
 use crate::host::filesystem::FileSystemHost;
+use crate::host::framework::HttpFramework;
 use crate::host::handler::Handler;
 use crate::host::http_client::HttpClientHost;
 use crate::host::http_server::HttpServerHost;
@@ -59,6 +60,9 @@ impl ActorRuntime {
                 }
                 HandlerConfig::HttpClient(config) => {
                     Handler::HttpClient(HttpClientHost::new(config.clone()))
+                }
+                HandlerConfig::HttpFramework(_) => {
+                    Handler::HttpFramework(HttpFramework::new())
                 }
                 HandlerConfig::Runtime(config) => {
                     Handler::Runtime(RuntimeHost::new(config.clone()))
