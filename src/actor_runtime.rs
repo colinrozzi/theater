@@ -14,7 +14,6 @@ use crate::host::supervisor::SupervisorHost;
 use crate::host::websocket_server::WebSocketServerHost;
 use crate::id::TheaterId;
 use crate::messages::{ActorMessage, TheaterCommand};
-use crate::store::ContentStore;
 use crate::wasm::ActorComponent;
 use crate::Result;
 use tokio::sync::mpsc::{Receiver, Sender};
@@ -39,7 +38,6 @@ impl ActorRuntime {
         actor_mailbox: Receiver<ActorMessage>,
         operation_rx: Receiver<ActorOperation>,
         operation_tx: Sender<ActorOperation>,
-        content_store: ContentStore,
     ) -> Result<Self> {
         let mut handlers = Vec::new();
 
@@ -71,15 +69,13 @@ impl ActorRuntime {
                 HandlerConfig::Supervisor(config) => {
                     Handler::Supervisor(SupervisorHost::new(config.clone()))
                 }
-                HandlerConfig::Store(config) => {
-                    Handler::Store(StoreHost::new(config.clone(), content_store.clone()))
-                }
+                HandlerConfig::Store(config) => Handler::Store(StoreHost::new(config.clone())),
             };
             handlers.push(handler);
         }
 
-        let store = ActorStore::new(id.clone(), theater_tx.clone(), content_store.clone());
-        let mut actor_component = ActorComponent::new(config, store.clone()).await.expect(
+        let actor_store = ActorStore::new(id.clone(), theater_tx.clone());
+        let mut actor_component = ActorComponent::new(config, actor_store).await.expect(
             format!(
                 "Failed to create actor component for actor: {:?}",
                 config.name

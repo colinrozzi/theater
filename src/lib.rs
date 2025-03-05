@@ -16,6 +16,7 @@ pub mod router;
 pub mod store;
 pub mod theater_runtime;
 pub mod theater_server;
+pub mod utils;
 mod wasm;
 
 pub use actor_store::ActorStore;

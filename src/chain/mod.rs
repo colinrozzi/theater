@@ -8,7 +8,7 @@ use std::sync::mpsc;
 use wasmtime::component::{ComponentType, Lift, Lower};
 
 use crate::events::ChainEventData;
-use crate::store::{ContentRef, ContentStore};
+use crate::store::ContentRef;
 use crate::TheaterId;
 
 #[derive(Debug, Clone, Serialize, Deserialize, ComponentType, Lift, Lower)]
@@ -112,18 +112,15 @@ pub struct StateChain {
     #[serde(skip)]
     event_callback: Option<mpsc::Sender<ChainEvent>>,
     #[serde(skip)]
-    #[allow(dead_code)]
-    content_store: ContentStore,
     actor_id: TheaterId,
 }
 
 impl StateChain {
-    pub fn new(actor_id: TheaterId, content_store: ContentStore) -> Self {
+    pub fn new(actor_id: TheaterId) -> Self {
         Self {
             events: Vec::new(),
             current_hash: None,
             event_callback: None,
-            content_store,
             actor_id,
         }
     }

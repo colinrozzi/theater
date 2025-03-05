@@ -6,42 +6,44 @@ interface store {
         hash: string,
     }
 
+    new: func() -> result<string, string>;
+
     /// Store content and return its ContentRef
-    store: func(content: list<u8>) -> result<content-ref, string>;
+    store: func(store_id: string, content: list<u8>) -> result<content-ref, string>;
     
     /// Retrieve content by its reference
-    get: func(content-ref: content-ref) -> result<list<u8>, string>;
+    get: func(store_id: string, content-ref: content-ref) -> result<list<u8>, string>;
     
     /// Check if content exists
-    exists: func(content-ref: content-ref) -> result<bool, string>;
+    exists: func(store_id: string, content-ref: content-ref) -> result<bool, string>;
     
     /// Attach a label to content
-    label: func(label: string, content-ref: content-ref) -> result<_, string>;
+    label: func(store_id: string, label: string, content-ref: content-ref) -> result<_, string>;
     
     /// Get content reference by label
-    get-by-label: func(label: string) -> result<option<content-ref>, string>;
+    get-by-label: func(store_id: string, label: string) -> result<option<content-ref>, string>;
     
     /// Remove a label
-    remove-label: func(label: string) -> result<_, string>;
+    remove-label: func(store_id: string, label: string) -> result<_, string>;
     
     /// Remove a specific content reference from a label
-    remove-from-label: func(label: string, content-ref: content-ref) -> result<_, string>;
+    remove-from-label: func(store_id: string, label: string, content-ref: content-ref) -> result<_, string>;
     
     /// Store content and immediately label it
-    put-at-label: func(label: string, content: list<u8>) -> result<content-ref, string>;
+    put-at-label: func(store_id: string, label: string, content: list<u8>) -> result<content-ref, string>;
     
     /// Put content at a label, replacing any existing content
-    replace-content-at-label: func(label: string, content: list<u8>) -> result<content-ref, string>;
+    replace-content-at-label: func(store_id: string, label: string, content: list<u8>) -> result<content-ref, string>;
     
     /// Replace content at a label with a specific content reference
-    replace-at-label: func(label: string, content-ref: content-ref) -> result<_, string>;
+    replace-at-label: func(store_id: string, label: string, content-ref: content-ref) -> result<_, string>;
     
     /// List all labels
-    list-labels: func() -> result<list<string>, string>;
+    list-labels: func(store_id: string) -> result<list<string>, string>;
     
     /// List all content references
-    list-all-content: func() -> result<list<content-ref>, string>;
+    list-all-content: func(store_id: string) -> result<list<content-ref>, string>;
     
     /// Calculate total size of all content
-    calculate-total-size: func() -> result<u64, string>;
+    calculate-total-size: func(store_id: string) -> result<u64, string>;
 }

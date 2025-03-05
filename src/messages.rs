@@ -53,10 +53,6 @@ pub enum TheaterCommand {
         actor_id: TheaterId,
         response_tx: oneshot::Sender<Result<ActorMetrics>>,
     },
-    StoreOperation {
-        command: StoreCommand,
-        response_tx: oneshot::Sender<Result<StoreResponse>>,
-    },
 }
 
 impl TheaterCommand {
@@ -93,9 +89,6 @@ impl TheaterCommand {
             TheaterCommand::GetActorMetrics { actor_id, .. } => {
                 format!("GetActorMetrics: {:?}", actor_id)
             }
-            TheaterCommand::StoreOperation { command, .. } => {
-                format!("StoreOperation: {:?}", command)
-            }
         }
     }
 }
@@ -122,59 +115,4 @@ pub enum ActorStatus {
     Running,
     Stopped,
     Failed,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum StoreCommand {
-    // Content operations
-    Store {
-        content: Vec<u8>,
-    },
-    Get {
-        content_ref: String, // Hash string
-    },
-    Exists {
-        content_ref: String, // Hash string
-    },
-
-    // Label operations
-    Label {
-        label: String,
-        content_ref: String, // Hash string
-    },
-    GetByLabel {
-        label: String,
-    },
-    RemoveLabel {
-        label: String,
-    },
-    RemoveFromLabel {
-        label: String,
-        content_ref: String, // Hash string
-    },
-    ReplaceAtLabel {
-        label: String,
-        content_ref: String, // Hash string
-    },
-    PutAtLabel {
-        label: String,
-        content: Vec<u8>,
-    },
-
-    // Utility operations
-    ListLabels,
-    ListAllContent,
-    CalculateTotalSize,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum StoreResponse {
-    ContentRef(String), // Hash string
-    Content(Vec<u8>),
-    Exists(bool),
-    ContentRefs(Vec<String>), // List of hash strings
-    Labels(Vec<String>),
-    Size(u64),
-    Success,
-    Error(String),
 }

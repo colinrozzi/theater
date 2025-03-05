@@ -2,12 +2,9 @@ use crate::actor_executor::{ActorError, ActorOperation};
 use crate::actor_runtime::ActorRuntime;
 use crate::chain::ChainEvent;
 use crate::id::TheaterId;
-use crate::messages::{
-    ActorMessage, ActorSend, ActorStatus, StoreCommand, StoreResponse, TheaterCommand,
-};
+use crate::messages::{ActorMessage, ActorSend, ActorStatus, TheaterCommand};
 use crate::metrics::ActorMetrics;
-use crate::store::ContentRef;
-use crate::store::ContentStore;
+use crate::utils::resolve_reference;
 use crate::wasm::Event;
 use crate::ManifestConfig;
 use crate::Result;
@@ -25,7 +22,6 @@ pub struct TheaterRuntime {
     pub theater_tx: Sender<TheaterCommand>,
     theater_rx: Receiver<TheaterCommand>,
     event_subscribers: Vec<mpsc::Sender<(TheaterId, ChainEvent)>>,
-    content_store: ContentStore,
 }
 
 pub struct ActorProcess {
@@ -43,15 +39,11 @@ impl TheaterRuntime {
         theater_tx: Sender<TheaterCommand>,
         theater_rx: Receiver<TheaterCommand>,
     ) -> Result<Self> {
-        let store_path = PathBuf::from("store");
-        let content_store = ContentStore::start(store_path);
-
         Ok(Self {
             theater_tx,
             theater_rx,
             actors: HashMap::new(),
             event_subscribers: Vec::new(),
-            content_store,
         })
     }
 
@@ -236,21 +228,6 @@ impl TheaterRuntime {
                         }
                     }
                 }
-                TheaterCommand::StoreOperation {
-                    command,
-                    response_tx,
-                } => {
-                    debug!("Processing store operation: {:?}", command);
-                    match self.handle_store_command(command).await {
-                        Ok(response) => {
-                            let _ = response_tx.send(Ok(response));
-                        }
-                        Err(e) => {
-                            error!("Failed to process store operation: {}", e);
-                            let _ = response_tx.send(Err(e));
-                        }
-                    }
-                }
             };
         }
         info!("Theater runtime shutting down");
@@ -271,10 +248,7 @@ impl TheaterRuntime {
         // check if the manifest is a valid path OR starts with store:
         let manifest: ManifestConfig;
         if manifest_path.starts_with("store:") || PathBuf::from(manifest_path.clone()).exists() {
-            let manifest_bytes = self
-                .content_store
-                .resolve_reference(manifest_path.as_str())
-                .await?;
+            let manifest_bytes = resolve_reference(manifest_path.as_str()).await?;
             manifest = ManifestConfig::from_vec(manifest_bytes)?;
         } else {
             manifest = ManifestConfig::from_str(manifest_path.as_str())?;
@@ -287,7 +261,6 @@ impl TheaterRuntime {
         let theater_tx = self.theater_tx.clone();
 
         let actor_operation_tx = operation_tx.clone();
-        let content_store = self.content_store.clone();
         let actor_runtime_process = tokio::spawn(async move {
             let actor_id = TheaterId::generate();
             debug!("Initializing actor runtime");
@@ -301,7 +274,6 @@ impl TheaterRuntime {
                 mailbox_rx,
                 operation_rx,
                 actor_operation_tx,
-                content_store.clone(),
             )
             .await
             .unwrap()
@@ -489,14 +461,6 @@ impl TheaterRuntime {
         }
     }
 
-    pub fn content_store(&self) -> &ContentStore {
-        &self.content_store
-    }
-
-    pub fn content_store_mut(&mut self) -> &mut ContentStore {
-        &mut self.content_store
-    }
-
     pub async fn stop(&mut self) -> Result<()> {
         info!("Initiating theater runtime shutdown");
 
@@ -505,86 +469,7 @@ impl TheaterRuntime {
             self.stop_actor(actor_id).await?;
         }
 
-        if let Err(e) = self.content_store.shutdown().await {
-            error!("Failed to shut down content store: {}", e);
-        }
-
         info!("Theater runtime shutdown complete");
         Ok(())
-    }
-
-    pub async fn handle_store_command(&mut self, command: StoreCommand) -> Result<StoreResponse> {
-        match command {
-            StoreCommand::Get { content_ref } => {
-                let content = self
-                    .content_store
-                    .get(ContentRef::from_str(&content_ref))
-                    .await?;
-                Ok(StoreResponse::Content(content))
-            }
-            StoreCommand::Store { content } => {
-                let content_ref = self.content_store.store(content).await?;
-                Ok(StoreResponse::ContentRef(content_ref.hash().to_string()))
-            }
-            StoreCommand::Exists { content_ref } => {
-                let exists = self
-                    .content_store
-                    .exists(ContentRef::from_str(&content_ref))
-                    .await?;
-                Ok(StoreResponse::Exists(exists))
-            }
-            StoreCommand::GetByLabel { label } => {
-                let content_refs = self.content_store.get_by_label(label).await?;
-                Ok(StoreResponse::ContentRefs(
-                    content_refs
-                        .into_iter()
-                        .map(|r| r.hash().to_string())
-                        .collect(),
-                ))
-            }
-            StoreCommand::Label { label, content_ref } => {
-                self.content_store
-                    .label(label, ContentRef::from_str(&content_ref))
-                    .await?;
-                Ok(StoreResponse::ContentRef(content_ref))
-            }
-            StoreCommand::RemoveLabel { label } => {
-                self.content_store.remove_label(label).await?;
-                Ok(StoreResponse::Labels(Vec::new()))
-            }
-            StoreCommand::RemoveFromLabel { label, content_ref } => {
-                self.content_store
-                    .remove_from_label(label, ContentRef::from_str(&content_ref))
-                    .await?;
-                Ok(StoreResponse::ContentRef(content_ref))
-            }
-            StoreCommand::ReplaceAtLabel { label, content_ref } => {
-                self.content_store
-                    .replace_at_label(label, ContentRef::from_str(&content_ref))
-                    .await?;
-                Ok(StoreResponse::ContentRef(content_ref))
-            }
-            StoreCommand::PutAtLabel { label, content } => {
-                self.content_store.put_at_label(label, content).await?;
-                Ok(StoreResponse::Success)
-            }
-            StoreCommand::ListLabels => {
-                let labels = self.content_store.list_labels().await?;
-                Ok(StoreResponse::Labels(labels))
-            }
-            StoreCommand::ListAllContent => {
-                let content_refs = self.content_store.list_all_content().await?;
-                Ok(StoreResponse::ContentRefs(
-                    content_refs
-                        .into_iter()
-                        .map(|r| r.hash().to_string())
-                        .collect(),
-                ))
-            }
-            StoreCommand::CalculateTotalSize => {
-                let size = self.content_store.calculate_total_size().await?;
-                Ok(StoreResponse::Size(size))
-            }
-        }
     }
 }

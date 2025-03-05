@@ -2,7 +2,6 @@ use crate::chain::{ChainEvent, StateChain};
 use crate::events::ChainEventData;
 use crate::id::TheaterId;
 use crate::messages::TheaterCommand;
-use crate::store::ContentStore;
 use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc::Sender;
 
@@ -13,21 +12,15 @@ pub struct ActorStore {
     pub theater_tx: Sender<TheaterCommand>,
     pub chain: Arc<Mutex<StateChain>>,
     pub state: Option<Vec<u8>>,
-    pub content_store: ContentStore,
 }
 
 impl ActorStore {
-    pub fn new(
-        id: TheaterId,
-        theater_tx: Sender<TheaterCommand>,
-        content_store: ContentStore,
-    ) -> Self {
+    pub fn new(id: TheaterId, theater_tx: Sender<TheaterCommand>) -> Self {
         Self {
             id: id.clone(),
             theater_tx,
-            chain: Arc::new(Mutex::new(StateChain::new(id, content_store.clone()))),
+            chain: Arc::new(Mutex::new(StateChain::new(id))),
             state: Some(vec![]),
-            content_store,
         }
     }
 

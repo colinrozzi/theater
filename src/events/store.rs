@@ -1,127 +1,150 @@
+use crate::store::ContentRef;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum StoreEventData {
+    NewStoreCall {},
+    NewStoreResult {
+        store_id: String,
+        success: bool,
+    },
+
     // Store content events
     StoreCall {
-        content_size: usize,
+        store_id: String,
+        content: Vec<u8>,
     },
     StoreResult {
-        hash: String,
+        store_id: String,
+        content_ref: ContentRef,
         success: bool,
     },
 
     // Get content events
     GetCall {
-        hash: String,
+        store_id: String,
+        content_ref: ContentRef,
     },
     GetResult {
-        hash: String,
-        content_size: usize,
+        store_id: String,
+        content_ref: ContentRef,
+        content: Option<Vec<u8>>,
         success: bool,
     },
 
     // Exists events
     ExistsCall {
-        hash: String,
+        store_id: String,
+        content_ref: ContentRef,
     },
     ExistsResult {
-        hash: String,
+        store_id: String,
+        content_ref: ContentRef,
         exists: bool,
         success: bool,
     },
 
     // Label events
     LabelCall {
+        store_id: String,
         label: String,
-        hash: String,
+        content_ref: ContentRef,
     },
     LabelResult {
+        store_id: String,
         label: String,
-        hash: String,
+        content_ref: ContentRef,
         success: bool,
     },
 
     // Get by label events
     GetByLabelCall {
+        store_id: String,
         label: String,
     },
     GetByLabelResult {
+        store_id: String,
         label: String,
-        refs_count: usize,
+        content_ref: Option<ContentRef>,
         success: bool,
     },
 
     // Remove label events
     RemoveLabelCall {
+        store_id: String,
         label: String,
     },
     RemoveLabelResult {
+        store_id: String,
         label: String,
-        success: bool,
-    },
-
-    // Remove from label events
-    RemoveFromLabelCall {
-        label: String,
-        hash: String,
-    },
-    RemoveFromLabelResult {
-        label: String,
-        hash: String,
         success: bool,
     },
 
     // Put at label events
     PutAtLabelCall {
+        store_id: String,
         label: String,
-        content_size: usize,
+        content: Vec<u8>,
     },
     PutAtLabelResult {
+        store_id: String,
         label: String,
-        hash: String,
+        content_ref: ContentRef,
         success: bool,
     },
 
     // Replace content at label events
     ReplaceContentAtLabelCall {
+        store_id: String,
         label: String,
-        content_size: usize,
+        content: Vec<u8>,
     },
     ReplaceContentAtLabelResult {
+        store_id: String,
         label: String,
-        hash: String,
+        content_ref: ContentRef,
         success: bool,
     },
 
     // Replace at label events
     ReplaceAtLabelCall {
+        store_id: String,
         label: String,
-        hash: String,
+        content_ref: ContentRef,
     },
     ReplaceAtLabelResult {
+        store_id: String,
         label: String,
-        hash: String,
+        content_ref: ContentRef,
         success: bool,
     },
 
     // List labels events
-    ListLabelsCall {},
+    ListLabelsCall {
+        store_id: String,
+    },
     ListLabelsResult {
-        labels_count: usize,
+        store_id: String,
+        labels: Vec<String>,
         success: bool,
     },
 
     // List all content events
-    ListAllContentCall {},
+    ListAllContentCall {
+        store_id: String,
+    },
     ListAllContentResult {
-        refs_count: usize,
+        store_id: String,
+        content_refs: Vec<ContentRef>,
         success: bool,
     },
 
     // Calculate total size events
-    CalculateTotalSizeCall {},
+    CalculateTotalSizeCall {
+        store_id: String,
+    },
     CalculateTotalSizeResult {
+        store_id: String,
         size: u64,
         success: bool,
     },

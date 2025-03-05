@@ -14,6 +14,7 @@ use wasmtime::{Engine, Store};
 
 use crate::actor_store::ActorStore;
 use crate::config::ManifestConfig;
+use crate::utils::resolve_reference;
 use tracing::{error, info};
 use wasmtime::component::types::ComponentItem;
 
@@ -72,10 +73,7 @@ impl ActorComponent {
         // Load WASM component
         let engine = Engine::new(wasmtime::Config::new().async_support(true))?;
         info!("Loading WASM component from: {}", config.component_path);
-        let wasm_bytes = actor_store
-            .content_store
-            .resolve_reference(&config.component_path)
-            .await?;
+        let wasm_bytes = resolve_reference(&config.component_path).await?;
 
         let component = Component::new(&engine, &wasm_bytes)?;
         let linker = Linker::new(&engine);
