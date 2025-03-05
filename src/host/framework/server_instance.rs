@@ -232,7 +232,8 @@ impl ServerInstance {
             info!("Server starting on {}", actual_addr);
             
             // Use Axum's serve function with our router
-            if let Err(e) = axum::serve(&*listener_clone, router).await {
+            let server = axum::serve((*listener_clone).clone(), router);
+            if let Err(e) = server.await {
                 error!("Server error: {}", e);
             }
             
@@ -462,7 +463,7 @@ impl ServerInstance {
             // Upgrade the connection
             ws.on_upgrade(move |socket| async move {
                 // Handle the WebSocket connection
-                Self::handle_websocket_connection(state, socket, connection_id, path, query, config).await;
+                Self::handle_websocket_connection(state, socket, connection_id, path, query, config.clone()).await;
             })
         } else {
             // No WebSocket configured for this path

@@ -9,7 +9,7 @@ use std::io::Write as StdWrite;
 use std::path::{Path, PathBuf};
 use tokio::fs;
 use tokio::io::AsyncWriteExt;
-use tracing::{debug, error, info, warn};
+use tracing::debug;
 use wasmtime::component::{ComponentType, Lift, Lower};
 
 /// A reference to content in the store

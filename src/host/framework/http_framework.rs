@@ -14,7 +14,7 @@ use std::sync::{
     Arc,
 };
 use thiserror::Error;
-use tokio::sync::{mpsc, RwLock};
+use tokio::sync::RwLock;
 use tracing::{error, info};
 
 
@@ -75,11 +75,11 @@ impl HttpFramework {
         info!("Setting up HTTP framework host functions");
 
         let servers_clone = self.servers.clone();
-        let handlers_clone = self.handlers.clone();
+        let _handlers_clone = self.handlers.clone();
         let next_server_id = self.next_server_id.clone();
-        let next_handler_id = self.next_handler_id.clone();
-        let next_route_id = self.next_route_id.clone();
-        let next_middleware_id = self.next_middleware_id.clone();
+        let _next_handler_id = self.next_handler_id.clone();
+        let _next_route_id = self.next_route_id.clone();
+        let _next_middleware_id = self.next_middleware_id.clone();
 
         let mut interface = actor_component
             .linker
@@ -131,8 +131,9 @@ impl HttpFramework {
                 });
 
                 // Store server instance
+                let servers_clone_inner = servers_clone.clone();
                 tokio::spawn(async move {
-                    let mut servers = servers_clone.write().await;
+                    let mut servers = servers_clone_inner.write().await;
                     servers.insert(server_id, server);
                 });
 
@@ -400,6 +401,10 @@ impl HttpFramework {
                 if !is_valid_method(&method) {
                     return Ok((Err(format!("Invalid HTTP method: {}", method)),));
                 }
+                
+                // Clone values before moving to async context
+                let path_clone = path.clone();
+                let method_clone = method.clone();
 
                 // Capture the current execution context for async operations
                 let current_task = tokio::task::spawn(async move {
@@ -417,7 +422,7 @@ impl HttpFramework {
                     // Verify server exists and add route
                     let mut servers = servers_clone.write().await;
                     if let Some(server) = servers.get_mut(&server_id) {
-                        match server.add_route(route_id, path.clone(), method.clone(), handler_id).await {
+                        match server.add_route(route_id, path_clone.clone(), method_clone.clone(), handler_id).await {
                             Ok(_) => Ok(()),
                             Err(e) => Err(e.to_string())
                         }
@@ -439,14 +444,14 @@ impl HttpFramework {
                             data: EventData::Http(HttpEventData::RouteAdd {
                                 route_id,
                                 server_id,
-                                path: path.clone(),
-                                method: method.clone(),
+                                path: path_clone.clone(),
+                                method: method_clone.clone(),
                                 handler_id,
                             }),
                             timestamp: chrono::Utc::now().timestamp_millis() as u64,
                             description: Some(format!(
                                 "Added route {} for {} {} on server {}",
-                                route_id, method, path, server_id
+                                route_id, method_clone, path_clone, server_id
                             )),
                         });
 
@@ -537,6 +542,9 @@ impl HttpFramework {
                 if !path.starts_with('/') {
                     return Ok((Err("Path must start with /".to_string()),));
                 }
+                
+                // Clone values before moving to async context
+                let path_clone = path.clone();
 
                 // Capture the current execution context
                 let current_task = tokio::task::spawn(async move {
@@ -554,7 +562,7 @@ impl HttpFramework {
                     // Verify server exists and add middleware
                     let mut servers = servers_clone.write().await;
                     if let Some(server) = servers.get_mut(&server_id) {
-                        match server.add_middleware(middleware_id, path.clone(), handler_id) {
+                        match server.add_middleware(middleware_id, path_clone.clone(), handler_id) {
                             Ok(_) => Ok(()),
                             Err(e) => Err(e.to_string())
                         }
@@ -576,13 +584,13 @@ impl HttpFramework {
                             data: EventData::Http(HttpEventData::MiddlewareAdd {
                                 middleware_id,
                                 server_id,
-                                path: path.clone(),
+                                path: path_clone.clone(),
                                 handler_id,
                             }),
                             timestamp: chrono::Utc::now().timestamp_millis() as u64,
                             description: Some(format!(
                                 "Added middleware {} for path {} on server {}",
-                                middleware_id, path, server_id
+                                middleware_id, path_clone, server_id
                             )),
                         });
 
@@ -677,6 +685,9 @@ impl HttpFramework {
                 if !path.starts_with('/') {
                     return Ok((Err("Path must start with /".to_string()),));
                 }
+                
+                // Clone values before moving to async context
+                let path_clone = path.clone();
 
                 // Capture the current execution context
                 let current_task = tokio::task::spawn(async move {
@@ -722,7 +733,7 @@ impl HttpFramework {
                     let mut servers = servers_clone.write().await;
                     if let Some(server) = servers.get_mut(&server_id) {
                         match server.enable_websocket(
-                            path.clone(),
+                            path_clone.clone(),
                             connect_handler_id,
                             message_handler_id,
                             disconnect_handler_id,
@@ -747,7 +758,7 @@ impl HttpFramework {
                             event_type: "http-framework/enable-websocket".to_string(),
                             data: EventData::Http(HttpEventData::WebSocketEnable {
                                 server_id,
-                                path: path.clone(),
+                                path: path_clone.clone(),
                                 connect_handler_id,
                                 message_handler_id,
                                 disconnect_handler_id,
@@ -755,7 +766,7 @@ impl HttpFramework {
                             timestamp: chrono::Utc::now().timestamp_millis() as u64,
                             description: Some(format!(
                                 "Enabled WebSocket on path {} for server {}",
-                                path, server_id
+                                path_clone, server_id
                             )),
                         });
 
@@ -780,7 +791,7 @@ impl HttpFramework {
                     let mut servers = servers_clone.write().await;
 
                     if let Some(server) = servers.get_mut(&server_id) {
-                        match server.disable_websocket(&path) {
+                        match server.disable_websocket(&path_clone) {
                             Ok(_) => Ok(()),
                             Err(e) => Err(e.to_string())
                         }
@@ -801,12 +812,12 @@ impl HttpFramework {
                             event_type: "http-framework/disable-websocket".to_string(),
                             data: EventData::Http(HttpEventData::WebSocketDisable {
                                 server_id,
-                                path: path.clone(),
+                                path: path_clone.clone(),
                             }),
                             timestamp: chrono::Utc::now().timestamp_millis() as u64,
                             description: Some(format!(
                                 "Disabled WebSocket on path {} for server {}",
-                                path, server_id
+                                path_clone, server_id
                             )),
                         });
 
@@ -835,7 +846,8 @@ impl HttpFramework {
 
                         if let Some(connection) = connections.get(&connection_id) {
                             // Try to send the message
-                            match connection.sender.send(message.clone()).await {
+                            let message_clone = message.clone();
+                            match connection.sender.send(message_clone).await {
                                 Ok(_) => Ok(()),
                                 Err(e) => Err(format!("Failed to send WebSocket message: {}", e)),
                             }
@@ -855,7 +867,7 @@ impl HttpFramework {
                 match result {
                     Ok(_) => {
                         // Record event
-                        let message_type = match message.ty {
+                        let message_type = match &message.ty {
                             MessageType::Text => "text",
                             MessageType::Binary => "binary",
                             MessageType::Connect => "connect",

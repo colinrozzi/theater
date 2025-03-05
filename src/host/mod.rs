@@ -10,4 +10,4 @@ pub mod supervisor;
 pub mod websocket_server;
 
 pub use handler::Handler;
-pub use framework::HttpFrameworkHandler;
+pub use framework::HttpFramework;

@@ -2,9 +2,6 @@ mod server_instance;
 mod handlers;
 mod types;
 
-use crate::actor_handle::ActorHandle;
-use crate::wasm::{ActorComponent, ActorInstance};
-use anyhow::Result;
 
 pub use handlers::{HandlerConfig, HandlerRegistry, HandlerType};
 pub use server_instance::ServerInstance;
