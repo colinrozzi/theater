@@ -1,0 +1,2 @@
+[alias]
+bc = "component build --release --target wasm32-unknown-unknown"

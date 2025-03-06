@@ -13,7 +13,6 @@ use crate::bindings::ntwk::theater::types::State;
 use crate::bindings::ntwk::theater::websocket_types::{MessageType, WebsocketMessage};
 
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 
 #[derive(Serialize, Deserialize)]
 struct AppState {
@@ -32,7 +31,7 @@ impl Default for AppState {
 
 struct Actor;
 impl Guest for Actor {
-    fn init(state: State, params: (String,)) -> Result<(State,), String> {
+    fn init(_state: State, params: (String,)) -> Result<(State,), String> {
         log("Initializing HTTP Actor");
         let (param,) = params;
         log(&format!("Init parameter: {}", param));
