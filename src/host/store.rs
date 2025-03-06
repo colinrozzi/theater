@@ -458,7 +458,7 @@ impl StoreHost {
                             Ok((Ok(content_ref_wit),))
                         },
                         Err(e) => {
-                            error!("Error storing content at label: {}", e);
+                            error!("Error storing content at label [{}]: {}", label, e);
                             
                             // Record put-at-label error event
                             ctx.data_mut().record_event(ChainEventData {

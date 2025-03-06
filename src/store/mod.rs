@@ -316,6 +316,9 @@ impl ContentStore {
 
         // Write the single content ref hash to the label file
         let label_path = self.label_path(label);
+        fs::create_dir_all(label_path.parent().unwrap())
+            .await
+            .context("Failed to create label parent directories")?;
         fs::write(&label_path, content_ref.hash())
             .await
             .context("Failed to write label file")?;
