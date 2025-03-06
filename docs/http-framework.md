@@ -10,6 +10,7 @@ The HTTP Framework is a powerful feature in Theater that gives WebAssembly actor
 - **WebSocket Integration**: Enable WebSocket support on specific paths
 - **Lifecycle Management**: Start, stop, and destroy servers as needed
 - **Full Control**: Actors have complete control over their server configurations
+- **State Management**: Consistent state handling across all HTTP and WebSocket handlers
 
 ## Getting Started
 
@@ -23,162 +24,276 @@ type = "http-framework"
 config = {}
 ```
 
-### 2. Create a Server
+### 2. Implement Required Interfaces
+
+In your `world.wit` file, make sure to import the HTTP framework and export the handlers:
+
+```wit
+world single-actor {
+    import runtime;
+    // ... other imports
+    import http-framework;
+    export http-handlers;
+    export actor;
+    // ... other exports
+}
+```
+
+### 3. Create a Server
+
+In your actor's initialization function, set up the HTTP server:
 
 ```rust
-use ntwk::theater::host::http_framework;
-
-// Create a new HTTP server
-let config = http_framework::ServerConfig {
-    port: Some(8080),       // Use None for auto-assigned port
-    host: Some("0.0.0.0".to_string()),
-    tls_config: None,       // Optional TLS config
+use bindings::ntwk::theater::http_framework::{
+    add_middleware, add_route, create_server, enable_websocket,
+    register_handler, start_server, ServerConfig
 };
 
-let server_id = http_framework::create_server(config)?;
-```
+// Setup function called from init
+fn setup_http_server() -> Result<u64, String> {
+    // Create server configuration
+    let config = ServerConfig {
+        port: Some(8080),
+        host: Some("0.0.0.0".to_string()),
+        tls_config: None,
+    };
 
-### 3. Register Handlers
+    // Create a new HTTP server
+    let server_id = create_server(&config)?;
 
-```rust
-// Register handlers with unique names
-let api_handler_id = http_framework::register_handler("handle_api")?;
-let auth_middleware_id = http_framework::register_handler("auth_middleware")?;
-let ws_handler_id = http_framework::register_handler("handle_websocket")?;
-```
+    // Register handlers
+    let api_handler_id = register_handler("handle_api")?;
+    let middleware_handler_id = register_handler("auth_middleware")?;
+    let ws_handler_id = register_handler("handle_websocket")?;
 
-### 4. Add Routes and Middleware
+    // Add middleware
+    add_middleware(server_id, "/api", middleware_handler_id)?;
 
-```rust
-// Add routes with specific HTTP methods
-http_framework::add_route(server_id, "/api/data", "GET", api_handler_id)?;
-http_framework::add_route(server_id, "/api/data", "POST", api_handler_id)?;
+    // Add routes
+    add_route(server_id, "/api/data", "GET", api_handler_id)?;
+    add_route(server_id, "/api/data", "POST", api_handler_id)?;
 
-// Add middleware
-http_framework::add_middleware(server_id, "/api", auth_middleware_id)?;
-```
+    // Enable WebSocket
+    enable_websocket(
+        server_id,
+        "/ws",
+        Some(ws_handler_id), // Connect handler
+        ws_handler_id,       // Message handler
+        Some(ws_handler_id), // Disconnect handler
+    )?;
 
-### 5. Enable WebSocket (Optional)
+    // Start the server
+    let port = start_server(server_id)?;
 
-```rust
-// Enable WebSocket support on a path
-http_framework::enable_websocket(
-    server_id,
-    "/ws",
-    Some(connect_handler_id),    // Optional connect handler
-    message_handler_id,          // Required message handler
-    Some(disconnect_handler_id), // Optional disconnect handler
-)?;
-```
-
-### 6. Start the Server
-
-```rust
-// Start the server (returns the actual port)
-let actual_port = http_framework::start_server(server_id)?;
-println!("Server started on port {}", actual_port);
+    Ok(server_id)
+}
 ```
 
 ## Handler Implementation
 
-Here's how to implement the handler functions:
-
-### HTTP Request Handler
+Implement the `HttpHandlers` trait for your actor component:
 
 ```rust
-// Handler for HTTP requests
-#[no_mangle]
-pub fn handle_api(handler_id: u64, request: HttpRequest) -> Result<HttpResponse, String> {
-    // Process the request
-    let response = HttpResponse {
-        status: 200,
-        headers: vec![("content-type".to_string(), "application/json".to_string())],
-        body: Some("{'success': true}".as_bytes().to_vec()),
-    };
-    
-    Ok(response)
-}
-```
+use bindings::exports::ntwk::theater::http_handlers::Guest as HttpHandlers;
+use bindings::ntwk::theater::http_types::{HttpRequest, HttpResponse, MiddlewareResult};
+use bindings::ntwk::theater::websocket_types::{WebsocketMessage};
+use bindings::ntwk::theater::types::State;
 
-### Middleware Handler
+struct Actor;
 
-```rust
-// Middleware handler
-#[no_mangle]
-pub fn auth_middleware(handler_id: u64, request: HttpRequest) -> Result<MiddlewareResult, String> {
-    // Check for authorization header
-    let auth_header = request.headers.iter().find(|(name, _)| name == "authorization");
-    
-    if auth_header.is_none() {
-        // Reject the request
-        return Ok(MiddlewareResult {
-            proceed: false,
-            request: request,
-        });
+impl HttpHandlers for Actor {
+    // HTTP Request Handler
+    fn handle_request(
+        state: State,
+        params: (u64, HttpRequest),
+    ) -> Result<(State, (HttpResponse,)), String> {
+        let (handler_id, request) = params;
+        
+        // Parse the current state
+        let state_bytes = state.unwrap_or_default();
+        let mut app_state: AppState = if !state_bytes.is_empty() {
+            serde_json::from_slice(&state_bytes).map_err(|e| e.to_string())?
+        } else {
+            AppState::default()
+        };
+        
+        // Process the request based on path and method
+        let response = match (request.uri.as_str(), request.method.as_str()) {
+            ("/api/data", "GET") => {
+                // Return data
+                let data = serde_json::json!({ "data": app_state.some_field });
+                let body = serde_json::to_vec(&data).map_err(|e| e.to_string())?;
+                
+                HttpResponse {
+                    status: 200,
+                    headers: vec![("content-type".to_string(), "application/json".to_string())],
+                    body: Some(body),
+                }
+            },
+            // Handle other routes...
+            _ => {
+                // Not found
+                HttpResponse {
+                    status: 404,
+                    headers: vec![("content-type".to_string(), "text/plain".to_string())],
+                    body: Some("Not Found".as_bytes().to_vec()),
+                }
+            }
+        };
+        
+        // Save updated state
+        let updated_state_bytes = serde_json::to_vec(&app_state).map_err(|e| e.to_string())?;
+        
+        Ok((Some(updated_state_bytes), (response,)))
     }
     
-    // Allow the request to proceed
-    Ok(MiddlewareResult {
-        proceed: true,
-        request: request,
-    })
-}
-```
-
-### WebSocket Handlers
-
-```rust
-// WebSocket connect handler
-#[no_mangle]
-pub fn handle_ws_connect(handler_id: u64, connection_id: u64, path: String, query: Option<String>) -> Result<(), String> {
-    println!("New WebSocket connection: {}", connection_id);
-    Ok(())
-}
-
-// WebSocket message handler
-#[no_mangle]
-pub fn handle_ws_message(handler_id: u64, connection_id: u64, message: WebSocketMessage) -> Result<Vec<WebSocketMessage>, String> {
-    // Echo the message back
-    Ok(vec![message])
-}
-
-// WebSocket disconnect handler
-#[no_mangle]
-pub fn handle_ws_disconnect(handler_id: u64, connection_id: u64) -> Result<(), String> {
-    println!("WebSocket disconnected: {}", connection_id);
-    Ok(())
+    // Middleware Handler
+    fn handle_middleware(
+        state: State,
+        params: (u64, HttpRequest),
+    ) -> Result<(State, (MiddlewareResult,)), String> {
+        let (handler_id, request) = params;
+        
+        // Check for authentication
+        let auth_header = request
+            .headers
+            .iter()
+            .find(|(name, _)| name.to_lowercase() == "x-api-key");
+            
+        if let Some((_, value)) = auth_header {
+            if value == "valid-api-key" {
+                // Allow request to proceed
+                Ok((state, (MiddlewareResult {
+                    proceed: true,
+                    request,
+                },)))
+            } else {
+                // Invalid key
+                Ok((state, (MiddlewareResult {
+                    proceed: false,
+                    request,
+                },)))
+            }
+        } else {
+            // No key provided
+            Ok((state, (MiddlewareResult {
+                proceed: false,
+                request,
+            },)))
+        }
+    }
+    
+    // WebSocket Connect Handler
+    fn handle_websocket_connect(
+        state: State,
+        params: (u64, u64, String, Option<String>),
+    ) -> Result<(State,), String> {
+        let (handler_id, connection_id, path, query) = params;
+        // Process new connection
+        Ok((state,))
+    }
+    
+    // WebSocket Message Handler
+    fn handle_websocket_message(
+        state: State,
+        params: (u64, u64, WebsocketMessage),
+    ) -> Result<(State, (Vec<WebsocketMessage>,)), String> {
+        let (handler_id, connection_id, message) = params;
+        
+        // Process message and generate responses
+        let responses = vec![/* response messages */];
+        
+        Ok((state, (responses,)))
+    }
+    
+    // WebSocket Disconnect Handler
+    fn handle_websocket_disconnect(
+        state: State,
+        params: (u64, u64),
+    ) -> Result<(State,), String> {
+        let (handler_id, connection_id) = params;
+        // Handle disconnect
+        Ok((state,))
+    }
 }
 ```
 
 ## Server Lifecycle Management
 
+You can manage your HTTP server throughout your actor's lifecycle:
+
 ```rust
+use bindings::ntwk::theater::http_framework::{get_server_info, stop_server, destroy_server};
+
 // Get server info
-let server_info = http_framework::get_server_info(server_id)?;
+let server_info = get_server_info(server_id)?;
 
 // Stop a server (can be restarted later)
-http_framework::stop_server(server_id)?;
+stop_server(server_id)?;
 
 // Destroy a server (permanently removes it)
-http_framework::destroy_server(server_id)?;
+destroy_server(server_id)?;
 ```
 
 ## WebSocket Message Sending
 
-You can send messages to connected WebSocket clients:
+Send messages to connected WebSocket clients:
 
 ```rust
+use bindings::ntwk::theater::http_framework::{send_websocket_message, close_websocket};
+use bindings::ntwk::theater::websocket_types::{WebsocketMessage, MessageType};
+
 // Send a message to a specific connection
-let message = WebSocketMessage {
+let message = WebsocketMessage {
     ty: MessageType::Text,
     data: None,
     text: Some("Hello from server!".to_string()),
 };
 
-http_framework::send_websocket_message(server_id, connection_id, message)?;
+send_websocket_message(server_id, connection_id, message)?;
 
 // Close a specific connection
-http_framework::close_websocket(server_id, connection_id)?;
+close_websocket(server_id, connection_id)?;
+```
+
+## State Management
+
+All HTTP Framework handlers receive and return the actor state. This allows consistent state management across all handler types:
+
+1. The state is provided as the first parameter to all handlers
+2. Updated state is returned as part of the result tuple
+3. State is typically serialized/deserialized using serde
+
+```rust
+// Example state struct
+#[derive(Serialize, Deserialize)]
+struct AppState {
+    count: u32,
+    messages: Vec<String>,
+}
+
+// State handling in handlers
+fn handle_request(
+    state: State,  // Input state (Option<Vec<u8>>)
+    params: (u64, HttpRequest),
+) -> Result<(State, (HttpResponse,)), String> {
+    // Deserialize state
+    let state_bytes = state.unwrap_or_default();
+    let mut app_state: AppState = if !state_bytes.is_empty() {
+        serde_json::from_slice(&state_bytes).map_err(|e| e.to_string())?
+    } else {
+        AppState::default()
+    };
+    
+    // Update state
+    app_state.count += 1;
+    
+    // Serialize updated state
+    let updated_state_bytes = serde_json::to_vec(&app_state).map_err(|e| e.to_string())?;
+    
+    // Return updated state and response
+    Ok((Some(updated_state_bytes), (response,)))
+}
 ```
 
 ## Events and Logging
@@ -196,3 +311,4 @@ All HTTP Framework operations are recorded in the actor's event chain, providing
 | Routing | Dynamic, method-specific | Limited by implementation |
 | Middleware | Yes, with path filtering | No |
 | WebSocket Integration | Built-in with handler callbacks | Separate handler |
+| State Management | Consistent across all handlers | Different for each handler type |
