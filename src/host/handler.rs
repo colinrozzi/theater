@@ -16,7 +16,7 @@ pub enum Handler {
     HttpServer(HttpServerHost),
     FileSystem(FileSystemHost),
     HttpClient(HttpClientHost),
-    HttpFramework(HttpFramework),  // New handler for our HTTP Framework
+    HttpFramework(HttpFramework), // New handler for our HTTP Framework
     Runtime(RuntimeHost),
     WebSocketServer(WebSocketServerHost),
     Supervisor(SupervisorHost),
@@ -45,7 +45,7 @@ impl Handler {
             Handler::HttpFramework(_) => {
                 // The HTTP Framework doesn't need a start method as servers are started on demand
                 Ok(())
-            },
+            }
             Handler::Runtime(h) => Ok(h.start(actor_handle).await.expect("Error starting runtime")),
             Handler::WebSocketServer(h) => Ok(h
                 .start(actor_handle)
@@ -118,11 +118,10 @@ impl Handler {
                 .add_export_functions(actor_instance)
                 .await
                 .expect("Error adding functions to http client")),
-            Handler::HttpFramework(_) => {
-                // The HTTP Framework doesn't need to add export functions
-                // It's entirely host-side and the actor calls into it
-                Ok(())
-            },
+            Handler::HttpFramework(handler) => Ok(handler
+                .add_export_functions(actor_instance)
+                .await
+                .expect("Error adding functions to http framework")),
             Handler::Runtime(handler) => Ok(handler
                 .add_export_functions(actor_instance)
                 .await

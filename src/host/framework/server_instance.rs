@@ -58,7 +58,6 @@ pub struct ServerInstance {
     websockets: HashMap<String, WebSocketConfig>,
     pub active_ws_connections: Arc<RwLock<HashMap<u64, WebSocketConnection>>>,
     server_handle: Option<JoinHandle<()>>,
-    listener: Option<Arc<tokio::net::TcpListener>>,
     port: u16,
     running: bool,
 }
@@ -77,7 +76,6 @@ impl ServerInstance {
             websockets: HashMap::new(),
             active_ws_connections: Arc::new(RwLock::new(HashMap::new())),
             server_handle: None,
-            listener: None,
             port,
             running: false,
         }
@@ -229,17 +227,12 @@ impl ServerInstance {
         let actual_port = actual_addr.port();
         self.port = actual_port;
 
-        // Store listener in Arc for potential future updates
-        let listener_arc = Arc::new(listener);
-        self.listener = Some(listener_arc.clone());
-
         // Launch server in separate task
-        let listener_clone = listener_arc.clone();
         let server_handle = tokio::spawn(async move {
             info!("Server starting on {}", actual_addr);
 
             // Use Axum's serve function with our router
-            let server = axum::serve(*listener_clone, router);
+            let server = axum::serve(listener, router);
             if let Err(e) = server.await {
                 error!("Server error: {}", e);
             }
@@ -266,8 +259,7 @@ impl ServerInstance {
             // It will be properly cancelled
         }
 
-        // Close listener
-        self.listener = None;
+        // No need to close listener - it's owned by the server task
 
         // Close all WebSocket connections
         let mut connections = self.active_ws_connections.write().await;
@@ -478,7 +470,7 @@ impl ServerInstance {
 
             // Extract query parameters
             let query = req.uri().query().map(|q| q.to_string());
-            
+
             // Clone the path and state for use in the closure
             let path_clone = path.clone();
             let state_clone = state.clone();
@@ -726,7 +718,7 @@ impl ServerState {
         let result = self
             .actor_handle
             .call_function::<(u64, HttpRequest), (HttpResponse,)>(
-                "ntwk:theater/host:http-handlers.handle-request".to_string(),
+                "ntwk:theater/http-handlers.handle-request".to_string(),
                 (handler_id, request),
             )
             .await?;
@@ -743,7 +735,7 @@ impl ServerState {
         let result = self
             .actor_handle
             .call_function::<(u64, HttpRequest), (MiddlewareResult,)>(
-                "ntwk:theater/host:http-handlers.handle-middleware".to_string(),
+                "ntwk:theater/http-handlers.handle-middleware".to_string(),
                 (handler_id, request),
             )
             .await?;
@@ -761,7 +753,7 @@ impl ServerState {
         // Call connect handler
         self.actor_handle
             .call_function::<(u64, u64, String, Option<String>), ()>(
-                "ntwk:theater/host:http-handlers.handle-websocket-connect".to_string(),
+                "ntwk:theater/http-handlers.handle-websocket-connect".to_string(),
                 (handler_id, connection_id, path, query),
             )
             .await?;
@@ -779,7 +771,7 @@ impl ServerState {
         let result = self
             .actor_handle
             .call_function::<(u64, u64, WebSocketMessage), (Vec<WebSocketMessage>,)>(
-                "ntwk:theater/host:http-handlers.handle-websocket-message".to_string(),
+                "ntwk:theater/http-handlers.handle-websocket-message".to_string(),
                 (handler_id, connection_id, message),
             )
             .await?;
@@ -795,7 +787,7 @@ impl ServerState {
         // Call disconnect handler
         self.actor_handle
             .call_function::<(u64, u64), ()>(
-                "ntwk:theater/host:http-handlers.handle-websocket-disconnect".to_string(),
+                "ntwk:theater/http-handlers.handle-websocket-disconnect".to_string(),
                 (handler_id, connection_id),
             )
             .await?;

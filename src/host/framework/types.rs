@@ -7,13 +7,16 @@ use wasmtime::component::{ComponentType, Lift, Lower};
 pub struct ServerConfig {
     pub port: Option<u16>,
     pub host: Option<String>,
+    #[component(name = "tls-config")]
     pub tls_config: Option<TlsConfig>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, ComponentType, Lift, Lower)]
 #[component(record)]
 pub struct TlsConfig {
+    #[component(name = "cert-path")]
     pub cert_path: String,
+    #[component(name = "key-path")]
     pub key_path: String,
 }
 
@@ -24,8 +27,11 @@ pub struct ServerInfo {
     pub port: u16,
     pub host: String,
     pub running: bool,
+    #[component(name = "routes-count")]
     pub routes_count: u32,
+    #[component(name = "middleware-count")]
     pub middleware_count: u32,
+    #[component(name = "websocket-enabled")]
     pub websocket_enabled: bool,
 }
 
