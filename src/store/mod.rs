@@ -1,5 +1,3 @@
-// src/store/content_store.rs
-
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use sha1::{Digest, Sha1};
@@ -34,11 +32,6 @@ impl ContentRef {
         &self.hash
     }
 
-    /// Convert to a path for storage
-    fn to_path(&self, base_path: &Path) -> PathBuf {
-        base_path.join("data").join(&self.hash)
-    }
-
     /// Create a ContentRef by hashing content
     pub fn from_content(content: &[u8]) -> Self {
         let mut hasher = Sha1::new();
@@ -46,6 +39,183 @@ impl ContentRef {
         let hash = hasher.finalize();
         let hash_str = hex::encode(hash);
         Self { hash: hash_str }
+    }
+
+    /// Convert to a path for storage within a base directory
+    pub fn to_path(&self, base_path: &Path) -> PathBuf {
+        base_path.join("data").join(&self.hash)
+    }
+
+    /// Check if content exists in the store
+    pub async fn exists(&self, base_path: &Path) -> bool {
+        let path = self.to_path(base_path);
+        fs::try_exists(&path).await.unwrap_or(false)
+    }
+
+    /// Check if content exists in the store (synchronous version)
+    pub fn exists_sync(&self, base_path: &Path) -> bool {
+        let path = self.to_path(base_path);
+        std_fs::exists(&path).unwrap_or(false)
+    }
+
+    /// Store content in the filesystem and ensure it exists
+    pub async fn store_content(&self, base_path: &Path, content: &[u8]) -> Result<()> {
+        let path = self.to_path(base_path);
+
+        // Check if content already exists
+        if !fs::try_exists(&path).await.unwrap_or(false) {
+            // Create parent directories if they don't exist
+            if let Some(parent) = path.parent() {
+                fs::create_dir_all(parent)
+                    .await
+                    .context("Failed to create parent directories")?;
+            }
+
+            // Write content to file
+            let mut file = fs::File::create(&path)
+                .await
+                .context("Failed to create content file")?;
+            file.write_all(content)
+                .await
+                .context("Failed to write content")?;
+            debug!("Stored content with hash: {}", self.hash());
+        } else {
+            debug!("Content already exists: {}", self.hash());
+        }
+
+        Ok(())
+    }
+
+    /// Store content in the filesystem synchronously
+    pub fn store_content_sync(&self, base_path: &Path, content: &[u8]) -> Result<()> {
+        let path = self.to_path(base_path);
+
+        // Check if content already exists
+        if !std_fs::exists(&path).unwrap_or(false) {
+            // Create parent directories if they don't exist
+            if let Some(parent) = path.parent() {
+                std_fs::create_dir_all(parent).context("Failed to create parent directories")?;
+            }
+
+            // Write content to file synchronously
+            let mut file = std_fs::File::create(&path).context("Failed to create content file")?;
+            file.write_all(content).context("Failed to write content")?;
+            debug!("Stored content with hash: {}", self.hash());
+        } else {
+            debug!("Content already exists: {}", self.hash());
+        }
+
+        Ok(())
+    }
+
+    /// Retrieve content from the filesystem
+    pub async fn get_content(&self, base_path: &Path) -> Result<Vec<u8>> {
+        let path = self.to_path(base_path);
+        fs::read(&path)
+            .await
+            .with_context(|| format!("Failed to read content at path: {:?}", path))
+    }
+}
+
+/// A label that references content in the store
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Label {
+    name: String,
+}
+
+impl Label {
+    /// Create a new label
+    pub fn new(name: String) -> Self {
+        Self { name }
+    }
+
+    /// Create a label from a string
+    pub fn from_str(name: &str) -> Self {
+        Self::new(name.to_string())
+    }
+
+    /// Get the label name
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// Convert to a path for storage within a base directory
+    pub fn to_path(&self, base_path: &Path) -> PathBuf {
+        base_path.join("labels").join(&self.name)
+    }
+
+    /// Check if the label exists
+    pub async fn exists(&self, base_path: &Path) -> bool {
+        let path = self.to_path(base_path);
+        fs::try_exists(&path).await.unwrap_or(false)
+    }
+
+    /// Get the ContentRef associated with this label, if any
+    pub async fn get_content_ref(&self, base_path: &Path) -> Result<Option<ContentRef>> {
+        let path = self.to_path(base_path);
+
+        // If label doesn't exist, return None
+        if !fs::try_exists(&path).await.unwrap_or(false) {
+            return Ok(None);
+        }
+
+        // Read and parse label file
+        let content = fs::read_to_string(&path)
+            .await
+            .context("Failed to read label file")?;
+
+        let content_hash = content.trim();
+        if content_hash.is_empty() {
+            return Ok(None);
+        }
+
+        // Return a single content reference
+        let content_ref = ContentRef::new(content_hash.to_string());
+        Ok(Some(content_ref))
+    }
+
+    /// Set the ContentRef for this label
+    pub async fn set_content_ref(&self, base_path: &Path, content_ref: &ContentRef) -> Result<()> {
+        let path = self.to_path(base_path);
+
+        // Create parent directories if they don't exist
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)
+                .await
+                .context("Failed to create label parent directories")?;
+        }
+
+        // Write the content ref hash to the label file
+        fs::write(&path, content_ref.hash())
+            .await
+            .context("Failed to write label file")?;
+
+        debug!(
+            "Set content {} for label '{}'",
+            content_ref.hash(),
+            self.name
+        );
+
+        Ok(())
+    }
+
+    /// Remove this label
+    pub async fn remove(&self, base_path: &Path) -> Result<()> {
+        let path = self.to_path(base_path);
+
+        // If label doesn't exist, do nothing
+        if !fs::try_exists(&path).await.unwrap_or(false) {
+            debug!("Label does not exist: {}", self.name);
+            return Ok(());
+        }
+
+        // Remove label file
+        fs::remove_file(&path)
+            .await
+            .context("Failed to remove label file")?;
+
+        debug!("Removed label: {}", self.name);
+        Ok(())
     }
 }
 
@@ -95,291 +265,145 @@ impl ContentStore {
     /// Store content and return its ContentRef
     pub async fn store(&self, content: Vec<u8>) -> Result<ContentRef> {
         let content_ref = ContentRef::from_content(&content);
-        let path = content_ref.to_path(&self.base_path);
-
-        // Check if content already exists
-        if !fs::try_exists(&path).await.unwrap_or(false) {
-            // Create parent directories if they don't exist
-            if let Some(parent) = path.parent() {
-                fs::create_dir_all(parent)
-                    .await
-                    .context("Failed to create parent directories")?;
-            }
-
-            // Write content to file
-            let mut file = fs::File::create(&path)
-                .await
-                .context("Failed to create content file")?;
-            file.write_all(&content)
-                .await
-                .context("Failed to write content")?;
-            debug!("Stored content with hash: {}", content_ref.hash());
-        } else {
-            debug!("Content already exists: {}", content_ref.hash());
-        }
-
+        content_ref.store_content(&self.base_path, &content).await?;
         Ok(content_ref)
     }
 
     /// Store content synchronously and return its ContentRef
     pub fn store_sync(&self, content: Vec<u8>) -> Result<ContentRef> {
         let content_ref = ContentRef::from_content(&content);
-        let path = content_ref.to_path(&self.base_path);
-
-        // Check if content already exists
-        if !std_fs::exists(&path).unwrap_or(false) {
-            // Create parent directories if they don't exist
-            if let Some(parent) = path.parent() {
-                std_fs::create_dir_all(parent).context("Failed to create parent directories")?;
-            }
-
-            // Write content to file synchronously
-            let mut file = std_fs::File::create(&path).context("Failed to create content file")?;
-            file.write_all(&content)
-                .context("Failed to write content")?;
-            debug!("Stored content with hash: {}", content_ref.hash());
-        } else {
-            debug!("Content already exists: {}", content_ref.hash());
-        }
-
+        content_ref.store_content_sync(&self.base_path, &content)?;
         Ok(content_ref)
     }
 
     /// Retrieve content by its reference
     pub async fn get(&self, content_ref: &ContentRef) -> Result<Vec<u8>> {
-        let path = content_ref.to_path(&self.base_path);
-        fs::read(&path)
-            .await
-            .with_context(|| format!("Failed to read content at path: {:?}", path))
+        content_ref.get_content(&self.base_path).await
     }
 
     /// Check if content exists
     pub async fn exists(&self, content_ref: &ContentRef) -> bool {
-        let path = content_ref.to_path(&self.base_path);
-        fs::try_exists(&path).await.unwrap_or(false)
-    }
-
-    /// Get the path to a label file
-    pub fn label_path(&self, label: &str) -> PathBuf {
-        self.base_path.join("labels").join(label)
+        content_ref.exists(&self.base_path).await
     }
 
     /// Attach a label to content (replaces any existing content at that label)
     pub async fn label(&self, label: &str, content_ref: &ContentRef) -> Result<()> {
         // Ensure content exists before labeling
-        if !self.exists(content_ref).await {
+        if !content_ref.exists(&self.base_path).await {
             return Err(anyhow::anyhow!(
                 "Content does not exist: {}",
                 content_ref.hash()
             ));
         }
 
-        let label_path = self.label_path(label);
-
-        // Create parent directories if they don't exist
-        if let Some(parent) = label_path.parent() {
-            fs::create_dir_all(parent)
-                .await
-                .context("Failed to create label parent directories")?;
-        }
-
-        // Write the single content ref hash to the label file
-        fs::write(&label_path, content_ref.hash())
-            .await
-            .context("Failed to write label file")?;
-
-        debug!("Set content {} for label '{}'", content_ref.hash(), label);
-
-        Ok(())
+        let label = Label::from_str(label);
+        label.set_content_ref(&self.base_path, content_ref).await
     }
 
     pub async fn replace_content_at_label(
         &self,
-        label: &str,
+        label_name: &str,
         content: Vec<u8>,
     ) -> Result<ContentRef> {
         let content_ref = ContentRef::from_content(&content);
-        let path = content_ref.to_path(&self.base_path);
 
-        // Create parent directories if they don't exist
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)
-                .await
-                .context("Failed to create parent directories")?;
-        }
+        // Store the content
+        content_ref.store_content(&self.base_path, &content).await?;
 
-        // Write content to file
-        let mut file = fs::File::create(&path)
-            .await
-            .context("Failed to create content file")?;
-        file.write_all(&content)
-            .await
-            .context("Failed to write content")?;
-        debug!("Stored content with hash: {}", content_ref.hash());
+        // Update the label
+        let label = Label::from_str(label_name);
+        label.set_content_ref(&self.base_path, &content_ref).await?;
 
-        // Replace label with new content
-        let label_path = self.label_path(label);
-        let content = content_ref.hash();
-
-        fs::write(&label_path, content)
-            .await
-            .context("Failed to write label file")?;
-
-        debug!("Replaced content in label '{}'", label);
+        debug!("Replaced content in label '{}'", label_name);
 
         Ok(content_ref)
     }
 
-    pub async fn replace_at_label(&self, label: &str, content_ref: &ContentRef) -> Result<()> {
+    pub async fn replace_at_label(&self, label_name: &str, content_ref: &ContentRef) -> Result<()> {
         // Ensure content exists before labeling
-        if !self.exists(content_ref).await {
+        if !content_ref.exists(&self.base_path).await {
             return Err(anyhow::anyhow!(
                 "Content does not exist: {}",
                 content_ref.hash()
             ));
         }
 
-        let label_path = self.label_path(label);
+        let label = Label::from_str(label_name);
+        label.set_content_ref(&self.base_path, content_ref).await?;
 
-        // Create parent directories if they don't exist
-        if let Some(parent) = label_path.parent() {
-            fs::create_dir_all(parent)
-                .await
-                .context("Failed to create label parent directories")?;
-        }
-
-        // Write updated refs to label file
-        let content = content_ref.hash();
-
-        fs::write(&label_path, content)
-            .await
-            .context("Failed to write label file")?;
-
-        debug!("Replaced content in label '{}'", label);
+        debug!("Replaced content in label '{}'", label_name);
 
         Ok(())
     }
 
     /// Get content reference by label
-    pub async fn get_by_label(&self, label: &str) -> Result<Option<ContentRef>> {
-        let label_path = self.label_path(label);
-
-        // If label doesn't exist, return None
-        if !fs::try_exists(&label_path).await.unwrap_or(false) {
-            return Ok(None);
-        }
-
-        // Read and parse label file
-        let content = fs::read_to_string(&label_path)
-            .await
-            .context("Failed to read label file")?;
-
-        let content_hash = content.trim();
-        if content_hash.is_empty() {
-            return Ok(None);
-        }
-
-        // Return a single content reference
-        let content_ref = ContentRef::new(content_hash.to_string());
-        Ok(Some(content_ref))
+    pub async fn get_by_label(&self, label_name: &str) -> Result<Option<ContentRef>> {
+        let label = Label::from_str(label_name);
+        label.get_content_ref(&self.base_path).await
     }
 
     /// Get content by label
-    pub async fn get_content_by_label(&self, label: &str) -> Result<Option<Vec<u8>>> {
-        if let Some(content_ref) = self.get_by_label(label).await? {
-            let content = self.get(&content_ref).await?;
+    pub async fn get_content_by_label(&self, label_name: &str) -> Result<Option<Vec<u8>>> {
+        let label = Label::from_str(label_name);
+        if let Some(content_ref) = label.get_content_ref(&self.base_path).await? {
+            let content = content_ref.get_content(&self.base_path).await?;
             Ok(Some(content))
         } else {
             Ok(None)
         }
     }
 
-    pub async fn put_at_label(&self, label: &str, content: Vec<u8>) -> Result<ContentRef> {
+    pub async fn put_at_label(&self, label_name: &str, content: Vec<u8>) -> Result<ContentRef> {
         let content_ref = ContentRef::from_content(&content);
-        let path = content_ref.to_path(&self.base_path);
 
-        // Create parent directories if they don't exist
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)
-                .await
-                .context("Failed to create parent directories")?;
-        }
+        // Store the content
+        content_ref.store_content(&self.base_path, &content).await?;
 
-        // Write content to file
-        let mut file = fs::File::create(&path)
-            .await
-            .context("Failed to create content file")?;
-        file.write_all(&content)
-            .await
-            .context("Failed to write content")?;
-        debug!("Stored content with hash: {}", content_ref.hash());
-
-        // Write the single content ref hash to the label file
-        let label_path = self.label_path(label);
-        fs::create_dir_all(label_path.parent().unwrap())
-            .await
-            .context("Failed to create label parent directories")?;
-        fs::write(&label_path, content_ref.hash())
-            .await
-            .context("Failed to write label file")?;
-
-        debug!("Set content {} for label '{}'", content_ref.hash(), label);
+        // Create and set the label
+        let label = Label::from_str(label_name);
+        label.set_content_ref(&self.base_path, &content_ref).await?;
 
         Ok(content_ref)
     }
 
     /// Remove a label
-    pub async fn remove_label(&self, label: &str) -> Result<()> {
-        let label_path = self.label_path(label);
-
-        // If label doesn't exist, do nothing
-        if !fs::try_exists(&label_path).await.unwrap_or(false) {
-            debug!("Label does not exist: {}", label);
-            return Ok(());
-        }
-
-        // Remove label file
-        fs::remove_file(&label_path)
-            .await
-            .context("Failed to remove label file")?;
-
-        debug!("Removed label: {}", label);
-        Ok(())
+    pub async fn remove_label(&self, label_name: &str) -> Result<()> {
+        let label = Label::from_str(label_name);
+        label.remove(&self.base_path).await
     }
 
     /// Remove a specific content reference from a label
     /// If the content reference matches the one at the label, the label is removed
-    pub async fn remove_from_label(&self, label: &str, content_ref: &ContentRef) -> Result<()> {
-        let label_path = self.label_path(label);
+    pub async fn remove_from_label(
+        &self,
+        label_name: &str,
+        content_ref: &ContentRef,
+    ) -> Result<()> {
+        let label = Label::from_str(label_name);
 
         // If label doesn't exist, do nothing
-        if !fs::try_exists(&label_path).await.unwrap_or(false) {
-            debug!("Label does not exist: {}", label);
+        if !label.exists(&self.base_path).await {
+            debug!("Label does not exist: {}", label_name);
             return Ok(());
         }
 
-        // Read the current content ref from the label file
-        let content = fs::read_to_string(&label_path)
-            .await
-            .context("Failed to read label file")?;
-        let current_hash = content.trim();
-
-        // If the current content ref matches the one we want to remove, remove the label
-        if current_hash == content_ref.hash() {
-            fs::remove_file(&label_path)
-                .await
-                .context("Failed to remove label file")?;
-            debug!(
-                "Removed label '{}' that pointed to content {}",
-                label,
-                content_ref.hash()
-            );
-        } else {
-            debug!(
-                "Label '{}' does not point to content {}",
-                label,
-                content_ref.hash()
-            );
+        // Get the current content ref from the label
+        if let Some(current_ref) = label.get_content_ref(&self.base_path).await? {
+            // If the current content ref matches the one we want to remove, remove the label
+            if current_ref.hash() == content_ref.hash() {
+                label.remove(&self.base_path).await?;
+                debug!(
+                    "Removed label '{}' that pointed to content {}",
+                    label_name,
+                    content_ref.hash()
+                );
+            } else {
+                debug!(
+                    "Label '{}' does not point to content {}",
+                    label_name,
+                    content_ref.hash()
+                );
+            }
         }
 
         Ok(())
