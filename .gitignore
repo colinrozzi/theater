@@ -1,9 +1,7 @@
-target/*
-.next/*
-notes/*
-chain/*
-examples/*
-logs/*
+/target
+/notes
+/chain
+/logs
 .aider*
 .env
 !.gitignore

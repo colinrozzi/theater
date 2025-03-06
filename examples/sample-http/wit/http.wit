@@ -94,11 +94,6 @@ interface http-handlers {
     handle-websocket-disconnect: func(state: state, params: tuple<handler-id, u64>) -> result<tuple<state>, string>;
 }
 
-interface http-client {
-    use http-types.{http-request, http-response};
-
-    send-http: func(req: http-request) -> result<http-response, string>;
-}
 
 /// Types used by the HTTP framework
 interface http-types {

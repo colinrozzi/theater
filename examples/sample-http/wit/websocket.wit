@@ -1,0 +1,43 @@
+package ntwk:theater;
+
+/// Interface for handling WebSocket connections and messages
+interface websocket-server {
+    use types.{state};
+
+    /// The type of WebSocket message/event
+    variant message-type {
+        /// A text message
+        text,
+        /// A binary message
+        binary,
+        /// A new connection was established
+        connect,
+        /// The connection was closed
+        close,
+        /// A ping message (for keep-alive)
+        ping,
+        /// A pong message (response to ping)
+        pong,
+        /// Any other message type
+        other(string),
+    }
+
+    /// Represents a message sent or received over a WebSocket connection
+    record websocket-message {
+        /// The type of the message
+        ty: message-type,
+        /// Binary data payload (used for binary messages)
+        data: option<list<u8>>,
+        /// Text payload (used for text messages)
+        text: option<string>,
+    }
+
+    /// Response containing messages to send back over the WebSocket
+    record websocket-response {
+        /// List of messages to send back to the client
+        messages: list<websocket-message>,
+    }
+
+    /// Called for each event on the WebSocket (connections, messages, disconnections)
+    handle-message: func(state: state, params: tuple<websocket-message>) -> result<tuple<state, tuple<websocket-response>>, string>;
+}
