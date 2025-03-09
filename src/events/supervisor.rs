@@ -11,6 +11,16 @@ pub enum SupervisorEventData {
         success: bool,
     },
 
+    // Resume child events
+    ResumeChildCall {
+        manifest_path: String,
+        initial_state: Option<Vec<u8>>,
+    },
+    ResumeChildResult {
+        child_id: String,
+        success: bool,
+    },
+
     // Stop child events
     StopChildCall {
         child_id: String,

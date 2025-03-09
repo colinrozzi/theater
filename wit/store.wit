@@ -30,7 +30,7 @@ interface store {
     remove-from-label: func(store-id: string, label: string, content-ref: content-ref) -> result<_, string>;
     
     /// Store content and immediately label it
-    put-at-label: func(store-id: string, label: string, content: list<u8>) -> result<content-ref, string>;
+    store-at-label: func(store-id: string, label: string, content: list<u8>) -> result<content-ref, string>;
     
     /// Put content at a label, replacing any existing content
     replace-content-at-label: func(store-id: string, label: string, content: list<u8>) -> result<content-ref, string>;

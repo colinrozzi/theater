@@ -81,12 +81,12 @@ pub enum StoreEventData {
     },
 
     // Put at label events
-    PutAtLabelCall {
+    StoreAtLabelCall {
         store_id: String,
         label: String,
         content: Vec<u8>,
     },
-    PutAtLabelResult {
+    StoreAtLabelResult {
         store_id: String,
         label: String,
         content_ref: ContentRef,

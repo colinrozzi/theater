@@ -152,6 +152,110 @@ impl SupervisorHost {
             )
             .expect("Failed to wrap spawn function");
 
+        // spawn-child implementation
+        let _ = interface
+            .func_wrap_async(
+                "resume",
+                move |mut ctx: StoreContextMut<'_, ActorStore>,
+                      (manifest, state_bytes): (String, Option<Vec<u8>>)|
+                      -> Box<dyn Future<Output = Result<(Result<String, String>,)>> + Send> {
+                    // Record spawn child call event
+                    ctx.data_mut().record_event(ChainEventData {
+                        event_type: "ntwk:theater/supervisor/spawn".to_string(),
+                        data: EventData::Supervisor(SupervisorEventData::ResumeChildCall {
+                            manifest_path: manifest.clone(),
+                            initial_state: state_bytes.clone(),
+                        }),
+                        timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                        description: Some(format!("Resuming child from manifest: {}", manifest)),
+                    });
+                    
+                    let store = ctx.data_mut();
+                    let theater_tx = store.theater_tx.clone();
+                    let parent_id = store.id.clone();
+
+                    Box::new(async move {
+                        let (response_tx, response_rx) = oneshot::channel();
+                        match theater_tx
+                            .send(TheaterCommand::ResumeActor {
+                                manifest_path: manifest,
+                                state_bytes,
+                                response_tx,
+                                parent_id: Some(parent_id),
+                            })
+                            .await
+                        {
+                            Ok(_) => {
+                                match response_rx.await {
+                                    Ok(Ok(actor_id)) => {
+                                        let actor_id_str = actor_id.to_string();
+                                        
+                                        // Record spawn child result event
+                                        ctx.data_mut().record_event(ChainEventData {
+                                            event_type: "ntwk:theater/supervisor/resume".to_string(),
+                                            data: EventData::Supervisor(SupervisorEventData::ResumeChildResult {
+                                                child_id: actor_id_str.clone(),
+                                                success: true,
+                                            }),
+                                            timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                                            description: Some(format!("Successfully resumed child with ID: {}", actor_id_str)),
+                                        });
+                                        
+                                        Ok((Ok(actor_id_str),))
+                                    }
+                                    Ok(Err(e)) => {
+                                        // Record spawn child error event
+                                        ctx.data_mut().record_event(ChainEventData {
+                                            event_type: "ntwk:theater/supervisor/spawn".to_string(),
+                                            data: EventData::Supervisor(SupervisorEventData::Error {
+                                                operation: "resume".to_string(),
+                                                child_id: None,
+                                                message: e.to_string(),
+                                            }),
+                                            timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                                            description: Some(format!("Failed to spawn child: {}", e)),
+                                        });
+                                        
+                                        Ok((Err(e.to_string()),))
+                                    }
+                                    Err(e) => {
+                                        // Record spawn child error event
+                                        ctx.data_mut().record_event(ChainEventData {
+                                            event_type: "ntwk:theater/supervisor/resume".to_string(),
+                                            data: EventData::Supervisor(SupervisorEventData::Error {
+                                                operation: "resume".to_string(),
+                                                child_id: None,
+                                                message: e.to_string(),
+                                            }),
+                                            timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                                            description: Some(format!("Failed to receive spawn response: {}", e)),
+                                        });
+                                        
+                                        Ok((Err(format!("Failed to receive response: {}", e)),))
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                // Record spawn child error event
+                                ctx.data_mut().record_event(ChainEventData {
+                                    event_type: "ntwk:theater/supervisor/resume".to_string(),
+                                    data: EventData::Supervisor(SupervisorEventData::Error {
+                                        operation: "resume".to_string(),
+                                        child_id: None,
+                                        message: e.to_string(),
+                                    }),
+                                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                                    description: Some(format!("Failed to send resume command: {}", e)),
+                                });
+                                
+                                Ok((Err(format!("Failed to send resume command: {}", e)),))
+                            }
+                        }
+                    })
+                },
+            )
+            .expect("Failed to wrap resume function");
+
         // list-children implementation
         let _ = interface
             .func_wrap_async(

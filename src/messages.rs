@@ -13,6 +13,12 @@ pub enum TheaterCommand {
         response_tx: oneshot::Sender<Result<TheaterId>>,
         parent_id: Option<TheaterId>,
     },
+    ResumeActor {
+        manifest_path: String,
+        state_bytes: Option<Vec<u8>>,
+        response_tx: oneshot::Sender<Result<TheaterId>>,
+        parent_id: Option<TheaterId>,
+    },
     StopActor {
         actor_id: TheaterId,
         response_tx: oneshot::Sender<Result<()>>,
@@ -60,6 +66,9 @@ impl TheaterCommand {
         match self {
             TheaterCommand::SpawnActor { manifest_path, .. } => {
                 format!("SpawnActor: {}", manifest_path)
+            }
+            TheaterCommand::ResumeActor { manifest_path, .. } => {
+                format!("ResumeActor: {}", manifest_path)
             }
             TheaterCommand::StopActor { actor_id, .. } => {
                 format!("StopActor: {:?}", actor_id)

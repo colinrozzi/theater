@@ -34,11 +34,12 @@ impl ActorRuntime {
     pub async fn start(
         id: TheaterId,
         config: &ManifestConfig,
-        init_bytes: Option<Vec<u8>>,
+        state_bytes: Option<Vec<u8>>,
         theater_tx: Sender<TheaterCommand>,
         actor_mailbox: Receiver<ActorMessage>,
         operation_rx: Receiver<ActorOperation>,
         operation_tx: Sender<ActorOperation>,
+        init: bool,
     ) -> Result<Self> {
         let mut handlers = Vec::new();
 
@@ -61,9 +62,7 @@ impl ActorRuntime {
                 HandlerConfig::HttpClient(config) => {
                     Handler::HttpClient(HttpClientHost::new(config.clone()))
                 }
-                HandlerConfig::HttpFramework(_) => {
-                    Handler::HttpFramework(HttpFramework::new())
-                }
+                HandlerConfig::HttpFramework(_) => Handler::HttpFramework(HttpFramework::new()),
                 HandlerConfig::Runtime(config) => {
                     Handler::Runtime(RuntimeHost::new(config.clone()))
                 }
@@ -130,28 +129,32 @@ impl ActorRuntime {
         }
 
         // Actor handle already created above
-
-        let init_state;
-        info!("Loading init state for actor: {:?}", id);
-        if let Some(init_bytes) = init_bytes {
-            info!("init bytes found: {:?}", init_bytes);
-            init_state = Some(init_bytes);
-        } else {
-            init_state = config.load_init_state().expect("Failed to load init state");
-            info!("config init state found: {:?}", init_state);
+        let mut init_state = state_bytes.clone();
+        if init {
+            info!("Loading init state for actor: {:?}", id);
+            if let Some(init_bytes) = state_bytes {
+                info!("init bytes found: {:?}", init_bytes);
+                init_state = Some(init_bytes);
+            } else {
+                init_state = config.load_init_state().expect("Failed to load init state");
+                info!("config init state found: {:?}", init_state);
+            }
         }
+
         actor_instance.store.data_mut().set_state(init_state);
 
         let mut actor_executor = ActorExecutor::new(actor_instance, operation_rx);
         let executor_task = tokio::spawn(async move { actor_executor.run().await });
 
-        actor_handle
-            .call_function::<(String,), ()>(
-                "ntwk:theater/actor.init".to_string(),
-                (id.to_string(),),
-            )
-            .await
-            .expect("Failed to call init function");
+        if init {
+            actor_handle
+                .call_function::<(String,), ()>(
+                    "ntwk:theater/actor.init".to_string(),
+                    (id.to_string(),),
+                )
+                .await
+                .expect("Failed to call init function");
+        }
 
         let mut handler_tasks: Vec<JoinHandle<()>> = Vec::new();
 

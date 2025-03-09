@@ -3,6 +3,9 @@ package ntwk:theater;
 interface supervisor {
     // Spawn a new child actor
     spawn: func(manifest: string, init-bytes: option<list<u8>>) -> result<string, string>;
+
+    // Resume a previously stopped child actor
+    resume: func(manifest: string, init-state: option<list<u8>>) -> result<string, string>;
     
     // Get list of child IDs
     list-children: func() -> list<string>;

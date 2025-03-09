@@ -124,7 +124,7 @@ impl TheaterRuntime {
                         manifest_path
                     );
                     match self
-                        .spawn_actor(manifest_path.clone(), init_bytes, parent_id)
+                        .spawn_actor(manifest_path.clone(), init_bytes, parent_id, true)
                         .await
                     {
                         Ok(actor_id) => {
@@ -138,6 +138,37 @@ impl TheaterRuntime {
                         }
                         Err(e) => {
                             error!("Failed to spawn actor from {:?}: {}", manifest_path, e);
+                            if let Err(send_err) = response_tx.send(Err(e)) {
+                                error!("Failed to send error response: {:?}", send_err);
+                            }
+                        }
+                    }
+                }
+                TheaterCommand::ResumeActor {
+                    manifest_path,
+                    state_bytes,
+                    response_tx,
+                    parent_id,
+                } => {
+                    debug!(
+                        "Processing ResumeActor command for manifest: {:?}",
+                        manifest_path
+                    );
+                    match self
+                        .spawn_actor(manifest_path.clone(), state_bytes, parent_id, false)
+                        .await
+                    {
+                        Ok(actor_id) => {
+                            info!("Successfully resumed actor: {:?}", actor_id);
+                            if let Err(e) = response_tx.send(Ok(actor_id.clone())) {
+                                error!(
+                                    "Failed to send success response for actor {:?}: {:?}",
+                                    actor_id, e
+                                );
+                            }
+                        }
+                        Err(e) => {
+                            error!("Failed to resume actor from {:?}: {}", manifest_path, e);
                             if let Err(send_err) = response_tx.send(Err(e)) {
                                 error!("Failed to send error response: {:?}", send_err);
                             }
@@ -239,6 +270,7 @@ impl TheaterRuntime {
         manifest_path: String,
         init_bytes: Option<Vec<u8>>,
         parent_id: Option<TheaterId>,
+        init: bool,
     ) -> Result<TheaterId> {
         debug!(
             "Starting actor spawn process from manifest: {:?}",
@@ -274,6 +306,7 @@ impl TheaterRuntime {
                 mailbox_rx,
                 operation_rx,
                 actor_operation_tx,
+                init,
             )
             .await
             .unwrap()
@@ -388,6 +421,12 @@ impl TheaterRuntime {
             return Err(anyhow::anyhow!("Actor not found"));
         };
 
+        // Get the actor's state
+        let state_bytes = self
+            .get_actor_state(actor_id.clone())
+            .await
+            .expect("Failed to get actor state");
+
         // Stop the actor
         self.stop_actor(actor_id).await?;
 
@@ -396,7 +435,8 @@ impl TheaterRuntime {
         // we handle the state? I don't know.
 
         // Spawn it again
-        self.spawn_actor(manifest_path, None, parent_id).await?;
+        self.spawn_actor(manifest_path, state_bytes, parent_id, false)
+            .await?;
 
         Ok(())
     }

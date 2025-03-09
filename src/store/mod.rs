@@ -353,7 +353,7 @@ impl ContentStore {
         }
     }
 
-    pub async fn put_at_label(&self, label_name: &str, content: Vec<u8>) -> Result<ContentRef> {
+    pub async fn store_at_label(&self, label_name: &str, content: Vec<u8>) -> Result<ContentRef> {
         let content_ref = ContentRef::from_content(&content);
 
         // Store the content

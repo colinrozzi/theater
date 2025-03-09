@@ -417,13 +417,13 @@ impl StoreHost {
         )?;
 
         interface.func_wrap_async(
-            "put-at-label",
+            "store-at-label",
             move |mut ctx: StoreContextMut<'_, ActorStore>, (store_id, label, content): (String, String, Vec<u8>)| 
                 -> Box<dyn Future<Output = Result<(Result<ContentRef, String>,)>> + Send> {
                 // Record put-at-label call event
                 ctx.data_mut().record_event(ChainEventData {
-                    event_type: "ntwk:theater/store/put-at-label".to_string(),
-                    data: EventData::Store(StoreEventData::PutAtLabelCall {
+                    event_type: "ntwk:theater/store/store-at-label".to_string(),
+                    data: EventData::Store(StoreEventData::StoreAtLabelCall {
                         store_id: store_id.clone(),
                         label: label.clone(),
                         content: content.clone(),
@@ -437,15 +437,15 @@ impl StoreHost {
                 
                 Box::new(async move {
                     // Perform the operation
-                    match store.put_at_label(&label, content).await {
+                    match store.store_at_label(&label, content).await {
                         Ok(content_ref) => {
                             debug!("Content stored at label successfully");
                             let content_ref_wit = ContentRef::from(content_ref.clone());
                             
                             // Record put-at-label result event
                             ctx.data_mut().record_event(ChainEventData {
-                                event_type: "ntwk:theater/store/put-at-label".to_string(),
-                                data: EventData::Store(StoreEventData::PutAtLabelResult {
+                                event_type: "ntwk:theater/store/store-at-label".to_string(),
+                                data: EventData::Store(StoreEventData::StoreAtLabelResult {
                                     store_id: store_id.clone(),
                                     label: label_clone.clone(),
                                     content_ref: content_ref.clone(),
