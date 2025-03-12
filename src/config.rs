@@ -104,9 +104,7 @@ pub struct WebSocketServerHandlerConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct MessageServerConfig {
-    pub port: u16,
-}
+pub struct MessageServerConfig {}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FileSystemHandlerConfig {
