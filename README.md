@@ -1,6 +1,8 @@
 # Theater
 
-A WebAssembly actor system that enables state management, verification, and flexible interaction patterns.
+A WebAssembly actor system that enables state management, verification, and flexible interaction patterns. 
+This project is in active development and not yet ready for production use. Most of the code is undocumented, untested, and subject to change.
+If you are interested at all in the project or have questions, please reach out to me at colinrozzi@gmail.com.
 
 [Read more about why we built Theater and its core concepts →](docs/why-theater.md)
 
