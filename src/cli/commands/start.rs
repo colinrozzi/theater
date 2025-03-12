@@ -115,10 +115,27 @@ pub fn execute(args: &StartArgs, _verbose: bool, json: bool) -> Result<()> {
             
             // Keep receiving events until Ctrl+C is pressed
             while running.load(Ordering::SeqCst) {
+                // First, try to flush any pending events by polling
+                for _ in 0..5 {
+                    if let Ok(Ok(ManagementResponse::ActorEvent { id, event })) = client.receive_response_nonblocking() {
+                        if id == actor_id {
+                            event_count += 1;
+                            println!("{}. {}", event_count, event.event_type);
+                            println!("   Time: {}", event.timestamp);
+                            println!("   Hash: {}", hex::encode(&event.hash));
+                            if let Some(parent) = &event.parent_hash {
+                                println!("   Parent: {}", hex::encode(parent));
+                            }
+                            println!();
+                        }
+                    } else {
+                        break;
+                    }
+                }
                 // Try to receive a response with a timeout to avoid blocking forever
                 if let Ok(response) = tokio::time::timeout(
                     std::time::Duration::from_secs(1), 
-                    client.receive_response()
+                    client.receive_response_with_timeout(std::time::Duration::from_millis(500))
                 ).await {
                     match response {
                         Ok(ManagementResponse::ActorEvent { id, event }) => {

@@ -208,17 +208,23 @@ impl TheaterRuntime {
                     }
                 }
                 TheaterCommand::NewEvent { actor_id, event } => {
-                    debug!("Received new event from actor {:?}", actor_id);
+                    debug!("Received new event from actor {:?}: {:?}", actor_id, event.event_type);
                     // Forward event to subscribers
+                    let mut subscriber_count = 0;
                     self.event_subscribers.retain_mut(|tx| {
                         match tx.try_send((actor_id.clone(), event.clone())) {
-                            Ok(_) => true,
+                            Ok(_) => {
+                                subscriber_count += 1;
+                                true
+                            },
                             Err(e) => {
                                 warn!("Failed to forward event to subscriber: {}", e);
                                 false
                             }
                         }
                     });
+                    
+                    info!("Forwarded event to {} subscribers", subscriber_count);
 
                     if let Err(e) = self.handle_actor_event(actor_id, event).await {
                         error!("Failed to handle actor event: {}", e);

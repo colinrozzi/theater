@@ -45,9 +45,26 @@ impl ActorStore {
 
     pub fn record_event(&self, event_data: ChainEventData) -> ChainEvent {
         let mut chain = self.chain.lock().unwrap();
-        chain
+        let event = chain
             .add_typed_event(event_data)
-            .expect("Failed to record event")
+            .expect("Failed to record event");
+        
+        // Also send the event directly to the theater runtime as a backup mechanism
+        let theater_tx = self.theater_tx.clone();
+        let actor_id = self.id.clone(); 
+        let event_clone = event.clone();
+        
+        // Spawn a task to avoid blocking
+        tokio::spawn(async move {
+            if let Err(e) = theater_tx.send(crate::messages::TheaterCommand::NewEvent {
+                actor_id,
+                event: event_clone,
+            }).await {
+                tracing::warn!("Failed to send event directly to theater runtime: {}", e);
+            }
+        });
+        
+        event
     }
 
     pub fn verify_chain(&self) -> bool {

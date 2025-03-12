@@ -1,7 +1,9 @@
 use anyhow::{anyhow, Result};
 use bytes::Bytes;
 use futures::sink::SinkExt;
-use futures::stream::StreamExt;
+use futures::stream::{StreamExt, TryStreamExt};
+use futures::future::FutureExt;
+use tokio::io::AsyncReadExt;
 
 use std::net::SocketAddr;
 use tokio::net::TcpStream;
@@ -234,6 +236,62 @@ impl TheaterClient {
             // Connection closed
             self.connection = None;
             Err(anyhow!("Connection closed by server"))
+        }
+    }
+    
+    /// Receive a response from the server with a timeout
+    /// Useful for receiving events from subscriptions without blocking indefinitely
+    pub async fn receive_response_with_timeout(&mut self, timeout: std::time::Duration) -> Result<ManagementResponse> {
+        // Make sure we have an active connection
+        if self.connection.is_none() {
+            return Err(anyhow!("No active connection"));
+        }
+
+        let connection = self.connection.as_mut().unwrap();
+        
+        // Receive and deserialize the response with timeout
+        if let Ok(Some(response_bytes)) = tokio::time::timeout(timeout, connection.next()).await {
+            let response_bytes = response_bytes?;
+            let response: ManagementResponse = serde_json::from_slice(&response_bytes)?;
+            debug!("Received response: {:?}", response);
+            Ok(response)
+        } else {
+            // Timeout or connection closed
+            Err(anyhow!("Timeout or connection closed"))
+        }
+    }
+    
+    /// Try to receive a response without blocking
+    /// Returns immediately if no response is available
+    pub fn receive_response_nonblocking(&mut self) -> Result<Result<ManagementResponse>> {
+        // Make sure we have an active connection
+        if self.connection.is_none() {
+            return Err(anyhow!("No active connection"));
+        }
+
+        let connection = self.connection.as_mut().unwrap();
+        
+        // Poll for response
+        match connection.get_mut().try_read_buf(&mut bytes::BytesMut::new()) {
+            Ok(0) => Err(anyhow!("No data available")),
+            Ok(_) => {
+                // There's data available, use the async version to properly decode it
+                // This is a bit of a hack, but the LengthDelimitedCodec doesn't have a good non-blocking interface
+                tokio::task::block_in_place(|| {
+                    let rt = tokio::runtime::Handle::current();
+                    rt.block_on(async {
+                        if let Some(response_bytes) = connection.next().now_or_never().flatten() {
+                            let response_bytes = response_bytes?;
+                            let response: ManagementResponse = serde_json::from_slice(&response_bytes)?;
+                            debug!("Received response non-blocking: {:?}", response);
+                            Ok(Ok(response))
+                        } else {
+                            Err(anyhow!("No complete message available"))
+                        }
+                    })
+                })
+            },
+            Err(e) => Err(anyhow!("Error reading from socket: {}", e)),
         }
     }
 }

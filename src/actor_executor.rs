@@ -100,7 +100,8 @@ impl ActorExecutor {
             state.as_ref().map(|s| s.len()).unwrap_or(0)
         );
 
-        self.actor_instance
+        // Record the event and ensure it gets propagated to the runtime
+        let event = self.actor_instance
             .store
             .data_mut()
             .record_event(ChainEventData {
@@ -122,7 +123,7 @@ impl ActorExecutor {
             .await
         {
             Ok(result) => {
-                self.actor_instance
+                let result_event = self.actor_instance
                     .store
                     .data_mut()
                     .record_event(ChainEventData {
@@ -136,10 +137,11 @@ impl ActorExecutor {
                             },
                         ),
                     });
+                tracing::debug!("Recorded successful result event for function '{}'", name);
                 result
             }
             Err(e) => {
-                self.actor_instance
+                let error_event = self.actor_instance
                     .store
                     .data_mut()
                     .record_event(ChainEventData {
@@ -153,7 +155,7 @@ impl ActorExecutor {
                             },
                         ),
                     });
-
+                tracing::debug!("Recorded error event for function '{}'", name);
                 error!("Failed to execute function '{}': {}", name, e);
                 return Err(ActorError::Internal(e));
             }

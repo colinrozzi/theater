@@ -18,6 +18,7 @@ use crate::messages::{ActorMessage, TheaterCommand};
 use crate::wasm::ActorComponent;
 use crate::Result;
 use tokio::sync::mpsc::{Receiver, Sender};
+use std::sync::mpsc as std_mpsc;
 use tokio::task::JoinHandle;
 use tracing::{info, warn};
 
@@ -78,7 +79,33 @@ impl ActorRuntime {
         }
 
         let actor_handle = ActorHandle::new(operation_tx.clone());
+        // Create the mpsc channel for event notifications
+        let (event_tx, event_rx) = std_mpsc::channel();
+        
         let actor_store = ActorStore::new(id.clone(), theater_tx.clone(), actor_handle.clone());
+        
+        // Set up the event callback to propagate events
+        actor_store.chain.lock().unwrap().set_event_callback(event_tx);
+        
+        // Create a task to forward events to the theater runtime
+        let actor_id = id.clone();
+        let theater_tx_clone = theater_tx.clone();
+        tokio::spawn(async move {
+            use crate::messages::TheaterCommand;
+            let rx = event_rx;
+            
+            while let Ok(event) = rx.recv() {
+                if let Err(e) = theater_tx_clone.send(TheaterCommand::NewEvent {
+                    actor_id: actor_id.clone(),
+                    event: event.clone(),
+                }).await {
+                    tracing::error!("Failed to forward event to theater runtime: {}", e);
+                    break;
+                }
+                tracing::debug!("Forwarded event to theater runtime: {:?}", event.event_type);
+            }
+            tracing::debug!("Event forwarder task ended");
+        });
         let mut actor_component = ActorComponent::new(config, actor_store).await.expect(
             format!(
                 "Failed to create actor component for actor: {:?}",
