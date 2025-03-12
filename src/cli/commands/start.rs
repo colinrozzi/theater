@@ -100,7 +100,10 @@ pub fn execute(args: &StartArgs, _verbose: bool, json: bool) -> Result<()> {
             println!("{} Monitoring events for actor: {}", 
                 style("ℹ").blue().bold(),
                 style(actor_id.to_string()).cyan());
-            println!("Press Ctrl+C to stop monitoring");
+            println!("{} Waiting for events (Press Ctrl+C to stop monitoring)", 
+                style("i").dim());
+            println!("{} Note: You may need to trigger actions in the actor to generate events", 
+                style("i").dim());
             
             // Subscribe to actor events
             let subscription_id = client.subscribe_to_actor(actor_id.clone()).await?;
@@ -108,11 +111,11 @@ pub fn execute(args: &StartArgs, _verbose: bool, json: bool) -> Result<()> {
             
             // Setup to receive events
             let mut event_count = 0;
+            let mut heartbeat_counter = 0;
             
             // Keep receiving events until Ctrl+C is pressed
             while running.load(Ordering::SeqCst) {
-                // This is a basic implementation, you might want to add a timeout
-                // to not block indefinitely on next()
+                // Try to receive a response with a timeout to avoid blocking forever
                 if let Ok(response) = tokio::time::timeout(
                     std::time::Duration::from_secs(1), 
                     client.receive_response()
@@ -130,8 +133,9 @@ pub fn execute(args: &StartArgs, _verbose: bool, json: bool) -> Result<()> {
                                 println!();
                             }
                         },
-                        Ok(_) => {
-                            // Ignore other response types
+                        Ok(other) => {
+                            // Log other response types for debugging
+                            debug!("Received non-event response: {:?}", other);
                         },
                         Err(e) => {
                             // Connection error or other issue
@@ -139,9 +143,21 @@ pub fn execute(args: &StartArgs, _verbose: bool, json: bool) -> Result<()> {
                             break;
                         }
                     }
+                } else {
+                    // Timeout occurred, but that's okay in this case
+                    debug!("Timeout waiting for events, still alive");
+                    
+                    // Increment heartbeat counter and show a heartbeat message every ~30 seconds
+                    heartbeat_counter += 1;
+                    if heartbeat_counter >= 30 {
+                        println!("{} Still monitoring for events from actor: {}", 
+                            style("⟳").dim(),
+                            style(&actor_id.to_string()[..8]).dim());
+                        heartbeat_counter = 0;
+                    }
                 }
-                // Small delay to prevent CPU spinning
-                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+                // Small delay to prevent CPU spinning, slightly longer
+                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
             }
             
             // Clean up subscription before exiting

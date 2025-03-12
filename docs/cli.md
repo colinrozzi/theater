@@ -226,6 +226,8 @@ To monitor and debug actors:
    # When starting a new actor
    theater start manifest.toml --monitor
    ```
+   
+   > **Note**: The event monitoring functionality is currently in beta. You may need to trigger actions in the actor to generate events.
 
 6. Restart an actor if issues occur
    ```bash
@@ -266,5 +268,6 @@ For parent-child actor relationships:
 - Use the `--verbose` flag for detailed output during commands
 - Use the `--json` flag to get structured output for scripting
 - For faster development, use the `watch` command for automatic redeployment
-- Use the `start --monitor` flag to start an actor and monitor its events in real-time
+- Use the `start --monitor` flag to start an actor and monitor its events in real-time (beta feature)
+- When monitoring events, you may need to interact with the actor to generate events
 - Check `theater --help` and `theater <command> --help` for specific command options
