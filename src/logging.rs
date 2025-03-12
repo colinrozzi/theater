@@ -15,6 +15,16 @@ pub fn setup_global_logging(
         fs::create_dir_all(parent)?;
     }
 
+    // Create a more sophisticated filter string
+    // Format: theater=debug,wasmtime=info
+    let enhanced_filter = if filter_string.to_lowercase() == "debug" {
+        // If debug is requested, set debug for theater components but keep wasmtime at info
+        "theater=debug,wasmtime=info,wasmtime_wasi=info".to_string()
+    } else {
+        // Otherwise use the original filter string for all crates
+        filter_string.to_string()
+    };
+
     let file = File::create(log_path)?;
     let file_writer = std::sync::Mutex::new(file).with_max_level(tracing::Level::TRACE);
 
@@ -25,7 +35,7 @@ pub fn setup_global_logging(
         .with_file(true)
         .with_target(true)
         .with_ansi(false)
-        .with_filter(EnvFilter::builder().parse(filter_string)?);
+        .with_filter(EnvFilter::builder().parse(&enhanced_filter)?);
 
     if with_stdout {
         let stdout_layer = fmt::layer()
@@ -35,7 +45,7 @@ pub fn setup_global_logging(
             .with_file(true)
             .with_target(true)
             .with_ansi(true)
-            .with_filter(EnvFilter::builder().parse(filter_string)?);
+            .with_filter(EnvFilter::builder().parse(&enhanced_filter)?);
 
         tracing_subscriber::registry()
             .with(file_layer)

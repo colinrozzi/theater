@@ -13,9 +13,14 @@ pub struct StartArgs {
     #[arg(short, long, default_value = "127.0.0.1:9000")]
     pub address: SocketAddr,
 
-    /// logging level
+    /// logging level (simple version, e.g. 'info', 'debug')
     #[arg(short, long, default_value = "info")]
     pub log_level: String,
+
+    /// Advanced logging filter (e.g. "theater=debug,wasmtime=info")
+    /// This overrides log_level if provided
+    #[arg(long)]
+    pub log_filter: Option<String>,
 
     /// log directory
     #[arg(long, default_value = "logs/theater")]
@@ -30,8 +35,11 @@ pub async fn start_server(args: &StartArgs) -> Result<()> {
     // Create the runtime log file path
     let log_path = args.log_dir.join("theater.log");
 
-    // Build the subscriber
-    let filter_string = format!("{}", args.log_level);
+    // Determine filter string based on available args
+    let filter_string = match &args.log_filter {
+        Some(filter) => filter.clone(),
+        None => args.log_level.clone(),
+    };
 
     logging::setup_global_logging(log_path, &filter_string, args.log_stdout)
         .expect("Failed to setup logging");
