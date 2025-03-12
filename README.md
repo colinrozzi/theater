@@ -4,6 +4,33 @@ A WebAssembly actor system that enables state management, verification, and flex
 
 [Read more about why we built Theater and its core concepts →](docs/why-theater.md)
 
+## Quick Start with Theater CLI
+
+Theater includes a powerful CLI tool for managing the entire actor lifecycle:
+
+```bash
+# Create a new actor project
+theater create my-actor
+
+# Build the WebAssembly actor
+cd my-actor
+theater build
+
+# Start a Theater server
+theater server
+
+# Deploy the actor
+theater deploy manifest.toml
+
+# List running actors
+theater list
+
+# View actor logs
+theater logs <actor-id>
+```
+
+[See complete CLI documentation →](docs/cli.md)
+
 ## Features
 
 - **Actor State Management**: Actors maintain verifiable state with complete history
@@ -20,6 +47,7 @@ A WebAssembly actor system that enables state management, verification, and flex
 ## Documentation
 
 - [Why Theater](docs/why-theater.md) - Core concepts and motivation
+- [CLI Documentation](docs/cli.md) - Complete guide to the Theater CLI
 - [Store System](docs/store/README.md) - Content-addressable storage documentation
 - [Making Changes](docs/making-changes.md) - Guide for contributing changes
 - [Current Changes](/changes/in-progress.md) - Overview of work in progress
@@ -156,8 +184,14 @@ cargo build
 
 ## Running
 
-To run an actor with a manifest:
+You can run Theater using either the CLI or directly with cargo:
+
 ```bash
+# Using the Theater CLI (recommended)
+theater server
+theater deploy path/to/your/manifest.toml
+
+# Or using cargo directly
 cargo run -- --manifest path/to/your/manifest.toml
 ```
 
