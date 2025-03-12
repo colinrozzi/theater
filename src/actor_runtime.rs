@@ -2,6 +2,7 @@ use crate::actor_executor::ActorExecutor;
 use crate::actor_executor::ActorOperation;
 use crate::actor_handle::ActorHandle;
 use crate::actor_store::ActorStore;
+use crate::chain::ChainEvent;
 use crate::config::{HandlerConfig, ManifestConfig};
 use crate::host::filesystem::FileSystemHost;
 use crate::host::framework::HttpFramework;
@@ -40,6 +41,7 @@ impl ActorRuntime {
         operation_rx: Receiver<ActorOperation>,
         operation_tx: Sender<ActorOperation>,
         init: bool,
+        event_channel: Sender<ChainEvent>,
     ) -> Result<Self> {
         let mut handlers = Vec::new();
 
@@ -78,7 +80,12 @@ impl ActorRuntime {
         }
 
         let actor_handle = ActorHandle::new(operation_tx.clone());
-        let actor_store = ActorStore::new(id.clone(), theater_tx.clone(), actor_handle.clone());
+        let actor_store = ActorStore::new(
+            id.clone(),
+            theater_tx.clone(),
+            actor_handle.clone(),
+            event_channel,
+        );
         let mut actor_component = ActorComponent::new(config, actor_store).await.expect(
             format!(
                 "Failed to create actor component for actor: {:?}",
@@ -132,14 +139,14 @@ impl ActorRuntime {
         let mut init_state = None;
         if init {
             info!("Loading init state for actor: {:?}", id);
-            
+
             // Get state from config if available
             let config_state = config.load_init_state().unwrap_or(None);
-            
+
             // Merge with provided state
             init_state = crate::utils::merge_initial_states(config_state, state_bytes)
                 .expect("Failed to merge initial states");
-            
+
             info!("Final init state ready: {:?}", init_state.is_some());
         }
 

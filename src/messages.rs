@@ -3,6 +3,7 @@ use crate::id::TheaterId;
 use crate::metrics::ActorMetrics;
 use crate::Result;
 use serde::{Deserialize, Serialize};
+use tokio::sync::mpsc::Sender;
 use tokio::sync::oneshot;
 
 #[derive(Debug)]
@@ -59,6 +60,10 @@ pub enum TheaterCommand {
         actor_id: TheaterId,
         response_tx: oneshot::Sender<Result<ActorMetrics>>,
     },
+    SubscribeToActor {
+        actor_id: TheaterId,
+        event_tx: Sender<ChainEvent>,
+    },
 }
 
 impl TheaterCommand {
@@ -97,6 +102,9 @@ impl TheaterCommand {
             }
             TheaterCommand::GetActorMetrics { actor_id, .. } => {
                 format!("GetActorMetrics: {:?}", actor_id)
+            }
+            TheaterCommand::SubscribeToActor { actor_id, .. } => {
+                format!("SubscribeToActor: {:?}", actor_id)
             }
         }
     }

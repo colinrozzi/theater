@@ -5,6 +5,7 @@ use sha1::{Digest, Sha1};
 use std::fmt;
 use std::path::Path;
 use std::sync::mpsc;
+use tokio::sync::mpsc::Sender;
 use wasmtime::component::{ComponentType, Lift, Lower};
 
 use crate::events::ChainEventData;
@@ -110,17 +111,17 @@ pub struct StateChain {
     events: Vec<ChainEvent>,
     current_hash: Option<Vec<u8>>,
     #[serde(skip)]
-    event_callback: Option<mpsc::Sender<ChainEvent>>,
+    event_callback: Option<Sender<ChainEvent>>,
     #[serde(skip)]
     actor_id: TheaterId,
 }
 
 impl StateChain {
-    pub fn new(actor_id: TheaterId) -> Self {
+    pub fn new(actor_id: TheaterId, event_callback: Sender<ChainEvent>) -> Self {
         Self {
             events: Vec::new(),
             current_hash: None,
-            event_callback: None,
+            event_callback: Some(event_callback),
             actor_id,
         }
     }
@@ -147,9 +148,13 @@ impl StateChain {
 
         // Notify runtime if callback is set
         if let Some(callback) = &self.event_callback {
-            if let Err(err) = callback.send(event.clone()) {
-                tracing::warn!("Failed to notify runtime of event: {}", err);
-            }
+            let event_callback = callback.clone();
+            let evt = event.clone();
+            tokio::spawn(async move {
+                if let Err(err) = event_callback.send(evt.clone()).await {
+                    tracing::warn!("Failed to notify runtime of event: {}", err);
+                }
+            });
         }
 
         // I am removing storing the events in the content store for now because they are
@@ -205,10 +210,6 @@ impl StateChain {
         }
 
         true
-    }
-
-    pub fn set_event_callback(&mut self, callback: mpsc::Sender<ChainEvent>) {
-        self.event_callback = Some(callback);
     }
 
     pub fn save_to_file(&self, path: &Path) -> Result<()> {

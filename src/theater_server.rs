@@ -157,8 +157,6 @@ impl TheaterServer {
             self.management_socket.local_addr()?
         );
 
-        let mut event_rx = self.runtime.subscribe_to_events().await?;
-
         // Start the theater runtime in its own task
         let runtime_handle = tokio::spawn(async move {
             match self.runtime.run().await {
@@ -166,28 +164,6 @@ impl TheaterServer {
                 Err(e) => {
                     error!("Theater runtime failed: {}", e);
                     Err(e)
-                }
-            }
-        });
-
-        // Start the subscription event forwarder
-        let subscriptions = self.subscriptions.clone();
-        tokio::spawn(async move {
-            while let Some((actor_id, event)) = event_rx.recv().await {
-                let subs = subscriptions.lock().await;
-                if let Some(subscribers) = subs.get(&actor_id) {
-                    for sub in subscribers {
-                        let response = ManagementResponse::ActorEvent {
-                            id: actor_id.clone(),
-                            event: event.clone(),
-                        };
-                        debug!("Forwarding event for actor {:?} to subscription {:?}", actor_id, sub.id);
-                        if let Err(e) = sub.client_tx.send(response).await {
-                            error!("Failed to forward event to subscriber {}: {}", sub.id, e);
-                            // We could clean up dead subscriptions here, but we'll leave that 
-                            // for a more comprehensive update
-                        }
-                    }
                 }
             }
         });
@@ -218,16 +194,16 @@ impl TheaterServer {
     ) -> Result<()> {
         // Create a channel for sending responses to this client
         let (client_tx, mut client_rx) = mpsc::channel::<ManagementResponse>(32);
-        
+
         // Create a framed connection for the main thread
         let framed = Framed::new(socket, LengthDelimitedCodec::new());
-        
+
         // Split the framed connection into read and write parts
         let (mut framed_sink, mut framed_stream) = framed.split();
-        
+
         // Clone the client_tx for use in the command loop
         let cmd_client_tx = client_tx.clone();
-        
+
         // Start a task to forward responses to the client
         tokio::spawn(async move {
             while let Some(response) = client_rx.recv().await {
@@ -248,28 +224,31 @@ impl TheaterServer {
 
         // Store active subscriptions for this connection to clean up on disconnect
         let mut connection_subscriptions: Vec<(TheaterId, Uuid)> = Vec::new();
-        
+
         while let Some(msg) = framed_stream.next().await {
             debug!("Received management message");
             let msg = msg?;
             let cmd: ManagementCommand = serde_json::from_slice(&msg)?;
             debug!("Parsed command: {:?}", cmd);
-            
+
             // Store the command for reference (used for subscription tracking)
             let cmd_clone = cmd.clone();
 
             let response = match cmd {
-                ManagementCommand::StartActor { manifest, initial_state } => {
-                info!("Starting actor from manifest: {:?}", manifest);
-                let (cmd_tx, cmd_rx) = tokio::sync::oneshot::channel();
-                debug!("Sending SpawnActor command to runtime");
-                match runtime_tx
-                .send(TheaterCommand::SpawnActor {
-                manifest_path: manifest.clone(),
-                init_bytes: initial_state,
-                response_tx: cmd_tx,
-                parent_id: None,
-                })
+                ManagementCommand::StartActor {
+                    manifest,
+                    initial_state,
+                } => {
+                    info!("Starting actor from manifest: {:?}", manifest);
+                    let (cmd_tx, cmd_rx) = tokio::sync::oneshot::channel();
+                    debug!("Sending SpawnActor command to runtime");
+                    match runtime_tx
+                        .send(TheaterCommand::SpawnActor {
+                            manifest_path: manifest.clone(),
+                            init_bytes: initial_state,
+                            response_tx: cmd_tx,
+                            parent_id: None,
+                        })
                         .await
                     {
                         Ok(_) => {
@@ -350,13 +329,6 @@ impl TheaterServer {
                         client_tx: cmd_client_tx.clone(),
                     };
 
-                    subscriptions
-                        .lock()
-                        .await
-                        .entry(id.clone())
-                        .or_insert_with(HashSet::new)
-                        .insert(subscription);
-                    
                     debug!("Subscription created with ID: {}", subscription_id);
 
                     ManagementResponse::Subscribed {
@@ -367,17 +339,7 @@ impl TheaterServer {
                 ManagementCommand::UnsubscribeFromActor {
                     id,
                     subscription_id,
-                } => {
-                    subscriptions
-                        .lock()
-                        .await
-                        .entry(id.clone())
-                        .and_modify(|subs| {
-                            subs.retain(|sub| sub.id != subscription_id);
-                        });
-
-                    ManagementResponse::Unsubscribed { id }
-                }
+                } => ManagementResponse::Unsubscribed { id },
                 ManagementCommand::SendActorMessage { id, data } => {
                     info!("Sending message to actor: {:?}", id);
                     runtime_tx
@@ -489,51 +451,10 @@ impl TheaterServer {
             };
 
             debug!("Sending response: {:?}", response);
-            
-            // For subscription-related events, we've already set up client_tx to handle them
-            // For regular commands, send responses directly through the client_tx
-            if !matches!(response, ManagementResponse::ActorEvent { .. }) {
-                // If this is a subscription response, track it for cleanup
-                if let ManagementResponse::Subscribed { id, subscription_id } = &response {
-                    connection_subscriptions.push((id.clone(), *subscription_id));
-                }
-                
-                // If this is an unsubscribe response, remove it from tracking
-                if let ManagementResponse::Unsubscribed { id } = &response {
-                    if let ManagementCommand::UnsubscribeFromActor { id: _, subscription_id } = cmd_clone {
-                        connection_subscriptions.retain(|(actor_id, sub_id)| 
-                            !(actor_id == id && *sub_id == subscription_id));
-                    }
-                }
-                
-                // Send the response through the client_tx channel
-                if let Err(e) = cmd_client_tx.send(response.clone()).await {
-                    error!("Failed to send response through client channel: {}", e);
-                }
-            }
-            
             debug!("Response sent");
-        }
-        
-        // Connection has closed, clean up any active subscriptions
-        if !connection_subscriptions.is_empty() {
-            info!("Cleaning up {} subscriptions for disconnected client", connection_subscriptions.len());
-            let mut subs = subscriptions.lock().await;
-            
-            for (actor_id, subscription_id) in connection_subscriptions {
-                if let Some(actor_subs) = subs.get_mut(&actor_id) {
-                    actor_subs.retain(|sub| sub.id != subscription_id);
-                    debug!("Removed subscription {} for actor {}", subscription_id, actor_id);
-                    
-                    // If no more subscriptions for this actor, remove the entry
-                    if actor_subs.is_empty() {
-                        subs.remove(&actor_id);
-                        debug!("Removed empty subscription set for actor {}", actor_id);
-                    }
-                }
-            }
         }
 
         Ok(())
     }
 }
+

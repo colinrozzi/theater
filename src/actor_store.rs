@@ -17,11 +17,16 @@ pub struct ActorStore {
 }
 
 impl ActorStore {
-    pub fn new(id: TheaterId, theater_tx: Sender<TheaterCommand>, actor_handle: ActorHandle) -> Self {
+    pub fn new(
+        id: TheaterId,
+        theater_tx: Sender<TheaterCommand>,
+        actor_handle: ActorHandle,
+        event_channel: Sender<ChainEvent>,
+    ) -> Self {
         Self {
             id: id.clone(),
             theater_tx,
-            chain: Arc::new(Mutex::new(StateChain::new(id))),
+            chain: Arc::new(Mutex::new(StateChain::new(id, event_channel))),
             state: Some(vec![]),
             actor_handle,
         }

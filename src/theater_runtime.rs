@@ -21,7 +21,8 @@ pub struct TheaterRuntime {
     actors: HashMap<TheaterId, ActorProcess>,
     pub theater_tx: Sender<TheaterCommand>,
     theater_rx: Receiver<TheaterCommand>,
-    event_subscribers: Vec<mpsc::Sender<(TheaterId, ChainEvent)>>,
+    event_subscribers: Vec<Sender<(TheaterId, ChainEvent)>>,
+    actor_event_channels: HashMap<TheaterId, Receiver<ChainEvent>>,
 }
 
 pub struct ActorProcess {
@@ -44,13 +45,8 @@ impl TheaterRuntime {
             theater_rx,
             actors: HashMap::new(),
             event_subscribers: Vec::new(),
+            actor_event_channels: HashMap::new(),
         })
-    }
-
-    pub async fn subscribe_to_events(&mut self) -> Result<mpsc::Receiver<(TheaterId, ChainEvent)>> {
-        let (tx, rx) = mpsc::channel(32);
-        self.event_subscribers.push(tx);
-        Ok(rx)
     }
 
     pub async fn run(&mut self) -> Result<()> {
@@ -259,6 +255,9 @@ impl TheaterRuntime {
                         }
                     }
                 }
+                TheaterCommand::SubscribeToActor { actor_id, event_tx } => {
+                    debug!("Subscribing to events for actor: {:?}", actor_id);
+                }
             };
         }
         info!("Theater runtime shutting down");
@@ -290,6 +289,7 @@ impl TheaterRuntime {
         let (response_tx, response_rx) = tokio::sync::oneshot::channel();
         let (mailbox_tx, mailbox_rx) = mpsc::channel(100);
         let (operation_tx, operation_rx) = mpsc::channel(100);
+        let (event_tx, event_rx) = mpsc::channel(100);
         let theater_tx = self.theater_tx.clone();
 
         let actor_operation_tx = operation_tx.clone();
@@ -307,6 +307,7 @@ impl TheaterRuntime {
                 operation_rx,
                 actor_operation_tx,
                 init,
+                event_tx,
             )
             .await
             .unwrap()
@@ -327,6 +328,8 @@ impl TheaterRuntime {
                     status: ActorStatus::Running,
                     manifest_path: manifest_path.clone(),
                 };
+
+                self.actor_event_channels.insert(actor_id.clone(), event_rx);
 
                 if let Some(parent_id) = parent_id {
                     if let Some(parent) = self.actors.get_mut(&parent_id) {
@@ -349,39 +352,6 @@ impl TheaterRuntime {
                 Err(anyhow::anyhow!("Failed to receive actor ID"))
             }
         }
-    }
-
-    async fn handle_actor_event(&mut self, actor_id: TheaterId, event: ChainEvent) -> Result<()> {
-        debug!("Handling event from actor {:?}", actor_id);
-        // Find the parent of this actor
-        let parent_id = self.actors.iter().find_map(|(id, proc)| {
-            if proc.children.contains(&actor_id) {
-                Some(id.clone())
-            } else {
-                None
-            }
-        });
-
-        let wasm_event = Event {
-            event_type: event.event_type.clone(),
-            parent: None,
-            data: event.data.clone(),
-        };
-
-        // If there's a parent, forward the event
-        if let Some(parent_id) = parent_id {
-            debug!("Forwarding event to parent actor {:?}", parent_id);
-            if let Some(parent) = self.actors.get(&parent_id) {
-                let event_message = ActorMessage::Send(ActorSend {
-                    data: serde_json::to_vec(&wasm_event)?,
-                });
-                if let Err(e) = parent.mailbox_tx.send(event_message).await {
-                    error!("Failed to forward event to parent: {}", e);
-                }
-            }
-        }
-
-        Ok(())
     }
 
     async fn stop_actor(&mut self, actor_id: TheaterId) -> Result<()> {
