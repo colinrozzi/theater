@@ -23,7 +23,7 @@ pub struct StateArgs {
     pub format: String,
 }
 
-pub fn execute(args: &StateArgs, verbose: bool, json: bool) -> Result<()> {
+pub fn execute(args: &StateArgs, _verbose: bool, json: bool) -> Result<()> {
     debug!("Getting state for actor: {}", args.actor_id);
     debug!("Connecting to server at: {}", args.address);
     

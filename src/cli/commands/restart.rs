@@ -19,7 +19,7 @@ pub struct RestartArgs {
     pub address: SocketAddr,
 }
 
-pub fn execute(args: &RestartArgs, verbose: bool, json: bool) -> Result<()> {
+pub fn execute(args: &RestartArgs, _verbose: bool, json: bool) -> Result<()> {
     debug!("Restarting actor: {}", args.actor_id);
     debug!("Connecting to server at: {}", args.address);
     

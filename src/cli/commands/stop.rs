@@ -19,7 +19,7 @@ pub struct StopArgs {
     pub address: SocketAddr,
 }
 
-pub fn execute(args: &StopArgs, verbose: bool, json: bool) -> Result<()> {
+pub fn execute(args: &StopArgs, _verbose: bool, json: bool) -> Result<()> {
     debug!("Stopping actor: {}", args.actor_id);
     debug!("Connecting to server at: {}", args.address);
     

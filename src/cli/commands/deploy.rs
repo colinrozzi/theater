@@ -23,7 +23,7 @@ pub struct DeployArgs {
     pub wait: bool,
 }
 
-pub fn execute(args: &DeployArgs, verbose: bool, json: bool) -> Result<()> {
+pub fn execute(args: &DeployArgs, _verbose: bool, json: bool) -> Result<()> {
     debug!("Deploying actor from manifest: {}", args.manifest.display());
     debug!("Connecting to server at: {}", args.address);
     

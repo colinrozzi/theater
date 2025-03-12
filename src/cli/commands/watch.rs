@@ -23,7 +23,7 @@ pub struct WatchArgs {
     pub interval: u64,
 }
 
-pub fn execute(args: &WatchArgs, verbose: bool, json: bool) -> Result<()> {
+pub fn execute(args: &WatchArgs, _verbose: bool, _json: bool) -> Result<()> {
     debug!("Watching manifest: {}", args.manifest.display());
     debug!("Connecting to server at: {}", args.address);
     

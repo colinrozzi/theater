@@ -68,9 +68,9 @@ pub fn execute(args: &EventsArgs, verbose: bool, json: bool) -> Result<()> {
                 for (i, event) in events.iter().enumerate() {
                     println!("{}. {}", i + 1, event.event_type);
                     println!("   Time: {}", event.timestamp);
-                    println!("   Hash: {}", event.hash);
+                    println!("   Hash: {}", hex::encode(&event.hash));
                     if let Some(parent) = &event.parent_hash {
-                        println!("   Parent: {}", parent);
+                        println!("   Parent: {}", hex::encode(parent));
                     }
                     println!("");
                 }

@@ -27,7 +27,7 @@ pub struct MessageArgs {
     pub request: bool,
 }
 
-pub fn execute(args: &MessageArgs, verbose: bool, json: bool) -> Result<()> {
+pub fn execute(args: &MessageArgs, _verbose: bool, json: bool) -> Result<()> {
     debug!("Sending message to actor: {}", args.actor_id);
     debug!("Message: {}", args.message);
     debug!("Connecting to server at: {}", args.address);

@@ -13,7 +13,7 @@ pub struct ListArgs {
     pub address: SocketAddr,
 }
 
-pub fn execute(args: &ListArgs, verbose: bool, json: bool) -> Result<()> {
+pub fn execute(args: &ListArgs, _verbose: bool, json: bool) -> Result<()> {
     debug!("Listing actors");
     debug!("Connecting to server at: {}", args.address);
     

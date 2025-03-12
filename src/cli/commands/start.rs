@@ -18,7 +18,7 @@ pub struct StartArgs {
     pub address: SocketAddr,
 }
 
-pub fn execute(args: &StartArgs, verbose: bool, json: bool) -> Result<()> {
+pub fn execute(args: &StartArgs, _verbose: bool, json: bool) -> Result<()> {
     debug!("Starting actor from manifest: {}", args.manifest.display());
     debug!("Connecting to server at: {}", args.address);
     
