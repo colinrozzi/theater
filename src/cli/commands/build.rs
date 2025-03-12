@@ -113,16 +113,24 @@ pub fn execute(args: &BuildArgs, verbose: bool, json: bool) -> Result<()> {
     }
 
     if !json {
+        // Canonicalize paths for cleaner display
+        let normalized_wasm_path = canonicalize_path(&wasm_path)?;
+        let normalized_manifest_path = if manifest_path.exists() {
+            canonicalize_path(&manifest_path)?
+        } else {
+            manifest_path.display().to_string()
+        };
+        
         println!(
             "{} Successfully built WebAssembly component: {}",
             style("✓").green().bold(),
-            style(wasm_path.display().to_string()).cyan()
+            style(normalized_wasm_path).cyan()
         );
 
         // Instructions for deployment if manifest exists
         if manifest_path.exists() {
             println!("\nTo deploy your actor:");
-            println!("  theater deploy {}", manifest_path.display());
+            println!("  theater deploy {}", normalized_manifest_path);
         }
     } else {
         let output = serde_json::json!({
@@ -180,4 +188,32 @@ fn get_package_name(cargo_toml_path: &Path) -> Result<String> {
     }
     
     Err(anyhow!("Could not find package name in Cargo.toml"))
+}
+
+/// Canonicalize a path to its absolute, clean form
+fn canonicalize_path(path: &Path) -> Result<String> {
+    // Use std::fs::canonicalize to get the canonical form of the path
+    // This resolves all symbolic links and normalizes the path
+    match std::fs::canonicalize(path) {
+        Ok(canon_path) => Ok(canon_path.display().to_string()),
+        Err(_) => {
+            // Fallback to manual normalization if canonicalization fails
+            // (which can happen if the file doesn't exist yet)
+            let path_str = path.display().to_string();
+            
+            // Remove redundant path components
+            let path_str = path_str
+                .replace("/./", "/")  // Replace /./ with /
+                .replace("//", "/");  // Replace // with /
+                
+            // Remove trailing /. if present
+            let path_str = if path_str.ends_with("/.") {
+                path_str[..path_str.len()-2].to_string()
+            } else {
+                path_str
+            };
+            
+            Ok(path_str)
+        }
+    }
 }
