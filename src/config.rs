@@ -104,9 +104,7 @@ pub struct WebSocketServerHandlerConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct MessageServerConfig {
-    pub port: u16,
-}
+pub struct MessageServerConfig {}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FileSystemHandlerConfig {
@@ -161,15 +159,6 @@ impl ManifestConfig {
             }
             None => Ok(None),
         }
-    }
-
-    pub fn message_server_port(&self) -> Option<u16> {
-        for handler in &self.handlers {
-            if let HandlerConfig::MessageServer(config) = handler {
-                return Some(config.port);
-            }
-        }
-        None
     }
 
     pub fn websocket_server_port(&self) -> Option<u16> {

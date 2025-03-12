@@ -17,7 +17,8 @@ This document tracks changes that are currently in progress for the Theater proj
 
 ## Upcoming Changes
 
-| Priority | Change | Description |
-|----------|--------|-------------|
-| Medium | State Compression | Add optional compression for large actor states to improve performance |
-| Low | CLI Interface | Create a command-line interface for actor management and inspection |
+| Priority | Change | Description | Proposal |
+|----------|--------|-------------|----------|
+| Medium | State Compression | Add optional compression for large actor states to improve performance | N/A |
+| High | CLI Enhancement | Extend the CLI with actor management capabilities | [Proposal](proposals/01-cli-enhancement.md) |
+| Medium | CLI Advanced Features | Add inspection, debugging, and store management features to CLI | [Proposal](proposals/02-cli-advanced-features.md) |
