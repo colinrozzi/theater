@@ -57,15 +57,26 @@ pub fn execute(args: &BuildArgs, verbose: bool, json: bool) -> Result<()> {
             println!("Cleaning target directory...");
         }
         
-        let status = run_command(
-            Command::new("cargo")
-                .arg("clean")
-                .current_dir(&project_dir),
-            verbose,
-        )?;
+        let mut clean_cmd = Command::new("cargo");
+        clean_cmd.arg("clean").current_dir(&project_dir);
         
-        if !status.success() {
-            return Err(anyhow!("Failed to clean target directory"));
+        match run_command_with_output(&mut clean_cmd, verbose) {
+            Ok((status, _, stderr)) => {
+                if !status.success() {
+                    if !stderr.is_empty() {
+                        if !json {
+                            println!("{} Clean failed with errors:\n", style("✗").red().bold());
+                            println!("{}", stderr);
+                        }
+                        return Err(anyhow!("Failed to clean target directory: {}", stderr.lines().next().unwrap_or("Unknown error")));
+                    } else {
+                        return Err(anyhow!("Failed to clean target directory"));
+                    }
+                }
+            }
+            Err(e) => {
+                return Err(anyhow!("Failed to execute cargo clean command: {}", e));
+            }
         }
     }
 
@@ -89,9 +100,29 @@ pub fn execute(args: &BuildArgs, verbose: bool, json: bool) -> Result<()> {
         );
     }
 
-    let status = run_command(&mut cargo_cmd, verbose)?;
-    if !status.success() {
-        return Err(anyhow!("Failed to build WebAssembly component"));
+    // Run the cargo build command and capture any errors
+    match run_command_with_output(&mut cargo_cmd, verbose) {
+        Ok((status, stdout, stderr)) => {
+            if !status.success() {
+                // If there's stderr output, display it
+                if !stderr.is_empty() {
+                    if !json {
+                        println!("{} Build failed with errors:\n", style("✗").red().bold());
+                        println!("{}", stderr);
+                    }
+                    return Err(anyhow!("Failed to build WebAssembly component: {}", stderr.lines().next().unwrap_or("Unknown error")));
+                } else {
+                    return Err(anyhow!("Failed to build WebAssembly component"));
+                }
+            }
+            // If verbose mode is enabled, also print stdout
+            if verbose && !stdout.is_empty() {
+                println!("{}", stdout);
+            }
+        }
+        Err(e) => {
+            return Err(anyhow!("Failed to execute cargo build command: {}", e));
+        }
     }
 
     // Get the output path (assuming the Cargo.toml name matches the package name)
@@ -168,6 +199,41 @@ fn run_command(cmd: &mut Command, verbose: bool) -> Result<std::process::ExitSta
         }
         
         Ok(output.status)
+    }
+}
+
+/// Run a command and return the status, stdout, and stderr
+fn run_command_with_output(cmd: &mut Command, verbose: bool) -> Result<(std::process::ExitStatus, String, String)> {
+    debug!("Running command: {:?}", cmd);
+    
+    if verbose {
+        // For verbose mode, capture the output but also print it to the console
+        let output = cmd
+            .output()
+            .map_err(|e| anyhow!("Failed to execute command: {}", e))?;
+            
+        let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+        
+        // Print output to console for verbose mode
+        if !stdout.is_empty() {
+            println!("{}", stdout);
+        }
+        if !stderr.is_empty() {
+            eprintln!("{}", stderr);
+        }
+        
+        Ok((output.status, stdout, stderr))
+    } else {
+        // For non-verbose mode, just capture the output
+        let output = cmd
+            .output()
+            .map_err(|e| anyhow!("Failed to execute command: {}", e))?;
+            
+        let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+        
+        Ok((output.status, stdout, stderr))
     }
 }
 
