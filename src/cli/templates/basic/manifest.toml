@@ -11,6 +11,3 @@ requires = []
 type = "runtime"
 config = {}
 
-[[handlers]]
-type = "message-server"
-config = {}

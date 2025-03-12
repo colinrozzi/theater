@@ -15,6 +15,3 @@ config = {}
 type = "http-framework"
 config = {}
 
-[[handlers]]
-type = "message-server"
-config = {}
