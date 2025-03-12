@@ -13,6 +13,7 @@ This document tracks changes that are currently in progress for the Theater proj
 
 | Date | Change | Description | Proposal |
 |------|--------|-------------|----------|
+| 2025-03-12 | CLI Start Monitor Flag | Added `--monitor` flag to start command to stream events in real-time | [Proposal](proposals/2025-03-12-cli-monitor-flag.md) |
 | 2025-02-26 | Documentation Update | Updated docs to accurately reflect current implementation status | N/A |
 
 ## Upcoming Changes

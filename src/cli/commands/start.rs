@@ -3,9 +3,11 @@ use clap::Parser;
 use console::style;
 use std::net::SocketAddr;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use tracing::debug;
 
-use crate::cli::client::TheaterClient;
+use crate::cli::client::{ManagementResponse, TheaterClient};
 
 #[derive(Debug, Parser)]
 pub struct StartArgs {
@@ -24,6 +26,10 @@ pub struct StartArgs {
     /// Initial state as JSON string or path to JSON file
     #[arg(short, long)]
     pub initial_state: Option<String>,
+    
+    /// Monitor actor events after starting
+    #[arg(long)]
+    pub monitor: bool,
 }
 
 pub fn execute(args: &StartArgs, _verbose: bool, json: bool) -> Result<()> {
@@ -77,6 +83,78 @@ pub fn execute(args: &StartArgs, _verbose: bool, json: bool) -> Result<()> {
                 "manifest": args.manifest.display().to_string()
             });
             println!("{}", serde_json::to_string_pretty(&output)?);
+        }
+        
+        // If monitor flag is set, subscribe to and monitor events from the actor
+        if args.monitor && !json {
+            // Set up Ctrl+C handler
+            let running = Arc::new(AtomicBool::new(true));
+            let r = running.clone();
+            
+            let ctrl_c_handler = tokio::spawn(async move {
+                let _ = tokio::signal::ctrl_c().await;
+                r.store(false, Ordering::SeqCst);
+            });
+            
+            // Subscribe to actor events
+            println!("{} Monitoring events for actor: {}", 
+                style("ℹ").blue().bold(),
+                style(actor_id.to_string()).cyan());
+            println!("Press Ctrl+C to stop monitoring");
+            
+            // Subscribe to actor events
+            let subscription_id = client.subscribe_to_actor(actor_id.clone()).await?;
+            debug!("Subscribed to actor events, subscription ID: {}", subscription_id);
+            
+            // Setup to receive events
+            let mut event_count = 0;
+            
+            // Keep receiving events until Ctrl+C is pressed
+            while running.load(Ordering::SeqCst) {
+                // This is a basic implementation, you might want to add a timeout
+                // to not block indefinitely on next()
+                if let Ok(response) = tokio::time::timeout(
+                    std::time::Duration::from_secs(1), 
+                    client.receive_response()
+                ).await {
+                    match response {
+                        Ok(ManagementResponse::ActorEvent { id, event }) => {
+                            if id == actor_id {
+                                event_count += 1;
+                                println!("{}. {}", event_count, event.event_type);
+                                println!("   Time: {}", event.timestamp);
+                                println!("   Hash: {}", hex::encode(&event.hash));
+                                if let Some(parent) = &event.parent_hash {
+                                    println!("   Parent: {}", hex::encode(parent));
+                                }
+                                println!();
+                            }
+                        },
+                        Ok(_) => {
+                            // Ignore other response types
+                        },
+                        Err(e) => {
+                            // Connection error or other issue
+                            debug!("Error receiving event: {:?}", e);
+                            break;
+                        }
+                    }
+                }
+                // Small delay to prevent CPU spinning
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+            
+            // Clean up subscription before exiting
+            if let Err(e) = client.unsubscribe_from_actor(actor_id.clone(), subscription_id).await {
+                debug!("Error unsubscribing from actor events: {:?}", e);
+            }
+            
+            println!("\n{} Stopped monitoring actor: {}", 
+                style("✓").green().bold(),
+                style(actor_id.to_string()).cyan());
+            
+            // Cancel the Ctrl+C handler
+            ctrl_c_handler.abort();
         }
         
         Ok::<(), anyhow::Error>(())

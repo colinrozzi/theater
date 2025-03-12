@@ -213,4 +213,27 @@ impl TheaterClient {
             _ => Err(anyhow!("Unexpected response")),
         }
     }
+    
+    /// Receive a response from the server without sending a command first
+    /// Useful for receiving events from subscriptions
+    pub async fn receive_response(&mut self) -> Result<ManagementResponse> {
+        // Make sure we have an active connection
+        if self.connection.is_none() {
+            return Err(anyhow!("No active connection"));
+        }
+
+        let connection = self.connection.as_mut().unwrap();
+        
+        // Receive and deserialize the response
+        if let Some(response_bytes) = connection.next().await {
+            let response_bytes = response_bytes?;
+            let response: ManagementResponse = serde_json::from_slice(&response_bytes)?;
+            debug!("Received response: {:?}", response);
+            Ok(response)
+        } else {
+            // Connection closed
+            self.connection = None;
+            Err(anyhow!("Connection closed by server"))
+        }
+    }
 }

@@ -96,6 +96,9 @@ theater server --data-dir /path/to/data
 # Start an actor from a manifest
 theater start path/to/manifest.toml
 
+# Start an actor and monitor its events
+theater start path/to/manifest.toml --monitor
+
 # List all running actors
 theater list
 
@@ -125,7 +128,10 @@ theater create my-actor
 cd my-actor
 theater build
 
-# Start the actor
+# Start the actor and monitor its events
+theater start manifest.toml --monitor
+
+# Or, start without monitoring
 theater start manifest.toml
 
 # Watch the directory and redeploy on changes
@@ -215,7 +221,13 @@ To monitor and debug actors:
    theater events <actor-id>
    ```
 
-5. Restart an actor if issues occur
+5. Monitor actor events in real-time
+   ```bash
+   # When starting a new actor
+   theater start manifest.toml --monitor
+   ```
+
+6. Restart an actor if issues occur
    ```bash
    theater restart <actor-id>
    ```
@@ -254,4 +266,5 @@ For parent-child actor relationships:
 - Use the `--verbose` flag for detailed output during commands
 - Use the `--json` flag to get structured output for scripting
 - For faster development, use the `watch` command for automatic redeployment
+- Use the `start --monitor` flag to start an actor and monitor its events in real-time
 - Check `theater --help` and `theater <command> --help` for specific command options
