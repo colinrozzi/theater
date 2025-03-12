@@ -66,9 +66,10 @@ pub fn execute(args: &BuildArgs, verbose: bool, json: bool) -> Result<()> {
                     if !stderr.is_empty() {
                         if !json {
                             println!("{} Clean failed with errors:\n", style("✗").red().bold());
-                            println!("{}", stderr);
+                            // Print stderr directly to preserve colors
+                            eprint!("{}", stderr);
                         }
-                        return Err(anyhow!("Failed to clean target directory: {}", stderr.lines().next().unwrap_or("Unknown error")));
+                        return Err(anyhow!("Failed to clean target directory"));
                     } else {
                         return Err(anyhow!("Failed to clean target directory"));
                     }
@@ -104,20 +105,21 @@ pub fn execute(args: &BuildArgs, verbose: bool, json: bool) -> Result<()> {
     match run_command_with_output(&mut cargo_cmd, verbose) {
         Ok((status, stdout, stderr)) => {
             if !status.success() {
-                // If there's stderr output, display it
+                // If there's stderr output, display it with preserved colors
                 if !stderr.is_empty() {
                     if !json {
                         println!("{} Build failed with errors:\n", style("✗").red().bold());
-                        println!("{}", stderr);
+                        // Just print the stderr directly - it already has ANSI color codes
+                        eprint!("{}", stderr);
                     }
-                    return Err(anyhow!("Failed to build WebAssembly component: {}", stderr.lines().next().unwrap_or("Unknown error")));
+                    return Err(anyhow!("Failed to build WebAssembly component"));
                 } else {
                     return Err(anyhow!("Failed to build WebAssembly component"));
                 }
             }
-            // If verbose mode is enabled, also print stdout
-            if verbose && !stdout.is_empty() {
-                println!("{}", stdout);
+            // For non-verbose mode, if there is stdout and we want to show it
+            if !verbose && !stdout.is_empty() && false { // Typically we don't want to show stdout
+                print!("{}", stdout);
             }
         }
         Err(e) => {
@@ -206,26 +208,21 @@ fn run_command(cmd: &mut Command, verbose: bool) -> Result<std::process::ExitSta
 fn run_command_with_output(cmd: &mut Command, verbose: bool) -> Result<(std::process::ExitStatus, String, String)> {
     debug!("Running command: {:?}", cmd);
     
+    // Force ANSI colors for Cargo
+    cmd.env("CARGO_TERM_COLOR", "always");
+    
     if verbose {
-        // For verbose mode, capture the output but also print it to the console
-        let output = cmd
-            .output()
+        // For verbose mode, we'll just let cargo output directly to the console
+        // with all its colors, and then capture the output separately for the result
+        let status = cmd
+            .status()
             .map_err(|e| anyhow!("Failed to execute command: {}", e))?;
-            
-        let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
         
-        // Print output to console for verbose mode
-        if !stdout.is_empty() {
-            println!("{}", stdout);
-        }
-        if !stderr.is_empty() {
-            eprintln!("{}", stderr);
-        }
-        
-        Ok((output.status, stdout, stderr))
+        // If we're in verbose mode and directly showing output, return empty strings for stdout/stderr
+        // since they were already displayed
+        Ok((status, String::new(), String::new()))
     } else {
-        // For non-verbose mode, just capture the output
+        // For non-verbose mode, capture the output but preserve ANSI color codes
         let output = cmd
             .output()
             .map_err(|e| anyhow!("Failed to execute command: {}", e))?;
