@@ -1,9 +1,8 @@
-pub mod commands;
 pub mod client;
+pub mod commands;
 pub mod templates;
 
 use clap::{Parser, Subcommand};
-
 
 /// Theater CLI - A WebAssembly actor system that enables state management,
 /// verification, and flexible interaction patterns.
@@ -74,16 +73,12 @@ pub enum Commands {
     Watch(commands::watch::WatchArgs),
 }
 
-
-
 /// Run the Theater CLI
 pub fn run() -> anyhow::Result<()> {
     let cli = Cli::parse();
-    
+
     match &cli.command {
-        Commands::Server(args) => {
-            commands::server::start::execute(args, cli.verbose)
-        }
+        Commands::Server(args) => commands::server::start::execute(args, cli.verbose),
         Commands::Create(args) => commands::create::execute(args, cli.verbose, cli.json),
         Commands::Deploy(args) => commands::deploy::execute(args, cli.verbose, cli.json),
         Commands::List(args) => commands::list::execute(args, cli.verbose, cli.json),
