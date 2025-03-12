@@ -62,14 +62,14 @@ When the `--monitor` flag is used:
 4. Test the subscription mechanism to ensure it's working properly
 5. Update documentation and help text
 
-## Known Limitations and Future Improvements
+## Implementation Notes
 
-The current implementation of the event subscription mechanism in the Theater server has a limitation where events may not be properly forwarded to subscribers. While we've implemented the client-side subscription logic, a server-side enhancement will be required for full functionality.
+The implementation required two key components:
 
-### Server-side Enhancement Required
-The Theater server needs to be updated to properly forward events to clients over their TCP connections when they subscribe to an actor. Currently, the event forwarding mechanism creates a channel where messages are sent but not received.
+1. Client-side changes to add the `--monitor` flag and implement event subscription and display logic
+2. Server-side fixes to properly forward events from actors to subscribed clients
 
-This limitation will be addressed in a separate change proposal focused on server-side subscription functionality.
+These changes enable real-time monitoring of actor events, providing developers with immediate feedback on actor behavior without requiring a separate command execution.
 
 ## Impacts
 - Improves developer experience by enabling real-time event observation

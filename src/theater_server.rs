@@ -17,7 +17,7 @@ use crate::id::TheaterId;
 use crate::messages::TheaterCommand;
 use crate::theater_runtime::TheaterRuntime;
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ManagementCommand {
     StartActor {
         manifest: String,
@@ -59,7 +59,7 @@ pub enum ManagementCommand {
     },
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ManagementResponse {
     ActorStarted {
         id: TheaterId,
@@ -115,7 +115,7 @@ pub enum ManagementResponse {
 #[derive(Debug)]
 struct Subscription {
     id: Uuid,
-    sender: mpsc::Sender<ManagementResponse>,
+    client_tx: mpsc::Sender<ManagementResponse>,
 }
 
 impl Eq for Subscription {}
@@ -181,8 +181,11 @@ impl TheaterServer {
                             id: actor_id.clone(),
                             event: event.clone(),
                         };
-                        if let Err(e) = sub.sender.send(response).await {
-                            error!("Failed to forward event to subscriber: {}", e);
+                        debug!("Forwarding event for actor {:?} to subscription {:?}", actor_id, sub.id);
+                        if let Err(e) = sub.client_tx.send(response).await {
+                            error!("Failed to forward event to subscriber {}: {}", sub.id, e);
+                            // We could clean up dead subscriptions here, but we'll leave that 
+                            // for a more comprehensive update
                         }
                     }
                 }
@@ -213,13 +216,47 @@ impl TheaterServer {
         runtime_tx: mpsc::Sender<TheaterCommand>,
         subscriptions: Arc<Mutex<HashMap<TheaterId, HashSet<Subscription>>>>,
     ) -> Result<()> {
-        let mut framed = Framed::new(socket, LengthDelimitedCodec::new());
+        // Create a channel for sending responses to this client
+        let (client_tx, mut client_rx) = mpsc::channel::<ManagementResponse>(32);
+        
+        // Create a framed connection for the main thread
+        let framed = Framed::new(socket, LengthDelimitedCodec::new());
+        
+        // Split the framed connection into read and write parts
+        let (mut framed_sink, mut framed_stream) = framed.split();
+        
+        // Clone the client_tx for use in the command loop
+        let cmd_client_tx = client_tx.clone();
+        
+        // Start a task to forward responses to the client
+        tokio::spawn(async move {
+            while let Some(response) = client_rx.recv().await {
+                match serde_json::to_vec(&response) {
+                    Ok(data) => {
+                        if let Err(e) = framed_sink.send(Bytes::from(data)).await {
+                            debug!("Error sending response to client: {}", e);
+                            break;
+                        }
+                    }
+                    Err(e) => {
+                        error!("Error serializing response: {}", e);
+                    }
+                }
+            }
+            debug!("Response forwarder for client closed");
+        });
 
-        while let Some(msg) = framed.next().await {
+        // Store active subscriptions for this connection to clean up on disconnect
+        let mut connection_subscriptions: Vec<(TheaterId, Uuid)> = Vec::new();
+        
+        while let Some(msg) = framed_stream.next().await {
             debug!("Received management message");
             let msg = msg?;
             let cmd: ManagementCommand = serde_json::from_slice(&msg)?;
             debug!("Parsed command: {:?}", cmd);
+            
+            // Store the command for reference (used for subscription tracking)
+            let cmd_clone = cmd.clone();
 
             let response = match cmd {
                 ManagementCommand::StartActor { manifest, initial_state } => {
@@ -310,7 +347,7 @@ impl TheaterServer {
                     let subscription_id = Uuid::new_v4();
                     let subscription = Subscription {
                         id: subscription_id,
-                        sender: mpsc::channel(32).0,
+                        client_tx: cmd_client_tx.clone(),
                     };
 
                     subscriptions
@@ -319,6 +356,8 @@ impl TheaterServer {
                         .entry(id.clone())
                         .or_insert_with(HashSet::new)
                         .insert(subscription);
+                    
+                    debug!("Subscription created with ID: {}", subscription_id);
 
                     ManagementResponse::Subscribed {
                         id,
@@ -450,10 +489,49 @@ impl TheaterServer {
             };
 
             debug!("Sending response: {:?}", response);
-            framed
-                .send(Bytes::from(serde_json::to_vec(&response)?))
-                .await?;
+            
+            // For subscription-related events, we've already set up client_tx to handle them
+            // For regular commands, send responses directly through the client_tx
+            if !matches!(response, ManagementResponse::ActorEvent { .. }) {
+                // If this is a subscription response, track it for cleanup
+                if let ManagementResponse::Subscribed { id, subscription_id } = &response {
+                    connection_subscriptions.push((id.clone(), *subscription_id));
+                }
+                
+                // If this is an unsubscribe response, remove it from tracking
+                if let ManagementResponse::Unsubscribed { id } = &response {
+                    if let ManagementCommand::UnsubscribeFromActor { id: _, subscription_id } = cmd_clone {
+                        connection_subscriptions.retain(|(actor_id, sub_id)| 
+                            !(actor_id == id && *sub_id == subscription_id));
+                    }
+                }
+                
+                // Send the response through the client_tx channel
+                if let Err(e) = cmd_client_tx.send(response.clone()).await {
+                    error!("Failed to send response through client channel: {}", e);
+                }
+            }
+            
             debug!("Response sent");
+        }
+        
+        // Connection has closed, clean up any active subscriptions
+        if !connection_subscriptions.is_empty() {
+            info!("Cleaning up {} subscriptions for disconnected client", connection_subscriptions.len());
+            let mut subs = subscriptions.lock().await;
+            
+            for (actor_id, subscription_id) in connection_subscriptions {
+                if let Some(actor_subs) = subs.get_mut(&actor_id) {
+                    actor_subs.retain(|sub| sub.id != subscription_id);
+                    debug!("Removed subscription {} for actor {}", subscription_id, actor_id);
+                    
+                    // If no more subscriptions for this actor, remove the entry
+                    if actor_subs.is_empty() {
+                        subs.remove(&actor_id);
+                        debug!("Removed empty subscription set for actor {}", actor_id);
+                    }
+                }
+            }
         }
 
         Ok(())
