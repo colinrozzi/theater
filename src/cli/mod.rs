@@ -32,7 +32,13 @@ pub enum Commands {
     #[command(name = "create")]
     Create(commands::create::CreateArgs),
 
-    // Deploy command removed (functionality merged with start)
+    /// Build a Theater actor to WebAssembly
+    #[command(name = "build")]
+    Build(commands::build::BuildArgs),
+
+    /// Deploy an actor to a Theater server
+    #[command(name = "deploy")]
+    Deploy(commands::deploy::DeployArgs),
 
     /// List all running actors
     #[command(name = "list")]
@@ -78,7 +84,8 @@ pub fn run() -> anyhow::Result<()> {
     match &cli.command {
         Commands::Server(args) => commands::server::start::execute(args, cli.verbose),
         Commands::Create(args) => commands::create::execute(args, cli.verbose, cli.json),
-        // Deploy command removed (functionality merged with start)
+        Commands::Build(args) => commands::build::execute(args, cli.verbose, cli.json),
+        Commands::Deploy(args) => commands::deploy::execute(args, cli.verbose, cli.json),
         Commands::List(args) => commands::list::execute(args, cli.verbose, cli.json),
         Commands::Logs(args) => commands::logs::execute(args, cli.verbose, cli.json),
         Commands::State(args) => commands::state::execute(args, cli.verbose, cli.json),
