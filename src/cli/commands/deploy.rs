@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use tracing::debug;
 
 use crate::cli::client::TheaterClient;
-use theater::id::TheaterId;
+
 
 #[derive(Debug, Parser)]
 pub struct DeployArgs {

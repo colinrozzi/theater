@@ -24,7 +24,7 @@ pub struct EventsArgs {
     pub limit: usize,
 }
 
-pub fn execute(args: &EventsArgs, verbose: bool, json: bool) -> Result<()> {
+pub fn execute(args: &EventsArgs, _verbose: bool, json: bool) -> Result<()> {
     debug!("Getting events for actor: {}", args.actor_id);
     debug!("Connecting to server at: {}", args.address);
     

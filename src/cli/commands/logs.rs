@@ -78,7 +78,7 @@ pub fn execute(args: &LogsArgs, verbose: bool, json: bool) -> Result<()> {
             } else {
                 for log in logs_to_show {
                     // Log event data should contain a message field
-                    if let Some(data) = log.data.as_ref() {
+                    if let Some(ref data) = log.data {
                         if let Ok(json_data) = serde_json::from_slice::<serde_json::Value>(data) {
                             if let Some(message) = json_data.get("message").and_then(|m| m.as_str()) {
                                 println!("[{}] {}", log.timestamp, message);

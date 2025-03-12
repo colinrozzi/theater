@@ -2,7 +2,7 @@ use anyhow::{anyhow, Result};
 use bytes::Bytes;
 use futures::sink::SinkExt;
 use futures::stream::StreamExt;
-use serde;
+
 use std::net::SocketAddr;
 use tokio::net::TcpStream;
 use tokio_util::codec::{Framed, LengthDelimitedCodec};
