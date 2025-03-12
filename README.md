@@ -19,8 +19,8 @@ theater build
 # Start a Theater server
 theater server
 
-# Deploy the actor
-theater deploy manifest.toml
+# Start the actor
+theater start manifest.toml
 
 # List running actors
 theater list
@@ -189,7 +189,7 @@ You can run Theater using either the CLI or directly with cargo:
 ```bash
 # Using the Theater CLI (recommended)
 theater server
-theater deploy path/to/your/manifest.toml
+theater start path/to/your/manifest.toml
 
 # Or using cargo directly
 cargo run -- --manifest path/to/your/manifest.toml

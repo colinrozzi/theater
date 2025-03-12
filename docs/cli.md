@@ -35,7 +35,6 @@ theater --json <command>
 |-----------|-------------------------------------------|
 | `build`   | Build a Theater actor to WebAssembly      |
 | `create`  | Create a new Theater actor project        |
-| `deploy`  | Deploy an actor to a Theater server       |
 | `events`  | Get actor events                          |
 | `list`    | List all running actors                   |
 | `logs`    | View actor logs                           |
@@ -91,12 +90,9 @@ theater server --port 9001
 theater server --data-dir /path/to/data
 ```
 
-### Deploying and Running Actors
+### Running Actors
 
 ```bash
-# Deploy an actor using its manifest
-theater deploy path/to/manifest.toml
-
 # Start an actor from a manifest
 theater start path/to/manifest.toml
 
@@ -129,8 +125,8 @@ theater create my-actor
 cd my-actor
 theater build
 
-# Deploy the actor
-theater deploy manifest.toml
+# Start the actor
+theater start manifest.toml
 
 # Watch the directory and redeploy on changes
 theater watch . --manifest manifest.toml
@@ -167,7 +163,7 @@ The Theater CLI respects the following environment variables:
 
 ## Common Workflows
 
-### Develop, Build, and Deploy Loop
+### Develop, Build, and Run Loop
 
 1. Create a new actor project
    ```bash
@@ -185,9 +181,9 @@ The Theater CLI respects the following environment variables:
    theater server
    ```
 
-4. Deploy the actor
+4. Start the actor
    ```bash
-   theater deploy manifest.toml
+   theater start manifest.toml
    ```
 
 5. Watch for changes and automatically redeploy
@@ -235,11 +231,11 @@ For HTTP actors:
    theater create my-http-actor --template http
    ```
 
-2. Build and deploy
+2. Build and start
    ```bash
    cd my-http-actor
    theater build
-   theater deploy manifest.toml
+   theater start manifest.toml
    ```
 
 3. The HTTP server will be available at the port specified in the manifest
@@ -250,7 +246,7 @@ For parent-child actor relationships:
 
 1. Create parent and child actors
 2. Configure the parent with supervisor capabilities
-3. Deploy the parent actor
+3. Start the parent actor
 4. The parent can then spawn and manage child actors
 
 ## Tips and Tricks
