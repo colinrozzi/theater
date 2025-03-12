@@ -28,7 +28,7 @@ pub struct LogsArgs {
     pub lines: usize,
 }
 
-pub fn execute(args: &LogsArgs, verbose: bool, json: bool) -> Result<()> {
+pub fn execute(args: &LogsArgs, _verbose: bool, json: bool) -> Result<()> {
     debug!("Getting logs for actor: {}", args.actor_id);
     debug!("Connecting to server at: {}", args.address);
 
@@ -46,7 +46,7 @@ pub fn execute(args: &LogsArgs, verbose: bool, json: bool) -> Result<()> {
         client.connect().await?;
 
         // Get the actor events (we'll filter for log events)
-        let mut events = client.get_actor_events(actor_id.clone()).await?;
+        let events = client.get_actor_events(actor_id.clone()).await?;
 
         // Filter for log events and extract log messages
         let log_events: Vec<_> = events.iter().filter(|e| e.event_type == "Log").collect();

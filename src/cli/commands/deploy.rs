@@ -45,7 +45,7 @@ pub fn execute(args: &DeployArgs, _verbose: bool, json: bool) -> Result<()> {
         client.connect().await?;
         
         // Deploy the actor
-        let actor_id = client.start_actor(manifest_content).await?;
+        let actor_id = client.start_actor(manifest_content, None).await?;
         
         // Output the result
         if !json {

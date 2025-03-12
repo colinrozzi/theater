@@ -45,7 +45,7 @@ pub fn execute(args: &WatchArgs, _verbose: bool, _json: bool) -> Result<()> {
         client.connect().await?;
         
         let manifest_content = std::fs::read_to_string(&args.manifest)?;
-        let actor_id = client.start_actor(manifest_content).await?;
+        let actor_id = client.start_actor(manifest_content, None).await?;
         
         println!("{} Deployed actor: {}", 
             style("✓").green().bold(),
@@ -103,7 +103,7 @@ if last_deploy_time.elapsed() > Duration::from_secs(120) { // Exit after 2 minut
                         
                         // Deploy the new actor
                         let manifest_content = std::fs::read_to_string(&args.manifest)?;
-                        let new_actor_id = client.start_actor(manifest_content).await?;
+                        let new_actor_id = client.start_actor(manifest_content, None).await?;
                         
                         println!("{} Redeployed actor: {}", 
                             style("✓").green().bold(),
