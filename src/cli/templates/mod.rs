@@ -209,6 +209,13 @@ fn copy_wit_files(project_dir: &Path, template_name: &str) -> Result<()> {
 
 /// Create a new project from a template
 pub fn create_project(template_name: &str, project_name: &str, output_dir: &Path) -> Result<()> {
+    // Get absolute path of the output directory
+    let abs_output_dir = if output_dir.is_absolute() {
+        output_dir.to_path_buf()
+    } else {
+        std::env::current_dir()?.join(output_dir)
+    };
+    debug!("Absolute output directory: {}", abs_output_dir.display());
     let templates = available_templates();
     let template = templates.get(template_name).ok_or_else(|| {
         anyhow!(
@@ -224,7 +231,7 @@ pub fn create_project(template_name: &str, project_name: &str, output_dir: &Path
     );
 
     // Create the project directory
-    let project_dir = output_dir.join(project_name);
+    let project_dir = abs_output_dir.join(project_name);
     if project_dir.exists() {
         return Err(anyhow!(
             "Directory already exists: {}",
@@ -252,9 +259,35 @@ pub fn create_project(template_name: &str, project_name: &str, output_dir: &Path
         }
 
         // Replace template variables
-        let content = content
+        let mut content = content
             .replace("{{project_name}}", project_name)
             .replace("{{project_name_snake}}", &project_name.replace('-', "_"));
+
+        // If this is the manifest.toml file, replace the component_path with absolute path
+        if *file_path == "manifest.toml" {
+            // Construct the absolute path to the WASM file
+            let project_name_snake = project_name.replace('-', "_");
+            let wasm_rel_path = format!(
+                "target/wasm32-unknown-unknown/release/{}.wasm",
+                project_name_snake
+            );
+            let wasm_abs_path = project_dir.join(&wasm_rel_path);
+
+            // Replace the relative component_path with the absolute path
+            // First find the line with component_path
+            if let Some(start_pos) = content.find("component_path = ") {
+                let end_pos = content[start_pos..]
+                    .find('\n')
+                    .map_or(content.len(), |pos| start_pos + pos);
+                let original_line = &content[start_pos..end_pos];
+                let new_line = format!("component_path = \"{}\"", wasm_abs_path.display());
+
+                // Replace the specific line
+                content = content.replace(original_line, &new_line);
+            }
+
+            debug!("Set absolute component_path: {}", wasm_abs_path.display());
+        }
 
         // Write the file
         fs::write(&dest_path, content)?;
