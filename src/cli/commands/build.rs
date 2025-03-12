@@ -56,10 +56,10 @@ pub fn execute(args: &BuildArgs, verbose: bool, json: bool) -> Result<()> {
         if !json {
             println!("Cleaning target directory...");
         }
-        
+
         let mut clean_cmd = Command::new("cargo");
         clean_cmd.arg("clean").current_dir(&project_dir);
-        
+
         match run_command_with_output(&mut clean_cmd, verbose) {
             Ok((status, _, stderr)) => {
                 if !status.success() {
@@ -83,12 +83,13 @@ pub fn execute(args: &BuildArgs, verbose: bool, json: bool) -> Result<()> {
 
     // Build the WebAssembly component
     let mut cargo_cmd = Command::new("cargo");
+    cargo_cmd.arg("component");
     cargo_cmd.arg("build");
-    
+
     if args.release {
         cargo_cmd.arg("--release");
     }
-    
+
     cargo_cmd
         .arg("--target")
         .arg("wasm32-unknown-unknown")
@@ -118,7 +119,8 @@ pub fn execute(args: &BuildArgs, verbose: bool, json: bool) -> Result<()> {
                 }
             }
             // For non-verbose mode, if there is stdout and we want to show it
-            if !verbose && !stdout.is_empty() && false { // Typically we don't want to show stdout
+            if !verbose && !stdout.is_empty() && false {
+                // Typically we don't want to show stdout
                 print!("{}", stdout);
             }
         }
@@ -134,7 +136,7 @@ pub fn execute(args: &BuildArgs, verbose: bool, json: bool) -> Result<()> {
     } else {
         "target/wasm32-unknown-unknown/debug"
     };
-    
+
     let wasm_file = format!("{}.wasm", package_name);
     let wasm_path = project_dir.join(target_dir).join(&wasm_file);
 
@@ -153,7 +155,7 @@ pub fn execute(args: &BuildArgs, verbose: bool, json: bool) -> Result<()> {
         } else {
             manifest_path.display().to_string()
         };
-        
+
         println!(
             "{} Successfully built WebAssembly component: {}",
             style("✓").green().bold(),
@@ -183,41 +185,45 @@ pub fn execute(args: &BuildArgs, verbose: bool, json: bool) -> Result<()> {
 /// Run a command with optional verbose output
 fn run_command(cmd: &mut Command, verbose: bool) -> Result<std::process::ExitStatus> {
     debug!("Running command: {:?}", cmd);
-    
+
     if verbose {
         // Run with inherited stdout/stderr for verbose output
-        cmd.status().map_err(|e| anyhow!("Failed to execute command: {}", e))
+        cmd.status()
+            .map_err(|e| anyhow!("Failed to execute command: {}", e))
     } else {
         // Capture stdout/stderr for normal output
         let output = cmd
             .output()
             .map_err(|e| anyhow!("Failed to execute command: {}", e))?;
-        
+
         if !output.status.success() && !output.stderr.is_empty() {
             info!(
                 "Command failed with: {}",
                 String::from_utf8_lossy(&output.stderr)
             );
         }
-        
+
         Ok(output.status)
     }
 }
 
 /// Run a command and return the status, stdout, and stderr
-fn run_command_with_output(cmd: &mut Command, verbose: bool) -> Result<(std::process::ExitStatus, String, String)> {
+fn run_command_with_output(
+    cmd: &mut Command,
+    verbose: bool,
+) -> Result<(std::process::ExitStatus, String, String)> {
     debug!("Running command: {:?}", cmd);
-    
+
     // Force ANSI colors for Cargo
     cmd.env("CARGO_TERM_COLOR", "always");
-    
+
     if verbose {
         // For verbose mode, we'll just let cargo output directly to the console
         // with all its colors, and then capture the output separately for the result
         let status = cmd
             .status()
             .map_err(|e| anyhow!("Failed to execute command: {}", e))?;
-        
+
         // If we're in verbose mode and directly showing output, return empty strings for stdout/stderr
         // since they were already displayed
         Ok((status, String::new(), String::new()))
@@ -226,10 +232,10 @@ fn run_command_with_output(cmd: &mut Command, verbose: bool) -> Result<(std::pro
         let output = cmd
             .output()
             .map_err(|e| anyhow!("Failed to execute command: {}", e))?;
-            
+
         let stdout = String::from_utf8_lossy(&output.stdout).to_string();
         let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-        
+
         Ok((output.status, stdout, stderr))
     }
 }
@@ -237,7 +243,7 @@ fn run_command_with_output(cmd: &mut Command, verbose: bool) -> Result<(std::pro
 /// Extract the package name from Cargo.toml
 fn get_package_name(cargo_toml_path: &Path) -> Result<String> {
     let cargo_toml = std::fs::read_to_string(cargo_toml_path)?;
-    
+
     // Simple parse to extract package name
     for line in cargo_toml.lines() {
         let line = line.trim();
@@ -249,7 +255,7 @@ fn get_package_name(cargo_toml_path: &Path) -> Result<String> {
             }
         }
     }
-    
+
     Err(anyhow!("Could not find package name in Cargo.toml"))
 }
 
@@ -263,19 +269,19 @@ fn canonicalize_path(path: &Path) -> Result<String> {
             // Fallback to manual normalization if canonicalization fails
             // (which can happen if the file doesn't exist yet)
             let path_str = path.display().to_string();
-            
+
             // Remove redundant path components
             let path_str = path_str
-                .replace("/./", "/")  // Replace /./ with /
-                .replace("//", "/");  // Replace // with /
-                
+                .replace("/./", "/") // Replace /./ with /
+                .replace("//", "/"); // Replace // with /
+
             // Remove trailing /. if present
             let path_str = if path_str.ends_with("/.") {
-                path_str[..path_str.len()-2].to_string()
+                path_str[..path_str.len() - 2].to_string()
             } else {
                 path_str
             };
-            
+
             Ok(path_str)
         }
     }
