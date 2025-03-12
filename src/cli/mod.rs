@@ -36,9 +36,13 @@ pub enum Commands {
     #[command(name = "build")]
     Build(commands::build::BuildArgs),
 
-    /// Deploy an actor to a Theater server
-    #[command(name = "deploy")]
-    Deploy(commands::deploy::DeployArgs),
+    /// Start or deploy an actor from a manifest
+    #[command(name = "start")]
+    Start(commands::start::StartArgs),
+
+    /// Subscribe to real-time events from an actor
+    #[command(name = "subscribe")]
+    Subscribe(commands::subscribe::SubscribeArgs),
 
     /// List all running actors
     #[command(name = "list")]
@@ -55,10 +59,6 @@ pub enum Commands {
     /// Get actor events
     #[command(name = "events")]
     Events(commands::events::EventsArgs),
-
-    /// Start or deploy an actor from a manifest
-    #[command(name = "start")]
-    Start(commands::start::StartArgs),
 
     /// Stop a running actor
     #[command(name = "stop")]
@@ -82,10 +82,10 @@ pub fn run() -> anyhow::Result<()> {
     let cli = Cli::parse();
 
     match &cli.command {
+        Commands::Subscribe(args) => commands::subscribe::execute(args, cli.verbose, cli.json),
         Commands::Server(args) => commands::server::start::execute(args, cli.verbose),
         Commands::Create(args) => commands::create::execute(args, cli.verbose, cli.json),
         Commands::Build(args) => commands::build::execute(args, cli.verbose, cli.json),
-        Commands::Deploy(args) => commands::deploy::execute(args, cli.verbose, cli.json),
         Commands::List(args) => commands::list::execute(args, cli.verbose, cli.json),
         Commands::Logs(args) => commands::logs::execute(args, cli.verbose, cli.json),
         Commands::State(args) => commands::state::execute(args, cli.verbose, cli.json),
