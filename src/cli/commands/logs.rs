@@ -2,14 +2,12 @@ use anyhow::{anyhow, Result};
 use clap::Parser;
 use console::style;
 use std::net::SocketAddr;
-use std::str::FromStr;
 use std::time::Duration;
-use std::sync::{Arc, Mutex};
-use tracing::{debug, info};
-use uuid::Uuid;
+use tracing::debug;
 
 use crate::cli::client::TheaterClient;
-use crate::id::TheaterId;
+use theater::id::TheaterId;
+use std::str::FromStr;
 
 #[derive(Debug, Parser)]
 pub struct LogsArgs {

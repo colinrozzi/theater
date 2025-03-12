@@ -2,20 +2,20 @@ use anyhow::{anyhow, Result};
 use bytes::Bytes;
 use futures::sink::SinkExt;
 use futures::stream::StreamExt;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use std::net::SocketAddr;
 use tokio::net::TcpStream;
 use tokio_util::codec::{Framed, LengthDelimitedCodec};
-use tracing::{debug, error, info};
+use tracing::{debug, info};
 use uuid::Uuid;
 
-use crate::id::TheaterId;
-use crate::messages::ActorStatus;
-use crate::ChainEvent;
+use theater::id::TheaterId;
+use theater::messages::ActorStatus;
+use theater::ChainEvent;
 
 // Re-export the ManagementCommand and ManagementResponse types from the theater_server module
 // This allows easier integration with the existing code
-pub use crate::theater_server::{ManagementCommand, ManagementResponse};
+pub use theater::theater_server::{ManagementCommand, ManagementResponse};
 
 /// A client for the Theater management API
 pub struct TheaterClient {

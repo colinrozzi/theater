@@ -3,7 +3,7 @@ use clap::Parser;
 use console::style;
 use std::net::SocketAddr;
 use std::path::PathBuf;
-use tracing::{debug, info};
+use tracing::debug;
 
 use crate::cli::client::TheaterClient;
 

@@ -1,8 +1,8 @@
 use anyhow::{anyhow, Result};
 use clap::Parser;
 use console::style;
-use std::path::{Path, PathBuf};
-use tracing::{debug, info};
+use std::path::PathBuf;
+use tracing::debug;
 
 use crate::cli::templates;
 
@@ -21,7 +21,7 @@ pub struct CreateArgs {
     pub output_dir: Option<PathBuf>,
 }
 
-pub fn execute(args: &CreateArgs, verbose: bool, json: bool) -> Result<()> {
+pub fn execute(args: &CreateArgs, _verbose: bool, json: bool) -> Result<()> {
     debug!("Creating new actor project: {}", args.name);
     debug!("Using template: {}", args.template);
     

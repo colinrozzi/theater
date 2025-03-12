@@ -3,7 +3,7 @@ pub mod client;
 pub mod templates;
 
 use clap::{Parser, Subcommand};
-use std::path::PathBuf;
+
 
 /// Theater CLI - A WebAssembly actor system that enables state management,
 /// verification, and flexible interaction patterns.
@@ -27,7 +27,7 @@ pub struct Cli {
 pub enum Commands {
     /// Start a Theater server
     #[command(name = "server")]
-    Server(ServerCommands),
+    Server(commands::server::start::StartArgs),
 
     /// Create a new Theater actor project
     #[command(name = "create")]
@@ -74,19 +74,14 @@ pub enum Commands {
     Watch(commands::watch::WatchArgs),
 }
 
-#[derive(Debug, Subcommand)]
-pub enum ServerCommands {
-    /// Start a Theater server
-    #[command(name = "start")]
-    Start(commands::server::start::StartArgs),
-}
+
 
 /// Run the Theater CLI
 pub fn run() -> anyhow::Result<()> {
     let cli = Cli::parse();
     
     match &cli.command {
-        Commands::Server(ServerCommands::Start(args)) => {
+        Commands::Server(args) => {
             commands::server::start::execute(args, cli.verbose)
         }
         Commands::Create(args) => commands::create::execute(args, cli.verbose, cli.json),

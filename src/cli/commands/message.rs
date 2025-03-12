@@ -2,11 +2,11 @@ use anyhow::{anyhow, Result};
 use clap::Parser;
 use console::style;
 use std::net::SocketAddr;
-use std::str::FromStr;
-use tracing::{debug, info};
+use tracing::debug;
 
 use crate::cli::client::TheaterClient;
-use crate::id::TheaterId;
+use theater::id::TheaterId;
+use std::str::FromStr;
 
 #[derive(Debug, Parser)]
 pub struct MessageArgs {
@@ -50,7 +50,7 @@ pub fn execute(args: &MessageArgs, verbose: bool, json: bool) -> Result<()> {
         
         if args.request {
             // Send as a request and wait for response
-            let response = client.request_actor_message(actor_id.clone(), message_bytes).await?;
+            let response: Vec<u8> = client.request_actor_message(actor_id.clone(), message_bytes).await?;
             
             // Output the response
             if json {

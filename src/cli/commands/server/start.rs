@@ -4,8 +4,8 @@ use std::net::SocketAddr;
 use std::path::PathBuf;
 use tracing::info;
 
-use crate::logging;
-use crate::theater_server::TheaterServer;
+use theater::logging;
+use theater::theater_server::TheaterServer;
 
 #[derive(Debug, Parser)]
 pub struct StartArgs {
@@ -46,7 +46,7 @@ pub async fn start_server(args: &StartArgs) -> Result<()> {
     Ok(())
 }
 
-pub fn execute(args: &StartArgs, verbose: bool) -> Result<()> {
+pub fn execute(args: &StartArgs, _verbose: bool) -> Result<()> {
     let runtime = tokio::runtime::Runtime::new()?;
     runtime.block_on(start_server(args))?;
     Ok(())

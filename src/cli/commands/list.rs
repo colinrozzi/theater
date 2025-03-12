@@ -2,7 +2,7 @@ use anyhow::Result;
 use clap::Parser;
 use console::style;
 use std::net::SocketAddr;
-use tracing::{debug, info};
+use tracing::debug;
 
 use crate::cli::client::TheaterClient;
 
