@@ -6,8 +6,8 @@ use std::time::Duration;
 use tracing::debug;
 
 use crate::cli::client::TheaterClient;
-use theater::id::TheaterId;
 use std::str::FromStr;
+use theater::id::TheaterId;
 
 #[derive(Debug, Parser)]
 pub struct LogsArgs {
@@ -18,11 +18,11 @@ pub struct LogsArgs {
     /// Address of the theater server
     #[arg(short, long, default_value = "127.0.0.1:9000")]
     pub address: SocketAddr,
-    
+
     /// Follow logs in real-time
     #[arg(short, long, default_value = "false")]
     pub follow: bool,
-    
+
     /// Number of lines to show (0 for all)
     #[arg(short, long, default_value = "10")]
     pub lines: usize,
@@ -31,35 +31,33 @@ pub struct LogsArgs {
 pub fn execute(args: &LogsArgs, verbose: bool, json: bool) -> Result<()> {
     debug!("Getting logs for actor: {}", args.actor_id);
     debug!("Connecting to server at: {}", args.address);
-    
+
     // Parse the actor ID
     let actor_id = TheaterId::from_str(&args.actor_id)
         .map_err(|_| anyhow!("Invalid actor ID: {}", args.actor_id))?;
-    
+
     // Create runtime and connect to the server
     let runtime = tokio::runtime::Runtime::new()?;
-    
+
     runtime.block_on(async {
         let mut client = TheaterClient::new(args.address);
-        
+
         // Connect to the server
         client.connect().await?;
-        
+
         // Get the actor events (we'll filter for log events)
         let mut events = client.get_actor_events(actor_id.clone()).await?;
-        
+
         // Filter for log events and extract log messages
-        let log_events: Vec<_> = events.iter()
-            .filter(|e| e.event_type == "Log")
-            .collect();
-        
+        let log_events: Vec<_> = events.iter().filter(|e| e.event_type == "Log").collect();
+
         // Limit the number of logs if requested
         let logs_to_show = if args.lines > 0 && log_events.len() > args.lines {
             &log_events[log_events.len() - args.lines..]
         } else {
             &log_events[..]
         };
-        
+
         // Output the logs
         if json {
             let output = serde_json::json!({
@@ -69,50 +67,53 @@ pub fn execute(args: &LogsArgs, verbose: bool, json: bool) -> Result<()> {
             });
             println!("{}", serde_json::to_string_pretty(&output)?);
         } else {
-            println!("{} Logs for actor: {}", 
+            println!(
+                "{} Logs for actor: {}",
                 style("ℹ").blue().bold(),
-                style(actor_id.to_string()).cyan());
-            
+                style(actor_id.to_string()).cyan()
+            );
+
             if logs_to_show.is_empty() {
                 println!("  No logs found.");
             } else {
                 for log in logs_to_show {
                     // Log event data should contain a message field
-                    if let Some(ref data) = log.data {
-                        if let Ok(json_data) = serde_json::from_slice::<serde_json::Value>(data) {
-                            if let Some(message) = json_data.get("message").and_then(|m| m.as_str()) {
-                                println!("[{}] {}", log.timestamp, message);
-                            }
+                    let ref data = log.data;
+                    if let Ok(json_data) = serde_json::from_slice::<serde_json::Value>(data) {
+                        if let Some(message) = json_data.get("message").and_then(|m| m.as_str()) {
+                            println!("[{}] {}", log.timestamp, message);
                         }
                     }
                 }
             }
         }
-        
+
         // If follow mode is enabled, subscribe to actor events and print new logs
         if args.follow {
             if !json {
-                println!("\n{} Following logs in real-time. Press Ctrl+C to exit.", 
-                    style("ℹ").blue().bold());
+                println!(
+                    "\n{} Following logs in real-time. Press Ctrl+C to exit.",
+                    style("ℹ").blue().bold()
+                );
             }
-            
+
             // Subscribe to actor events
             let sub_id = client.subscribe_to_actor(actor_id.clone()).await?;
-            
+
             // TODO: Implement subscription handling for real-time logs
             // This would require a more complex setup with a channel to receive events
             // For now, we'll just pause execution to simulate following logs
-            
+
             // Simulating follow mode with a 60-second wait
             // In a real implementation, this would process events as they come in
             tokio::time::sleep(Duration::from_secs(60)).await;
-            
+
             // Unsubscribe when done
             client.unsubscribe_from_actor(actor_id, sub_id).await?;
         }
-        
+
         Ok::<(), anyhow::Error>(())
     })?;
-    
+
     Ok(())
 }
