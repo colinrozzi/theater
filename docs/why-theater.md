@@ -1,6 +1,6 @@
 # Why Theater?
 
-Theater is more than just another actor system - it's an exploration into making distributed systems more debuggable, reproducible, and verifiable. The project introduces several key innovations:
+Theater is an exploration into making distributed systems more debuggable, reproducible, and verifiable. The project introduces several key ideas:
 
 ## Core Concepts
 
