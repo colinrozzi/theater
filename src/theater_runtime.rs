@@ -5,7 +5,6 @@ use crate::id::TheaterId;
 use crate::messages::{ActorMessage, ActorSend, ActorStatus, TheaterCommand};
 use crate::metrics::ActorMetrics;
 use crate::utils::resolve_reference;
-use crate::wasm::Event;
 use crate::ManifestConfig;
 use crate::Result;
 use std::collections::HashMap;

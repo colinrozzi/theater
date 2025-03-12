@@ -235,7 +235,7 @@ impl TheaterServer {
                     break 'connection;
                 }
             };
-            
+
             let cmd = match serde_json::from_slice::<ManagementCommand>(&msg) {
                 Ok(c) => c,
                 Err(e) => {
@@ -346,7 +346,12 @@ impl TheaterServer {
                     debug!("Subscription created with ID: {}", subscription_id);
 
                     // Register the subscription in the global map
-                    subscriptions.lock().await.entry(id.clone()).or_default().insert(subscription);
+                    subscriptions
+                        .lock()
+                        .await
+                        .entry(id.clone())
+                        .or_default()
+                        .insert(subscription);
 
                     // Set up the event channel for the subscription
                     let (event_tx, mut event_rx) = mpsc::channel(32);
@@ -365,7 +370,10 @@ impl TheaterServer {
                     let client_tx_clone = cmd_client_tx.clone();
                     let actor_id_clone = id.clone();
                     tokio::spawn(async move {
-                        debug!("Starting event forwarder for subscription {}", subscription_id);
+                        debug!(
+                            "Starting event forwarder for subscription {}",
+                            subscription_id
+                        );
                         while let Some(event) = event_rx.recv().await {
                             debug!("Received event for subscription {}", subscription_id);
                             let response = ManagementResponse::ActorEvent {
@@ -377,7 +385,10 @@ impl TheaterServer {
                                 break;
                             }
                         }
-                        debug!("Event forwarder for subscription {} stopped", subscription_id);
+                        debug!(
+                            "Event forwarder for subscription {} stopped",
+                            subscription_id
+                        );
                     });
 
                     ManagementResponse::Subscribed {
@@ -389,25 +400,29 @@ impl TheaterServer {
                     id,
                     subscription_id,
                 } => {
-                    debug!("Removing subscription {} for actor {:?}", subscription_id, id);
-                    
+                    debug!(
+                        "Removing subscription {} for actor {:?}",
+                        subscription_id, id
+                    );
+
                     // Remove subscription from the tracking list for this connection
-                    connection_subscriptions.retain(|(aid, sid)| *aid != id || *sid != subscription_id);
-                    
+                    connection_subscriptions
+                        .retain(|(aid, sid)| *aid != id || *sid != subscription_id);
+
                     // Remove from the global subscriptions map
                     let mut subs = subscriptions.lock().await;
                     if let Some(actor_subs) = subs.get_mut(&id) {
                         actor_subs.retain(|sub| sub.id != subscription_id);
-                        
+
                         // Remove the entry if no subscriptions remain
                         if actor_subs.is_empty() {
                             subs.remove(&id);
                         }
                     }
-                    
+
                     debug!("Subscription removed");
                     ManagementResponse::Unsubscribed { id }
-                },
+                }
                 ManagementCommand::SendActorMessage { id, data } => {
                     info!("Sending message to actor: {:?}", id);
                     runtime_tx
@@ -519,26 +534,32 @@ impl TheaterServer {
             };
 
             debug!("Sending response: {:?}", response);
+            if let Err(e) = client_tx.send(response).await {
+                error!("Failed to send response: {}", e);
+                break;
+            }
             debug!("Response sent");
         }
 
         // Clean up all subscriptions for this connection
-        debug!("Connection closed, cleaning up {} subscriptions", connection_subscriptions.len());
+        debug!(
+            "Connection closed, cleaning up {} subscriptions",
+            connection_subscriptions.len()
+        );
         let mut subs = subscriptions.lock().await;
-        
+
         for (actor_id, sub_id) in connection_subscriptions {
             if let Some(actor_subs) = subs.get_mut(&actor_id) {
                 actor_subs.retain(|sub| sub.id != sub_id);
-                
+
                 // Remove the entry if no subscriptions remain
                 if actor_subs.is_empty() {
                     subs.remove(&actor_id);
                 }
             }
         }
-        
+
         debug!("Cleaned up all subscriptions for the connection");
         Ok(())
     }
 }
-
