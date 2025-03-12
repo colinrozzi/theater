@@ -1,5 +1,5 @@
 pub mod create;
-pub mod deploy;
+// deploy command removed (functionality merged with start)
 pub mod events;
 pub mod list;
 pub mod logs;

@@ -16,6 +16,10 @@ pub struct StartArgs {
     /// Address of the theater server
     #[arg(short, long, default_value = "127.0.0.1:9000")]
     pub address: SocketAddr,
+    
+    /// Wait for actor to start
+    #[arg(short, long, default_value = "true")]
+    pub wait: bool,
 }
 
 pub fn execute(args: &StartArgs, _verbose: bool, json: bool) -> Result<()> {
@@ -44,7 +48,7 @@ pub fn execute(args: &StartArgs, _verbose: bool, json: bool) -> Result<()> {
         
         // Output the result
         if !json {
-            println!("{} Started actor: {}", 
+            println!("{} Actor started successfully: {}", 
                 style("✓").green().bold(),
                 style(actor_id.to_string()).cyan());
         } else {
