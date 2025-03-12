@@ -20,6 +20,10 @@ pub struct StartArgs {
     /// Wait for actor to start
     #[arg(short, long, default_value = "true")]
     pub wait: bool,
+
+    /// Initial state as JSON string or path to JSON file
+    #[arg(short, long)]
+    pub initial_state: Option<String>,
 }
 
 pub fn execute(args: &StartArgs, _verbose: bool, json: bool) -> Result<()> {
@@ -34,6 +38,21 @@ pub fn execute(args: &StartArgs, _verbose: bool, json: bool) -> Result<()> {
     // Read the manifest file
     let manifest_content = std::fs::read_to_string(&args.manifest)?;
     
+    // Handle the initial state parameter
+    let initial_state = if let Some(state_str) = &args.initial_state {
+        // Check if it's a file path
+        if std::path::Path::new(state_str).exists() {
+            debug!("Reading initial state from file: {}", state_str);
+            Some(std::fs::read(state_str)?)
+        } else {
+            // Assume it's a JSON string
+            debug!("Using provided JSON string as initial state");
+            Some(state_str.as_bytes().to_vec())
+        }
+    } else {
+        None
+    };
+    
     // Create runtime and connect to the server
     let runtime = tokio::runtime::Runtime::new()?;
     
@@ -43,8 +62,8 @@ pub fn execute(args: &StartArgs, _verbose: bool, json: bool) -> Result<()> {
         // Connect to the server
         client.connect().await?;
         
-        // Start the actor
-        let actor_id = client.start_actor(manifest_content).await?;
+        // Start the actor with initial state
+        let actor_id = client.start_actor(manifest_content, initial_state).await?;
         
         // Output the result
         if !json {

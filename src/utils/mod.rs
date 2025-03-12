@@ -1,7 +1,9 @@
 use thiserror::Error;
 use tracing::info;
+use serde_json;
 
 use crate::store::{ContentRef, ContentStore};
+use anyhow::Result;
 
 #[derive(Error, Debug)]
 pub enum ReferenceError {
@@ -62,5 +64,53 @@ pub async fn resolve_reference(reference: &str) -> Result<Vec<u8>, ReferenceErro
         tokio::fs::read(reference)
             .await
             .map_err(|e| ReferenceError::ResolveError(e.to_string()))
+    }
+}
+
+/// Merge two optional initial states, with the override state taking precedence
+/// for any overlapping keys.
+///
+/// The states should be JSON objects. If either state is not a valid JSON object,
+/// the following rules apply:
+/// - If config_state is None and override_state is None, returns None
+/// - If config_state is Some and override_state is None, returns config_state
+/// - If config_state is None and override_state is Some, returns override_state
+/// - If both are Some but either is not a valid JSON object, returns override_state
+/// - If both are Some and both are valid JSON objects, merges them with override_state taking precedence
+pub fn merge_initial_states(config_state: Option<Vec<u8>>, override_state: Option<Vec<u8>>) -> Result<Option<Vec<u8>>> {
+    match (config_state, override_state) {
+        (None, None) => Ok(None),
+        (Some(state), None) => Ok(Some(state)),
+        (None, Some(state)) => Ok(Some(state)),
+        (Some(config_state), Some(override_state)) => {
+            // Parse both states
+            let config_json_result = serde_json::from_slice(&config_state);
+            let override_json_result = serde_json::from_slice(&override_state);
+            
+            match (config_json_result, override_json_result) {
+                (Ok(mut config_json), Ok(override_json)) => {
+                    // Ensure both are objects
+                    if let (serde_json::Value::Object(ref mut config_map), serde_json::Value::Object(override_map)) = 
+                        (&mut config_json, &override_json) {
+                        // Merge override values into config
+                        for (key, value) in override_map {
+                            config_map.insert(key.clone(), value.clone());
+                        }
+                        
+                        // Serialize the merged result
+                        Ok(Some(serde_json::to_vec(&config_json)?))
+                    } else {
+                        // If either isn't an object, just use the override
+                        info!("Either initial state is not a JSON object, using override state");
+                        Ok(Some(override_state))
+                    }
+                },
+                _ => {
+                    // If either parsing fails, just use the override
+                    info!("Failed to parse one of the initial states as JSON, using override state");
+                    Ok(Some(override_state))
+                }
+            }
+        }
     }
 }

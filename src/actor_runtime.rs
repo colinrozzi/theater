@@ -129,16 +129,18 @@ impl ActorRuntime {
         }
 
         // Actor handle already created above
-        let mut init_state = state_bytes.clone();
+        let mut init_state = None;
         if init {
             info!("Loading init state for actor: {:?}", id);
-            if let Some(init_bytes) = state_bytes {
-                info!("init bytes found: {:?}", init_bytes);
-                init_state = Some(init_bytes);
-            } else {
-                init_state = config.load_init_state().expect("Failed to load init state");
-                info!("config init state found: {:?}", init_state);
-            }
+            
+            // Get state from config if available
+            let config_state = config.load_init_state().unwrap_or(None);
+            
+            // Merge with provided state
+            init_state = crate::utils::merge_initial_states(config_state, state_bytes)
+                .expect("Failed to merge initial states");
+            
+            info!("Final init state ready: {:?}", init_state.is_some());
         }
 
         actor_instance.store.data_mut().set_state(init_state);

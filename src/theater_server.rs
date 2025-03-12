@@ -21,6 +21,7 @@ use crate::theater_runtime::TheaterRuntime;
 pub enum ManagementCommand {
     StartActor {
         manifest: String,
+        initial_state: Option<Vec<u8>>,
     },
     StopActor {
         id: TheaterId,
@@ -221,17 +222,17 @@ impl TheaterServer {
             debug!("Parsed command: {:?}", cmd);
 
             let response = match cmd {
-                ManagementCommand::StartActor { manifest } => {
-                    info!("Starting actor from manifest: {:?}", manifest);
-                    let (cmd_tx, cmd_rx) = tokio::sync::oneshot::channel();
-                    debug!("Sending SpawnActor command to runtime");
-                    match runtime_tx
-                        .send(TheaterCommand::SpawnActor {
-                            manifest_path: manifest.clone(),
-                            init_bytes: None,
-                            response_tx: cmd_tx,
-                            parent_id: None,
-                        })
+                ManagementCommand::StartActor { manifest, initial_state } => {
+                info!("Starting actor from manifest: {:?}", manifest);
+                let (cmd_tx, cmd_rx) = tokio::sync::oneshot::channel();
+                debug!("Sending SpawnActor command to runtime");
+                match runtime_tx
+                .send(TheaterCommand::SpawnActor {
+                manifest_path: manifest.clone(),
+                init_bytes: initial_state,
+                response_tx: cmd_tx,
+                parent_id: None,
+                })
                         .await
                     {
                         Ok(_) => {

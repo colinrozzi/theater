@@ -70,9 +70,9 @@ impl TheaterClient {
         }
     }
 
-    /// Start an actor from a manifest file
-    pub async fn start_actor(&mut self, manifest: String) -> Result<TheaterId> {
-        let command = ManagementCommand::StartActor { manifest };
+    /// Start an actor from a manifest file with optional initial state
+    pub async fn start_actor(&mut self, manifest: String, initial_state: Option<Vec<u8>>) -> Result<TheaterId> {
+        let command = ManagementCommand::StartActor { manifest, initial_state };
         let response = self.send_command(command).await?;
 
         match response {
