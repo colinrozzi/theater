@@ -6,7 +6,7 @@ Theater is more than just another actor system - it's an exploration into making
 
 ### State Tracking Through Hash Chains
 
-At the heart of Theater is a novel approach to state management in WebAssembly components. Every interaction between host and WebAssembly is tracked in a hash chain, creating a complete and verifiable history of state transitions. This is similar to a blockchain or hashgraph event, but at the granular level of individual actor interactions.
+At the heart of Theater is a novel approach to state management in WebAssembly components. Every interaction between host and WebAssembly is tracked in a hash chain, creating a complete and verifiable history of state transitions. 
 
 Key benefits:
 - **Complete State History**: Every state change is recorded and linked to its parent state
