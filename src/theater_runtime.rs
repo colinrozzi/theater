@@ -21,8 +21,7 @@ pub struct TheaterRuntime {
     actors: HashMap<TheaterId, ActorProcess>,
     pub theater_tx: Sender<TheaterCommand>,
     theater_rx: Receiver<TheaterCommand>,
-    event_subscribers: Vec<Sender<(TheaterId, ChainEvent)>>,
-    actor_event_channels: HashMap<TheaterId, Receiver<ChainEvent>>,
+    subscriptions: HashMap<TheaterId, Vec<Sender<ChainEvent>>>,
 }
 
 pub struct ActorProcess {
@@ -44,8 +43,7 @@ impl TheaterRuntime {
             theater_tx,
             theater_rx,
             actors: HashMap::new(),
-            event_subscribers: Vec::new(),
-            actor_event_channels: HashMap::new(),
+            subscriptions: HashMap::new(),
         })
     }
 
@@ -205,16 +203,6 @@ impl TheaterRuntime {
                 }
                 TheaterCommand::NewEvent { actor_id, event } => {
                     debug!("Received new event from actor {:?}", actor_id);
-                    // Forward event to subscribers
-                    self.event_subscribers.retain_mut(|tx| {
-                        match tx.try_send((actor_id.clone(), event.clone())) {
-                            Ok(_) => true,
-                            Err(e) => {
-                                warn!("Failed to forward event to subscriber: {}", e);
-                                false
-                            }
-                        }
-                    });
 
                     if let Err(e) = self.handle_actor_event(actor_id, event).await {
                         error!("Failed to handle actor event: {}", e);
@@ -255,8 +243,19 @@ impl TheaterRuntime {
                         }
                     }
                 }
+                #[allow(unused_variables)]
                 TheaterCommand::SubscribeToActor { actor_id, event_tx } => {
                     debug!("Subscribing to events for actor: {:?}", actor_id);
+
+                    // Use entry API to handle the subscription map more elegantly
+                    match self.subscriptions.entry(actor_id.clone()) {
+                        std::collections::hash_map::Entry::Occupied(mut entry) => {
+                            entry.get_mut().push(event_tx);
+                        }
+                        std::collections::hash_map::Entry::Vacant(entry) => {
+                            entry.insert(vec![event_tx]);
+                        }
+                    }
                 }
             };
         }
@@ -289,7 +288,6 @@ impl TheaterRuntime {
         let (response_tx, response_rx) = tokio::sync::oneshot::channel();
         let (mailbox_tx, mailbox_rx) = mpsc::channel(100);
         let (operation_tx, operation_rx) = mpsc::channel(100);
-        let (event_tx, event_rx) = mpsc::channel(100);
         let theater_tx = self.theater_tx.clone();
 
         let actor_operation_tx = operation_tx.clone();
@@ -307,7 +305,6 @@ impl TheaterRuntime {
                 operation_rx,
                 actor_operation_tx,
                 init,
-                event_tx,
             )
             .await
             .unwrap()
@@ -328,8 +325,6 @@ impl TheaterRuntime {
                     status: ActorStatus::Running,
                     manifest_path: manifest_path.clone(),
                 };
-
-                self.actor_event_channels.insert(actor_id.clone(), event_rx);
 
                 if let Some(parent_id) = parent_id {
                     if let Some(parent) = self.actors.get_mut(&parent_id) {
@@ -352,6 +347,49 @@ impl TheaterRuntime {
                 Err(anyhow::anyhow!("Failed to receive actor ID"))
             }
         }
+    }
+
+    async fn handle_actor_event(&mut self, actor_id: TheaterId, event: ChainEvent) -> Result<()> {
+        debug!("Handling event for actor: {:?}", actor_id);
+
+        // Use entry API to handle the subscription map more elegantly
+        let should_remove = if let std::collections::hash_map::Entry::Occupied(mut entry) =
+            self.subscriptions.entry(actor_id.clone())
+        {
+            let subscribers = entry.get_mut();
+            let mut to_remove = Vec::new();
+
+            // Send events and track failures
+            for (index, subscriber) in subscribers.iter().enumerate() {
+                if let Err(e) = subscriber.send(event.clone()).await {
+                    error!("Failed to send event to subscriber: {}", e);
+                    to_remove.push(index);
+                }
+            }
+
+            // Remove failed subscribers in reverse order
+            if !to_remove.is_empty() {
+                to_remove.sort_unstable_by(|a, b| b.cmp(a));
+                for index in to_remove {
+                    subscribers.swap_remove(index);
+                    debug!("Removed failed subscriber at index {}", index);
+                }
+            }
+
+            // Check if we should remove the entire entry
+            subscribers.is_empty()
+        } else {
+            warn!("No subscribers found for actor: {:?}", actor_id);
+            false
+        };
+
+        // Remove the entry if needed
+        if should_remove {
+            self.subscriptions.remove(&actor_id);
+            debug!("Removed empty subscription entry for actor {:?}", actor_id);
+        }
+
+        Ok(())
     }
 
     async fn stop_actor(&mut self, actor_id: TheaterId) -> Result<()> {

@@ -21,12 +21,11 @@ impl ActorStore {
         id: TheaterId,
         theater_tx: Sender<TheaterCommand>,
         actor_handle: ActorHandle,
-        event_channel: Sender<ChainEvent>,
     ) -> Self {
         Self {
             id: id.clone(),
-            theater_tx,
-            chain: Arc::new(Mutex::new(StateChain::new(id, event_channel))),
+            theater_tx: theater_tx.clone(),
+            chain: Arc::new(Mutex::new(StateChain::new(id, theater_tx))),
             state: Some(vec![]),
             actor_handle,
         }

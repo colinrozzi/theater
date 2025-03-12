@@ -4,11 +4,11 @@ use serde::{Deserialize, Serialize};
 use sha1::{Digest, Sha1};
 use std::fmt;
 use std::path::Path;
-use std::sync::mpsc;
 use tokio::sync::mpsc::Sender;
 use wasmtime::component::{ComponentType, Lift, Lower};
 
 use crate::events::ChainEventData;
+use crate::messages::TheaterCommand;
 use crate::store::ContentRef;
 use crate::TheaterId;
 
@@ -111,17 +111,17 @@ pub struct StateChain {
     events: Vec<ChainEvent>,
     current_hash: Option<Vec<u8>>,
     #[serde(skip)]
-    event_callback: Option<Sender<ChainEvent>>,
+    theater_tx: Sender<TheaterCommand>,
     #[serde(skip)]
     actor_id: TheaterId,
 }
 
 impl StateChain {
-    pub fn new(actor_id: TheaterId, event_callback: Sender<ChainEvent>) -> Self {
+    pub fn new(actor_id: TheaterId, theater_tx: Sender<TheaterCommand>) -> Self {
         Self {
             events: Vec::new(),
             current_hash: None,
-            event_callback: Some(event_callback),
+            theater_tx,
             actor_id,
         }
     }
@@ -146,16 +146,12 @@ impl StateChain {
         self.events.push(event.clone());
         self.current_hash = Some(event.hash.clone());
 
-        // Notify runtime if callback is set
-        if let Some(callback) = &self.event_callback {
-            let event_callback = callback.clone();
-            let evt = event.clone();
-            tokio::spawn(async move {
-                if let Err(err) = event_callback.send(evt.clone()).await {
-                    tracing::warn!("Failed to notify runtime of event: {}", err);
-                }
-            });
-        }
+        // notify the runtime of the event
+        let evt = event.clone();
+        let _ = self.theater_tx.send(TheaterCommand::NewEvent {
+            actor_id: self.actor_id.clone(),
+            event: evt.clone(),
+        });
 
         // I am removing storing the events in the content store for now because they are
         // accumulating too quickly. I need to build out the store local to each actor to store its

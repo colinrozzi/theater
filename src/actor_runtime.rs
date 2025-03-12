@@ -41,7 +41,6 @@ impl ActorRuntime {
         operation_rx: Receiver<ActorOperation>,
         operation_tx: Sender<ActorOperation>,
         init: bool,
-        event_channel: Sender<ChainEvent>,
     ) -> Result<Self> {
         let mut handlers = Vec::new();
 
@@ -80,12 +79,7 @@ impl ActorRuntime {
         }
 
         let actor_handle = ActorHandle::new(operation_tx.clone());
-        let actor_store = ActorStore::new(
-            id.clone(),
-            theater_tx.clone(),
-            actor_handle.clone(),
-            event_channel,
-        );
+        let actor_store = ActorStore::new(id.clone(), theater_tx.clone(), actor_handle.clone());
         let mut actor_component = ActorComponent::new(config, actor_store).await.expect(
             format!(
                 "Failed to create actor component for actor: {:?}",
