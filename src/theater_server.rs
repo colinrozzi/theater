@@ -19,6 +19,7 @@ use crate::theater_runtime::TheaterRuntime;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ManagementCommand {
+    Ping,
     StartActor {
         manifest: String,
         initial_state: Option<Vec<u8>>,
@@ -61,6 +62,7 @@ pub enum ManagementCommand {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ManagementResponse {
+    Pong,
     ActorStarted {
         id: TheaterId,
     },
@@ -259,6 +261,10 @@ impl TheaterServer {
             let cmd_clone = cmd.clone();
 
             let response = match cmd {
+                ManagementCommand::Ping => {
+                    debug!("Received ping, responding with pong");
+                    ManagementResponse::Pong
+                },
                 ManagementCommand::StartActor { manifest, initial_state } => {
                 info!("Starting actor from manifest: {:?}", manifest);
                 let (cmd_tx, cmd_rx) = tokio::sync::oneshot::channel();

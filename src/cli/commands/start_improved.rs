@@ -48,8 +48,6 @@ pub fn execute(args: &StartArgs, _verbose: bool, json: bool) -> Result<()> {
     let initial_state = if let Some(state_str) = &args.initial_state {
         // Check if it's a file path
         if std::path::Path::new(state_str).exists() {
-            let mut consecutive_errors = 0;
-            let mut reconnect_attempts = 0;
             debug!("Reading initial state from file: {}", state_str);
             Some(std::fs::read(state_str)?)
         } else {
@@ -107,9 +105,9 @@ pub fn execute(args: &StartArgs, _verbose: bool, json: bool) -> Result<()> {
             println!("{} Note: You may need to trigger actions in the actor to generate events", 
                 style("i").dim());
             
-            // Subscribe to actor events - with retry mechanism
+            // Subscribe to actor events - with better retry mechanism
             let mut subscription_id = None;
-            for attempt in 1..=3 {
+            for attempt in 1..=5 {
                 match client.subscribe_to_actor(actor_id.clone()).await {
                     Ok(sub_id) => {
                         subscription_id = Some(sub_id);
@@ -117,9 +115,9 @@ pub fn execute(args: &StartArgs, _verbose: bool, json: bool) -> Result<()> {
                         break;
                     },
                     Err(e) => {
-                        if attempt < 3 {
+                        if attempt < 5 {
                             warn!("Failed to subscribe to actor events (attempt {}): {}", attempt, e);
-                            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+                            tokio::time::sleep(std::time::Duration::from_millis(300 * attempt)).await;
                         } else {
                             error!("Failed all attempts to subscribe to actor events: {}", e);
                             return Err(anyhow!("Could not subscribe to actor events: {}", e));
@@ -128,51 +126,35 @@ pub fn execute(args: &StartArgs, _verbose: bool, json: bool) -> Result<()> {
                 }
             }
             
+            // Make sure we have a subscription ID
+            let subscription_id = match subscription_id {
+                Some(id) => id,
+                None => return Err(anyhow!("Failed to obtain subscription ID")),
+            };
+            
             // Setup to receive events
             let mut event_count = 0;
             let mut heartbeat_counter = 0;
             let mut consecutive_errors = 0;
             let mut reconnect_attempts = 0;
             
-            // Try to get all existing events first to avoid missing anything
-            match client.get_actor_events(actor_id.clone()).await {
-                Ok(events) => {
-                    if !events.is_empty() {
-                        info!("Found {} existing events", events.len());
-                        for (i, event) in events.iter().enumerate() {
-                            println!("{}.{} {}", 
-                                i + 1,
-                                style(" [Init]").yellow(),
-                                style(&event.event_type).cyan());
-                            println!("   Time: {}", event.timestamp);
-                            println!("   Hash: {}", hex::encode(&event.hash));
-                            if let Some(parent) = &event.parent_hash {
-                                println!("   Parent: {}", hex::encode(parent));
-                            }
-                            println!();
-                        }
-                        event_count = events.len();
-                    }
-                },
-                Err(e) => {
-                    warn!("Could not retrieve existing events: {}", e);
-                }
-            }
-            
             // Keep receiving events until Ctrl+C is pressed
             while running.load(Ordering::SeqCst) {
+                let mut events_received = false;
+                
                 // First, try to flush any pending events by polling
-                let mut had_events = false;
-                for _ in 0..5 {
+                let mut poll_count = 0;
+                for _ in 0..10 {  // Try to get more events
+                    poll_count += 1;
                     match client.receive_response_nonblocking() {
                         Ok(Ok(ManagementResponse::ActorEvent { id, event })) => {
                             if id == actor_id {
-                                had_events = true;
+                                events_received = true;
                                 consecutive_errors = 0;
                                 event_count += 1;
-                                println!("{}.{} {}", 
+                                println!("{}. {} {}", 
                                     event_count,
-                                    style(" [Event]").green(),
+                                    style("[Event]").green(),
                                     style(&event.event_type).cyan());
                                 println!("   Time: {}", event.timestamp);
                                 println!("   Hash: {}", hex::encode(&event.hash));
@@ -182,110 +164,117 @@ pub fn execute(args: &StartArgs, _verbose: bool, json: bool) -> Result<()> {
                                 println!();
                             }
                         },
-                        Err(_) => break,
-                        _ => {}
-                    }
-                }
-                
-                // If we're not getting events for a while, try a ping
-                if !had_events && heartbeat_counter % 20 == 10 {
-                    debug!("No events received recently, checking connection with ping");
-                    match client.ping().await {
-                        Ok(_) => {
-                            debug!("Ping successful, connection is alive");
-                            consecutive_errors = 0;
+                        Err(_) => {
+                            // No more events available, stop polling
+                            if poll_count > 1 {
+                                debug!("Polled {} times", poll_count);
+                            }
+                            break;
                         },
-                        Err(e) => {
-                            warn!("Ping failed: {}", e);
-                            consecutive_errors += 1;
+                        _ => {
+                            // Other responses, just continue
                         }
                     }
                 }
+                
                 // Try to receive a response with a timeout to avoid blocking forever
-                match tokio::time::timeout(
+                if let Ok(response) = tokio::time::timeout(
                     std::time::Duration::from_millis(500), 
                     client.receive_response_with_timeout(std::time::Duration::from_millis(200))
                 ).await {
-                    Ok(Ok(ManagementResponse::ActorEvent { id, event })) => {
-                        if id == actor_id {
-                            had_events = true;
-                            consecutive_errors = 0;
-                            event_count += 1;
-                            println!("{}.{} {}", 
-                                event_count,
-                                style(" [Event]").green(),
-                                style(&event.event_type).cyan());
-                            println!("   Time: {}", event.timestamp);
-                            println!("   Hash: {}", hex::encode(&event.hash));
-                            if let Some(parent) = &event.parent_hash {
-                                println!("   Parent: {}", hex::encode(parent));
-                            }
-                            println!();
-                        }
-                    },
-                    Ok(Ok(_)) => {
-                        // Ignore other response types
-                    },
-                    Ok(Err(e)) => {
-                        // Connection error
-                        consecutive_errors += 1;
-                        warn!("Error receiving event (error {}): {:?}", consecutive_errors, e);
-                        
-                        // If we've had several consecutive errors, try to reconnect
-                        if consecutive_errors >= 5 {
-                            warn!("Multiple consecutive errors, attempting to reconnect...");
-                            
-                            // Try to reconnect
-                            reconnect_attempts += 1;
-                            if reconnect_attempts <= 3 {
-                                match client.connect().await {
-                                    Ok(_) => {
-                                        info!("Successfully reconnected to server");
-                                        
-                                        // Re-subscribe to actor events
-                                        match client.subscribe_to_actor(actor_id.clone()).await {
-                                            Ok(_) => {
-                                                info!("Successfully re-subscribed to actor events");
-                                                consecutive_errors = 0;
-                                            },
-                                            Err(e) => {
-                                                error!("Failed to re-subscribe to actor events: {}", e);
-                                            }
-                                        }
-                                    },
-                                    Err(e) => {
-                                        error!("Failed to reconnect to server: {}", e);
-                                    }
+                    match response {
+                        Ok(ManagementResponse::ActorEvent { id, event }) => {
+                            if id == actor_id {
+                                events_received = true;
+                                consecutive_errors = 0;
+                                event_count += 1;
+                                println!("{}. {} {}", 
+                                    event_count,
+                                    style("[Event]").green(),
+                                    style(&event.event_type).cyan());
+                                println!("   Time: {}", event.timestamp);
+                                println!("   Hash: {}", hex::encode(&event.hash));
+                                if let Some(parent) = &event.parent_hash {
+                                    println!("   Parent: {}", hex::encode(parent));
                                 }
-                            } else {
-                                error!("Too many reconnection attempts, giving up");
-                                break;
+                                println!();
+                            }
+                        },
+                        Ok(_) => {
+                            // Ignore other response types
+                        },
+                        Err(e) => {
+                            // Connection error
+                            consecutive_errors += 1;
+                            debug!("Error receiving event (error {}): {:?}", consecutive_errors, e);
+                            
+                            // If we've had several consecutive errors, try to reconnect
+                            if consecutive_errors >= 5 {
+                                warn!("Multiple consecutive errors, attempting to reconnect...");
+                                
+                                // Try to reconnect
+                                reconnect_attempts += 1;
+                                if reconnect_attempts <= 3 {
+                                    match client.connect().await {
+                                        Ok(_) => {
+                                            info!("Successfully reconnected to server");
+                                            
+                                            // Re-subscribe to actor events
+                                            match client.subscribe_to_actor(actor_id.clone()).await {
+                                                Ok(new_sub_id) => {
+                                                    info!("Successfully re-subscribed to actor events");
+                                                    consecutive_errors = 0;
+                                                    // Don't need to unsubscribe the old one as the connection was lost
+                                                },
+                                                Err(e) => {
+                                                    error!("Failed to re-subscribe to actor events: {}", e);
+                                                }
+                                            }
+                                        },
+                                        Err(e) => {
+                                            error!("Failed to reconnect to server: {}", e);
+                                        }
+                                    }
+                                } else {
+                                    error!("Too many reconnection attempts, giving up");
+                                    break;
+                                }
                             }
                         }
-                    },
-                    Err(_) => {
-                        // Timeout occurred, that's fine
+                    }
+                } else {
+                    // Timeout occurred, but that's okay in this case
+                    debug!("Timeout waiting for events, still alive");
+                    
+                    // Increment heartbeat counter and show a heartbeat message every ~10 seconds
+                    heartbeat_counter += 1;
+                    if heartbeat_counter >= 20 {
+                        println!("{} Still monitoring for events from actor: {}", 
+                            style("⟳").dim(),
+                            style(&actor_id.to_string()[..8]).dim());
+                        
+                        // Also try a ping to see if we're still connected
+                        match client.ping().await {
+                            Ok(_) => {
+                                debug!("Server connection is still alive");
+                                consecutive_errors = 0;
+                            },
+                            Err(e) => {
+                                warn!("Failed to ping server: {}", e);
+                                consecutive_errors += 1;
+                            }
+                        }
+                        
+                        heartbeat_counter = 0;
                     }
                 }
                 
-                // Increment heartbeat counter and show a heartbeat message every ~10 seconds
-                heartbeat_counter += 1;
-                if heartbeat_counter >= 20 {
-                    println!("{} Still monitoring for events from actor: {}", 
-                        style("⟳").dim(),
-                        style(&actor_id.to_string()[..8]).dim());
-                    heartbeat_counter = 0;
-                }
-                // Small delay to prevent CPU spinning, slightly longer
+                // Small delay to prevent CPU spinning
                 tokio::time::sleep(std::time::Duration::from_millis(50)).await;
             }
             
             // Clean up subscription before exiting
-            if let Some(sub_id) = subscription_id {
-                if let Err(e) = client.unsubscribe_from_actor(actor_id.clone(), sub_id).await {
-                    debug!("Error unsubscribing from actor events: {:?}", e);
-                }
-            }
+            let _ = client.unsubscribe_from_actor(actor_id.clone(), subscription_id).await;
             
             println!("\n{} Stopped monitoring actor: {}", 
                 style("✓").green().bold(),

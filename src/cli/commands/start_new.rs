@@ -48,8 +48,6 @@ pub fn execute(args: &StartArgs, _verbose: bool, json: bool) -> Result<()> {
     let initial_state = if let Some(state_str) = &args.initial_state {
         // Check if it's a file path
         if std::path::Path::new(state_str).exists() {
-            let mut consecutive_errors = 0;
-            let mut reconnect_attempts = 0;
             debug!("Reading initial state from file: {}", state_str);
             Some(std::fs::read(state_str)?)
         } else {
@@ -107,42 +105,15 @@ pub fn execute(args: &StartArgs, _verbose: bool, json: bool) -> Result<()> {
             println!("{} Note: You may need to trigger actions in the actor to generate events", 
                 style("i").dim());
             
-            // Subscribe to actor events - with retry mechanism
-            let mut subscription_id = None;
-            for attempt in 1..=3 {
-                match client.subscribe_to_actor(actor_id.clone()).await {
-                    Ok(sub_id) => {
-                        subscription_id = Some(sub_id);
-                        debug!("Subscribed to actor events, subscription ID: {}", sub_id);
-                        break;
-                    },
-                    Err(e) => {
-                        if attempt < 3 {
-                            warn!("Failed to subscribe to actor events (attempt {}): {}", attempt, e);
-                            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-                        } else {
-                            error!("Failed all attempts to subscribe to actor events: {}", e);
-                            return Err(anyhow!("Could not subscribe to actor events: {}", e));
-                        }
-                    }
-                }
-            }
-            
-            // Setup to receive events
-            let mut event_count = 0;
-            let mut heartbeat_counter = 0;
-            let mut consecutive_errors = 0;
-            let mut reconnect_attempts = 0;
-            
             // Try to get all existing events first to avoid missing anything
             match client.get_actor_events(actor_id.clone()).await {
                 Ok(events) => {
                     if !events.is_empty() {
                         info!("Found {} existing events", events.len());
                         for (i, event) in events.iter().enumerate() {
-                            println!("{}.{} {}", 
+                            println!("{}. {} {}", 
                                 i + 1,
-                                style(" [Init]").yellow(),
+                                style("[Init]").yellow(),
                                 style(&event.event_type).cyan());
                             println!("   Time: {}", event.timestamp);
                             println!("   Hash: {}", hex::encode(&event.hash));
@@ -151,13 +122,46 @@ pub fn execute(args: &StartArgs, _verbose: bool, json: bool) -> Result<()> {
                             }
                             println!();
                         }
-                        event_count = events.len();
                     }
                 },
                 Err(e) => {
                     warn!("Could not retrieve existing events: {}", e);
                 }
             }
+            
+            // Subscribe to actor events with retry mechanism
+            let mut subscription_id = None;
+            for attempt in 1..=5 {
+                match client.subscribe_to_actor(actor_id.clone()).await {
+                    Ok(sub_id) => {
+                        subscription_id = Some(sub_id);
+                        debug!("Subscribed to actor events, subscription ID: {}", sub_id);
+                        break;
+                    },
+                    Err(e) => {
+                        if attempt < 5 {
+                            warn!("Failed to subscribe to actor events (attempt {}): {}", attempt, e);
+                            tokio::time::sleep(std::time::Duration::from_millis(300 * attempt)).await;
+                        } else {
+                            error!("Failed all attempts to subscribe to actor events: {}", e);
+                            return Err(anyhow!("Could not subscribe to actor events: {}", e));
+                        }
+                    }
+                }
+            }
+            
+            // Make sure we got a subscription ID
+            let subscription_id = if let Some(id) = subscription_id {
+                id
+            } else {
+                return Err(anyhow!("Failed to obtain subscription ID"));
+            };
+            
+            // Setup to receive events
+            let mut event_count = 0;
+            let mut heartbeat_counter = 0;
+            let mut consecutive_errors = 0;
+            let mut reconnect_attempts = 0;
             
             // Keep receiving events until Ctrl+C is pressed
             while running.load(Ordering::SeqCst) {
@@ -170,9 +174,9 @@ pub fn execute(args: &StartArgs, _verbose: bool, json: bool) -> Result<()> {
                                 had_events = true;
                                 consecutive_errors = 0;
                                 event_count += 1;
-                                println!("{}.{} {}", 
+                                println!("{}. {} {}", 
                                     event_count,
-                                    style(" [Event]").green(),
+                                    style("[Event]").green(),
                                     style(&event.event_type).cyan());
                                 println!("   Time: {}", event.timestamp);
                                 println!("   Hash: {}", hex::encode(&event.hash));
@@ -201,6 +205,7 @@ pub fn execute(args: &StartArgs, _verbose: bool, json: bool) -> Result<()> {
                         }
                     }
                 }
+                
                 // Try to receive a response with a timeout to avoid blocking forever
                 match tokio::time::timeout(
                     std::time::Duration::from_millis(500), 
@@ -211,9 +216,9 @@ pub fn execute(args: &StartArgs, _verbose: bool, json: bool) -> Result<()> {
                             had_events = true;
                             consecutive_errors = 0;
                             event_count += 1;
-                            println!("{}.{} {}", 
+                            println!("{}. {} {}", 
                                 event_count,
-                                style(" [Event]").green(),
+                                style("[Event]").green(),
                                 style(&event.event_type).cyan());
                             println!("   Time: {}", event.timestamp);
                             println!("   Hash: {}", hex::encode(&event.hash));
@@ -244,7 +249,7 @@ pub fn execute(args: &StartArgs, _verbose: bool, json: bool) -> Result<()> {
                                         
                                         // Re-subscribe to actor events
                                         match client.subscribe_to_actor(actor_id.clone()).await {
-                                            Ok(_) => {
+                                            Ok(new_sub_id) => {
                                                 info!("Successfully re-subscribed to actor events");
                                                 consecutive_errors = 0;
                                             },
@@ -276,15 +281,14 @@ pub fn execute(args: &StartArgs, _verbose: bool, json: bool) -> Result<()> {
                         style(&actor_id.to_string()[..8]).dim());
                     heartbeat_counter = 0;
                 }
-                // Small delay to prevent CPU spinning, slightly longer
+                
+                // Small delay to prevent CPU spinning
                 tokio::time::sleep(std::time::Duration::from_millis(50)).await;
             }
             
             // Clean up subscription before exiting
-            if let Some(sub_id) = subscription_id {
-                if let Err(e) = client.unsubscribe_from_actor(actor_id.clone(), sub_id).await {
-                    debug!("Error unsubscribing from actor events: {:?}", e);
-                }
+            if let Err(e) = client.unsubscribe_from_actor(actor_id.clone(), subscription_id).await {
+                debug!("Error unsubscribing from actor events: {:?}", e);
             }
             
             println!("\n{} Stopped monitoring actor: {}", 
