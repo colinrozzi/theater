@@ -182,8 +182,449 @@ impl HttpFramework {
             },
         )?;
 
-        // Other implementations follow the same pattern...
-        // ...
+        // Start server implementation
+        let servers_clone = self.servers.clone();
+        interface.func_wrap_async(
+            "start-server",
+            move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore>,
+                  (server_id,): (u64,)|
+                  -> Box<dyn Future<Output = Result<(Result<u16, String>,)>> + Send> {
+                let servers_clone = servers_clone.clone();
+                let actor_handle = ctx.data().actor_handle.clone();
+
+                Box::new(async move {
+                    let mut servers = servers_clone.write().await;
+
+                    if let Some(server) = servers.get_mut(&server_id) {
+                        match server.start(actor_handle).await {
+                            Ok(port) => {
+                                // Record event
+                                ctx.data_mut().record_event(ChainEventData {
+                                    event_type: "http-framework/start-server".to_string(),
+                                    data: EventData::Http(HttpEventData::ServerStart {
+                                        server_id,
+                                        port,
+                                    }),
+                                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                                    description: Some(format!(
+                                        "Started HTTP server {} on port {}",
+                                        server_id, port
+                                    )),
+                                });
+
+                                Ok((Ok(port),))
+                            }
+                            Err(e) => {
+                                error!("Failed to start server {}: {}", server_id, e);
+
+                                // Record error event
+                                ctx.data_mut().record_event(ChainEventData {
+                                    event_type: "http-framework/start-server".to_string(),
+                                    data: EventData::Http(HttpEventData::Error {
+                                        operation: "start-server".to_string(),
+                                        path: format!("server-{}", server_id),
+                                        message: e.to_string(),
+                                    }),
+                                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                                    description: Some(format!(
+                                        "Failed to start HTTP server {}: {}",
+                                        server_id, e
+                                    )),
+                                });
+
+                                Ok((Err(format!("Failed to start server: {}", e)),))
+                            }
+                        }
+                    } else {
+                        Ok((Err(format!("Server not found: {}", server_id)),))
+                    }
+                })
+            },
+        )?;
+
+        // Stop server implementation
+        let servers_clone = self.servers.clone();
+        interface.func_wrap_async(
+            "stop-server",
+            move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore>,
+                  (server_id,): (u64,)|
+                  -> Box<dyn Future<Output = Result<(Result<(), String>,)>> + Send> {
+                let servers_clone = servers_clone.clone();
+
+                Box::new(async move {
+                    let mut servers = servers_clone.write().await;
+
+                    if let Some(server) = servers.get_mut(&server_id) {
+                        match server.stop().await {
+                            Ok(_) => {
+                                // Record event
+                                ctx.data_mut().record_event(ChainEventData {
+                                    event_type: "http-framework/stop-server".to_string(),
+                                    data: EventData::Http(HttpEventData::ServerStop { server_id }),
+                                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                                    description: Some(format!("Stopped HTTP server {}", server_id)),
+                                });
+
+                                Ok((Ok(()),))
+                            }
+                            Err(e) => {
+                                error!("Failed to stop server {}: {}", server_id, e);
+
+                                // Record error event
+                                ctx.data_mut().record_event(ChainEventData {
+                                    event_type: "http-framework/stop-server".to_string(),
+                                    data: EventData::Http(HttpEventData::Error {
+                                        operation: "stop-server".to_string(),
+                                        path: format!("server-{}", server_id),
+                                        message: e.to_string(),
+                                    }),
+                                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                                    description: Some(format!(
+                                        "Failed to stop HTTP server {}: {}",
+                                        server_id, e
+                                    )),
+                                });
+
+                                Ok((Err(format!("Failed to stop server: {}", e)),))
+                            }
+                        }
+                    } else {
+                        Ok((Err(format!("Server not found: {}", server_id)),))
+                    }
+                })
+            },
+        )?;
+
+        // Destroy server implementation
+        let servers_clone = self.servers.clone();
+        interface.func_wrap_async(
+            "destroy-server",
+            move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore>,
+                  (server_id,): (u64,)|
+                  -> Box<dyn Future<Output = Result<(Result<(), String>,)>> + Send> {
+                let servers_clone = servers_clone.clone();
+
+                Box::new(async move {
+                    let mut servers = servers_clone.write().await;
+
+                    if let Some(server) = servers.get_mut(&server_id) {
+                        // Make sure server is stopped first
+                        if server.is_running() {
+                            match server.stop().await {
+                                Ok(_) => {}
+                                Err(e) => {
+                                    error!(
+                                        "Failed to stop server {} during destroy: {}",
+                                        server_id, e
+                                    );
+                                    // Continue with removal anyway
+                                }
+                            }
+                        }
+
+                        // Remove the server
+                        servers.remove(&server_id);
+
+                        // Record event
+                        ctx.data_mut().record_event(ChainEventData {
+                            event_type: "http-framework/destroy-server".to_string(),
+                            data: EventData::Http(HttpEventData::ServerDestroy { server_id }),
+                            timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                            description: Some(format!("Destroyed HTTP server {}", server_id)),
+                        });
+
+                        Ok((Ok(()),))
+                    } else {
+                        Ok((Err(format!("Server not found: {}", server_id)),))
+                    }
+                })
+            },
+        )?;
+
+        // Register handler implementation
+        let handlers_clone = self.handlers.clone();
+        let next_handler_id = self.next_handler_id.clone();
+        interface.func_wrap(
+            "register-handler",
+            move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore>,
+                  (handler_name,): (String,)|
+                  -> Result<(Result<u64, String>,)> {
+                let handlers_clone = handlers_clone.clone();
+                let handler_id = next_handler_id.fetch_add(1, Ordering::SeqCst);
+
+                // Validate handler name
+                if handler_name.is_empty() {
+                    return Ok((Err("Handler name cannot be empty".to_string()),));
+                }
+
+                // Create handler config
+                let handler_config = HandlerConfig {
+                    id: handler_id,
+                    name: handler_name.clone(),
+                    handler_type: HandlerType::Unknown, // Will be determined when used
+                };
+
+                // Record event
+                ctx.data_mut().record_event(ChainEventData {
+                    event_type: "http-framework/register-handler".to_string(),
+                    data: EventData::Http(HttpEventData::HandlerRegister {
+                        handler_id,
+                        name: handler_name.clone(),
+                    }),
+                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                    description: Some(format!(
+                        "Registered handler {} with name '{}'",
+                        handler_id, handler_name
+                    )),
+                });
+
+                // Store handler
+                tokio::spawn(async move {
+                    let mut handlers = handlers_clone.write().await;
+                    handlers.register(handler_config);
+                });
+
+                Ok((Ok(handler_id),))
+            },
+        )?;
+
+        // Add route implementation
+        let servers_clone = self.servers.clone();
+        let handlers_clone = self.handlers.clone();
+        let next_route_id = self.next_route_id.clone();
+        interface.func_wrap(
+            "add-route",
+            move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore>,
+                  (server_id, path, method, handler_id): (u64, String, String, u64)|
+                  -> Result<(Result<u64, String>,)> {
+                let servers_clone = servers_clone.clone();
+                let handlers_clone = handlers_clone.clone();
+                let route_id = next_route_id.fetch_add(1, Ordering::SeqCst);
+
+                // Validate path
+                if !path.starts_with('/') {
+                    return Ok((Err("Path must start with /".to_string()),));
+                }
+
+                // Validate method
+                let method = method.to_uppercase();
+                if !is_valid_method(&method) {
+                    return Ok((Err(format!("Invalid HTTP method: {}", method)),));
+                }
+
+                // Clone values before moving to async context
+                let path_clone = path.clone();
+                let method_clone = method.clone();
+
+                // Capture the current execution context for async operations
+                let current_task = tokio::task::spawn(async move {
+                    // Verify handler exists
+                    let handlers = handlers_clone.read().await;
+                    if !handlers.exists(handler_id) {
+                        return Err(format!("Handler not found: {}", handler_id));
+                    }
+
+                    // Mark handler as HTTP request handler
+                    handlers
+                        .set_handler_type(handler_id, HandlerType::HttpRequest)
+                        .await;
+
+                    // Verify server exists and add route
+                    let mut servers = servers_clone.write().await;
+                    if let Some(server) = servers.get_mut(&server_id) {
+                        match server
+                            .add_route(
+                                route_id,
+                                path_clone.clone(),
+                                method_clone.clone(),
+                                handler_id,
+                            )
+                            .await
+                        {
+                            Ok(_) => Ok(()),
+                            Err(e) => Err(e.to_string()),
+                        }
+                    } else {
+                        Err(format!("Server not found: {}", server_id))
+                    }
+                });
+
+                // Wait for the async task to complete
+                let result = tokio::task::block_in_place(|| {
+                    tokio::runtime::Handle::current().block_on(current_task)
+                })?;
+
+                let path_clone = path.clone();
+                let method_clone = method.clone();
+
+                match result {
+                    Ok(_) => {
+                        // Record event
+                        ctx.data_mut().record_event(ChainEventData {
+                            event_type: "http-framework/add-route".to_string(),
+                            data: EventData::Http(HttpEventData::RouteAdd {
+                                route_id,
+                                server_id,
+                                path: path_clone.clone(),
+                                method: method_clone.clone(),
+                                handler_id,
+                            }),
+                            timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                            description: Some(format!(
+                                "Added route {} for {} {} on server {}",
+                                route_id, method_clone, path_clone, server_id
+                            )),
+                        });
+
+                        Ok((Ok(route_id),))
+                    }
+                    Err(e) => Ok((Err(e),)),
+                }
+            },
+        )?;
+
+        // Remove route implementation
+        let servers_clone = self.servers.clone();
+        interface.func_wrap(
+            "remove-route",
+            move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore>,
+                  (route_id,): (u64,)|
+                  -> Result<(Result<(), String>,)> {
+                let servers_clone = servers_clone.clone();
+
+                // Capture the current execution context
+                let current_task = tokio::task::spawn(async move {
+                    let mut servers = servers_clone.write().await;
+
+                    // Find server with this route
+                    let mut found = false;
+                    let mut server_id = 0;
+
+                    for (id, server) in servers.iter_mut() {
+                        if server.has_route(route_id) {
+                            found = true;
+                            server_id = *id;
+                            if let Err(e) = server.remove_route(route_id) {
+                                return Err(e.to_string());
+                            }
+                            break;
+                        }
+                    }
+
+                    if found {
+                        Ok(server_id)
+                    } else {
+                        Err(format!("Route not found: {}", route_id))
+                    }
+                });
+
+                // Wait for the async task to complete
+                let result = tokio::task::block_in_place(|| {
+                    tokio::runtime::Handle::current().block_on(current_task)
+                })?;
+
+                match result {
+                    Ok(server_id) => {
+                        // Record event
+                        ctx.data_mut().record_event(ChainEventData {
+                            event_type: "http-framework/remove-route".to_string(),
+                            data: EventData::Http(HttpEventData::RouteRemove {
+                                route_id,
+                                server_id,
+                            }),
+                            timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                            description: Some(format!(
+                                "Removed route {} from server {}",
+                                route_id, server_id
+                            )),
+                        });
+
+                        Ok((Ok(()),))
+                    }
+                    Err(e) => Ok((Err(e),)),
+                }
+            },
+        )?;
+
+        // Add middleware implementation
+        let servers_clone = self.servers.clone();
+        let handlers_clone = self.handlers.clone();
+        let next_middleware_id = self.next_middleware_id.clone();
+        interface.func_wrap(
+            "add-middleware",
+            move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore>,
+                  (server_id, path, handler_id): (u64, String, u64)|
+                  -> Result<(Result<u64, String>,)> {
+                let servers_clone = servers_clone.clone();
+                let handlers_clone = handlers_clone.clone();
+                let middleware_id = next_middleware_id.fetch_add(1, Ordering::SeqCst);
+
+                // Validate path
+                if !path.starts_with('/') {
+                    return Ok((Err("Path must start with /".to_string()),));
+                }
+
+                // Clone values before moving to async context
+                let path_clone = path.clone();
+
+                // Capture the current execution context
+                let current_task = tokio::task::spawn(async move {
+                    // Verify handler exists
+                    let handlers = handlers_clone.read().await;
+                    if !handlers.exists(handler_id) {
+                        return Err(format!("Handler not found: {}", handler_id));
+                    }
+
+                    // Mark handler as middleware handler
+                    handlers
+                        .set_handler_type(handler_id, HandlerType::Middleware)
+                        .await;
+
+                    // Verify server exists and add middleware
+                    let mut servers = servers_clone.write().await;
+                    if let Some(server) = servers.get_mut(&server_id) {
+                        match server.add_middleware(middleware_id, path_clone.clone(), handler_id) {
+                            Ok(_) => Ok(()),
+                            Err(e) => Err(e.to_string()),
+                        }
+                    } else {
+                        Err(format!("Server not found: {}", server_id))
+                    }
+                });
+
+                // Wait for the async task to complete
+                let result = tokio::task::block_in_place(|| {
+                    tokio::runtime::Handle::current().block_on(current_task)
+                })?;
+
+                let path_clone = path.clone();
+
+                match result {
+                    Ok(_) => {
+                        // Record event
+                        ctx.data_mut().record_event(ChainEventData {
+                            event_type: "http-framework/add-middleware".to_string(),
+                            data: EventData::Http(HttpEventData::MiddlewareAdd {
+                                middleware_id,
+                                server_id,
+                                path: path_clone.clone(),
+                                handler_id,
+                            }),
+                            timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                            description: Some(format!(
+                                "Added middleware {} for path {} on server {}",
+                                middleware_id, path_clone, server_id
+                            )),
+                        });
+
+                        Ok((Ok(middleware_id),))
+                    }
+                    Err(e) => Ok((Err(e),)),
+                }
+            },
+        )?;
+
+        // Other implementation methods go here...
 
         info!("HTTP framework host functions set up");
 
