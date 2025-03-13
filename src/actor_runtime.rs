@@ -7,20 +7,18 @@ use crate::host::filesystem::FileSystemHost;
 use crate::host::framework::HttpFramework;
 use crate::host::handler::Handler;
 use crate::host::http_client::HttpClientHost;
-use crate::host::http_server::HttpServerHost;
 use crate::host::message_server::MessageServerHost;
 use crate::host::runtime::RuntimeHost;
 use crate::host::store::StoreHost;
 use crate::host::supervisor::SupervisorHost;
-use crate::host::websocket_server::WebSocketServerHost;
 use crate::id::TheaterId;
 use crate::messages::{ActorMessage, TheaterCommand};
+use crate::shutdown::{ShutdownController, ShutdownReceiver};
 use crate::wasm::ActorComponent;
 use crate::Result;
 use tokio::sync::mpsc::{Receiver, Sender};
 use tokio::task::JoinHandle;
-use tracing::{info, warn, debug};
-use crate::shutdown::{ShutdownController, ShutdownReceiver};
+use tracing::{debug, info, warn};
 
 #[allow(dead_code)]
 const SHUTDOWN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
@@ -58,9 +56,6 @@ impl ActorRuntime {
                 HandlerConfig::MessageServer(_) => {
                     panic!("MessageServer handler is already added")
                 }
-                HandlerConfig::HttpServer(config) => {
-                    Handler::HttpServer(HttpServerHost::new(config.clone()))
-                }
                 HandlerConfig::FileSystem(config) => {
                     Handler::FileSystem(FileSystemHost::new(config.clone()))
                 }
@@ -70,9 +65,6 @@ impl ActorRuntime {
                 HandlerConfig::HttpFramework(_) => Handler::HttpFramework(HttpFramework::new()),
                 HandlerConfig::Runtime(config) => {
                     Handler::Runtime(RuntimeHost::new(config.clone()))
-                }
-                HandlerConfig::WebSocketServer(config) => {
-                    Handler::WebSocketServer(WebSocketServerHost::new(config.clone()))
                 }
                 HandlerConfig::Supervisor(config) => {
                     Handler::Supervisor(SupervisorHost::new(config.clone()))
@@ -152,7 +144,8 @@ impl ActorRuntime {
 
         // Create a shutdown receiver for the executor
         let executor_shutdown = shutdown_controller.subscribe();
-        let mut actor_executor = ActorExecutor::new(actor_instance, operation_rx, executor_shutdown);
+        let mut actor_executor =
+            ActorExecutor::new(actor_instance, operation_rx, executor_shutdown);
         let executor_task = tokio::spawn(async move { actor_executor.run().await });
 
         if init {
@@ -178,7 +171,7 @@ impl ActorRuntime {
             });
             handler_tasks.push(handler_task);
         }
-        
+
         // Monitor parent shutdown signal and propagate
         let shutdown_controller_clone = shutdown_controller.clone();
         let mut parent_shutdown_receiver_clone = parent_shutdown_receiver;
@@ -201,14 +194,14 @@ impl ActorRuntime {
 
     pub async fn stop(&mut self) -> Result<()> {
         info!("Initiating actor runtime shutdown");
-        
+
         // Signal shutdown to all components
         info!("Signaling shutdown to all components");
         self.shutdown_controller.signal_shutdown();
-        
+
         // Wait a bit for graceful shutdown
         tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-        
+
         // If any handlers are still running, abort them
         for task in self.handler_tasks.drain(..) {
             if !task.is_finished() {
@@ -216,7 +209,7 @@ impl ActorRuntime {
                 task.abort();
             }
         }
-        
+
         // Finally abort the executor if it's still running
         if !self.actor_executor_task.is_finished() {
             debug!("Aborting executor task that didn't shut down gracefully");

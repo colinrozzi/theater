@@ -89,7 +89,7 @@ impl HttpFramework {
         let next_handler_id = self.next_handler_id.clone();
         let next_route_id = self.next_route_id.clone();
         let next_middleware_id = self.next_middleware_id.clone();
-        let server_handles_clone = self.server_handles.clone();
+        let _server_handles_clone = self.server_handles.clone();
 
         let mut interface = actor_component
             .linker

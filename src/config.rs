@@ -67,8 +67,6 @@ pub struct InterfacesConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", content = "config")]
 pub enum HandlerConfig {
-    #[serde(rename = "http-server")]
-    HttpServer(HttpServerHandlerConfig),
     #[serde(rename = "message-server")]
     MessageServer(MessageServerConfig),
     #[serde(rename = "filesystem")]
@@ -79,8 +77,6 @@ pub enum HandlerConfig {
     HttpFramework(HttpFrameworkHandlerConfig),
     #[serde(rename = "runtime")]
     Runtime(RuntimeHostConfig),
-    #[serde(rename = "websocket-server")]
-    WebSocketServer(WebSocketServerHandlerConfig),
     #[serde(rename = "supervisor")]
     Supervisor(SupervisorHostConfig),
     #[serde(rename = "store")]
@@ -159,23 +155,5 @@ impl ManifestConfig {
             }
             None => Ok(None),
         }
-    }
-
-    pub fn websocket_server_port(&self) -> Option<u16> {
-        for handler in &self.handlers {
-            if let HandlerConfig::WebSocketServer(config) = handler {
-                return Some(config.port);
-            }
-        }
-        None
-    }
-
-    pub fn http_server_port(&self) -> Option<u16> {
-        for handler in &self.handlers {
-            if let HandlerConfig::HttpServer(config) = handler {
-                return Some(config.port);
-            }
-        }
-        None
     }
 }
