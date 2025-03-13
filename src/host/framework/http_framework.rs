@@ -256,8 +256,8 @@ impl HttpFramework {
                 if let Some(handle) = handles.get_mut(id) {
                     if let Some(tx) = handle.shutdown_tx.take() {
                         debug!("Sending graceful shutdown signal to server {}", id);
-                        if let Err(e) = tx.send(()) {
-                            warn!("Failed to send shutdown to HTTP server {}: {}", id, e);
+                        if let Err(_) = tx.send(()) {
+                            warn!("Failed to send shutdown to HTTP server {}", id);
                         } else {
                             debug!("Shutdown signal sent to server {}", id);
                         }

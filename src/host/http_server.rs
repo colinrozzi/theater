@@ -77,15 +77,18 @@ impl HttpServerHost {
         info!("Starting http server on port {}", self.port);
         let listener = tokio::net::TcpListener::bind(&addr).await?;
         info!("Listening on {}", addr);
+        // Get the port before moving into async closure
+        let port = self.port;
+        
         // Start with graceful shutdown
         let server = axum::serve(listener, app.into_make_service());
         
         // Use with_graceful_shutdown
         let server_task = server.with_graceful_shutdown(async move {
-            debug!("HTTP server on port {} waiting for shutdown signal", self.port);
+            debug!("HTTP server on port {} waiting for shutdown signal", port);
             shutdown_receiver.wait_for_shutdown().await;
-            info!("HTTP server on port {} received shutdown signal", self.port);
-            debug!("Beginning graceful shutdown of HTTP server on port {}", self.port);
+            info!("HTTP server on port {} received shutdown signal", port);
+            debug!("Beginning graceful shutdown of HTTP server on port {}", port);
         });
         
         server_task.await?;

@@ -1,7 +1,7 @@
 use crate::actor_executor::ActorError;
 use crate::actor_handle::ActorHandle;
-use crate::shutdown::ShutdownReceiver;
 use crate::config::WebSocketServerHandlerConfig;
+use crate::shutdown::ShutdownReceiver;
 use crate::wasm::{ActorComponent, ActorInstance};
 use anyhow::Result;
 use axum::{
@@ -21,7 +21,7 @@ use thiserror::Error;
 use tokio::sync::mpsc;
 use tokio::sync::Mutex;
 use tokio::sync::RwLock;
-use tracing::{error, info};
+use tracing::{debug, error, info};
 use wasmtime::component::{ComponentType, Lift, Lower};
 
 #[derive(Debug, Clone, Deserialize, Serialize, ComponentType, Lift, Lower)]
@@ -108,7 +108,11 @@ impl WebSocketServerHost {
         )
     }
 
-    pub async fn start(&mut self, actor_handle: ActorHandle, mut shutdown_receiver: ShutdownReceiver) -> Result<()> {
+    pub async fn start(
+        &mut self,
+        actor_handle: ActorHandle,
+        mut shutdown_receiver: ShutdownReceiver,
+    ) -> Result<()> {
         let (message_sender, mut message_receiver) = mpsc::channel(100);
 
         let app = Router::new()
@@ -126,10 +130,12 @@ impl WebSocketServerHost {
         // Start the server with graceful shutdown
         let server_task = tokio::spawn(async move {
             let server = axum::serve(listener, app.into_make_service());
-            server.with_graceful_shutdown(async {
-                let _ = rx.await;
-                debug!("WebSocket server received shutdown signal, starting graceful shutdown");
-            }).await
+            server
+                .with_graceful_shutdown(async {
+                    let _ = rx.await;
+                    debug!("WebSocket server received shutdown signal, starting graceful shutdown");
+                })
+                .await
         });
 
         // Message processing task
@@ -137,7 +143,8 @@ impl WebSocketServerHost {
         let message_task = tokio::spawn(async move {
             while let Some(msg) = message_receiver.recv().await {
                 debug!("WebSocket message received");
-                if let Err(e) = Self::process_message(msg, &actor_handle, &connections_clone).await {
+                if let Err(e) = Self::process_message(msg, &actor_handle, &connections_clone).await
+                {
                     error!("Error processing message: {}", e);
                 }
                 debug!("WebSocket message processed");
@@ -149,24 +156,24 @@ impl WebSocketServerHost {
             // Monitor shutdown channel
             _ = shutdown_receiver.wait_for_shutdown() => {
                 debug!("WebSocket server on port {} received shutdown signal", self.port);
-                
+
                 // Send shutdown to server
                 let _ = tx.send(());
-                
+
                 // Wait a moment for graceful shutdown
                 tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-                
+
                 // Clean up tasks
                 if !server_task.is_finished() {
                     debug!("Aborting WebSocket server task");
                     server_task.abort();
                 }
-                
+
                 if !message_task.is_finished() {
                     debug!("Aborting message processing task");
                     message_task.abort();
                 }
-                
+
                 debug!("WebSocket server on port {} shutdown complete", self.port);
             }
             // If tasks complete on their own, that's fine too
@@ -177,7 +184,7 @@ impl WebSocketServerHost {
                 debug!("WebSocket message task completed");
             }
         }
-        
+
         info!("WebSocket server on port {} stopped", self.port);
         Ok(())
     }
