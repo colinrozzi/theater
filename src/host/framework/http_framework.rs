@@ -686,52 +686,52 @@ impl HttpFramework {
             shutdown_receiver.wait_for_shutdown().await;
             info!("HTTP Framework received shutdown signal");
             
-            // Shut down all servers
-            let servers = servers_ref.read().await;
-            debug!("HTTP Framework shutting down {} servers", servers.len());
-            
-            // First, get a copy of all server IDs to avoid holding the lock during shutdown
-            let server_ids: Vec<u64> = servers.keys().cloned().collect();
-            
-            let mut shutdown_futures = Vec::new();
-            
-            // Initiate shutdown for each server
-            for id in &server_ids {
-                debug!("Initiating shutdown of HTTP Framework server {}", id);
+            // First stop all the servers
+            {
+                let servers = servers_ref.read().await;
+                debug!("HTTP Framework shutting down {} servers", servers.len());
                 
-                // Get a clone of the servers reference for this async block
-                let servers_clone = servers_ref.clone();
-                let handle_future = tokio::spawn(async move {
-                    // Get a write lock to modify the server
-                    let mut servers = servers_clone.write().await;
-                    if let Some(server) = servers.get_mut(id) {
-                        debug!("Stopping HTTP server {}", id);
-                        if let Err(e) = server.stop().await {
-                            warn!("Error stopping HTTP server {}: {}", id, e);
-                        } else {
-                            debug!("Successfully stopped HTTP server {}", id);
+                // Get server IDs
+                let server_ids: Vec<u64> = servers.keys().cloned().collect();
+                
+                // Create a vector to hold futures
+                let mut futures = Vec::new();
+                
+                // Stop each server in parallel
+                for server_id in server_ids {
+                    let servers_clone = servers_ref.clone();
+                    let fut = tokio::spawn(async move {
+                        let mut servers = servers_clone.write().await;
+                        if let Some(server) = servers.get_mut(&server_id) {
+                            debug!("Stopping HTTP server {}", server_id);
+                            if let Err(e) = server.stop().await {
+                                warn!("Error stopping HTTP server {}: {}", server_id, e);
+                            } else {
+                                debug!("Successfully stopped HTTP server {}", server_id);
+                            }
                         }
-                    }
-                    *id
-                });
-                shutdown_futures.push(handle_future);
-            }
-            
-            // Wait for all servers to complete shutdown
-            for future in shutdown_futures {
-                if let Ok(id) = future.await {
-                    debug!("Completed shutdown of server {}", id);
+                    });
+                    futures.push(fut);
+                }
+                
+                // Wait for all servers to be stopped
+                for fut in futures {
+                    let _ = fut.await;
                 }
             }
             
-            // Now clean up the server handles and ensure they're fully aborted
-            let mut handles = server_handles_ref.write().await;
-            for id in server_ids {
-                if let Some(handle) = handles.remove(&id) {
-                    if let Some(task) = handle.task {
-                        if !task.is_finished() {
-                            task.abort();
-                            debug!("Aborted server task for server {}", id);
+            // Then clean up the handles
+            {
+                let mut handles = server_handles_ref.write().await;
+                let handle_ids: Vec<u64> = handles.keys().cloned().collect();
+                
+                for handle_id in handle_ids {
+                    if let Some(handle) = handles.remove(&handle_id) {
+                        if let Some(task) = handle.task {
+                            if !task.is_finished() {
+                                task.abort();
+                                debug!("Aborted server task for server {}", handle_id);
+                            }
                         }
                     }
                 }

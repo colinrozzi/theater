@@ -13,7 +13,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::sync::{mpsc, RwLock};
 use tokio::task::JoinHandle;
-use tracing::{error, info};
+use tracing::{debug, error, info};
 
 use super::types::*;
 
@@ -257,7 +257,7 @@ impl ServerInstance {
         if let Some(handle) = self.server_handle.take() {
             debug!("Aborting server task");
             handle.abort();
-            
+
             // Wait for the task to be actually aborted
             match tokio::time::timeout(std::time::Duration::from_millis(200), handle).await {
                 Ok(_) => debug!("Server task completed gracefully"),
