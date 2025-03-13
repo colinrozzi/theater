@@ -5,6 +5,7 @@ use sha1::{Digest, Sha1};
 use std::fmt;
 use std::path::Path;
 use tokio::sync::mpsc::Sender;
+use tracing::debug;
 use wasmtime::component::{ComponentType, Lift, Lower};
 
 use crate::events::ChainEventData;
@@ -148,9 +149,16 @@ impl StateChain {
 
         // notify the runtime of the event
         let evt = event.clone();
-        let _ = self.theater_tx.send(TheaterCommand::NewEvent {
-            actor_id: self.actor_id.clone(),
-            event: evt.clone(),
+        let id = self.actor_id.clone();
+        let tx = self.theater_tx.clone();
+        tokio::spawn(async move {
+            tx.send(TheaterCommand::NewEvent {
+                actor_id: id.clone(),
+                event: evt.clone(),
+            })
+            .await
+            .expect("Failed to send event to runtime");
+            debug!("Sent event {} to runtime for actor {}", evt, id);
         });
 
         // I am removing storing the events in the content store for now because they are
@@ -177,7 +185,7 @@ impl StateChain {
         });
         */
 
-        tracing::debug!(
+        debug!(
             "Stored event {} in content store for actor {}",
             content_ref.hash(),
             self.actor_id
