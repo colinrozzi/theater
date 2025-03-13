@@ -18,9 +18,14 @@ use crate::id::TheaterId;
 use crate::messages::{ActorMessage, TheaterCommand};
 use crate::wasm::ActorComponent;
 use crate::Result;
-use tokio::sync::mpsc::{Receiver, Sender};
+use std::sync::Arc;
+use tokio::sync::broadcast;
+use tokio::sync::{
+    mpsc::{Receiver, Sender},
+    Mutex,
+};
 use tokio::task::JoinHandle;
-use tracing::{info, warn};
+use tracing::{error, info, warn};
 
 #[allow(dead_code)]
 const SHUTDOWN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
@@ -40,13 +45,15 @@ impl ActorRuntime {
         actor_mailbox: Receiver<ActorMessage>,
         operation_rx: Receiver<ActorOperation>,
         operation_tx: Sender<ActorOperation>,
+        shutdown_rx: broadcast::Receiver<()>,
         init: bool,
-    ) -> Result<Self> {
+    ) -> Result<()> {
         let mut handlers = Vec::new();
 
         handlers.push(Handler::MessageServer(MessageServerHost::new(
             actor_mailbox,
             theater_tx.clone(),
+            shutdown_rx.clone(),
         )));
 
         for handler_config in &config.handlers {
@@ -55,25 +62,29 @@ impl ActorRuntime {
                     panic!("MessageServer handler is already added")
                 }
                 HandlerConfig::HttpServer(config) => {
-                    Handler::HttpServer(HttpServerHost::new(config.clone()))
+                    Handler::HttpServer(HttpServerHost::new(config.clone(), shutdown_rx.clone()))
                 }
                 HandlerConfig::FileSystem(config) => {
-                    Handler::FileSystem(FileSystemHost::new(config.clone()))
+                    Handler::FileSystem(FileSystemHost::new(config.clone(), shutdown_rx.clone()))
                 }
                 HandlerConfig::HttpClient(config) => {
-                    Handler::HttpClient(HttpClientHost::new(config.clone()))
+                    Handler::HttpClient(HttpClientHost::new(config.clone(), shutdown_rx.clone()))
                 }
-                HandlerConfig::HttpFramework(_) => Handler::HttpFramework(HttpFramework::new()),
+                HandlerConfig::HttpFramework(_) => {
+                    Handler::HttpFramework(HttpFramework::new(shutdown_rx.clone()))
+                }
                 HandlerConfig::Runtime(config) => {
-                    Handler::Runtime(RuntimeHost::new(config.clone()))
+                    Handler::Runtime(RuntimeHost::new(config.clone(), shutdown_rx.clone()))
                 }
-                HandlerConfig::WebSocketServer(config) => {
-                    Handler::WebSocketServer(WebSocketServerHost::new(config.clone()))
-                }
+                HandlerConfig::WebSocketServer(config) => Handler::WebSocketServer(
+                    WebSocketServerHost::new(config.clone(), shutdown_rx.clone()),
+                ),
                 HandlerConfig::Supervisor(config) => {
-                    Handler::Supervisor(SupervisorHost::new(config.clone()))
+                    Handler::Supervisor(SupervisorHost::new(config.clone(), shutdown_rx.clone()))
                 }
-                HandlerConfig::Store(config) => Handler::Store(StoreHost::new(config.clone())),
+                HandlerConfig::Store(config) => {
+                    Handler::Store(StoreHost::new(config.clone(), shutdown_rx.clone()))
+                }
             };
             handlers.push(handler);
         }
@@ -172,25 +183,57 @@ impl ActorRuntime {
             handler_tasks.push(handler_task);
         }
 
-        Ok(ActorRuntime {
+        // Start a task to monitor for shutdown signal
+        let actor_id_clone = id.clone();
+        let runtime_clone = Arc::new(Mutex::new(ActorRuntime {
             actor_id: id.clone(),
             handler_tasks,
             actor_executor_task: executor_task,
-        })
+        }));
+
+        tokio::spawn(async move {
+            if shutdown_rx.await.is_ok() {
+                info!("Received shutdown signal for actor {:?}", actor_id_clone);
+
+                // Use the stop method for a clean shutdown
+                let mut runtime_guard = runtime_clone.lock().await;
+                if let Err(e) = runtime_guard.stop().await {
+                    error!("Error stopping actor runtime: {:?}", e);
+                }
+
+                info!("Shutdown sequence completed for actor {:?}", actor_id_clone);
+            }
+        });
+
+        Ok(())
     }
 
     pub async fn stop(&mut self) -> Result<()> {
-        info!("Initiating actor runtime shutdown");
+        info!(
+            "Initiating actor runtime shutdown for actor {:?}",
+            self.actor_id
+        );
 
-        // Stop all handlers
-        for task in self.handler_tasks.drain(..) {
+        // Stop all handlers in a controlled manner
+        // In a real implementation, we would signal each handler to shut down first
+        for (i, task) in self.handler_tasks.drain(..).enumerate() {
+            info!("Stopping handler {}", i);
+            // First try to gracefully stop it (in a real implementation)
+            // For now, we just abort the task
             task.abort();
+
+            // Give a small delay to allow resources to be freed
+            tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
         }
 
         // Finally abort the executor if it's still running
+        info!("Stopping actor executor");
         self.actor_executor_task.abort();
 
-        info!("Actor runtime shutdown complete");
+        info!(
+            "Actor runtime shutdown complete for actor {:?}",
+            self.actor_id
+        );
         Ok(())
     }
 }

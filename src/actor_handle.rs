@@ -160,28 +160,33 @@ impl ActorHandle {
     pub async fn shutdown(&self) -> Result<(), ActorError> {
         let (tx, rx) = oneshot::channel();
 
-        self.operation_tx
+        // Try to send the shutdown operation to the executor
+        match self.operation_tx
             .send(ActorOperation::Shutdown { response_tx: tx })
-            .await
-            .map_err(|e| {
+            .await {
+            Ok(_) => {
+                // Wait for confirmation with timeout
+                match timeout(DEFAULT_OPERATION_TIMEOUT, rx).await {
+                    Ok(result) => result.map_err(|e| {
+                        error!(
+                            "Channel closed while waiting for Shutdown response: {:?}",
+                            e
+                        );
+                        ActorError::ChannelClosed
+                    })?,
+                    Err(_) => {
+                        error!(
+                            "Shutdown operation timed out after {:?}",
+                            DEFAULT_OPERATION_TIMEOUT
+                        );
+                        Err(ActorError::OperationTimeout(DEFAULT_OPERATION_TIMEOUT))
+                    }
+                }
+            },
+            Err(e) => {
+                // The channel might already be closed if the actor is stopping
                 error!("Failed to send Shutdown operation: {}", e);
-                ActorError::ChannelClosed
-            })?;
-
-        match timeout(DEFAULT_OPERATION_TIMEOUT, rx).await {
-            Ok(result) => result.map_err(|e| {
-                error!(
-                    "Channel closed while waiting for Shutdown response: {:?}",
-                    e
-                );
-                ActorError::ChannelClosed
-            })?,
-            Err(_) => {
-                error!(
-                    "Shutdown operation timed out after {:?}",
-                    DEFAULT_OPERATION_TIMEOUT
-                );
-                Err(ActorError::OperationTimeout(DEFAULT_OPERATION_TIMEOUT))
+                Err(ActorError::ChannelClosed)
             }
         }
     }

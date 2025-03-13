@@ -14,6 +14,7 @@ use std::sync::{
     Arc,
 };
 use thiserror::Error;
+use tokio::sync::mpsc::Receiver;
 use tokio::sync::RwLock;
 use tracing::{error, info};
 
@@ -56,10 +57,11 @@ pub struct HttpFramework {
     next_handler_id: Arc<AtomicU64>,
     next_route_id: Arc<AtomicU64>,
     next_middleware_id: Arc<AtomicU64>,
+    shutdown_rx: Receiver<()>,
 }
 
 impl HttpFramework {
-    pub fn new() -> Self {
+    pub fn new(shutdown_rx: Reciever<()>) -> Self {
         Self {
             servers: Arc::new(RwLock::new(HashMap::new())),
             handlers: Arc::new(RwLock::new(HandlerRegistry::new())),
@@ -67,6 +69,7 @@ impl HttpFramework {
             next_handler_id: Arc::new(AtomicU64::new(1)),
             next_route_id: Arc::new(AtomicU64::new(1)),
             next_middleware_id: Arc::new(AtomicU64::new(1)),
+            shutdown_rx,
         }
     }
 

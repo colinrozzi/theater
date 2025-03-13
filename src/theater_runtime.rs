@@ -25,12 +25,13 @@ pub struct TheaterRuntime {
 
 pub struct ActorProcess {
     pub actor_id: TheaterId,
-    pub process: JoinHandle<ActorRuntime>,
+    pub process: JoinHandle<()>,
     pub mailbox_tx: mpsc::Sender<ActorMessage>,
     pub operation_tx: mpsc::Sender<ActorOperation>,
     pub children: HashSet<TheaterId>,
     pub status: ActorStatus,
     pub manifest_path: String,
+    pub shutdown_signal: Option<oneshot::Sender<()>>,
 }
 
 impl TheaterRuntime {
@@ -288,6 +289,7 @@ impl TheaterRuntime {
         let (response_tx, response_rx) = tokio::sync::oneshot::channel();
         let (mailbox_tx, mailbox_rx) = mpsc::channel(100);
         let (operation_tx, operation_rx) = mpsc::channel(100);
+        let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
         let theater_tx = self.theater_tx.clone();
 
         let actor_operation_tx = operation_tx.clone();
@@ -296,7 +298,7 @@ impl TheaterRuntime {
             debug!("Initializing actor runtime");
             debug!("Starting actor runtime");
             response_tx.send(actor_id.clone()).unwrap();
-            ActorRuntime::start(
+            let runtime = ActorRuntime::start(
                 actor_id,
                 &manifest,
                 init_bytes,
@@ -304,10 +306,13 @@ impl TheaterRuntime {
                 mailbox_rx,
                 operation_rx,
                 actor_operation_tx,
+                shutdown_rx,
                 init,
             )
             .await
-            .unwrap()
+            .unwrap();
+
+            runtime
         });
 
         match response_rx.await {
@@ -324,6 +329,7 @@ impl TheaterRuntime {
                     children: HashSet::new(),
                     status: ActorStatus::Running,
                     manifest_path: manifest_path.clone(),
+                    shutdown_signal: Some(shutdown_tx),
                 };
 
                 if let Some(parent_id) = parent_id {
@@ -393,17 +399,53 @@ impl TheaterRuntime {
     }
 
     async fn stop_actor(&mut self, actor_id: TheaterId) -> Result<()> {
-        // there is an issue here, for some reason we are not stopping the actor. perhaps we are
-        // only stopping the actor runtime? idk
         debug!("Stopping actor: {:?}", actor_id);
         if let Some(mut proc) = self.actors.remove(&actor_id) {
+            debug!("Found actor process, initiating shutdown sequence");
+
+            // First, stop all child actors
+            let children = proc.children.clone();
+            for child_id in children {
+                debug!("Stopping child actor: {:?}", child_id);
+                Box::pin(self.stop_actor(child_id)).await?;
+            }
+
+            // First try graceful shutdown via the operation channel
+            debug!("Sending shutdown operation to actor executor");
+            let (shutdown_tx, shutdown_rx) = oneshot::channel::<Result<(), ActorError>>();
+            if proc
+                .operation_tx
+                .send(ActorOperation::Shutdown {
+                    response_tx: shutdown_tx,
+                })
+                .await
+                .is_ok()
+            {
+                // Wait for confirmation with timeout
+                match tokio::time::timeout(std::time::Duration::from_secs(5), shutdown_rx).await {
+                    Ok(Ok(Ok(()))) => {
+                        debug!("Actor executor acknowledged shutdown request");
+                    }
+                    _ => {
+                        debug!("Shutdown request timed out or failed, will abort process");
+                    }
+                }
+            }
+
+            // If the actor has a shutdown signal, send it
+            if let Some(shutdown_tx) = proc.shutdown_signal.take() {
+                debug!("Sending runtime shutdown signal");
+                let _ = shutdown_tx.send(()); // Ignore errors as the receiver might be dropped
+            }
+
+            // Give it a short time to clean up
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+            // Abort the process if it's still running
+            debug!("Aborting actor process");
             proc.process.abort();
             proc.status = ActorStatus::Stopped;
             debug!("Actor stopped and removed from runtime");
-            let children = proc.children.clone();
-            for child_id in children {
-                Box::pin(self.stop_actor(child_id)).await?;
-            }
         } else {
             warn!("Attempted to stop non-existent actor: {:?}", actor_id);
         }
