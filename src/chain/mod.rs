@@ -152,6 +152,7 @@ impl StateChain {
         let id = self.actor_id.clone();
         let tx = self.theater_tx.clone();
         tokio::spawn(async move {
+            debug!("Sending event {} to runtime for actor {}", evt, id);
             tx.send(TheaterCommand::NewEvent {
                 actor_id: id.clone(),
                 event: evt.clone(),
