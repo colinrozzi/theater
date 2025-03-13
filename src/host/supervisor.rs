@@ -1,5 +1,6 @@
 use crate::actor_executor::ActorError;
 use crate::actor_handle::ActorHandle;
+use crate::shutdown::ShutdownReceiver;
 use crate::actor_store::ActorStore;
 use crate::config::SupervisorHostConfig;
 use crate::events::supervisor::SupervisorEventData;
@@ -820,7 +821,7 @@ impl SupervisorHost {
         Ok(())
     }
 
-    pub async fn start(&self, _actor_handle: ActorHandle) -> Result<()> {
+    pub async fn start(&self, _actor_handle: ActorHandle, _shutdown_receiver: ShutdownReceiver) -> Result<()> {
         info!("Starting supervisor host");
         Ok(())
     }

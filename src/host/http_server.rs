@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use thiserror::Error;
-use tracing::{error, info};
+use tracing::{debug, error, info};
 use wasmtime::component::{ComponentType, Lift, Lower};
 
 #[derive(Clone)]

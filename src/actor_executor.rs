@@ -183,7 +183,7 @@ impl ActorExecutor {
         loop {
             tokio::select! {
                 // Monitor shutdown channel
-                signal = self.shutdown_receiver.wait_for_shutdown() => {
+                _ = self.shutdown_receiver.wait_for_shutdown() => {
                     info!("Actor executor received shutdown signal");
                     debug!("Executor for actor instance starting shutdown sequence");
                     self.shutdown_initiated = true;

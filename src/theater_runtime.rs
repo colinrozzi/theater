@@ -1,9 +1,9 @@
 use crate::actor_executor::{ActorError, ActorOperation};
-use crate::shutdown::{ShutdownController, ShutdownReceiver, DEFAULT_SHUTDOWN_TIMEOUT};
+use crate::shutdown::{ShutdownController, DEFAULT_SHUTDOWN_TIMEOUT};
 use crate::actor_runtime::ActorRuntime;
 use crate::chain::ChainEvent;
 use crate::id::TheaterId;
-use crate::messages::{ActorMessage, ActorSend, ActorStatus, TheaterCommand};
+use crate::messages::{ActorMessage, ActorStatus, TheaterCommand};
 use crate::metrics::ActorMetrics;
 use crate::utils::resolve_reference;
 use crate::ManifestConfig;
@@ -401,19 +401,26 @@ impl TheaterRuntime {
     async fn stop_actor(&mut self, actor_id: TheaterId) -> Result<()> {
         debug!("Stopping actor: {:?}", actor_id);
         
-        if let Some(proc) = self.actors.get(&actor_id) {
+        // Find the actor's children to stop them first
+        let children = if let Some(proc) = self.actors.get(&actor_id) {
             debug!("Actor {:?} has {} children to stop first", actor_id, proc.children.len());
-            
-            // First, stop all children recursively
-            let children = proc.children.clone();
-            for (index, child_id) in children.iter().enumerate() {
-                debug!("Stopping child {}/{} with ID {:?} of parent {:?}", 
-                       index + 1, children.len(), child_id, actor_id);
-                Box::pin(self.stop_actor(child_id.clone())).await?;
-                debug!("Successfully stopped child {:?}", child_id);
-            }
-            
-            // Signal this specific actor to shutdown
+            proc.children.clone()
+        } else {
+            debug!("Actor {:?} not found", actor_id);
+            return Ok(());
+        };
+        
+        // First, stop all children recursively
+        for (index, child_id) in children.iter().enumerate() {
+            debug!("Stopping child {}/{} with ID {:?} of parent {:?}", 
+                   index + 1, children.len(), child_id, actor_id);
+            Box::pin(self.stop_actor(child_id.clone())).await?;
+            debug!("Successfully stopped child {:?}", child_id);
+        }
+        
+        // Signal this specific actor to shutdown - we need to get the actor again since
+        // we may have changed the actors map when stopping children
+        if let Some(proc) = self.actors.get(&actor_id) {
             debug!("Sending shutdown signal to actor {:?}", actor_id);
             proc.shutdown_controller.signal_shutdown();
             debug!("Shutdown signal sent to actor {:?}, waiting for grace period", actor_id);
@@ -421,21 +428,22 @@ impl TheaterRuntime {
             // Allow some time for graceful shutdown
             tokio::time::sleep(DEFAULT_SHUTDOWN_TIMEOUT).await;
             debug!("Grace period for actor {:?} complete", actor_id);
-            
-            // Force abort if still running
-            if let Some(proc) = self.actors.get(&actor_id) {
-                debug!("Force aborting actor {:?} task after grace period", actor_id);
-                proc.process.abort();
-                debug!("Actor {:?} task aborted", actor_id);
-            }
-            
-            // Remove from actors map
-            if let Some(mut removed_proc) = self.actors.remove(&actor_id) {
-                removed_proc.status = ActorStatus::Stopped;
-                debug!("Actor {:?} stopped and removed from runtime", actor_id);
-            }
         } else {
-            warn!("Attempted to stop non-existent actor: {:?}", actor_id);
+            debug!("Actor {:?} no longer exists after stopping children", actor_id);
+            return Ok(());
+        }
+        
+        // Force abort if still running
+        if let Some(proc) = self.actors.get(&actor_id) {
+            debug!("Force aborting actor {:?} task after grace period", actor_id);
+            proc.process.abort();
+            debug!("Actor {:?} task aborted", actor_id);
+        }
+        
+        // Remove from actors map
+        if let Some(mut removed_proc) = self.actors.remove(&actor_id) {
+            removed_proc.status = ActorStatus::Stopped;
+            debug!("Actor {:?} stopped and removed from runtime", actor_id);
         }
         
         Ok(())

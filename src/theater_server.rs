@@ -205,7 +205,7 @@ impl TheaterServer {
         let cmd_client_tx = client_tx.clone();
 
         // Start a task to forward responses to the client
-        let response_task = tokio::spawn(async move {
+        let _response_task = tokio::spawn(async move {
             while let Some(response) = client_rx.recv().await {
                 match serde_json::to_vec(&response) {
                     Ok(data) => {
@@ -246,7 +246,7 @@ impl TheaterServer {
             debug!("Parsed command: {:?}", cmd);
 
             // Store the command for reference (used for subscription tracking)
-            let cmd_clone = cmd.clone();
+            let _cmd_clone = cmd.clone();
 
             let response = match cmd {
                 ManagementCommand::StartActor {

@@ -1,5 +1,6 @@
 use crate::actor_executor::ActorError;
 use crate::actor_handle::ActorHandle;
+use crate::shutdown::ShutdownReceiver;
 use crate::actor_store::ActorStore;
 use crate::config::StoreHandlerConfig;
 use crate::events::{ChainEventData, EventData};
@@ -780,7 +781,7 @@ impl StoreHost {
         Ok(())
     }
 
-    pub async fn start(&self, _actor_handle: ActorHandle) -> Result<()> {
+    pub async fn start(&self, _actor_handle: ActorHandle, _shutdown_receiver: ShutdownReceiver) -> Result<()> {
         info!("STORE handler starting...");
         Ok(())
     }

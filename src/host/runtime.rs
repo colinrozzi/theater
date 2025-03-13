@@ -1,5 +1,6 @@
 use crate::actor_executor::ActorError;
 use crate::actor_handle::ActorHandle;
+use crate::shutdown::ShutdownReceiver;
 use crate::actor_store::ActorStore;
 use crate::config::RuntimeHostConfig;
 use crate::events::runtime::RuntimeEventData;
@@ -168,7 +169,7 @@ impl RuntimeHost {
         actor_instance.register_function_no_result::<(String,)>("ntwk:theater/actor", "init")
     }
 
-    pub async fn start(&self, _actor_handle: ActorHandle) -> Result<()> {
+    pub async fn start(&self, _actor_handle: ActorHandle, _shutdown_receiver: ShutdownReceiver) -> Result<()> {
         info!("Runtime host starting");
         Ok(())
     }

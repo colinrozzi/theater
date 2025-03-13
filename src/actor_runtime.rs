@@ -2,7 +2,6 @@ use crate::actor_executor::ActorExecutor;
 use crate::actor_executor::ActorOperation;
 use crate::actor_handle::ActorHandle;
 use crate::actor_store::ActorStore;
-use crate::chain::ChainEvent;
 use crate::config::{HandlerConfig, ManifestConfig};
 use crate::host::filesystem::FileSystemHost;
 use crate::host::framework::HttpFramework;
@@ -182,14 +181,14 @@ impl ActorRuntime {
         
         // Monitor parent shutdown signal and propagate
         let shutdown_controller_clone = shutdown_controller.clone();
-        let actor_id_clone = id.clone();
+        let mut parent_shutdown_receiver_clone = parent_shutdown_receiver;
         tokio::spawn(async move {
-            debug!("Actor {:?} waiting for parent shutdown signal", actor_id_clone);
-            parent_shutdown_receiver.wait_for_shutdown().await;
-            info!("Actor {:?} runtime received parent shutdown signal", actor_id_clone);
-            debug!("Propagating shutdown signal to all handler components for actor {:?}", actor_id_clone);
+            debug!("Actor waiting for parent shutdown signal");
+            parent_shutdown_receiver_clone.wait_for_shutdown().await;
+            info!("Actor runtime received parent shutdown signal");
+            debug!("Propagating shutdown signal to all handler components");
             shutdown_controller_clone.signal_shutdown();
-            debug!("Shutdown signal propagated to all components of actor {:?}", actor_id_clone);
+            debug!("Shutdown signal propagated to all components");
         });
 
         Ok(ActorRuntime {

@@ -1,5 +1,6 @@
 use crate::actor_executor::ActorError;
 use crate::actor_handle::ActorHandle;
+use crate::shutdown::ShutdownReceiver;
 use crate::config::FileSystemHandlerConfig;
 use crate::events::filesystem::FilesystemEventData;
 use crate::events::{ChainEventData, EventData};
@@ -708,7 +709,7 @@ let _ = interface.func_wrap_async(
         Ok(())
     }
 
-    pub async fn start(&self, _actor_handle: ActorHandle) -> Result<()> {
+    pub async fn start(&self, _actor_handle: ActorHandle, _shutdown_receiver: ShutdownReceiver) -> Result<()> {
         info!("FILESYSTEM starting on path {:?}", self.path);
         Ok(())
     }

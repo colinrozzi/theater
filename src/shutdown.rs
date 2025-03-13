@@ -1,6 +1,6 @@
 use tokio::sync::broadcast;
 use std::time::Duration;
-use tracing::{debug, info};
+use tracing::debug;
 
 /// Default timeout for waiting for a component to shutdown gracefully
 pub const DEFAULT_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);
