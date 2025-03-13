@@ -30,6 +30,10 @@ pub struct StartArgs {
     /// Monitor actor events after starting
     #[arg(long)]
     pub monitor: bool,
+    
+    /// Output only the actor ID (useful for piping to other commands)
+    #[arg(long)]
+    pub id_only: bool,
 }
 
 pub fn execute(args: &StartArgs, _verbose: bool, json: bool) -> Result<()> {
@@ -72,7 +76,10 @@ pub fn execute(args: &StartArgs, _verbose: bool, json: bool) -> Result<()> {
         let actor_id = client.start_actor(manifest_content, initial_state).await?;
         
         // Output the result
-        if !json {
+        if args.id_only {
+            // Just print the actor ID for piping to other commands
+            println!("{}", actor_id);
+        } else if !json {
             println!("{} Actor started successfully: {}", 
                 style("✓").green().bold(),
                 style(actor_id.to_string()).cyan());

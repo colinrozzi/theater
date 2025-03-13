@@ -96,6 +96,9 @@ theater server --data-dir /path/to/data
 # Start an actor from a manifest
 theater start path/to/manifest.toml
 
+# Start an actor and output only its ID (useful for piping)
+theater start path/to/manifest.toml --id-only
+
 # Start an actor and monitor its events
 theater start path/to/manifest.toml --monitor
 
@@ -116,6 +119,12 @@ theater stop <actor-id>
 
 # Restart an actor
 theater restart <actor-id>
+
+# Subscribe to actor events
+theater subscribe <actor-id>
+
+# Start an actor and subscribe to its events (piping commands)
+theater start path/to/manifest.toml --id-only | theater subscribe -
 ```
 
 ### Development Workflow
@@ -225,6 +234,12 @@ To monitor and debug actors:
    ```bash
    # When starting a new actor
    theater start manifest.toml --monitor
+   
+   # Or use the subscribe command
+   theater subscribe <actor-id>
+   
+   # Or pipe commands together for a streamlined workflow
+   theater start manifest.toml --id-only | theater subscribe -
    ```
 
 6. Restart an actor if issues occur
@@ -267,4 +282,7 @@ For parent-child actor relationships:
 - Use the `--json` flag to get structured output for scripting
 - For faster development, use the `watch` command for automatic redeployment
 - Use the `start --monitor` flag to start an actor and monitor its events in real-time
+- For more advanced event monitoring, use the `subscribe` command with filtering options
+- Combine commands with pipes: `theater start manifest.toml --id-only | theater subscribe -`
+- The `subscribe` command supports various filtering options like `--event-type`, `--detailed`, and `--limit`
 - Check `theater --help` and `theater <command> --help` for specific command options

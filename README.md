@@ -29,6 +29,9 @@ theater list
 
 # View actor logs
 theater logs <actor-id>
+
+# Start actor and subscribe to its events in one command
+theater start manifest.toml --id-only | theater subscribe -
 ```
 
 [See complete CLI documentation →](docs/cli.md)

@@ -1,6 +1,7 @@
 use anyhow::{anyhow, Result};
 use clap::Parser;
 use console::style;
+use std::io::Read;
 use std::net::SocketAddr;
 use std::str::FromStr;
 use std::time::Duration;
@@ -13,7 +14,7 @@ use theater::id::TheaterId;
 
 #[derive(Debug, Parser)]
 pub struct SubscribeArgs {
-    /// ID of the actor to subscribe to events from
+    /// ID of the actor to subscribe to events from (use "-" to read from stdin)
     #[arg(required = true)]
     pub actor_id: String,
 
@@ -39,12 +40,21 @@ pub struct SubscribeArgs {
 }
 
 pub fn execute(args: &SubscribeArgs, verbose: bool, json: bool) -> Result<()> {
-    debug!("Subscribing to events for actor: {}", args.actor_id);
+    // Read actor ID from stdin if "-" is specified
+    let actor_id_str = if args.actor_id == "-" {
+        let mut input = String::new();
+        std::io::stdin().read_line(&mut input)?;
+        input.trim().to_string()
+    } else {
+        args.actor_id.clone()
+    };
+    
+    debug!("Subscribing to events for actor: {}", actor_id_str);
     debug!("Connecting to server at: {}", args.address);
     
     // Parse the actor ID
-    let actor_id = TheaterId::from_str(&args.actor_id)
-        .map_err(|_| anyhow!("Invalid actor ID: {}", args.actor_id))?;
+    let actor_id = TheaterId::from_str(&actor_id_str)
+        .map_err(|_| anyhow!("Invalid actor ID: {}", actor_id_str))?;
     
     // Create runtime and connect to the server
     let runtime = tokio::runtime::Runtime::new()?;
