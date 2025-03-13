@@ -425,8 +425,8 @@ impl TheaterRuntime {
             proc.shutdown_controller.signal_shutdown();
             debug!("Shutdown signal sent to actor {:?}, waiting for grace period", actor_id);
             
-            // Allow some time for graceful shutdown
-            tokio::time::sleep(DEFAULT_SHUTDOWN_TIMEOUT).await;
+            // Allow more time for graceful shutdown to ensure proper resource cleanup
+            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
             debug!("Grace period for actor {:?} complete", actor_id);
         } else {
             debug!("Actor {:?} no longer exists after stopping children", actor_id);

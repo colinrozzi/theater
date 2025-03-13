@@ -252,21 +252,30 @@ impl ServerInstance {
             return Ok(());
         }
 
+        // IMPORTANT: We need to properly close the TCP listener and ensure socket is released
         // Cancel the server task
         if let Some(handle) = self.server_handle.take() {
+            debug!("Aborting server task");
             handle.abort();
-            // We don't need to wait for it to complete
-            // It will be properly cancelled
+            
+            // Wait for the task to be actually aborted
+            match tokio::time::timeout(std::time::Duration::from_millis(200), handle).await {
+                Ok(_) => debug!("Server task completed gracefully"),
+                Err(_) => debug!("Server task aborted after timeout"),
+            }
         }
 
-        // No need to close listener - it's owned by the server task
-
         // Close all WebSocket connections
-        let mut connections = self.active_ws_connections.write().await;
-        connections.clear();
+        {
+            let mut connections = self.active_ws_connections.write().await;
+            connections.clear();
+        }
 
         self.running = false;
         info!("HTTP server stopped");
+
+        // Add a small delay to ensure socket is released
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
         Ok(())
     }

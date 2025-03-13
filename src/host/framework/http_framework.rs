@@ -688,42 +688,58 @@ impl HttpFramework {
             
             // Shut down all servers
             let servers = servers_ref.read().await;
-            let mut handles = server_handles_ref.write().await;
             debug!("HTTP Framework shutting down {} servers", servers.len());
             
-            for (id, _server) in servers.iter() {
+            // First, get a copy of all server IDs to avoid holding the lock during shutdown
+            let server_ids: Vec<u64> = servers.keys().cloned().collect();
+            
+            let mut shutdown_futures = Vec::new();
+            
+            // Initiate shutdown for each server
+            for id in &server_ids {
                 debug!("Initiating shutdown of HTTP Framework server {}", id);
                 
-                if let Some(handle) = handles.get_mut(id) {
-                    if let Some(tx) = handle.shutdown_tx.take() {
-                        debug!("Sending graceful shutdown signal to server {}", id);
-                        if let Err(_) = tx.send(()) {
-                            warn!("Failed to send shutdown to HTTP server {}", id);
+                // Get a clone of the servers reference for this async block
+                let servers_clone = servers_ref.clone();
+                let handle_future = tokio::spawn(async move {
+                    // Get a write lock to modify the server
+                    let mut servers = servers_clone.write().await;
+                    if let Some(server) = servers.get_mut(id) {
+                        debug!("Stopping HTTP server {}", id);
+                        if let Err(e) = server.stop().await {
+                            warn!("Error stopping HTTP server {}: {}", id, e);
                         } else {
-                            debug!("Shutdown signal sent to server {}", id);
+                            debug!("Successfully stopped HTTP server {}", id);
                         }
-                    } else {
-                        debug!("No shutdown channel for server {}", id);
                     }
-                    
-                    // Give a moment for graceful shutdown
-                    debug!("Waiting for server {} to shut down gracefully", id);
-                    tokio::time::sleep(Duration::from_millis(100)).await;
-                    
-                    // Force abort if still running
-                    if let Some(task) = &handle.task {
+                    *id
+                });
+                shutdown_futures.push(handle_future);
+            }
+            
+            // Wait for all servers to complete shutdown
+            for future in shutdown_futures {
+                if let Ok(id) = future.await {
+                    debug!("Completed shutdown of server {}", id);
+                }
+            }
+            
+            // Now clean up the server handles and ensure they're fully aborted
+            let mut handles = server_handles_ref.write().await;
+            for id in server_ids {
+                if let Some(handle) = handles.remove(&id) {
+                    if let Some(task) = handle.task {
                         if !task.is_finished() {
-                            debug!("Server {} still running after grace period, aborting", id);
-                            handle.task.take().map(|t| t.abort());
-                            info!("Forcibly aborted HTTP Framework server {}", id);
-                        } else {
-                            debug!("Server {} shutdown gracefully", id);
+                            task.abort();
+                            debug!("Aborted server task for server {}", id);
                         }
-                    } else {
-                        debug!("No task handle for server {}", id);
                     }
                 }
             }
+            
+            // Add a longer delay to ensure OS has time to release sockets
+            debug!("Waiting for OS to release socket resources");
+            tokio::time::sleep(Duration::from_millis(500)).await;
             
             debug!("HTTP Framework shutdown complete");
         });
