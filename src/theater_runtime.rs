@@ -202,6 +202,7 @@ impl TheaterRuntime {
                 }
                 TheaterCommand::NewEvent { actor_id, event } => {
                     debug!("Received new event from actor {:?}", actor_id);
+                    info!("Received event: {:?}", event);
 
                     if let Err(e) = self.handle_actor_event(actor_id, event).await {
                         error!("Failed to handle actor event: {}", e);
@@ -392,6 +393,8 @@ impl TheaterRuntime {
     }
 
     async fn stop_actor(&mut self, actor_id: TheaterId) -> Result<()> {
+        // there is an issue here, for some reason we are not stopping the actor. perhaps we are
+        // only stopping the actor runtime? idk
         debug!("Stopping actor: {:?}", actor_id);
         if let Some(mut proc) = self.actors.remove(&actor_id) {
             proc.process.abort();
