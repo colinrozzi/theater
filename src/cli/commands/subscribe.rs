@@ -1,7 +1,6 @@
 use anyhow::{anyhow, Result};
 use clap::Parser;
 use console::style;
-use std::io::Read;
 use std::net::SocketAddr;
 use std::str::FromStr;
 use std::time::Duration;
