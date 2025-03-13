@@ -2,6 +2,8 @@ use anyhow::{anyhow, Result};
 use clap::Parser;
 use console::style;
 use std::net::SocketAddr;
+use std::path::PathBuf;
+use std::fs;
 use tracing::debug;
 
 use crate::cli::client::TheaterClient;
@@ -15,8 +17,12 @@ pub struct MessageArgs {
     pub actor_id: String,
     
     /// Message to send (as string)
-    #[arg(required = true)]
-    pub message: String,
+    #[arg(required_unless_present = "file")]
+    pub message: Option<String>,
+
+    /// File containing message to send
+    #[arg(short, long, conflicts_with = "message")]
+    pub file: Option<PathBuf>,
 
     /// Address of the theater server
     #[arg(short, long, default_value = "127.0.0.1:9000")]
@@ -29,7 +35,18 @@ pub struct MessageArgs {
 
 pub fn execute(args: &MessageArgs, _verbose: bool, json: bool) -> Result<()> {
     debug!("Sending message to actor: {}", args.actor_id);
-    debug!("Message: {}", args.message);
+    // Get message content either from direct argument or file
+    let message_content = if let Some(message) = &args.message {
+        message.clone()
+    } else if let Some(file_path) = &args.file {
+        debug!("Reading message from file: {:?}", file_path);
+        fs::read_to_string(file_path)
+            .map_err(|e| anyhow!("Failed to read message file: {}", e))?
+    } else {
+        return Err(anyhow!("Either message or file must be provided"));
+    };
+    
+    debug!("Message: {}", message_content);
     debug!("Connecting to server at: {}", args.address);
     
     // Parse the actor ID
@@ -46,7 +63,7 @@ pub fn execute(args: &MessageArgs, _verbose: bool, json: bool) -> Result<()> {
         client.connect().await?;
         
         // Convert message to bytes
-        let message_bytes = args.message.as_bytes().to_vec();
+        let message_bytes = message_content.as_bytes().to_vec();
         
         if args.request {
             // Send as a request and wait for response
@@ -56,7 +73,7 @@ pub fn execute(args: &MessageArgs, _verbose: bool, json: bool) -> Result<()> {
             if json {
                 let output = serde_json::json!({
                     "actor_id": actor_id.to_string(),
-                    "request": args.message,
+                    "request": message_content,
                     "response": String::from_utf8_lossy(&response).to_string()
                 });
                 println!("{}", serde_json::to_string_pretty(&output)?);
@@ -76,7 +93,7 @@ pub fn execute(args: &MessageArgs, _verbose: bool, json: bool) -> Result<()> {
                 let output = serde_json::json!({
                     "success": true,
                     "actor_id": actor_id.to_string(),
-                    "message": args.message
+                    "message": message_content
                 });
                 println!("{}", serde_json::to_string_pretty(&output)?);
             } else {
