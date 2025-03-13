@@ -51,6 +51,23 @@ pub enum HttpFrameworkError {
     InvalidConfiguration(String),
 }
 
+// Helper functions for validation
+
+// Validate hostname or IP address
+fn is_valid_host(host: &str) -> bool {
+    // Basic validation - could be enhanced with regex for stricter checking
+    !host.is_empty() && !host.contains(' ') && host.len() < 255
+}
+
+// Validate HTTP method
+fn is_valid_method(method: &str) -> bool {
+    match method {
+        "GET" | "POST" | "PUT" | "DELETE" | "PATCH" | "HEAD" | "OPTIONS" | "CONNECT" | "TRACE"
+        | "*" => true,
+        _ => false,
+    }
+}
+
 struct ServerHandle {
     shutdown_tx: Option<oneshot::Sender<()>>,
     task: Option<JoinHandle<()>>,
@@ -666,7 +683,377 @@ impl HttpFramework {
             },
         )?;
 
-        // Other implementation methods go here...
+        // Remove middleware implementation
+        let servers_clone = self.servers.clone();
+        interface.func_wrap(
+            "remove-middleware",
+            move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore>,
+                  (middleware_id,): (u64,)|
+                  -> Result<(Result<(), String>,)> {
+                let servers_clone = servers_clone.clone();
+
+                // Capture the current execution context
+                let current_task = tokio::task::spawn(async move {
+                    let mut servers = servers_clone.write().await;
+
+                    // Find server with this middleware
+                    let mut found = false;
+                    let mut server_id = 0;
+
+                    for (id, server) in servers.iter_mut() {
+                        if server.has_middleware(middleware_id) {
+                            found = true;
+                            server_id = *id;
+                            if let Err(e) = server.remove_middleware(middleware_id) {
+                                return Err(e.to_string());
+                            }
+                            break;
+                        }
+                    }
+
+                    if found {
+                        Ok(server_id)
+                    } else {
+                        Err(format!("Middleware not found: {}", middleware_id))
+                    }
+                });
+
+                // Wait for the async task to complete
+                let result = tokio::task::block_in_place(|| {
+                    tokio::runtime::Handle::current().block_on(current_task)
+                })?;
+
+                match result {
+                    Ok(server_id) => {
+                        // Record event
+                        ctx.data_mut().record_event(ChainEventData {
+                            event_type: "http-framework/remove-middleware".to_string(),
+                            data: EventData::Http(HttpEventData::MiddlewareRemove {
+                                middleware_id,
+                                server_id,
+                            }),
+                            timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                            description: Some(format!(
+                                "Removed middleware {} from server {}",
+                                middleware_id, server_id
+                            )),
+                        });
+
+                        Ok((Ok(()),))
+                    }
+                    Err(e) => Ok((Err(e),)),
+                }
+            },
+        )?;
+
+        // Enable WebSocket implementation
+        let servers_clone = self.servers.clone();
+        let handlers_clone = self.handlers.clone();
+        interface.func_wrap(
+            "enable-websocket",
+            move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore>,
+                  (
+                server_id,
+                path,
+                connect_handler_id,
+                message_handler_id,
+                disconnect_handler_id,
+            ): (u64, String, Option<u64>, u64, Option<u64>)|
+                  -> Result<(Result<(), String>,)> {
+                let servers_clone = servers_clone.clone();
+                let handlers_clone = handlers_clone.clone();
+
+                // Validate path
+                if !path.starts_with('/') {
+                    return Ok((Err("Path must start with /".to_string()),));
+                }
+
+                // Clone values before moving to async context
+                let path_clone = path.clone();
+
+                // Capture the current execution context
+                let current_task = tokio::task::spawn(async move {
+                    let handlers = handlers_clone.read().await;
+
+                    // Verify message handler exists
+                    if !handlers.exists(message_handler_id) {
+                        return Err(format!("Message handler not found: {}", message_handler_id));
+                    }
+
+                    // Verify connect handler if provided
+                    if let Some(id) = connect_handler_id {
+                        if !handlers.exists(id) {
+                            return Err(format!("Connect handler not found: {}", id));
+                        }
+                    }
+
+                    // Verify disconnect handler if provided
+                    if let Some(id) = disconnect_handler_id {
+                        if !handlers.exists(id) {
+                            return Err(format!("Disconnect handler not found: {}", id));
+                        }
+                    }
+
+                    // Mark handlers with correct types
+                    handlers
+                        .set_handler_type(message_handler_id, HandlerType::WebSocketMessage)
+                        .await;
+
+                    if let Some(id) = connect_handler_id {
+                        handlers
+                            .set_handler_type(id, HandlerType::WebSocketConnect)
+                            .await;
+                    }
+
+                    if let Some(id) = disconnect_handler_id {
+                        handlers
+                            .set_handler_type(id, HandlerType::WebSocketDisconnect)
+                            .await;
+                    }
+
+                    // Enable WebSocket on server
+                    let mut servers = servers_clone.write().await;
+                    if let Some(server) = servers.get_mut(&server_id) {
+                        match server.enable_websocket(
+                            path_clone.clone(),
+                            connect_handler_id,
+                            message_handler_id,
+                            disconnect_handler_id,
+                        ) {
+                            Ok(_) => Ok(()),
+                            Err(e) => Err(e.to_string()),
+                        }
+                    } else {
+                        Err(format!("Server not found: {}", server_id))
+                    }
+                });
+
+                // Wait for the async task to complete
+                let result = tokio::task::block_in_place(|| {
+                    tokio::runtime::Handle::current().block_on(current_task)
+                })?;
+
+                let path_clone = path.clone();
+
+                match result {
+                    Ok(_) => {
+                        // Record event
+                        ctx.data_mut().record_event(ChainEventData {
+                            event_type: "http-framework/enable-websocket".to_string(),
+                            data: EventData::Http(HttpEventData::WebSocketEnable {
+                                server_id,
+                                path: path_clone.clone(),
+                                connect_handler_id,
+                                message_handler_id,
+                                disconnect_handler_id,
+                            }),
+                            timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                            description: Some(format!(
+                                "Enabled WebSocket on path {} for server {}",
+                                path_clone, server_id
+                            )),
+                        });
+
+                        Ok((Ok(()),))
+                    }
+                    Err(e) => Ok((Err(e),)),
+                }
+            },
+        )?;
+
+        // Disable WebSocket implementation
+        let servers_clone = self.servers.clone();
+        interface.func_wrap(
+            "disable-websocket",
+            move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore>,
+                  (server_id, path): (u64, String)|
+                  -> Result<(Result<(), String>,)> {
+                let servers_clone = servers_clone.clone();
+
+                // Clone values before moving to async context
+                let path_clone = path.clone();
+
+                // Capture the current execution context
+                let current_task = tokio::task::spawn(async move {
+                    let mut servers = servers_clone.write().await;
+                    if let Some(server) = servers.get_mut(&server_id) {
+                        server
+                            .disable_websocket(&path_clone)
+                            .map_err(|e| e.to_string())
+                    } else {
+                        Err(format!("Server not found: {}", server_id))
+                    }
+                });
+
+                // Wait for the async task to complete
+                let result = tokio::task::block_in_place(|| {
+                    tokio::runtime::Handle::current().block_on(current_task)
+                })?;
+
+                match result {
+                    Ok(_) => {
+                        // Record event
+                        ctx.data_mut().record_event(ChainEventData {
+                            event_type: "http-framework/disable-websocket".to_string(),
+                            data: EventData::Http(HttpEventData::WebSocketDisable {
+                                server_id,
+                                path: path.clone(),
+                            }),
+                            timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                            description: Some(format!(
+                                "Disabled WebSocket on path {} for server {}",
+                                path, server_id
+                            )),
+                        });
+
+                        Ok((Ok(()),))
+                    }
+                    Err(e) => Ok((Err(e),)),
+                }
+            },
+        )?;
+
+        // Send WebSocket message implementation
+        let servers_clone = self.servers.clone();
+        interface.func_wrap(
+            "send-websocket-message",
+            move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore>,
+                  (server_id, connection_id, message): (u64, u64, WebSocketMessage)|
+                  -> Result<(Result<(), String>,)> {
+                let servers_clone = servers_clone.clone();
+                let message_clone = message.clone();
+
+                // Capture the current execution context
+                let current_task = tokio::task::spawn(async move {
+                    let servers = servers_clone.read().await;
+
+                    if let Some(server) = servers.get(&server_id) {
+                        let connections = server.active_ws_connections.read().await;
+
+                        if let Some(connection) = connections.get(&connection_id) {
+                            // Try to send the message
+                            match connection.sender.send(message_clone).await {
+                                Ok(_) => Ok(()),
+                                Err(e) => Err(format!("Failed to send WebSocket message: {}", e)),
+                            }
+                        } else {
+                            Err(format!("WebSocket connection not found: {}", connection_id))
+                        }
+                    } else {
+                        Err(format!("Server not found: {}", server_id))
+                    }
+                });
+
+                // Wait for the async task to complete
+                let result = tokio::task::block_in_place(|| {
+                    tokio::runtime::Handle::current().block_on(current_task)
+                })?;
+
+                let message_clone = message.clone();
+
+                match result {
+                    Ok(_) => {
+                        // Record event
+                        let message_type = match &message.ty {
+                            MessageType::Text => "text",
+                            MessageType::Binary => "binary",
+                            MessageType::Connect => "connect",
+                            MessageType::Close => "close",
+                            MessageType::Ping => "ping",
+                            MessageType::Pong => "pong",
+                            MessageType::Other(ref s) => s,
+                        };
+
+                        let message_size = message_clone.data.as_ref().map_or(0, |d| d.len())
+                            + message_clone.text.as_ref().map_or(0, |t| t.len());
+
+                        ctx.data_mut().record_event(ChainEventData {
+                            event_type: "http-framework/send-websocket-message".to_string(),
+                            data: EventData::Http(HttpEventData::WebSocketMessage {
+                                server_id,
+                                connection_id,
+                                message_type: message_type.to_string(),
+                                message_size,
+                            }),
+                            timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                            description: Some(format!(
+                                "Sent WebSocket message to connection {} on server {}",
+                                connection_id, server_id
+                            )),
+                        });
+
+                        Ok((Ok(()),))
+                    }
+                    Err(e) => Ok((Err(e),)),
+                }
+            },
+        )?;
+
+        // Close WebSocket connection implementation
+        let servers_clone = self.servers.clone();
+        interface.func_wrap(
+            "close-websocket",
+            move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore>,
+                  (server_id, connection_id): (u64, u64)|
+                  -> Result<(Result<(), String>,)> {
+                let servers_clone = servers_clone.clone();
+
+                // Capture the current execution context
+                let current_task = tokio::task::spawn(async move {
+                    let servers = servers_clone.read().await;
+
+                    if let Some(server) = servers.get(&server_id) {
+                        let connections = server.active_ws_connections.read().await;
+
+                        if let Some(connection) = connections.get(&connection_id) {
+                            // Send close message
+                            let close_message = WebSocketMessage {
+                                ty: MessageType::Close,
+                                data: None,
+                                text: None,
+                            };
+
+                            match connection.sender.send(close_message).await {
+                                Ok(_) => Ok(()),
+                                Err(e) => {
+                                    Err(format!("Failed to close WebSocket connection: {}", e))
+                                }
+                            }
+                        } else {
+                            Err(format!("WebSocket connection not found: {}", connection_id))
+                        }
+                    } else {
+                        Err(format!("Server not found: {}", server_id))
+                    }
+                });
+
+                // Wait for the async task to complete
+                let result = tokio::task::block_in_place(|| {
+                    tokio::runtime::Handle::current().block_on(current_task)
+                })?;
+
+                match result {
+                    Ok(_) => {
+                        // Record event
+                        ctx.data_mut().record_event(ChainEventData {
+                            event_type: "http-framework/close-websocket".to_string(),
+                            data: EventData::Http(HttpEventData::WebSocketDisconnect {
+                                server_id,
+                                connection_id,
+                            }),
+                            timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                            description: Some(format!(
+                                "Closed WebSocket connection {} on server {}",
+                                connection_id, server_id
+                            )),
+                        });
+
+                        Ok((Ok(()),))
+                    }
+                    Err(e) => Ok((Err(e),)),
+                }
+            },
+        )?;
 
         info!("HTTP framework host functions set up");
 
