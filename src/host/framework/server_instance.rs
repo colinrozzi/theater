@@ -1,4 +1,5 @@
 use crate::actor_handle::ActorHandle;
+use crate::shutdown::ShutdownReceiver;
 use anyhow::{anyhow, Result};
 use axum::{
     extract::{State, WebSocketUpgrade},
@@ -13,7 +14,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::sync::{mpsc, RwLock};
 use tokio::task::JoinHandle;
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
 
 use super::types::*;
 
@@ -60,6 +61,8 @@ pub struct ServerInstance {
     server_handle: Option<JoinHandle<()>>,
     port: u16,
     running: bool,
+    // Channel to signal server shutdown
+    shutdown_tx: Option<tokio::sync::oneshot::Sender<()>>,
 }
 
 impl ServerInstance {
@@ -78,6 +81,7 @@ impl ServerInstance {
             server_handle: None,
             port,
             running: false,
+            shutdown_tx: None,
         }
     }
 
@@ -204,6 +208,7 @@ impl ServerInstance {
 
     pub async fn start(&mut self, actor_handle: ActorHandle) -> Result<u16> {
         if self.running {
+            debug!("Server {} already running on port {}", self.id, self.port);
             return Ok(self.port);
         }
 
@@ -222,60 +227,138 @@ impl ServerInstance {
         let addr = format!("{}:{}", host, port).parse::<SocketAddr>()?;
 
         // Start listener
-        let listener = tokio::net::TcpListener::bind(addr).await?;
+        debug!("Binding HTTP server {} to {}:{}", self.id, host, port);
+        let listener = match tokio::net::TcpListener::bind(addr).await {
+            Ok(l) => l,
+            Err(e) => {
+                error!(
+                    "Failed to bind HTTP server {} to {}:{}: {}",
+                    self.id, host, port, e
+                );
+                return Err(anyhow!("Failed to bind to address: {}", e));
+            }
+        };
+
         let actual_addr = listener.local_addr()?;
         let actual_port = actual_addr.port();
         self.port = actual_port;
 
-        // Launch server in separate task
+        // Create shutdown channel
+        let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
+        self.shutdown_tx = Some(shutdown_tx);
+
+        // Launch server in separate task with graceful shutdown
+        let server_id = self.id; // Clone for use in the task
         let server_handle = tokio::spawn(async move {
-            info!("Server starting on {}", actual_addr);
+            info!("HTTP server {} starting on {}", server_id, actual_addr);
 
-            // Use Axum's serve function with our router
+            // Use Axum's serve function with our router and graceful shutdown
             let server = axum::serve(listener, router);
-            if let Err(e) = server.await {
-                error!("Server error: {}", e);
-            }
 
-            info!("Server stopped");
+            // Run with graceful shutdown
+            match server
+                .with_graceful_shutdown(async move {
+                    match shutdown_rx.await {
+                        Ok(_) => debug!(
+                            "HTTP server {} received graceful shutdown signal",
+                            server_id
+                        ),
+                        Err(e) => {
+                            debug!("HTTP server {} shutdown channel closed: {}", server_id, e)
+                        }
+                    }
+                })
+                .await
+            {
+                Ok(_) => info!("HTTP server {} stopped gracefully", server_id),
+                Err(e) => error!("HTTP server {} error: {}", server_id, e),
+            }
         });
 
         self.server_handle = Some(server_handle);
         self.running = true;
 
-        info!("HTTP server started on port {}", actual_port);
+        info!("HTTP server {} started on port {}", self.id, actual_port);
         Ok(actual_port)
     }
 
     pub async fn stop(&mut self) -> Result<()> {
         if !self.running {
+            debug!("Server {} is not running, nothing to stop", self.id);
             return Ok(());
         }
 
-        // IMPORTANT: We need to properly close the TCP listener and ensure socket is released
-        // Cancel the server task
-        if let Some(handle) = self.server_handle.take() {
-            debug!("Aborting server task");
-            handle.abort();
+        debug!("Stopping HTTP server {} on port {}", self.id, self.port);
 
-            // Wait for the task to be actually aborted
-            match tokio::time::timeout(std::time::Duration::from_millis(200), handle).await {
-                Ok(_) => debug!("Server task completed gracefully"),
-                Err(_) => debug!("Server task aborted after timeout"),
+        // First, signal graceful shutdown through the channel
+        if let Some(tx) = self.shutdown_tx.take() {
+            debug!(
+                "Sending graceful shutdown signal to HTTP server {}",
+                self.id
+            );
+            if let Err(e) = tx.send(()) {
+                warn!(
+                    "Failed to send shutdown signal to server {}: {:?}",
+                    self.id, e
+                );
+                // Continue with forceful shutdown as fallback
+            } else {
+                debug!("Graceful shutdown signal sent to HTTP server {}", self.id);
+            }
+        } else {
+            warn!(
+                "No shutdown channel available for server {}, using forceful shutdown",
+                self.id
+            );
+        }
+
+        // Wait for the server task to finish with a timeout
+        if let Some(handle) = self.server_handle.take() {
+            debug!("Waiting for HTTP server {} task to complete", self.id);
+            match tokio::time::timeout(std::time::Duration::from_secs(5), handle).await {
+                Ok(result) => match result {
+                    Ok(_) => debug!("HTTP server {} task completed normally", self.id),
+                    Err(e) => {
+                        if e.is_cancelled() {
+                            debug!("HTTP server {} task was cancelled", self.id);
+                        } else {
+                            error!("HTTP server {} task failed: {}", self.id, e);
+                        }
+                    }
+                },
+                Err(_) => {
+                    warn!(
+                        "HTTP server {} shutdown timed out after 5s, forcing abort",
+                        self.id
+                    );
+                    // Wait a bit more to ensure the abort happens
+                    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                }
             }
         }
 
         // Close all WebSocket connections
         {
-            let mut connections = self.active_ws_connections.write().await;
-            connections.clear();
+            let connections_count = self.active_ws_connections.read().await.len();
+            if connections_count > 0 {
+                debug!(
+                    "Closing {} WebSocket connections for server {}",
+                    connections_count, self.id
+                );
+                let mut connections = self.active_ws_connections.write().await;
+                connections.clear();
+            }
         }
 
         self.running = false;
-        info!("HTTP server stopped");
+        info!("HTTP server {} on port {} stopped", self.id, self.port);
 
-        // Add a small delay to ensure socket is released
-        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        // Add a small delay to ensure socket is released by the OS
+        debug!(
+            "Waiting for OS to release socket resources for server {}",
+            self.id
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
 
         Ok(())
     }

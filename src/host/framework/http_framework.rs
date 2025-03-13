@@ -54,6 +54,7 @@ pub enum HttpFrameworkError {
 struct ServerHandle {
     shutdown_tx: Option<oneshot::Sender<()>>,
     task: Option<JoinHandle<()>>,
+    server_id: u64, // Track which server this handle belongs to
 }
 
 #[derive(Clone)]
@@ -89,7 +90,7 @@ impl HttpFramework {
         let next_handler_id = self.next_handler_id.clone();
         let next_route_id = self.next_route_id.clone();
         let next_middleware_id = self.next_middleware_id.clone();
-        let _server_handles_clone = self.server_handles.clone();
+        let server_handles_clone = self.server_handles.clone();
 
         let mut interface = actor_component
             .linker
@@ -184,6 +185,7 @@ impl HttpFramework {
 
         // Start server implementation
         let servers_clone = self.servers.clone();
+        let server_handles_clone = self.server_handles.clone();
         interface.func_wrap_async(
             "start-server",
             move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore>,
@@ -192,11 +194,12 @@ impl HttpFramework {
                 let servers_clone = servers_clone.clone();
                 let actor_handle = ctx.data().actor_handle.clone();
 
+                let server_handles_clone = server_handles_clone.clone();
                 Box::new(async move {
                     let mut servers = servers_clone.write().await;
 
                     if let Some(server) = servers.get_mut(&server_id) {
-                        match server.start(actor_handle).await {
+                        match server.start(actor_handle.clone()).await {
                             Ok(port) => {
                                 // Record event
                                 ctx.data_mut().record_event(ChainEventData {
@@ -210,6 +213,21 @@ impl HttpFramework {
                                         "Started HTTP server {} on port {}",
                                         server_id, port
                                     )),
+                                });
+
+                                // Create server handle for tracking
+                                let server_handle = ServerHandle {
+                                    shutdown_tx: None, // We don't have this yet
+                                    task: None,        // We don't have this yet
+                                    server_id,         // Track which server this is for
+                                };
+
+                                // Store the handle
+                                let handle_clone = server_handles_clone.clone();
+                                tokio::spawn(async move {
+                                    let mut handles = handle_clone.write().await;
+                                    handles.insert(server_id, server_handle);
+                                    debug!("Stored handle for server {}", server_id);
                                 });
 
                                 Ok((Ok(port),))
@@ -244,18 +262,31 @@ impl HttpFramework {
 
         // Stop server implementation
         let servers_clone = self.servers.clone();
+        let server_handles_clone = self.server_handles.clone();
         interface.func_wrap_async(
             "stop-server",
             move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore>,
                   (server_id,): (u64,)|
                   -> Box<dyn Future<Output = Result<(Result<(), String>,)>> + Send> {
                 let servers_clone = servers_clone.clone();
+                let server_handles_clone = server_handles_clone.clone();
 
                 Box::new(async move {
                     let mut servers = servers_clone.write().await;
 
                     if let Some(server) = servers.get_mut(&server_id) {
-                        match server.stop().await {
+                        let result = server.stop().await;
+
+                        // Remove the server handle since we're explicitly stopping it
+                        let handles_clone = server_handles_clone.clone();
+                        tokio::spawn(async move {
+                            let mut handles = handles_clone.write().await;
+                            if handles.remove(&server_id).is_some() {
+                                debug!("Removed handle for stopped server {}", server_id);
+                            }
+                        });
+
+                        match result {
                             Ok(_) => {
                                 // Record event
                                 ctx.data_mut().record_event(ChainEventData {
@@ -297,12 +328,14 @@ impl HttpFramework {
 
         // Destroy server implementation
         let servers_clone = self.servers.clone();
+        let server_handles_clone = self.server_handles.clone();
         interface.func_wrap_async(
             "destroy-server",
             move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore>,
                   (server_id,): (u64,)|
                   -> Box<dyn Future<Output = Result<(Result<(), String>,)>> + Send> {
                 let servers_clone = servers_clone.clone();
+                let server_handles_clone = server_handles_clone.clone();
 
                 Box::new(async move {
                     let mut servers = servers_clone.write().await;
@@ -324,6 +357,15 @@ impl HttpFramework {
 
                         // Remove the server
                         servers.remove(&server_id);
+
+                        // Remove the server handle
+                        let handles_clone = server_handles_clone.clone();
+                        tokio::spawn(async move {
+                            let mut handles = handles_clone.write().await;
+                            if handles.remove(&server_id).is_some() {
+                                debug!("Removed handle for destroyed server {}", server_id);
+                            }
+                        });
 
                         // Record event
                         ctx.data_mut().record_event(ChainEventData {
@@ -674,76 +716,166 @@ impl HttpFramework {
         Ok(())
     }
 
-    pub async fn start(&self, _actor_handle: ActorHandle, mut shutdown_receiver: ShutdownReceiver) -> Result<()> {
+    pub async fn start(
+        &self,
+        _actor_handle: ActorHandle,
+        mut shutdown_receiver: ShutdownReceiver,
+    ) -> Result<()> {
         // Create task to monitor shutdown signal
         let servers_ref = self.servers.clone();
         let server_handles_ref = self.server_handles.clone();
-        
+
+        info!("HTTP Framework started, monitoring for shutdown signal");
+
         tokio::spawn(async move {
             debug!("HTTP Framework shutdown monitor started");
-            
+
             // Wait for shutdown signal
             shutdown_receiver.wait_for_shutdown().await;
             info!("HTTP Framework received shutdown signal");
-            
+
             // First stop all the servers
-            {
+            let server_count = {
                 let servers = servers_ref.read().await;
-                debug!("HTTP Framework shutting down {} servers", servers.len());
-                
+                let count = servers.len();
+                debug!("HTTP Framework shutting down {} servers", count);
+
                 // Get server IDs
                 let server_ids: Vec<u64> = servers.keys().cloned().collect();
-                
+                count
+            };
+
+            if server_count > 0 {
                 // Create a vector to hold futures
-                let mut futures = Vec::new();
-                
-                // Stop each server in parallel
-                for server_id in server_ids {
+                let mut shutdown_tasks = Vec::new();
+
+                // Stop each server in parallel with individual timeouts
+                for server_id in servers_ref
+                    .read()
+                    .await
+                    .keys()
+                    .cloned()
+                    .collect::<Vec<u64>>()
+                {
                     let servers_clone = servers_ref.clone();
-                    let fut = tokio::spawn(async move {
-                        let mut servers = servers_clone.write().await;
-                        if let Some(server) = servers.get_mut(&server_id) {
-                            debug!("Stopping HTTP server {}", server_id);
-                            if let Err(e) = server.stop().await {
-                                warn!("Error stopping HTTP server {}: {}", server_id, e);
+                    let task = tokio::spawn(async move {
+                        let start_time = std::time::Instant::now();
+                        debug!("Starting shutdown of HTTP server {}", server_id);
+
+                        let result = {
+                            let mut servers = servers_clone.write().await;
+                            if let Some(server) = servers.get_mut(&server_id) {
+                                server.stop().await
                             } else {
-                                debug!("Successfully stopped HTTP server {}", server_id);
+                                debug!("Server {} not found during shutdown", server_id);
+                                Ok(())
                             }
+                        };
+
+                        match result {
+                            Ok(_) => debug!(
+                                "Successfully stopped HTTP server {} in {:?}",
+                                server_id,
+                                start_time.elapsed()
+                            ),
+                            Err(ref e) => warn!("Error stopping HTTP server {}: {}", server_id, e),
                         }
+                        (server_id, result)
                     });
-                    futures.push(fut);
+                    shutdown_tasks.push(task);
                 }
-                
-                // Wait for all servers to be stopped
-                for fut in futures {
-                    let _ = fut.await;
+
+                // Wait for all servers to be stopped with a global timeout
+                debug!("Waiting for all servers to stop (timeout: 10s)");
+                match tokio::time::timeout(
+                    std::time::Duration::from_secs(10),
+                    futures::future::join_all(shutdown_tasks),
+                )
+                .await
+                {
+                    Ok(results) => {
+                        let success_count = results
+                            .iter()
+                            .filter(|r| r.is_ok() && r.as_ref().unwrap().1.is_ok())
+                            .count();
+                        let failure_count = results.len() - success_count;
+
+                        if failure_count > 0 {
+                            warn!(
+                                "Stopped {}/{} HTTP servers successfully, {} had errors",
+                                success_count,
+                                results.len(),
+                                failure_count
+                            );
+                        } else {
+                            info!("All {} HTTP servers stopped successfully", success_count);
+                        }
+                    }
+                    Err(_) => {
+                        error!("Global timeout reached while waiting for servers to stop");
+
+                        // Log which servers might still be running
+                        let servers = servers_ref.read().await;
+                        let running_servers: Vec<u64> = servers
+                            .iter()
+                            .filter(|(_, server)| server.is_running())
+                            .map(|(id, _)| *id)
+                            .collect();
+
+                        if !running_servers.is_empty() {
+                            error!(
+                                "The following servers may still be running: {:?}",
+                                running_servers
+                            );
+                        }
+                    }
                 }
+            } else {
+                debug!("No HTTP servers to shut down");
             }
-            
+
             // Then clean up the handles
             {
                 let mut handles = server_handles_ref.write().await;
-                let handle_ids: Vec<u64> = handles.keys().cloned().collect();
-                
-                for handle_id in handle_ids {
-                    if let Some(handle) = handles.remove(&handle_id) {
-                        if let Some(task) = handle.task {
-                            if !task.is_finished() {
-                                task.abort();
-                                debug!("Aborted server task for server {}", handle_id);
+                if !handles.is_empty() {
+                    debug!("Cleaning up {} server handles", handles.len());
+                    let handle_ids: Vec<u64> = handles.keys().cloned().collect();
+
+                    for handle_id in handle_ids {
+                        if let Some(handle) = handles.remove(&handle_id) {
+                            if let Some(task) = handle.task {
+                                if !task.is_finished() {
+                                    debug!("Aborting server task for server {}", handle_id);
+                                    task.abort();
+                                    // Wait a tiny bit for the abort to register
+                                    tokio::time::sleep(Duration::from_millis(50)).await;
+                                    debug!("Aborted server task for server {}", handle_id);
+                                }
+                            }
+
+                            if let Some(tx) = handle.shutdown_tx {
+                                if tx.is_closed() {
+                                    debug!(
+                                        "Shutdown channel for server {} already closed",
+                                        handle_id
+                                    );
+                                } else {
+                                    debug!("Sending final shutdown signal to server {}", handle_id);
+                                    let _ = tx.send(()); // Ignore errors, this is just a backup
+                                }
                             }
                         }
                     }
                 }
             }
-            
+
             // Add a longer delay to ensure OS has time to release sockets
             debug!("Waiting for OS to release socket resources");
             tokio::time::sleep(Duration::from_millis(500)).await;
-            
-            debug!("HTTP Framework shutdown complete");
+
+            info!("HTTP Framework shutdown complete");
         });
-        
+
         Ok(())
     }
 }
