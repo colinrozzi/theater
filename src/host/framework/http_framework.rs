@@ -69,7 +69,6 @@ impl HttpFramework {
             next_middleware_id: Arc::new(AtomicU64::new(1)),
             server_handles: Arc::new(RwLock::new(HashMap::new())),
         }
-        }
     }
 
     pub async fn setup_host_functions(&self, actor_component: &mut ActorComponent) -> Result<()> {
@@ -1037,26 +1036,30 @@ impl HttpFramework {
         Ok(())
     }
 
-    pub async fn start(&self, _actor_handle: ActorHandle, mut shutdown_receiver: ShutdownReceiver) -> Result<()> {
+    pub async fn start(
+        &self,
+        _actor_handle: ActorHandle,
+        mut shutdown_receiver: ShutdownReceiver,
+    ) -> Result<()> {
         // Create task to monitor shutdown signal
         let servers_ref = self.servers.clone();
         let server_handles_ref = self.server_handles.clone();
-        
+
         tokio::spawn(async move {
             debug!("HTTP Framework shutdown monitor started");
-            
+
             // Wait for shutdown signal
             shutdown_receiver.wait_for_shutdown().await;
             info!("HTTP Framework received shutdown signal");
-            
+
             // Shut down all servers
             let servers = servers_ref.read().await;
             let mut handles = server_handles_ref.write().await;
             debug!("HTTP Framework shutting down {} servers", servers.len());
-            
+
             for (id, server) in servers.iter() {
                 debug!("Initiating shutdown of HTTP Framework server {}", id);
-                
+
                 if let Some(handle) = handles.get_mut(id) {
                     if let Some(tx) = handle.shutdown_tx.take() {
                         debug!("Sending graceful shutdown signal to server {}", id);
@@ -1068,11 +1071,11 @@ impl HttpFramework {
                     } else {
                         debug!("No shutdown channel for server {}", id);
                     }
-                    
+
                     // Give a moment for graceful shutdown
                     debug!("Waiting for server {} to shut down gracefully", id);
                     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-                    
+
                     // Force abort if still running
                     if let Some(task) = &handle.task {
                         if !task.is_finished() {
@@ -1087,10 +1090,10 @@ impl HttpFramework {
                     }
                 }
             }
-            
+
             debug!("HTTP Framework shutdown complete");
         });
-        
+
         Ok(())
     }
 }
