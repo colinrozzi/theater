@@ -1,4 +1,5 @@
 use crate::actor_executor::{ActorError, ActorOperation};
+use crate::shutdown::{ShutdownController, ShutdownReceiver, DEFAULT_SHUTDOWN_TIMEOUT};
 use crate::actor_runtime::ActorRuntime;
 use crate::chain::ChainEvent;
 use crate::id::TheaterId;
@@ -31,6 +32,7 @@ pub struct ActorProcess {
     pub children: HashSet<TheaterId>,
     pub status: ActorStatus,
     pub manifest_path: String,
+    pub shutdown_controller: ShutdownController,
 }
 
 impl TheaterRuntime {
@@ -285,11 +287,14 @@ impl TheaterRuntime {
 
         // start the actor in a new process
         let (response_tx, response_rx) = tokio::sync::oneshot::channel();
+        // Create a shutdown controller for this specific actor
+        let (shutdown_controller, shutdown_receiver) = ShutdownController::new();
         let (mailbox_tx, mailbox_rx) = mpsc::channel(100);
         let (operation_tx, operation_rx) = mpsc::channel(100);
         let theater_tx = self.theater_tx.clone();
 
         let actor_operation_tx = operation_tx.clone();
+        let shutdown_receiver_clone = shutdown_receiver;
         let actor_runtime_process = tokio::spawn(async move {
             let actor_id = TheaterId::generate();
             debug!("Initializing actor runtime");
@@ -304,6 +309,7 @@ impl TheaterRuntime {
                 operation_rx,
                 actor_operation_tx,
                 init,
+                shutdown_receiver_clone,
             )
             .await
             .unwrap()
@@ -323,6 +329,7 @@ impl TheaterRuntime {
                     children: HashSet::new(),
                     status: ActorStatus::Running,
                     manifest_path: manifest_path.clone(),
+                    shutdown_controller,
                 };
 
                 if let Some(parent_id) = parent_id {
@@ -393,17 +400,44 @@ impl TheaterRuntime {
 
     async fn stop_actor(&mut self, actor_id: TheaterId) -> Result<()> {
         debug!("Stopping actor: {:?}", actor_id);
-        if let Some(mut proc) = self.actors.remove(&actor_id) {
-            proc.process.abort();
-            proc.status = ActorStatus::Stopped;
-            debug!("Actor stopped and removed from runtime");
+        
+        if let Some(proc) = self.actors.get(&actor_id) {
+            debug!("Actor {:?} has {} children to stop first", actor_id, proc.children.len());
+            
+            // First, stop all children recursively
             let children = proc.children.clone();
-            for child_id in children {
-                Box::pin(self.stop_actor(child_id)).await?;
+            for (index, child_id) in children.iter().enumerate() {
+                debug!("Stopping child {}/{} with ID {:?} of parent {:?}", 
+                       index + 1, children.len(), child_id, actor_id);
+                Box::pin(self.stop_actor(child_id.clone())).await?;
+                debug!("Successfully stopped child {:?}", child_id);
+            }
+            
+            // Signal this specific actor to shutdown
+            debug!("Sending shutdown signal to actor {:?}", actor_id);
+            proc.shutdown_controller.signal_shutdown();
+            debug!("Shutdown signal sent to actor {:?}, waiting for grace period", actor_id);
+            
+            // Allow some time for graceful shutdown
+            tokio::time::sleep(DEFAULT_SHUTDOWN_TIMEOUT).await;
+            debug!("Grace period for actor {:?} complete", actor_id);
+            
+            // Force abort if still running
+            if let Some(proc) = self.actors.get(&actor_id) {
+                debug!("Force aborting actor {:?} task after grace period", actor_id);
+                proc.process.abort();
+                debug!("Actor {:?} task aborted", actor_id);
+            }
+            
+            // Remove from actors map
+            if let Some(mut removed_proc) = self.actors.remove(&actor_id) {
+                removed_proc.status = ActorStatus::Stopped;
+                debug!("Actor {:?} stopped and removed from runtime", actor_id);
             }
         } else {
             warn!("Attempted to stop non-existent actor: {:?}", actor_id);
         }
+        
         Ok(())
     }
 
@@ -513,7 +547,11 @@ impl TheaterRuntime {
 
         // Stop all actors
         for actor_id in self.actors.keys().cloned().collect::<Vec<_>>() {
-            self.stop_actor(actor_id).await?;
+            debug!("Stopping actor {} as part of theater shutdown", actor_id);
+            if let Err(e) = self.stop_actor(actor_id).await {
+                error!("Error stopping actor during shutdown: {}", e);
+                // Continue with other actors even if one fails
+            }
         }
 
         info!("Theater runtime shutdown complete");

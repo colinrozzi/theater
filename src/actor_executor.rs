@@ -1,5 +1,6 @@
 use anyhow::Result;
 use std::fmt::Debug;
+use crate::shutdown::ShutdownReceiver;
 use thiserror::Error;
 use tokio::sync::{mpsc, oneshot};
 use tokio::time::{Duration, Instant};
@@ -64,18 +65,21 @@ pub struct ActorExecutor {
     operation_rx: mpsc::Receiver<ActorOperation>,
     metrics: MetricsCollector,
     shutdown_initiated: bool,
+    shutdown_receiver: ShutdownReceiver,
 }
 
 impl ActorExecutor {
     pub fn new(
         actor_instance: ActorInstance,
         operation_rx: mpsc::Receiver<ActorOperation>,
+        shutdown_receiver: ShutdownReceiver,
     ) -> Self {
         Self {
             actor_instance,
             operation_rx,
             metrics: MetricsCollector::new(),
             shutdown_initiated: false,
+            shutdown_receiver,
         }
     }
 
@@ -178,7 +182,37 @@ impl ActorExecutor {
 
         loop {
             tokio::select! {
+                // Monitor shutdown channel
+                signal = self.shutdown_receiver.wait_for_shutdown() => {
+                    info!("Actor executor received shutdown signal");
+                    debug!("Executor for actor instance starting shutdown sequence");
+                    self.shutdown_initiated = true;
+                    debug!("Executor marked as shutting down, will reject new operations");
+                    break;
+                }
                 Some(op) = self.operation_rx.recv() => {
+                    if self.shutdown_initiated {
+                        // Reject operations during shutdown
+                        debug!("Rejecting operation during shutdown");
+                        match op {
+                            ActorOperation::Shutdown { response_tx } => {
+                                let _ = response_tx.send(Ok(()));
+                            }
+                            ActorOperation::CallFunction { response_tx, .. } => {
+                                let _ = response_tx.send(Err(ActorError::ShuttingDown));
+                            }
+                            ActorOperation::GetMetrics { response_tx } => {
+                                let _ = response_tx.send(Err(ActorError::ShuttingDown));
+                            }
+                            ActorOperation::GetChain { response_tx } => {
+                                let _ = response_tx.send(Err(ActorError::ShuttingDown));
+                            }
+                            ActorOperation::GetState { response_tx } => {
+                                let _ = response_tx.send(Err(ActorError::ShuttingDown));
+                            }
+                        }
+                        continue;
+                    }
                     debug!("Processing actor operation");
 
                     if self.shutdown_initiated {

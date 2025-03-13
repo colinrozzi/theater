@@ -1,6 +1,7 @@
 use crate::actor_executor::ActorError;
 use crate::actor_handle::ActorHandle;
 use crate::config::HttpServerHandlerConfig;
+use crate::shutdown::ShutdownReceiver;
 use crate::wasm::{ActorComponent, ActorInstance};
 use anyhow::Result;
 use axum::{
@@ -67,7 +68,7 @@ impl HttpServerHost {
         )
     }
 
-    pub async fn start(&self, actor_handle: ActorHandle) -> Result<()> {
+    pub async fn start(&self, actor_handle: ActorHandle, mut shutdown_receiver: ShutdownReceiver) -> Result<()> {
         let app = Router::new()
             .route("/", any(Self::handle_request))
             .route("/{*wildcard}", any(Self::handle_request))
@@ -76,8 +77,20 @@ impl HttpServerHost {
         info!("Starting http server on port {}", self.port);
         let listener = tokio::net::TcpListener::bind(&addr).await?;
         info!("Listening on {}", addr);
-        axum::serve(listener, app.into_make_service()).await?;
-        info!("Server started");
+        // Start with graceful shutdown
+        let server = axum::serve(listener, app.into_make_service());
+        
+        // Use with_graceful_shutdown
+        let server_task = server.with_graceful_shutdown(async move {
+            debug!("HTTP server on port {} waiting for shutdown signal", self.port);
+            shutdown_receiver.wait_for_shutdown().await;
+            info!("HTTP server on port {} received shutdown signal", self.port);
+            debug!("Beginning graceful shutdown of HTTP server on port {}", self.port);
+        });
+        
+        server_task.await?;
+        info!("HTTP server on port {} shut down gracefully", self.port);
+        debug!("HTTP server resources for port {} released", self.port);
         Ok(())
     }
 

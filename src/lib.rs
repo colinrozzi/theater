@@ -12,6 +12,7 @@ pub mod id;
 pub mod logging;
 pub mod messages;
 pub mod metrics;
+pub mod shutdown;
 pub mod store;
 pub mod theater_runtime;
 pub mod theater_server;

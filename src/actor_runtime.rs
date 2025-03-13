@@ -20,7 +20,8 @@ use crate::wasm::ActorComponent;
 use crate::Result;
 use tokio::sync::mpsc::{Receiver, Sender};
 use tokio::task::JoinHandle;
-use tracing::{info, warn};
+use tracing::{info, warn, debug};
+use crate::shutdown::{ShutdownController, ShutdownReceiver};
 
 #[allow(dead_code)]
 const SHUTDOWN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
@@ -29,6 +30,7 @@ pub struct ActorRuntime {
     pub actor_id: TheaterId,
     handler_tasks: Vec<JoinHandle<()>>,
     actor_executor_task: JoinHandle<()>,
+    shutdown_controller: ShutdownController,
 }
 
 impl ActorRuntime {
@@ -41,7 +43,10 @@ impl ActorRuntime {
         operation_rx: Receiver<ActorOperation>,
         operation_tx: Sender<ActorOperation>,
         init: bool,
+        parent_shutdown_receiver: ShutdownReceiver,
     ) -> Result<Self> {
+        // Create a local shutdown controller for this runtime
+        let (shutdown_controller, _) = ShutdownController::new();
         let mut handlers = Vec::new();
 
         handlers.push(Handler::MessageServer(MessageServerHost::new(
@@ -146,7 +151,9 @@ impl ActorRuntime {
 
         actor_instance.store.data_mut().set_state(init_state);
 
-        let mut actor_executor = ActorExecutor::new(actor_instance, operation_rx);
+        // Create a shutdown receiver for the executor
+        let executor_shutdown = shutdown_controller.subscribe();
+        let mut actor_executor = ActorExecutor::new(actor_instance, operation_rx, executor_shutdown);
         let executor_task = tokio::spawn(async move { actor_executor.run().await });
 
         if init {
@@ -164,31 +171,58 @@ impl ActorRuntime {
         for mut handler in handlers {
             info!("Starting handler: {:?}", handler.name());
             let actor_handle = actor_handle.clone();
+            let handler_shutdown = shutdown_controller.subscribe();
             let handler_task = tokio::spawn(async move {
-                if let Err(e) = handler.start(actor_handle).await {
+                if let Err(e) = handler.start(actor_handle, handler_shutdown).await {
                     warn!("Handler failed: {:?}", e);
                 }
             });
             handler_tasks.push(handler_task);
         }
+        
+        // Monitor parent shutdown signal and propagate
+        let shutdown_controller_clone = shutdown_controller.clone();
+        let actor_id_clone = id.clone();
+        tokio::spawn(async move {
+            debug!("Actor {:?} waiting for parent shutdown signal", actor_id_clone);
+            parent_shutdown_receiver.wait_for_shutdown().await;
+            info!("Actor {:?} runtime received parent shutdown signal", actor_id_clone);
+            debug!("Propagating shutdown signal to all handler components for actor {:?}", actor_id_clone);
+            shutdown_controller_clone.signal_shutdown();
+            debug!("Shutdown signal propagated to all components of actor {:?}", actor_id_clone);
+        });
 
         Ok(ActorRuntime {
             actor_id: id.clone(),
             handler_tasks,
             actor_executor_task: executor_task,
+            shutdown_controller,
         })
     }
 
     pub async fn stop(&mut self) -> Result<()> {
         info!("Initiating actor runtime shutdown");
-
-        // Stop all handlers
+        
+        // Signal shutdown to all components
+        info!("Signaling shutdown to all components");
+        self.shutdown_controller.signal_shutdown();
+        
+        // Wait a bit for graceful shutdown
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        
+        // If any handlers are still running, abort them
         for task in self.handler_tasks.drain(..) {
-            task.abort();
+            if !task.is_finished() {
+                debug!("Aborting handler task that didn't shut down gracefully");
+                task.abort();
+            }
         }
-
+        
         // Finally abort the executor if it's still running
-        self.actor_executor_task.abort();
+        if !self.actor_executor_task.is_finished() {
+            debug!("Aborting executor task that didn't shut down gracefully");
+            self.actor_executor_task.abort();
+        }
 
         info!("Actor runtime shutdown complete");
         Ok(())

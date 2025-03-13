@@ -1,4 +1,5 @@
 use crate::actor_handle::ActorHandle;
+use crate::shutdown::ShutdownReceiver;
 use crate::host::filesystem::FileSystemHost;
 use crate::host::framework::HttpFramework;
 use crate::host::http_client::HttpClientHost;
@@ -24,38 +25,38 @@ pub enum Handler {
 }
 
 impl Handler {
-    pub async fn start(&mut self, actor_handle: ActorHandle) -> Result<()> {
+    pub async fn start(&mut self, actor_handle: ActorHandle, shutdown_receiver: ShutdownReceiver) -> Result<()> {
         match self {
             Handler::MessageServer(h) => Ok(h
-                .start(actor_handle)
+                .start(actor_handle, shutdown_receiver)
                 .await
                 .expect("Error starting message server")),
             Handler::HttpServer(h) => Ok(h
-                .start(actor_handle)
+                .start(actor_handle, shutdown_receiver)
                 .await
                 .expect("Error starting http server")),
             Handler::FileSystem(h) => Ok(h
-                .start(actor_handle)
+                .start(actor_handle, shutdown_receiver)
                 .await
                 .expect("Error starting filesystem")),
             Handler::HttpClient(h) => Ok(h
-                .start(actor_handle)
+                .start(actor_handle, shutdown_receiver)
                 .await
                 .expect("Error starting http client")),
-            Handler::HttpFramework(_) => {
-                // The HTTP Framework doesn't need a start method as servers are started on demand
-                Ok(())
-            }
-            Handler::Runtime(h) => Ok(h.start(actor_handle).await.expect("Error starting runtime")),
+            Handler::HttpFramework(h) => Ok(h
+                .start(actor_handle, shutdown_receiver)
+                .await
+                .expect("Error starting http framework")),
+            Handler::Runtime(h) => Ok(h.start(actor_handle, shutdown_receiver).await.expect("Error starting runtime")),
             Handler::WebSocketServer(h) => Ok(h
-                .start(actor_handle)
+                .start(actor_handle, shutdown_receiver)
                 .await
                 .expect("Error starting websocket server")),
             Handler::Supervisor(h) => Ok(h
-                .start(actor_handle)
+                .start(actor_handle, shutdown_receiver)
                 .await
                 .expect("Error starting supervisor")),
-            Handler::Store(h) => Ok(h.start(actor_handle).await.expect("Error starting store")),
+            Handler::Store(h) => Ok(h.start(actor_handle, shutdown_receiver).await.expect("Error starting store")),
         }
     }
 

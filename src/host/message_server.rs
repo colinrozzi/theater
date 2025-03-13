@@ -3,6 +3,7 @@ use crate::actor_handle::ActorHandle;
 use crate::actor_store::ActorStore;
 use crate::events::{ChainEventData, EventData, message::MessageEventData};
 use crate::messages::{ActorMessage, ActorRequest, ActorSend, TheaterCommand};
+use crate::shutdown::ShutdownReceiver;
 use crate::wasm::{ActorComponent, ActorInstance};
 use crate::TheaterId;
 use anyhow::Result;
@@ -10,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use std::future::Future;
 use thiserror::Error;
 use tokio::sync::mpsc::{Receiver, Sender};
-use tracing::{error, info};
+use tracing::{debug, error, info};
 
 pub struct MessageServerHost {
     mailbox_rx: Receiver<ActorMessage>,
@@ -256,11 +257,30 @@ impl MessageServerHost {
         Ok(())
     }
 
-    pub async fn start(&mut self, actor_handle: ActorHandle) -> Result<()> {
+    pub async fn start(&mut self, actor_handle: ActorHandle, mut shutdown_receiver: ShutdownReceiver) -> Result<()> {
         info!("Starting message server");
-        while let Some(msg) = self.mailbox_rx.recv().await {
-            let _ = self.process_message(msg, actor_handle.clone()).await;
+        loop {
+            tokio::select! {
+                // Monitor shutdown channel
+                _ = shutdown_receiver.wait_for_shutdown() => {
+                    info!("Message server received shutdown signal");
+                    debug!("Message server shutting down");
+                    break;
+                }
+                msg = self.mailbox_rx.recv() => {
+                    match msg {
+                        Some(message) => {
+                            let _ = self.process_message(message, actor_handle.clone()).await;
+                        }
+                        None => {
+                            info!("Message channel closed, shutting down");
+                            break;
+                        }
+                    }
+                }
+            }
         }
+        info!("Message server shutdown complete");
         Ok(())
     }
 
