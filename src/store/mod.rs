@@ -110,7 +110,9 @@ impl ContentRef {
 
     /// Retrieve content from the filesystem
     pub async fn get_content(&self, base_path: &Path) -> Result<Vec<u8>> {
+        debug!("Base path: {:?}", base_path);
         let path = self.to_path(base_path);
+        debug!("Getting content at path: {:?}", path);
         fs::read(&path)
             .await
             .with_context(|| format!("Failed to read content at path: {:?}", path))
@@ -278,6 +280,7 @@ impl ContentStore {
 
     /// Retrieve content by its reference
     pub async fn get(&self, content_ref: &ContentRef) -> Result<Vec<u8>> {
+        debug!("Getting content with hash: {}", content_ref.hash());
         content_ref.get_content(&self.base_path).await
     }
 
