@@ -1,0 +1,12 @@
+package ntwk:theater;
+
+interface timing {
+    // Returns the current time in milliseconds since the UNIX epoch
+    now: func() -> u64;
+    
+    // Pauses execution for the specified number of milliseconds
+    sleep: func(duration: u64) -> result<_, string>;
+    
+    // Pauses execution until the specified timestamp (milliseconds since UNIX epoch)
+    deadline: func(timestamp: u64) -> result<_, string>;
+}

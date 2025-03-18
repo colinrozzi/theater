@@ -11,6 +11,7 @@ use crate::host::message_server::MessageServerHost;
 use crate::host::runtime::RuntimeHost;
 use crate::host::store::StoreHost;
 use crate::host::supervisor::SupervisorHost;
+use crate::host::timing::TimingHost;
 use crate::id::TheaterId;
 use crate::messages::{ActorMessage, TheaterCommand};
 use crate::shutdown::{ShutdownController, ShutdownReceiver};
@@ -70,6 +71,7 @@ impl ActorRuntime {
                     Handler::Supervisor(SupervisorHost::new(config.clone()))
                 }
                 HandlerConfig::Store(config) => Handler::Store(StoreHost::new(config.clone())),
+                HandlerConfig::Timing(config) => Handler::Timing(TimingHost::new(config.clone())),
             };
             handlers.push(handler);
         }

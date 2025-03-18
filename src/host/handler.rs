@@ -6,6 +6,7 @@ use crate::host::message_server::MessageServerHost;
 use crate::host::runtime::RuntimeHost;
 use crate::host::store::StoreHost;
 use crate::host::supervisor::SupervisorHost;
+use crate::host::timing::TimingHost;
 use crate::shutdown::ShutdownReceiver;
 use crate::wasm::{ActorComponent, ActorInstance};
 use anyhow::Result;
@@ -18,6 +19,7 @@ pub enum Handler {
     Runtime(RuntimeHost),
     Supervisor(SupervisorHost),
     Store(StoreHost),
+    Timing(TimingHost),
 }
 
 impl Handler {
@@ -55,6 +57,10 @@ impl Handler {
                 .start(actor_handle, shutdown_receiver)
                 .await
                 .expect("Error starting store")),
+            Handler::Timing(h) => Ok(h
+                .start(actor_handle, shutdown_receiver)
+                .await
+                .expect("Error starting timing")),
         }
     }
 
@@ -88,6 +94,10 @@ impl Handler {
                 .setup_host_functions(actor_component)
                 .await
                 .expect("Error setting up store host functions")),
+            Handler::Timing(h) => Ok(h
+                .setup_host_functions(actor_component)
+                .await
+                .expect("Error setting up timing host functions")),
         }
     }
 
@@ -121,6 +131,10 @@ impl Handler {
                 .add_export_functions(actor_instance)
                 .await
                 .expect("Error adding functions to store")),
+            Handler::Timing(handler) => Ok(handler
+                .add_export_functions(actor_instance)
+                .await
+                .expect("Error adding functions to timing")),
         }
     }
 
@@ -133,6 +147,7 @@ impl Handler {
             Handler::Runtime(_) => "runtime",
             Handler::Supervisor(_) => "supervisor",
             Handler::Store(_) => "store",
+            Handler::Timing(_) => "timing",
         }
     }
 }

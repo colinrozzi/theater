@@ -19,6 +19,7 @@ pub enum EventData {
     Runtime(runtime::RuntimeEventData),
     Supervisor(supervisor::SupervisorEventData),
     Store(store::StoreEventData),
+    Timing(timing::TimingEventData),
     Wasm(wasm::WasmEventData),
 }
 
@@ -63,4 +64,5 @@ pub mod message;
 pub mod runtime;
 pub mod store;
 pub mod supervisor;
+pub mod timing;
 pub mod wasm;

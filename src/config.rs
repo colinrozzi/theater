@@ -81,6 +81,8 @@ pub enum HandlerConfig {
     Supervisor(SupervisorHostConfig),
     #[serde(rename = "store")]
     Store(StoreHandlerConfig),
+    #[serde(rename = "timing")]
+    Timing(TimingHostConfig),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -88,6 +90,24 @@ pub struct SupervisorHostConfig {}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RuntimeHostConfig {}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TimingHostConfig {
+    #[serde(default = "default_max_sleep_duration")]
+    pub max_sleep_duration: u64,
+    #[serde(default = "default_min_sleep_duration")]
+    pub min_sleep_duration: u64,
+}
+
+fn default_max_sleep_duration() -> u64 {
+    // Default to 1 hour maximum sleep duration (in milliseconds)
+    3600000
+}
+
+fn default_min_sleep_duration() -> u64 {
+    // Default to 1 millisecond minimum sleep duration
+    1
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HttpServerHandlerConfig {

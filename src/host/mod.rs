@@ -6,5 +6,7 @@ pub mod message_server;
 pub mod runtime;
 pub mod store;
 pub mod supervisor;
+pub mod timing;
 pub use framework::HttpFramework;
 pub use handler::Handler;
+pub use timing::TimingHost;
