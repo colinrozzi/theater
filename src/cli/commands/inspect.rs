@@ -103,7 +103,8 @@ pub fn execute(args: &InspectArgs, verbose: bool, json: bool) -> Result<()> {
             
             // Calculate uptime if we have events
             if let Some(first_event) = events.first() {
-                let uptime = SystemTime::now().duration_since(first_event.timestamp).unwrap_or(Duration::from_secs(0));
+                let now = chrono::Utc::now().timestamp() as u64;
+                let uptime = Duration::from_secs(now.saturating_sub(first_event.timestamp));
                 println!("{}", formatting::format_key_value("Uptime", &formatting::format_duration(uptime)));
             }
             

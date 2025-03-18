@@ -173,7 +173,7 @@ pub fn execute(args: &ValidateArgs, verbose: bool, json: bool) -> Result<()> {
 /// Validate the manifest content
 fn validate_manifest(
     manifest: &ActorManifest,
-    manifest_path: &Path,
+    _manifest_path: &Path,
     check_paths: bool,
     check_interfaces: bool,
     errors: &mut Vec<ValidationResult>,

@@ -21,18 +21,16 @@ pub fn format_short_id(id: &TheaterId) -> String {
 pub fn format_status(status: &ActorStatus) -> String {
     match status {
         ActorStatus::Running => style("RUNNING").green().bold().to_string(),
-        ActorStatus::Starting => style("STARTING").yellow().bold().to_string(),
-        ActorStatus::Stopping => style("STOPPING").yellow().bold().to_string(),
         ActorStatus::Stopped => style("STOPPED").red().bold().to_string(),
         ActorStatus::Failed => style("FAILED").red().bold().to_string(),
-        ActorStatus::Unknown => style("UNKNOWN").dim().to_string(),
     }
 }
 
 /// Format a timestamp as a human-readable date/time
-pub fn format_timestamp(timestamp: &SystemTime) -> String {
-    let datetime: DateTime<Utc> = (*timestamp).into();
-    datetime.format("%Y-%m-%d %H:%M:%S UTC").to_string()
+pub fn format_timestamp(timestamp: &u64) -> String {
+    let datetime = chrono::DateTime::from_timestamp(*timestamp as i64, 0)
+        .unwrap_or_else(|| chrono::DateTime::UNIX_EPOCH);
+    datetime.format("%Y-%m-%d %H:%M:%S").to_string()
 }
 
 /// Format a duration in a human-readable form

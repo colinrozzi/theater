@@ -38,7 +38,7 @@ pub struct SubscribeArgs {
     pub timeout: u64,
 }
 
-pub fn execute(args: &SubscribeArgs, verbose: bool, json: bool) -> Result<()> {
+pub fn execute(args: &SubscribeArgs, _verbose: bool, json: bool) -> Result<()> {
     // Read actor ID from stdin if "-" is specified
     let actor_id_str = if args.actor_id == "-" {
         let mut input = String::new();

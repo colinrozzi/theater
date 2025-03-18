@@ -32,7 +32,7 @@ struct ShellCommand {
     args: Vec<String>,
 }
 
-pub fn execute(args: &ShellArgs, verbose: bool, _json: bool) -> Result<()> {
+pub fn execute(args: &ShellArgs, _verbose: bool, _json: bool) -> Result<()> {
     debug!("Starting interactive shell");
     debug!("Connecting to server at: {}", args.address);
     
@@ -66,7 +66,7 @@ pub fn execute(args: &ShellArgs, verbose: bool, _json: bool) -> Result<()> {
     
     // Setup command history
     let mut history = VecDeque::with_capacity(args.history_size);
-    let mut history_index = 0;
+    let mut _history_index = 0; // Kept for future use with keyboard navigation
     
     // Setup running flag for ctrl+c handling
     let running = Arc::new(AtomicBool::new(true));
@@ -108,7 +108,7 @@ pub fn execute(args: &ShellArgs, verbose: bool, _json: bool) -> Result<()> {
             }
             history.push_back(input.to_string());
         }
-        history_index = history.len();
+        _history_index = history.len(); // Update for future keyboard navigation
         
         // Parse command
         let command = parse_command(input);
@@ -251,7 +251,7 @@ fn handle_list_command(client: &mut TheaterClient, runtime: &tokio::runtime::Run
         let status = runtime.block_on(async {
             match client.get_actor_status(actor_id.clone()).await {
                 Ok(status) => status,
-                Err(_) => theater::messages::ActorStatus::Unknown,
+                Err(_) => theater::messages::ActorStatus::Stopped, // Use Stopped as fallback
             }
         });
         

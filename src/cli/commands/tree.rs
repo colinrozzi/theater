@@ -73,7 +73,7 @@ pub fn execute(args: &TreeArgs, verbose: bool, json: bool) -> Result<()> {
             // Get actor status
             let status = match client.get_actor_status(actor_id.clone()).await {
                 Ok(status) => status,
-                Err(_) => ActorStatus::Unknown,
+                Err(_) => ActorStatus::Stopped, // Use Stopped as fallback
             };
             
             // We'd need to get actual parent/child relationships from the server
