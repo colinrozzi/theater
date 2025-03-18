@@ -36,14 +36,18 @@ theater --json <command>
 | `build`   | Build a Theater actor to WebAssembly      |
 | `create`  | Create a new Theater actor project        |
 | `events`  | Get actor events                          |
+| `inspect` | Show detailed information about an actor  |
 | `list`    | List all running actors                   |
 | `logs`    | View actor logs                           |
 | `message` | Send a message to an actor                |
 | `restart` | Restart a running actor                   |
 | `server`  | Start a Theater server                    |
+| `shell`   | Start an interactive shell                |
 | `start`   | Start an actor from a manifest            |
 | `state`   | Get actor state                           |
 | `stop`    | Stop a running actor                      |
+| `tree`    | Show actor hierarchy as a tree            |
+| `validate` | Validate an actor manifest               |
 | `watch`   | Watch a directory and redeploy on changes |
 
 ## Detailed Command Usage
@@ -275,6 +279,67 @@ For parent-child actor relationships:
 2. Configure the parent with supervisor capabilities
 3. Start the parent actor
 4. The parent can then spawn and manage child actors
+
+## New Advanced Commands
+
+### Inspecting Actors
+
+```bash
+# Inspect an actor in detail
+theater inspect <actor-id>
+
+# Show detailed view with full state and all events
+theater inspect <actor-id> --detailed
+```
+
+### Visualizing Actor Hierarchies
+
+```bash
+# View actor hierarchy as a tree
+theater tree
+
+# Limit tree depth
+theater tree --depth 2
+
+# Show tree starting from a specific actor
+theater tree --root <actor-id>
+```
+
+### Validating Manifests
+
+```bash
+# Validate an actor manifest
+theater validate path/to/manifest.toml
+
+# Validate with interface compatibility check
+theater validate path/to/manifest.toml --check-interfaces
+```
+
+### Interactive Shell
+
+Theater provides an interactive shell for working with actors:
+
+```bash
+# Start the interactive shell
+theater shell
+
+# Connect to a custom server
+theater shell --address 127.0.0.1:9001
+```
+
+In the shell, you can run commands like:
+
+- `list` - List all running actors
+- `inspect <id>` - Show detailed information about an actor
+- `state <id>` - Show the current state of an actor
+- `events <id>` - Show events for an actor
+- `start <path>` - Start an actor from a manifest
+- `stop <id>` - Stop a running actor
+- `restart <id>` - Restart a running actor
+- `message <id> <msg>` - Send a message to an actor
+- `clear` - Clear the screen
+- `help` - Show help
+- `exit` - Exit the shell
 
 ## Tips and Tricks
 

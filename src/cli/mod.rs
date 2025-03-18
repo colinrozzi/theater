@@ -1,6 +1,7 @@
 pub mod client;
 pub mod commands;
 pub mod templates;
+pub mod utils;
 
 use clap::{Parser, Subcommand};
 
@@ -60,6 +61,22 @@ pub enum Commands {
     #[command(name = "events")]
     Events(commands::events::EventsArgs),
 
+    /// Inspect a running actor (detailed view)
+    #[command(name = "inspect")]
+    Inspect(commands::inspect::InspectArgs),
+
+    /// Show actor hierarchy as a tree
+    #[command(name = "tree")]
+    Tree(commands::tree::TreeArgs),
+
+    /// Validate an actor manifest
+    #[command(name = "validate")]
+    Validate(commands::validate::ValidateArgs),
+
+    /// Start interactive shell
+    #[command(name = "shell")]
+    Shell(commands::shell::ShellArgs),
+
     /// Stop a running actor
     #[command(name = "stop")]
     Stop(commands::stop::StopArgs),
@@ -90,6 +107,10 @@ pub fn run() -> anyhow::Result<()> {
         Commands::Logs(args) => commands::logs::execute(args, cli.verbose, cli.json),
         Commands::State(args) => commands::state::execute(args, cli.verbose, cli.json),
         Commands::Events(args) => commands::events::execute(args, cli.verbose, cli.json),
+        Commands::Inspect(args) => commands::inspect::execute(args, cli.verbose, cli.json),
+        Commands::Tree(args) => commands::tree::execute(args, cli.verbose, cli.json),
+        Commands::Validate(args) => commands::validate::execute(args, cli.verbose, cli.json),
+        Commands::Shell(args) => commands::shell::execute(args, cli.verbose, cli.json),
         Commands::Start(args) => commands::start::execute(args, cli.verbose, cli.json),
         Commands::Stop(args) => commands::stop::execute(args, cli.verbose, cli.json),
         Commands::Restart(args) => commands::restart::execute(args, cli.verbose, cli.json),

@@ -1,13 +1,17 @@
 pub mod build;
 pub mod create;
 pub mod events;
+pub mod inspect;
 pub mod list;
 pub mod logs;
 pub mod message;
 pub mod restart;
 pub mod server;
+pub mod shell;
 pub mod start;
 pub mod state;
 pub mod stop;
 pub mod subscribe;
+pub mod tree;
+pub mod validate;
 pub mod watch;
