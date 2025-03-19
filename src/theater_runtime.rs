@@ -227,7 +227,7 @@ impl TheaterRuntime {
                         .map(|proc| proc.status.clone())
                         .unwrap_or(ActorStatus::Stopped);
                     if let Err(e) = response_tx.send(Ok(status)) {
-                        error!("Failed tk send actor status: {:?}", e);
+                        error!("Failed to send actor status: {:?}", e);
                     }
                 }
                 TheaterCommand::GetActorMetrics {
@@ -256,6 +256,81 @@ impl TheaterRuntime {
                         std::collections::hash_map::Entry::Vacant(entry) => {
                             entry.insert(vec![event_tx]);
                         }
+                    }
+                }
+                // Channel-related commands
+                TheaterCommand::ChannelOpen {
+                    initiator_id,
+                    target_id,
+                    channel_id,
+                    initial_message,
+                    response_tx,
+                } => {
+                    debug!("Opening channel from {:?} to {:?}", initiator_id, target_id);
+                    if let Some(proc) = self.actors.get_mut(&target_id) {
+                        // Create channel open message
+                        let actor_message = ActorMessage::ChannelOpen(ActorChannelOpen {
+                            channel_id: channel_id.clone(),
+                            response_tx,
+                            data: initial_message,
+                        });
+                        
+                        // Send the message to the target actor
+                        if let Err(e) = proc.mailbox_tx.send(actor_message).await {
+                            error!("Failed to send channel open message to actor: {}", e);
+                        }
+                    } else {
+                        warn!("Attempted to open channel to non-existent actor: {:?}", target_id);
+                        let _ = response_tx.send(Err(anyhow::anyhow!("Target actor not found")));
+                    }
+                }
+                TheaterCommand::ChannelMessage {
+                    channel_id,
+                    message,
+                } => {
+                    debug!("Sending message on channel: {:?}", channel_id);
+                    
+                    // Find any actor that has this channel registered
+                    let mut found = false;
+                    for (_, proc) in self.actors.iter_mut() {
+                        // In a real implementation, we would have a lookup table for channels->actors
+                        // but for now just forward to all actors and let them decide if they should handle it
+                        let actor_message = ActorMessage::ChannelMessage(ActorChannelMessage {
+                            channel_id: channel_id.clone(),
+                            data: message.clone(),
+                        });
+                        
+                        if let Err(e) = proc.mailbox_tx.send(actor_message).await {
+                            error!("Failed to send channel message to actor: {}", e);
+                        }
+                        found = true;
+                    }
+                    
+                    if !found {
+                        warn!("No actors found to handle channel message for: {:?}", channel_id);
+                    }
+                }
+                TheaterCommand::ChannelClose {
+                    channel_id,
+                } => {
+                    debug!("Closing channel: {:?}", channel_id);
+                    
+                    // Find any actor that has this channel registered
+                    let mut found = false;
+                    for (_, proc) in self.actors.iter_mut() {
+                        // In a real implementation, we would have a lookup table for channels->actors
+                        let actor_message = ActorMessage::ChannelClose(ActorChannelClose {
+                            channel_id: channel_id.clone(),
+                        });
+                        
+                        if let Err(e) = proc.mailbox_tx.send(actor_message).await {
+                            error!("Failed to send channel close message to actor: {}", e);
+                        }
+                        found = true;
+                    }
+                    
+                    if !found {
+                        warn!("No actors found to handle channel close for: {:?}", channel_id);
                     }
                 }
             };

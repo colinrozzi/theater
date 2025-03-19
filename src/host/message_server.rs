@@ -1,65 +1,4 @@
-        interface
-            .func_wrap_async(
-                "close-channel",
-                move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore>,
-                      (channel_id,): (String,)|
-                      -> Box<dyn Future<Output = Result<(Result<(), String>,)>> + Send> {
-                    let channel_id_clone = channel_id.clone();
-                    
-                    // Record the channel close call event
-                    ctx.data_mut().record_event(ChainEventData {
-                        event_type: "ntwk:theater/message-server-host/close-channel".to_string(),
-                        data: EventData::Message(MessageEventData::CloseChannelCall {
-                            channel_id: channel_id.clone(),
-                        }),
-                        timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                        description: Some(format!("Closing channel {}", channel_id)),
-                    });
-                    
-                    // Parse channel ID
-                    let channel_id_parsed = ChannelId(channel_id.clone());
-                    
-                    // Create the command
-                    let command = TheaterCommand::ChannelClose {
-                        channel_id: channel_id_parsed,
-                    };
-                    
-                    let theater_tx = theater_tx.clone();
-                    
-                    Box::new(async move {
-                        match theater_tx.send(command).await {
-                            Ok(_) => {
-                                // Record successful channel close
-                                ctx.data_mut().record_event(ChainEventData {
-                                    event_type: "ntwk:theater/message-server-host/close-channel".to_string(),
-                                    data: EventData::Message(MessageEventData::CloseChannelResult {
-                                        channel_id: channel_id_clone.clone(),
-                                        success: true,
-                                    }),
-                                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                                    description: Some(format!("Successfully closed channel {}", channel_id_clone)),
-                                });
-                                Ok((Ok(()),))
-                            },
-                            Err(e) => {
-                                let err_msg = format!("Failed to close channel: {}", e);
-                                ctx.data_mut().record_event(ChainEventData {
-                                    event_type: "ntwk:theater/message-server-host/close-channel".to_string(),
-                                    data: EventData::Message(MessageEventData::Error {
-                                        operation: "close-channel".to_string(),
-                                        recipient: None,
-                                        message: err_msg.clone(),
-                                    }),
-                                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                                    description: Some(format!("Error closing channel {}: {}", channel_id_clone, err_msg)),
-                                });
-                                Ok((Err(err_msg),))
-                            }
-                        }
-                    })
-                },
-            )
-            .expect("Failed to wrap async close-channel function");use crate::actor_executor::ActorError;
+use crate::actor_executor::ActorError;
 use crate::actor_handle::ActorHandle;
 use crate::actor_store::ActorStore;
 use crate::events::{ChainEventData, EventData, message::MessageEventData};
@@ -74,7 +13,7 @@ use std::future::Future;
 use std::collections::HashMap;
 use thiserror::Error;
 use tokio::sync::mpsc::{Receiver, Sender};
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
 
 pub struct MessageServerHost {
     mailbox_rx: Receiver<ActorMessage>,

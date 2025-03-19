@@ -3,20 +3,47 @@ use wasmtime::component::{ComponentNamedList, ComponentType, Lift, Lower};
 
 use tokio::sync::{mpsc, oneshot};
 use tokio::time::timeout;
-use tracing::error;
+use tracing::{error, info};
 
 use crate::actor_executor::{ActorError, ActorOperation, DEFAULT_OPERATION_TIMEOUT};
 use crate::chain::ChainEvent;
+use crate::events::ChainEventData;
+use crate::messages::TheaterCommand;
 use crate::metrics::ActorMetrics;
+use crate::TheaterId;
 
 #[derive(Clone)]
 pub struct ActorHandle {
     operation_tx: mpsc::Sender<ActorOperation>,
+    actor_id: TheaterId,
+    theater_tx: mpsc::Sender<TheaterCommand>,
 }
 
 impl ActorHandle {
-    pub fn new(operation_tx: mpsc::Sender<ActorOperation>) -> Self {
-        Self { operation_tx }
+    pub fn new(operation_tx: mpsc::Sender<ActorOperation>, actor_id: TheaterId, theater_tx: mpsc::Sender<TheaterCommand>) -> Self {
+        Self { operation_tx, actor_id, theater_tx }
+    }
+    
+    pub fn actor_id(&self) -> &TheaterId {
+        &self.actor_id
+    }
+    
+    pub fn record_event(&self, event: ChainEventData) {
+        let event = ChainEvent {
+            data: event,
+            // These fields will be filled in by the actor runtime
+            hash: 0,
+            parent_hash: None,
+        };
+        
+        // Send the event to the theater runtime
+        let theater_tx = self.theater_tx.clone();
+        let actor_id = self.actor_id.clone();
+        tokio::spawn(async move {
+            if let Err(e) = theater_tx.send(TheaterCommand::NewEvent { actor_id, event }).await {
+                error!("Failed to send event to theater runtime: {}", e);
+            }
+        });
     }
 
     pub async fn call_function<P, R>(&self, name: String, params: P) -> Result<R, ActorError>
