@@ -47,6 +47,61 @@ pub enum MessageEventData {
         response_size: usize,
         success: bool,
     },
+    
+    // Channel events
+    OpenChannelCall {
+        recipient: String,
+        message_type: String,
+        size: usize,
+    },
+    OpenChannelResult {
+        recipient: String,
+        channel_id: String,
+        accepted: bool,
+    },
+    ChannelMessageCall {
+        channel_id: String,
+        message_type: String,
+        size: usize,
+    },
+    ChannelMessageResult {
+        channel_id: String,
+        success: bool,
+    },
+    CloseChannelCall {
+        channel_id: String,
+    },
+    CloseChannelResult {
+        channel_id: String,
+        success: bool,
+    },
+    HandleChannelOpenCall {
+        sender: String,
+        channel_id: String,
+        message_type: String,
+        size: usize,
+    },
+    HandleChannelOpenResult {
+        sender: String,
+        channel_id: String,
+        accepted: bool,
+    },
+    HandleChannelMessageCall {
+        channel_id: String,
+        message_type: String,
+        size: usize,
+    },
+    HandleChannelMessageResult {
+        channel_id: String,
+        success: bool,
+    },
+    HandleChannelCloseCall {
+        channel_id: String,
+    },
+    HandleChannelCloseResult {
+        channel_id: String,
+        success: bool,
+    },
 
     // Error events
     Error {

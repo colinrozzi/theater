@@ -1,18 +1,28 @@
 package ntwk:theater;
 
 interface message-server-client {
-    use types.{json, event};
+    use types.{json, event, channel-id, channel-accept};
 
     handle-send: func(state: option<json>, params: tuple<json>) -> result<tuple<option<json>>, string>;
     handle-request: func(state: option<json>, params: tuple<json>) -> result<tuple<option<json>, tuple<json>>, string>;
+    
+    // Channel operations
+    handle-channel-open: func(state: option<json>, params: tuple<json>) -> result<tuple<option<json>, channel-accept>, string>;
+    handle-channel-message: func(state: option<json>, channel-id: channel-id, msg: json) -> result<tuple<option<json>>, string>;
+    handle-channel-close: func(state: option<json>, channel-id: channel-id) -> result<tuple<option<json>>, string>;
 }
 
 interface message-server-host {
-    use types.{json, actor-id};
+    use types.{json, actor-id, channel-id};
 
     // send and forget message
     send: func(actor-id: actor-id, msg: json) -> result<_, string>;
 
     // send message and wait for response
     request: func(actor-id: actor-id, msg: json) -> result<json, string>;
+    
+    // channel operations
+    open-channel: func(actor-id: actor-id, initial-msg: json) -> result<channel-id, string>;
+    send-on-channel: func(channel-id: channel-id, msg: json) -> result<_, string>;
+    close-channel: func(channel-id: channel-id) -> result<_, string>;
 }

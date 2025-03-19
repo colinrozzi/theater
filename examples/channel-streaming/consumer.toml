@@ -1,0 +1,7 @@
+name = "streaming-consumer"
+description = "Example actor that demonstrates consuming data over a channel"
+component_path = "consumer.wasm"
+
+[[handlers]]
+type = "message-server"
+config = {}

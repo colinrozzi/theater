@@ -7,6 +7,12 @@ interface types {
     type state = option<list<u8>>;
 
     type actor-id = string;
+    type channel-id = string;
+    
+    record channel-accept {
+        accepted: bool,
+        message: option<json>,
+    }
 
     record chain {
         events: list<meta-event>

@@ -6,6 +6,7 @@ This document tracks changes that are currently in progress for the Theater proj
 
 | Date | Change | Description | Status |
 |------|--------|-------------|--------|
+| 2025-03-19 | Channel Streaming | Adding bidirectional streaming capability to message server for long-standing connections between actors | In Progress |
 | 2025-03-13 | Actor Shutdown System | Implementing robust shutdown mechanism to ensure proper termination of all actor-related processes | In Progress |
 | 2025-02-26 | Random ID System | Implementing cryptographically secure random IDs for actors | In Progress |
 | 2025-02-26 | WebSocket Enhancements | Improving WebSocket handler with automatic reconnection and better error handling | In Progress |
