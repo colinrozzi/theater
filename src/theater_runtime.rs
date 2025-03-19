@@ -4,6 +4,7 @@ use crate::actor_runtime::ActorRuntime;
 use crate::chain::ChainEvent;
 use crate::id::TheaterId;
 use crate::messages::{ActorMessage, ActorStatus, TheaterCommand};
+use crate::messages::{ActorChannelOpen, ActorChannelMessage, ActorChannelClose, ChannelId};
 use crate::metrics::ActorMetrics;
 use crate::utils::resolve_reference;
 use crate::ManifestConfig;

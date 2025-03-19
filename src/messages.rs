@@ -138,7 +138,7 @@ impl TheaterCommand {
 
 // Channel ID type
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
-pub struct ChannelId(String);
+pub struct ChannelId(pub String);
 
 impl std::fmt::Display for ChannelId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

@@ -3,7 +3,7 @@ use wasmtime::component::{ComponentNamedList, ComponentType, Lift, Lower};
 
 use tokio::sync::{mpsc, oneshot};
 use tokio::time::timeout;
-use tracing::{error, info};
+use tracing::error;
 
 use crate::actor_executor::{ActorError, ActorOperation, DEFAULT_OPERATION_TIMEOUT};
 use crate::chain::ChainEvent;
@@ -28,9 +28,10 @@ impl ActorHandle {
         &self.actor_id
     }
     
-    pub fn record_event(&self, event: ChainEventData) {
+    pub fn record_event(&self, event_data: ChainEventData) {
+        // Create a chain event
         let event = ChainEvent {
-            data: event,
+            data: event_data,
             // These fields will be filled in by the actor runtime
             hash: 0,
             parent_hash: None,

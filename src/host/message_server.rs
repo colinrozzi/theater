@@ -259,7 +259,7 @@ impl MessageServerHost {
                       (address, initial_msg): (String, Vec<u8>)|
                       -> Box<dyn Future<Output = Result<(Result<String, String>,)>> + Send> {
                     // Get the current actor ID
-                    let current_actor_id = ctx.data().actor_id.clone();
+                    let current_actor_id = ctx.data().id.clone();
                     let address_clone = address.clone();
                     
                     // Record the channel open call event

@@ -64,7 +64,7 @@ impl Handler {
         }
     }
 
-    pub async fn setup_host_functions(&self, actor_component: &mut ActorComponent) -> Result<()> {
+    pub async fn setup_host_functions(&mut self, actor_component: &mut ActorComponent) -> Result<()> {
         match self {
             Handler::MessageServer(h) => Ok(h
                 .setup_host_functions(actor_component)

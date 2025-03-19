@@ -53,7 +53,7 @@ impl ActorRuntime {
         )));
 
         for handler_config in &config.handlers {
-            let handler = match handler_config {
+        let handler = match handler_config {
                 HandlerConfig::MessageServer(_) => {
                     panic!("MessageServer handler is already added")
                 }
@@ -92,7 +92,7 @@ impl ActorRuntime {
 
         // Add the host functions to the linker of the actor
         {
-            for handler in &handlers {
+            for handler in &mut handlers {
                 info!(
                     "Setting up host functions for handler: {:?}",
                     handler.name()
