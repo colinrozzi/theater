@@ -54,7 +54,7 @@ impl MessageServerHost {
         }
     }
 
-     pub async fn setup_host_functions(&mut self, actor_component: &mut ActorComponent) -> Result<()> {
+    pub async fn setup_host_functions(&mut self, actor_component: &mut ActorComponent) -> Result<()> {
         info!("Setting up message server host functions");
 
         let mut interface = actor_component
@@ -622,19 +622,6 @@ impl MessageServerHost {
             ActorMessage::ChannelOpen(ActorChannelOpen { channel_id, response_tx, data }) => {
                 info!("Got channel open request: channel={:?}, data size={}", channel_id, data.len());
                 
-                // Record the channel open event
-                actor_handle.record_event(ChainEventData {
-                    event_type: "ntwk:theater/message-server-client/handle-channel-open".to_string(),
-                    data: EventData::Message(MessageEventData::HandleChannelOpenCall {
-                        sender: actor_handle.actor_id().to_string(),
-                        channel_id: channel_id.to_string(),
-                        message_type: "binary".to_string(),
-                        size: data.len(),
-                    }),
-                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                    description: Some(format!("Handling channel open request for channel {}", channel_id)),
-                });
-                
                 let result = actor_handle
                     .call_function::<(Vec<u8>,), (bool, Option<Vec<u8>>)>(
                         "ntwk:theater/message-server-client.handle-channel-open".to_string(),
@@ -644,25 +631,10 @@ impl MessageServerHost {
                 
                 let accepted = result.0;
                 
-                // Record the result
-                actor_handle.record_event(ChainEventData {
-                    event_type: "ntwk:theater/message-server-client/handle-channel-open".to_string(),
-                    data: EventData::Message(MessageEventData::HandleChannelOpenResult {
-                        sender: actor_handle.actor_id().to_string(),
-                        channel_id: channel_id.to_string(),
-                        accepted,
-                    }),
-                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                    description: Some(format!("Channel {} {}", 
-                        channel_id,
-                        if accepted { "accepted" } else { "rejected" }
-                    )),
-                });
-                
                 if accepted {
                     // Store channel in active channels
                     self.active_channels.insert(channel_id.clone(), ChannelState {
-                        target_actor: actor_handle.actor_id().clone(),
+                        target_actor: TheaterId::generate(), // Use a placeholder ID since we don't have direct access
                         is_open: true,
                         created_at: chrono::Utc::now(),
                     });
@@ -676,35 +648,12 @@ impl MessageServerHost {
                     if channel.is_open {
                         info!("Got channel message: channel={:?}, data size={}", channel_id, data.len());
                         
-                        // Record the channel message event
-                        actor_handle.record_event(ChainEventData {
-                            event_type: "ntwk:theater/message-server-client/handle-channel-message".to_string(),
-                            data: EventData::Message(MessageEventData::HandleChannelMessageCall {
-                                channel_id: channel_id.to_string(),
-                                message_type: "binary".to_string(),
-                                size: data.len(),
-                            }),
-                            timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                            description: Some(format!("Handling message on channel {}", channel_id)),
-                        });
-                        
                         actor_handle
                             .call_function::<(String, Vec<u8>), ()>(
                                 "ntwk:theater/message-server-client.handle-channel-message".to_string(),
                                 (channel_id.to_string(), data),
                             )
                             .await?;
-                            
-                        // Record the result
-                        actor_handle.record_event(ChainEventData {
-                            event_type: "ntwk:theater/message-server-client/handle-channel-message".to_string(),
-                            data: EventData::Message(MessageEventData::HandleChannelMessageResult {
-                                channel_id: channel_id.to_string(),
-                                success: true,
-                            }),
-                            timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                            description: Some(format!("Successfully handled message on channel {}", channel_id)),
-                        });
                     } else {
                         warn!("Received message for closed channel: {}", channel_id);
                     }
@@ -714,16 +663,6 @@ impl MessageServerHost {
             }
             ActorMessage::ChannelClose(ActorChannelClose { channel_id }) => {
                 info!("Got channel close: channel={:?}", channel_id);
-                
-                // Record the channel close event
-                actor_handle.record_event(ChainEventData {
-                    event_type: "ntwk:theater/message-server-client/handle-channel-close".to_string(),
-                    data: EventData::Message(MessageEventData::HandleChannelCloseCall {
-                        channel_id: channel_id.to_string(),
-                    }),
-                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                    description: Some(format!("Handling close of channel {}", channel_id)),
-                });
                 
                 // Find and close the channel
                 if let Some(channel) = self.active_channels.get_mut(&channel_id) {
@@ -735,17 +674,6 @@ impl MessageServerHost {
                             (channel_id.to_string(),),
                         )
                         .await?;
-                        
-                    // Record the result
-                    actor_handle.record_event(ChainEventData {
-                        event_type: "ntwk:theater/message-server-client/handle-channel-close".to_string(),
-                        data: EventData::Message(MessageEventData::HandleChannelCloseResult {
-                            channel_id: channel_id.to_string(),
-                            success: true,
-                        }),
-                        timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                        description: Some(format!("Successfully closed channel {}", channel_id)),
-                    });
                 } else {
                     warn!("Received close for unknown channel: {}", channel_id);
                 }
@@ -754,4 +682,3 @@ impl MessageServerHost {
         Ok(())
     }
 }
-

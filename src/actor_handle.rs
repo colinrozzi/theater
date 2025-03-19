@@ -7,33 +7,16 @@ use tracing::error;
 
 use crate::actor_executor::{ActorError, ActorOperation, DEFAULT_OPERATION_TIMEOUT};
 use crate::chain::ChainEvent;
-use crate::events::ChainEventData;
-use crate::messages::TheaterCommand;
 use crate::metrics::ActorMetrics;
-use crate::TheaterId;
 
 #[derive(Clone)]
 pub struct ActorHandle {
     operation_tx: mpsc::Sender<ActorOperation>,
-    actor_id: TheaterId,
-    theater_tx: mpsc::Sender<TheaterCommand>,
 }
 
 impl ActorHandle {
-    pub fn new(
-        operation_tx: mpsc::Sender<ActorOperation>,
-        actor_id: TheaterId,
-        theater_tx: mpsc::Sender<TheaterCommand>,
-    ) -> Self {
-        Self {
-            operation_tx,
-            actor_id,
-            theater_tx,
-        }
-    }
-
-    pub fn actor_id(&self) -> &TheaterId {
-        &self.actor_id
+    pub fn new(operation_tx: mpsc::Sender<ActorOperation>) -> Self {
+        Self { operation_tx }
     }
 
     pub async fn call_function<P, R>(&self, name: String, params: P) -> Result<R, ActorError>

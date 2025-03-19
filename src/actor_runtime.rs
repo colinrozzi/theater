@@ -76,11 +76,7 @@ impl ActorRuntime {
             handlers.push(handler);
         }
 
-        let actor_handle = ActorHandle::new(
-            operation_tx.clone(), 
-            id.clone(), 
-            theater_tx.clone()
-        );
+        let actor_handle = ActorHandle::new(operation_tx.clone());
         let actor_store = ActorStore::new(id.clone(), theater_tx.clone(), actor_handle.clone());
         let mut actor_component = ActorComponent::new(config, actor_store).await.expect(
             format!(
