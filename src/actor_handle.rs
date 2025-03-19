@@ -20,31 +20,20 @@ pub struct ActorHandle {
 }
 
 impl ActorHandle {
-    pub fn new(operation_tx: mpsc::Sender<ActorOperation>, actor_id: TheaterId, theater_tx: mpsc::Sender<TheaterCommand>) -> Self {
-        Self { operation_tx, actor_id, theater_tx }
+    pub fn new(
+        operation_tx: mpsc::Sender<ActorOperation>,
+        actor_id: TheaterId,
+        theater_tx: mpsc::Sender<TheaterCommand>,
+    ) -> Self {
+        Self {
+            operation_tx,
+            actor_id,
+            theater_tx,
+        }
     }
-    
+
     pub fn actor_id(&self) -> &TheaterId {
         &self.actor_id
-    }
-    
-    pub fn record_event(&self, event_data: ChainEventData) {
-        // Create a chain event
-        let event = ChainEvent {
-            data: event_data,
-            // These fields will be filled in by the actor runtime
-            hash: 0,
-            parent_hash: None,
-        };
-        
-        // Send the event to the theater runtime
-        let theater_tx = self.theater_tx.clone();
-        let actor_id = self.actor_id.clone();
-        tokio::spawn(async move {
-            if let Err(e) = theater_tx.send(TheaterCommand::NewEvent { actor_id, event }).await {
-                error!("Failed to send event to theater runtime: {}", e);
-            }
-        });
     }
 
     pub async fn call_function<P, R>(&self, name: String, params: P) -> Result<R, ActorError>
