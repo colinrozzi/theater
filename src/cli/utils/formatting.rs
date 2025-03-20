@@ -1,9 +1,8 @@
-use console::{style, Style};
+use console::style;
 use theater::id::TheaterId;
 use theater::messages::ActorStatus;
 use theater::ChainEvent;
-use std::time::{Duration, SystemTime};
-use chrono::{DateTime, Utc};
+use std::time::Duration;
 
 /// Format an actor ID in a consistent way
 pub fn format_id(id: &TheaterId) -> String {

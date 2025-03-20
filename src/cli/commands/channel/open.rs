@@ -9,7 +9,7 @@ use tokio::sync::mpsc;
 use tokio::sync::Mutex;
 use rustyline::error::ReadlineError;
 use rustyline::DefaultEditor;
-use tracing::{debug, info, error};
+use tracing::{debug, error};
 
 use crate::cli::client::TheaterClient;
 use theater::id::TheaterId;

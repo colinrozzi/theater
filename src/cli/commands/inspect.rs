@@ -1,12 +1,11 @@
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 use clap::Parser;
 use serde_json::json;
 use std::net::SocketAddr;
-use std::time::{Duration, SystemTime};
+use std::time::Duration;
 use tracing::debug;
 
 use theater::id::TheaterId;
-use theater::theater_server::ManagementResponse;
 
 use crate::cli::client::TheaterClient;
 use crate::cli::utils::formatting;

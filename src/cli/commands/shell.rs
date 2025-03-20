@@ -6,7 +6,6 @@ use std::io::{self, Write};
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use std::time::Duration;
 use tracing::debug;
 
 use theater::id::TheaterId;
