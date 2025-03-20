@@ -8,7 +8,7 @@ use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio::sync::Mutex;
 use rustyline::error::ReadlineError;
-use rustyline::Editor;
+use rustyline::DefaultEditor;
 use tracing::{debug, info, error};
 
 use crate::cli::client::TheaterClient;
@@ -133,7 +133,7 @@ async fn run_channel_session(
     });
     
     // Run the REPL
-    let mut rl = Editor::<()>::new()?;
+    let mut rl = DefaultEditor::new()?;
     let mut running = true;
     
     // Set up a separate task to display incoming messages
