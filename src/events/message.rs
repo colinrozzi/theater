@@ -47,7 +47,7 @@ pub enum MessageEventData {
         response_size: usize,
         success: bool,
     },
-    
+
     // Channel events
     OpenChannelCall {
         recipient: String,
@@ -61,8 +61,7 @@ pub enum MessageEventData {
     },
     ChannelMessageCall {
         channel_id: String,
-        message_type: String,
-        size: usize,
+        msg: Vec<u8>,
     },
     ChannelMessageResult {
         channel_id: String,

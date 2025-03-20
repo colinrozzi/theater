@@ -410,11 +410,10 @@ impl MessageServerHost {
                         event_type: "ntwk:theater/message-server-host/send-on-channel".to_string(),
                         data: EventData::Message(MessageEventData::ChannelMessageCall {
                             channel_id: channel_id.clone(),
-                            message_type: "binary".to_string(),
-                            size: msg.len(),
+                            msg: msg.clone(),
                         }),
                         timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                        description: Some(format!("Sending message on channel {}", channel_id)),
+                        description: Some(format!("Sending message on channel [{}]: {}", channel_id, String::from_utf8_lossy(&msg))),
                     });
                     
                     // Parse channel ID
