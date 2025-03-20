@@ -321,6 +321,7 @@ impl TheaterClient {
                     ManagementResponse::ChannelMessage {
                         channel_id,
                         message,
+                        sender_id: _,
                     } => Ok(Some((channel_id, message))),
                     // Other responses are ignored as they're not relevant to our channel
                     _ => Ok(None),

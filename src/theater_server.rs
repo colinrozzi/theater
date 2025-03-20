@@ -14,7 +14,7 @@ use tracing::{debug, error, info};
 use uuid::Uuid;
 
 use crate::id::TheaterId;
-use crate::messages::TheaterCommand;
+use crate::messages::{ChannelId, TheaterCommand};
 use crate::theater_runtime::TheaterRuntime;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -193,11 +193,15 @@ impl TheaterServer {
     // Process channel events and forward them to subscribed clients
     async fn process_channel_events(
         mut channel_events_rx: mpsc::Receiver<ChannelEvent>,
-        channel_subscriptions: Arc<Mutex<HashMap<String, ChannelSubscription>>>
+        channel_subscriptions: Arc<Mutex<HashMap<String, ChannelSubscription>>>,
     ) {
         while let Some(event) = channel_events_rx.recv().await {
             match event {
-                ChannelEvent::Message { channel_id, sender_id, message } => {
+                ChannelEvent::Message {
+                    channel_id,
+                    sender_id,
+                    message,
+                } => {
                     tracing::debug!("Received channel message for {}", channel_id);
                     // Forward to subscribed clients
                     let subs = channel_subscriptions.lock().await;
@@ -207,12 +211,12 @@ impl TheaterServer {
                             sender_id,
                             message,
                         };
-                        
+
                         if let Err(e) = sub.client_tx.send(response).await {
                             tracing::warn!("Failed to forward channel message: {}", e);
                         }
                     }
-                },
+                }
                 // Handle other channel events as needed
             }
         }
@@ -220,16 +224,21 @@ impl TheaterServer {
 
     pub async fn new(address: std::net::SocketAddr) -> Result<Self> {
         let (theater_tx, theater_rx) = mpsc::channel(32);
-        
+
         // Create channel for runtime to send channel events back to server
         let (channel_events_tx, channel_events_rx) = mpsc::channel(32);
-        
+
         // Pass channel_events_tx to runtime during initialization
-        let runtime = TheaterRuntime::new(theater_tx.clone(), theater_rx, Some(channel_events_tx.clone())).await?;
+        let runtime = TheaterRuntime::new(
+            theater_tx.clone(),
+            theater_rx,
+            Some(channel_events_tx.clone()),
+        )
+        .await?;
         let management_socket = TcpListener::bind(address).await?;
-        
+
         let channel_subscriptions = Arc::new(Mutex::new(HashMap::new()));
-        
+
         // Start task to process channel events
         let channel_subs_clone = channel_subscriptions.clone();
         tokio::spawn(async move {
