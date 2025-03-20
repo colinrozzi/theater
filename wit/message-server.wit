@@ -8,8 +8,8 @@ interface message-server-client {
     
     // Channel operations
     handle-channel-open: func(state: option<json>, params: tuple<json>) -> result<tuple<option<json>, channel-accept>, string>;
-    handle-channel-message: func(state: option<json>, channel-id: channel-id, msg: json) -> result<tuple<option<json>>, string>;
-    handle-channel-close: func(state: option<json>, channel-id: channel-id) -> result<tuple<option<json>>, string>;
+    handle-channel-message: func(state: option<json>, params: tuple<channel-id, json>) -> result<tuple<option<json>>, string>;
+    handle-channel-close: func(state: option<json>, params: tuple<channel-id>) -> result<tuple<option<json>>, string>;
 }
 
 interface message-server-host {

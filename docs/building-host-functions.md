@@ -4,7 +4,12 @@ This guide explores the principles, challenges, and best practices for implement
 
 ## Core Principles
 
-### 1. State Chain Integrity
+### 1. Consistent Parameter Patterns
+- WIT interfaces should use tuple-based parameter patterns
+- Client functions should always receive state as their first parameter
+- Parameters should be bundled in tuples for consistency
+
+### 2. State Chain Integrity
 - Every state transition must be properly recorded in the hash chain
 - State updates must be atomic and consistent
 - The chain must remain verifiable at all times
@@ -106,6 +111,71 @@ Break long-running operations into discrete steps:
    - Validate state after transitions
    - Handle partial failures gracefully
 
+## Interface Design Guidelines
+
+### 1. WIT Interface Design
+- Define client-side functions with consistent state parameter patterns:
+  ```wit
+  handle-function: func(state: option<json>, params: tuple<param1-type, param2-type>) -> result<tuple<option<json>, return-type>, string>;
+  ```
+- The first parameter is always the actor's state
+- The second parameter is always a tuple containing function parameters
+- The result includes both the new state and function result
+
+### 2. Host Implementation
+- When implementing host-side code that calls client functions, use natural Rust syntax:
+  ```rust
+  actor_handle
+    .call_function::<(ParamType1, ParamType2), ReturnType>(
+      "interface.function-name",
+      (param1, param2),
+    )
+    .await?;
+  ```
+- The type parameters to `call_function` should match the WIT interface
+- The adapter layer handles wrapping parameters to match the tuple-based interface
+
+### 3. Function Registration
+- Register functions with types matching the WIT interface:
+  ```rust
+  actor_instance
+    .register_function_no_result::<(ParamType1, ParamType2)>(
+      "interface",
+      "function-name",
+    )
+  ```
+
+### 4. Example: Channel Functions
+- For channel operations, follow the same parameter pattern:
+
+  **WIT Interface**:
+  ```wit
+  // Correct pattern with tuple-based parameters
+  handle-channel-message: func(state: option<json>, params: tuple<channel-id, json>) -> result<tuple<option<json>>, string>;
+  handle-channel-close: func(state: option<json>, params: tuple<channel-id>) -> result<tuple<option<json>>, string>;
+  ```
+
+  **Host Implementation**:
+  ```rust
+  // Standard Rust syntax for calling the functions
+  actor_handle
+    .call_function::<(String, Vec<u8>), ()>(
+      "ntwk:theater/message-server-client.handle-channel-message",
+      (channel_id.to_string(), data),
+    )
+    .await?;
+  ```
+
+  **Function Registration**:
+  ```rust
+  // Register with types matching the WIT interface
+  actor_instance
+    .register_function_no_result::<(String, Vec<u8>)>(
+      "ntwk:theater/message-server-client",
+      "handle-channel-message",
+    )
+  ```
+
 ## Implementation Guidelines
 
 ### 1. Planning Phase
@@ -170,6 +240,53 @@ impl WebSocketHost {
 }
 ```
 
+## Understanding Parameter Wrapping
+
+The Theater runtime handles parameter conversion between Rust function calls and WebAssembly interfaces. Here's how it works:
+
+### 1. Parameter Flow
+
+1. **Host Call Layer**: When calling `actor_handle.call_function<P, R>(...)`, the parameters are serialized to JSON bytes:
+   ```rust
+   let params = serde_json::to_vec(&params)?
+   ```
+
+2. **Executor Layer**: The `execute_call` function passes state and parameters to the actor instance:
+   ```rust
+   let (new_state, results) = self.actor_instance.call_function(&name, state, params).await
+   ```
+
+3. **Adapter Layer**: The `TypedFunction` implementation deserializes parameters and calls the appropriately typed function:
+   ```rust
+   let params_deserialized: P = serde_json::from_slice(&params)?
+   match self.call_func(store, state, params_deserialized).await ...
+   ```
+
+4. **WebAssembly Layer**: The parameters are passed to the WebAssembly function according to the WIT interface, with state as the first parameter and parameters as a tuple.
+
+### 2. Return Flow
+
+1. **WebAssembly Layer**: The function returns a result containing the new state and return value.
+
+2. **Adapter Layer**: The result is serialized back to JSON bytes:
+   ```rust
+   let result_serialized = serde_json::to_vec(&result)?
+   ```
+
+3. **Executor Layer**: The new state is stored in the actor store:
+   ```rust
+   self.actor_instance.store.data_mut().set_state(new_state);
+   ```
+
+4. **Host Call Layer**: The result is deserialized back to the expected return type:
+   ```rust
+   let res = serde_json::from_slice::<R>(&result)?;
+   ```
+
+### 3. Type Mapping
+
+The type parameters used in `call_function<P, R>` and `register_function*` functions should match the WebAssembly interface definition, but the adapter layer handles the specifics of matching the tuple structure. This lets you use natural Rust parameter patterns while maintaining a consistent WIT interface.
+
 ## Troubleshooting Common Issues
 
 ### 1. Blocking Operations
@@ -184,12 +301,25 @@ impl WebSocketHost {
 **Problem**: State becomes invalid during concurrent operations
 **Solution**: Use atomic operations and validate state transitions
 
+### 4. Parameter Pattern Mismatch
+**Problem**: WIT interface defines tuple parameters but implementation doesn't match
+**Solution**: Ensure WIT interface uses consistent tuple pattern for parameters:
+  ```wit
+  // CORRECT
+  handle-function: func(state: option<json>, params: tuple<type1, type2>) -> ...;
+  
+  // INCORRECT
+  handle-function: func(state: option<json>, param1: type1, param2: type2) -> ...;
+  ```
+And ensure the host implementation uses matching types in function registration.
+
 ## Conclusion
 
 Building host functions requires careful consideration of:
+- Consistent parameter patterns in WIT interfaces
 - Sequential execution constraints
 - State consistency requirements
 - Resource management
 - Error handling
 
-Following these patterns and guidelines helps create robust, maintainable host functions that work well within Theater's actor system.
+Following these patterns and guidelines helps create robust, maintainable host functions that work well within Theater's actor system. In particular, consistently using tuple-based parameter patterns in the WIT interface while leveraging the adapter layer to maintain natural Rust code creates a clean separation between interface definition and implementation.
