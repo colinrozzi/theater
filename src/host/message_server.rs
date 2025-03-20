@@ -14,6 +14,7 @@ use std::collections::HashMap;
 use thiserror::Error;
 use tokio::sync::mpsc::{Receiver, Sender};
 use tracing::{debug, error, info, warn};
+use wasmtime::component::{ComponentType, Lift, Lower};
 
 pub struct MessageServerHost {
     mailbox_rx: Receiver<ActorMessage>,
@@ -39,10 +40,11 @@ pub enum MessageServerError {
     SerializationError(#[from] serde_json::Error),
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-struct MessageEvent {
-    message_type: String,
-    data: Vec<u8>,
+#[derive(Debug, Deserialize, Serialize, ComponentType, Lift, Lower)]
+#[component(record)]
+struct ChannelAccept {
+    accepted: bool,
+    message: Option<Vec<u8>>,
 }
 
 impl MessageServerHost {
@@ -546,7 +548,7 @@ impl MessageServerHost {
             
         // Register channel functions
         actor_instance
-            .register_function::<(Vec<u8>,), (bool, Option<Vec<u8>>)>(
+            .register_function::<(Vec<u8>,), ChannelAccept>(
                 "ntwk:theater/message-server-client",
                 "handle-channel-open",
             )
@@ -623,13 +625,13 @@ impl MessageServerHost {
                 info!("Got channel open request: channel={:?}, data size={}", channel_id, data.len());
                 
                 let result = actor_handle
-                    .call_function::<(Vec<u8>,), (bool, Option<Vec<u8>>)>(
+                    .call_function::<(Vec<u8>,), ChannelAccept>(
                         "ntwk:theater/message-server-client.handle-channel-open".to_string(),
                         (data,),
                     )
                     .await?;
                 
-                let accepted = result.0;
+                let accepted = result.accepted;
                 
                 if accepted {
                     // Store channel in active channels
