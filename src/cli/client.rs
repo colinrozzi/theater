@@ -213,6 +213,67 @@ impl TheaterClient {
             _ => Err(anyhow!("Unexpected response")),
         }
     }
+
+    /// Open a channel to an actor
+    pub async fn open_channel(&mut self, id: TheaterId, initial_message: Vec<u8>) -> Result<String> {
+        let command = ManagementCommand::OpenChannel { 
+            actor_id: id.clone(),
+            initial_message 
+        };
+        let response = self.send_command(command).await?;
+
+        match response {
+            ManagementResponse::ChannelOpened { channel_id, .. } => Ok(channel_id),
+            ManagementResponse::Error { message } => Err(anyhow!("Error opening channel: {}", message)),
+            _ => Err(anyhow!("Unexpected response")),
+        }
+    }
+
+    /// Send a message on an existing channel
+    pub async fn send_on_channel(&mut self, channel_id: &str, message: Vec<u8>) -> Result<()> {
+        let command = ManagementCommand::SendOnChannel { 
+            channel_id: channel_id.to_string(),
+            message 
+        };
+        let response = self.send_command(command).await?;
+
+        match response {
+            ManagementResponse::MessageSent { .. } => Ok(()),
+            ManagementResponse::Error { message } => Err(anyhow!("Error sending on channel: {}", message)),
+            _ => Err(anyhow!("Unexpected response")),
+        }
+    }
+
+    /// Close an existing channel
+    pub async fn close_channel(&mut self, channel_id: &str) -> Result<()> {
+        let command = ManagementCommand::CloseChannel { 
+            channel_id: channel_id.to_string() 
+        };
+        let response = self.send_command(command).await?;
+
+        match response {
+            ManagementResponse::ChannelClosed { .. } => Ok(()),
+            ManagementResponse::Error { message } => Err(anyhow!("Error closing channel: {}", message)),
+            _ => Err(anyhow!("Unexpected response")),
+        }
+    }
+    
+    /// Receive a message on a channel (non-blocking)
+    pub async fn receive_channel_message(&mut self) -> Result<Option<(String, Vec<u8>)>> {
+        // Try to receive a response without sending a command first
+        match self.receive_response().await {
+            Ok(response) => {
+                match response {
+                    ManagementResponse::ChannelMessage { channel_id, message } => {
+                        Ok(Some((channel_id, message)))
+                    },
+                    // Other responses are ignored as they're not relevant to our channel
+                    _ => Ok(None)
+                }
+            },
+            Err(_) => Ok(None) // No message available or other error
+        }
+    }
     
     /// Receive a response from the server without sending a command first
     /// Useful for receiving events from subscriptions

@@ -57,6 +57,18 @@ pub enum ManagementCommand {
     GetActorMetrics {
         id: TheaterId,
     },
+    // Channel management commands
+    OpenChannel {
+        actor_id: TheaterId,
+        initial_message: Vec<u8>,
+    },
+    SendOnChannel {
+        channel_id: String,
+        message: Vec<u8>,
+    },
+    CloseChannel {
+        channel_id: String,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -110,6 +122,21 @@ pub enum ManagementResponse {
         id: TheaterId,
         metrics: serde_json::Value,
     },
+    // Channel management responses
+    ChannelOpened {
+        channel_id: String,
+        actor_id: TheaterId,
+    },
+    MessageSent {
+        channel_id: String,
+    },
+    ChannelMessage {
+        channel_id: String,
+        message: Vec<u8>,
+    },
+    ChannelClosed {
+        channel_id: String,
+    },
 }
 
 #[derive(Debug)]
@@ -130,11 +157,20 @@ impl std::hash::Hash for Subscription {
     }
 }
 
+// Structure to track active channel subscriptions
+#[derive(Debug)]
+struct ChannelSubscription {
+    channel_id: String,
+    client_tx: mpsc::Sender<ManagementResponse>,
+}
+
 pub struct TheaterServer {
     runtime: TheaterRuntime,
     theater_tx: mpsc::Sender<TheaterCommand>,
     management_socket: TcpListener,
     subscriptions: Arc<Mutex<HashMap<TheaterId, HashSet<Subscription>>>>,
+    // New field to track channel subscriptions
+    channel_subscriptions: Arc<Mutex<HashMap<String, ChannelSubscription>>>,
 }
 
 impl TheaterServer {
@@ -148,6 +184,7 @@ impl TheaterServer {
             theater_tx,
             management_socket,
             subscriptions: Arc::new(Mutex::new(HashMap::new())),
+            channel_subscriptions: Arc::new(Mutex::new(HashMap::new())),
         })
     }
 
@@ -173,10 +210,11 @@ impl TheaterServer {
             info!("New management connection from {}", addr);
             let runtime_tx = self.theater_tx.clone();
             let subscriptions = self.subscriptions.clone();
+            let channel_subscriptions = self.channel_subscriptions.clone();
 
             tokio::spawn(async move {
                 if let Err(e) =
-                    Self::handle_management_connection(socket, runtime_tx, subscriptions).await
+                    Self::handle_management_connection(socket, runtime_tx, subscriptions, channel_subscriptions).await
                 {
                     error!("Error handling management connection: {}", e);
                 }
@@ -191,6 +229,7 @@ impl TheaterServer {
         socket: TcpStream,
         runtime_tx: mpsc::Sender<TheaterCommand>,
         subscriptions: Arc<Mutex<HashMap<TheaterId, HashSet<Subscription>>>>,
+        channel_subscriptions: Arc<Mutex<HashMap<String, ChannelSubscription>>>,
     ) -> Result<()> {
         // Create a channel for sending responses to this client
         let (client_tx, mut client_rx) = mpsc::channel::<ManagementResponse>(32);
@@ -224,6 +263,9 @@ impl TheaterServer {
 
         // Store active subscriptions for this connection to clean up on disconnect
         let mut connection_subscriptions: Vec<(TheaterId, Uuid)> = Vec::new();
+        
+        // Store active channel subscriptions for cleanup
+        let mut connection_channel_subscriptions: Vec<String> = Vec::new();
 
         // Loop until connection closes or an error occurs
         'connection: while let Some(msg) = framed_stream.next().await {
@@ -530,6 +572,116 @@ impl TheaterServer {
                         id,
                         metrics: serde_json::to_value(metrics?)?,
                     }
+                },
+                // Handle channel management commands
+                ManagementCommand::OpenChannel { actor_id, initial_message } => {
+                    info!("Opening channel to actor: {:?}", actor_id);
+                    
+                    // Create a response channel
+                    let (response_tx, response_rx) = tokio::sync::oneshot::channel();
+                    
+                    // Generate a channel ID
+                    let client_id = TheaterId::generate(); // Use a generated ID for the client side
+                    let channel_id = crate::messages::ChannelId::new(&client_id, &actor_id);
+                    let channel_id_str = channel_id.0.clone();
+                    
+                    // Send the channel open command to the runtime
+                    runtime_tx
+                        .send(TheaterCommand::ChannelOpen {
+                            initiator_id: client_id.clone(),
+                            target_id: actor_id.clone(),
+                            channel_id: channel_id.clone(),
+                            initial_message,
+                            response_tx,
+                        })
+                        .await
+                        .map_err(|e| anyhow::anyhow!("Failed to send channel open command: {}", e))?;
+                    
+                    // Wait for the response
+                    match response_rx.await {
+                        Ok(result) => {
+                            match result {
+                                Ok(accepted) => {
+                                    if accepted {
+                                        // Channel opened successfully
+                                        info!("Channel opened successfully: {}", channel_id_str);
+                                        
+                                        // Register the channel subscription to receive messages
+                                        let channel_sub = ChannelSubscription {
+                                            channel_id: channel_id_str.clone(),
+                                            client_tx: cmd_client_tx.clone(),
+                                        };
+                                        
+                                        channel_subscriptions.lock().await.insert(channel_id_str.clone(), channel_sub);
+                                        
+                                        // Track this channel for cleanup on disconnect
+                                        connection_channel_subscriptions.push(channel_id_str.clone());
+                                        
+                                        ManagementResponse::ChannelOpened {
+                                            channel_id: channel_id_str,
+                                            actor_id,
+                                        }
+                                    } else {
+                                        // Channel rejected by target
+                                        ManagementResponse::Error {
+                                            message: "Channel rejected by target actor".to_string(),
+                                        }
+                                    }
+                                },
+                                Err(e) => {
+                                    ManagementResponse::Error {
+                                        message: format!("Error opening channel: {}", e),
+                                    }
+                                }
+                            }
+                        },
+                        Err(e) => {
+                            ManagementResponse::Error {
+                                message: format!("Failed to receive channel open response: {}", e),
+                            }
+                        }
+                    }
+                },
+                ManagementCommand::SendOnChannel { channel_id, message } => {
+                    info!("Sending message on channel: {}", channel_id);
+                    
+                    // Parse the channel ID
+                    let channel_id_parsed = crate::messages::ChannelId(channel_id.clone());
+                    
+                    // Send the message on the channel
+                    runtime_tx
+                        .send(TheaterCommand::ChannelMessage {
+                            channel_id: channel_id_parsed,
+                            message,
+                        })
+                        .await
+                        .map_err(|e| anyhow::anyhow!("Failed to send message on channel: {}", e))?;
+                    
+                    ManagementResponse::MessageSent {
+                        channel_id,
+                    }
+                },
+                ManagementCommand::CloseChannel { channel_id } => {
+                    info!("Closing channel: {}", channel_id);
+                    
+                    // Parse the channel ID
+                    let channel_id_parsed = crate::messages::ChannelId(channel_id.clone());
+                    
+                    // Close the channel
+                    runtime_tx
+                        .send(TheaterCommand::ChannelClose {
+                            channel_id: channel_id_parsed,
+                        })
+                        .await
+                        .map_err(|e| anyhow::anyhow!("Failed to close channel: {}", e))?;
+                    
+                    // Remove from channel subscriptions
+                    channel_subscriptions.lock().await.remove(&channel_id);
+                    connection_channel_subscriptions.retain(|id| id != &channel_id);
+                    
+                    ManagementResponse::ChannelClosed {
+                        channel_id,
+                    }
                 }
             };
 
@@ -557,6 +709,17 @@ impl TheaterServer {
                     subs.remove(&actor_id);
                 }
             }
+        }
+        
+        // Clean up channel subscriptions
+        debug!(
+            "Connection closed, cleaning up {} channel subscriptions",
+            connection_channel_subscriptions.len()
+        );
+        let mut channel_subs = channel_subscriptions.lock().await;
+        
+        for channel_id in connection_channel_subscriptions {
+            channel_subs.remove(&channel_id);
         }
 
         debug!("Cleaned up all subscriptions for the connection");

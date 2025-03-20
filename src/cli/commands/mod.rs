@@ -1,4 +1,5 @@
 pub mod build;
+pub mod channel;
 pub mod create;
 pub mod events;
 pub mod inspect;

@@ -92,6 +92,10 @@ pub enum Commands {
     /// Watch a directory and redeploy actor on changes
     #[command(name = "watch")]
     Watch(commands::watch::WatchArgs),
+    
+    /// Channel operations
+    #[command(name = "channel")]
+    Channel(commands::channel::ChannelArgs),
 }
 
 /// Run the Theater CLI
@@ -116,5 +120,10 @@ pub fn run() -> anyhow::Result<()> {
         Commands::Restart(args) => commands::restart::execute(args, cli.verbose, cli.json),
         Commands::Message(args) => commands::message::execute(args, cli.verbose, cli.json),
         Commands::Watch(args) => commands::watch::execute(args, cli.verbose, cli.json),
+        Commands::Channel(args) => match &args.command {
+            commands::channel::ChannelCommands::Open(open_args) => {
+                commands::channel::open::execute(open_args, cli.verbose, cli.json)
+            }
+        },
     }
 }
