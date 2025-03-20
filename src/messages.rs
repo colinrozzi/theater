@@ -81,6 +81,19 @@ pub enum TheaterCommand {
     ChannelClose {
         channel_id: ChannelId,
     },
+    // Channel diagnostics
+    ListChannels {
+        response_tx: oneshot::Sender<Result<Vec<(ChannelId, Vec<TheaterId>)>>>,
+    },
+    GetChannelStatus {
+        channel_id: ChannelId,
+        response_tx: oneshot::Sender<Result<Option<Vec<TheaterId>>>>,
+    },
+    // Internal channel management
+    RegisterChannel {
+        channel_id: ChannelId,
+        participants: Vec<TheaterId>,
+    },
 }
 
 impl TheaterCommand {
@@ -131,6 +144,15 @@ impl TheaterCommand {
             }
             TheaterCommand::ChannelClose { channel_id } => {
                 format!("ChannelClose: {}", channel_id)
+            }
+            TheaterCommand::ListChannels { .. } => {
+                "ListChannels".to_string()
+            }
+            TheaterCommand::GetChannelStatus { channel_id, .. } => {
+                format!("GetChannelStatus: {}", channel_id)
+            }
+            TheaterCommand::RegisterChannel { channel_id, participants } => {
+                format!("RegisterChannel: {} with {} participants", channel_id, participants.len())
             }
         }
     }

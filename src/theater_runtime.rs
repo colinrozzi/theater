@@ -1,11 +1,11 @@
 use crate::actor_executor::{ActorError, ActorOperation};
-use crate::shutdown::{ShutdownController, DEFAULT_SHUTDOWN_TIMEOUT};
 use crate::actor_runtime::ActorRuntime;
 use crate::chain::ChainEvent;
 use crate::id::TheaterId;
+use crate::messages::{ActorChannelClose, ActorChannelMessage, ActorChannelOpen, ChannelId};
 use crate::messages::{ActorMessage, ActorStatus, TheaterCommand};
-use crate::messages::{ActorChannelOpen, ActorChannelMessage, ActorChannelClose, ChannelId};
 use crate::metrics::ActorMetrics;
+use crate::shutdown::{ShutdownController, DEFAULT_SHUTDOWN_TIMEOUT};
 use crate::utils::resolve_reference;
 use crate::ManifestConfig;
 use crate::Result;
@@ -23,6 +23,7 @@ pub struct TheaterRuntime {
     pub theater_tx: Sender<TheaterCommand>,
     theater_rx: Receiver<TheaterCommand>,
     subscriptions: HashMap<TheaterId, Vec<Sender<ChainEvent>>>,
+    channels: HashMap<ChannelId, HashSet<TheaterId>>,
 }
 
 pub struct ActorProcess {
@@ -46,6 +47,7 @@ impl TheaterRuntime {
             theater_rx,
             actors: HashMap::new(),
             subscriptions: HashMap::new(),
+            channels: HashMap::new(),
         })
     }
 
@@ -269,19 +271,71 @@ impl TheaterRuntime {
                 } => {
                     debug!("Opening channel from {:?} to {:?}", initiator_id, target_id);
                     if let Some(proc) = self.actors.get_mut(&target_id) {
+                        // Create a oneshot channel to intercept the response
+                        let (inner_tx, inner_rx) = tokio::sync::oneshot::channel();
+
                         // Create channel open message
                         let actor_message = ActorMessage::ChannelOpen(ActorChannelOpen {
                             channel_id: channel_id.clone(),
-                            response_tx,
+                            response_tx: inner_tx,
                             data: initial_message,
                         });
-                        
+
                         // Send the message to the target actor
                         if let Err(e) = proc.mailbox_tx.send(actor_message).await {
                             error!("Failed to send channel open message to actor: {}", e);
+                            let _ = response_tx
+                                .send(Err(anyhow::anyhow!("Failed to send channel open message")));
+                            continue;
                         }
+
+                        // Process the response asynchronously
+                        let channel_id_clone = channel_id.clone();
+                        let initiator_id_clone = initiator_id.clone();
+                        let target_id_clone = target_id.clone();
+                        let theater_tx_clone = self.theater_tx.clone();
+
+                        tokio::spawn(async move {
+                            match inner_rx.await {
+                                Ok(result) => {
+                                    if let Ok(true) = &result {
+                                        // Channel was accepted, register both participants via a new command
+                                        // This avoids holding a mutable reference across an await point
+                                        let register_cmd = TheaterCommand::RegisterChannel {
+                                            channel_id: channel_id_clone.clone(),
+                                            participants: vec![
+                                                initiator_id_clone.clone(),
+                                                target_id_clone.clone(),
+                                            ],
+                                        };
+
+                                        if let Err(e) = theater_tx_clone.send(register_cmd).await {
+                                            error!(
+                                                "Failed to register channel participants: {}",
+                                                e
+                                            );
+                                        } else {
+                                            debug!("Requested registration of channel {:?} with participants {:?} and {:?}", 
+                                                channel_id_clone, initiator_id_clone, target_id_clone);
+                                        }
+                                    }
+
+                                    // Forward the result to the original requester
+                                    let _ = response_tx.send(result);
+                                }
+                                Err(e) => {
+                                    error!("Failed to receive channel open response: {}", e);
+                                    let _ = response_tx.send(Err(anyhow::anyhow!(
+                                        "Failed to receive channel open response"
+                                    )));
+                                }
+                            }
+                        });
                     } else {
-                        warn!("Attempted to open channel to non-existent actor: {:?}", target_id);
+                        warn!(
+                            "Attempted to open channel to non-existent actor: {:?}",
+                            target_id
+                        );
                         let _ = response_tx.send(Err(anyhow::anyhow!("Target actor not found")));
                     }
                 }
@@ -290,49 +344,135 @@ impl TheaterRuntime {
                     message,
                 } => {
                     debug!("Sending message on channel: {:?}", channel_id);
-                    
-                    // Find any actor that has this channel registered
-                    let mut found = false;
-                    for (_, proc) in self.actors.iter_mut() {
-                        // In a real implementation, we would have a lookup table for channels->actors
-                        // but for now just forward to all actors and let them decide if they should handle it
-                        let actor_message = ActorMessage::ChannelMessage(ActorChannelMessage {
-                            channel_id: channel_id.clone(),
-                            data: message.clone(),
-                        });
-                        
-                        if let Err(e) = proc.mailbox_tx.send(actor_message).await {
-                            error!("Failed to send channel message to actor: {}", e);
+
+                    // Look up the participants for this channel
+                    if let Some(participant_ids) = self.channels.get(&channel_id) {
+                        let mut successful_delivery = false;
+
+                        for actor_id in participant_ids {
+                            if let Some(proc) = self.actors.get_mut(actor_id) {
+                                let actor_message =
+                                    ActorMessage::ChannelMessage(ActorChannelMessage {
+                                        channel_id: channel_id.clone(),
+                                        data: message.clone(),
+                                    });
+
+                                match proc.mailbox_tx.send(actor_message).await {
+                                    Ok(_) => {
+                                        successful_delivery = true;
+                                        debug!("Delivered channel message to actor {:?}", actor_id);
+                                    }
+                                    Err(e) => {
+                                        error!(
+                                            "Failed to send channel message to actor {:?}: {}",
+                                            actor_id, e
+                                        );
+                                    }
+                                }
+                            } else {
+                                warn!(
+                                    "Actor {:?} registered for channel {:?} no longer exists",
+                                    actor_id, channel_id
+                                );
+                            }
                         }
-                        found = true;
-                    }
-                    
-                    if !found {
-                        warn!("No actors found to handle channel message for: {:?}", channel_id);
+
+                        if !successful_delivery {
+                            warn!(
+                                "Failed to deliver message to any actor for channel {:?}",
+                                channel_id
+                            );
+                        }
+                    } else {
+                        warn!("No actors registered for channel: {:?}", channel_id);
                     }
                 }
-                TheaterCommand::ChannelClose {
-                    channel_id,
-                } => {
+                TheaterCommand::ChannelClose { channel_id } => {
                     debug!("Closing channel: {:?}", channel_id);
-                    
-                    // Find any actor that has this channel registered
-                    let mut found = false;
-                    for (_, proc) in self.actors.iter_mut() {
-                        // In a real implementation, we would have a lookup table for channels->actors
-                        let actor_message = ActorMessage::ChannelClose(ActorChannelClose {
-                            channel_id: channel_id.clone(),
-                        });
-                        
-                        if let Err(e) = proc.mailbox_tx.send(actor_message).await {
-                            error!("Failed to send channel close message to actor: {}", e);
+
+                    // Get participant IDs before removing the channel
+                    let participant_ids = if let Some(ids) = self.channels.get(&channel_id) {
+                        ids.clone()
+                    } else {
+                        HashSet::new()
+                    };
+
+                    // Remove the channel from the registry
+                    self.channels.remove(&channel_id);
+                    debug!("Removed channel {:?} from registry", channel_id);
+
+                    // Notify participants about channel closure
+                    let mut successful_notification = false;
+                    for actor_id in &participant_ids {
+                        if let Some(proc) = self.actors.get_mut(&actor_id) {
+                            let actor_message = ActorMessage::ChannelClose(ActorChannelClose {
+                                channel_id: channel_id.clone(),
+                            });
+
+                            match proc.mailbox_tx.send(actor_message).await {
+                                Ok(_) => {
+                                    successful_notification = true;
+                                    debug!(
+                                        "Notified actor {:?} about channel {:?} closure",
+                                        actor_id, channel_id
+                                    );
+                                }
+                                Err(e) => {
+                                    error!(
+                                        "Failed to send channel close message to actor {:?}: {}",
+                                        actor_id, e
+                                    );
+                                }
+                            }
+                        } else {
+                            warn!("Actor {:?} registered for channel {:?} no longer exists during closure", 
+                                actor_id, channel_id);
                         }
-                        found = true;
                     }
-                    
-                    if !found {
-                        warn!("No actors found to handle channel close for: {:?}", channel_id);
+
+                    if !successful_notification && !participant_ids.is_empty() {
+                        warn!(
+                            "Failed to notify any actors about channel {:?} closure",
+                            channel_id
+                        );
                     }
+                }
+                TheaterCommand::ListChannels { response_tx } => {
+                    debug!("Getting list of channels");
+                    let channels = self.list_channels().await;
+
+                    if let Err(e) = response_tx.send(Ok(channels)) {
+                        error!("Failed to send channel list: {:?}", e);
+                    }
+                }
+                TheaterCommand::GetChannelStatus {
+                    channel_id,
+                    response_tx,
+                } => {
+                    debug!("Getting status for channel: {:?}", channel_id);
+                    let status = self.get_channel_status(&channel_id).await;
+
+                    if let Err(e) = response_tx.send(Ok(status)) {
+                        error!("Failed to send channel status: {:?}", e);
+                    }
+                }
+                TheaterCommand::RegisterChannel {
+                    channel_id,
+                    participants,
+                } => {
+                    debug!(
+                        "Registering channel {:?} with {} participants",
+                        channel_id,
+                        participants.len()
+                    );
+
+                    // Convert the Vec to a HashSet
+                    let participant_set: HashSet<TheaterId> = participants.into_iter().collect();
+
+                    // Register the channel with its participants
+                    self.channels.insert(channel_id.clone(), participant_set);
+
+                    debug!("Successfully registered channel {:?}", channel_id);
                 }
             };
         }
@@ -476,52 +616,90 @@ impl TheaterRuntime {
 
     async fn stop_actor(&mut self, actor_id: TheaterId) -> Result<()> {
         debug!("Stopping actor: {:?}", actor_id);
-        
+
         // Find the actor's children to stop them first
         let children = if let Some(proc) = self.actors.get(&actor_id) {
-            debug!("Actor {:?} has {} children to stop first", actor_id, proc.children.len());
+            debug!(
+                "Actor {:?} has {} children to stop first",
+                actor_id,
+                proc.children.len()
+            );
             proc.children.clone()
         } else {
             debug!("Actor {:?} not found", actor_id);
             return Ok(());
         };
-        
+
         // First, stop all children recursively
         for (index, child_id) in children.iter().enumerate() {
-            debug!("Stopping child {}/{} with ID {:?} of parent {:?}", 
-                   index + 1, children.len(), child_id, actor_id);
+            debug!(
+                "Stopping child {}/{} with ID {:?} of parent {:?}",
+                index + 1,
+                children.len(),
+                child_id,
+                actor_id
+            );
             Box::pin(self.stop_actor(child_id.clone())).await?;
             debug!("Successfully stopped child {:?}", child_id);
         }
-        
+
         // Signal this specific actor to shutdown - we need to get the actor again since
         // we may have changed the actors map when stopping children
         if let Some(proc) = self.actors.get(&actor_id) {
             debug!("Sending shutdown signal to actor {:?}", actor_id);
             proc.shutdown_controller.signal_shutdown();
-            debug!("Shutdown signal sent to actor {:?}, waiting for grace period", actor_id);
-            
+            debug!(
+                "Shutdown signal sent to actor {:?}, waiting for grace period",
+                actor_id
+            );
+
             // Allow more time for graceful shutdown to ensure proper resource cleanup
             tokio::time::sleep(std::time::Duration::from_secs(5)).await;
             debug!("Grace period for actor {:?} complete", actor_id);
         } else {
-            debug!("Actor {:?} no longer exists after stopping children", actor_id);
+            debug!(
+                "Actor {:?} no longer exists after stopping children",
+                actor_id
+            );
             return Ok(());
         }
-        
+
         // Force abort if still running
         if let Some(proc) = self.actors.get(&actor_id) {
-            debug!("Force aborting actor {:?} task after grace period", actor_id);
+            debug!(
+                "Force aborting actor {:?} task after grace period",
+                actor_id
+            );
             proc.process.abort();
             debug!("Actor {:?} task aborted", actor_id);
         }
-        
+
         // Remove from actors map
         if let Some(mut removed_proc) = self.actors.remove(&actor_id) {
             removed_proc.status = ActorStatus::Stopped;
             debug!("Actor {:?} stopped and removed from runtime", actor_id);
         }
-        
+
+        // Remove actor from any channel registrations
+        let mut channels_to_remove = Vec::new();
+        for (channel_id, participants) in self.channels.iter_mut() {
+            if participants.remove(&actor_id) {
+                debug!("Removed actor {:?} from channel {:?}", actor_id, channel_id);
+
+                // If this was the last participant, mark the channel for removal
+                if participants.is_empty() {
+                    debug!("Channel {:?} is now empty, marking for removal", channel_id);
+                    channels_to_remove.push(channel_id.clone());
+                }
+            }
+        }
+
+        // Remove any empty channels
+        for channel_id in channels_to_remove {
+            self.channels.remove(&channel_id);
+            debug!("Removed empty channel {:?}", channel_id);
+        }
+
         Ok(())
     }
 
@@ -626,6 +804,21 @@ impl TheaterRuntime {
         }
     }
 
+    // Get status of a specific channel
+    pub async fn get_channel_status(&self, channel_id: &ChannelId) -> Option<Vec<TheaterId>> {
+        self.channels
+            .get(channel_id)
+            .map(|participants| participants.iter().cloned().collect())
+    }
+
+    // Get a list of all channels and their participants
+    pub async fn list_channels(&self) -> Vec<(ChannelId, Vec<TheaterId>)> {
+        self.channels
+            .iter()
+            .map(|(id, participants)| (id.clone(), participants.iter().cloned().collect()))
+            .collect()
+    }
+
     pub async fn stop(&mut self) -> Result<()> {
         info!("Initiating theater runtime shutdown");
 
@@ -636,6 +829,15 @@ impl TheaterRuntime {
                 error!("Error stopping actor during shutdown: {}", e);
                 // Continue with other actors even if one fails
             }
+        }
+
+        // Clear any remaining channel registrations
+        if !self.channels.is_empty() {
+            debug!(
+                "Clearing {} remaining channel registrations",
+                self.channels.len()
+            );
+            self.channels.clear();
         }
 
         info!("Theater runtime shutdown complete");
