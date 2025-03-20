@@ -15,7 +15,7 @@ use wasmtime::{Engine, Store};
 use crate::actor_store::ActorStore;
 use crate::config::ManifestConfig;
 use crate::utils::resolve_reference;
-use tracing::{error, info};
+use tracing::{debug, error, info};
 use wasmtime::component::types::ComponentItem;
 
 pub type Json = Vec<u8>;
@@ -236,13 +236,14 @@ impl ActorInstance {
                 error!("Failed to find function export: {}", e);
                 e
             })?;
-        info!(
+        debug!(
             "Found function: {}.{} with export index: {:?}",
             interface, function_name, export_index
         );
         let name = format!("{}.{}", interface, function_name);
         let func =
-            TypedComponentFunction::<P, R>::new(&mut self.store, &self.instance, export_index)?;
+            TypedComponentFunction::<P, R>::new(&mut self.store, &self.instance, export_index)
+                .expect("Failed to create typed function");
         self.functions.insert(name.to_string(), Box::new(func));
         Ok(())
     }
@@ -258,13 +259,19 @@ impl ActorInstance {
     {
         let export_index = self
             .actor_component
-            .find_function_export(interface, function_name)?;
+            .find_function_export(interface, function_name)
+            .map_err(|e| {
+                error!("Failed to find function export: {}", e);
+                e
+            })?;
+        debug!(
+            "Found function: {}.{} with export index: {:?}",
+            interface, function_name, export_index
+        );
         let name = format!("{}.{}", interface, function_name);
-        let func = TypedComponentFunctionNoParams::<R>::new(
-            &mut self.store,
-            &self.instance,
-            export_index,
-        )?;
+        let func =
+            TypedComponentFunctionNoParams::<R>::new(&mut self.store, &self.instance, export_index)
+                .expect("Failed to create typed function");
         self.functions.insert(name.to_string(), Box::new(func));
         Ok(())
     }
@@ -280,7 +287,15 @@ impl ActorInstance {
     {
         let export_index = self
             .actor_component
-            .find_function_export(interface, function_name)?;
+            .find_function_export(interface, function_name)
+            .map_err(|e| {
+                error!("Failed to find function export: {}", e);
+                e
+            })?;
+        debug!(
+            "Found function: {}.{} with export index: {:?}",
+            interface, function_name, export_index
+        );
         let name = format!("{}.{}", interface, function_name);
         let func = TypedComponentFunctionNoResult::<P>::new(
             &mut self.store,
@@ -298,8 +313,16 @@ impl ActorInstance {
     ) -> Result<()> {
         let export_index = self
             .actor_component
-            .find_function_export(interface, function_name)?;
+            .find_function_export(interface, function_name)
+            .map_err(|e| {
+                error!("Failed to find function export: {}", e);
+                e
+            })?;
         let name = format!("{}.{}", interface, function_name);
+        debug!(
+            "Found function: {}.{} with export index: {:?}",
+            interface, function_name, export_index
+        );
         let func = TypedComponentFunctionNoParamsNoResult::new(
             &mut self.store,
             &self.instance,
