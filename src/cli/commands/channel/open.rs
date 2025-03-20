@@ -186,7 +186,7 @@ async fn run_channel_session(
         let readline = rl.readline("channel> ");
         match readline {
             Ok(line) => {
-                rl.add_history_entry(line.as_str());
+                let _ = rl.add_history_entry(line.as_str());
                 let trimmed = line.trim();
                 
                 if trimmed.is_empty() {
