@@ -24,6 +24,8 @@ pub struct TheaterRuntime {
     theater_rx: Receiver<TheaterCommand>,
     subscriptions: HashMap<TheaterId, Vec<Sender<ChainEvent>>>,
     channels: HashMap<ChannelId, HashSet<TheaterId>>,
+    // Optional channel to send channel events back to the server
+    channel_events_tx: Option<Sender<crate::theater_server::ChannelEvent>>,
 }
 
 pub struct ActorProcess {
@@ -41,6 +43,7 @@ impl TheaterRuntime {
     pub async fn new(
         theater_tx: Sender<TheaterCommand>,
         theater_rx: Receiver<TheaterCommand>,
+        channel_events_tx: Option<Sender<crate::theater_server::ChannelEvent>>,
     ) -> Result<Self> {
         Ok(Self {
             theater_tx,
@@ -48,6 +51,7 @@ impl TheaterRuntime {
             actors: HashMap::new(),
             subscriptions: HashMap::new(),
             channels: HashMap::new(),
+            channel_events_tx,
         })
     }
 
@@ -345,6 +349,21 @@ impl TheaterRuntime {
                     sender_id,
                 } => {
                     debug!("Sending message on channel: {:?}", channel_id);
+
+                    // Notify the server about this message (for client subscriptions)
+                    if let Some(tx) = &self.channel_events_tx {
+                        let channel_event = crate::theater_server::ChannelEvent::Message {
+                            channel_id: channel_id.clone(),
+                            sender_id: sender_id.clone(),
+                            message: message.clone(),
+                        };
+                        
+                        if let Err(e) = tx.send(channel_event).await {
+                            error!("Failed to notify server about channel message: {}", e);
+                        } else {
+                            debug!("Notified server about message on channel {:?}", channel_id);
+                        }
+                    }
 
                     // Look up the participants for this channel
                     if let Some(participant_ids) = self.channels.get(&channel_id) {

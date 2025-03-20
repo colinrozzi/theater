@@ -132,6 +132,7 @@ pub enum ManagementResponse {
     },
     ChannelMessage {
         channel_id: String,
+        sender_id: TheaterId,
         message: Vec<u8>,
     },
     ChannelClosed {
@@ -157,11 +158,23 @@ impl std::hash::Hash for Subscription {
     }
 }
 
+// Define channel events
+#[derive(Debug)]
+pub enum ChannelEvent {
+    Message {
+        channel_id: ChannelId,
+        sender_id: TheaterId,
+        message: Vec<u8>,
+    },
+    // We can add other events like Open, Close if needed
+}
+
 // Structure to track active channel subscriptions
 #[derive(Debug)]
 struct ChannelSubscription {
     channel_id: String,
-    id: TheaterId,
+    initiator_id: TheaterId,
+    target_id: TheaterId,
     client_tx: mpsc::Sender<ManagementResponse>,
 }
 
@@ -170,22 +183,66 @@ pub struct TheaterServer {
     theater_tx: mpsc::Sender<TheaterCommand>,
     management_socket: TcpListener,
     subscriptions: Arc<Mutex<HashMap<TheaterId, HashSet<Subscription>>>>,
-    // New field to track channel subscriptions
+    // Field to track channel subscriptions
     channel_subscriptions: Arc<Mutex<HashMap<String, ChannelSubscription>>>,
+    // Channel for runtime to send channel events back to server
+    channel_events_tx: mpsc::Sender<ChannelEvent>,
 }
 
 impl TheaterServer {
+    // Process channel events and forward them to subscribed clients
+    async fn process_channel_events(
+        mut channel_events_rx: mpsc::Receiver<ChannelEvent>,
+        channel_subscriptions: Arc<Mutex<HashMap<String, ChannelSubscription>>>
+    ) {
+        while let Some(event) = channel_events_rx.recv().await {
+            match event {
+                ChannelEvent::Message { channel_id, sender_id, message } => {
+                    tracing::debug!("Received channel message for {}", channel_id);
+                    // Forward to subscribed clients
+                    let subs = channel_subscriptions.lock().await;
+                    if let Some(sub) = subs.get(&channel_id.0) {
+                        let response = ManagementResponse::ChannelMessage {
+                            channel_id: channel_id.0.clone(),
+                            sender_id,
+                            message,
+                        };
+                        
+                        if let Err(e) = sub.client_tx.send(response).await {
+                            tracing::warn!("Failed to forward channel message: {}", e);
+                        }
+                    }
+                },
+                // Handle other channel events as needed
+            }
+        }
+    }
+
     pub async fn new(address: std::net::SocketAddr) -> Result<Self> {
         let (theater_tx, theater_rx) = mpsc::channel(32);
-        let runtime = TheaterRuntime::new(theater_tx.clone(), theater_rx).await?;
+        
+        // Create channel for runtime to send channel events back to server
+        let (channel_events_tx, channel_events_rx) = mpsc::channel(32);
+        
+        // Pass channel_events_tx to runtime during initialization
+        let runtime = TheaterRuntime::new(theater_tx.clone(), theater_rx, Some(channel_events_tx.clone())).await?;
         let management_socket = TcpListener::bind(address).await?;
+        
+        let channel_subscriptions = Arc::new(Mutex::new(HashMap::new()));
+        
+        // Start task to process channel events
+        let channel_subs_clone = channel_subscriptions.clone();
+        tokio::spawn(async move {
+            Self::process_channel_events(channel_events_rx, channel_subs_clone).await;
+        });
 
         Ok(Self {
             runtime,
             theater_tx,
             management_socket,
             subscriptions: Arc::new(Mutex::new(HashMap::new())),
-            channel_subscriptions: Arc::new(Mutex::new(HashMap::new())),
+            channel_subscriptions,
+            channel_events_tx,
         })
     }
 
@@ -621,7 +678,8 @@ impl TheaterServer {
                                         // Register the channel subscription to receive messages
                                         let channel_sub = ChannelSubscription {
                                             channel_id: channel_id_str.clone(),
-                                            id: client_id.clone(),
+                                            initiator_id: client_id.clone(),
+                                            target_id: actor_id.clone(),
                                             client_tx: cmd_client_tx.clone(),
                                         };
 
@@ -667,7 +725,7 @@ impl TheaterServer {
                         .lock()
                         .await
                         .get(&channel_id)
-                        .map(|sub| sub.id.clone())
+                        .map(|sub| sub.initiator_id.clone())
                         .unwrap_or_else(|| TheaterId::generate());
 
                     // Send the message on the channel
