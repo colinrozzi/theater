@@ -342,6 +342,7 @@ impl TheaterRuntime {
                 TheaterCommand::ChannelMessage {
                     channel_id,
                     message,
+                    sender_id,
                 } => {
                     debug!("Sending message on channel: {:?}", channel_id);
 
@@ -350,7 +351,13 @@ impl TheaterRuntime {
                         let mut successful_delivery = false;
 
                         for actor_id in participant_ids {
+                            debug!("Delivering message to actor {:?}", actor_id);
                             if let Some(proc) = self.actors.get_mut(actor_id) {
+                                if proc.actor_id == sender_id {
+                                    // Skip sending the message back to the sender
+                                    continue;
+                                }
+
                                 let actor_message =
                                     ActorMessage::ChannelMessage(ActorChannelMessage {
                                         channel_id: channel_id.clone(),

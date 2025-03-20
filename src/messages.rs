@@ -3,10 +3,10 @@ use crate::id::TheaterId;
 use crate::metrics::ActorMetrics;
 use crate::Result;
 use serde::{Deserialize, Serialize};
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
 use tokio::sync::mpsc::Sender;
 use tokio::sync::oneshot;
-use std::hash::{Hash, Hasher};
-use std::collections::hash_map::DefaultHasher;
 
 #[derive(Debug)]
 pub enum TheaterCommand {
@@ -76,6 +76,7 @@ pub enum TheaterCommand {
     },
     ChannelMessage {
         channel_id: ChannelId,
+        sender_id: TheaterId,
         message: Vec<u8>,
     },
     ChannelClose {
@@ -136,8 +137,16 @@ impl TheaterCommand {
             TheaterCommand::SubscribeToActor { actor_id, .. } => {
                 format!("SubscribeToActor: {:?}", actor_id)
             }
-            TheaterCommand::ChannelOpen { initiator_id, target_id, channel_id, .. } => {
-                format!("ChannelOpen: {} -> {} (channel: {})", initiator_id, target_id, channel_id)
+            TheaterCommand::ChannelOpen {
+                initiator_id,
+                target_id,
+                channel_id,
+                ..
+            } => {
+                format!(
+                    "ChannelOpen: {} -> {} (channel: {})",
+                    initiator_id, target_id, channel_id
+                )
             }
             TheaterCommand::ChannelMessage { channel_id, .. } => {
                 format!("ChannelMessage: {}", channel_id)
@@ -145,14 +154,19 @@ impl TheaterCommand {
             TheaterCommand::ChannelClose { channel_id } => {
                 format!("ChannelClose: {}", channel_id)
             }
-            TheaterCommand::ListChannels { .. } => {
-                "ListChannels".to_string()
-            }
+            TheaterCommand::ListChannels { .. } => "ListChannels".to_string(),
             TheaterCommand::GetChannelStatus { channel_id, .. } => {
                 format!("GetChannelStatus: {}", channel_id)
             }
-            TheaterCommand::RegisterChannel { channel_id, participants } => {
-                format!("RegisterChannel: {} with {} participants", channel_id, participants.len())
+            TheaterCommand::RegisterChannel {
+                channel_id,
+                participants,
+            } => {
+                format!(
+                    "RegisterChannel: {} with {} participants",
+                    channel_id,
+                    participants.len()
+                )
             }
         }
     }
@@ -173,16 +187,16 @@ impl ChannelId {
         let mut hasher = DefaultHasher::new();
         let timestamp = chrono::Utc::now().timestamp_millis();
         let rand_value: u64 = rand::random();
-        
+
         initiator.hash(&mut hasher);
         target.hash(&mut hasher);
         timestamp.hash(&mut hasher);
         rand_value.hash(&mut hasher);
-        
+
         let hash = hasher.finish();
         ChannelId(format!("ch_{:016x}", hash))
     }
-    
+
     pub fn as_str(&self) -> &str {
         &self.0
     }

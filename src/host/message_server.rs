@@ -23,7 +23,6 @@ pub struct MessageServerHost {
 }
 
 struct ChannelState {
-    target_actor: TheaterId,
     is_open: bool,
     created_at: chrono::DateTime<chrono::Utc>,
 }
@@ -423,6 +422,7 @@ impl MessageServerHost {
                     let command = TheaterCommand::ChannelMessage {
                         channel_id: channel_id_parsed,
                         message: msg.clone(),
+                        sender_id: ctx.data().id.clone(),
                     };
                     
                     let theater_tx = theater_tx.clone();
@@ -635,7 +635,6 @@ impl MessageServerHost {
                 if accepted {
                     // Store channel in active channels
                     self.active_channels.insert(channel_id.clone(), ChannelState {
-                        target_actor: TheaterId::generate(), // Use a placeholder ID since we don't have direct access
                         is_open: true,
                         created_at: chrono::Utc::now(),
                     });

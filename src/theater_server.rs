@@ -161,6 +161,7 @@ impl std::hash::Hash for Subscription {
 #[derive(Debug)]
 struct ChannelSubscription {
     channel_id: String,
+    id: TheaterId,
     client_tx: mpsc::Sender<ManagementResponse>,
 }
 
@@ -213,8 +214,13 @@ impl TheaterServer {
             let channel_subscriptions = self.channel_subscriptions.clone();
 
             tokio::spawn(async move {
-                if let Err(e) =
-                    Self::handle_management_connection(socket, runtime_tx, subscriptions, channel_subscriptions).await
+                if let Err(e) = Self::handle_management_connection(
+                    socket,
+                    runtime_tx,
+                    subscriptions,
+                    channel_subscriptions,
+                )
+                .await
                 {
                     error!("Error handling management connection: {}", e);
                 }
@@ -234,8 +240,9 @@ impl TheaterServer {
         // Create a channel for sending responses to this client
         let (client_tx, mut client_rx) = mpsc::channel::<ManagementResponse>(32);
 
-        // Create a framed connection for the main thread
-        let framed = Framed::new(socket, LengthDelimitedCodec::new());
+        let mut codec = LengthDelimitedCodec::new();
+        codec.set_max_frame_length(32 * 1024 * 1024); // Increase to 32MB
+        let framed = Framed::new(socket, codec);
 
         // Split the framed connection into read and write parts
         let (mut framed_sink, mut framed_stream) = framed.split();
@@ -263,7 +270,7 @@ impl TheaterServer {
 
         // Store active subscriptions for this connection to clean up on disconnect
         let mut connection_subscriptions: Vec<(TheaterId, Uuid)> = Vec::new();
-        
+
         // Store active channel subscriptions for cleanup
         let mut connection_channel_subscriptions: Vec<String> = Vec::new();
 
@@ -572,19 +579,22 @@ impl TheaterServer {
                         id,
                         metrics: serde_json::to_value(metrics?)?,
                     }
-                },
+                }
                 // Handle channel management commands
-                ManagementCommand::OpenChannel { actor_id, initial_message } => {
+                ManagementCommand::OpenChannel {
+                    actor_id,
+                    initial_message,
+                } => {
                     info!("Opening channel to actor: {:?}", actor_id);
-                    
+
                     // Create a response channel
                     let (response_tx, response_rx) = tokio::sync::oneshot::channel();
-                    
+
                     // Generate a channel ID
                     let client_id = TheaterId::generate(); // Use a generated ID for the client side
                     let channel_id = crate::messages::ChannelId::new(&client_id, &actor_id);
                     let channel_id_str = channel_id.0.clone();
-                    
+
                     // Send the channel open command to the runtime
                     runtime_tx
                         .send(TheaterCommand::ChannelOpen {
@@ -595,8 +605,10 @@ impl TheaterServer {
                             response_tx,
                         })
                         .await
-                        .map_err(|e| anyhow::anyhow!("Failed to send channel open command: {}", e))?;
-                    
+                        .map_err(|e| {
+                            anyhow::anyhow!("Failed to send channel open command: {}", e)
+                        })?;
+
                     // Wait for the response
                     match response_rx.await {
                         Ok(result) => {
@@ -605,18 +617,23 @@ impl TheaterServer {
                                     if accepted {
                                         // Channel opened successfully
                                         info!("Channel opened successfully: {}", channel_id_str);
-                                        
+
                                         // Register the channel subscription to receive messages
                                         let channel_sub = ChannelSubscription {
                                             channel_id: channel_id_str.clone(),
+                                            id: client_id.clone(),
                                             client_tx: cmd_client_tx.clone(),
                                         };
-                                        
-                                        channel_subscriptions.lock().await.insert(channel_id_str.clone(), channel_sub);
-                                        
+
+                                        channel_subscriptions
+                                            .lock()
+                                            .await
+                                            .insert(channel_id_str.clone(), channel_sub);
+
                                         // Track this channel for cleanup on disconnect
-                                        connection_channel_subscriptions.push(channel_id_str.clone());
-                                        
+                                        connection_channel_subscriptions
+                                            .push(channel_id_str.clone());
+
                                         ManagementResponse::ChannelOpened {
                                             channel_id: channel_id_str,
                                             actor_id,
@@ -627,46 +644,50 @@ impl TheaterServer {
                                             message: "Channel rejected by target actor".to_string(),
                                         }
                                     }
-                                },
-                                Err(e) => {
-                                    ManagementResponse::Error {
-                                        message: format!("Error opening channel: {}", e),
-                                    }
                                 }
-                            }
-                        },
-                        Err(e) => {
-                            ManagementResponse::Error {
-                                message: format!("Failed to receive channel open response: {}", e),
+                                Err(e) => ManagementResponse::Error {
+                                    message: format!("Error opening channel: {}", e),
+                                },
                             }
                         }
+                        Err(e) => ManagementResponse::Error {
+                            message: format!("Failed to receive channel open response: {}", e),
+                        },
                     }
-                },
-                ManagementCommand::SendOnChannel { channel_id, message } => {
+                }
+                ManagementCommand::SendOnChannel {
+                    channel_id,
+                    message,
+                } => {
                     info!("Sending message on channel: {}", channel_id);
-                    
+
                     // Parse the channel ID
                     let channel_id_parsed = crate::messages::ChannelId(channel_id.clone());
-                    
+                    let client_id = channel_subscriptions
+                        .lock()
+                        .await
+                        .get(&channel_id)
+                        .map(|sub| sub.id.clone())
+                        .unwrap_or_else(|| TheaterId::generate());
+
                     // Send the message on the channel
                     runtime_tx
                         .send(TheaterCommand::ChannelMessage {
                             channel_id: channel_id_parsed,
                             message,
+                            sender_id: client_id,
                         })
                         .await
                         .map_err(|e| anyhow::anyhow!("Failed to send message on channel: {}", e))?;
-                    
-                    ManagementResponse::MessageSent {
-                        channel_id,
-                    }
-                },
+
+                    ManagementResponse::MessageSent { channel_id }
+                }
                 ManagementCommand::CloseChannel { channel_id } => {
                     info!("Closing channel: {}", channel_id);
-                    
+
                     // Parse the channel ID
                     let channel_id_parsed = crate::messages::ChannelId(channel_id.clone());
-                    
+
                     // Close the channel
                     runtime_tx
                         .send(TheaterCommand::ChannelClose {
@@ -674,14 +695,12 @@ impl TheaterServer {
                         })
                         .await
                         .map_err(|e| anyhow::anyhow!("Failed to close channel: {}", e))?;
-                    
+
                     // Remove from channel subscriptions
                     channel_subscriptions.lock().await.remove(&channel_id);
                     connection_channel_subscriptions.retain(|id| id != &channel_id);
-                    
-                    ManagementResponse::ChannelClosed {
-                        channel_id,
-                    }
+
+                    ManagementResponse::ChannelClosed { channel_id }
                 }
             };
 
@@ -710,14 +729,14 @@ impl TheaterServer {
                 }
             }
         }
-        
+
         // Clean up channel subscriptions
         debug!(
             "Connection closed, cleaning up {} channel subscriptions",
             connection_channel_subscriptions.len()
         );
         let mut channel_subs = channel_subscriptions.lock().await;
-        
+
         for channel_id in connection_channel_subscriptions {
             channel_subs.remove(&channel_id);
         }
