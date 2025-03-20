@@ -1,14 +1,14 @@
 use anyhow::{anyhow, Result};
 use clap::Parser;
 use console::style;
+use rustyline::error::ReadlineError;
+use rustyline::DefaultEditor;
 use std::fs;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio::sync::Mutex;
-use rustyline::error::ReadlineError;
-use rustyline::DefaultEditor;
 use tracing::{debug, error};
 
 use crate::cli::client::TheaterClient;
@@ -27,7 +27,7 @@ pub struct OpenArgs {
     /// File containing initial message to send
     #[arg(short, long, conflicts_with = "message")]
     pub file: Option<PathBuf>,
-    
+
     /// Address of the theater server
     #[arg(short, long, default_value = "127.0.0.1:9000")]
     pub address: SocketAddr,
@@ -36,14 +36,13 @@ pub struct OpenArgs {
 /// Execute the channel open command
 pub fn execute(args: &OpenArgs, verbose: bool, json: bool) -> Result<()> {
     debug!("Opening channel to actor: {}", args.actor_id);
-    
+
     // Get initial message content either from direct argument or file
     let initial_message = if let Some(message) = &args.message {
         message.clone().into_bytes()
     } else if let Some(file_path) = &args.file {
         debug!("Reading initial message from file: {:?}", file_path);
-        fs::read(file_path)
-            .map_err(|e| anyhow!("Failed to read message file: {}", e))?
+        fs::read(file_path).map_err(|e| anyhow!("Failed to read message file: {}", e))?
     } else {
         // Default initial message
         serde_json::to_vec(&serde_json::json!({
@@ -51,21 +50,22 @@ pub fn execute(args: &OpenArgs, verbose: bool, json: bool) -> Result<()> {
             "payload": {
                 "timestamp": chrono::Utc::now().timestamp_millis(),
             }
-        })).map_err(|e| anyhow!("Failed to create default initial message: {}", e))?
+        }))
+        .map_err(|e| anyhow!("Failed to create default initial message: {}", e))?
     };
-    
+
     debug!("Initial message size: {} bytes", initial_message.len());
     debug!("Connecting to server at: {}", args.address);
-    
+
     // Parse the actor ID
     let actor_id = match TheaterId::parse(&args.actor_id) {
         Ok(id) => id,
-        Err(e) => return Err(anyhow!("Invalid actor ID: {}", e))
+        Err(e) => return Err(anyhow!("Invalid actor ID: {}", e)),
     };
-    
+
     // Create tokio runtime
     let runtime = tokio::runtime::Runtime::new()?;
-    
+
     runtime.block_on(async {
         // Set up the interactive channel session
         run_channel_session(args.address, actor_id, initial_message, json, verbose).await
@@ -77,34 +77,40 @@ async fn run_channel_session(
     actor_id: TheaterId,
     initial_message: Vec<u8>,
     json_output: bool,
-    verbose: bool
+    verbose: bool,
 ) -> Result<()> {
     let mut client = TheaterClient::new(server_addr);
-    
+
     // Connect to the server
     client.connect().await?;
-    
-    println!("{} Opening channel to actor: {}", 
+
+    println!(
+        "{} Opening channel to actor: {}",
         style(">").green().bold(),
-        style(actor_id.to_string()).cyan());
-    
+        style(actor_id.to_string()).cyan()
+    );
+
     // Open a channel to the actor
-    let channel_id = client.open_channel(actor_id.clone(), initial_message).await?;
-    
-    println!("{} Channel opened: {}", 
+    let channel_id = client
+        .open_channel(actor_id.clone(), initial_message)
+        .await?;
+
+    println!(
+        "{} Channel opened: {}",
         style("✓").green().bold(),
-        style(&channel_id).cyan());
-    
+        style(&channel_id).cyan()
+    );
+
     // Create a shared client for both sending and receiving
     let client = Arc::new(Mutex::new(client));
-    
+
     // Set up a channel for receiving messages
     let (msg_tx, mut msg_rx) = mpsc::channel::<Vec<u8>>(32);
-    
+
     // Clone references for the receive task
     let receive_client = client.clone();
     let channel_id_clone = channel_id.clone();
-    
+
     // Spawn a task to listen for channel messages
     let receive_handle = tokio::spawn(async move {
         loop {
@@ -122,7 +128,7 @@ async fn run_channel_session(
                         // No message received, could be a connection issue
                         tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
                     }
-                },
+                }
                 Err(e) => {
                     error!("Error receiving channel message: {}", e);
                     // Short backoff before retrying
@@ -131,14 +137,14 @@ async fn run_channel_session(
             }
         }
     });
-    
+
     // Run the REPL
     let mut rl = DefaultEditor::new()?;
     let mut running = true;
-    
+
     // Set up a separate task to display incoming messages
     let (stop_tx, mut stop_rx) = mpsc::channel::<bool>(1);
-    
+
     tokio::spawn(async move {
         loop {
             tokio::select! {
@@ -177,40 +183,44 @@ async fn run_channel_session(
             }
         }
     });
-    
-    println!("{} Enter commands ('help' for available commands, 'exit' to quit)", 
-        style("i").blue().bold());
-    
+
+    println!(
+        "{} Enter commands ('help' for available commands, 'exit' to quit)",
+        style("i").blue().bold()
+    );
+
     // Main REPL loop
     while running {
         let readline = rl.readline("channel> ");
         match readline {
             Ok(line) => {
+                println!("{}", line);
                 let _ = rl.add_history_entry(line.as_str());
                 let trimmed = line.trim();
-                
+
                 if trimmed.is_empty() {
                     continue;
                 }
-                
+
                 // Process the command
                 let parts: Vec<&str> = trimmed.split_whitespace().collect();
                 let cmd = parts[0].to_lowercase();
-                
+
                 match cmd.as_str() {
                     "send" => {
+                        println!("Sending message...");
                         // Handle send command with various formats
                         if parts.len() < 2 {
                             println!("Error: send requires a message or --file option");
                             continue;
                         }
-                        
+
                         let message = if parts[1] == "--file" || parts[1] == "-f" {
                             if parts.len() < 3 {
                                 println!("Error: --file option requires a file path");
                                 continue;
                             }
-                            
+
                             let file_path = parts[2];
                             match fs::read(file_path) {
                                 Ok(content) => content,
@@ -222,69 +232,83 @@ async fn run_channel_session(
                         } else {
                             // Send the rest of the line as the message
                             let message_text = trimmed[5..].trim(); // Skip "send "
-                            
+
                             // Check if it's a quoted string and remove the quotes if needed
-                            let text = if message_text.starts_with('"') && message_text.ends_with('"') && message_text.len() >= 2 {
-                                &message_text[1..message_text.len()-1]
+                            let text = if message_text.starts_with('"')
+                                && message_text.ends_with('"')
+                                && message_text.len() >= 2
+                            {
+                                &message_text[1..message_text.len() - 1]
                             } else {
                                 message_text
                             };
-                            
+
                             text.as_bytes().to_vec()
                         };
-                        
+
                         debug!("Sending message on channel: {} bytes", message.len());
-                        
+
                         // Send the message
-                        match client.lock().await.send_on_channel(&channel_id, message).await {
+                        match client
+                            .lock()
+                            .await
+                            .send_on_channel(&channel_id, message)
+                            .await
+                        {
                             Ok(_) => {
                                 if verbose {
                                     println!("{} Message sent", style("✓").green().bold());
                                 }
-                            },
+                            }
                             Err(e) => {
-                                println!("{} Error sending message: {}", 
-                                    style("✗").red().bold(), e);
+                                println!(
+                                    "{} Error sending message: {}",
+                                    style("✗").red().bold(),
+                                    e
+                                );
                             }
                         }
-                    },
+                    }
                     "exit" | "quit" => {
                         running = false;
                         println!("Closing channel and exiting...");
-                    },
+                    }
                     "help" => {
                         println!("Available commands:");
                         println!("  send \"message\"    - Send a text message");
                         println!("  send --file path  - Send contents of a file");
                         println!("  exit | quit       - Close channel and exit");
                         println!("  help              - Show this help");
-                    },
+                    }
                     _ => {
-                        println!("Unknown command: {}. Type 'help' for available commands.", cmd);
+                        println!(
+                            "Unknown command: {}. Type 'help' for available commands.",
+                            cmd
+                        );
                     }
                 }
-            },
+            }
             Err(ReadlineError::Interrupted) | Err(ReadlineError::Eof) => {
                 println!("Closing channel and exiting...");
                 running = false;
-            },
+            }
             Err(err) => {
                 println!("Error: {}", err);
                 running = false;
             }
         }
     }
-    
+
     // Clean up
     let _ = stop_tx.send(true).await;
-    
+
     // Close the channel
     client.lock().await.close_channel(&channel_id).await?;
-    
+
     // Abort the receive task
     receive_handle.abort();
-    
+
     println!("{} Channel closed", style("✓").green().bold());
-    
+
     Ok(())
 }
