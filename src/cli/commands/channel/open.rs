@@ -101,107 +101,50 @@ async fn run_channel_session(
         style(&channel_id).cyan()
     );
 
-    // Create a shared client for both sending and receiving
-    let client = Arc::new(Mutex::new(client));
-
-    // Set up a channel for receiving messages
-    let (msg_tx, mut msg_rx) = mpsc::channel::<Vec<u8>>(32);
-
-    // Clone references for the receive task
-    let receive_client = client.clone();
-    let channel_id_clone = channel_id.clone();
-
-    // Spawn a task to listen for channel messages
-    let receive_handle = tokio::spawn(async move {
-        loop {
-            match receive_client.lock().await.receive_channel_message().await {
-                Ok(response) => {
-                    if let Some((id, message)) = response {
-                        // Only process messages for our channel
-                        if id == channel_id_clone {
-                            if let Err(e) = msg_tx.send(message).await {
-                                error!("Failed to forward received message: {}", e);
-                                break;
-                            }
-                        }
-                    } else {
-                        // No message received, could be a connection issue
-                        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-                    }
-                }
-                Err(e) => {
-                    error!("Error receiving channel message: {}", e);
-                    // Short backoff before retrying
-                    tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
-                }
-            }
-        }
-    });
-
-    // Run the REPL
+    // Set up the REPL
     let mut rl = DefaultEditor::new()?;
-    let mut running = true;
-
-    // Set up a separate task to display incoming messages
-    let (stop_tx, mut stop_rx) = mpsc::channel::<bool>(1);
-
-    tokio::spawn(async move {
-        loop {
-            tokio::select! {
-                // Check for stop signal
-                _ = stop_rx.recv() => {
-                    break;
-                }
-                // Process incoming messages
-                msg = msg_rx.recv() => {
-                    if let Some(message) = msg {
-                        // Try to pretty print if it looks like JSON
-                        match std::str::from_utf8(&message) {
-                            Ok(text) => {
-                                if let Ok(json) = serde_json::from_str::<serde_json::Value>(text) {
-                                    if json_output {
-                                        println!("{}", serde_json::to_string_pretty(&json).unwrap_or_else(|_| text.to_string()));
-                                    } else {
-                                        println!("\r{}", text);
-                                    }
-                                } else {
-                                    println!("\r{}", text);
-                                }
-                            },
-                            Err(_) => {
-                                println!("\r[Binary message of {} bytes]", message.len());
-                                if verbose {
-                                    println!("\r{:?}", message);
-                                }
-                            }
-                        }
-                        // Re-display the prompt
-                        print!("channel> ");
-                        let _ = std::io::Write::flush(&mut std::io::stdout());
-                    }
-                }
-            }
-        }
-    });
-
     println!(
         "{} Enter commands ('help' for available commands, 'exit' to quit)",
         style("i").blue().bold()
     );
 
-    // Main REPL loop
-    while running {
-        let readline = rl.readline("channel> ");
-        match readline {
-            Ok(line) => {
-                let _ = rl.add_history_entry(line.as_str());
-                let trimmed = line.trim();
+    // Create a task to listen for input
+    let (input_tx, mut input_rx) = mpsc::channel::<String>(32);
+    let input_task = tokio::spawn(async move {
+        loop {
+            let readline = rl.readline("channel> ");
+            match readline {
+                Ok(line) => {
+                    let _ = rl.add_history_entry(line.as_str());
+                    if let Err(_) = input_tx.send(line).await {
+                        break;
+                    }
+                }
+                Err(ReadlineError::Interrupted) | Err(ReadlineError::Eof) => {
+                    println!("\rClosing channel and exiting...");
+                    break;
+                }
+                Err(err) => {
+                    println!("\rError: {}", err);
+                    break;
+                }
+            }
+        }
+    });
 
+    let mut running = true;
+
+    // Main event loop using select!
+    while running {
+        tokio::select! {
+            // Handle user input
+            Some(line) = input_rx.recv() => {
+                let trimmed = line.trim();
                 if trimmed.is_empty() {
                     continue;
                 }
 
-                // Process the command
+                // Process commands
                 let parts: Vec<&str> = trimmed.split_whitespace().collect();
                 let cmd = parts[0].to_lowercase();
 
@@ -256,13 +199,8 @@ async fn run_channel_session(
                         debug!("Sending message on channel: {} bytes", message.len());
                         println!("{} Sending message...", style(">").green().bold());
 
-                        // Send the message
-                        match client
-                            .lock()
-                            .await
-                            .send_on_channel(&channel_id, message)
-                            .await
-                        {
+                        // Send the message without competing for locks
+                        match client.send_on_channel(&channel_id, message).await {
                             Ok(_) => {
                                 if verbose {
                                     println!("{} Message sent", style("✓").green().bold());
@@ -295,26 +233,60 @@ async fn run_channel_session(
                         );
                     }
                 }
-            }
-            Err(ReadlineError::Interrupted) | Err(ReadlineError::Eof) => {
-                println!("Closing channel and exiting...");
-                running = false;
-            }
-            Err(err) => {
-                println!("Error: {}", err);
-                running = false;
+            },
+
+            // Check for incoming messages
+            // This branch will run when there's no user input to process
+            else => {
+                match client.receive_channel_message().await {
+                    Ok(response) => {
+                        if let Some((id, message)) = response {
+                            // Only process messages for our channel
+                            if id == channel_id {
+                                // Try to pretty print if it looks like JSON
+                                match std::str::from_utf8(&message) {
+                                    Ok(text) => {
+                                        if let Ok(json) = serde_json::from_str::<serde_json::Value>(text) {
+                                            if json_output {
+                                                println!("{}", serde_json::to_string_pretty(&json).unwrap_or_else(|_| text.to_string()));
+                                            } else {
+                                                println!("\r{}", text);
+                                            }
+                                        } else {
+                                            println!("\r{}", text);
+                                        }
+                                    },
+                                    Err(_) => {
+                                        println!("\r[Binary message of {} bytes]", message.len());
+                                        if verbose {
+                                            println!("\r{:?}", message);
+                                        }
+                                    }
+                                }
+                                // Re-display the prompt
+                                print!("channel> ");
+                                let _ = std::io::Write::flush(&mut std::io::stdout());
+                            }
+                        } else {
+                            // No message received, small delay to prevent CPU spinning
+                            tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+                        }
+                    }
+                    Err(e) => {
+                        error!("Error receiving channel message: {}", e);
+                        // Short backoff before retrying
+                        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+                    }
+                }
             }
         }
     }
 
     // Clean up
-    let _ = stop_tx.send(true).await;
+    input_task.abort();
 
     // Close the channel
-    client.lock().await.close_channel(&channel_id).await?;
-
-    // Abort the receive task
-    receive_handle.abort();
+    client.close_channel(&channel_id).await?;
 
     println!("{} Channel closed", style("✓").green().bold());
 
