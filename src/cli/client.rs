@@ -50,7 +50,7 @@ impl TheaterClient {
         }
 
         let connection = self.connection.as_mut().unwrap();
-        
+
         // Serialize and send the command
         debug!("Sending command: {:?}", command);
         let command_bytes = serde_json::to_vec(&command)?;
@@ -71,13 +71,22 @@ impl TheaterClient {
     }
 
     /// Start an actor from a manifest file with optional initial state
-    pub async fn start_actor(&mut self, manifest: String, initial_state: Option<Vec<u8>>) -> Result<TheaterId> {
-        let command = ManagementCommand::StartActor { manifest, initial_state };
+    pub async fn start_actor(
+        &mut self,
+        manifest: String,
+        initial_state: Option<Vec<u8>>,
+    ) -> Result<TheaterId> {
+        let command = ManagementCommand::StartActor {
+            manifest,
+            initial_state,
+        };
         let response = self.send_command(command).await?;
 
         match response {
             ManagementResponse::ActorStarted { id } => Ok(id),
-            ManagementResponse::Error { message } => Err(anyhow!("Error starting actor: {}", message)),
+            ManagementResponse::Error { message } => {
+                Err(anyhow!("Error starting actor: {}", message))
+            }
             _ => Err(anyhow!("Unexpected response")),
         }
     }
@@ -89,7 +98,9 @@ impl TheaterClient {
 
         match response {
             ManagementResponse::ActorStopped { .. } => Ok(()),
-            ManagementResponse::Error { message } => Err(anyhow!("Error stopping actor: {}", message)),
+            ManagementResponse::Error { message } => {
+                Err(anyhow!("Error stopping actor: {}", message))
+            }
             _ => Err(anyhow!("Unexpected response")),
         }
     }
@@ -101,7 +112,9 @@ impl TheaterClient {
 
         match response {
             ManagementResponse::ActorList { actors } => Ok(actors),
-            ManagementResponse::Error { message } => Err(anyhow!("Error listing actors: {}", message)),
+            ManagementResponse::Error { message } => {
+                Err(anyhow!("Error listing actors: {}", message))
+            }
             _ => Err(anyhow!("Unexpected response")),
         }
     }
@@ -112,20 +125,34 @@ impl TheaterClient {
         let response = self.send_command(command).await?;
 
         match response {
-            ManagementResponse::Subscribed { id: _, subscription_id } => Ok(subscription_id),
-            ManagementResponse::Error { message } => Err(anyhow!("Error subscribing to actor: {}", message)),
+            ManagementResponse::Subscribed {
+                id: _,
+                subscription_id,
+            } => Ok(subscription_id),
+            ManagementResponse::Error { message } => {
+                Err(anyhow!("Error subscribing to actor: {}", message))
+            }
             _ => Err(anyhow!("Unexpected response")),
         }
     }
 
     /// Unsubscribe from events from an actor
-    pub async fn unsubscribe_from_actor(&mut self, id: TheaterId, subscription_id: Uuid) -> Result<()> {
-        let command = ManagementCommand::UnsubscribeFromActor { id, subscription_id };
+    pub async fn unsubscribe_from_actor(
+        &mut self,
+        id: TheaterId,
+        subscription_id: Uuid,
+    ) -> Result<()> {
+        let command = ManagementCommand::UnsubscribeFromActor {
+            id,
+            subscription_id,
+        };
         let response = self.send_command(command).await?;
 
         match response {
             ManagementResponse::Unsubscribed { .. } => Ok(()),
-            ManagementResponse::Error { message } => Err(anyhow!("Error unsubscribing from actor: {}", message)),
+            ManagementResponse::Error { message } => {
+                Err(anyhow!("Error unsubscribing from actor: {}", message))
+            }
             _ => Err(anyhow!("Unexpected response")),
         }
     }
@@ -137,7 +164,9 @@ impl TheaterClient {
 
         match response {
             ManagementResponse::SentMessage { .. } => Ok(()),
-            ManagementResponse::Error { message } => Err(anyhow!("Error sending message to actor: {}", message)),
+            ManagementResponse::Error { message } => {
+                Err(anyhow!("Error sending message to actor: {}", message))
+            }
             _ => Err(anyhow!("Unexpected response")),
         }
     }
@@ -149,7 +178,9 @@ impl TheaterClient {
 
         match response {
             ManagementResponse::RequestedMessage { message, .. } => Ok(message),
-            ManagementResponse::Error { message } => Err(anyhow!("Error requesting message from actor: {}", message)),
+            ManagementResponse::Error { message } => {
+                Err(anyhow!("Error requesting message from actor: {}", message))
+            }
             _ => Err(anyhow!("Unexpected response")),
         }
     }
@@ -161,7 +192,9 @@ impl TheaterClient {
 
         match response {
             ManagementResponse::ActorStatus { status, .. } => Ok(status),
-            ManagementResponse::Error { message } => Err(anyhow!("Error getting actor status: {}", message)),
+            ManagementResponse::Error { message } => {
+                Err(anyhow!("Error getting actor status: {}", message))
+            }
             _ => Err(anyhow!("Unexpected response")),
         }
     }
@@ -173,7 +206,9 @@ impl TheaterClient {
 
         match response {
             ManagementResponse::Restarted { .. } => Ok(()),
-            ManagementResponse::Error { message } => Err(anyhow!("Error restarting actor: {}", message)),
+            ManagementResponse::Error { message } => {
+                Err(anyhow!("Error restarting actor: {}", message))
+            }
             _ => Err(anyhow!("Unexpected response")),
         }
     }
@@ -185,7 +220,9 @@ impl TheaterClient {
 
         match response {
             ManagementResponse::ActorState { state, .. } => Ok(state),
-            ManagementResponse::Error { message } => Err(anyhow!("Error getting actor state: {}", message)),
+            ManagementResponse::Error { message } => {
+                Err(anyhow!("Error getting actor state: {}", message))
+            }
             _ => Err(anyhow!("Unexpected response")),
         }
     }
@@ -197,7 +234,9 @@ impl TheaterClient {
 
         match response {
             ManagementResponse::ActorEvents { events, .. } => Ok(events),
-            ManagementResponse::Error { message } => Err(anyhow!("Error getting actor events: {}", message)),
+            ManagementResponse::Error { message } => {
+                Err(anyhow!("Error getting actor events: {}", message))
+            }
             _ => Err(anyhow!("Unexpected response")),
         }
     }
@@ -209,72 +248,88 @@ impl TheaterClient {
 
         match response {
             ManagementResponse::ActorMetrics { metrics, .. } => Ok(metrics),
-            ManagementResponse::Error { message } => Err(anyhow!("Error getting actor metrics: {}", message)),
+            ManagementResponse::Error { message } => {
+                Err(anyhow!("Error getting actor metrics: {}", message))
+            }
             _ => Err(anyhow!("Unexpected response")),
         }
     }
 
     /// Open a channel to an actor
-    pub async fn open_channel(&mut self, id: TheaterId, initial_message: Vec<u8>) -> Result<String> {
-        let command = ManagementCommand::OpenChannel { 
+    pub async fn open_channel(
+        &mut self,
+        id: TheaterId,
+        initial_message: Vec<u8>,
+    ) -> Result<String> {
+        let command = ManagementCommand::OpenChannel {
             actor_id: id.clone(),
-            initial_message 
+            initial_message,
         };
         let response = self.send_command(command).await?;
 
         match response {
             ManagementResponse::ChannelOpened { channel_id, .. } => Ok(channel_id),
-            ManagementResponse::Error { message } => Err(anyhow!("Error opening channel: {}", message)),
+            ManagementResponse::Error { message } => {
+                Err(anyhow!("Error opening channel: {}", message))
+            }
             _ => Err(anyhow!("Unexpected response")),
         }
     }
 
     /// Send a message on an existing channel
     pub async fn send_on_channel(&mut self, channel_id: &str, message: Vec<u8>) -> Result<()> {
-        let command = ManagementCommand::SendOnChannel { 
+        println!("send_on_channel");
+        println!("channel_id: {:?}", channel_id);
+        let command = ManagementCommand::SendOnChannel {
             channel_id: channel_id.to_string(),
-            message 
+            message,
         };
+        println!("command: {:?}", command);
         let response = self.send_command(command).await?;
 
         match response {
             ManagementResponse::MessageSent { .. } => Ok(()),
-            ManagementResponse::Error { message } => Err(anyhow!("Error sending on channel: {}", message)),
+            ManagementResponse::Error { message } => {
+                Err(anyhow!("Error sending on channel: {}", message))
+            }
             _ => Err(anyhow!("Unexpected response")),
         }
     }
 
     /// Close an existing channel
     pub async fn close_channel(&mut self, channel_id: &str) -> Result<()> {
-        let command = ManagementCommand::CloseChannel { 
-            channel_id: channel_id.to_string() 
+        let command = ManagementCommand::CloseChannel {
+            channel_id: channel_id.to_string(),
         };
         let response = self.send_command(command).await?;
 
         match response {
             ManagementResponse::ChannelClosed { .. } => Ok(()),
-            ManagementResponse::Error { message } => Err(anyhow!("Error closing channel: {}", message)),
+            ManagementResponse::Error { message } => {
+                Err(anyhow!("Error closing channel: {}", message))
+            }
             _ => Err(anyhow!("Unexpected response")),
         }
     }
-    
+
     /// Receive a message on a channel (non-blocking)
     pub async fn receive_channel_message(&mut self) -> Result<Option<(String, Vec<u8>)>> {
         // Try to receive a response without sending a command first
         match self.receive_response().await {
             Ok(response) => {
                 match response {
-                    ManagementResponse::ChannelMessage { channel_id, message } => {
-                        Ok(Some((channel_id, message)))
-                    },
+                    ManagementResponse::ChannelMessage {
+                        channel_id,
+                        message,
+                    } => Ok(Some((channel_id, message))),
                     // Other responses are ignored as they're not relevant to our channel
-                    _ => Ok(None)
+                    _ => Ok(None),
                 }
-            },
-            Err(_) => Ok(None) // No message available or other error
+            }
+            Err(_) => Ok(None), // No message available or other error
         }
     }
-    
+
     /// Receive a response from the server without sending a command first
     /// Useful for receiving events from subscriptions
     pub async fn receive_response(&mut self) -> Result<ManagementResponse> {
@@ -284,7 +339,7 @@ impl TheaterClient {
         }
 
         let connection = self.connection.as_mut().unwrap();
-        
+
         // Receive and deserialize the response
         if let Some(response_bytes) = connection.next().await {
             let response_bytes = response_bytes?;

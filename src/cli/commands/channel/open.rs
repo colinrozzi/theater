@@ -194,7 +194,6 @@ async fn run_channel_session(
         let readline = rl.readline("channel> ");
         match readline {
             Ok(line) => {
-                println!("{}", line);
                 let _ = rl.add_history_entry(line.as_str());
                 let trimmed = line.trim();
 
@@ -208,7 +207,6 @@ async fn run_channel_session(
 
                 match cmd.as_str() {
                     "send" => {
-                        println!("Sending message...");
                         // Handle send command with various formats
                         if parts.len() < 2 {
                             println!("Error: send requires a message or --file option");
@@ -216,6 +214,7 @@ async fn run_channel_session(
                         }
 
                         let message = if parts[1] == "--file" || parts[1] == "-f" {
+                            println!("{} Reading message from file...", style(">").green().bold());
                             if parts.len() < 3 {
                                 println!("Error: --file option requires a file path");
                                 continue;
@@ -223,13 +222,21 @@ async fn run_channel_session(
 
                             let file_path = parts[2];
                             match fs::read(file_path) {
-                                Ok(content) => content,
+                                Ok(content) => {
+                                    println!(
+                                        "{} Read {} bytes from file",
+                                        style("✓").green().bold(),
+                                        content.len()
+                                    );
+                                    content
+                                }
                                 Err(e) => {
                                     println!("Error reading file: {}", e);
                                     continue;
                                 }
                             }
                         } else {
+                            println!("{} Sending message...", style(">").green().bold());
                             // Send the rest of the line as the message
                             let message_text = trimmed[5..].trim(); // Skip "send "
 
@@ -247,6 +254,7 @@ async fn run_channel_session(
                         };
 
                         debug!("Sending message on channel: {} bytes", message.len());
+                        println!("{} Sending message...", style(">").green().bold());
 
                         // Send the message
                         match client
