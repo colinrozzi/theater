@@ -2,8 +2,7 @@ use crate::actor_executor::ActorError;
 use crate::actor_handle::ActorHandle;
 use crate::actor_store::ActorStore;
 use crate::events::{ChainEventData, EventData, message::MessageEventData};
-use crate::messages::{ActorMessage, ActorRequest, ActorSend, TheaterCommand};
-use crate::messages::{ActorChannelOpen, ActorChannelMessage, ActorChannelClose, ChannelId};
+use crate::messages::{ActorMessage, ActorRequest, ActorSend, TheaterCommand, ActorChannelOpen, ActorChannelMessage, ActorChannelClose, ChannelId, ChannelParticipant};
 use crate::shutdown::ShutdownReceiver;
 use crate::wasm::{ActorComponent, ActorInstance};
 use crate::TheaterId;
@@ -294,7 +293,7 @@ impl MessageServerHost {
                     };
                     
                     // Create a channel ID
-                    let channel_id = ChannelId::new(&current_actor_id, &target_id);
+                    let channel_id = ChannelId::new(&ChannelParticipant::Actor(current_actor_id.clone()), &ChannelParticipant::Actor(target_id.clone()));
                     let channel_id_str = channel_id.as_str().to_string();
                     
                     // Create response channel
@@ -302,8 +301,8 @@ impl MessageServerHost {
                     
                     // Create the command
                     let command = TheaterCommand::ChannelOpen {
-                        initiator_id: current_actor_id.clone(),
-                        target_id: target_id.clone(),
+                        initiator_id: ChannelParticipant::Actor(current_actor_id.clone()),
+                        target_id: ChannelParticipant::Actor(target_id.clone()),
                         channel_id: channel_id.clone(),
                         initial_message: initial_msg.clone(),
                         response_tx,
@@ -422,7 +421,7 @@ impl MessageServerHost {
                     let command = TheaterCommand::ChannelMessage {
                         channel_id: channel_id_parsed,
                         message: msg.clone(),
-                        sender_id: ctx.data().id.clone(),
+                        sender_id: ChannelParticipant::Actor(ctx.data().id.clone()),
                     };
                     
                     let theater_tx = theater_tx.clone();

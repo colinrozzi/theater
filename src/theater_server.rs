@@ -1,4 +1,4 @@
-use crate::messages::{ActorMessage, ActorRequest, ActorSend, ActorStatus};
+use crate::messages::{ActorMessage, ActorRequest, ActorSend, ActorStatus, ChannelParticipant};
 use crate::ChainEvent;
 use anyhow::Result;
 use bytes::Bytes;
@@ -59,7 +59,7 @@ pub enum ManagementCommand {
     },
     // Channel management commands
     OpenChannel {
-        actor_id: TheaterId,
+        actor_id: ChannelParticipant,
         initial_message: Vec<u8>,
     },
     SendOnChannel {
@@ -125,14 +125,14 @@ pub enum ManagementResponse {
     // Channel management responses
     ChannelOpened {
         channel_id: String,
-        actor_id: TheaterId,
+        actor_id: ChannelParticipant,
     },
     MessageSent {
         channel_id: String,
     },
     ChannelMessage {
         channel_id: String,
-        sender_id: TheaterId,
+        sender_id: ChannelParticipant,
         message: Vec<u8>,
     },
     ChannelClosed {
@@ -163,18 +163,20 @@ impl std::hash::Hash for Subscription {
 pub enum ChannelEvent {
     Message {
         channel_id: ChannelId,
-        sender_id: TheaterId,
+        sender_id: ChannelParticipant,
         message: Vec<u8>,
     },
-    // We can add other events like Open, Close if needed
+    Close {
+        channel_id: ChannelId,
+    },
 }
 
 // Structure to track active channel subscriptions
 #[derive(Debug)]
 struct ChannelSubscription {
     channel_id: String,
-    initiator_id: TheaterId,
-    target_id: TheaterId,
+    initiator_id: ChannelParticipant,
+    target_id: ChannelParticipant,
     client_tx: mpsc::Sender<ManagementResponse>,
 }
 
@@ -217,7 +219,20 @@ impl TheaterServer {
                         }
                     }
                 }
-                // Handle other channel events as needed
+                ChannelEvent::Close { channel_id } => {
+                    tracing::debug!("Received channel close event for {}", channel_id);
+                    // Forward to subscribed clients
+                    let mut subs = channel_subscriptions.lock().await;
+                    if let Some(sub) = subs.remove(&channel_id.0) {
+                        let response = ManagementResponse::ChannelClosed {
+                            channel_id: channel_id.0.clone(),
+                        };
+
+                        if let Err(e) = sub.client_tx.send(response).await {
+                            tracing::warn!("Failed to forward channel close event: {}", e);
+                        }
+                    }
+                }
             }
         }
     }
@@ -657,7 +672,7 @@ impl TheaterServer {
                     let (response_tx, response_rx) = tokio::sync::oneshot::channel();
 
                     // Generate a channel ID
-                    let client_id = TheaterId::generate(); // Use a generated ID for the client side
+                    let client_id = ChannelParticipant::External;
                     let channel_id = crate::messages::ChannelId::new(&client_id, &actor_id);
                     let channel_id_str = channel_id.0.clone();
 
@@ -735,7 +750,7 @@ impl TheaterServer {
                         .await
                         .get(&channel_id)
                         .map(|sub| sub.initiator_id.clone())
-                        .unwrap_or_else(|| TheaterId::generate());
+                        .unwrap();
 
                     // Send the message on the channel
                     runtime_tx

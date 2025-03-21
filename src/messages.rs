@@ -68,15 +68,15 @@ pub enum TheaterCommand {
     },
     // Channel-related commands
     ChannelOpen {
-        initiator_id: TheaterId,
-        target_id: TheaterId,
+        initiator_id: ChannelParticipant,
+        target_id: ChannelParticipant,
         channel_id: ChannelId,
         initial_message: Vec<u8>,
         response_tx: oneshot::Sender<Result<bool>>,
     },
     ChannelMessage {
         channel_id: ChannelId,
-        sender_id: TheaterId,
+        sender_id: ChannelParticipant,
         message: Vec<u8>,
     },
     ChannelClose {
@@ -84,16 +84,16 @@ pub enum TheaterCommand {
     },
     // Channel diagnostics
     ListChannels {
-        response_tx: oneshot::Sender<Result<Vec<(ChannelId, Vec<TheaterId>)>>>,
+        response_tx: oneshot::Sender<Result<Vec<(ChannelId, Vec<ChannelParticipant>)>>>,
     },
     GetChannelStatus {
         channel_id: ChannelId,
-        response_tx: oneshot::Sender<Result<Option<Vec<TheaterId>>>>,
+        response_tx: oneshot::Sender<Result<Option<Vec<ChannelParticipant>>>>,
     },
     // Internal channel management
     RegisterChannel {
         channel_id: ChannelId,
-        participants: Vec<TheaterId>,
+        participants: Vec<ChannelParticipant>,
     },
 }
 
@@ -183,7 +183,7 @@ impl std::fmt::Display for ChannelId {
 }
 
 impl ChannelId {
-    pub fn new(initiator: &TheaterId, target: &TheaterId) -> Self {
+    pub fn new(initiator: &ChannelParticipant, target: &ChannelParticipant) -> Self {
         let mut hasher = DefaultHasher::new();
         let timestamp = chrono::Utc::now().timestamp_millis();
         let rand_value: u64 = rand::random();
@@ -199,6 +199,23 @@ impl ChannelId {
 
     pub fn as_str(&self) -> &str {
         &self.0
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum ChannelParticipant {
+    /// An actor in the runtime
+    Actor(TheaterId),
+    /// An external client (like CLI)
+    External,
+}
+
+impl std::fmt::Display for ChannelParticipant {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ChannelParticipant::Actor(actor_id) => write!(f, "Actor({})", actor_id),
+            ChannelParticipant::External => write!(f, "External"),
+        }
     }
 }
 

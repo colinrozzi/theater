@@ -10,7 +10,7 @@ use tracing::{debug, info};
 use uuid::Uuid;
 
 use theater::id::TheaterId;
-use theater::messages::ActorStatus;
+use theater::messages::{ActorStatus, ChannelParticipant};
 use theater::ChainEvent;
 
 // Re-export the ManagementCommand and ManagementResponse types from the theater_server module
@@ -262,7 +262,7 @@ impl TheaterClient {
         initial_message: Vec<u8>,
     ) -> Result<String> {
         let command = ManagementCommand::OpenChannel {
-            actor_id: id.clone(),
+            actor_id: ChannelParticipant::Actor(id),
             initial_message,
         };
         let response = self.send_command(command).await?;
