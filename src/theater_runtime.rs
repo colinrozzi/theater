@@ -359,21 +359,6 @@ impl TheaterRuntime {
                 } => {
                     debug!("Sending message on channel: {:?}", channel_id);
 
-                    // Notify the server about this message (for client subscriptions)
-                    if let Some(tx) = &self.channel_events_tx {
-                        // Create the channel event
-                        let channel_event = crate::theater_server::ChannelEvent::Message {
-                            channel_id: channel_id.clone(),
-                            sender_id: sender_id.clone(),
-                            message: message.clone(),
-                        };
-
-                        // Send it to the server
-                        if let Err(e) = tx.send(channel_event).await {
-                            error!("Failed to notify server about channel message: {}", e);
-                        }
-                    }
-
                     // Look up the participants for this channel
                     if let Some(participants) = self.channels.get(&channel_id) {
                         debug!(
@@ -432,6 +417,25 @@ impl TheaterRuntime {
                                         "External participant {} will be notified via server",
                                         client_id
                                     );
+                                    // Notify the server about this message (for client subscriptions)
+                                    if let Some(tx) = &self.channel_events_tx {
+                                        // Create the channel event
+                                        let channel_event =
+                                            crate::theater_server::ChannelEvent::Message {
+                                                channel_id: channel_id.clone(),
+                                                sender_id: sender_id.clone(),
+                                                message: message.clone(),
+                                            };
+
+                                        // Send it to the server
+                                        if let Err(e) = tx.send(channel_event).await {
+                                            error!(
+                                                "Failed to notify server about channel message: {}",
+                                                e
+                                            );
+                                        }
+                                    }
+
                                     successful_delivery = true; // Consider this successful, as we tried to notify the server
                                 }
                             }
