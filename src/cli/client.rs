@@ -36,7 +36,10 @@ impl TheaterClient {
     pub async fn connect(&mut self) -> Result<()> {
         info!("Connecting to Theater server at {}", self.address);
         let socket = TcpStream::connect(self.address).await?;
-        let framed = Framed::new(socket, LengthDelimitedCodec::new());
+
+        let mut codec = LengthDelimitedCodec::new();
+        codec.set_max_frame_length(32 * 1024 * 1024); // Increase to 32MB
+        let framed = Framed::new(socket, codec);
         self.connection = Some(framed);
         info!("Connected to Theater server");
         Ok(())
