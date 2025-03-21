@@ -159,10 +159,7 @@ impl StateChain {
             })
             .await
             .expect("Failed to send event to runtime");
-            debug!(
-                "Sent event {} to runtime",
-                String::from_utf8_lossy(&evt.hash)
-            );
+            debug!("Sent event {} to runtime", hex::encode(evt.hash.clone()));
         });
 
         // I am removing storing the events in the content store for now because they are
