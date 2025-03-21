@@ -179,7 +179,6 @@ async fn run_channel_session(
                                 }
                             }
                         } else {
-                            println!("{} Sending message...", style(">").green().bold());
                             // Send the rest of the line as the message
                             let message_text = trimmed[5..].trim(); // Skip "send "
 
@@ -197,7 +196,6 @@ async fn run_channel_session(
                         };
 
                         debug!("Sending message on channel: {} bytes", message.len());
-                        println!("{} Sending message...", style(">").green().bold());
 
                         // Send the message without competing for locks
                         match client.send_on_channel(&channel_id, message).await {

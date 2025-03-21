@@ -367,7 +367,7 @@ impl TheaterRuntime {
                             sender_id: sender_id.clone(),
                             message: message.clone(),
                         };
-                        
+
                         // Send it to the server
                         if let Err(e) = tx.send(channel_event).await {
                             error!("Failed to notify server about channel message: {}", e);
@@ -376,7 +376,11 @@ impl TheaterRuntime {
 
                     // Look up the participants for this channel
                     if let Some(participants) = self.channels.get(&channel_id) {
-                        debug!("Found {} participants for channel {:?}", participants.len(), channel_id);
+                        debug!(
+                            "Found {} participants for channel {:?}",
+                            participants.len(),
+                            channel_id
+                        );
                         let mut successful_delivery = false;
 
                         // Process each participant
@@ -390,18 +394,22 @@ impl TheaterRuntime {
                                     }
 
                                     debug!("Delivering message to actor {:?}", actor_id);
-                                    
+
                                     // Deliver to actor via mailbox
                                     if let Some(proc) = self.actors.get_mut(actor_id) {
-                                        let actor_message = ActorMessage::ChannelMessage(ActorChannelMessage {
-                                            channel_id: channel_id.clone(),
-                                            data: message.clone(),
-                                        });
+                                        let actor_message =
+                                            ActorMessage::ChannelMessage(ActorChannelMessage {
+                                                channel_id: channel_id.clone(),
+                                                data: message.clone(),
+                                            });
 
                                         match proc.mailbox_tx.send(actor_message).await {
                                             Ok(_) => {
                                                 successful_delivery = true;
-                                                debug!("Delivered channel message to actor {:?}", actor_id);
+                                                debug!(
+                                                    "Delivered channel message to actor {:?}",
+                                                    actor_id
+                                                );
                                             }
                                             Err(e) => {
                                                 error!(
@@ -416,18 +424,24 @@ impl TheaterRuntime {
                                             actor_id, channel_id
                                         );
                                     }
-                                },
+                                }
                                 ChannelParticipant::External(client_id) => {
                                     // External participants are handled by the server via channel_events_tx
                                     // The notification was already sent above
-                                    debug!("External participant {} will be notified via server", client_id);
+                                    debug!(
+                                        "External participant {} will be notified via server",
+                                        client_id
+                                    );
                                     successful_delivery = true; // Consider this successful, as we tried to notify the server
                                 }
                             }
                         }
 
                         if !successful_delivery {
-                            warn!("Failed to deliver message to any participant for channel {:?}", channel_id);
+                            warn!(
+                                "Failed to deliver message to any participant for channel {:?}",
+                                channel_id
+                            );
                         }
                     } else {
                         warn!("No participants registered for channel: {:?}", channel_id);
@@ -452,13 +466,14 @@ impl TheaterRuntime {
                     let mut successful_notification = false;
 
                     // Notify actor participants about channel closure
-                    for participant in participants {
+                    for participant in &participants {
                         match participant {
                             ChannelParticipant::Actor(actor_id) => {
                                 if let Some(proc) = self.actors.get_mut(&actor_id) {
-                                    let actor_message = ActorMessage::ChannelClose(ActorChannelClose {
-                                        channel_id: channel_id.clone(),
-                                    });
+                                    let actor_message =
+                                        ActorMessage::ChannelClose(ActorChannelClose {
+                                            channel_id: channel_id.clone(),
+                                        });
 
                                     match proc.mailbox_tx.send(actor_message).await {
                                         Ok(_) => {
@@ -479,11 +494,14 @@ impl TheaterRuntime {
                                     warn!("Actor {:?} registered for channel {:?} no longer exists during closure", 
                                         actor_id, channel_id);
                                 }
-                            },
+                            }
                             ChannelParticipant::External(client_id) => {
                                 // For external clients, we should notify the server
                                 if let Some(tx) = &self.channel_events_tx {
-                                    debug!("Notifying server about channel {:?} closure for client {}", channel_id, client_id);
+                                    debug!(
+                                        "Notifying server about channel {:?} closure for client {}",
+                                        channel_id, client_id
+                                    );
                                     // We could add a ChannelClosed event type if needed here
                                 }
                                 // Consider this successful as we've removed the channel
@@ -761,11 +779,11 @@ impl TheaterRuntime {
                     ChannelParticipant::Actor(id) if *id == actor_id => {
                         actor_removed = true;
                         false // Remove this actor
-                    },
+                    }
                     _ => true, // Keep other participants
                 }
             });
-            
+
             if actor_removed {
                 debug!("Removed actor {:?} from channel {:?}", actor_id, channel_id);
             }
