@@ -2,8 +2,10 @@ use crate::actor_executor::{ActorError, ActorOperation};
 use crate::actor_runtime::ActorRuntime;
 use crate::chain::ChainEvent;
 use crate::id::TheaterId;
-use crate::messages::{ActorChannelClose, ActorChannelMessage, ActorChannelOpen, ChannelId};
-use crate::messages::{ActorMessage, ActorStatus, TheaterCommand};
+use crate::messages::{
+    ActorChannelClose, ActorChannelMessage, ActorChannelOpen, ActorMessage, ActorStatus, ChannelId,
+    ChannelParticipant, TheaterCommand,
+};
 use crate::metrics::ActorMetrics;
 use crate::shutdown::{ShutdownController, DEFAULT_SHUTDOWN_TIMEOUT};
 use crate::utils::resolve_reference;
@@ -17,15 +19,6 @@ use tokio::sync::mpsc::Sender;
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
 use tracing::{debug, error, info, warn};
-
-/// Represents a participant in a channel
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum ChannelParticipant {
-    /// An actor in the runtime
-    Actor(TheaterId),
-    /// An external client (like CLI)
-    External(String),
-}
 
 pub struct TheaterRuntime {
     actors: HashMap<TheaterId, ActorProcess>,
@@ -283,73 +276,91 @@ impl TheaterRuntime {
                     response_tx,
                 } => {
                     debug!("Opening channel from {:?} to {:?}", initiator_id, target_id);
-                    if let Some(proc) = self.actors.get_mut(&target_id) {
-                        // Create a oneshot channel to intercept the response
-                        let (inner_tx, inner_rx) = tokio::sync::oneshot::channel();
-
-                        // Create channel open message
-                        let actor_message = ActorMessage::ChannelOpen(ActorChannelOpen {
-                            channel_id: channel_id.clone(),
-                            response_tx: inner_tx,
-                            data: initial_message,
-                        });
-
-                        // Send the message to the target actor
-                        if let Err(e) = proc.mailbox_tx.send(actor_message).await {
-                            error!("Failed to send channel open message to actor: {}", e);
+                    match target_id {
+                        ChannelParticipant::External(_) => {
+                            warn!("External clients cannot be target of channel open");
                             let _ = response_tx
-                                .send(Err(anyhow::anyhow!("Failed to send channel open message")));
+                                .send(Err(anyhow::anyhow!("External client cannot be target")));
                             continue;
                         }
+                        ChannelParticipant::Actor(actor_id) => {
+                            if let Some(proc) = self.actors.get_mut(&actor_id) {
+                                // Create a oneshot channel to intercept the response
+                                let (inner_tx, inner_rx) = tokio::sync::oneshot::channel();
 
-                        // Process the response asynchronously
-                        let channel_id_clone = channel_id.clone();
-                        let initiator_id_clone = initiator_id.clone();
-                        let target_id_clone = target_id.clone();
-                        let theater_tx_clone = self.theater_tx.clone();
+                                // Create channel open message
+                                let actor_message = ActorMessage::ChannelOpen(ActorChannelOpen {
+                                    channel_id: channel_id.clone(),
+                                    response_tx: inner_tx,
+                                    data: initial_message,
+                                });
 
-                        tokio::spawn(async move {
-                            match inner_rx.await {
-                                Ok(result) => {
-                                    if let Ok(true) = &result {
-                                        // Channel was accepted, register both participants via a new command
-                                        // This avoids holding a mutable reference across an await point
-                                        let register_cmd = TheaterCommand::RegisterChannel {
-                                            channel_id: channel_id_clone.clone(),
-                                            participants: vec![
-                                                (initiator_id_clone.clone(), true), // External client
-                                                (target_id_clone.clone(), false),   // Actor
-                                            ],
-                                        };
+                                // Send the message to the target actor
+                                if let Err(e) = proc.mailbox_tx.send(actor_message).await {
+                                    error!("Failed to send channel open message to actor: {}", e);
+                                    let _ = response_tx.send(Err(anyhow::anyhow!(
+                                        "Failed to send channel open message"
+                                    )));
+                                    continue;
+                                }
 
-                                        if let Err(e) = theater_tx_clone.send(register_cmd).await {
-                                            error!(
+                                // Process the response asynchronously
+                                let channel_id_clone = channel_id.clone();
+                                let initiator_id_clone = initiator_id.clone();
+                                let target_id_clone = target_id.clone();
+                                let theater_tx_clone = self.theater_tx.clone();
+
+                                tokio::spawn(async move {
+                                    match inner_rx.await {
+                                        Ok(result) => {
+                                            if let Ok(true) = &result {
+                                                // Channel was accepted, register both participants via a new command
+                                                // This avoids holding a mutable reference across an await point
+                                                let register_cmd =
+                                                    TheaterCommand::RegisterChannel {
+                                                        channel_id: channel_id_clone.clone(),
+                                                        participants: vec![
+                                                            initiator_id_clone.clone(), // External client
+                                                            target_id_clone.clone(),    // Actor
+                                                        ],
+                                                    };
+
+                                                if let Err(e) =
+                                                    theater_tx_clone.send(register_cmd).await
+                                                {
+                                                    error!(
                                                 "Failed to register channel participants: {}",
                                                 e
                                             );
-                                        } else {
-                                            debug!("Requested registration of channel {:?} with participants {:?} and {:?}", 
+                                                } else {
+                                                    debug!("Requested registration of channel {:?} with participants {:?} and {:?}", 
                                                 channel_id_clone, initiator_id_clone, target_id_clone);
+                                                }
+                                            }
+
+                                            // Forward the result to the original requester
+                                            let _ = response_tx.send(result);
+                                        }
+                                        Err(e) => {
+                                            error!(
+                                                "Failed to receive channel open response: {}",
+                                                e
+                                            );
+                                            let _ = response_tx.send(Err(anyhow::anyhow!(
+                                                "Failed to receive channel open response"
+                                            )));
                                         }
                                     }
-
-                                    // Forward the result to the original requester
-                                    let _ = response_tx.send(result);
-                                }
-                                Err(e) => {
-                                    error!("Failed to receive channel open response: {}", e);
-                                    let _ = response_tx.send(Err(anyhow::anyhow!(
-                                        "Failed to receive channel open response"
-                                    )));
-                                }
+                                });
+                            } else {
+                                warn!(
+                                    "Attempted to open channel to non-existent actor: {:?}",
+                                    target_id
+                                );
+                                let _ = response_tx
+                                    .send(Err(anyhow::anyhow!("Target actor not found")));
                             }
-                        });
-                    } else {
-                        warn!(
-                            "Attempted to open channel to non-existent actor: {:?}",
-                            target_id
-                        );
-                        let _ = response_tx.send(Err(anyhow::anyhow!("Target actor not found")));
+                        }
                     }
                 }
                 TheaterCommand::ChannelMessage {
@@ -370,14 +381,16 @@ impl TheaterRuntime {
 
                         // Process each participant
                         for participant in participants {
+                            if *sender_id == participant {
+                                // Skip sending to the sender
+                                debug!(
+                                    "Skipping message delivery to sender {:?} on channel {:?}",
+                                    sender_id, channel_id
+                                );
+                                continue;
+                            }
                             match participant {
                                 ChannelParticipant::Actor(actor_id) => {
-                                    // Skip if this actor is the sender
-                                    if *actor_id == sender_id {
-                                        debug!("Skipping delivery to sender actor {:?}", actor_id);
-                                        continue;
-                                    }
-
                                     debug!("Delivering message to actor {:?}", actor_id);
 
                                     // Deliver to actor via mailbox
@@ -910,7 +923,10 @@ impl TheaterRuntime {
     }
 
     // Get status of a specific channel
-    pub async fn get_channel_status(&self, channel_id: &ChannelId) -> Option<Vec<TheaterId>> {
+    pub async fn get_channel_status(
+        &self,
+        channel_id: &ChannelId,
+    ) -> Option<Vec<ChannelParticipant>> {
         // Convert our internal representation to the public API representation
         // which just lists actor IDs for backward compatibility
         self.channels.get(channel_id).map(|participants| {
@@ -926,20 +942,11 @@ impl TheaterRuntime {
     }
 
     // Get a list of all channels and their participants
-    pub async fn list_channels(&self) -> Vec<(ChannelId, Vec<TheaterId>)> {
+    pub async fn list_channels(&self) -> Vec<(ChannelId, Vec<ChannelParticipant>)> {
         self.channels
             .iter()
-            .map(|(id, participants)| {
-                // Convert participant set to just actor IDs for backward compatibility
-                let actor_ids: Vec<TheaterId> = participants
-                    .iter()
-                    .filter_map(|p| match p {
-                        ChannelParticipant::Actor(id) => Some(id.clone()),
-                        // Skip external participants in the public API for now
-                        ChannelParticipant::External(_) => None,
-                    })
-                    .collect();
-                (id.clone(), actor_ids)
+            .map(|(channel_id, participants)| {
+                (channel_id.clone(), participants.iter().cloned().collect())
             })
             .collect()
     }

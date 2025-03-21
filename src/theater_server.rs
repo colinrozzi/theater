@@ -1,4 +1,4 @@
-use crate::messages::{ActorMessage, ActorRequest, ActorSend, ActorStatus};
+use crate::messages::{ActorMessage, ActorRequest, ActorSend, ActorStatus, ChannelParticipant};
 use crate::ChainEvent;
 use anyhow::Result;
 use bytes::Bytes;
@@ -163,7 +163,7 @@ impl std::hash::Hash for Subscription {
 pub enum ChannelEvent {
     Message {
         channel_id: ChannelId,
-        sender_id: TheaterId,
+        sender_id: ChannelParticipant,
         message: Vec<u8>,
     },
     // We can add other events like Open, Close if needed
@@ -217,8 +217,7 @@ impl TheaterServer {
                             tracing::warn!("Failed to forward channel message: {}", e);
                         }
                     }
-                }
-                // Handle other channel events as needed
+                } // Handle other channel events as needed
             }
         }
     }
@@ -732,7 +731,7 @@ impl TheaterServer {
 
                     // Parse the channel ID
                     let channel_id_parsed = crate::messages::ChannelId(channel_id.clone());
-                    
+
                     // Get the client ID (initiator)
                     let client_id = channel_subscriptions
                         .lock()
