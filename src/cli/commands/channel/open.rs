@@ -131,10 +131,9 @@ async fn run_channel_session(
             }
         }
     });
-
+    // Main event loop using select!
     let mut running = true;
 
-    // Main event loop using select!
     while running {
         tokio::select! {
             // Handle user input
@@ -232,11 +231,9 @@ async fn run_channel_session(
                     }
                 }
             },
-
-            // Check for incoming messages
-            // This branch will run when there's no user input to process
-            else => {
-                match client.receive_channel_message().await {
+            // Handle incoming messages
+            result = client.receive_channel_message() => {
+                match result {
                     Ok(response) => {
                         if let Some((id, message)) = response {
                             // Only process messages for our channel
@@ -246,7 +243,7 @@ async fn run_channel_session(
                                     Ok(text) => {
                                         if let Ok(json) = serde_json::from_str::<serde_json::Value>(text) {
                                             if json_output {
-                                                println!("{}", serde_json::to_string_pretty(&json).unwrap_or_else(|_| text.to_string()));
+                                                println!("\r{}", serde_json::to_string_pretty(&json).unwrap_or_else(|_| text.to_string()));
                                             } else {
                                                 println!("\r{}", text);
                                             }
@@ -265,9 +262,6 @@ async fn run_channel_session(
                                 print!("channel> ");
                                 let _ = std::io::Write::flush(&mut std::io::stdout());
                             }
-                        } else {
-                            // No message received, small delay to prevent CPU spinning
-                            tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
                         }
                     }
                     Err(e) => {
