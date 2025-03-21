@@ -278,13 +278,10 @@ impl TheaterClient {
 
     /// Send a message on an existing channel
     pub async fn send_on_channel(&mut self, channel_id: &str, message: Vec<u8>) -> Result<()> {
-        println!("send_on_channel");
-        println!("channel_id: {:?}", channel_id);
         let command = ManagementCommand::SendOnChannel {
             channel_id: channel_id.to_string(),
             message,
         };
-        println!("command: {:?}", command);
         let response = self.send_command(command).await?;
 
         match response {
