@@ -267,6 +267,14 @@ fn export_events(events: &[ChainEvent], path: &str, format: &str) -> Result<()> 
 
             String::from_utf8(wtr.into_inner()?)?
         }
+        "pretty" => {
+            let mut output = String::new();
+            for event in events {
+                output.push_str(&pretty_stringify_event(event, true));
+                output.push_str("\n");
+            }
+            output
+        }
         _ => serde_json::to_string_pretty(events)?, // Default to JSON
     };
 
@@ -394,91 +402,14 @@ fn display_events_pretty(
     }
 
     for (i, event) in events.iter().enumerate() {
-        // Format timestamp as human-readable
-        let timestamp = chrono::DateTime::from_timestamp(event.timestamp as i64, 0)
-            .unwrap_or_else(|| chrono::DateTime::UNIX_EPOCH)
-            .format("%Y-%m-%d %H:%M:%S%.3f")
-            .to_string();
-
-        // Format event type with color based on category
-        let event_type = match event.event_type.split('.').next().unwrap_or("") {
-            "http" => style(&event.event_type).cyan(),
-            "filesystem" => style(&event.event_type).green(),
-            "message" => style(&event.event_type).magenta(),
-            "runtime" => style(&event.event_type).blue(),
-            "error" => style(&event.event_type).red(),
-            _ => style(&event.event_type).yellow(),
-        };
-
         println!(
-            "{} Event {}: {} [{}]",
-            style("►").bold().blue(),
-            i + 1,
-            event_type,
-            timestamp
+            "{}",
+            pretty_stringify_event(event, detailed).replace("\n", "\n  ")
         );
 
-        // Always show the hash (shortened for readability)
-        let hash_str = hex::encode(&event.hash);
-        let short_hash = if hash_str.len() > 8 {
-            format!("{}..{}", &hash_str[0..4], &hash_str[hash_str.len() - 4..])
-        } else {
-            hash_str
-        };
-        println!("  Hash: {}", short_hash);
-
-        // Show parent hash if available (shortened for readability)
-        if let Some(parent) = &event.parent_hash {
-            let parent_str = hex::encode(parent);
-            let short_parent = if parent_str.len() > 8 {
-                format!(
-                    "{}..{}",
-                    &parent_str[0..4],
-                    &parent_str[parent_str.len() - 4..]
-                )
-            } else {
-                parent_str
-            };
-            println!("  Parent: {}", short_parent);
+        if i < events.len() - 1 {
+            println!("{}", style("─".repeat(80)).dim());
         }
-
-        // Show description if available
-        if let Some(desc) = &event.description {
-            println!("  Description: {}", desc);
-        }
-
-        // Show data preview or full data if detailed is enabled
-        if detailed {
-            // Try to pretty-print the event data as JSON
-            if let Ok(text) = std::str::from_utf8(&event.data) {
-                if let Ok(json) = serde_json::from_str::<serde_json::Value>(text) {
-                    println!("  Data: {}", serde_json::to_string_pretty(&json)?);
-                } else {
-                    println!("  Data: {}", text);
-                }
-            } else {
-                println!("  Data: {} bytes of binary data", event.data.len());
-                // Print hex dump for binary data
-                print_hex_dump(&event.data, 16);
-            }
-        } else {
-            // Just show a preview or size
-            if let Ok(text) = std::str::from_utf8(&event.data) {
-                if text.len() > 60 {
-                    println!(
-                        "  Data: {}... ({} bytes total)",
-                        &text[0..57],
-                        event.data.len()
-                    );
-                } else if !text.is_empty() {
-                    println!("  Data: {}", text);
-                }
-            } else if !event.data.is_empty() {
-                println!("  Data: {} bytes of binary data", event.data.len());
-            }
-        }
-
-        println!("");
     }
 
     if limit > 0 && events.len() == limit {
@@ -489,6 +420,75 @@ fn display_events_pretty(
     }
 
     Ok(())
+}
+
+fn pretty_stringify_event(event: &ChainEvent, full: bool) -> String {
+    let timestamp = chrono::DateTime::from_timestamp(event.timestamp as i64, 0)
+        .unwrap_or_else(|| chrono::DateTime::UNIX_EPOCH)
+        .format("%Y-%m-%d %H:%M:%S%.3f")
+        .to_string();
+
+    let event_type = match event.event_type.split('.').next().unwrap_or("") {
+        "http" => style(&event.event_type).cyan(),
+        "filesystem" => style(&event.event_type).green(),
+        "message" => style(&event.event_type).magenta(),
+        "runtime" => style(&event.event_type).blue(),
+        "error" => style(&event.event_type).red(),
+        _ => style(&event.event_type).yellow(),
+    };
+
+    let mut output = format!(
+        "{} [{}] [{}]\n",
+        style("►").bold().blue(),
+        event_type,
+        timestamp,
+    );
+
+    let hash_str = hex::encode(&event.hash);
+    let short_hash = if hash_str.len() > 8 {
+        format!("{}..{}", &hash_str[0..4], &hash_str[hash_str.len() - 4..])
+    } else {
+        hash_str
+    };
+    output.push_str(&format!("  Hash: {}\n", short_hash));
+
+    if let Some(parent) = &event.parent_hash {
+        let parent_str = hex::encode(parent);
+        let short_parent = if parent_str.len() > 8 {
+            format!(
+                "{}..{}",
+                &parent_str[0..4],
+                &parent_str[parent_str.len() - 4..]
+            )
+        } else {
+            parent_str
+        };
+        output.push_str(&format!("  Parent: {}\n", short_parent));
+    }
+
+    if let Some(desc) = &event.description {
+        output.push_str(&format!("  Description: {}\n", desc));
+    }
+
+    if let Ok(text) = std::str::from_utf8(&event.data) {
+        if !full {
+            output.push_str(&format!(
+                "  Data: {}... ({} bytes total)\n",
+                &text[0..57],
+                event.data.len()
+            ));
+        } else {
+            output.push_str(&format!("  Data: {}\n", text));
+        }
+    } else if !event.data.is_empty() {
+        output.push_str(&format!(
+            "  Data: {} bytes of binary data\n",
+            event.data.len()
+        ));
+    }
+
+    output.push_str("\n");
+    output
 }
 
 // Display events in timeline view
@@ -654,4 +654,3 @@ fn print_hex_dump(data: &[u8], bytes_per_line: usize) {
         offset += bytes_per_line;
     }
 }
-
