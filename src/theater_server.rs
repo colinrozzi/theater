@@ -745,12 +745,7 @@ impl TheaterServer {
 
                     // Parse the channel ID
                     let channel_id_parsed = crate::messages::ChannelId(channel_id.clone());
-                    let client_id = channel_subscriptions
-                        .lock()
-                        .await
-                        .get(&channel_id)
-                        .map(|sub| sub.initiator_id.clone())
-                        .unwrap();
+                    let client_id = ChannelParticipant::External;
 
                     // Send the message on the channel
                     runtime_tx

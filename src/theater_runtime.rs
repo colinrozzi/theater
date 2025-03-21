@@ -378,21 +378,6 @@ impl TheaterRuntime {
                 } => {
                     debug!("Sending message on channel: {:?}", channel_id);
 
-                    // Notify the server about this message (for client subscriptions)
-                    if let Some(tx) = &self.channel_events_tx {
-                        let channel_event = crate::theater_server::ChannelEvent::Message {
-                            channel_id: channel_id.clone(),
-                            sender_id: sender_id.clone(),
-                            message: message.clone(),
-                        };
-
-                        if let Err(e) = tx.send(channel_event).await {
-                            error!("Failed to notify server about channel message: {}", e);
-                        } else {
-                            debug!("Notified server about message on channel {:?}", channel_id);
-                        }
-                    }
-
                     // Look up the participants for this channel
                     if let Some(participant_ids) = self.channels.get(&channel_id) {
                         let mut successful_delivery = false;
@@ -422,19 +407,20 @@ impl TheaterRuntime {
                                             }
                                             Err(e) => {
                                                 error!(
-                                            "Failed to send channel message to actor {:?}: {}",
-                                            actor_id, e
-                                        );
+                                                    "Failed to send channel message to actor {:?}: {}",
+                                                    actor_id, e
+                                                );
                                             }
                                         }
                                     } else {
                                         warn!(
-                                    "Actor {:?} registered for channel {:?} no longer exists",
-                                    actor_id, channel_id
-                                );
+                                            "Actor {:?} registered for channel {:?} no longer exists",
+                                            actor_id, channel_id
+                                        );
                                     }
                                 }
                                 ChannelParticipant::External => {
+                                    debug!("Sending message to server");
                                     // Send the message to the server
                                     if let Some(tx) = &self.channel_events_tx {
                                         let channel_event =
