@@ -601,6 +601,8 @@ impl TheaterRuntime {
 
         let actor_operation_tx = operation_tx.clone();
         let shutdown_receiver_clone = shutdown_receiver;
+        let actor_sender = mailbox_tx.clone();
+
         let actor_runtime_process = tokio::spawn(async move {
             let actor_id = TheaterId::generate();
             debug!("Initializing actor runtime");
@@ -611,6 +613,7 @@ impl TheaterRuntime {
                 &manifest,
                 init_bytes,
                 theater_tx,
+                actor_sender,
                 mailbox_rx,
                 operation_rx,
                 actor_operation_tx,
@@ -743,8 +746,7 @@ impl TheaterRuntime {
                 actor_id
             );
 
-            // Allow more time for graceful shutdown to ensure proper resource cleanup
-            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
             debug!("Grace period for actor {:?} complete", actor_id);
         } else {
             debug!(

@@ -249,12 +249,20 @@ pub struct ActorChannelClose {
 }
 
 #[derive(Debug)]
+pub struct ActorChannelInitiated {
+    pub channel_id: ChannelId,
+    pub target_id: ChannelParticipant,
+    pub initial_msg: Vec<u8>,
+}
+
+#[derive(Debug)]
 pub enum ActorMessage {
     Request(ActorRequest),
     Send(ActorSend),
     ChannelOpen(ActorChannelOpen),
     ChannelMessage(ActorChannelMessage),
     ChannelClose(ActorChannelClose),
+    ChannelInitiated(ActorChannelInitiated),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

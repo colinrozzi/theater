@@ -37,6 +37,7 @@ impl ActorRuntime {
         config: &ManifestConfig,
         state_bytes: Option<Vec<u8>>,
         theater_tx: Sender<TheaterCommand>,
+        actor_sender: Sender<ActorMessage>,
         actor_mailbox: Receiver<ActorMessage>,
         operation_rx: Receiver<ActorOperation>,
         operation_tx: Sender<ActorOperation>,
@@ -48,12 +49,13 @@ impl ActorRuntime {
         let mut handlers = Vec::new();
 
         handlers.push(Handler::MessageServer(MessageServerHost::new(
+            actor_sender,
             actor_mailbox,
             theater_tx.clone(),
         )));
 
         for handler_config in &config.handlers {
-        let handler = match handler_config {
+            let handler = match handler_config {
                 HandlerConfig::MessageServer(_) => {
                     panic!("MessageServer handler is already added")
                 }

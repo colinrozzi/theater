@@ -2,7 +2,7 @@ use crate::actor_executor::ActorError;
 use crate::actor_handle::ActorHandle;
 use crate::actor_store::ActorStore;
 use crate::events::{ChainEventData, EventData, message::MessageEventData};
-use crate::messages::{ActorMessage, ActorRequest, ActorSend, TheaterCommand, ActorChannelOpen, ActorChannelMessage, ActorChannelClose, ChannelId, ChannelParticipant};
+use crate::messages::{ActorMessage, ActorRequest, ActorSend, TheaterCommand, ActorChannelOpen, ActorChannelMessage, ActorChannelClose, ChannelId, ChannelParticipant, ActorChannelInitiated};
 use crate::shutdown::ShutdownReceiver;
 use crate::wasm::{ActorComponent, ActorInstance};
 use crate::TheaterId;
@@ -16,6 +16,7 @@ use tracing::{debug, error, info, warn};
 use wasmtime::component::{ComponentType, Lift, Lower};
 
 pub struct MessageServerHost {
+    mailbox_tx: Sender<ActorMessage>,
     mailbox_rx: Receiver<ActorMessage>,
     theater_tx: Sender<TheaterCommand>,
     active_channels: HashMap<ChannelId, ChannelState>,
@@ -23,7 +24,6 @@ pub struct MessageServerHost {
 
 struct ChannelState {
     is_open: bool,
-    created_at: chrono::DateTime<chrono::Utc>,
 }
 
 #[derive(Error, Debug)]
@@ -46,8 +46,9 @@ struct ChannelAccept {
 }
 
 impl MessageServerHost {
-    pub fn new(mailbox_rx: Receiver<ActorMessage>, theater_tx: Sender<TheaterCommand>) -> Self {
+    pub fn new(mailbox_tx: Sender<ActorMessage>, mailbox_rx: Receiver<ActorMessage>, theater_tx: Sender<TheaterCommand>) -> Self {
         Self {
+            mailbox_tx,
             mailbox_rx,
             theater_tx,
             active_channels: HashMap::new(),
@@ -248,8 +249,8 @@ impl MessageServerHost {
             )
             .expect("Failed to wrap async request function");
 
-        // Add channel operations
         let theater_tx = self.theater_tx.clone();
+        let mailbox_tx = self.mailbox_tx.clone();
         
         // Add open-channel function
         interface
@@ -275,7 +276,7 @@ impl MessageServerHost {
                     });
                     
                     let target_id = match TheaterId::parse(&address) {
-                        Ok(id) => id,
+                        Ok(id) => ChannelParticipant::Actor(id),
                         Err(e) => {
                             let err_msg = format!("Failed to parse actor ID: {}", e);
                             ctx.data_mut().record_event(ChainEventData {
@@ -293,7 +294,7 @@ impl MessageServerHost {
                     };
                     
                     // Create a channel ID
-                    let channel_id = ChannelId::new(&ChannelParticipant::Actor(current_actor_id.clone()), &ChannelParticipant::Actor(target_id.clone()));
+                    let channel_id = ChannelId::new(&ChannelParticipant::Actor(current_actor_id.clone()), &target_id);
                     let channel_id_str = channel_id.as_str().to_string();
                     
                     // Create response channel
@@ -302,14 +303,16 @@ impl MessageServerHost {
                     // Create the command
                     let command = TheaterCommand::ChannelOpen {
                         initiator_id: ChannelParticipant::Actor(current_actor_id.clone()),
-                        target_id: ChannelParticipant::Actor(target_id.clone()),
+                        target_id: target_id.clone(),
                         channel_id: channel_id.clone(),
                         initial_message: initial_msg.clone(),
                         response_tx,
                     };
-                    
+
+
                     let theater_tx = theater_tx.clone();
                     let channel_id_clone = channel_id_str.clone();
+                    let mailbox_tx = mailbox_tx.clone();
                     
                     Box::new(async move {
                         match theater_tx.send(command).await {
@@ -335,6 +338,11 @@ impl MessageServerHost {
                                                 });
                                                 
                                                 if accepted {
+                                                    mailbox_tx.send(ActorMessage::ChannelInitiated(ActorChannelInitiated { 
+                                                        channel_id: channel_id.clone(),
+                                                        target_id: target_id.clone(),
+                                                        initial_msg,
+                                                    }));
                                                     Ok((Ok(channel_id_clone),))
                                                 } else {
                                                     Ok((Err("Channel request rejected by target actor".to_string()),))
@@ -635,7 +643,6 @@ impl MessageServerHost {
                     // Store channel in active channels
                     self.active_channels.insert(channel_id.clone(), ChannelState {
                         is_open: true,
-                        created_at: chrono::Utc::now(),
                     });
                 }
                 
@@ -676,6 +683,14 @@ impl MessageServerHost {
                 } else {
                     warn!("Received close for unknown channel: {}", channel_id);
                 }
+            }
+            ActorMessage::ChannelInitiated(ActorChannelInitiated { channel_id, target_id, initial_msg }) => {
+                info!("Channel initiated: channel={:?}, target={:?}, initial_msg size={}", channel_id, target_id, initial_msg.len());
+                
+                // Store channel in active channels
+                self.active_channels.insert(channel_id.clone(), ChannelState {
+                    is_open: true,
+                });
             }
         }
         Ok(())
