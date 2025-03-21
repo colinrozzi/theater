@@ -93,7 +93,7 @@ pub enum TheaterCommand {
     // Internal channel management
     RegisterChannel {
         channel_id: ChannelId,
-        participants: Vec<TheaterId>,
+        participants: Vec<(TheaterId, bool)>, // (participant_id, is_external)
     },
 }
 

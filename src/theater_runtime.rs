@@ -18,12 +18,21 @@ use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
 use tracing::{debug, error, info, warn};
 
+/// Represents a participant in a channel
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum ChannelParticipant {
+    /// An actor in the runtime
+    Actor(TheaterId),
+    /// An external client (like CLI)
+    External(String),
+}
+
 pub struct TheaterRuntime {
     actors: HashMap<TheaterId, ActorProcess>,
     pub theater_tx: Sender<TheaterCommand>,
     theater_rx: Receiver<TheaterCommand>,
     subscriptions: HashMap<TheaterId, Vec<Sender<ChainEvent>>>,
-    channels: HashMap<ChannelId, HashSet<TheaterId>>,
+    channels: HashMap<ChannelId, HashSet<ChannelParticipant>>,
     // Optional channel to send channel events back to the server
     channel_events_tx: Option<Sender<crate::theater_server::ChannelEvent>>,
 }
@@ -308,8 +317,8 @@ impl TheaterRuntime {
                                         let register_cmd = TheaterCommand::RegisterChannel {
                                             channel_id: channel_id_clone.clone(),
                                             participants: vec![
-                                                initiator_id_clone.clone(),
-                                                target_id_clone.clone(),
+                                                (initiator_id_clone.clone(), true), // External client
+                                                (target_id_clone.clone(), false),   // Actor
                                             ],
                                         };
 
@@ -352,74 +361,86 @@ impl TheaterRuntime {
 
                     // Notify the server about this message (for client subscriptions)
                     if let Some(tx) = &self.channel_events_tx {
+                        // Create the channel event
                         let channel_event = crate::theater_server::ChannelEvent::Message {
                             channel_id: channel_id.clone(),
                             sender_id: sender_id.clone(),
                             message: message.clone(),
                         };
                         
+                        // Send it to the server
                         if let Err(e) = tx.send(channel_event).await {
                             error!("Failed to notify server about channel message: {}", e);
-                        } else {
-                            debug!("Notified server about message on channel {:?}", channel_id);
                         }
                     }
 
                     // Look up the participants for this channel
-                    if let Some(participant_ids) = self.channels.get(&channel_id) {
+                    if let Some(participants) = self.channels.get(&channel_id) {
+                        debug!("Found {} participants for channel {:?}", participants.len(), channel_id);
                         let mut successful_delivery = false;
 
-                        for actor_id in participant_ids {
-                            debug!("Delivering message to actor {:?}", actor_id);
-                            if let Some(proc) = self.actors.get_mut(actor_id) {
-                                if proc.actor_id == sender_id {
-                                    // Skip sending the message back to the sender
-                                    continue;
-                                }
-
-                                let actor_message =
-                                    ActorMessage::ChannelMessage(ActorChannelMessage {
-                                        channel_id: channel_id.clone(),
-                                        data: message.clone(),
-                                    });
-
-                                match proc.mailbox_tx.send(actor_message).await {
-                                    Ok(_) => {
-                                        successful_delivery = true;
-                                        debug!("Delivered channel message to actor {:?}", actor_id);
+                        // Process each participant
+                        for participant in participants {
+                            match participant {
+                                ChannelParticipant::Actor(actor_id) => {
+                                    // Skip if this actor is the sender
+                                    if *actor_id == sender_id {
+                                        debug!("Skipping delivery to sender actor {:?}", actor_id);
+                                        continue;
                                     }
-                                    Err(e) => {
-                                        error!(
-                                            "Failed to send channel message to actor {:?}: {}",
-                                            actor_id, e
+
+                                    debug!("Delivering message to actor {:?}", actor_id);
+                                    
+                                    // Deliver to actor via mailbox
+                                    if let Some(proc) = self.actors.get_mut(actor_id) {
+                                        let actor_message = ActorMessage::ChannelMessage(ActorChannelMessage {
+                                            channel_id: channel_id.clone(),
+                                            data: message.clone(),
+                                        });
+
+                                        match proc.mailbox_tx.send(actor_message).await {
+                                            Ok(_) => {
+                                                successful_delivery = true;
+                                                debug!("Delivered channel message to actor {:?}", actor_id);
+                                            }
+                                            Err(e) => {
+                                                error!(
+                                                    "Failed to send channel message to actor {:?}: {}",
+                                                    actor_id, e
+                                                );
+                                            }
+                                        }
+                                    } else {
+                                        warn!(
+                                            "Actor {:?} registered for channel {:?} no longer exists",
+                                            actor_id, channel_id
                                         );
                                     }
+                                },
+                                ChannelParticipant::External(client_id) => {
+                                    // External participants are handled by the server via channel_events_tx
+                                    // The notification was already sent above
+                                    debug!("External participant {} will be notified via server", client_id);
+                                    successful_delivery = true; // Consider this successful, as we tried to notify the server
                                 }
-                            } else {
-                                warn!(
-                                    "Actor {:?} registered for channel {:?} no longer exists",
-                                    actor_id, channel_id
-                                );
                             }
                         }
 
                         if !successful_delivery {
-                            warn!(
-                                "Failed to deliver message to any actor for channel {:?}",
-                                channel_id
-                            );
+                            warn!("Failed to deliver message to any participant for channel {:?}", channel_id);
                         }
                     } else {
-                        warn!("No actors registered for channel: {:?}", channel_id);
+                        warn!("No participants registered for channel: {:?}", channel_id);
                     }
                 }
                 TheaterCommand::ChannelClose { channel_id } => {
                     debug!("Closing channel: {:?}", channel_id);
 
                     // Get participant IDs before removing the channel
-                    let participant_ids = if let Some(ids) = self.channels.get(&channel_id) {
-                        ids.clone()
+                    let participants = if let Some(parts) = self.channels.get(&channel_id) {
+                        parts.clone()
                     } else {
+                        debug!("No participants found for channel {:?}", channel_id);
                         HashSet::new()
                     };
 
@@ -427,38 +448,53 @@ impl TheaterRuntime {
                     self.channels.remove(&channel_id);
                     debug!("Removed channel {:?} from registry", channel_id);
 
-                    // Notify participants about channel closure
+                    // Track if we've successfully notified anyone
                     let mut successful_notification = false;
-                    for actor_id in &participant_ids {
-                        if let Some(proc) = self.actors.get_mut(&actor_id) {
-                            let actor_message = ActorMessage::ChannelClose(ActorChannelClose {
-                                channel_id: channel_id.clone(),
-                            });
 
-                            match proc.mailbox_tx.send(actor_message).await {
-                                Ok(_) => {
-                                    successful_notification = true;
-                                    debug!(
-                                        "Notified actor {:?} about channel {:?} closure",
-                                        actor_id, channel_id
-                                    );
+                    // Notify actor participants about channel closure
+                    for participant in participants {
+                        match participant {
+                            ChannelParticipant::Actor(actor_id) => {
+                                if let Some(proc) = self.actors.get_mut(&actor_id) {
+                                    let actor_message = ActorMessage::ChannelClose(ActorChannelClose {
+                                        channel_id: channel_id.clone(),
+                                    });
+
+                                    match proc.mailbox_tx.send(actor_message).await {
+                                        Ok(_) => {
+                                            successful_notification = true;
+                                            debug!(
+                                                "Notified actor {:?} about channel {:?} closure",
+                                                actor_id, channel_id
+                                            );
+                                        }
+                                        Err(e) => {
+                                            error!(
+                                                "Failed to send channel close message to actor {:?}: {}",
+                                                actor_id, e
+                                            );
+                                        }
+                                    }
+                                } else {
+                                    warn!("Actor {:?} registered for channel {:?} no longer exists during closure", 
+                                        actor_id, channel_id);
                                 }
-                                Err(e) => {
-                                    error!(
-                                        "Failed to send channel close message to actor {:?}: {}",
-                                        actor_id, e
-                                    );
+                            },
+                            ChannelParticipant::External(client_id) => {
+                                // For external clients, we should notify the server
+                                if let Some(tx) = &self.channel_events_tx {
+                                    debug!("Notifying server about channel {:?} closure for client {}", channel_id, client_id);
+                                    // We could add a ChannelClosed event type if needed here
                                 }
+                                // Consider this successful as we've removed the channel
+                                successful_notification = true;
                             }
-                        } else {
-                            warn!("Actor {:?} registered for channel {:?} no longer exists during closure", 
-                                actor_id, channel_id);
                         }
                     }
 
-                    if !successful_notification && !participant_ids.is_empty() {
+                    if !successful_notification && !participants.is_empty() {
                         warn!(
-                            "Failed to notify any actors about channel {:?} closure",
+                            "Failed to notify any participants about channel {:?} closure",
                             channel_id
                         );
                     }
@@ -492,8 +528,17 @@ impl TheaterRuntime {
                         participants.len()
                     );
 
-                    // Convert the Vec to a HashSet
-                    let participant_set: HashSet<TheaterId> = participants.into_iter().collect();
+                    // Convert participants to ChannelParticipant enum
+                    let participant_set: HashSet<ChannelParticipant> = participants
+                        .into_iter()
+                        .map(|(id, is_external)| {
+                            if is_external {
+                                ChannelParticipant::External(id.to_string())
+                            } else {
+                                ChannelParticipant::Actor(id)
+                            }
+                        })
+                        .collect();
 
                     // Register the channel with its participants
                     self.channels.insert(channel_id.clone(), participant_set);
@@ -709,14 +754,26 @@ impl TheaterRuntime {
         // Remove actor from any channel registrations
         let mut channels_to_remove = Vec::new();
         for (channel_id, participants) in self.channels.iter_mut() {
-            if participants.remove(&actor_id) {
-                debug!("Removed actor {:?} from channel {:?}", actor_id, channel_id);
-
-                // If this was the last participant, mark the channel for removal
-                if participants.is_empty() {
-                    debug!("Channel {:?} is now empty, marking for removal", channel_id);
-                    channels_to_remove.push(channel_id.clone());
+            // Remove this actor if it's a participant
+            let mut actor_removed = false;
+            participants.retain(|p| {
+                match p {
+                    ChannelParticipant::Actor(id) if *id == actor_id => {
+                        actor_removed = true;
+                        false // Remove this actor
+                    },
+                    _ => true, // Keep other participants
                 }
+            });
+            
+            if actor_removed {
+                debug!("Removed actor {:?} from channel {:?}", actor_id, channel_id);
+            }
+
+            // If this was the last participant, mark the channel for removal
+            if participants.is_empty() {
+                debug!("Channel {:?} is now empty, marking for removal", channel_id);
+                channels_to_remove.push(channel_id.clone());
             }
         }
 
@@ -832,16 +889,36 @@ impl TheaterRuntime {
 
     // Get status of a specific channel
     pub async fn get_channel_status(&self, channel_id: &ChannelId) -> Option<Vec<TheaterId>> {
-        self.channels
-            .get(channel_id)
-            .map(|participants| participants.iter().cloned().collect())
+        // Convert our internal representation to the public API representation
+        // which just lists actor IDs for backward compatibility
+        self.channels.get(channel_id).map(|participants| {
+            participants
+                .iter()
+                .filter_map(|p| match p {
+                    ChannelParticipant::Actor(id) => Some(id.clone()),
+                    // Skip external participants in the public API for now
+                    ChannelParticipant::External(_) => None,
+                })
+                .collect()
+        })
     }
 
     // Get a list of all channels and their participants
     pub async fn list_channels(&self) -> Vec<(ChannelId, Vec<TheaterId>)> {
         self.channels
             .iter()
-            .map(|(id, participants)| (id.clone(), participants.iter().cloned().collect()))
+            .map(|(id, participants)| {
+                // Convert participant set to just actor IDs for backward compatibility
+                let actor_ids: Vec<TheaterId> = participants
+                    .iter()
+                    .filter_map(|p| match p {
+                        ChannelParticipant::Actor(id) => Some(id.clone()),
+                        // Skip external participants in the public API for now
+                        ChannelParticipant::External(_) => None,
+                    })
+                    .collect();
+                (id.clone(), actor_ids)
+            })
             .collect()
     }
 

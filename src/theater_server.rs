@@ -176,6 +176,7 @@ struct ChannelSubscription {
     initiator_id: TheaterId,
     target_id: TheaterId,
     client_tx: mpsc::Sender<ManagementResponse>,
+    is_external: bool,
 }
 
 pub struct TheaterServer {
@@ -690,6 +691,7 @@ impl TheaterServer {
                                             initiator_id: client_id.clone(),
                                             target_id: actor_id.clone(),
                                             client_tx: cmd_client_tx.clone(),
+                                            is_external: true,
                                         };
 
                                         channel_subscriptions
@@ -730,6 +732,8 @@ impl TheaterServer {
 
                     // Parse the channel ID
                     let channel_id_parsed = crate::messages::ChannelId(channel_id.clone());
+                    
+                    // Get the client ID (initiator)
                     let client_id = channel_subscriptions
                         .lock()
                         .await
