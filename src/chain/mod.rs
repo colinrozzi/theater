@@ -152,14 +152,17 @@ impl StateChain {
         let id = self.actor_id.clone();
         let tx = self.theater_tx.clone();
         tokio::spawn(async move {
-            debug!("Sending event {} to runtime for actor {}", evt, id);
+            debug!("actor [{}]: Sending event {} to runtime", id, evt);
             tx.send(TheaterCommand::NewEvent {
                 actor_id: id.clone(),
                 event: evt.clone(),
             })
             .await
             .expect("Failed to send event to runtime");
-            debug!("Sent event {} to runtime for actor {}", evt, id);
+            debug!(
+                "Sent event {} to runtime",
+                String::from_utf8_lossy(&evt.hash)
+            );
         });
 
         // I am removing storing the events in the content store for now because they are
