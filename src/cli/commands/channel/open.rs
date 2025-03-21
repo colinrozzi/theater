@@ -6,9 +6,7 @@ use rustyline::DefaultEditor;
 use std::fs;
 use std::net::SocketAddr;
 use std::path::PathBuf;
-use std::sync::Arc;
 use tokio::sync::mpsc;
-use tokio::sync::Mutex;
 use tracing::{debug, error};
 
 use crate::cli::client::TheaterClient;
