@@ -338,11 +338,13 @@ impl MessageServerHost {
                                                 });
                                                 
                                                 if accepted {
-                                                    mailbox_tx.send(ActorMessage::ChannelInitiated(ActorChannelInitiated { 
-                                                        channel_id: channel_id.clone(),
-                                                        target_id: target_id.clone(),
-                                                        initial_msg,
-                                                    }));
+                                                    tokio::spawn(async move {
+                                                        // Send the initial message
+                                                        mailbox_tx.send(ActorMessage::ChannelMessage(ActorChannelMessage {
+                                                            channel_id: channel_id.clone(),
+                                                            data: initial_msg.clone(),
+                                                        })).await.expect("Failed to send initial message on channel");
+                                                    });
                                                     Ok((Ok(channel_id_clone),))
                                                 } else {
                                                     Ok((Err("Channel request rejected by target actor".to_string()),))
