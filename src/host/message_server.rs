@@ -340,10 +340,11 @@ impl MessageServerHost {
                                                 if accepted {
                                                     tokio::spawn(async move {
                                                         // Send the initial message
-                                                        mailbox_tx.send(ActorMessage::ChannelMessage(ActorChannelMessage {
+                                                        mailbox_tx.send(ActorMessage::ChannelInitiated(ActorChannelInitiated {
+                                                            target_id: target_id.clone(),
                                                             channel_id: channel_id.clone(),
-                                                            data: initial_msg.clone(),
-                                                        })).await.expect("Failed to send initial message on channel");
+                                                            initial_msg: initial_msg.clone(),
+                                                        })).await.expect("Failed to send channel initiated message");
                                                     });
                                                     Ok((Ok(channel_id_clone),))
                                                 } else {
