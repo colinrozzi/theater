@@ -1,7 +1,7 @@
 use anyhow::{anyhow, Result};
 use clap::Parser;
 use console::style;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::net::SocketAddr;
 use std::str::FromStr;
 
@@ -53,8 +53,8 @@ pub struct EventsArgs {
     #[arg(short = 'd', long)]
     pub detailed: bool,
 
-    /// Sort events (time, type, size)
-    #[arg(short, long, default_value = "time")]
+    /// Sort events (chain, time, type, size)
+    #[arg(short, long, default_value = "chain")]
     pub sort: String,
 
     /// Reverse the sort order
@@ -128,8 +128,13 @@ pub fn execute(args: &EventsArgs, verbose: bool, json: bool) -> Result<()> {
             });
         }
 
-        // Sort events
+        // Organize events by chain structure if "chain" sort is requested, otherwise use standard sorts
         match args.sort.as_str() {
+            "chain" => {
+                // Sort events by their chain structure (parent-child relationships)
+                let ordered_events = order_events_by_chain(&events, args.reverse);
+                events = ordered_events;
+            }
             "time" => {
                 if args.reverse {
                     events.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
@@ -152,12 +157,9 @@ pub fn execute(args: &EventsArgs, verbose: bool, json: bool) -> Result<()> {
                 }
             }
             _ => {
-                // Default to time
-                if args.reverse {
-                    events.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
-                } else {
-                    events.sort_by(|a, b| a.timestamp.cmp(&b.timestamp));
-                }
+                // Default to chain
+                let ordered_events = order_events_by_chain(&events, args.reverse);
+                events = ordered_events;
             }
         }
 
@@ -599,6 +601,125 @@ fn display_events_timeline(events: &[ChainEvent], actor_id: &TheaterId) -> Resul
     }
 
     Ok(())
+}
+
+// Order events by their chain structure (parent-child relationships)
+fn order_events_by_chain(events: &[ChainEvent], reverse: bool) -> Vec<ChainEvent> {
+    if events.is_empty() {
+        return Vec::new();
+    }
+
+    // Create hash maps for quick lookup
+    let mut hash_to_index: HashMap<String, usize> = HashMap::new();
+    let mut parent_to_children: HashMap<String, Vec<usize>> = HashMap::new();
+    let mut has_parent_in_list: HashSet<usize> = HashSet::new();
+
+    // First pass: build the hash maps
+    for (i, event) in events.iter().enumerate() {
+        let event_hash = hex::encode(&event.hash);
+        hash_to_index.insert(event_hash.clone(), i);
+
+        // If event has a parent, record the relationship
+        if let Some(parent_hash) = &event.parent_hash {
+            let parent_hash_hex = hex::encode(parent_hash);
+            parent_to_children.entry(parent_hash_hex.clone())
+                .or_insert_with(Vec::new)
+                .push(i);
+
+            // Check if the parent exists in our events list
+            if hash_to_index.contains_key(&parent_hash_hex) {
+                has_parent_in_list.insert(i);
+            }
+        }
+    }
+
+    // Identify root events (events with no parent in our list)
+    let mut root_indices: Vec<usize> = events.iter().enumerate()
+        .filter_map(|(i, _)| {
+            if !has_parent_in_list.contains(&i) {
+                Some(i)
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    // Sort root events by timestamp
+    root_indices.sort_by(|&a, &b| {
+        if reverse {
+            events[b].timestamp.cmp(&events[a].timestamp)
+        } else {
+            events[a].timestamp.cmp(&events[b].timestamp)
+        }
+    });
+
+    let mut ordered_events = Vec::new();
+    let mut visited = HashSet::new();
+
+    // Helper function to recursively add events in chain order
+    fn add_event_chain(
+        index: usize,
+        events: &[ChainEvent],
+        parent_to_children: &HashMap<String, Vec<usize>>,
+        visited: &mut HashSet<usize>,
+        ordered_events: &mut Vec<ChainEvent>,
+        reverse: bool,
+    ) {
+        if visited.contains(&index) {
+            return;
+        }
+
+        // Add this event
+        ordered_events.push(events[index].clone());
+        visited.insert(index);
+
+        // Find and sort children
+        let event_hash = hex::encode(&events[index].hash);
+        if let Some(children) = parent_to_children.get(&event_hash) {
+            // Copy and sort children by timestamp
+            let mut children = children.clone();
+            children.sort_by(|&a, &b| {
+                if reverse {
+                    events[b].timestamp.cmp(&events[a].timestamp)
+                } else {
+                    events[a].timestamp.cmp(&events[b].timestamp)
+                }
+            });
+
+            // Recursively add each child's chain
+            for &child_index in &children {
+                add_event_chain(
+                    child_index,
+                    events,
+                    parent_to_children,
+                    visited,
+                    ordered_events,
+                    reverse,
+                );
+            }
+        }
+    }
+
+    // Process each root event and its chains
+    for &root_index in &root_indices {
+        add_event_chain(
+            root_index,
+            events,
+            &parent_to_children,
+            &mut visited,
+            &mut ordered_events,
+            reverse,
+        );
+    }
+
+    // Add any events that weren't part of any chain
+    for (i, event) in events.iter().enumerate() {
+        if !visited.contains(&i) {
+            ordered_events.push(event.clone());
+        }
+    }
+
+    ordered_events
 }
 
 // Helper function to format timestamps in a human-readable way
