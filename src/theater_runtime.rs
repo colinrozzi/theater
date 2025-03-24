@@ -601,7 +601,7 @@ impl TheaterRuntime {
         };
 
         // start the actor in a new process
-        let (response_tx, response_rx) = mpsc::channel(1);
+        let (response_tx, mut response_rx) = mpsc::channel(1);
         // Create a shutdown controller for this specific actor
         let (shutdown_controller, shutdown_receiver) = ShutdownController::new();
         let (mailbox_tx, mailbox_rx) = mpsc::channel(100);
@@ -633,8 +633,8 @@ impl TheaterRuntime {
             .unwrap()
         });
 
-        match response_rx.await {
-            Ok(StartActorResult::Success(actor_id)) => {
+        match response_rx.recv().await {
+            Some(StartActorResult::Success(actor_id)) => {
                 debug!(
                     "Received actor ID from runtime initialization: {:?}",
                     actor_id
@@ -666,20 +666,23 @@ impl TheaterRuntime {
                 debug!("Actor process registered with runtime");
                 Ok(actor_id)
             }
-            Ok(StartActorResult::Failure(actor_id, e)) => {
-                error!("Failed to start actor: {}", e);
+            Some(StartActorResult::Failure(actor_id, e)) => {
+                error!("Failed to start actor [{}]: {}", actor_id, e);
                 // Abort the runtime process since it failed
                 actor_runtime_process.abort();
                 // Return the specific error message to the spawner
-                Err(anyhow::anyhow!("Actor startup failed: {}", e))
+                Err(anyhow::anyhow!(
+                    "Actor startup failed: [{}] {}",
+                    actor_id,
+                    e
+                ))
             }
-            Err(e) => {
-                error!("Failed to receive actor ID from runtime: {}", e);
+            None => {
+                error!("Failed to receive actor ID from runtime");
                 // Abort the runtime process since we couldn't get a response
                 actor_runtime_process.abort();
                 Err(anyhow::anyhow!(
-                    "Failed to receive response from actor runtime: {}",
-                    e
+                    "Failed to receive response from actor runtime",
                 ))
             }
         }
