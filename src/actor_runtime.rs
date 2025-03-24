@@ -3,6 +3,8 @@ use crate::actor_executor::ActorOperation;
 use crate::actor_handle::ActorHandle;
 use crate::actor_store::ActorStore;
 use crate::config::{HandlerConfig, ManifestConfig};
+use crate::events::theater_runtime::{TheaterRuntimeEvent, TheaterRuntimeEventData};
+use crate::events::{ChainEventData, EventData};
 use crate::host::filesystem::FileSystemHost;
 use crate::host::framework::HttpFramework;
 use crate::host::handler::Handler;
@@ -15,6 +17,7 @@ use crate::host::timing::TimingHost;
 use crate::id::TheaterId;
 use crate::messages::{ActorMessage, TheaterCommand};
 use crate::shutdown::{ShutdownController, ShutdownReceiver};
+use crate::store::{ContentRef, ContentStore, Label};
 use crate::wasm::ActorComponent;
 use crate::Result;
 use tokio::sync::mpsc::{Receiver, Sender};
@@ -50,8 +53,25 @@ impl ActorRuntime {
         operation_tx: Sender<ActorOperation>,
         init: bool,
         parent_shutdown_receiver: ShutdownReceiver,
-        response_tx: oneshot::Sender<StartActorResult>,
+        response_tx: Sender<StartActorResult>,
     ) -> Result<Self> {
+        let actor_handle = ActorHandle::new(operation_tx.clone());
+        let actor_store = ActorStore::new(id.clone(), theater_tx.clone(), actor_handle.clone());
+
+        let manifest_store = ContentStore::from_id("manifest");
+        let manifest_id = manifest_store
+            .store(config.clone().into_fixed_bytes())
+            .await?;
+
+        actor_store.record_event(ChainEventData {
+            event_type: "theater-runtime".to_string(),
+            data: EventData::TheaterRuntime(TheaterRuntimeEventData::ActorLoadCall {
+                manifest_id: manifest_id.clone(),
+            }),
+            timestamp: chrono::Utc::now().timestamp_millis() as u64,
+            description: format!("Loading actor [{}] from manifest [{}] ", id, manifest_id).into(),
+        });
+
         // Create a local shutdown controller for this runtime
         let (shutdown_controller, _) = ShutdownController::new();
         let mut handlers = Vec::new();
@@ -86,8 +106,6 @@ impl ActorRuntime {
             handlers.push(handler);
         }
 
-        let actor_handle = ActorHandle::new(operation_tx.clone());
-        let actor_store = ActorStore::new(id.clone(), theater_tx.clone(), actor_handle.clone());
         let mut actor_component = ActorComponent::new(config, actor_store).await.expect(
             format!(
                 "Failed to create actor component for actor: {:?}",
@@ -98,6 +116,7 @@ impl ActorRuntime {
 
         // Add the host functions to the linker of the actor
         {
+            let response_tx = response_tx.clone();
             for handler in &mut handlers {
                 info!(
                     "Setting up host functions for handler: {:?}",
@@ -106,13 +125,13 @@ impl ActorRuntime {
                 handler
                     .setup_host_functions(&mut actor_component)
                     .await
-                    .expect(
-                        format!(
-                            "Failed to setup host functions for handler: {:?}",
-                            handler.name()
-                        )
-                        .as_str(),
-                    );
+                    .map_err(async move |e| {
+                        response_tx
+                            .send(StartActorResult::Failure(id.clone(), e.to_string()))
+                            .await
+                            .expect("Failed to send response");
+                        e
+                    })?;
             }
         }
 

@@ -17,6 +17,13 @@ pub struct ContentRef {
     hash: String,
 }
 
+// implement display for ContentRef
+impl std::fmt::Display for ContentRef {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "{}", self.hash)
+    }
+}
+
 impl ContentRef {
     /// Create a new ContentRef from a hash
     pub fn new(hash: String) -> Self {
@@ -235,6 +242,10 @@ impl ContentStore {
         Self { id, base_path }
     }
 
+    pub fn new_named_store(id: &str) -> Self {
+        ContentStore::from_id(id)
+    }
+
     pub fn from_id(id: &str) -> Self {
         let base_path = PathBuf::from("/Users/colinrozzi/work/theater/store").join(id);
         Self {
@@ -245,23 +256,6 @@ impl ContentStore {
 
     pub fn id(&self) -> &str {
         &self.id
-    }
-
-    /// Initialize the store (create necessary directories)
-    async fn init(&self) -> Result<()> {
-        // Create data directory
-        let data_dir = self.base_path.join("data");
-        fs::create_dir_all(&data_dir)
-            .await
-            .context("Failed to create data directory")?;
-
-        // Create labels directory
-        let labels_dir = self.base_path.join("labels");
-        fs::create_dir_all(&labels_dir)
-            .await
-            .context("Failed to create labels directory")?;
-
-        Ok(())
     }
 
     /// Store content and return its ContentRef

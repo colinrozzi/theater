@@ -9,8 +9,24 @@ interface filesystem {
     create-dir: func(path: string) -> result<_, string>;
     delete-dir: func(path: string) -> result<_, string>;
     path-exists: func(path: string) -> result<bool, string>;
+
+    // Command Types
+    record command-success {   
+        stdout: string,
+        stderr: string,
+        exit-code: u32,
+    }
+
+    record command-error {
+        message: string,
+    }
+
+    variant command-result {
+        success(command-success),
+        error(command-error),
+    }
     
     // Command execution functions
-    execute-command: func(dir: string, command: string, args: list<string>) -> result<string, string>;
-    execute-nix-command: func(dir: string, command: string) -> result<string, string>;
+    execute-command: func(dir: string, command: string, args: list<string>) -> result<command-result, string>;
+    execute-nix-command: func(dir: string, command: string) -> result<command-result, string>;
 }

@@ -47,6 +47,8 @@ impl TheaterRuntime {
         theater_rx: Receiver<TheaterCommand>,
         channel_events_tx: Option<Sender<crate::theater_server::ChannelEvent>>,
     ) -> Result<Self> {
+        info!("Theater runtime initializing");
+
         Ok(Self {
             theater_tx,
             theater_rx,
@@ -599,7 +601,7 @@ impl TheaterRuntime {
         };
 
         // start the actor in a new process
-        let (response_tx, response_rx) = tokio::sync::oneshot::channel();
+        let (response_tx, response_rx) = mpsx::channel(1);
         // Create a shutdown controller for this specific actor
         let (shutdown_controller, shutdown_receiver) = ShutdownController::new();
         let (mailbox_tx, mailbox_rx) = mpsc::channel(100);

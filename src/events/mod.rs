@@ -21,6 +21,7 @@ pub enum EventData {
     Store(store::StoreEventData),
     Timing(timing::TimingEventData),
     Wasm(wasm::WasmEventData),
+    TheaterRuntime(theater_runtime::TheaterRuntimeEventData),
 }
 
 impl ChainEventData {
@@ -64,5 +65,6 @@ pub mod message;
 pub mod runtime;
 pub mod store;
 pub mod supervisor;
+pub mod theater_runtime;
 pub mod timing;
 pub mod wasm;

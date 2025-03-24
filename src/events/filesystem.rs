@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use wasmtime::component::{ComponentType, Lift, Lower};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum FilesystemEventData {
@@ -7,18 +8,17 @@ pub enum FilesystemEventData {
         path: String,
     },
     FileReadResult {
-        bytes_read: usize,
         success: bool,
+        contents: Vec<u8>,
     },
 
     // Write file events
     FileWriteCall {
         path: String,
-        data_size: usize,
+        contents: Vec<u8>,
     },
     FileWriteResult {
         path: String,
-        bytes_written: usize,
         success: bool,
     },
 
@@ -36,6 +36,7 @@ pub enum FilesystemEventData {
         path: String,
     },
     DirectoryCreatedResult {
+        path: String,
         success: bool,
     },
 
@@ -43,6 +44,7 @@ pub enum FilesystemEventData {
         path: String,
     },
     DirectoryDeletedResult {
+        path: String,
         success: bool,
     },
 
@@ -51,6 +53,7 @@ pub enum FilesystemEventData {
         path: String,
     },
     DirectoryListResult {
+        path: String,
         entries: Vec<String>,
         success: bool,
     },
@@ -83,11 +86,31 @@ pub enum FilesystemEventData {
         command: String,
     },
     CommandCompleted {
-        success: bool,
-        stdout: String,
-        stderr: String,
-        exit_code: i32,
+        result: CommandResult,
     },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ComponentType, Lift, Lower)]
+#[component(variant)]
+pub enum CommandResult {
+    #[component(name = "command-success")]
+    Success(CommandSuccess),
+    #[component(name = "command-error")]
+    Error(CommandError),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ComponentType, Lift, Lower)]
+#[component(record)]
+pub struct CommandSuccess {
+    pub stdout: String,
+    pub stderr: String,
+    pub exit_code: i32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ComponentType, Lift, Lower)]
+#[component(record)]
+pub struct CommandError {
+    pub message: String,
 }
 
 pub struct FilesystemEvent {

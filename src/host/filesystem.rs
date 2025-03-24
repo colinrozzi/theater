@@ -1,9 +1,9 @@
 use crate::actor_executor::ActorError;
 use crate::actor_handle::ActorHandle;
-use crate::shutdown::ShutdownReceiver;
 use crate::config::FileSystemHandlerConfig;
-use crate::events::filesystem::FilesystemEventData;
+use crate::events::filesystem::{CommandError, CommandResult, CommandSuccess, FilesystemEventData};
 use crate::events::{ChainEventData, EventData};
+use crate::shutdown::ShutdownReceiver;
 use crate::wasm::ActorComponent;
 use crate::wasm::ActorInstance;
 use crate::ActorStore;
@@ -54,18 +54,6 @@ pub enum FileSystemError {
 
     #[error("Serialization error: {0}")]
     SerializationError(#[from] serde_json::Error),
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum CommandResult {
-    Success {
-        stdout: String,
-        stderr: String,
-        exit_code: i32,
-    },
-    Error {
-        message: String,
-    },
 }
 
 pub struct FileSystemHost {
@@ -171,7 +159,7 @@ impl FileSystemHost {
                 ctx.data_mut().record_event(ChainEventData {
                     event_type: "ntwk:theater/filesystem/read-file".to_string(),
                     data: EventData::Filesystem(FilesystemEventData::FileReadResult {
-                        bytes_read: contents.len(),
+                        contents: contents.clone(),
                         success: true,
                     }),
                     timestamp: chrono::Utc::now().timestamp_millis() as u64,
@@ -199,7 +187,7 @@ impl FileSystemHost {
                     event_type: "ntwk:theater/filesystem/write-file".to_string(),
                     data: EventData::Filesystem(FilesystemEventData::FileWriteCall {
                         path: file_path.clone(),
-                        data_size: contents.len(),
+                        contents: contents.clone().into(),
                     }),
                     timestamp: chrono::Utc::now().timestamp_millis() as u64,
                     description: Some(format!(
@@ -221,7 +209,6 @@ impl FileSystemHost {
                                 event_type: "ntwk:theater/filesystem/write-file".to_string(),
                                 data: EventData::Filesystem(FilesystemEventData::FileWriteResult {
                                     path: file_path.to_string_lossy().to_string(),
-                                    bytes_written: contents.len(),
                                     success: true,
                                 }),
                                 timestamp: chrono::Utc::now().timestamp_millis() as u64,
@@ -312,6 +299,7 @@ impl FileSystemHost {
                             event_type: "ntwk:theater/filesystem/list-files".to_string(),
                             data: EventData::Filesystem(FilesystemEventData::DirectoryListResult {
                                 entries: files.clone(),
+                                path: dir_path.to_string_lossy().to_string(),
                                 success: true,
                             }),
                             timestamp: chrono::Utc::now().timestamp_millis() as u64,
@@ -432,7 +420,10 @@ impl FileSystemHost {
                         ctx.data_mut().record_event(ChainEventData {
                             event_type: "ntwk:theater/filesystem/create-dir".to_string(),
                             data: EventData::Filesystem(
-                                FilesystemEventData::DirectoryCreatedResult { success: true },
+                                FilesystemEventData::DirectoryCreatedResult {
+                                    success: true,
+                                    path: dir_path.to_string_lossy().to_string(),
+                                },
                             ),
                             timestamp: chrono::Utc::now().timestamp_millis() as u64,
                             description: Some(format!(
@@ -492,7 +483,10 @@ impl FileSystemHost {
                         ctx.data_mut().record_event(ChainEventData {
                             event_type: "ntwk:theater/filesystem/delete-dir".to_string(),
                             data: EventData::Filesystem(
-                                FilesystemEventData::DirectoryDeletedResult { success: true },
+                                FilesystemEventData::DirectoryDeletedResult {
+                                    success: true,
+                                    path: dir_path.to_string_lossy().to_string(),
+                                },
                             ),
                             timestamp: chrono::Utc::now().timestamp_millis() as u64,
                             description: Some(format!(
@@ -566,140 +560,123 @@ impl FileSystemHost {
 
         let allowed_path = self.path.clone();
         let allowed_commands = self.allowed_commands.clone();
-let _ = interface.func_wrap_async(
-    "execute-command",
-    move |mut ctx: StoreContextMut<'_, ActorStore>,
-          (dir, command, args): (String, String, Vec<String>)|
-          -> Box<dyn Future<Output = Result<(Result<String, String>,)>> + Send> {
-        
-        // Validate command if whitelist is configured
-        if let Some(allowed) = &allowed_commands {
-            if !allowed.contains(&command) {
-                return Box::new(async move {
-                    Ok((Err(format!("Command '{}' not in allowed list", command)),))
-                });
-            }
-        }
-
-        // Record command execution event
-        ctx.data_mut().record_event(ChainEventData {
-            event_type: "ntwk:theater/filesystem/execute-command".to_string(),
-            data: EventData::Filesystem(FilesystemEventData::CommandExecuted {
-                directory: dir.clone(),
-                command: command.clone(),
-                args: args.clone(),
-            }),
-            timestamp: chrono::Utc::now().timestamp_millis() as u64,
-            description: Some(format!(
-                "Executing command '{}' in directory '{}'",
-                command, dir
-            )),
-        });
-
-        let dir_path = allowed_path.join(Path::new(&dir));
-        let args_refs: Vec<String> = args.clone();
-        let allowed_path = allowed_path.clone();
-        let command_clone = command.clone();
-        
-        Box::new(async move {
-            match execute_command(
-                allowed_path,
-                &dir_path,
-                &command_clone,
-                &args_refs.iter().map(AsRef::as_ref).collect::<Vec<&str>>(),
-            ).await {
-                Ok(result) => match result {
-                    CommandResult::Success {
-                        stdout,
-                        stderr,
-                        exit_code,
-                    } => {
-                        // Record successful execution
-                        ctx.data_mut().record_event(ChainEventData {
-                            event_type: "ntwk:theater/filesystem/command-result".to_string(),
-                            data: EventData::Filesystem(
-                                FilesystemEventData::CommandCompleted {
-                                    success: exit_code == 0,
-                                    stdout: stdout.clone(),
-                                    stderr,
-                                    exit_code,
-                                },
-                            ),
-                            timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                            description: Some("Command completed".to_string()),
-                        });
-                        Ok((Ok(stdout),))
+        let _ =
+            interface.func_wrap_async(
+                "execute-command",
+                move |mut ctx: StoreContextMut<'_, ActorStore>,
+                      (dir, command, args): (String, String, Vec<String>)|
+                      -> Box<
+                    dyn Future<Output = Result<(Result<CommandResult, String>,)>> + Send,
+                > {
+                    // Validate command if whitelist is configured
+                    if let Some(allowed) = &allowed_commands {
+                        if !allowed.contains(&command) {
+                            return Box::new(async move {
+                                Ok((Err(format!("Command '{}' not in allowed list", command)),))
+                            });
+                        }
                     }
-                    CommandResult::Error { message } => Ok((Err(message),)),
+
+                    // Record command execution event
+                    ctx.data_mut().record_event(ChainEventData {
+                        event_type: "ntwk:theater/filesystem/execute-command".to_string(),
+                        data: EventData::Filesystem(FilesystemEventData::CommandExecuted {
+                            directory: dir.clone(),
+                            command: command.clone(),
+                            args: args.clone(),
+                        }),
+                        timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                        description: Some(format!(
+                            "Executing command '{}' in directory '{}'",
+                            command, dir
+                        )),
+                    });
+
+                    let dir_path = allowed_path.join(Path::new(&dir));
+                    let args_refs: Vec<String> = args.clone();
+                    let allowed_path = allowed_path.clone();
+                    let command_clone = command.clone();
+
+                    Box::new(async move {
+                        match execute_command(
+                            allowed_path,
+                            &dir_path,
+                            &command_clone,
+                            &args_refs.iter().map(AsRef::as_ref).collect::<Vec<&str>>(),
+                        )
+                        .await
+                        {
+                            Ok(result) => {
+                                // Record successful
+                                ctx.data_mut().record_event(ChainEventData {
+                                    event_type: "ntwk:theater/filesystem/command-result"
+                                        .to_string(),
+                                    data: EventData::Filesystem(
+                                        FilesystemEventData::CommandCompleted {
+                                            result: result.clone(),
+                                        },
+                                    ),
+                                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                                    description: Some("Command completed".to_string()),
+                                });
+                                Ok((Ok(result),))
+                            }
+                            Err(e) => Ok((Err(e.to_string()),)),
+                        }
+                    })
                 },
-                Err(e) => Ok((Err(e.to_string()),)),
-            }
-        })
-    },
-)?;
+            )?;
 
         let allowed_path = self.path.clone();
 
-let _ = interface.func_wrap_async(
-    "execute-nix-command",
-    move |mut ctx: StoreContextMut<'_, ActorStore>,
-          (dir, command): (String, String)|
-          -> Box<dyn Future<Output = Result<(Result<String, String>,)>> + Send> {
-        
-        // Record nix command execution event
-        ctx.data_mut().record_event(ChainEventData {
-            event_type: "ntwk:theater/filesystem/execute-nix-command".to_string(),
-            data: EventData::Filesystem(FilesystemEventData::NixCommandExecuted {
-                directory: dir.clone(),
-                command: command.clone(),
-            }),
-            timestamp: chrono::Utc::now().timestamp_millis() as u64,
-            description: Some(format!(
-                "Executing nix command '{}' in directory '{}'",
-                command, dir
-            )),
-        });
+        let _ =
+            interface.func_wrap_async(
+                "execute-nix-command",
+                move |mut ctx: StoreContextMut<'_, ActorStore>,
+                      (dir, command): (String, String)|
+                      -> Box<
+                    dyn Future<Output = Result<(Result<CommandResult, String>,)>> + Send,
+                > {
+                    // Record nix command execution event
+                    ctx.data_mut().record_event(ChainEventData {
+                        event_type: "ntwk:theater/filesystem/execute-nix-command".to_string(),
+                        data: EventData::Filesystem(FilesystemEventData::NixCommandExecuted {
+                            directory: dir.clone(),
+                            command: command.clone(),
+                        }),
+                        timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                        description: Some(format!(
+                            "Executing nix command '{}' in directory '{}'",
+                            command, dir
+                        )),
+                    });
 
-        let dir_path = allowed_path.join(Path::new(&dir));
-        let allowed_path = allowed_path.clone();
-        let command_clone = command.clone();
-        
-        Box::new(async move {
-            match execute_nix_command(
-                allowed_path,
-                &dir_path,
-                &command_clone,
-            ).await {
-                Ok(result) => match result {
-                    CommandResult::Success {
-                        stdout,
-                        stderr,
-                        exit_code,
-                    } => {
-                        // Record successful execution
-                        ctx.data_mut().record_event(ChainEventData {
-                            event_type: "ntwk:theater/filesystem/nix-command-result"
-                                .to_string(),
-                            data: EventData::Filesystem(
-                                FilesystemEventData::CommandCompleted {
-                                    success: exit_code == 0,
-                                    stdout: stdout.clone(),
-                                    stderr,
-                                    exit_code,
-                                },
-                            ),
-                            timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                            description: Some("Nix command completed".to_string()),
-                        });
-                        Ok((Ok(stdout),))
-                    }
-                    CommandResult::Error { message } => Ok((Err(message),)),
+                    let dir_path = allowed_path.join(Path::new(&dir));
+                    let allowed_path = allowed_path.clone();
+                    let command_clone = command.clone();
+
+                    Box::new(async move {
+                        match execute_nix_command(allowed_path, &dir_path, &command_clone).await {
+                            Ok(result) => {
+                                // Record successful execution
+                                ctx.data_mut().record_event(ChainEventData {
+                                    event_type: "ntwk:theater/filesystem/nix-command-result"
+                                        .to_string(),
+                                    data: EventData::Filesystem(
+                                        FilesystemEventData::CommandCompleted {
+                                            result: result.clone(),
+                                        },
+                                    ),
+                                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                                    description: Some("Nix command completed".to_string()),
+                                });
+                                Ok((Ok(result),))
+                            }
+                            Err(e) => Ok((Err(e.to_string()),)),
+                        }
+                    })
                 },
-                Err(e) => Ok((Err(e.to_string()),)),
-            }
-        })
-    },
-)?;
+            )?;
 
         Ok(())
     }
@@ -709,7 +686,11 @@ let _ = interface.func_wrap_async(
         Ok(())
     }
 
-    pub async fn start(&self, _actor_handle: ActorHandle, _shutdown_receiver: ShutdownReceiver) -> Result<()> {
+    pub async fn start(
+        &self,
+        _actor_handle: ActorHandle,
+        _shutdown_receiver: ShutdownReceiver,
+    ) -> Result<()> {
         info!("FILESYSTEM starting on path {:?}", self.path);
         Ok(())
     }
@@ -723,15 +704,15 @@ async fn execute_command(
 ) -> Result<CommandResult> {
     // Validate that the directory is within our allowed path
     if !dir.starts_with(&allowed_path) {
-        return Ok(CommandResult::Error {
+        return Ok(CommandResult::Error(CommandError {
             message: "Directory not within allowed path".to_string(),
-        });
+        }));
     }
 
     if cmd != "nix" {
-        return Ok(CommandResult::Error {
+        return Ok(CommandResult::Error(CommandError {
             message: "Command not allowed".to_string(),
-        });
+        }));
     }
 
     if args
@@ -742,17 +723,13 @@ async fn execute_command(
             "-c",
             "cargo component build --target wasm32-unknown-unknown --release",
         ]
-        &&
-        args != &[
-            "flake",
-            "init"
-        ]
+        && args != &["flake", "init"]
     {
         info!("Args not allowed");
-        info!("{:?}" ,args);
-        return Ok(CommandResult::Error {
+        info!("{:?}", args);
+        return Ok(CommandResult::Error(CommandError {
             message: "Args not allowed".to_string(),
-        });
+        }));
     }
 
     info!("Executing command: {} {:?}", cmd, args);
@@ -769,11 +746,11 @@ async fn execute_command(
     info!("stderr: {}", String::from_utf8_lossy(&output.stderr));
     info!("exit code: {}", output.status.code().unwrap());
 
-    Ok(CommandResult::Success {
+    Ok(CommandResult::Success(CommandSuccess {
         stdout: String::from_utf8_lossy(&output.stdout).to_string(),
         stderr: String::from_utf8_lossy(&output.stderr).to_string(),
         exit_code: output.status.code().unwrap_or(-1),
-    })
+    }))
 }
 
 async fn execute_nix_command(

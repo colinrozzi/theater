@@ -176,4 +176,12 @@ impl ManifestConfig {
             None => Ok(None),
         }
     }
+
+    // This is intended to store a manifest in the content store in a such a way that there is only
+    // one representation per possible manifest. I don't know if toml::to_string does this, but I
+    // am going to go forward for now, because this is more a nice to have than need to have at
+    // this point.
+    pub fn into_fixed_bytes(self) -> Vec<u8> {
+        toml::to_string(&self).unwrap().into_bytes()
+    }
 }
