@@ -14,7 +14,7 @@ interface filesystem {
     record command-success {   
         stdout: string,
         stderr: string,
-        exit-code: u32,
+        exit-code: s32,
     }
 
     record command-error {

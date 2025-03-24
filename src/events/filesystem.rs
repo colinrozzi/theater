@@ -93,9 +93,9 @@ pub enum FilesystemEventData {
 #[derive(Debug, Clone, Serialize, Deserialize, ComponentType, Lift, Lower)]
 #[component(variant)]
 pub enum CommandResult {
-    #[component(name = "command-success")]
+    #[component(name = "success")]
     Success(CommandSuccess),
-    #[component(name = "command-error")]
+    #[component(name = "error")]
     Error(CommandError),
 }
 
@@ -104,6 +104,7 @@ pub enum CommandResult {
 pub struct CommandSuccess {
     pub stdout: String,
     pub stderr: String,
+    #[component(name = "exit-code")]
     pub exit_code: i32,
 }
 
