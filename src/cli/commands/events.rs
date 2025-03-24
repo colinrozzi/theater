@@ -612,59 +612,47 @@ fn order_events_by_chain(events: &[ChainEvent], reverse: bool) -> Vec<ChainEvent
         return Vec::new();
     }
 
-    // Create a map of event hashes to events for quick lookup
-    let mut hash_to_event = HashMap::new();
-    for event in events {
-        hash_to_event.insert(&event.hash, event);
-    }
+    // Find the root event (the one without a parent)
+    let root = events.iter().find(|e| e.parent_hash.is_none());
 
-    // Create a map of parent hashes to children
-    let mut parent_to_children = HashMap::new();
-    for event in events {
-        if let Some(parent_hash) = &event.parent_hash {
-            parent_to_children
-                .entry(parent_hash)
-                .or_insert_with(Vec::new)
-                .push(event);
-        }
-    }
-
-    // Find the root event (the event without a parent)
-    let mut root = None;
-    for event in events {
-        if event.parent_hash.is_none() {
-            root = Some(event);
-            break;
-        }
-    }
-
-    // If no root found (should not happen given the guarantees), return events as-is
+    // If no root is found (should not happen with given guarantees), return events as-is
     let root = match root {
         Some(r) => r,
         None => return events.to_vec(),
     };
 
-    // Build ordered list starting from the root and following the chain
-    let mut ordered_events = Vec::with_capacity(events.len());
-    ordered_events.push(root.clone());
+    // Create a map from parent hash to children
+    let mut parent_to_children: HashMap<Vec<u8>, Vec<&ChainEvent>> = HashMap::new();
+    for event in events {
+        if let Some(parent_hash) = &event.parent_hash {
+            parent_to_children
+                .entry(parent_hash.clone())
+                .or_insert_with(Vec::new)
+                .push(event);
+        }
+    }
 
-    // Function to recursively add children
-    fn add_children(
-        current_hash: &[u8],
-        parent_to_children: &HashMap<&Vec<u8>, Vec<&ChainEvent>>,
+    // Function to recursively collect events in order
+    let mut ordered_events = Vec::new();
+
+    fn traverse_chain(
+        event: &ChainEvent,
+        parent_to_children: &HashMap<Vec<u8>, Vec<&ChainEvent>>,
         ordered_events: &mut Vec<ChainEvent>,
     ) {
-        if let Some(children) = parent_to_children.get(current_hash) {
-            for child in children {
-                ordered_events.push((*child).clone());
-                add_children(&child.hash, parent_to_children, ordered_events);
+        ordered_events.push(event.clone());
+
+        if let Some(children) = parent_to_children.get(&event.hash) {
+            for &child in children {
+                traverse_chain(child, parent_to_children, ordered_events);
             }
         }
     }
 
-    add_children(&root.hash, &parent_to_children, &mut ordered_events);
+    // Start traversal from the root
+    traverse_chain(root, &parent_to_children, &mut ordered_events);
 
-    // Reverse the order if requested
+    // Reverse if requested
     if reverse {
         ordered_events.reverse();
     }
