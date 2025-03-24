@@ -601,7 +601,7 @@ impl TheaterRuntime {
         };
 
         // start the actor in a new process
-        let (response_tx, response_rx) = mpsx::channel(1);
+        let (response_tx, response_rx) = mpsc::channel(1);
         // Create a shutdown controller for this specific actor
         let (shutdown_controller, shutdown_receiver) = ShutdownController::new();
         let (mailbox_tx, mailbox_rx) = mpsc::channel(100);
@@ -668,11 +668,19 @@ impl TheaterRuntime {
             }
             Ok(StartActorResult::Failure(actor_id, e)) => {
                 error!("Failed to start actor: {}", e);
-                Err(anyhow::anyhow!("Failed to start actor"))
+                // Abort the runtime process since it failed
+                actor_runtime_process.abort();
+                // Return the specific error message to the spawner
+                Err(anyhow::anyhow!("Actor startup failed: {}", e))
             }
             Err(e) => {
                 error!("Failed to receive actor ID from runtime: {}", e);
-                Err(anyhow::anyhow!("Failed to start actor"))
+                // Abort the runtime process since we couldn't get a response
+                actor_runtime_process.abort();
+                Err(anyhow::anyhow!(
+                    "Failed to receive response from actor runtime: {}",
+                    e
+                ))
             }
         }
     }

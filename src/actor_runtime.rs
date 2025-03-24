@@ -23,7 +23,7 @@ use crate::Result;
 use tokio::sync::mpsc::{Receiver, Sender};
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
-use tracing::{debug, info, warn};
+use tracing::{debug, error, info, warn};
 
 #[allow(dead_code)]
 const SHUTDOWN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
@@ -106,53 +106,92 @@ impl ActorRuntime {
             handlers.push(handler);
         }
 
-        let mut actor_component = ActorComponent::new(config, actor_store).await.expect(
-            format!(
-                "Failed to create actor component for actor: {:?}",
-                config.name
-            )
-            .as_str(),
-        );
+        let mut actor_component = match ActorComponent::new(config, actor_store).await {
+            Ok(component) => component,
+            Err(e) => {
+                let error_message = format!(
+                    "Failed to create actor component for actor {}: {}",
+                    config.name, e
+                );
+                error!("{}", error_message);
+                // Send failure result back to spawner with detailed error message
+                if let Err(send_err) = response_tx
+                    .send(StartActorResult::Failure(id.clone(), error_message))
+                    .await
+                {
+                    error!("Failed to send failure response: {}", send_err);
+                }
+                return Err(e.into());
+            }
+        };
 
         // Add the host functions to the linker of the actor
         {
-            let response_tx = response_tx.clone();
             for handler in &mut handlers {
                 info!(
                     "Setting up host functions for handler: {:?}",
                     handler.name()
                 );
-                handler
-                    .setup_host_functions(&mut actor_component)
-                    .await
-                    .map_err(async move |e| {
-                        response_tx
-                            .send(StartActorResult::Failure(id.clone(), e.to_string()))
+                match handler.setup_host_functions(&mut actor_component).await {
+                    Ok(_) => {} // Successfully set up host functions
+                    Err(e) => {
+                        let error_message = format!(
+                            "Failed to set up host functions for handler {}: {}",
+                            handler.name(),
+                            e
+                        );
+                        error!("{}", error_message);
+                        // Send failure result back to spawner with detailed error message
+                        if let Err(send_err) = response_tx
+                            .send(StartActorResult::Failure(id.clone(), error_message))
                             .await
-                            .expect("Failed to send response");
-                        e
-                    })?;
+                        {
+                            error!("Failed to send failure response: {}", send_err);
+                        }
+                        return Err(e);
+                    }
+                }
             }
         }
 
-        let mut actor_instance = actor_component
-            .instantiate()
-            .await
-            .expect("Failed to instantiate actor");
+        let mut actor_instance = match actor_component.instantiate().await {
+            Ok(instance) => instance,
+            Err(e) => {
+                let error_message = format!("Failed to instantiate actor {}: {}", id, e);
+                error!("{}", error_message);
+                // Send failure result back to spawner with detailed error message
+                if let Err(send_err) = response_tx
+                    .send(StartActorResult::Failure(id.clone(), error_message))
+                    .await
+                {
+                    error!("Failed to send failure response: {}", send_err);
+                }
+                return Err(e.into());
+            }
+        };
 
         {
             for handler in &handlers {
                 info!("Creating functions for handler: {:?}", handler.name());
-                handler
-                    .add_export_functions(&mut actor_instance)
-                    .await
-                    .expect(
-                        format!(
-                            "Failed to create functions for handler: {:?}",
-                            handler.name()
-                        )
-                        .as_str(),
-                    );
+                match handler.add_export_functions(&mut actor_instance).await {
+                    Ok(_) => {} // Successfully added export functions
+                    Err(e) => {
+                        let error_message = format!(
+                            "Failed to create export functions for handler {}: {}",
+                            handler.name(),
+                            e
+                        );
+                        error!("{}", error_message);
+                        // Send failure result back to spawner with detailed error message
+                        if let Err(send_err) = response_tx
+                            .send(StartActorResult::Failure(id.clone(), error_message))
+                            .await
+                        {
+                            error!("Failed to send failure response: {}", send_err);
+                        }
+                        return Err(e.into());
+                    }
+                }
             }
         }
 
@@ -180,13 +219,28 @@ impl ActorRuntime {
         let executor_task = tokio::spawn(async move { actor_executor.run().await });
 
         if init {
-            actor_handle
+            match actor_handle
                 .call_function::<(String,), ()>(
                     "ntwk:theater/actor.init".to_string(),
                     (id.to_string(),),
                 )
                 .await
-                .expect("Failed to call init function");
+            {
+                Ok(_) => {} // Successfully called init function
+                Err(e) => {
+                    let error_message =
+                        format!("Failed to call init function for actor {}: {}", id, e);
+                    error!("{}", error_message);
+                    // Send failure result back to spawner with detailed error message
+                    if let Err(send_err) = response_tx
+                        .send(StartActorResult::Failure(id.clone(), error_message.clone()))
+                        .await
+                    {
+                        error!("Failed to send failure response: {}", send_err);
+                    }
+                    return Err(anyhow::anyhow!(error_message));
+                }
+            }
         }
 
         let mut handler_tasks: Vec<JoinHandle<()>> = Vec::new();
@@ -216,9 +270,14 @@ impl ActorRuntime {
         });
 
         // Notify the caller that the actor has started
-        response_tx
+        if let Err(e) = response_tx
             .send(StartActorResult::Success(id.clone()))
-            .expect("Failed to send response");
+            .await
+        {
+            error!("Failed to send success response: {}", e);
+            // Even though we couldn't send the response, we'll return the runtime
+            // since it's been initialized successfully
+        }
 
         Ok(ActorRuntime {
             actor_id: id.clone(),
