@@ -14,6 +14,7 @@ use wasmtime::{Engine, Store};
 
 use crate::actor_store::ActorStore;
 use crate::config::ManifestConfig;
+use crate::id::TheaterId;
 use crate::utils::resolve_reference;
 use tracing::{debug, error, info};
 use wasmtime::component::types::ComponentItem;
@@ -197,6 +198,10 @@ pub struct ActorInstance {
 impl ActorInstance {
     pub fn has_function(&self, name: &str) -> bool {
         self.functions.contains_key(name)
+    }
+
+    pub fn id(&self) -> TheaterId {
+        self.actor_component.actor_store.id.clone()
     }
 
     pub async fn call_function(

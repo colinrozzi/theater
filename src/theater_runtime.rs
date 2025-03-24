@@ -1,5 +1,5 @@
 use crate::actor_executor::{ActorError, ActorOperation};
-use crate::actor_runtime::ActorRuntime;
+use crate::actor_runtime::{ActorRuntime, StartActorResult};
 use crate::chain::ChainEvent;
 use crate::id::TheaterId;
 use crate::messages::{
@@ -216,6 +216,13 @@ impl TheaterRuntime {
 
                     if let Err(e) = self.handle_actor_event(actor_id, event).await {
                         error!("Failed to handle actor event: {}", e);
+                    }
+                }
+                TheaterCommand::ActorError { actor_id, event } => {
+                    debug!("Received error event from actor {:?}", actor_id);
+
+                    if let Err(e) = self.handle_actor_error(actor_id, event).await {
+                        error!("Failed to handle actor error event: {}", e);
                     }
                 }
                 TheaterCommand::GetActors { response_tx } => {
@@ -607,7 +614,6 @@ impl TheaterRuntime {
             let actor_id = TheaterId::generate();
             debug!("Initializing actor runtime");
             debug!("Starting actor runtime");
-            response_tx.send(actor_id.clone()).unwrap();
             ActorRuntime::start(
                 actor_id,
                 &manifest,
@@ -619,13 +625,14 @@ impl TheaterRuntime {
                 actor_operation_tx,
                 init,
                 shutdown_receiver_clone,
+                response_tx,
             )
             .await
             .unwrap()
         });
 
         match response_rx.await {
-            Ok(actor_id) => {
+            Ok(StartActorResult::Success(actor_id)) => {
                 debug!(
                     "Received actor ID from runtime initialization: {:?}",
                     actor_id
@@ -657,9 +664,13 @@ impl TheaterRuntime {
                 debug!("Actor process registered with runtime");
                 Ok(actor_id)
             }
+            Ok(StartActorResult::Failure(actor_id, e)) => {
+                error!("Failed to start actor: {}", e);
+                Err(anyhow::anyhow!("Failed to start actor"))
+            }
             Err(e) => {
-                error!("Failed to receive actor ID: {}", e);
-                Err(anyhow::anyhow!("Failed to receive actor ID"))
+                error!("Failed to receive actor ID from runtime: {}", e);
+                Err(anyhow::anyhow!("Failed to start actor"))
             }
         }
     }
@@ -703,6 +714,13 @@ impl TheaterRuntime {
             self.subscriptions.remove(&actor_id);
             debug!("Removed empty subscription entry for actor {:?}", actor_id);
         }
+
+        Ok(())
+    }
+
+    async fn handle_actor_error(&mut self, actor_id: TheaterId, event: ChainEvent) -> Result<()> {
+        debug!("Handling error event for actor: {:?}", actor_id);
+        todo!();
 
         Ok(())
     }

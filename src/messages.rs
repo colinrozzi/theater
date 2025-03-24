@@ -34,6 +34,10 @@ pub enum TheaterCommand {
         actor_id: TheaterId,
         event: ChainEvent,
     },
+    ActorError {
+        actor_id: TheaterId,
+        event: ChainEvent,
+    },
     GetActors {
         response_tx: oneshot::Sender<Result<Vec<TheaterId>>>,
     },
@@ -114,6 +118,9 @@ impl TheaterCommand {
             }
             TheaterCommand::NewEvent { actor_id, .. } => {
                 format!("NewEvent: {:?}", actor_id)
+            }
+            TheaterCommand::ActorError { actor_id, .. } => {
+                format!("ActorError: {:?}", actor_id)
             }
             TheaterCommand::GetActors { .. } => "GetActors".to_string(),
             TheaterCommand::GetActorStatus { actor_id, .. } => {

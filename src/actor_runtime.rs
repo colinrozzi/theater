@@ -18,6 +18,7 @@ use crate::shutdown::{ShutdownController, ShutdownReceiver};
 use crate::wasm::ActorComponent;
 use crate::Result;
 use tokio::sync::mpsc::{Receiver, Sender};
+use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 use tracing::{debug, info, warn};
 
@@ -29,6 +30,12 @@ pub struct ActorRuntime {
     handler_tasks: Vec<JoinHandle<()>>,
     actor_executor_task: JoinHandle<()>,
     shutdown_controller: ShutdownController,
+}
+
+#[derive(Debug)]
+pub enum StartActorResult {
+    Success(TheaterId),
+    Failure(TheaterId, String),
 }
 
 impl ActorRuntime {
@@ -43,6 +50,7 @@ impl ActorRuntime {
         operation_tx: Sender<ActorOperation>,
         init: bool,
         parent_shutdown_receiver: ShutdownReceiver,
+        response_tx: oneshot::Sender<StartActorResult>,
     ) -> Result<Self> {
         // Create a local shutdown controller for this runtime
         let (shutdown_controller, _) = ShutdownController::new();
@@ -149,7 +157,7 @@ impl ActorRuntime {
         // Create a shutdown receiver for the executor
         let executor_shutdown = shutdown_controller.subscribe();
         let mut actor_executor =
-            ActorExecutor::new(actor_instance, operation_rx, executor_shutdown);
+            ActorExecutor::new(actor_instance, operation_rx, executor_shutdown, theater_tx);
         let executor_task = tokio::spawn(async move { actor_executor.run().await });
 
         if init {
@@ -187,6 +195,11 @@ impl ActorRuntime {
             shutdown_controller_clone.signal_shutdown();
             debug!("Shutdown signal propagated to all components");
         });
+
+        // Notify the caller that the actor has started
+        response_tx
+            .send(StartActorResult::Success(id.clone()))
+            .expect("Failed to send response");
 
         Ok(ActorRuntime {
             actor_id: id.clone(),

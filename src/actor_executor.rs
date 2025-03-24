@@ -7,6 +7,7 @@ use tokio::time::{Duration, Instant};
 use tracing::{debug, error, info};
 
 use crate::events::ChainEventData;
+use crate::messages::TheaterCommand;
 use crate::metrics::{ActorMetrics, MetricsCollector};
 use crate::wasm::ActorInstance;
 use crate::ChainEvent;
@@ -66,6 +67,7 @@ pub struct ActorExecutor {
     metrics: MetricsCollector,
     shutdown_initiated: bool,
     shutdown_receiver: ShutdownReceiver,
+    theater_tx: mpsc::Sender<TheaterCommand>,
 }
 
 impl ActorExecutor {
@@ -73,6 +75,7 @@ impl ActorExecutor {
         actor_instance: ActorInstance,
         operation_rx: mpsc::Receiver<ActorOperation>,
         shutdown_receiver: ShutdownReceiver,
+        theater_tx: mpsc::Sender<TheaterCommand>,
     ) -> Self {
         Self {
             actor_instance,
@@ -80,6 +83,7 @@ impl ActorExecutor {
             metrics: MetricsCollector::new(),
             shutdown_initiated: false,
             shutdown_receiver,
+            theater_tx,
         }
     }
 
@@ -110,7 +114,7 @@ impl ActorExecutor {
             .record_event(ChainEventData {
                 event_type: "wasm".to_string(),
                 timestamp: start.elapsed().as_secs(),
-                description: None,
+                description: Some(format!("Wasm call to function '{}'", name)),
                 data: crate::events::EventData::Wasm(
                     crate::events::wasm::WasmEventData::WasmCall {
                         function_name: name.clone(),
@@ -132,7 +136,7 @@ impl ActorExecutor {
                     .record_event(ChainEventData {
                         event_type: "wasm".to_string(),
                         timestamp: start.elapsed().as_secs(),
-                        description: None,
+                        description: Some(format!("Wasm call to function '{}' completed", name)),
                         data: crate::events::EventData::Wasm(
                             crate::events::wasm::WasmEventData::WasmResult {
                                 function_name: name.clone(),
@@ -143,13 +147,14 @@ impl ActorExecutor {
                 result
             }
             Err(e) => {
-                self.actor_instance
+                let event = self
+                    .actor_instance
                     .store
                     .data_mut()
                     .record_event(ChainEventData {
                         event_type: "wasm".to_string(),
                         timestamp: start.elapsed().as_secs(),
-                        description: None,
+                        description: Some(format!("Wasm call to function '{}' failed", name)),
                         data: crate::events::EventData::Wasm(
                             crate::events::wasm::WasmEventData::WasmError {
                                 function_name: name.clone(),
@@ -157,6 +162,15 @@ impl ActorExecutor {
                             },
                         ),
                     });
+
+                // Notify the theater runtime the actor has failed
+                let _ = self
+                    .theater_tx
+                    .send(TheaterCommand::ActorError {
+                        actor_id: self.actor_instance.id().clone(),
+                        event,
+                    })
+                    .await;
 
                 error!("Failed to execute function '{}': {}", name, e);
                 return Err(ActorError::Internal(e));
