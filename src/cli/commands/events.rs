@@ -22,7 +22,7 @@ pub struct EventsArgs {
     pub address: SocketAddr,
 
     /// Number of events to show (0 for all)
-    #[arg(short, long, default_value = "10")]
+    #[arg(short, long, default_value = "0")]
     pub limit: usize,
 
     /// Filter events by type (e.g., http.request, runtime.init)
@@ -604,119 +604,69 @@ fn display_events_timeline(events: &[ChainEvent], actor_id: &TheaterId) -> Resul
 }
 
 // Order events by their chain structure (parent-child relationships)
+// We are guaranteed that we are given all events in a chain, and that there are no cycles, and
+// that there is always exactly one root event. All events have only one parent, except the root.
+// Only one child event can have a given parent.
 fn order_events_by_chain(events: &[ChainEvent], reverse: bool) -> Vec<ChainEvent> {
     if events.is_empty() {
         return Vec::new();
     }
 
-    // Create hash maps for quick lookup
-    let mut hash_to_index: HashMap<String, usize> = HashMap::new();
-    let mut parent_to_children: HashMap<String, Vec<usize>> = HashMap::new();
-    let mut has_parent_in_list: HashSet<usize> = HashSet::new();
+    // Create a map of event hashes to events for quick lookup
+    let mut hash_to_event = HashMap::new();
+    for event in events {
+        hash_to_event.insert(&event.hash, event);
+    }
 
-    // First pass: build the hash maps
-    for (i, event) in events.iter().enumerate() {
-        let event_hash = hex::encode(&event.hash);
-        hash_to_index.insert(event_hash.clone(), i);
-
-        // If event has a parent, record the relationship
+    // Create a map of parent hashes to children
+    let mut parent_to_children = HashMap::new();
+    for event in events {
         if let Some(parent_hash) = &event.parent_hash {
-            let parent_hash_hex = hex::encode(parent_hash);
-            parent_to_children.entry(parent_hash_hex.clone())
+            parent_to_children
+                .entry(parent_hash)
                 .or_insert_with(Vec::new)
-                .push(i);
-
-            // Check if the parent exists in our events list
-            if hash_to_index.contains_key(&parent_hash_hex) {
-                has_parent_in_list.insert(i);
-            }
+                .push(event);
         }
     }
 
-    // Identify root events (events with no parent in our list)
-    let mut root_indices: Vec<usize> = events.iter().enumerate()
-        .filter_map(|(i, _)| {
-            if !has_parent_in_list.contains(&i) {
-                Some(i)
-            } else {
-                None
-            }
-        })
-        .collect();
-
-    // Sort root events by timestamp
-    root_indices.sort_by(|&a, &b| {
-        if reverse {
-            events[b].timestamp.cmp(&events[a].timestamp)
-        } else {
-            events[a].timestamp.cmp(&events[b].timestamp)
+    // Find the root event (the event without a parent)
+    let mut root = None;
+    for event in events {
+        if event.parent_hash.is_none() {
+            root = Some(event);
+            break;
         }
-    });
+    }
 
-    let mut ordered_events = Vec::new();
-    let mut visited = HashSet::new();
+    // If no root found (should not happen given the guarantees), return events as-is
+    let root = match root {
+        Some(r) => r,
+        None => return events.to_vec(),
+    };
 
-    // Helper function to recursively add events in chain order
-    fn add_event_chain(
-        index: usize,
-        events: &[ChainEvent],
-        parent_to_children: &HashMap<String, Vec<usize>>,
-        visited: &mut HashSet<usize>,
+    // Build ordered list starting from the root and following the chain
+    let mut ordered_events = Vec::with_capacity(events.len());
+    ordered_events.push(root.clone());
+
+    // Function to recursively add children
+    fn add_children(
+        current_hash: &[u8],
+        parent_to_children: &HashMap<&Vec<u8>, Vec<&ChainEvent>>,
         ordered_events: &mut Vec<ChainEvent>,
-        reverse: bool,
     ) {
-        if visited.contains(&index) {
-            return;
-        }
-
-        // Add this event
-        ordered_events.push(events[index].clone());
-        visited.insert(index);
-
-        // Find and sort children
-        let event_hash = hex::encode(&events[index].hash);
-        if let Some(children) = parent_to_children.get(&event_hash) {
-            // Copy and sort children by timestamp
-            let mut children = children.clone();
-            children.sort_by(|&a, &b| {
-                if reverse {
-                    events[b].timestamp.cmp(&events[a].timestamp)
-                } else {
-                    events[a].timestamp.cmp(&events[b].timestamp)
-                }
-            });
-
-            // Recursively add each child's chain
-            for &child_index in &children {
-                add_event_chain(
-                    child_index,
-                    events,
-                    parent_to_children,
-                    visited,
-                    ordered_events,
-                    reverse,
-                );
+        if let Some(children) = parent_to_children.get(current_hash) {
+            for child in children {
+                ordered_events.push((*child).clone());
+                add_children(&child.hash, parent_to_children, ordered_events);
             }
         }
     }
 
-    // Process each root event and its chains
-    for &root_index in &root_indices {
-        add_event_chain(
-            root_index,
-            events,
-            &parent_to_children,
-            &mut visited,
-            &mut ordered_events,
-            reverse,
-        );
-    }
+    add_children(&root.hash, &parent_to_children, &mut ordered_events);
 
-    // Add any events that weren't part of any chain
-    for (i, event) in events.iter().enumerate() {
-        if !visited.contains(&i) {
-            ordered_events.push(event.clone());
-        }
+    // Reverse the order if requested
+    if reverse {
+        ordered_events.reverse();
     }
 
     ordered_events

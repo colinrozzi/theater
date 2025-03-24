@@ -107,6 +107,13 @@ impl fmt::Display for ChainEvent {
     }
 }
 
+// implement Eq for ChainEvent
+impl PartialEq for ChainEvent {
+    fn eq(&self, other: &Self) -> bool {
+        self.hash == other.hash
+    }
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct StateChain {
     events: Vec<ChainEvent>,
