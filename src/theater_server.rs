@@ -369,7 +369,11 @@ impl TheaterServer {
             let cmd = match serde_json::from_slice::<ManagementCommand>(&msg) {
                 Ok(c) => c,
                 Err(e) => {
-                    error!("Error parsing command: {}", e);
+                    error!(
+                        "Error parsing command: {} {}",
+                        e,
+                        String::from_utf8_lossy(&msg)
+                    );
                     continue;
                 }
             };
