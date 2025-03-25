@@ -218,6 +218,16 @@ impl ActorRuntime {
             ActorExecutor::new(actor_instance, operation_rx, executor_shutdown, theater_tx);
         let executor_task = tokio::spawn(async move { actor_executor.run().await });
 
+        // Notify the caller that the actor has started
+        if let Err(e) = response_tx
+            .send(StartActorResult::Success(id.clone()))
+            .await
+        {
+            error!("Failed to send success response: {}", e);
+            // Even though we couldn't send the response, we'll return the runtime
+            // since it's been initialized successfully
+        }
+
         if init {
             match actor_handle
                 .call_function::<(String,), ()>(
@@ -268,16 +278,6 @@ impl ActorRuntime {
             shutdown_controller_clone.signal_shutdown();
             debug!("Shutdown signal propagated to all components");
         });
-
-        // Notify the caller that the actor has started
-        if let Err(e) = response_tx
-            .send(StartActorResult::Success(id.clone()))
-            .await
-        {
-            error!("Failed to send success response: {}", e);
-            // Even though we couldn't send the response, we'll return the runtime
-            // since it's been initialized successfully
-        }
 
         Ok(ActorRuntime {
             actor_id: id.clone(),
