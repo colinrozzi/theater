@@ -228,18 +228,16 @@ impl Label {
     }
 }
 
-/// The core content store implementation that runs in its own thread
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct ContentStore {
     pub id: String,
-    base_path: PathBuf,
 }
 
 impl ContentStore {
     /// Create a new store with the given base path
     pub fn new() -> Self {
         let id = uuid::Uuid::new_v4().to_string();
-        let base_path = PathBuf::from("/Users/colinrozzi/work/theater/store").join(&id);
-        Self { id, base_path }
+        Self { id }
     }
 
     pub fn new_named_store(id: &str) -> Self {
@@ -247,46 +245,48 @@ impl ContentStore {
     }
 
     pub fn from_id(id: &str) -> Self {
-        let base_path = PathBuf::from("/Users/colinrozzi/work/theater/store").join(id);
-        Self {
-            id: id.to_string(),
-            base_path,
-        }
+        Self { id: id.to_string() }
     }
 
     pub fn id(&self) -> &str {
         &self.id
     }
 
+    pub fn base_path(&self) -> PathBuf {
+        PathBuf::from("/Users/colinrozzi/work/theater/store").join(&self.id)
+    }
+
     /// Store content and return its ContentRef
     pub async fn store(&self, content: Vec<u8>) -> Result<ContentRef> {
         let content_ref = ContentRef::from_content(&content);
-        content_ref.store_content(&self.base_path, &content).await?;
+        content_ref
+            .store_content(&self.base_path(), &content)
+            .await?;
         Ok(content_ref)
     }
 
     /// Store content synchronously and return its ContentRef
     pub fn store_sync(&self, content: Vec<u8>) -> Result<ContentRef> {
         let content_ref = ContentRef::from_content(&content);
-        content_ref.store_content_sync(&self.base_path, &content)?;
+        content_ref.store_content_sync(&self.base_path(), &content)?;
         Ok(content_ref)
     }
 
     /// Retrieve content by its reference
     pub async fn get(&self, content_ref: &ContentRef) -> Result<Vec<u8>> {
         debug!("Getting content with hash: {}", content_ref.hash());
-        content_ref.get_content(&self.base_path).await
+        content_ref.get_content(&self.base_path()).await
     }
 
     /// Check if content exists
     pub async fn exists(&self, content_ref: &ContentRef) -> bool {
-        content_ref.exists(&self.base_path).await
+        content_ref.exists(&self.base_path()).await
     }
 
     /// Attach a label to content (replaces any existing content at that label)
     pub async fn label(&self, label: &str, content_ref: &ContentRef) -> Result<()> {
         // Ensure content exists before labeling
-        if !content_ref.exists(&self.base_path).await {
+        if !content_ref.exists(&self.base_path()).await {
             return Err(anyhow::anyhow!(
                 "Content does not exist: {}",
                 content_ref.hash()
@@ -294,7 +294,7 @@ impl ContentStore {
         }
 
         let label = Label::from_str(label);
-        label.set_content_ref(&self.base_path, content_ref).await
+        label.set_content_ref(&self.base_path(), content_ref).await
     }
 
     pub async fn replace_content_at_label(
@@ -305,11 +305,15 @@ impl ContentStore {
         let content_ref = ContentRef::from_content(&content);
 
         // Store the content
-        content_ref.store_content(&self.base_path, &content).await?;
+        content_ref
+            .store_content(&self.base_path(), &content)
+            .await?;
 
         // Update the label
         let label = Label::from_str(label_name);
-        label.set_content_ref(&self.base_path, &content_ref).await?;
+        label
+            .set_content_ref(&self.base_path(), &content_ref)
+            .await?;
 
         debug!("Replaced content in label '{}'", label_name);
 
@@ -318,7 +322,7 @@ impl ContentStore {
 
     pub async fn replace_at_label(&self, label_name: &str, content_ref: &ContentRef) -> Result<()> {
         // Ensure content exists before labeling
-        if !content_ref.exists(&self.base_path).await {
+        if !content_ref.exists(&self.base_path()).await {
             return Err(anyhow::anyhow!(
                 "Content does not exist: {}",
                 content_ref.hash()
@@ -326,7 +330,9 @@ impl ContentStore {
         }
 
         let label = Label::from_str(label_name);
-        label.set_content_ref(&self.base_path, content_ref).await?;
+        label
+            .set_content_ref(&self.base_path(), content_ref)
+            .await?;
 
         debug!("Replaced content in label '{}'", label_name);
 
@@ -336,14 +342,14 @@ impl ContentStore {
     /// Get content reference by label
     pub async fn get_by_label(&self, label_name: &str) -> Result<Option<ContentRef>> {
         let label = Label::from_str(label_name);
-        label.get_content_ref(&self.base_path).await
+        label.get_content_ref(&self.base_path()).await
     }
 
     /// Get content by label
     pub async fn get_content_by_label(&self, label_name: &str) -> Result<Option<Vec<u8>>> {
         let label = Label::from_str(label_name);
-        if let Some(content_ref) = label.get_content_ref(&self.base_path).await? {
-            let content = content_ref.get_content(&self.base_path).await?;
+        if let Some(content_ref) = label.get_content_ref(&self.base_path()).await? {
+            let content = content_ref.get_content(&self.base_path()).await?;
             Ok(Some(content))
         } else {
             Ok(None)
@@ -354,11 +360,15 @@ impl ContentStore {
         let content_ref = ContentRef::from_content(&content);
 
         // Store the content
-        content_ref.store_content(&self.base_path, &content).await?;
+        content_ref
+            .store_content(&self.base_path(), &content)
+            .await?;
 
         // Create and set the label
         let label = Label::from_str(label_name);
-        label.set_content_ref(&self.base_path, &content_ref).await?;
+        label
+            .set_content_ref(&self.base_path(), &content_ref)
+            .await?;
 
         Ok(content_ref)
     }
@@ -366,7 +376,7 @@ impl ContentStore {
     /// Remove a label
     pub async fn remove_label(&self, label_name: &str) -> Result<()> {
         let label = Label::from_str(label_name);
-        label.remove(&self.base_path).await
+        label.remove(&self.base_path()).await
     }
 
     /// Remove a specific content reference from a label
@@ -379,16 +389,16 @@ impl ContentStore {
         let label = Label::from_str(label_name);
 
         // If label doesn't exist, do nothing
-        if !label.exists(&self.base_path).await {
+        if !label.exists(&self.base_path()).await {
             debug!("Label does not exist: {}", label_name);
             return Ok(());
         }
 
         // Get the current content ref from the label
-        if let Some(current_ref) = label.get_content_ref(&self.base_path).await? {
+        if let Some(current_ref) = label.get_content_ref(&self.base_path()).await? {
             // If the current content ref matches the one we want to remove, remove the label
             if current_ref.hash() == content_ref.hash() {
-                label.remove(&self.base_path).await?;
+                label.remove(&self.base_path()).await?;
                 debug!(
                     "Removed label '{}' that pointed to content {}",
                     label_name,
@@ -409,7 +419,7 @@ impl ContentStore {
     /// List all labels recursively, including nested directories
     /// Returns paths relative to the labels directory
     pub async fn list_labels(&self) -> Result<Vec<String>> {
-        let labels_dir = self.base_path.join("labels");
+        let labels_dir = self.base_path().join("labels");
 
         // Ensure labels directory exists
         if !fs::try_exists(&labels_dir).await.unwrap_or(false) {
@@ -460,7 +470,7 @@ impl ContentStore {
 
     /// List all content references in the store
     pub async fn list_all_content(&self) -> Result<Vec<ContentRef>> {
-        let data_dir = self.base_path.join("data");
+        let data_dir = self.base_path().join("data");
 
         // Ensure data directory exists
         if !fs::try_exists(&data_dir).await.unwrap_or(false) {
@@ -491,7 +501,7 @@ impl ContentStore {
         let mut total_size = 0;
 
         for content_ref in refs {
-            let path = content_ref.to_path(&self.base_path);
+            let path = content_ref.to_path(&self.base_path());
             if let Ok(metadata) = fs::metadata(&path).await {
                 total_size += metadata.len();
             }

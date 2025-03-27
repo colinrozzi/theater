@@ -1,4 +1,5 @@
 use crate::messages::{ActorMessage, ActorRequest, ActorSend, ActorStatus, ChannelParticipant};
+use crate::store::ContentStore;
 use crate::ChainEvent;
 use anyhow::Result;
 use bytes::Bytes;
@@ -69,6 +70,9 @@ pub enum ManagementCommand {
     CloseChannel {
         channel_id: String,
     },
+
+    // Store commands
+    NewStore {},
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -137,6 +141,11 @@ pub enum ManagementResponse {
     },
     ChannelClosed {
         channel_id: String,
+    },
+
+    // Store responses
+    StoreCreated {
+        store_id: ContentStore,
     },
 }
 
@@ -782,6 +791,20 @@ impl TheaterServer {
                     connection_channel_subscriptions.retain(|id| id != &channel_id);
 
                     ManagementResponse::ChannelClosed { channel_id }
+                }
+                ManagementCommand::NewStore {} => {
+                    info!("Creating new store");
+                    let (cmd_tx, cmd_rx) = tokio::sync::oneshot::channel();
+                    runtime_tx
+                        .send(TheaterCommand::NewStore {
+                            response_tx: cmd_tx,
+                        })
+                        .await?;
+
+                    let store_id = cmd_rx.await?;
+                    ManagementResponse::StoreCreated {
+                        store_id: store_id?,
+                    }
                 }
             };
 

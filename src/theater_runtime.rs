@@ -573,6 +573,11 @@ impl TheaterRuntime {
 
                     debug!("Successfully registered channel {:?}", channel_id);
                 }
+                TheaterCommand::NewStore { response_tx } => {
+                    debug!("Creating new content store");
+                    let store_id = crate::store::ContentStore::new();
+                    let _ = response_tx.send(Ok(store_id));
+                }
             };
         }
         info!("Theater runtime shutting down");

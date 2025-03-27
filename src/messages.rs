@@ -1,6 +1,7 @@
 use crate::chain::ChainEvent;
 use crate::id::TheaterId;
 use crate::metrics::ActorMetrics;
+use crate::store::ContentStore;
 use crate::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::hash_map::DefaultHasher;
@@ -99,6 +100,11 @@ pub enum TheaterCommand {
         channel_id: ChannelId,
         participants: Vec<ChannelParticipant>,
     },
+
+    // Store commands
+    NewStore {
+        response_tx: oneshot::Sender<Result<ContentStore>>,
+    },
 }
 
 impl TheaterCommand {
@@ -175,6 +181,7 @@ impl TheaterCommand {
                     participants.len()
                 )
             }
+            TheaterCommand::NewStore { .. } => "NewStore".to_string(),
         }
     }
 }
