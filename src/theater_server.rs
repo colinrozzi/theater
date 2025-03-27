@@ -145,7 +145,7 @@ pub enum ManagementResponse {
 
     // Store responses
     StoreCreated {
-        store_id: ContentStore,
+        store_id: String,
     },
 }
 
@@ -803,7 +803,7 @@ impl TheaterServer {
 
                     let store_id = cmd_rx.await?;
                     ManagementResponse::StoreCreated {
-                        store_id: store_id?,
+                        store_id: store_id?.id,
                     }
                 }
             };
