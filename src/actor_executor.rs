@@ -12,7 +12,7 @@ use crate::metrics::{ActorMetrics, MetricsCollector};
 use crate::wasm::ActorInstance;
 use crate::ChainEvent;
 
-pub const DEFAULT_OPERATION_TIMEOUT: Duration = Duration::from_secs(300);
+pub const DEFAULT_OPERATION_TIMEOUT: Duration = Duration::from_secs(3000);
 #[allow(dead_code)]
 const METRICS_UPDATE_INTERVAL: Duration = Duration::from_secs(1);
 
