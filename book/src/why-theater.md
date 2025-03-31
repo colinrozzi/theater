@@ -1,6 +1,24 @@
 # Why Theater?
 
-Theater is an exploration into making distributed systems more debuggable, reproducible, and verifiable. The project introduces several key ideas:
+Theater is an exploration into making systems that are more trackable, reproducable, and predictable. At a high level, it does this by drawing a box around every actor, only allowing certain interacions with the outside world, and completely tracking every interaction.
+
+Theater is attempting to make a system for the new world of llm driven applications. With new tools come new requirements. The Theater is a collection of ideas that come together to provide an environment for building these new applications.
+
+With llm written applications, we are fundamentally executing untrusted code on our computers. This means we have to build into our systems ways to ensure our programs behave the way that we expect them to, and provide ways to verify that they are doing so and methods to debug them when they are not.
+
+To ensure the safety of our systems, Theater leverages the WebAssembly runtime to provide a sandboxed, deterministic, and portable environment for our actors.
+
+The Theater uses the Actor Model to provide a way to structure our applications. Theater's actor model is highly inspired by the erlang actor model, and hopes to inherit its robustness, scalability, and fault tolerance.
+
+To do this, Theater leverages many existing ideas and technologies.
+
+## Actor Model
+The Actor Model is a model of computation 
+
+## WebAssembly
+Each actor in the system is a WebAssembly Component. A huge amount of the heavy lifting in the system is done by the WebAssembly runtime. By using WebAssembly, each actor is sandboxed, deterministic, and portable. An actor is just a WebAssembly Component that implements a specific set of interfaces to interact with the host system. The WebAssembly component model has not yet reached a stable state, and many things like async, something like a package manager, and many language bindings are still in development. As the Component model approaches stability, Theater will evolve alongside it and will be making changes, especially to the host interfaces.
+
+
 
 ## Core Concepts
 
