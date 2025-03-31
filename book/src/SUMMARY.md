@@ -1,30 +1,30 @@
 # Summary
 
-[Introduction](../docs/README.md)
-[Why Theater?](../docs/why-theater.md)
+[Introduction](README.md)
+[Why Theater?](why-theater.md)
 
 # User Guide
-- [Configuration](../docs/configuration.md)
-- [CLI](../docs/cli.md)
-- [Troubleshooting](../docs/troubleshooting.md)
+- [Configuration](configuration.md)
+- [CLI](cli.md)
+- [Troubleshooting](troubleshooting.md)
 
 # Core Concepts
-- [Architecture](../docs/architecture.md)
-- [Actor IDs](../docs/actor-ids.md)
-- [State Management](../docs/state-management.md)
-- [Supervision](../docs/supervision.md)
-- [Interface System](../docs/interface-system.md)
+- [Architecture](architecture.md)
+- [Actor IDs](actor-ids.md)
+- [State Management](state-management.md)
+- [Supervision](supervision.md)
+- [Interface System](interface-system.md)
 
 # Development
-- [Building Actors](../docs/building-actors.md)
-- [Building Host Functions](../docs/building-host-functions.md)
-- [Making Changes](../docs/making-changes.md)
+- [Building Actors](building-actors.md)
+- [Building Host Functions](building-host-functions.md)
+- [Making Changes](making-changes.md)
 
 # Services
-- [HTTP Framework](../docs/http-framework.md)
-- [WebSocket Server](../docs/websocket-server.md)
-- [Host Services](../docs/host-services.md)
-- [Handlers](../docs/handlers.md)
+- [HTTP Framework](http-framework.md)
+- [WebSocket Server](websocket-server.md)
+- [Host Services](host-services.md)
+- [Handlers](handlers.md)
 
 # API Reference
-- [API Documentation](../docs/api.md)
+- [API Documentation](api.md)
