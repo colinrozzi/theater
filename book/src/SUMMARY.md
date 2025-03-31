@@ -14,6 +14,9 @@
 - [State Management](state-management.md)
 - [Supervision](supervision.md)
 - [Interface System](interface-system.md)
+- [Store System](store/README.md)
+    - [Actor API](store/actor-api.md)
+    - [Usage Patterns](store/usage-patterns.md)
 
 # Development
 - [Building Actors](building-actors.md)
