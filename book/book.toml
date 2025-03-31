@@ -1,25 +1,6 @@
 [book]
-authors = ["Colin Rozzi"]
+authors = ["colin"]
 language = "en"
 multilingual = false
 src = "src"
-title = "Theater Documentation"
-
-[output.html]
-default-theme = "light"
-preferred-dark-theme = "navy"
-git-repository-url = "https://github.com/colinrozzi/theater"
-additional-css = ["theme/custom.css"]
-
-[output.html.playground]
-editable = true
-line-numbers = true
-
-[output.html.search]
-limit-results = 20
-use-boolean-and = true
-boost-title = 2
-boost-hierarchy = 1
-boost-paragraph = 1
-expand = true
-heading-split-level = 3
+title = "Theater Docs"
