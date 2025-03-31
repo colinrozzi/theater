@@ -21,6 +21,7 @@ jobs:
           mdbook-version: 'latest'
 
       - name: Build Book
+        working-directory: ./book
         run: mdbook build
 
       - name: Deploy
