@@ -4,142 +4,100 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use theater::actor_handle::ActorHandle;
+
+use theater::actor_executor::ActorOperation;
 use theater::actor_runtime::{ActorRuntime, StartActorResult};
 use theater::actor_store::ActorStore;
-use theater::config::{HandlerConfig, ManifestConfig, MessageServerConfig};
+use theater::config::{HandlerConfig, InterfacesConfig, ManifestConfig, MessageServerConfig};
 use theater::id::TheaterId;
-use theater::messages::{ActorMessage, TheaterCommand};
-use theater::metrics::ActorMetrics;
-use theater::shutdown::ShutdownController;
+use theater::messages::{ActorMessage, ActorSend, TheaterCommand};
+use theater::metrics::{ActorMetrics, OperationMetrics, ResourceMetrics};
+use theater::shutdown::{ShutdownController, ShutdownReceiver};
 use tokio::sync::{mpsc, oneshot};
 use tokio::time::timeout;
 
-// Import our mock WASM module
 use crate::common::mock_wasm::{MockActorComponent, MockActorInstance, mock_function_result};
 
-// Create a basic test manifest config
+/// Helper to create a test manifest
 fn create_test_manifest() -> ManifestConfig {
-    let mut config = ManifestConfig {
+    ManifestConfig {
         name: "test-actor".to_string(),
-        component_path: "test-component-path".to_string(),
-        interface: Default::default(),
-        handlers: Vec::new(),
+        component_path: "test_component.wasm".to_string(),
         init_state: None,
-        environment: HashMap::new(),
-    };
-    
-    // Add a message server handler
-    config.handlers.push(HandlerConfig::MessageServer(MessageServerConfig {
-        port: None, // Use ephemeral port
-    }));
-    
-    config
+        interface: InterfacesConfig::default(),
+        handlers: vec![HandlerConfig::MessageServer(MessageServerConfig {})],
+        logging: Default::default(),
+        event_server: None,
+    }
 }
 
-// This test focuses on the actor lifecycle with a mocked component
-// Note that we have to mock a lot of interactions that would normally use WASM
+/// Helper to create test metrics
+fn create_test_metrics() -> ActorMetrics {
+    ActorMetrics {
+        operation_metrics: OperationMetrics {
+            total_operations: 10,
+            failed_operations: 0,
+            total_processing_time: Duration::from_millis(1000),
+            max_processing_time: Duration::from_millis(200),
+            min_processing_time: Some(Duration::from_millis(10)),
+        },
+        resource_metrics: ResourceMetrics {
+            memory_usage: 1024,
+            operation_queue_size: 5,
+            peak_memory_usage: 2048,
+            peak_queue_size: 10,
+        },
+        last_update: Some(std::time::SystemTime::now()),
+        uptime_secs: 60,
+        start_time: std::time::SystemTime::now(),
+    }
+}
+
+/// A basic test setup for ActorRuntime
+/// Note: This test is marked as ignored because it requires more complex mocking of the
+/// ActorComponent creation process which we'll implement in the future
 #[tokio::test]
-#[ignore] // Ignore for now until fully implemented with proper mocks
-async fn test_actor_lifecycle_with_mock() {
-    // Create basic channels and IDs
+#[ignore]
+async fn test_actor_runtime_basic() {
+    // Create basic test components
     let actor_id = TheaterId::generate();
     let config = create_test_manifest();
     
     let (theater_tx, mut theater_rx) = mpsc::channel(10);
-    let (actor_tx, actor_rx) = mpsc::channel(10);
-    let (op_tx, op_rx) = mpsc::channel(10);
+    let (actor_tx, actor_rx) = mpsc::channel::<ActorMessage>(10);
+    let (op_tx, op_rx) = mpsc::channel::<ActorOperation>(10);
     let (shutdown_controller, shutdown_receiver) = ShutdownController::new();
-    let (result_tx, mut result_rx) = mpsc::channel(1);
+    let (result_tx, mut result_rx) = mpsc::channel::<StartActorResult>(1);
     
-    // Create actor handle
-    let actor_handle = ActorHandle::new(op_tx.clone());
-    
-    // Create initial actor store
-    let actor_store = ActorStore::new(actor_id.clone(), theater_tx.clone(), actor_handle.clone());
-    
-    // Create mock component with predefined function results
-    let mut function_results = HashMap::new();
-    function_results.insert(
-        "ntwk:theater/actor.init".to_string(),
-        mock_function_result(&()).unwrap(),
-    );
-    
-    // Create mock metrics for testing
-    let metrics = ActorMetrics {
-        memory_used: 1024,
-        instance_count: 1,
-        operation_count: 0,
-        last_operation_timestamp: Utc::now().timestamp_millis(),
-        create_timestamp: Utc::now().timestamp_millis(),
-    };
-    
-    let mock_component = MockActorComponent::new(actor_store)
-        .with_function_results(function_results)
-        .with_metrics(metrics);
-    
-    // TODO: At this point we'd need to integrate our mocked components
-    // with the actual actor runtime startup process. This requires significant
-    // changes to make the runtime testable and would likely involve:
-    //
-    // 1. Adding interfaces for component creation to the ActorRuntime
-    // 2. Creating a test version of the runtime that uses our mocks
-    // 3. Making wasm.rs module support testing with mocked components
-    
-    // For now we're just setting up the structure so when we enhance the code
-    // to be more testable, we'll be ready to implement the details.
-    
-    // Monitor commands - this can work as is
+    // Set up a monitor for TheaterCommands
     tokio::spawn(async move {
         while let Some(cmd) = theater_rx.recv().await {
             match cmd {
                 TheaterCommand::NewEvent { actor_id, event } => {
                     println!("New event from actor {}: {:?}", actor_id, event);
                 }
-                _ => println!("Other theater command received"),
+                _ => println!("Other theater command: {:?}", cmd),
             }
         }
     });
     
-    // For complete testing, we would:
-    // 1. Start the actor runtime with our mock component
-    // 2. Send messages to the actor
-    // 3. Verify state changes
-    // 4. Shutdown the actor
-}
-
-// This is a simpler test that uses real components but just tests actor messaging
-#[tokio::test]
-async fn test_actor_message_handling() {
-    let actor_id = TheaterId::generate();
-    let sender_id = TheaterId::generate();
+    // TODO: Implement actual test with ActorRuntime
+    // This would require more complex mocking of the component creation process
     
-    // Create channels
-    let (actor_tx, mut actor_rx) = mpsc::channel::<ActorMessage>(10);
+    // For now, just verify the basics
+    let actor_handle = theater::actor_handle::ActorHandle::new(op_tx.clone());
+    let actor_store = ActorStore::new(actor_id.clone(), theater_tx.clone(), actor_handle.clone());
     
-    // Start a background task to process messages
-    tokio::spawn(async move {
-        while let Some(msg) = actor_rx.recv().await {
-            // Log the message - in a real test we'd verify behavior
-            println!("Actor {} received message from {}", 
-                     msg.recipient, msg.sender);
-            
-            // Here we would normally process the message
-            // For testing we can just verify it was received
-        }
+    // Send a test message
+    let test_message = ActorMessage::Send(ActorSend {
+        data: b"test message".to_vec(),
     });
     
-    // Create and send a test message
-    let test_payload = serde_json::to_vec(&"test message").unwrap();
-    let message = ActorMessage {
-        sender: sender_id.clone(),
-        recipient: actor_id.clone(),
-        payload: test_payload,
-    };
+    actor_tx.send(test_message).await.unwrap();
     
-    // Send the message - in a real test we'd verify the actor processed it
-    actor_tx.send(message).await.unwrap();
+    // Signal shutdown
+    shutdown_controller.signal_shutdown();
     
-    // Give the actor time to process
-    tokio::time::sleep(Duration::from_millis(50)).await;
+    // Wait a bit for shutdown to propagate
+    tokio::time::sleep(Duration::from_millis(100)).await;
 }

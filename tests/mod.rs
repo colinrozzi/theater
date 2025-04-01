@@ -12,5 +12,5 @@ mod tests {
     use crate::unit::store_tests;
     use crate::unit::messages_tests;
     
-    // Integration tests will be added later
+    use crate::unit::actor_runtime_tests;
 }
