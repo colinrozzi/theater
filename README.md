@@ -54,6 +54,7 @@ theater start manifest.toml --id-only | theater subscribe -
 - [Why Theater](docs/why-theater.md) - Core concepts and motivation
 - [CLI Documentation](docs/cli.md) - Complete guide to the Theater CLI
 - [Store System](docs/store/README.md) - Content-addressable storage documentation
+- [Testing](book/docs/testing.md) - Testing strategy and infrastructure
 - [Making Changes](docs/making-changes.md) - Guide for contributing changes
 - [Current Changes](/changes/in-progress.md) - Overview of work in progress
 
@@ -236,6 +237,33 @@ When using the Nix development environment, you get access to several useful too
 - `cargo watch` - Watch for changes and automatically rebuild
 - `cargo expand` - Show macro expansions
 - `cargo udeps` - Find unused dependencies
+
+## Testing
+
+Theater has a comprehensive test suite organized into unit and integration tests:
+
+```bash
+# Run all tests
+cargo test
+
+# Run only unit tests
+cargo test --test unit
+
+# Run only integration tests
+cargo test --test integration
+
+# Run with logs enabled
+RUST_LOG=debug cargo test -- --nocapture
+```
+
+Tests are organized into several categories:
+
+- **Core Component Tests**: Test individual components like StateChain, ActorStore, etc.
+- **Actor Runtime Tests**: Verify actor lifecycle management
+- **Message Handling Tests**: Test actor-to-actor communication
+- **Store System Tests**: Verify the content-addressable storage system
+
+See the [Testing Strategy](book/docs/testing.md) document for details on our testing approach.
 
 ## Contributing
 
