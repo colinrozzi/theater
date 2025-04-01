@@ -1,8 +1,5 @@
-use anyhow::Result;
-use std::sync::Arc;
 use tempfile::tempdir;
-use theater::store::{ContentRef, ContentStore, Label};
-use tokio::sync::Mutex;
+use theater::store::{ContentRef, ContentStore};
 
 #[tokio::test]
 async fn test_content_store_basic() {

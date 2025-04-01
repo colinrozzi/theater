@@ -1,11 +1,6 @@
-use anyhow::Result;
 use std::collections::HashMap;
 use theater::actor_executor::ActorOperation;
-use theater::actor_handle::ActorHandle;
-use theater::chain::ChainEvent;
-use theater::id::TheaterId;
-use theater::metrics::ActorMetrics;
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::mpsc;
 use std::sync::{Arc, Mutex};
 
 /// Mock actor handle for testing
@@ -26,7 +21,7 @@ impl MockActorHandle {
         )
     }
 
-    pub fn with_response(mut self, operation: &str, response: Vec<u8>) -> Self {
+    pub fn with_response(self, operation: &str, response: Vec<u8>) -> Self {
         self.response_map.lock().unwrap().insert(operation.to_string(), response);
         self
     }

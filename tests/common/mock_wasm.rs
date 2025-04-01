@@ -1,13 +1,10 @@
 use anyhow::Result;
 use std::collections::HashMap;
-use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use theater::actor_store::ActorStore;
-use theater::chain::ChainEvent;
 use theater::config::ManifestConfig;
-use theater::id::TheaterId;
-use wasmtime::component::{ComponentType, Lift, Lower};
+use wasmtime::component::Lower;
 
 /// A mock function result for testing
 pub struct MockFunctionResult {

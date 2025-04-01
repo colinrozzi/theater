@@ -1,11 +1,8 @@
-use anyhow::Result;
 use chrono::Utc;
-use theater::chain::{ChainEvent, StateChain};
+use theater::chain::StateChain;
 use theater::events::{ChainEventData, EventData};
 use theater::events::message::MessageEventData;
 use theater::id::TheaterId;
-use theater::messages::TheaterCommand;
-use std::time::{SystemTime, UNIX_EPOCH};
 use tempfile::tempdir;
 use tokio::sync::mpsc;
 

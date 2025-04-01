@@ -1,12 +1,11 @@
-use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use theater::actor_executor::{ActorError, ActorOperation};
 use theater::actor_handle::ActorHandle;
 use theater::chain::ChainEvent;
 use theater::metrics::{ActorMetrics, OperationMetrics, ResourceMetrics};
-use tokio::sync::{mpsc, oneshot};
-use tokio::time::{timeout, Duration};
-use std::time::{SystemTime, UNIX_EPOCH};
+use tokio::sync::mpsc;
+use tokio::time::Duration;
+use std::time::SystemTime;
 
 // Helper for creating a test actor handle with controlled channel
 async fn setup_test_handle() -> (ActorHandle, mpsc::Receiver<ActorOperation>) {

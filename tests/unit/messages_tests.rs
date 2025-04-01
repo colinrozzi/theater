@@ -1,7 +1,6 @@
-use anyhow::Result;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
-use theater::chain::{ChainEvent, StateChain};
+use theater::chain::ChainEvent;
 use theater::id::TheaterId;
 use theater::messages::{ActorMessage, ActorSend, TheaterCommand};
 use tokio::sync::{mpsc, oneshot};

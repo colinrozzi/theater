@@ -1,12 +1,9 @@
-use anyhow::Result;
 use chrono::Utc;
 use theater::actor_handle::ActorHandle;
 use theater::actor_store::ActorStore;
 use theater::events::{ChainEventData, EventData};
 use theater::events::message::MessageEventData;
 use theater::id::TheaterId;
-use theater::messages::TheaterCommand;
-use std::sync::Arc;
 use tokio::sync::mpsc;
 
 fn create_test_event_data(event_type: &str) -> ChainEventData {
