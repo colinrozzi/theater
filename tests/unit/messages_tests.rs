@@ -13,8 +13,8 @@ struct TestMessage {
 
 #[tokio::test]
 async fn test_actor_message_creation() {
-    let sender = TheaterId::generate();
-    let recipient = TheaterId::generate();
+    let _sender = TheaterId::generate();
+    let _recipient = TheaterId::generate();
     
     let test_msg = TestMessage {
         value: "test message content".to_string(),
@@ -48,7 +48,7 @@ async fn test_theater_command_stop_actor() {
     };
     
     match command {
-        TheaterCommand::StopActor { actor_id: id, response_tx: _ } => {
+        TheaterCommand::StopActor { actor_id: ref id, response_tx: _ } => {
             assert_eq!(id, actor_id);
         }
         _ => panic!("Wrong command type"),
@@ -73,7 +73,7 @@ async fn test_theater_command_spawn_actor() {
     };
     
     match command {
-        TheaterCommand::SpawnActor { manifest_path: path, parent_id: parent, .. } => {
+        TheaterCommand::SpawnActor { manifest_path: ref path, parent_id: ref parent, .. } => {
             assert_eq!(path, manifest_path);
             assert_eq!(parent, Some(parent_id));
         }
@@ -102,7 +102,7 @@ async fn test_theater_command_new_event() {
     };
     
     match command {
-        TheaterCommand::NewEvent { actor_id: id, event: e } => {
+        TheaterCommand::NewEvent { actor_id: ref id, event: ref e } => {
             assert_eq!(id, actor_id);
             assert_eq!(e.hash, event.hash);
             assert_eq!(e.event_type, event.event_type);

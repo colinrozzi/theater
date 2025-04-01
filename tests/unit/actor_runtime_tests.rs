@@ -61,13 +61,13 @@ fn create_test_metrics() -> ActorMetrics {
 async fn test_actor_runtime_basic() {
     // Create basic test components
     let actor_id = TheaterId::generate();
-    let config = create_test_manifest();
+    let _config = create_test_manifest();
     
     let (theater_tx, mut theater_rx) = mpsc::channel(10);
-    let (actor_tx, actor_rx) = mpsc::channel::<ActorMessage>(10);
-    let (op_tx, op_rx) = mpsc::channel::<ActorOperation>(10);
-    let (shutdown_controller, shutdown_receiver) = ShutdownController::new();
-    let (result_tx, mut result_rx) = mpsc::channel::<StartActorResult>(1);
+    let (actor_tx, _actor_rx) = mpsc::channel::<ActorMessage>(10);
+    let (op_tx, _op_rx) = mpsc::channel::<ActorOperation>(10);
+    let (shutdown_controller, _shutdown_receiver) = ShutdownController::new();
+    let (_result_tx, _result_rx) = mpsc::channel::<StartActorResult>(1);
     
     // Set up a monitor for TheaterCommands
     tokio::spawn(async move {
@@ -86,7 +86,7 @@ async fn test_actor_runtime_basic() {
     
     // For now, just verify the basics
     let actor_handle = theater::actor_handle::ActorHandle::new(op_tx.clone());
-    let actor_store = ActorStore::new(actor_id.clone(), theater_tx.clone(), actor_handle.clone());
+    let _actor_store = ActorStore::new(actor_id.clone(), theater_tx.clone(), actor_handle.clone());
     
     // Send a test message
     let test_message = ActorMessage::Send(ActorSend {

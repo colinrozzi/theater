@@ -7,7 +7,7 @@ use tokio::sync::Mutex;
 #[tokio::test]
 async fn test_content_store_basic() {
     let temp_dir = tempdir().unwrap();
-    let store_path = temp_dir.path().join("test-store");
+    let _store_path = temp_dir.path().join("test-store");
     
     let store = ContentStore::new();
     
@@ -16,7 +16,8 @@ async fn test_content_store_basic() {
     let content_ref = store.store(test_content.clone()).await.unwrap();
     
     // Verify the hash
-    let expected_hash = ContentRef::from_content(&test_content).hash();
+    let content_ref_obj = ContentRef::from_content(&test_content);
+    let expected_hash = content_ref_obj.hash();
     assert_eq!(content_ref.hash(), expected_hash);
     
     // Retrieve the content and verify
@@ -27,7 +28,7 @@ async fn test_content_store_basic() {
 #[tokio::test]
 async fn test_content_store_deduplication() {
     let temp_dir = tempdir().unwrap();
-    let store_path = temp_dir.path().join("test-store");
+    let _store_path = temp_dir.path().join("test-store");
     
     let store = ContentStore::new();
     
@@ -51,7 +52,7 @@ async fn test_content_store_deduplication() {
 #[tokio::test]
 async fn test_content_store_labeling() {
     let temp_dir = tempdir().unwrap();
-    let store_path = temp_dir.path().join("test-store");
+    let _store_path = temp_dir.path().join("test-store");
     
     let store = ContentStore::new();
     
@@ -63,8 +64,11 @@ async fn test_content_store_labeling() {
     let ref2 = store.store(test_content2.clone()).await.unwrap();
     
     // Add labels
+    // Skip label struct tests since Label isn't publicly constructable in the expected way
+    /*
     let label1 = Label::new("test-label-1");
     let label2 = Label::new("test-label-2");
+    */
     
     store.label("test-label-1", &ref1.clone()).await.unwrap();
     store.label("test-label-2", &ref2.clone()).await.unwrap();

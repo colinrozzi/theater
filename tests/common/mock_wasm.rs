@@ -132,7 +132,11 @@ impl MockActorComponentFactory {
         let config = ManifestConfig {
             name: "test-actor".to_string(),
             component_path: "test-component.wasm".to_string(),
-            ..Default::default()
+            init_state: None,
+            interface: Default::default(),
+            handlers: Vec::new(),
+            logging: Default::default(),
+            event_server: None,
         };
         
         let component = MockActorComponent::new(&config, store).await?;
