@@ -10,6 +10,7 @@ use theater::actor_store::ActorStore;
 use theater::chain::{ChainEvent, StateChain};
 use theater::config::{HandlerConfig, ManifestConfig, MessageServerConfig};
 use theater::events::{ChainEventData, EventData};
+use theater::events::message::MessageEventData;
 use theater::id::TheaterId;
 use theater::messages::{ActorMessage, TheaterCommand};
 use theater::shutdown::{ShutdownController, ShutdownReceiver};
@@ -20,7 +21,11 @@ use tokio::time::timeout;
 pub fn create_test_event_data(event_type: &str, data: &[u8]) -> ChainEventData {
     ChainEventData {
         event_type: event_type.to_string(),
-        data: EventData::Raw(data.to_vec()),
+        data: EventData::Message(MessageEventData {
+            content: data.to_vec(),
+            sender: "test-sender".to_string(),
+            recipient: "test-recipient".to_string(),
+        }),
         timestamp: Utc::now().timestamp_millis() as u64,
         description: Some(format!("Test event: {}", event_type)),
     }
@@ -34,13 +39,12 @@ pub fn create_test_manifest(name: &str) -> ManifestConfig {
         interface: Default::default(),
         handlers: Vec::new(),
         init_state: None,
-        environment: HashMap::new(),
+        logging: Default::default(),
+        event_server: None,
     };
     
     // Add a message server handler
-    config.handlers.push(HandlerConfig::MessageServer(MessageServerConfig {
-        port: None, // Use ephemeral port
-    }));
+    config.handlers.push(HandlerConfig::MessageServer(MessageServerConfig {}));
     
     config
 }

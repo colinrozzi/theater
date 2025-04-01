@@ -3,6 +3,7 @@ use chrono::Utc;
 use theater::actor_handle::ActorHandle;
 use theater::actor_store::ActorStore;
 use theater::events::{ChainEventData, EventData};
+use theater::events::message::MessageEventData;
 use theater::id::TheaterId;
 use theater::messages::TheaterCommand;
 use std::sync::Arc;
@@ -11,7 +12,11 @@ use tokio::sync::mpsc;
 fn create_test_event_data(event_type: &str) -> ChainEventData {
     ChainEventData {
         event_type: event_type.to_string(),
-        data: EventData::Raw(b"test data".to_vec()),
+        data: EventData::Message(MessageEventData {
+            content: b"test data".to_vec(),
+            sender: "test-sender".to_string(),
+            recipient: "test-recipient".to_string(),
+        }),
         timestamp: Utc::now().timestamp_millis() as u64,
         description: Some(format!("Test event: {}", event_type)),
     }
