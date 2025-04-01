@@ -1,7 +1,7 @@
 use anyhow::Result;
 use console::style;
 use serde::{Deserialize, Serialize};
-use sha1::{Digest, Sha1};
+use sha1::Digest;
 use std::fmt;
 use std::path::Path;
 use tokio::sync::mpsc::Sender;

@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::time::SystemTime;
-use theater::actor_executor::{ActorError, ActorOperation};
+use theater::actor_executor::ActorOperation;
 use theater::actor_handle::ActorHandle;
 use theater::chain::ChainEvent;
 use theater::metrics::{ActorMetrics, OperationMetrics, ResourceMetrics};
