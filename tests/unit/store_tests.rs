@@ -91,23 +91,31 @@ async fn test_content_store_delete() {
     let store_path = temp_dir.path().join("test-store");
 
     let store = ContentStore::new();
+    let label_name = "test-label";
 
     // Store content
     let test_content = b"deletable content".to_vec();
     let content_ref = store.store(test_content.clone()).await.unwrap();
 
-    // Verify it exists
+    // Create a label for this content
+    store.label(label_name, &content_ref).await.unwrap();
+
+    // Verify content exists and label points to it
     assert!(store.exists(&content_ref).await);
+    let label_ref = store.get_by_label(label_name).await.unwrap();
+    assert_eq!(Some(content_ref.clone()), label_ref);
 
-    // Delete it
-    store.remove_label(store.id()).await.unwrap();
+    // Delete the label
+    store.remove_label(label_name).await.unwrap();
 
-    // Verify it's gone
-    assert!(!store.exists(&content_ref).await);
-
-    // Trying to get it should error
-    let result = store.get(&content_ref).await;
-    assert!(result.is_err());
+    // The content should still exist, but the label should be gone
+    assert!(store.exists(&content_ref).await); // Content still exists
+    let label_ref_after = store.get_by_label(label_name).await.unwrap();
+    assert_eq!(None, label_ref_after); // Label is gone
+    
+    // Getting content by label should return None
+    let result = store.get_content_by_label(label_name).await.unwrap();
+    assert_eq!(None, result);
 }
 
 #[tokio::test]
