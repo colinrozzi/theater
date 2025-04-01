@@ -93,7 +93,7 @@ async fn test_content_store_delete() {
     let temp_dir = tempdir().unwrap();
     let store_path = temp_dir.path().join("test-store");
     
-    let store = ContentStore::new(store_path.to_str().unwrap());
+    let store = ContentStore::new();
     
     // Store content
     let test_content = b"deletable content".to_vec();
