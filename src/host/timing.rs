@@ -7,10 +7,10 @@ use crate::events::{ChainEventData, EventData};
 use crate::shutdown::ShutdownReceiver;
 use crate::wasm::{ActorComponent, ActorInstance};
 use anyhow::Result;
-use chrono::{DateTime, Utc};
+use chrono::Utc;
 use std::future::Future;
 use thiserror::Error;
-use tokio::time::{sleep, Duration, Instant};
+use tokio::time::{sleep, Duration};
 use tracing::{error, info};
 use wasmtime::StoreContextMut;
 

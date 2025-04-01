@@ -1,5 +1,4 @@
 use crate::actor_handle::ActorHandle;
-use crate::shutdown::ShutdownReceiver;
 use anyhow::{anyhow, Result};
 use axum::{
     extract::{State, WebSocketUpgrade},
