@@ -206,15 +206,31 @@ impl StateChain {
         let mut prev_hash = None;
 
         for event in &self.events {
-            let mut hasher = Sha1::new();
+            // Create a temporary event with everything except the hash
+            let temp_event = ChainEvent {
+                hash: vec![],
+                parent_hash: prev_hash.clone(),
+                event_type: event.event_type.clone(),
+                data: event.data.clone(),
+                timestamp: event.timestamp,
+                description: event.description.clone(),
+            };
 
-            if let Some(ph) = &prev_hash {
-                hasher.update(ph);
-            }
-            hasher.update(&event.data);
+            // Serialize the event (just like in add_typed_event)
+            let serialized_event = match serde_json::to_vec(&temp_event) {
+                Ok(data) => data,
+                Err(_) => return false,
+            };
 
-            let computed_hash = hasher.finalize().to_vec();
-            if computed_hash != event.hash {
+            // Calculate hash using ContentRef (same as in add_typed_event)
+            let content_ref = ContentRef::from_content(&serialized_event);
+            let hash_bytes = match hex::decode(content_ref.hash()) {
+                Ok(bytes) => bytes,
+                Err(_) => return false,
+            };
+
+            // Verify this hash matches the stored hash
+            if hash_bytes != event.hash {
                 return false;
             }
 
