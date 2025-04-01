@@ -21,10 +21,10 @@ use tokio::time::timeout;
 pub fn create_test_event_data(event_type: &str, data: &[u8]) -> ChainEventData {
     ChainEventData {
         event_type: event_type.to_string(),
-        data: EventData::Message(MessageEventData {
-            content: data.to_vec(),
+        data: EventData::Message(MessageEventData::HandleMessageCall {
             sender: "test-sender".to_string(),
-            recipient: "test-recipient".to_string(),
+            message_type: "test-message".to_string(),
+            size: data.len(),
         }),
         timestamp: Utc::now().timestamp_millis() as u64,
         description: Some(format!("Test event: {}", event_type)),

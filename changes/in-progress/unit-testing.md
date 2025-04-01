@@ -16,14 +16,14 @@ This change implements comprehensive unit and integration tests for key Theater 
 - ✅ Implemented test utilities (mocks and helpers)
 - ✅ Added StateChain unit tests
 - ✅ Added ActorStore unit tests
-- ✅ Added ActorHandle unit tests 
+- ✅ Added ActorHandle unit tests (basic functionality)
 - ✅ Added ContentStore unit tests
 - ✅ Added message serialization/deserialization tests
-- ✅ Added basic message routing tests
+- ✅ Fixed component compatibility issues
 
 ### In Progress
 
-- ⏳ Implement mock WASM component for actor runtime tests
+- ⏳ Implement ActorHandle call_function tests with proper ComponentType traits
 - ⏳ Complete handler interface mocks and tests
 - ⏳ Implement full lifecycle integration tests
 
@@ -45,6 +45,10 @@ This change implements comprehensive unit and integration tests for key Theater 
 ## Issues/Questions
 
 - Need to determine the best approach for mocking WASM components in tests
+- Our attempt to implement unit tests found several API differences from expected:
+  - MessageEventData is an enum, not a struct
+  - ActorMetrics has a different structure than originally expected
+  - ContentStore API has changed (methods and parameter types)
 - Consider using a separate test fixture for integration tests to avoid slow compile times
 - Investigate test coverage reporting options
 
