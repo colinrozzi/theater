@@ -1,10 +1,20 @@
 # Theater
 
-A WebAssembly actor system that enables state management, verification, and flexible interaction patterns. 
-This project is in active development and not yet ready for production use. Most of the code is undocumented, untested, and subject to change.
-If you are interested at all in the project or have questions, please reach out to me at colinrozzi@gmail.com.
+A WebAssembly actor system designed for the AI-generated code era.
 
-[Read more about why we built Theater and its core concepts →](docs/why-theater.md)
+## The Challenge
+
+LLMs present incredible opportunities for software, but they also present significant challenges. It's realistic to assume that in the very near future, significantly more software will be written, and much of it may never see human review. Because of this, many assumptions we've made in building the software ecosystem are no longer valid.
+
+## The Theater Approach
+
+Instead of trusting the programmer and the organization, Theater builds guarantees into the structure of the software system that hosts client applications:
+
+1. **WebAssembly Components** provide sandboxing and determinism
+2. **Actor Model with Supervision** implements an Erlang-style supervision system for isolation and fault-tolerance
+3. **Complete Traceability** tracks all information that enters or leaves the WebAssembly sandbox
+
+If something in the system goes wrong, we can trace it back through each actor, fixing whatever is needed along the way.
 
 ## Quick Start with Theater CLI
 
@@ -34,20 +44,26 @@ theater logs <actor-id>
 theater start manifest.toml --id-only | theater subscribe -
 ```
 
-[See complete CLI documentation →](docs/cli.md)
+## Key Features
 
-## Features
-
-- **Actor State Management**: Actors maintain verifiable state with complete history
-- **Hash Chain Verification**: All state changes are recorded in a verifiable hash chain
-- **Content-Addressable Storage**: Built-in store system for efficient data persistence and sharing
-- **Secure Actor Identification**: Cryptographically secure UUID-based identification system
+- **Robust Supervision System**: Parent actors can spawn, monitor, and restart child actors
+- **Complete State History**: All state changes are recorded in a verifiable chain
+- **Content-Addressable Storage**: Built-in store system for efficient data persistence
+- **Secure Actor Identification**: Cryptographically secure UUID-based identification
 - **Multiple Interface Types**: Support for:
   - Actor-to-actor messaging
   - HTTP server capabilities
   - HTTP client capabilities
   - Parent-child supervision
   - Extensible interface system
+
+## Use Cases
+
+Theater is particularly well-suited for:
+- **Running untrusted AI-generated code** in a safe, monitored environment
+- **Building systems requiring high reliability** and fault tolerance
+- **Developing microservices** with strong isolation and transparent communication
+- **Learning and experimenting** with actor models and distributed systems concepts
 
 ## Documentation
 
@@ -58,13 +74,9 @@ theater start manifest.toml --id-only | theater subscribe -
 - [Making Changes](docs/making-changes.md) - Guide for contributing changes
 - [Current Changes](/changes/in-progress.md) - Overview of work in progress
 
-# Supervision System
+## Supervision System
 
 Theater provides a robust supervision system that enables parent actors to manage their children:
-
-## Parent-Child Relationships
-
-Actors can spawn and manage child actors using the supervisor interface:
 
 ```toml
 # Parent actor manifest
@@ -75,8 +87,6 @@ component_path = "parent.wasm"
 type = "supervisor"
 config = {}
 ```
-
-## Supervisor Interface
 
 Parent actors can:
 - Spawn new child actors
@@ -132,40 +142,6 @@ https://nixos.org/download/
    nix develop
    ```
 
-The development environment provides:
-- Rust toolchain with the exact version needed
-- LLVM and Clang for wasmtime
-- All required system dependencies
-- Development tools like `cargo-watch`, `cargo-expand`, etc.
-
-#### Common Nix Commands
-
-- Start a new shell with the development environment:
-  ```bash
-  nix develop
-  ```
-
-- Run a command in the development environment without entering a shell:
-  ```bash
-  nix develop --command cargo build
-  ```
-
-- Update flake dependencies:
-  ```bash
-  nix flake update
-  ```
-
-#### Troubleshooting Nix
-
-- If you see "experimental feature" errors:
-  Make sure you've enabled flakes as described above.
-
-- If you see "nix-command" errors:
-  Your Nix installation might be too old. Update it with:
-  ```bash
-  nix-env -iA nixpkgs.nix
-  ```
-
 ### Manual Setup
 
 If you prefer not to use Nix, you'll need:
@@ -188,83 +164,6 @@ cd theater
 cargo build
 ```
 
-## Running
-
-You can run Theater using either the CLI or directly with cargo:
-
-```bash
-# Using the Theater CLI (recommended)
-theater server
-theater start path/to/your/manifest.toml
-
-# Or using cargo directly
-cargo run -- --manifest path/to/your/manifest.toml
-```
-
-## Actor Manifests
-
-Actors are configured using TOML manifests. Example:
-
-```toml
-name = "my-actor"
-component_path = "path/to/actor.wasm"
-
-[interface]
-implements = "ntwk:simple-actor/actor"
-requires = []
-
-# Optional message-server capability
-[[handlers]]
-type = "message-server"
-config = { port = 8080 }
-interface = "ntwk:theater/message-server-client"
-
-# Optional HTTP server capability
-[[handlers]]
-type = "http-server"
-config = { port = 8081 }
-```
-
-Note: The message-server handler is optional and requires implementing the `message-server-client` interface if you want your actor to handle messages.
-
-## Development Tools
-
-When using the Nix development environment, you get access to several useful tools:
-
-- `cargo clippy` - Run the Rust linter
-- `cargo fmt` - Format your code
-- `cargo test` - Run the test suite
-- `cargo watch` - Watch for changes and automatically rebuild
-- `cargo expand` - Show macro expansions
-- `cargo udeps` - Find unused dependencies
-
-## Testing
-
-Theater has a comprehensive test suite organized into unit and integration tests:
-
-```bash
-# Run all tests
-cargo test
-
-# Run only unit tests
-cargo test --test unit
-
-# Run only integration tests
-cargo test --test integration
-
-# Run with logs enabled
-RUST_LOG=debug cargo test -- --nocapture
-```
-
-Tests are organized into several categories:
-
-- **Core Component Tests**: Test individual components like StateChain, ActorStore, etc.
-- **Actor Runtime Tests**: Verify actor lifecycle management
-- **Message Handling Tests**: Test actor-to-actor communication
-- **Store System Tests**: Verify the content-addressable storage system
-
-See the [Testing Strategy](book/docs/testing.md) document for details on our testing approach.
-
 ## Contributing
 
 1. Fork the repository
@@ -275,3 +174,7 @@ See the [Testing Strategy](book/docs/testing.md) document for details on our tes
 6. Commit your changes (`git commit -m 'Add some amazing feature'`)
 7. Push to the branch (`git push origin feature/amazing-feature`)
 8. Open a Pull Request
+
+## Status
+
+This project is in active development and not yet ready for production use. Most of the code is undocumented, untested, and subject to change. If you are interested at all in the project or have questions, please reach out to me at colinrozzi@gmail.com.
