@@ -414,6 +414,13 @@ impl MessageServerHost {
                       -> Box<dyn Future<Output = Result<(Result<(), String>,)>> + Send> {
                     let channel_id_clone = channel_id.clone();
                     
+                    // Get the message string for display, only display the first 100 characters
+                    let msg_str = if msg.len() > 100 {
+                        format!("{}...", String::from_utf8_lossy(&msg[0..100]))
+                    } else {
+                        String::from_utf8_lossy(&msg).to_string()
+                    };
+                    
                     // Record the channel message call event
                     ctx.data_mut().record_event(ChainEventData {
                         event_type: "ntwk:theater/message-server-host/send-on-channel".to_string(),
@@ -422,7 +429,7 @@ impl MessageServerHost {
                             msg: msg.clone(),
                         }),
                         timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                        description: Some(format!("Sending message on channel [{}]: {}", channel_id, String::from_utf8_lossy(&msg))),
+                        description: Some(format!("Sending message on channel [{}]: {}", channel_id, msg_str)),
                     });
                     
                     // Parse channel ID

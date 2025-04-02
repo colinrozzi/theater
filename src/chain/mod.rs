@@ -68,7 +68,7 @@ impl fmt::Display for ChainEvent {
             // Format data preview, attempting JSON formatting if possible
             if let Ok(text) = std::str::from_utf8(&self.data) {
                 if let Ok(json) = serde_json::from_str::<serde_json::Value>(text) {
-                    if json.is_object() && json.as_object().unwrap().len() <= 3 {
+                    if json.is_object() && text.len() < 100 {
                         // For small JSON objects, inline them
                         serde_json::to_string(&json).unwrap_or_else(|_| text.to_string())
                     } else {
