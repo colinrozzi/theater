@@ -29,39 +29,19 @@ Theater uses WebAssembly Components as its foundation, providing several critica
 
 ### 2. Erlang-Inspired Supervision
 
-Taking inspiration from Erlang/OTP, one of the most reliable systems ever built, Theater implements a comprehensive supervision system:
+Taking inspiration from Erlang/OTP, Theater implements a comprehensive supervision system:
 
 - **Hierarchical Recovery**: Parent actors can monitor their children and restart them if they fail, containing failures to small parts of the system.
 - **Explicit Error Handling**: The supervision system makes error handling a first-class concern, not an afterthought.
-- **Separation of Concerns**: Each actor has a single responsibility, making the system easier to reason about and maintain.
+- **Lifetime Isolation**: When an actor fails, its state and chain are preserved, allowing for anything from detailed debugging to the resumption of the actor with a previous good state.
 
 ### 3. Complete Traceability
 
 Theater tracks all information that enters or leaves the WebAssembly sandbox:
 
-- **State History**: Every state change is recorded in a verifiable chain, creating a complete history of an actor's execution.
-- **Time-Travel Debugging**: The state history allows developers to "go back in time" to understand how a system reached a particular state.
-- **Audit Trail**: The comprehensive tracking creates an audit trail that can be invaluable for security and compliance.
-
-## Beyond the Technical: A Philosophy of Safe Innovation
-
-At its core, Theater represents a philosophy about how we should build software in an era of rapid innovation and increasing automation:
-
-1. **Don't Trust, Verify**: Rather than trusting code or its author, verify its behavior at runtime.
-2. **Fail Gracefully**: Design systems to handle failures as a normal part of operation, not an exceptional event.
-3. **Make Complexity Transparent**: Build tools that make complex systems more understandable and debuggable.
-4. **Enable Safe Experimentation**: Create environments where new approaches can be tried with minimal risk.
-
-This philosophy acknowledges that the pace of software development is accelerating, and we need new tools and approaches to keep up while maintaining reliability and security.
-
-## Where Theater Fits
-
-Theater isn't meant to replace all software systems—it's designed to address specific challenges in a changing landscape:
-
-- **AI Integration**: Systems that incorporate AI-generated components
-- **Critical Infrastructure**: Applications where reliability and fault tolerance are paramount
-- **Complex Microservices**: Distributed systems that require strong boundaries and clear communication patterns
-- **Educational Environments**: Places where people are learning about distributed systems and actor models
+- **State History**: Every state change is recorded and linked to its parent state, creating a complete and verifiable history of state transitions.
+- **Deterministic Replay**: Because WebAssembly is sandboxed and deterministic, any sequence of events can be replayed exactly on any system.
+- **Verification**: Each state transition is cryptographically linked to its predecessors, so state received from an external source can be verified.
 
 By providing a structured environment with strong guarantees, Theater enables developers to build more trustworthy systems, even when the components themselves might not be fully trusted.
 
