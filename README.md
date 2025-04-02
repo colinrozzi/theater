@@ -4,7 +4,7 @@ A WebAssembly actor system that enables state management, verification, and flex
 This project is in active development and not yet ready for production use. Most of the code is undocumented, untested, and subject to change.
 If you are interested at all in the project or have questions, please reach out to me at colinrozzi@gmail.com.
 
-[Read more about why we built Theater and its core concepts →](docs/why-theater.md)
+[Read more about why we built Theater and its core concepts →](book/src/why-theater.md)
 
 ## Quick Start with Theater CLI
 
@@ -34,7 +34,7 @@ theater logs <actor-id>
 theater start manifest.toml --id-only | theater subscribe -
 ```
 
-[See complete CLI documentation →](docs/cli.md)
+[See complete CLI documentation →](book/src/cli.md)
 
 ## Features
 
@@ -51,10 +51,10 @@ theater start manifest.toml --id-only | theater subscribe -
 
 ## Documentation
 
-- [Why Theater](docs/why-theater.md) - Core concepts and motivation
-- [CLI Documentation](docs/cli.md) - Complete guide to the Theater CLI
-- [Store System](docs/store/README.md) - Content-addressable storage documentation
-- [Making Changes](docs/making-changes.md) - Guide for contributing changes
+- [Why Theater](book/src/why-theater.md) - Core concepts and motivation
+- [CLI Documentation](book/src/cli.md) - Complete guide to the Theater CLI
+- [Store System](book/src/store/README.md) - Content-addressable storage documentation
+- [Making Changes](book/src/making-changes.md) - Guide for contributing changes
 - [Current Changes](/changes/in-progress.md) - Overview of work in progress
 
 # Supervision System
