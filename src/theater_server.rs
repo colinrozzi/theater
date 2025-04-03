@@ -1,5 +1,4 @@
 use crate::messages::{ActorMessage, ActorRequest, ActorSend, ActorStatus, ChannelParticipant};
-use crate::store::ContentStore;
 use crate::ChainEvent;
 use anyhow::Result;
 use bytes::Bytes;

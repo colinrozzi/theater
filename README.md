@@ -1,10 +1,18 @@
 # Theater
 
-A WebAssembly actor system that enables state management, verification, and flexible interaction patterns. 
-This project is in active development and not yet ready for production use. Most of the code is undocumented, untested, and subject to change.
-If you are interested at all in the project or have questions, please reach out to me at colinrozzi@gmail.com.
+A WebAssembly actor system designed for the AI-generated code era.
 
-[Read more about why we built Theater and its core concepts →](book/src/why-theater.md)
+## The Challenge
+
+LLMs present incredible opportunities for software, but they also present significant challenges. It's realistic to assume that in the very near future, significantly more software will be written, and much of it may never see human review. Because of this, many assumptions we've made in building the software ecosystem are no longer valid.
+
+## The Theater Approach
+
+Theater is an attempt to move a lot of the trust from the code and its author to the system itself. Similar to how rust provides memory safety at the language level, Theater provides guarantees at the system level. If your application runs in Theater, you can be sure that it is sandboxed, deterministic, traceable, and fault-tolerant.
+
+1. **WebAssembly Components** provide sandboxing and determinism
+2. **Actor Model with Supervision** implements an Erlang-style supervision system for isolation and fault-tolerance
+3. **Chain** tracks all information that enters or leaves the WebAssembly sandbox
 
 ## Quick Start with Theater CLI
 
@@ -18,7 +26,7 @@ theater create my-actor
 cd my-actor
 theater build
 
-# Start a Theater server
+# Start a Theater server in another terminal
 theater server
 
 # Start the actor
@@ -28,26 +36,13 @@ theater start manifest.toml
 theater list
 
 # View actor logs
-theater logs <actor-id>
+theater events <actor-id>
 
 # Start actor and subscribe to its events in one command
 theater start manifest.toml --id-only | theater subscribe -
 ```
 
 [See complete CLI documentation →](book/src/cli.md)
-
-## Features
-
-- **Actor State Management**: Actors maintain verifiable state with complete history
-- **Hash Chain Verification**: All state changes are recorded in a verifiable hash chain
-- **Content-Addressable Storage**: Built-in store system for efficient data persistence and sharing
-- **Secure Actor Identification**: Cryptographically secure UUID-based identification system
-- **Multiple Interface Types**: Support for:
-  - Actor-to-actor messaging
-  - HTTP server capabilities
-  - HTTP client capabilities
-  - Parent-child supervision
-  - Extensible interface system
 
 ## Documentation
 
@@ -57,13 +52,9 @@ theater start manifest.toml --id-only | theater subscribe -
 - [Making Changes](book/src/making-changes.md) - Guide for contributing changes
 - [Current Changes](/changes/in-progress.md) - Overview of work in progress
 
-# Supervision System
+## Supervision System
 
 Theater provides a robust supervision system that enables parent actors to manage their children:
-
-## Parent-Child Relationships
-
-Actors can spawn and manage child actors using the supervisor interface:
 
 ```toml
 # Parent actor manifest
@@ -74,8 +65,6 @@ component_path = "parent.wasm"
 type = "supervisor"
 config = {}
 ```
-
-## Supervisor Interface
 
 Parent actors can:
 - Spawn new child actors
@@ -131,40 +120,6 @@ https://nixos.org/download/
    nix develop
    ```
 
-The development environment provides:
-- Rust toolchain with the exact version needed
-- LLVM and Clang for wasmtime
-- All required system dependencies
-- Development tools like `cargo-watch`, `cargo-expand`, etc.
-
-#### Common Nix Commands
-
-- Start a new shell with the development environment:
-  ```bash
-  nix develop
-  ```
-
-- Run a command in the development environment without entering a shell:
-  ```bash
-  nix develop --command cargo build
-  ```
-
-- Update flake dependencies:
-  ```bash
-  nix flake update
-  ```
-
-#### Troubleshooting Nix
-
-- If you see "experimental feature" errors:
-  Make sure you've enabled flakes as described above.
-
-- If you see "nix-command" errors:
-  Your Nix installation might be too old. Update it with:
-  ```bash
-  nix-env -iA nixpkgs.nix
-  ```
-
 ### Manual Setup
 
 If you prefer not to use Nix, you'll need:
@@ -187,56 +142,6 @@ cd theater
 cargo build
 ```
 
-## Running
-
-You can run Theater using either the CLI or directly with cargo:
-
-```bash
-# Using the Theater CLI (recommended)
-theater server
-theater start path/to/your/manifest.toml
-
-# Or using cargo directly
-cargo run -- --manifest path/to/your/manifest.toml
-```
-
-## Actor Manifests
-
-Actors are configured using TOML manifests. Example:
-
-```toml
-name = "my-actor"
-component_path = "path/to/actor.wasm"
-
-[interface]
-implements = "ntwk:simple-actor/actor"
-requires = []
-
-# Optional message-server capability
-[[handlers]]
-type = "message-server"
-config = { port = 8080 }
-interface = "ntwk:theater/message-server-client"
-
-# Optional HTTP server capability
-[[handlers]]
-type = "http-server"
-config = { port = 8081 }
-```
-
-Note: The message-server handler is optional and requires implementing the `message-server-client` interface if you want your actor to handle messages.
-
-## Development Tools
-
-When using the Nix development environment, you get access to several useful tools:
-
-- `cargo clippy` - Run the Rust linter
-- `cargo fmt` - Format your code
-- `cargo test` - Run the test suite
-- `cargo watch` - Watch for changes and automatically rebuild
-- `cargo expand` - Show macro expansions
-- `cargo udeps` - Find unused dependencies
-
 ## Contributing
 
 1. Fork the repository
@@ -247,3 +152,7 @@ When using the Nix development environment, you get access to several useful too
 6. Commit your changes (`git commit -m 'Add some amazing feature'`)
 7. Push to the branch (`git push origin feature/amazing-feature`)
 8. Open a Pull Request
+
+## Status
+
+This project is in active development and not yet ready for production use. Most of the code is undocumented, untested, and subject to change. If you are interested at all in the project or have questions, please reach out to me at colinrozzi@gmail.com.

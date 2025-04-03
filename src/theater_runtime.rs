@@ -7,7 +7,7 @@ use crate::messages::{
 };
 use crate::messages::{ActorMessage, ActorStatus, TheaterCommand};
 use crate::metrics::ActorMetrics;
-use crate::shutdown::{ShutdownController, DEFAULT_SHUTDOWN_TIMEOUT};
+use crate::shutdown::ShutdownController;
 use crate::utils::resolve_reference;
 use crate::ManifestConfig;
 use crate::Result;
