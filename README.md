@@ -14,6 +14,10 @@ Theater is an attempt to move a lot of the trust from the code and its author to
 2. **Actor Model with Supervision** implements an Erlang-style supervision system for isolation and fault-tolerance
 3. **Chain** tracks all information that enters or leaves the WebAssembly sandbox
 
+## Status
+
+This project is in active development and not yet ready for production use. Most of the code is undocumented, untested, and subject to change. If you are interested at all in the project or have questions, please reach out to me at colinrozzi@gmail.com.
+
 ## Quick Start with Theater CLI
 
 Theater includes a powerful CLI tool for managing the entire actor lifecycle:
@@ -43,52 +47,6 @@ theater start manifest.toml --id-only | theater subscribe -
 ```
 
 [See complete CLI documentation →](book/src/cli.md)
-
-## Documentation
-
-- [Why Theater](book/src/why-theater.md) - Core concepts and motivation
-- [CLI Documentation](book/src/cli.md) - Complete guide to the Theater CLI
-- [Store System](book/src/store/README.md) - Content-addressable storage documentation
-- [Making Changes](book/src/making-changes.md) - Guide for contributing changes
-- [Current Changes](/changes/in-progress.md) - Overview of work in progress
-
-## Supervision System
-
-Theater provides a robust supervision system that enables parent actors to manage their children:
-
-```toml
-# Parent actor manifest
-name = "parent-actor"
-component_path = "parent.wasm"
-
-[[handlers]]
-type = "supervisor"
-config = {}
-```
-
-Parent actors can:
-- Spawn new child actors
-- List their children
-- Monitor child status
-- Stop and restart children
-- Access child state and event history
-
-Example usage in a parent actor:
-
-```rust
-use theater::supervisor::*;
-
-// Spawn a child actor
-let child_id = supervisor::spawn_child("child_manifest.toml")?;
-
-// Get child status
-let status = supervisor::get_child_status(&child_id)?;
-
-// Restart child if needed
-if status != ActorStatus::Running {
-    supervisor::restart_child(&child_id)?;
-}
-```
 
 ## Development Setup
 
@@ -142,17 +100,3 @@ cd theater
 cargo build
 ```
 
-## Contributing
-
-1. Fork the repository
-2. Create your feature branch (`git checkout -b feature/amazing-feature`)
-3. Run the tests (`cargo test`)
-4. Run the linter (`cargo clippy`)
-5. Format your code (`cargo fmt`)
-6. Commit your changes (`git commit -m 'Add some amazing feature'`)
-7. Push to the branch (`git push origin feature/amazing-feature`)
-8. Open a Pull Request
-
-## Status
-
-This project is in active development and not yet ready for production use. Most of the code is undocumented, untested, and subject to change. If you are interested at all in the project or have questions, please reach out to me at colinrozzi@gmail.com.
