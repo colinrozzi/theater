@@ -26,7 +26,7 @@ theater create my-actor
 cd my-actor
 theater build
 
-# Start a Theater server
+# Start a Theater server in another terminal
 theater server
 
 # Start the actor
@@ -36,24 +36,11 @@ theater start manifest.toml
 theater list
 
 # View actor logs
-theater logs <actor-id>
+theater events <actor-id>
 
 # Start actor and subscribe to its events in one command
 theater start manifest.toml --id-only | theater subscribe -
 ```
-
-## Key Features
-
-- **Robust Supervision System**: Parent actors can spawn, monitor, and restart child actors
-- **Complete State History**: All state changes are recorded in a verifiable chain
-- **Content-Addressable Storage**: Built-in store system for efficient data persistence
-- **Secure Actor Identification**: Cryptographically secure UUID-based identification
-- **Multiple Interface Types**: Support for:
-  - Actor-to-actor messaging
-  - HTTP server capabilities
-  - HTTP client capabilities
-  - Parent-child supervision
-  - Extensible interface system
 
 ## Documentation
 
