@@ -4,8 +4,8 @@ use crate::bindings::exports::ntwk::theater::actor::Guest;
 use crate::bindings::exports::ntwk::theater::http_handlers::Guest as HttpHandlers;
 use crate::bindings::exports::ntwk::theater::message_server_client::Guest as MessageServerClient;
 use crate::bindings::ntwk::theater::http_framework::{
-    add_middleware, add_route, create_server, enable_websocket, register_handler,
-    start_server, ServerConfig,
+    add_middleware, add_route, create_server, enable_websocket, register_handler, start_server,
+    ServerConfig,
 };
 use crate::bindings::ntwk::theater::http_types::{HttpRequest, HttpResponse, MiddlewareResult};
 use crate::bindings::ntwk::theater::runtime::log;
@@ -483,6 +483,47 @@ impl MessageServerClient for Actor {
         _params: (Vec<u8>,),
     ) -> Result<(Option<Vec<u8>>, (Vec<u8>,)), String> {
         Ok((state, (vec![],)))
+    }
+
+    fn handle_channel_open(
+        state: Option<bindings::exports::ntwk::theater::message_server_client::Json>,
+        params: (bindings::exports::ntwk::theater::message_server_client::Json,),
+    ) -> Result<
+        (
+            Option<bindings::exports::ntwk::theater::message_server_client::Json>,
+            (bindings::exports::ntwk::theater::message_server_client::ChannelAccept,),
+        ),
+        String,
+    > {
+        Ok((
+            state,
+            (
+                bindings::exports::ntwk::theater::message_server_client::ChannelAccept {
+                    accepted: true,
+                    message: None,
+                },
+            ),
+        ))
+    }
+
+    fn handle_channel_close(
+        state: Option<bindings::exports::ntwk::theater::message_server_client::Json>,
+        params: (String,),
+    ) -> Result<(Option<bindings::exports::ntwk::theater::message_server_client::Json>,), String>
+    {
+        Ok((state,))
+    }
+
+    fn handle_channel_message(
+        state: Option<bindings::exports::ntwk::theater::message_server_client::Json>,
+        params: (
+            String,
+            bindings::exports::ntwk::theater::message_server_client::Json,
+        ),
+    ) -> Result<(Option<bindings::exports::ntwk::theater::message_server_client::Json>,), String>
+    {
+        log("runtime-content-fs: Received channel message");
+        Ok((state,))
     }
 }
 

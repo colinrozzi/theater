@@ -47,7 +47,7 @@ impl MessageServerClient for Actor {
     ) -> Result<(Option<Vec<u8>>,), String> {
         log("Handling send message");
         let (data,) = params;
-        
+
         // Parse the current state
         let state_bytes = state.unwrap_or_default();
         let mut app_state: AppState = if !state_bytes.is_empty() {
@@ -55,7 +55,7 @@ impl MessageServerClient for Actor {
         } else {
             AppState::default()
         };
-        
+
         // Try to parse the message as a string
         if let Ok(message) = String::from_utf8(data) {
             log(&format!("Received message: {}", message));
@@ -64,11 +64,11 @@ impl MessageServerClient for Actor {
             log("Received binary data");
             app_state.count += 1;
         }
-        
+
         // Save the updated state
         let updated_state_bytes = serde_json::to_vec(&app_state).map_err(|e| e.to_string())?;
         let updated_state = Some(updated_state_bytes);
-        
+
         Ok((updated_state,))
     }
 
@@ -78,7 +78,7 @@ impl MessageServerClient for Actor {
     ) -> Result<(Option<Vec<u8>>, (Vec<u8>,)), String> {
         log("Handling request message");
         let (data,) = params;
-        
+
         // Parse the current state
         let state_bytes = state.unwrap_or_default();
         let mut app_state: AppState = if !state_bytes.is_empty() {
@@ -86,11 +86,11 @@ impl MessageServerClient for Actor {
         } else {
             AppState::default()
         };
-        
+
         // Try to parse the message as a string
         let response = if let Ok(message) = String::from_utf8(data.clone()) {
             log(&format!("Received request: {}", message));
-            
+
             match message.as_str() {
                 "count" => {
                     let response = format!("Current count: {}", app_state.count);
@@ -117,12 +117,53 @@ impl MessageServerClient for Actor {
             // Just echo back the data
             data
         };
-        
+
         // Save the updated state
         let updated_state_bytes = serde_json::to_vec(&app_state).map_err(|e| e.to_string())?;
         let updated_state = Some(updated_state_bytes);
-        
+
         Ok((updated_state, (response,)))
+    }
+
+    fn handle_channel_open(
+        state: Option<bindings::exports::ntwk::theater::message_server_client::Json>,
+        params: (bindings::exports::ntwk::theater::message_server_client::Json,),
+    ) -> Result<
+        (
+            Option<bindings::exports::ntwk::theater::message_server_client::Json>,
+            (bindings::exports::ntwk::theater::message_server_client::ChannelAccept,),
+        ),
+        String,
+    > {
+        Ok((
+            state,
+            (
+                bindings::exports::ntwk::theater::message_server_client::ChannelAccept {
+                    accepted: true,
+                    message: None,
+                },
+            ),
+        ))
+    }
+
+    fn handle_channel_close(
+        state: Option<bindings::exports::ntwk::theater::message_server_client::Json>,
+        params: (String,),
+    ) -> Result<(Option<bindings::exports::ntwk::theater::message_server_client::Json>,), String>
+    {
+        Ok((state,))
+    }
+
+    fn handle_channel_message(
+        state: Option<bindings::exports::ntwk::theater::message_server_client::Json>,
+        params: (
+            String,
+            bindings::exports::ntwk::theater::message_server_client::Json,
+        ),
+    ) -> Result<(Option<bindings::exports::ntwk::theater::message_server_client::Json>,), String>
+    {
+        log("runtime-content-fs: Received channel message");
+        Ok((state,))
     }
 }
 

@@ -8,13 +8,11 @@ LLMs present incredible opportunities for software, but they also present signif
 
 ## The Theater Approach
 
-Instead of trusting the programmer and the organization, Theater builds guarantees into the structure of the software system that hosts client applications:
+Theater is an attempt to move a lot of the trust from the code and its author to the system itself. Similar to how rust provides memory safety at the language level, Theater provides guarantees at the system level. If your application runs in Theater, you can be sure that it is sandboxed, deterministic, traceable, and fault-tolerant.
 
 1. **WebAssembly Components** provide sandboxing and determinism
 2. **Actor Model with Supervision** implements an Erlang-style supervision system for isolation and fault-tolerance
-3. **Complete Traceability** tracks all information that enters or leaves the WebAssembly sandbox
-
-If something in the system goes wrong, we can trace it back through each actor, fixing whatever is needed along the way.
+3. **Chain** tracks all information that enters or leaves the WebAssembly sandbox
 
 ## Quick Start with Theater CLI
 
@@ -56,14 +54,6 @@ theater start manifest.toml --id-only | theater subscribe -
   - HTTP client capabilities
   - Parent-child supervision
   - Extensible interface system
-
-## Use Cases
-
-Theater is particularly well-suited for:
-- **Running untrusted AI-generated code** in a safe, monitored environment
-- **Building systems requiring high reliability** and fault tolerance
-- **Developing microservices** with strong isolation and transparent communication
-- **Learning and experimenting** with actor models and distributed systems concepts
 
 ## Documentation
 
