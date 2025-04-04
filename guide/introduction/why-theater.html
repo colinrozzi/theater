@@ -1,0 +1,256 @@
+<!DOCTYPE HTML>
+<html lang="en" class="light sidebar-visible" dir="ltr">
+    <head>
+        <!-- Book generated using mdBook -->
+        <meta charset="UTF-8">
+        <title>Why Theater? - Theater Docs</title>
+
+
+        <!-- Custom HTML head -->
+
+        <meta name="description" content="">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="theme-color" content="#ffffff">
+
+        <link rel="icon" href="../favicon.svg">
+        <link rel="shortcut icon" href="../favicon.png">
+        <link rel="stylesheet" href="../css/variables.css">
+        <link rel="stylesheet" href="../css/general.css">
+        <link rel="stylesheet" href="../css/chrome.css">
+        <link rel="stylesheet" href="../css/print.css" media="print">
+
+        <!-- Fonts -->
+        <link rel="stylesheet" href="../FontAwesome/css/font-awesome.css">
+        <link rel="stylesheet" href="../fonts/fonts.css">
+
+        <!-- Highlight.js Stylesheets -->
+        <link rel="stylesheet" id="highlight-css" href="../highlight.css">
+        <link rel="stylesheet" id="tomorrow-night-css" href="../tomorrow-night.css">
+        <link rel="stylesheet" id="ayu-highlight-css" href="../ayu-highlight.css">
+
+        <!-- Custom theme stylesheets -->
+        <link rel="stylesheet" href="../css/custom.css">
+
+
+        <!-- Provide site root and default themes to javascript -->
+        <script>
+            const path_to_root = "../";
+            const default_light_theme = "light";
+            const default_dark_theme = "navy";
+        </script>
+        <!-- Start loading toc.js asap -->
+        <script src="../toc.js"></script>
+    </head>
+    <body>
+    <div id="body-container">
+        <!-- Work around some values being stored in localStorage wrapped in quotes -->
+        <script>
+            try {
+                let theme = localStorage.getItem('mdbook-theme');
+                let sidebar = localStorage.getItem('mdbook-sidebar');
+
+                if (theme.startsWith('"') && theme.endsWith('"')) {
+                    localStorage.setItem('mdbook-theme', theme.slice(1, theme.length - 1));
+                }
+
+                if (sidebar.startsWith('"') && sidebar.endsWith('"')) {
+                    localStorage.setItem('mdbook-sidebar', sidebar.slice(1, sidebar.length - 1));
+                }
+            } catch (e) { }
+        </script>
+
+        <!-- Set the theme before any content is loaded, prevents flash -->
+        <script>
+            const default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? default_dark_theme : default_light_theme;
+            let theme;
+            try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
+            if (theme === null || theme === undefined) { theme = default_theme; }
+            const html = document.documentElement;
+            html.classList.remove('light')
+            html.classList.add(theme);
+            html.classList.add("js");
+        </script>
+
+        <input type="checkbox" id="sidebar-toggle-anchor" class="hidden">
+
+        <!-- Hide / unhide sidebar before it is displayed -->
+        <script>
+            let sidebar = null;
+            const sidebar_toggle = document.getElementById("sidebar-toggle-anchor");
+            if (document.body.clientWidth >= 1080) {
+                try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
+                sidebar = sidebar || 'visible';
+            } else {
+                sidebar = 'hidden';
+            }
+            sidebar_toggle.checked = sidebar === 'visible';
+            html.classList.remove('sidebar-visible');
+            html.classList.add("sidebar-" + sidebar);
+        </script>
+
+        <nav id="sidebar" class="sidebar" aria-label="Table of contents">
+            <!-- populated by js -->
+            <mdbook-sidebar-scrollbox class="sidebar-scrollbox"></mdbook-sidebar-scrollbox>
+            <noscript>
+                <iframe class="sidebar-iframe-outer" src="../toc.html"></iframe>
+            </noscript>
+            <div id="sidebar-resize-handle" class="sidebar-resize-handle">
+                <div class="sidebar-resize-indicator"></div>
+            </div>
+        </nav>
+
+        <div id="page-wrapper" class="page-wrapper">
+
+            <div class="page">
+                <div id="menu-bar-hover-placeholder"></div>
+                <div id="menu-bar" class="menu-bar sticky">
+                    <div class="left-buttons">
+                        <label id="sidebar-toggle" class="icon-button" for="sidebar-toggle-anchor" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="sidebar">
+                            <i class="fa fa-bars"></i>
+                        </label>
+                        <button id="theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="theme-list">
+                            <i class="fa fa-paint-brush"></i>
+                        </button>
+                        <ul id="theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                            <li role="none"><button role="menuitem" class="theme" id="default_theme">Auto</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="light">Light</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="rust">Rust</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="coal">Coal</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="navy">Navy</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="ayu">Ayu</button></li>
+                        </ul>
+                        <button id="search-toggle" class="icon-button" type="button" title="Search. (Shortkey: s)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="S" aria-controls="searchbar">
+                            <i class="fa fa-search"></i>
+                        </button>
+                    </div>
+
+                    <h1 class="menu-title">Theater Docs</h1>
+
+                    <div class="right-buttons">
+                        <a href="../print.html" title="Print this book" aria-label="Print this book">
+                            <i id="print-button" class="fa fa-print"></i>
+                        </a>
+                        <a href="https://github.com/colinrozzi/theater" title="Git repository" aria-label="Git repository">
+                            <i id="git-repository-button" class="fa fa-github"></i>
+                        </a>
+                        <a href="https://github.com/colinrozzi/theater/edit/main/book/src/introduction/why-theater.md" title="Suggest an edit" aria-label="Suggest an edit">
+                            <i id="git-edit-button" class="fa fa-edit"></i>
+                        </a>
+
+                    </div>
+                </div>
+
+                <div id="search-wrapper" class="hidden">
+                    <form id="searchbar-outer" class="searchbar-outer">
+                        <input type="search" id="searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="searchresults-outer" aria-describedby="searchresults-header">
+                    </form>
+                    <div id="searchresults-outer" class="searchresults-outer hidden">
+                        <div id="searchresults-header" class="searchresults-header"></div>
+                        <ul id="searchresults">
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Apply ARIA attributes after the sidebar and the sidebar toggle button are added to the DOM -->
+                <script>
+                    document.getElementById('sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
+                    document.getElementById('sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
+                    Array.from(document.querySelectorAll('#sidebar a')).forEach(function(link) {
+                        link.setAttribute('tabIndex', sidebar === 'visible' ? 0 : -1);
+                    });
+                </script>
+
+                <div id="content" class="content">
+                    <main>
+                        <h1 id="why-theater"><a class="header" href="#why-theater">Why Theater?</a></h1>
+<h2 id="the-challenge-of-trust-in-modern-software"><a class="header" href="#the-challenge-of-trust-in-modern-software">The Challenge of Trust in Modern Software</a></h2>
+<p>Software has always been built on a foundation of trust. We trust programmers to write code that works correctly, we trust organizations to review that code, and we trust the ecosystem to catch and fix bugs. This trust model has worked reasonably well, but it's about to be severely tested.</p>
+<p>As Large Language Models (LLMs) begin to generate more and more code, we're entering an era where much of the software running in production may never have been reviewed by human eyes. The programmer—that essential link in the chain of trust—is increasingly being replaced by an AI system with different strengths and weaknesses than a human developer.</p>
+<p>This shift raises several critical challenges:</p>
+<ol>
+<li><strong>Quality Validation</strong>: How do we validate the correctness of code when there's simply too much of it to review?</li>
+<li><strong>Failure Containment</strong>: When AI-generated code fails, how do we prevent it from taking down entire systems?</li>
+<li><strong>Debugging Complexity</strong>: How do we debug issues in code we didn't write and may not fully understand?</li>
+<li><strong>Security Boundaries</strong>: How do we ensure that untrusted code can't access or manipulate data it shouldn't?</li>
+</ol>
+<p>These challenges aren't merely theoretical. They represent real problems that organizations will face as they integrate more AI-generated code into their workflows.</p>
+<h2 id="old-solutions"><a class="header" href="#old-solutions">Old Solutions</a></h2>
+<p>It is not like we have been existing in complete free-for-all. The history of software has been a history of building guarantees higher and higher in the abstraction stack. Type systems are a very good example of this. Instead of trusting the developer to write good code, you offload a significant amount of trust to a type system so if the program compiles, you have some guarantees that you have removed some classes of bugs. Automatic memory management is another example, as is something like rust's borrow checker. By building these guarantees into the language, you can offload some of the trust to the compiler.
+The Theater is just an attempt to continue that trend into the runtime. We want to make sure that our computers are safe when they are running code, that they code is as close to correct as we can get it, and that we can trust the code to do what it says it will do. We want to make sure that we can run arbitrary, untrusted code in a safe way, and to be able to recover from failures gracefully.</p>
+<h2 id="the-theater-solution"><a class="header" href="#the-theater-solution">The Theater Solution</a></h2>
+<p>Theater uses three key ideas to provide some guarantees about the code that is running in the system. These ideas are:</p>
+<h3 id="1-webassembly-sandboxing"><a class="header" href="#1-webassembly-sandboxing">1. WebAssembly Sandboxing</a></h3>
+<p>Theater uses WebAssembly Components as its foundation, providing several critical benefits:</p>
+<ul>
+<li><strong>Strong Isolation</strong>: Each actor runs in its own sandbox, preventing direct access to the host system or other actors.</li>
+<li><strong>Deterministic Execution</strong>: WebAssembly's deterministic nature ensures that the same inputs always produce the same outputs, making systems easier to test and debug.</li>
+<li><strong>Language Agnosticism</strong>: While Theater is built in Rust, actors can be written in any language that compiles to WebAssembly, expanding the ecosystem.</li>
+</ul>
+<h3 id="2-erlang-inspired-supervision"><a class="header" href="#2-erlang-inspired-supervision">2. Erlang-Inspired Supervision</a></h3>
+<p>Taking inspiration from Erlang/OTP, Theater implements a comprehensive supervision system:</p>
+<ul>
+<li><strong>Hierarchical Recovery</strong>: Parent actors can monitor their children and restart them if they fail, containing failures to small parts of the system.</li>
+<li><strong>Explicit Error Handling</strong>: The supervision system makes error handling a first-class concern, not an afterthought.</li>
+<li><strong>Lifetime Isolation</strong>: When an actor fails, its state and chain are preserved, allowing for anything from detailed debugging to the resumption of the actor with a previous good state.</li>
+</ul>
+<h3 id="3-chain-of-interactions"><a class="header" href="#3-chain-of-interactions">3. Chain of Interactions</a></h3>
+<p>Theater tracks all information that enters or leaves the WebAssembly sandbox:</p>
+<ul>
+<li><strong>Event Chaining</strong>: Each event is linked to its predecessor, allowing for easy tracing of how a particular state was reached.</li>
+<li><strong>Deterministic Replay</strong>: Because WebAssembly is sandboxed and deterministic, any sequence of events can be replayed exactly on any system.</li>
+<li><strong>Verification</strong>: Each state transition is cryptographically linked to its predecessors, so state received from an external source can be verified.</li>
+</ul>
+<p>By providing a structured environment with strong guarantees, Theater enables developers to build more trustworthy systems, even when the components themselves might not be fully trusted.</p>
+<p>In the following chapters, we'll explore how to use Theater in practice, diving into the details of its architecture and showing how it can be applied to real-world problems.</p>
+
+                    </main>
+
+                    <nav class="nav-wrapper" aria-label="Page navigation">
+                        <!-- Mobile navigation buttons -->
+                            <a rel="prev" href="../introduction/index.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                                <i class="fa fa-angle-left"></i>
+                            </a>
+
+                            <a rel="next prefetch" href="../core-concepts/architecture.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                                <i class="fa fa-angle-right"></i>
+                            </a>
+
+                        <div style="clear: both"></div>
+                    </nav>
+                </div>
+            </div>
+
+            <nav class="nav-wide-wrapper" aria-label="Page navigation">
+                    <a rel="prev" href="../introduction/index.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                        <i class="fa fa-angle-left"></i>
+                    </a>
+
+                    <a rel="next prefetch" href="../core-concepts/architecture.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                        <i class="fa fa-angle-right"></i>
+                    </a>
+            </nav>
+
+        </div>
+
+
+
+
+        <script>
+            window.playground_copyable = true;
+        </script>
+
+
+        <script src="../elasticlunr.min.js"></script>
+        <script src="../mark.min.js"></script>
+        <script src="../searcher.js"></script>
+
+        <script src="../clipboard.min.js"></script>
+        <script src="../highlight.js"></script>
+        <script src="../book.js"></script>
+
+        <!-- Custom JS scripts -->
+
+
+    </div>
+    </body>
+</html>

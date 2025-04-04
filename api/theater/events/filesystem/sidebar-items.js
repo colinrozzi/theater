@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["CommandResult","FilesystemEventData"],"struct":["CommandError","CommandSuccess","FilesystemEvent"]};

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["WasmError"],"struct":["ActorComponent","ActorInstance","Event","MemoryStats","TypedComponentFunction","TypedComponentFunctionNoParams","TypedComponentFunctionNoParamsNoResult","TypedComponentFunctionNoResult"],"trait":["TypedFunction"],"type":["Json"]};

@@ -1,0 +1,651 @@
+<!DOCTYPE HTML>
+<html lang="en" class="light sidebar-visible" dir="ltr">
+    <head>
+        <!-- Book generated using mdBook -->
+        <meta charset="UTF-8">
+        <title>Actor API - Theater Docs</title>
+
+
+        <!-- Custom HTML head -->
+
+        <meta name="description" content="">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="theme-color" content="#ffffff">
+
+        <link rel="icon" href="../../favicon.svg">
+        <link rel="shortcut icon" href="../../favicon.png">
+        <link rel="stylesheet" href="../../css/variables.css">
+        <link rel="stylesheet" href="../../css/general.css">
+        <link rel="stylesheet" href="../../css/chrome.css">
+        <link rel="stylesheet" href="../../css/print.css" media="print">
+
+        <!-- Fonts -->
+        <link rel="stylesheet" href="../../FontAwesome/css/font-awesome.css">
+        <link rel="stylesheet" href="../../fonts/fonts.css">
+
+        <!-- Highlight.js Stylesheets -->
+        <link rel="stylesheet" id="highlight-css" href="../../highlight.css">
+        <link rel="stylesheet" id="tomorrow-night-css" href="../../tomorrow-night.css">
+        <link rel="stylesheet" id="ayu-highlight-css" href="../../ayu-highlight.css">
+
+        <!-- Custom theme stylesheets -->
+        <link rel="stylesheet" href="../../css/custom.css">
+
+
+        <!-- Provide site root and default themes to javascript -->
+        <script>
+            const path_to_root = "../../";
+            const default_light_theme = "light";
+            const default_dark_theme = "navy";
+        </script>
+        <!-- Start loading toc.js asap -->
+        <script src="../../toc.js"></script>
+    </head>
+    <body>
+    <div id="body-container">
+        <!-- Work around some values being stored in localStorage wrapped in quotes -->
+        <script>
+            try {
+                let theme = localStorage.getItem('mdbook-theme');
+                let sidebar = localStorage.getItem('mdbook-sidebar');
+
+                if (theme.startsWith('"') && theme.endsWith('"')) {
+                    localStorage.setItem('mdbook-theme', theme.slice(1, theme.length - 1));
+                }
+
+                if (sidebar.startsWith('"') && sidebar.endsWith('"')) {
+                    localStorage.setItem('mdbook-sidebar', sidebar.slice(1, sidebar.length - 1));
+                }
+            } catch (e) { }
+        </script>
+
+        <!-- Set the theme before any content is loaded, prevents flash -->
+        <script>
+            const default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? default_dark_theme : default_light_theme;
+            let theme;
+            try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
+            if (theme === null || theme === undefined) { theme = default_theme; }
+            const html = document.documentElement;
+            html.classList.remove('light')
+            html.classList.add(theme);
+            html.classList.add("js");
+        </script>
+
+        <input type="checkbox" id="sidebar-toggle-anchor" class="hidden">
+
+        <!-- Hide / unhide sidebar before it is displayed -->
+        <script>
+            let sidebar = null;
+            const sidebar_toggle = document.getElementById("sidebar-toggle-anchor");
+            if (document.body.clientWidth >= 1080) {
+                try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
+                sidebar = sidebar || 'visible';
+            } else {
+                sidebar = 'hidden';
+            }
+            sidebar_toggle.checked = sidebar === 'visible';
+            html.classList.remove('sidebar-visible');
+            html.classList.add("sidebar-" + sidebar);
+        </script>
+
+        <nav id="sidebar" class="sidebar" aria-label="Table of contents">
+            <!-- populated by js -->
+            <mdbook-sidebar-scrollbox class="sidebar-scrollbox"></mdbook-sidebar-scrollbox>
+            <noscript>
+                <iframe class="sidebar-iframe-outer" src="../../toc.html"></iframe>
+            </noscript>
+            <div id="sidebar-resize-handle" class="sidebar-resize-handle">
+                <div class="sidebar-resize-indicator"></div>
+            </div>
+        </nav>
+
+        <div id="page-wrapper" class="page-wrapper">
+
+            <div class="page">
+                <div id="menu-bar-hover-placeholder"></div>
+                <div id="menu-bar" class="menu-bar sticky">
+                    <div class="left-buttons">
+                        <label id="sidebar-toggle" class="icon-button" for="sidebar-toggle-anchor" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="sidebar">
+                            <i class="fa fa-bars"></i>
+                        </label>
+                        <button id="theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="theme-list">
+                            <i class="fa fa-paint-brush"></i>
+                        </button>
+                        <ul id="theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                            <li role="none"><button role="menuitem" class="theme" id="default_theme">Auto</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="light">Light</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="rust">Rust</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="coal">Coal</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="navy">Navy</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="ayu">Ayu</button></li>
+                        </ul>
+                        <button id="search-toggle" class="icon-button" type="button" title="Search. (Shortkey: s)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="S" aria-controls="searchbar">
+                            <i class="fa fa-search"></i>
+                        </button>
+                    </div>
+
+                    <h1 class="menu-title">Theater Docs</h1>
+
+                    <div class="right-buttons">
+                        <a href="../../print.html" title="Print this book" aria-label="Print this book">
+                            <i id="print-button" class="fa fa-print"></i>
+                        </a>
+                        <a href="https://github.com/colinrozzi/theater" title="Git repository" aria-label="Git repository">
+                            <i id="git-repository-button" class="fa fa-github"></i>
+                        </a>
+                        <a href="https://github.com/colinrozzi/theater/edit/main/book/src/core-concepts/store/actor-api.md" title="Suggest an edit" aria-label="Suggest an edit">
+                            <i id="git-edit-button" class="fa fa-edit"></i>
+                        </a>
+
+                    </div>
+                </div>
+
+                <div id="search-wrapper" class="hidden">
+                    <form id="searchbar-outer" class="searchbar-outer">
+                        <input type="search" id="searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="searchresults-outer" aria-describedby="searchresults-header">
+                    </form>
+                    <div id="searchresults-outer" class="searchresults-outer hidden">
+                        <div id="searchresults-header" class="searchresults-header"></div>
+                        <ul id="searchresults">
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Apply ARIA attributes after the sidebar and the sidebar toggle button are added to the DOM -->
+                <script>
+                    document.getElementById('sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
+                    document.getElementById('sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
+                    Array.from(document.querySelectorAll('#sidebar a')).forEach(function(link) {
+                        link.setAttribute('tabIndex', sidebar === 'visible' ? 0 : -1);
+                    });
+                </script>
+
+                <div id="content" class="content">
+                    <main>
+                        <h1 id="store-api-for-actors"><a class="header" href="#store-api-for-actors">Store API for Actors</a></h1>
+<p>This guide explains how actors can interact with the Theater store system through the host interface.</p>
+<h2 id="overview"><a class="header" href="#overview">Overview</a></h2>
+<p>Theater's store system provides actors with a persistent, content-addressable storage mechanism that enables:</p>
+<ul>
+<li>Storing and retrieving arbitrary data</li>
+<li>Sharing content between actors</li>
+<li>Organizing content with labels</li>
+<li>Building higher-level persistence patterns</li>
+</ul>
+<h2 id="webassembly-interface"><a class="header" href="#webassembly-interface">WebAssembly Interface</a></h2>
+<p>The store interface is exposed to WebAssembly actors through the following WIT interface:</p>
+<pre><code class="language-wit">interface store {
+    /// A reference to content in the store
+    record content-ref {
+        hash: string,
+    }
+
+    /// Create a new store
+    new: func() -&gt; result&lt;string, string&gt;;
+
+    /// Store content and return a reference
+    store: func(store-id: string, content: list&lt;u8&gt;) -&gt; result&lt;content-ref, string&gt;;
+
+    /// Retrieve content by reference
+    get: func(store-id: string, content-ref: content-ref) -&gt; result&lt;list&lt;u8&gt;, string&gt;;
+
+    /// Check if content exists
+    exists: func(store-id: string, content-ref: content-ref) -&gt; result&lt;bool, string&gt;;
+
+    /// Label content with a string identifier
+    label: func(store-id: string, label: string, content-ref: content-ref) -&gt; result&lt;_, string&gt;;
+
+    /// Get content reference by label (returns None if label doesn't exist)
+    get-by-label: func(store-id: string, label: string) -&gt; result&lt;option&lt;content-ref&gt;, string&gt;;
+
+    /// Store content and label it in one operation
+    store-at-label: func(store-id: string, label: string, content: list&lt;u8&gt;) -&gt; result&lt;content-ref, string&gt;;
+
+    /// Replace content at a label
+    replace-content-at-label: func(store-id: string, label: string, content: list&lt;u8&gt;) -&gt; result&lt;content-ref, string&gt;;
+
+    /// Replace a content reference at a label
+    replace-at-label: func(store-id: string, label: string, content-ref: content-ref) -&gt; result&lt;_, string&gt;;
+
+    /// Remove a label
+    remove-label: func(store-id: string, label: string) -&gt; result&lt;_, string&gt;;
+
+    /// List all labels in the store
+    list-labels: func(store-id: string) -&gt; result&lt;list&lt;string&gt;, string&gt;;
+
+    /// List all content in the store
+    list-all-content: func(store-id: string) -&gt; result&lt;list&lt;content-ref&gt;, string&gt;;
+
+    /// Calculate total size of all content in the store
+    calculate-total-size: func(store-id: string) -&gt; result&lt;u64, string&gt;;
+}
+</code></pre>
+<h2 id="basic-usage"><a class="header" href="#basic-usage">Basic Usage</a></h2>
+<h3 id="creating-a-store"><a class="header" href="#creating-a-store">Creating a Store</a></h3>
+<p>First, create a new store instance:</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>// Rust example
+use theater::store;
+
+// Create a new store
+let store_id = store::new()?;
+<span class="boring">}</span></code></pre></pre>
+<pre><code class="language-javascript">// JavaScript example
+import { store } from "theater";
+
+// Create a new store
+const storeId = await store.new();
+</code></pre>
+<h3 id="storing-and-retrieving-content"><a class="header" href="#storing-and-retrieving-content">Storing and Retrieving Content</a></h3>
+<p>The most basic operations are storing and retrieving content:</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>// Rust example
+use theater::store;
+
+// Create a store
+let store_id = store::new()?;
+
+// Store some bytes
+let content = b"Hello, world!".to_vec();
+let content_ref = store::store(store_id.clone(), content)?;
+
+// Retrieve the content using its reference
+let retrieved = store::get(store_id.clone(), content_ref.clone())?;
+assert_eq!(retrieved, b"Hello, world!".to_vec());
+
+// Check if content exists
+let exists = store::exists(store_id.clone(), content_ref.clone())?;
+assert!(exists);
+<span class="boring">}</span></code></pre></pre>
+<pre><code class="language-javascript">// JavaScript example
+import { store } from "theater";
+
+// Create a store
+const storeId = await store.new();
+
+// Store some content
+const content = new TextEncoder().encode("Hello, world!");
+const contentRef = await store.store(storeId, content);
+
+// Retrieve the content
+const retrieved = await store.get(storeId, contentRef);
+const text = new TextDecoder().decode(retrieved);
+console.log(text); // "Hello, world!"
+
+// Check if content exists
+const exists = await store.exists(storeId, contentRef);
+console.log(exists); // true
+</code></pre>
+<h3 id="working-with-labels"><a class="header" href="#working-with-labels">Working with Labels</a></h3>
+<p>Labels provide a way to give meaningful names to content references:</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>// Rust example
+use theater::store;
+
+// Create a store
+let store_id = store::new()?;
+
+// Store and label in one operation
+let data = serde_json::to_vec(&amp;my_data)?;
+let content_ref = store::store_at_label(store_id.clone(), "my-actor-data", data)?;
+
+// Retrieve by label later
+let content_ref_opt = store::get_by_label(store_id.clone(), "my-actor-data")?;
+if let Some(content_ref) = content_ref_opt {
+    let data = store::get(store_id.clone(), content_ref)?;
+    let my_data: MyData = serde_json::from_slice(&amp;data)?;
+    // Use the data...
+}
+
+// Update data at a label
+let updated_data = serde_json::to_vec(&amp;new_data)?;
+let new_ref = store::replace_content_at_label(store_id.clone(), "my-actor-data", updated_data)?;
+
+// Remove a label
+store::remove_label(store_id.clone(), "my-actor-data")?;
+<span class="boring">}</span></code></pre></pre>
+<pre><code class="language-javascript">// JavaScript example
+import { store } from "theater";
+
+// Create a store
+const storeId = await store.new();
+
+// Store and label data
+const data = JSON.stringify({ key: "value" });
+const contentRef = await store.storeAtLabel(
+    storeId, 
+    "my-data", 
+    new TextEncoder().encode(data)
+);
+
+// Retrieve by label later
+const contentRefOpt = await store.getByLabel(storeId, "my-data");
+if (contentRefOpt) {
+    const data = await store.get(storeId, contentRefOpt);
+    const jsonData = JSON.parse(new TextDecoder().decode(data));
+    console.log(jsonData.key); // "value"
+}
+
+// Update data
+const updatedData = JSON.stringify({ key: "new-value" });
+const newRef = await store.replaceContentAtLabel(
+    storeId,
+    "my-data", 
+    new TextEncoder().encode(updatedData)
+);
+</code></pre>
+<h2 id="common-patterns"><a class="header" href="#common-patterns">Common Patterns</a></h2>
+<h3 id="actor-state-persistence"><a class="header" href="#actor-state-persistence">Actor State Persistence</a></h3>
+<p>Store your actor's state outside the chain for efficiency:</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>// Rust example
+use theater::store;
+
+// During actor initialization
+fn init() -&gt; Result&lt;(), String&gt; {
+    // Create a store
+    let store_id = store::new()?;
+    
+    // Check if we have stored state
+    let content_ref_opt = store::get_by_label(store_id.clone(), "my-actor-state")?;
+    
+    if let Some(content_ref) = content_ref_opt {
+        // Restore from stored state
+        let state_bytes = store::get(store_id.clone(), content_ref)?;
+        let state: MyState = bincode::deserialize(&amp;state_bytes)
+            .map_err(|e| e.to_string())?;
+        // Use restored state...
+    } else {
+        // Initialize new state
+        let initial_state = MyState::default();
+        let state_bytes = bincode::serialize(&amp;initial_state)
+            .map_err(|e| e.to_string())?;
+        
+        // Store initial state
+        store::store_at_label(store_id.clone(), "my-actor-state", state_bytes)?;
+    }
+    
+    Ok(())
+}
+
+// After state changes
+fn update_stored_state(store_id: &amp;str, state: &amp;MyState) -&gt; Result&lt;(), String&gt; {
+    let state_bytes = bincode::serialize(state)
+        .map_err(|e| e.to_string())?;
+    
+    store::replace_content_at_label(store_id.to_string(), "my-actor-state", state_bytes)?;
+    Ok(())
+}
+<span class="boring">}</span></code></pre></pre>
+<h3 id="versioned-content"><a class="header" href="#versioned-content">Versioned Content</a></h3>
+<p>Implement simple versioning with labeled content:</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>// Rust example
+use theater::store;
+
+// Store a new version
+fn store_version(store_id: &amp;str, version: u32, content: Vec&lt;u8&gt;) -&gt; Result&lt;String, String&gt; {
+    let label = format!("document:v{}", version);
+    let content_ref = store::store_at_label(store_id.to_string(), &amp;label, content)?;
+    
+    // Update latest pointer
+    store::label(store_id.to_string(), "document:latest", &amp;content_ref)?;
+    
+    Ok(content_ref.hash)
+}
+
+// Get specific version
+fn get_version(store_id: &amp;str, version: u32) -&gt; Result&lt;Vec&lt;u8&gt;, String&gt; {
+    let label = format!("document:v{}", version);
+    let content_ref_opt = store::get_by_label(store_id.to_string(), &amp;label)?;
+    
+    if let Some(content_ref) = content_ref_opt {
+        store::get(store_id.to_string(), content_ref)
+    } else {
+        Err(format!("Version {} not found", version))
+    }
+}
+
+// Get latest version
+fn get_latest(store_id: &amp;str) -&gt; Result&lt;Vec&lt;u8&gt;, String&gt; {
+    let content_ref_opt = store::get_by_label(store_id.to_string(), "document:latest")?;
+    
+    if let Some(content_ref) = content_ref_opt {
+        store::get(store_id.to_string(), content_ref)
+    } else {
+        Err("No versions available".to_string())
+    }
+}
+<span class="boring">}</span></code></pre></pre>
+<h3 id="shared-resources"><a class="header" href="#shared-resources">Shared Resources</a></h3>
+<p>Share data between actors using the store:</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>// Actor 1: Create and share configuration
+let store_id = store::new()?;
+let config = Config { /* ... */ };
+let config_bytes = serde_json::to_vec(&amp;config)?;
+let content_ref = store::store_at_label(store_id.clone(), "shared:config", config_bytes)?;
+
+// Send store_id to Actor 2
+send_message_to_actor("actor2", { "store_id": store_id });
+
+// Actor 2: Access shared configuration
+fn handle_message(message) {
+    let store_id = message.store_id;
+    let content_ref_opt = store::get_by_label(store_id, "shared:config")?;
+    
+    if let Some(content_ref) = content_ref_opt {
+        let config_bytes = store::get(store_id, content_ref)?;
+        let config: Config = serde_json::from_slice(&amp;config_bytes)?;
+        // Use the shared config...
+    }
+}
+<span class="boring">}</span></code></pre></pre>
+<h2 id="best-practices"><a class="header" href="#best-practices">Best Practices</a></h2>
+<h3 id="content-organization"><a class="header" href="#content-organization">Content Organization</a></h3>
+<p>Develop a consistent labeling scheme:</p>
+<ol>
+<li>
+<p><strong>Namespaced Labels</strong>: Use prefixes to group related content</p>
+<ul>
+<li><code>actor:{id}:state</code> - Actor-specific state</li>
+<li><code>shared:{resource}</code> - Resources shared between actors</li>
+<li><code>config:{component}</code> - Configuration data</li>
+</ul>
+</li>
+<li>
+<p><strong>Label Granularity</strong>: Balance between too many and too few labels</p>
+<ul>
+<li>Too many: Management overhead</li>
+<li>Too few: Loss of organization</li>
+</ul>
+</li>
+</ol>
+<h3 id="efficient-content-storage"><a class="header" href="#efficient-content-storage">Efficient Content Storage</a></h3>
+<p>Optimize your use of the store:</p>
+<ol>
+<li>
+<p><strong>Content Size</strong>: The store works best with small to medium data (&lt; 10MB)</p>
+<ul>
+<li>For larger data, consider splitting into chunks</li>
+</ul>
+</li>
+<li>
+<p><strong>Deduplication</strong>: Take advantage of content-addressing</p>
+<ul>
+<li>Same content is stored only once</li>
+<li>Use references to point to the same content</li>
+</ul>
+</li>
+<li>
+<p><strong>Batching</strong>: Minimize store operations by batching changes</p>
+<ul>
+<li>Accumulate changes before storing</li>
+</ul>
+</li>
+</ol>
+<h3 id="error-handling"><a class="header" href="#error-handling">Error Handling</a></h3>
+<p>Always handle store errors appropriately:</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>match store::get_by_label(store_id.clone(), "my-label") {
+    Ok(content_ref_opt) =&gt; {
+        if let Some(content_ref) = content_ref_opt {
+            // Process content...
+        } else {
+            // Handle missing label content
+        }
+    },
+    Err(e) =&gt; {
+        // Handle store error
+        eprintln!("Store error: {}", e);
+    }
+}
+<span class="boring">}</span></code></pre></pre>
+<h2 id="advanced-use-cases"><a class="header" href="#advanced-use-cases">Advanced Use Cases</a></h2>
+<h3 id="content-based-addressing"><a class="header" href="#content-based-addressing">Content-Based Addressing</a></h3>
+<p>Implement data structures using content references:</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>// Content-addressed tree
+struct TreeNode {
+    value: String,
+    left_ref: Option&lt;String&gt;,  // ContentRef hash
+    right_ref: Option&lt;String&gt;, // ContentRef hash
+}
+
+// Store a node
+fn store_node(store_id: &amp;str, node: &amp;TreeNode) -&gt; Result&lt;String, String&gt; {
+    let bytes = serde_json::to_vec(node).map_err(|e| e.to_string())?;
+    let content_ref = store::store(store_id.to_string(), bytes)?;
+    Ok(content_ref.hash)
+}
+
+// Load a node
+fn load_node(store_id: &amp;str, hash: &amp;str) -&gt; Result&lt;TreeNode, String&gt; {
+    let content_ref = ContentRef { hash: hash.to_string() };
+    let bytes = store::get(store_id.to_string(), content_ref)?;
+    serde_json::from_slice(&amp;bytes).map_err(|e| e.to_string())
+}
+
+// Create a simple tree
+let store_id = store::new()?;
+
+let leaf1 = TreeNode { 
+    value: "Leaf 1".to_string(), 
+    left_ref: None, 
+    right_ref: None 
+};
+let leaf2 = TreeNode { 
+    value: "Leaf 2".to_string(), 
+    left_ref: None, 
+    right_ref: None 
+};
+
+let leaf1_ref = store_node(&amp;store_id, &amp;leaf1)?;
+let leaf2_ref = store_node(&amp;store_id, &amp;leaf2)?;
+
+let root = TreeNode {
+    value: "Root".to_string(),
+    left_ref: Some(leaf1_ref),
+    right_ref: Some(leaf2_ref),
+};
+
+let root_ref = store_node(&amp;store_id, &amp;root)?;
+let content_ref = ContentRef { hash: root_ref };
+store::label(store_id.clone(), "tree:root", content_ref)?;
+<span class="boring">}</span></code></pre></pre>
+<h3 id="cached-computations"><a class="header" href="#cached-computations">Cached Computations</a></h3>
+<p>Cache expensive computation results:</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>// Create a store to use for caching
+let store_id = store::new()?;
+
+// Check if we have cached result
+let cache_label = format!("cache:computation:{}", input_hash);
+let content_ref_opt = store::get_by_label(store_id.clone(), &amp;cache_label)?;
+
+if let Some(content_ref) = content_ref_opt {
+    // Use cached result
+    let result_bytes = store::get(store_id.clone(), content_ref)?;
+    let result: ComputationResult = deserialize(&amp;result_bytes)?;
+    return Ok(result);
+}
+
+// Perform expensive computation
+let result = expensive_computation(input)?;
+
+// Cache the result
+let result_bytes = serialize(&amp;result)?;
+store::store_at_label(store_id.clone(), &amp;cache_label, result_bytes)?;
+
+Ok(result)
+<span class="boring">}</span></code></pre></pre>
+<h2 id="limitations-and-considerations"><a class="header" href="#limitations-and-considerations">Limitations and Considerations</a></h2>
+<ol>
+<li><strong>No Transactions</strong>: Operations are individual and cannot be rolled back</li>
+<li><strong>No Query System</strong>: Content can only be retrieved by explicit reference or label</li>
+<li><strong>Performance</strong>: Consider the overhead of store operations in performance-critical code</li>
+<li><strong>Memory Usage</strong>: Be mindful of data size to avoid excessive memory consumption</li>
+</ol>
+<h2 id="summary"><a class="header" href="#summary">Summary</a></h2>
+<p>The store API provides actors with powerful persistence capabilities while maintaining the integrity and security of the Theater system. By following these patterns and best practices, you can effectively leverage the store for your actor's data management needs.</p>
+
+                    </main>
+
+                    <nav class="nav-wrapper" aria-label="Page navigation">
+                        <!-- Mobile navigation buttons -->
+                            <a rel="prev" href="../../core-concepts/store/index.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                                <i class="fa fa-angle-left"></i>
+                            </a>
+
+                            <a rel="next prefetch" href="../../core-concepts/store/usage-patterns.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                                <i class="fa fa-angle-right"></i>
+                            </a>
+
+                        <div style="clear: both"></div>
+                    </nav>
+                </div>
+            </div>
+
+            <nav class="nav-wide-wrapper" aria-label="Page navigation">
+                    <a rel="prev" href="../../core-concepts/store/index.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                        <i class="fa fa-angle-left"></i>
+                    </a>
+
+                    <a rel="next prefetch" href="../../core-concepts/store/usage-patterns.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                        <i class="fa fa-angle-right"></i>
+                    </a>
+            </nav>
+
+        </div>
+
+
+
+
+        <script>
+            window.playground_copyable = true;
+        </script>
+
+
+        <script src="../../elasticlunr.min.js"></script>
+        <script src="../../mark.min.js"></script>
+        <script src="../../searcher.js"></script>
+
+        <script src="../../clipboard.min.js"></script>
+        <script src="../../highlight.js"></script>
+        <script src="../../book.js"></script>
+
+        <!-- Custom JS scripts -->
+
+
+    </div>
+    </body>
+</html>
