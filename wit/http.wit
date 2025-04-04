@@ -1,7 +1,67 @@
 package ntwk:theater;
 
+/// # HTTP Framework
+///
 /// The HTTP framework interface provides a comprehensive API for creating,
 /// configuring, and managing HTTP and WebSocket servers from within WebAssembly actors.
+///
+/// ## Purpose
+///
+/// This interface allows actors to act as HTTP servers, handling web requests directly
+/// from within the WebAssembly sandbox. It provides a complete set of functionality for
+/// creating servers, defining routes, processing requests, and managing WebSockets,
+/// enabling actors to serve web content and APIs while maintaining the security 
+/// guarantees of the Theater system.
+///
+/// ## Example
+///
+/// ```rust
+/// use ntwk::theater::http_framework;
+/// use ntwk::theater::http_types::{server_config, http_response};
+/// 
+/// // Create and start an HTTP server
+/// fn start_http_server() -> Result<u64, String> {
+///     // Configure a server on port 8080
+///     let config = server_config {
+///         port: Some(8080),
+///         host: Some("127.0.0.1".to_string()),
+///         tls_config: None,
+///     };
+///     
+///     // Create the server
+///     let server_id = http_framework::create_server(config)?;
+///     
+///     // Register a handler function
+///     let handler_id = http_framework::register_handler("handle_request")?;
+///     
+///     // Add a route
+///     http_framework::add_route(server_id, "/api/v1/hello", "GET", handler_id)?;
+///     
+///     // Start the server
+///     http_framework::start_server(server_id)?;
+///     
+///     Ok(server_id)
+/// }
+/// ```
+///
+/// ## Security
+///
+/// The HTTP framework enforces the Theater sandboxing model while allowing controlled
+/// access to network resources. All HTTP traffic is mediated by the Theater runtime,
+/// which can enforce rate limiting, connection limits, and other security policies.
+/// 
+/// Actors using this interface cannot directly access the network stack and are limited
+/// to the specific HTTP/WebSocket functionality provided here. The runtime tracks all
+/// HTTP activity in the event chain for complete auditability.
+///
+/// ## Implementation Notes
+///
+/// - The HTTP server implementation is backed by the runtime's event loop and does not
+///   spawn additional threads within the actor.
+/// - Server IDs, handler IDs, and other identifiers are managed by the runtime and
+///   are valid only within the context of the specific actor instance.
+/// - WebSocket support is implemented via callbacks to handler functions within the
+///   WebAssembly component.
 interface http-framework {
     use types.{state};
     use http-types.{http-request, http-response};
@@ -9,47 +69,196 @@ interface http-framework {
     use websocket-types.{websocket-message};
     
     // Core types
+    /// Unique identifier for an HTTP server instance
     type server-id = u64;
+    
+    /// Unique identifier for a registered handler function
     type handler-id = u64;
+    
+    /// Unique identifier for a registered route
     type route-id = u64;
+    
+    /// Unique identifier for registered middleware
     type middleware-id = u64;
     
     // Server lifecycle
-    /// Create a new HTTP server with the given configuration
+    /// # Create a new HTTP server
+    /// 
+    /// Creates a new HTTP server with the given configuration but does not start it.
+    /// The server will be ready to have routes and handlers added to it.
+    ///
+    /// ## Parameters
+    ///
+    /// * `config` - Configuration for the server including port, host and TLS settings
+    ///
+    /// ## Returns
+    ///
+    /// * `Ok(server-id)` - Unique identifier for the created server
+    /// * `Err(string)` - Error message if server creation fails
+    ///
+    /// ## Security
+    ///
+    /// The runtime will validate that the requested port is allowed by the actor's
+    /// permissions before creating the server.
     create-server: func(config: server-config) -> result<server-id, string>;
     
-    /// Get information about a server
+    /// # Get information about a server
+    ///
+    /// Retrieves the current status and configuration of an HTTP server.
+    ///
+    /// ## Parameters
+    ///
+    /// * `server-id` - The ID of the server to get information for
+    ///
+    /// ## Returns
+    ///
+    /// * `Ok(server-info)` - Information about the server
+    /// * `Err(string)` - Error message if retrieval fails
     get-server-info: func(server-id: server-id) -> result<server-info, string>;
     
-    /// Start a server
+    /// # Start a server
+    ///
+    /// Starts a previously created HTTP server, making it begin listening for connections.
+    ///
+    /// ## Parameters
+    ///
+    /// * `server-id` - The ID of the server to start
+    ///
+    /// ## Returns
+    ///
+    /// * `Ok(u16)` - The port number the server is listening on (may be different from
+    ///   requested port if port 0 was specified in config)
+    /// * `Err(string)` - Error message if server start fails
     start-server: func(server-id: server-id) -> result<u16, string>;
     
-    /// Stop a server
+    /// # Stop a server
+    ///
+    /// Stops a running HTTP server, closing all active connections and stopping it from
+    /// accepting new connections. The server can be restarted later.
+    ///
+    /// ## Parameters
+    ///
+    /// * `server-id` - The ID of the server to stop
+    ///
+    /// ## Returns
+    ///
+    /// * `Ok(_)` - Server was successfully stopped
+    /// * `Err(string)` - Error message if stop operation fails
     stop-server: func(server-id: server-id) -> result<_, string>;
     
-    /// Remove a server completely
+    /// # Remove a server completely
+    ///
+    /// Destroys an HTTP server, releasing all resources associated with it. The server
+    /// must be stopped before it can be destroyed.
+    ///
+    /// ## Parameters
+    ///
+    /// * `server-id` - The ID of the server to destroy
+    ///
+    /// ## Returns
+    ///
+    /// * `Ok(_)` - Server was successfully destroyed
+    /// * `Err(string)` - Error message if destroy operation fails
     destroy-server: func(server-id: server-id) -> result<_, string>;
     
     // Handler registration
-    /// Register a handler by name (the name is used to identify the handler function in the component)
+    /// # Register a handler by name
+    ///
+    /// Registers a function within the WebAssembly component to be used as an HTTP handler.
+    /// The handler name must correspond to an exported function with the correct signature.
+    ///
+    /// ## Parameters
+    ///
+    /// * `handler-name` - The name of the handler function in the component
+    ///
+    /// ## Returns
+    ///
+    /// * `Ok(handler-id)` - ID that can be used to reference this handler in other functions
+    /// * `Err(string)` - Error message if registration fails
     register-handler: func(handler-name: string) -> result<handler-id, string>;
     
     // Route management
-    /// Add a route to a server
+    /// # Add a route to a server
+    ///
+    /// Adds a new route to an HTTP server, mapping a URL path and method to a handler function.
+    ///
+    /// ## Parameters
+    ///
+    /// * `server-id` - The ID of the server to add the route to
+    /// * `path` - The URL path to handle (e.g., "/api/users")
+    /// * `method` - The HTTP method to handle (e.g., "GET", "POST")
+    /// * `handler-id` - The ID of the handler function to call for this route
+    ///
+    /// ## Returns
+    ///
+    /// * `Ok(route-id)` - ID that can be used to reference or remove this route
+    /// * `Err(string)` - Error message if route addition fails
     add-route: func(server-id: server-id, path: string, method: string, handler-id: handler-id) -> result<route-id, string>;
     
-    /// Remove a route
+    /// # Remove a route
+    ///
+    /// Removes a previously added route from a server.
+    ///
+    /// ## Parameters
+    ///
+    /// * `route-id` - The ID of the route to remove
+    ///
+    /// ## Returns
+    ///
+    /// * `Ok(_)` - Route was successfully removed
+    /// * `Err(string)` - Error message if removal fails
     remove-route: func(route-id: route-id) -> result<_, string>;
     
     // Middleware
-    /// Add middleware to a server path
+    /// # Add middleware to a server path
+    ///
+    /// Adds middleware to process requests before they reach the route handler.
+    /// Middleware can modify requests or short-circuit the request handling.
+    ///
+    /// ## Parameters
+    ///
+    /// * `server-id` - The ID of the server to add middleware to
+    /// * `path` - The URL path pattern to apply middleware to
+    /// * `handler-id` - The ID of the handler function to use as middleware
+    ///
+    /// ## Returns
+    ///
+    /// * `Ok(middleware-id)` - ID that can be used to reference or remove this middleware
+    /// * `Err(string)` - Error message if middleware addition fails
     add-middleware: func(server-id: server-id, path: string, handler-id: handler-id) -> result<middleware-id, string>;
     
-    /// Remove middleware
+    /// # Remove middleware
+    ///
+    /// Removes previously added middleware from a server.
+    ///
+    /// ## Parameters
+    ///
+    /// * `middleware-id` - The ID of the middleware to remove
+    ///
+    /// ## Returns
+    ///
+    /// * `Ok(_)` - Middleware was successfully removed
+    /// * `Err(string)` - Error message if removal fails
     remove-middleware: func(middleware-id: middleware-id) -> result<_, string>;
     
     // WebSocket support
-    /// Enable WebSocket support on a path
+    /// # Enable WebSocket support on a path
+    ///
+    /// Configures a path on the server to accept WebSocket connections and
+    /// registers handlers for WebSocket events.
+    ///
+    /// ## Parameters
+    ///
+    /// * `server-id` - The ID of the server to enable WebSockets on
+    /// * `path` - The URL path to accept WebSocket connections on
+    /// * `connect-handler-id` - Optional handler for connection events
+    /// * `message-handler-id` - Required handler for message events
+    /// * `disconnect-handler-id` - Optional handler for disconnection events
+    ///
+    /// ## Returns
+    ///
+    /// * `Ok(_)` - WebSocket support was successfully enabled
+    /// * `Err(string)` - Error message if operation fails
     enable-websocket: func(
         server-id: server-id, 
         path: string, 
@@ -58,19 +267,105 @@ interface http-framework {
         disconnect-handler-id: option<handler-id>
     ) -> result<_, string>;
     
-    /// Disable WebSocket support on a path
+    /// # Disable WebSocket support on a path
+    ///
+    /// Removes WebSocket support from a path, closing any active connections.
+    ///
+    /// ## Parameters
+    ///
+    /// * `server-id` - The ID of the server to modify
+    /// * `path` - The URL path to disable WebSocket support on
+    ///
+    /// ## Returns
+    ///
+    /// * `Ok(_)` - WebSocket support was successfully disabled
+    /// * `Err(string)` - Error message if operation fails
     disable-websocket: func(server-id: server-id, path: string) -> result<_, string>;
     
-    /// Send a message to a specific WebSocket connection
+    /// # Send a message to a specific WebSocket connection
+    ///
+    /// Sends a message to a client connected via WebSocket.
+    ///
+    /// ## Parameters
+    ///
+    /// * `server-id` - The ID of the server with the connection
+    /// * `connection-id` - The ID of the specific WebSocket connection
+    /// * `message` - The message to send to the client
+    ///
+    /// ## Returns
+    ///
+    /// * `Ok(_)` - Message was successfully sent
+    /// * `Err(string)` - Error message if send fails
     send-websocket-message: func(server-id: server-id, connection-id: u64, message: websocket-message) -> result<_, string>;
     
-    /// Close a specific WebSocket connection
+    /// # Close a specific WebSocket connection
+    ///
+    /// Closes a single WebSocket connection.
+    ///
+    /// ## Parameters
+    ///
+    /// * `server-id` - The ID of the server with the connection
+    /// * `connection-id` - The ID of the specific WebSocket connection to close
+    ///
+    /// ## Returns
+    ///
+    /// * `Ok(_)` - Connection was successfully closed
+    /// * `Err(string)` - Error message if close operation fails
     close-websocket: func(server-id: server-id, connection-id: u64) -> result<_, string>;
 }
 
 
+/// # HTTP Handlers Interface
+///
 /// The HTTP handlers interface defines the callback functions that are used
 /// to handle HTTP requests and WebSocket events.
+///
+/// ## Purpose
+///
+/// This interface establishes the contract for handler functions that process HTTP requests 
+/// and WebSocket events. These functions are implemented by the WebAssembly component and 
+/// called by the Theater runtime in response to incoming requests and events.
+///
+/// ## Example
+///
+/// ```rust
+/// use ntwk::theater::http_handlers::Guest;
+/// use ntwk::theater::http_types::{http_request, http_response};
+/// use ntwk::theater::websocket_types::websocket_message;
+/// 
+/// struct MyHttpHandlers;
+/// 
+/// impl Guest for MyHttpHandlers {
+///     fn handle_request(state: Vec<u8>, params: (u64, http_request)) 
+///         -> Result<(Vec<u8>, (http_response,)), String> {
+///         // Process the HTTP request and return a response
+///         let (handler_id, request) = params;
+///         
+///         // Create a simple response
+///         let response = http_response {
+///             status: 200,
+///             headers: vec![("content-type".to_string(), "text/plain".to_string())],
+///             body: Some("Hello, World!".as_bytes().to_vec()),
+///         };
+///         
+///         Ok((state, (response,)))
+///     }
+///     
+///     // Implement other required functions...
+/// }
+/// ```
+///
+/// ## Security
+///
+/// Handler functions receive data from untrusted external sources and must carefully 
+/// validate all input. The Theater runtime monitors handler execution for timeouts
+/// and resource usage to prevent denial-of-service attacks.
+///
+/// ## Implementation Notes
+///
+/// - All handler functions receive and return the actor's state to allow stateful processing
+/// - Handlers should be efficient as they may be called frequently
+/// - Errors returned from handlers are logged and may trigger actor supervision responses
 interface http-handlers {
     use types.{state};
     use http-types.{http-request, http-response};
@@ -78,56 +373,245 @@ interface http-handlers {
     use http-types.{middleware-result};
     use http-framework.{handler-id};
     
-    /// Called to handle an HTTP request
+    /// # Handle an HTTP request
+    ///
+    /// Called to process an incoming HTTP request and generate a response.
+    ///
+    /// ## Parameters
+    ///
+    /// * `state` - The current actor state
+    /// * `params` - Tuple containing:
+    ///   * `handler-id` - ID of the registered handler being called
+    ///   * `http-request` - The incoming HTTP request to handle
+    ///
+    /// ## Returns
+    ///
+    /// * `Ok((state, (http-response,)))` - Updated state and the HTTP response to send
+    /// * `Err(string)` - Error message if request handling fails
     handle-request: func(state: state, params: tuple<handler-id, http-request>) -> result<tuple<state, tuple<http-response>>, string>;
     
-    /// Called to process a request through middleware
+    /// # Process a request through middleware
+    ///
+    /// Called to process an HTTP request through middleware before it reaches a route handler.
+    ///
+    /// ## Parameters
+    ///
+    /// * `state` - The current actor state
+    /// * `params` - Tuple containing:
+    ///   * `handler-id` - ID of the registered middleware handler being called
+    ///   * `http-request` - The incoming HTTP request to process
+    ///
+    /// ## Returns
+    ///
+    /// * `Ok((state, (middleware-result,)))` - Updated state and middleware processing result
+    /// * `Err(string)` - Error message if middleware processing fails
     handle-middleware: func(state: state, params: tuple<handler-id, http-request>) -> result<tuple<state, tuple<middleware-result>>, string>;
     
-    /// Called when a WebSocket connection is established
+    /// # Handle WebSocket connection event
+    ///
+    /// Called when a new WebSocket connection is established.
+    ///
+    /// ## Parameters
+    ///
+    /// * `state` - The current actor state
+    /// * `params` - Tuple containing:
+    ///   * `handler-id` - ID of the registered connect handler being called
+    ///   * `u64` - Unique connection ID for this WebSocket connection
+    ///   * `string` - The URL path that was connected to
+    ///   * `option<string>` - Optional protocol specified by the client
+    ///
+    /// ## Returns
+    ///
+    /// * `Ok((state,))` - Updated actor state
+    /// * `Err(string)` - Error message if connection handling fails
     handle-websocket-connect: func(state: state, params: tuple<handler-id, u64, string, option<string>>) -> result<tuple<state>, string>;
     
-    /// Called when a WebSocket message is received
+    /// # Handle WebSocket message event
+    ///
+    /// Called when a message is received on a WebSocket connection.
+    ///
+    /// ## Parameters
+    ///
+    /// * `state` - The current actor state
+    /// * `params` - Tuple containing:
+    ///   * `handler-id` - ID of the registered message handler being called
+    ///   * `u64` - Connection ID that received the message
+    ///   * `websocket-message` - The message that was received
+    ///
+    /// ## Returns
+    ///
+    /// * `Ok((state, (list<websocket-message>,)))` - Updated state and optional response messages
+    /// * `Err(string)` - Error message if message handling fails
     handle-websocket-message: func(state: state, params: tuple<handler-id, u64, websocket-message>) -> result<tuple<state, tuple<list<websocket-message>>>, string>;
     
-    /// Called when a WebSocket connection is closed
+    /// # Handle WebSocket disconnection event
+    ///
+    /// Called when a WebSocket connection is closed.
+    ///
+    /// ## Parameters
+    ///
+    /// * `state` - The current actor state
+    /// * `params` - Tuple containing:
+    ///   * `handler-id` - ID of the registered disconnect handler being called
+    ///   * `u64` - Connection ID that was closed
+    ///
+    /// ## Returns
+    ///
+    /// * `Ok((state,))` - Updated actor state
+    /// * `Err(string)` - Error message if disconnect handling fails
     handle-websocket-disconnect: func(state: state, params: tuple<handler-id, u64>) -> result<tuple<state>, string>;
 }
 
+/// # HTTP Client Interface
+///
+/// Provides functionality for actors to make outbound HTTP requests.
+///
+/// ## Purpose
+///
+/// This interface allows actors to communicate with external HTTP services,
+/// enabling integration with external APIs and services while maintaining
+/// the security guarantees of the Theater system.
+///
+/// ## Example
+///
+/// ```rust
+/// use ntwk::theater::http_client;
+/// use ntwk::theater::http_types::{http_request, http_response};
+/// 
+/// async fn fetch_data() -> Result<String, String> {
+///     // Create a request
+///     let request = http_request {
+///         method: "GET".to_string(),
+///         uri: "https://api.example.com/data".to_string(),
+///         headers: vec![],
+///         body: None,
+///     };
+///     
+///     // Send the request
+///     let response = http_client::send_http(request)?;
+///     
+///     // Process the response
+///     if response.status == 200 {
+///         if let Some(body) = response.body {
+///             let text = String::from_utf8(body)
+///                 .map_err(|e| format!("Invalid UTF-8: {}", e))?;
+///             Ok(text)
+///         } else {
+///             Ok("".to_string())
+///         }
+///     } else {
+///         Err(format!("HTTP error: {}", response.status))
+///     }
+/// }
+/// ```
+///
+/// ## Security
+///
+/// The HTTP client enforces the Theater security model:
+/// - All outbound requests are logged in the event chain
+/// - The runtime may enforce rate limiting, URL restrictions, etc.
+/// - TLS certificates are validated by the runtime
+/// - Response sizes may be limited to prevent memory exhaustion
 interface http-client {
     use http-types.{http-request, http-response};
 
+    /// # Send an HTTP request
+    ///
+    /// Sends an outbound HTTP request and returns the response.
+    ///
+    /// ## Parameters
+    ///
+    /// * `req` - The HTTP request to send
+    ///
+    /// ## Returns
+    ///
+    /// * `Ok(http-response)` - The response received from the server
+    /// * `Err(string)` - Error message if the request fails
+    ///
+    /// ## Security
+    ///
+    /// The runtime may restrict which domains can be accessed based on
+    /// the actor's permissions. All requests are recorded in the event chain.
     send-http: func(req: http-request) -> result<http-response, string>;
 }
 
-/// Types used by the HTTP framework
+/// # HTTP Types
+///
+/// Types used by the HTTP framework for requests, responses, and configuration.
+///
+/// ## Purpose
+///
+/// This interface defines the data structures used throughout the HTTP subsystem,
+/// providing a consistent type system for HTTP operations. These types are used
+/// by both the framework and handlers interfaces.
+///
+/// ## Example
+///
+/// ```rust
+/// use ntwk::theater::http_types::{http_request, http_response, server_config};
+/// 
+/// // Create a server configuration
+/// let config = server_config {
+///     port: Some(8080),
+///     host: Some("127.0.0.1".to_string()),
+///     tls_config: None,
+/// };
+/// 
+/// // Create an HTTP response
+/// let response = http_response {
+///     status: 200,
+///     headers: vec![
+///         ("content-type".to_string(), "application/json".to_string()),
+///         ("x-powered-by".to_string(), "Theater".to_string()),
+///     ],
+///     body: Some(b"{\"message\":\"Hello, World!\"}".to_vec()),
+/// };
+/// ```
 interface http-types {
+    /// Raw binary data type
     type bytes = list<u8>;
 
+    /// # HTTP Request
+    ///
+    /// Represents an incoming HTTP request.
     record http-request {
+        /// HTTP method (GET, POST, PUT, DELETE, etc.)
         method: string,
+        /// Full request URI including query parameters
         uri: string,
+        /// List of request headers as key-value pairs
         headers: list<tuple<string, string>>,
+        /// Optional request body as binary data
         body: option<bytes>
     }
 
+    /// # HTTP Response
+    ///
+    /// Represents an outgoing HTTP response.
     record http-response {
+        /// HTTP status code (e.g., 200, 404, 500)
         status: u16,
+        /// List of response headers as key-value pairs
         headers: list<tuple<string, string>>,
+        /// Optional response body as binary data
         body: option<bytes>
     }
     
-    /// Configuration for an HTTP server
+    /// # Server Configuration
+    ///
+    /// Configuration for an HTTP server instance.
     record server-config {
         /// Port to listen on, 0 means system-assigned
         port: option<u16>,
         /// Host address to bind to
         host: option<string>,
-        /// TLS configuration
+        /// TLS configuration for HTTPS
         tls-config: option<tls-config>,
     }
     
-    /// TLS configuration
+    /// # TLS Configuration
+    ///
+    /// Configuration for HTTPS (TLS/SSL) support.
     record tls-config {
         /// Path to the certificate file
         cert-path: string,
@@ -135,7 +619,9 @@ interface http-types {
         key-path: string,
     }
     
-    /// Information about a server
+    /// # Server Information
+    ///
+    /// Information about a running HTTP server.
     record server-info {
         /// Server ID
         id: u64,
@@ -153,20 +639,51 @@ interface http-types {
         websocket-enabled: bool,
     }
     
-    /// Result from middleware processing
+    /// # Middleware Processing Result
+    ///
+    /// Result from middleware processing a request.
     record middleware-result {
         /// Whether to continue processing the request
         proceed: bool,
-        /// The modified request
+        /// The potentially modified request
         request: http-request,
     }
 }
 
-/// Types used for WebSocket communication
+/// # WebSocket Types
+///
+/// Types used for WebSocket communication.
+///
+/// ## Purpose
+///
+/// This interface defines the data structures used for WebSocket connections
+/// and messages, providing a type-safe way to handle real-time communication.
+///
+/// ## Example
+///
+/// ```rust
+/// use ntwk::theater::websocket_types::{websocket_message, message_type};
+/// 
+/// // Create a text message to send
+/// let message = websocket_message {
+///     ty: message_type::text,
+///     data: None,
+///     text: Some("Hello, WebSocket!".to_string()),
+/// };
+/// 
+/// // Create a binary message to send
+/// let binary_message = websocket_message {
+///     ty: message_type::binary,
+///     data: Some(vec![0x01, 0x02, 0x03, 0x04]),
+///     text: None,
+/// };
+/// ```
 interface websocket-types {
-    /// The type of WebSocket message/event
+    /// # WebSocket Message Type
+    ///
+    /// The type of WebSocket message or event.
     variant message-type {
-        /// A text message
+        /// A text message (UTF-8 encoded)
         text,
         /// A binary message
         binary,
@@ -178,11 +695,13 @@ interface websocket-types {
         ping,
         /// A pong message (response to ping)
         pong,
-        /// Any other message type
+        /// Any other message type with string identifier
         other(string),
     }
 
-    /// Represents a message sent or received over a WebSocket connection
+    /// # WebSocket Message
+    ///
+    /// Represents a message sent or received over a WebSocket connection.
     record websocket-message {
         /// The type of the message
         ty: message-type,
