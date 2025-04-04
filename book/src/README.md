@@ -1,38 +1,31 @@
 # Theater Documentation
 
-## Overview
-- [Why Theater?](why-theater.md) - Project thesis and core concepts
-- [Quick Start](../README.md) - Getting started with Theater
+Welcome to the Theater documentation! This guide will help you understand and use Theater, a WebAssembly-based actor system designed for trustworthy software in the age of AI-generated code.
 
-## Core Concepts
-- [Actor System Architecture](architecture.md) - Core components and message flow
-- [State Management & Hash Chains](state-management.md) - Verifiable state transitions
-- [Store System](store/README.md) - Content-addressable storage for actors
-- [Actor ID System](actor-ids.md) - UUID-based identification system
-- [Supervision Model](supervision.md) - Actor lifecycle and error handling
-- [Interface System](interface-system.md) - Actor interfaces and message handling
+## What's Inside
 
-## Developer Guides
-- [Building Actors](building-actors.md) - Guide to creating Theater actors
-- [Building Host Functions](building-host-functions.md) - Extending Theater's host capabilities
-- [Making Changes](making-changes.md) - Process for contributing to Theater
-- [Current Changes](../changes/in-progress.md) - Overview of work in progress
+The documentation is organized into several sections:
 
-## Component Reference
-- [API Documentation](api.md) - Complete API reference with examples
-- [Configuration Reference](configuration.md) - Detailed configuration guide
-- [Host Services](host-services.md) - Available host services and their usage
-- [Handlers](handlers.md) - Available handler types and configurations
+- [Introduction](introduction/README.md): Project overview and motivation
+- [Core Concepts](core-concepts/architecture.md): The fundamental ideas behind Theater
+- [User Guide](user-guide/configuration.md): Using Theater in your projects
+- [Development](development/building-actors.md): Building actors and extending Theater
+- [Services](services/http-framework.md): Built-in services and integrations
+- [API Reference](api-reference/api.md): Complete API documentation
 
-## Additional Resources
-- [WebSocket Server](websocket-server.md) - Using the WebSocket server capability
-- [Troubleshooting Guide](troubleshooting.md) - Common issues and solutions
+## Getting Started
+
+If you're new to Theater, we recommend starting with:
+
+1. [Why Theater?](introduction/why-theater.md) - Learn about the project's purpose
+2. [Architecture Overview](core-concepts/architecture.md) - Understand the system design
+3. [Configuration Guide](user-guide/configuration.md) - Set up your first Theater project
 
 ## Recent Updates
-- **February 2025**: Added complete store system documentation with examples and patterns
-- **February 2025**: Updated architecture documentation with detailed component descriptions
-- **February 2025**: Enhanced state management documentation with implementation details
-- **February 2025**: Expanded supervision documentation with pattern examples
-- **February 2025**: Updated interface system documentation to reflect current WIT interfaces
-- **February 2025**: Improved WebSocket server documentation with usage patterns
-- **February 2025**: Updated handler documentation with current implementation details
+
+This documentation was last updated in February 2025 with complete coverage of:
+- Store system documentation with examples and patterns
+- Enhanced architecture and state management details
+- Expanded supervision documentation with pattern examples
+- Updated interface system documentation for current WIT interfaces
+- Improved WebSocket server and handler documentation

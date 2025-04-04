@@ -1,33 +1,37 @@
 # Summary
 
-[Introduction](README.md)
-[Why Theater?](why-theater.md)
+[Theater Documentation](README.md)
 
-# User Guide
-- [Configuration](configuration.md)
-- [CLI](cli.md)
-- [Troubleshooting](troubleshooting.md)
+# Introduction
+- [Overview](introduction/README.md)
+- [Why Theater?](introduction/why-theater.md)
 
 # Core Concepts
-- [Architecture](architecture.md)
-- [Actor IDs](actor-ids.md)
-- [State Management](state-management.md)
-- [Supervision](supervision.md)
-- [Interface System](interface-system.md)
-- [Store System](store/README.md)
-    - [Actor API](store/actor-api.md)
-    - [Usage Patterns](store/usage-patterns.md)
+- [Architecture](core-concepts/architecture.md)
+- [Actors](core-concepts/actors.md)
+- [Actor IDs](core-concepts/actor-ids.md)
+- [State Management](core-concepts/state-management.md)
+- [Supervision](core-concepts/supervision.md)
+- [Interface System](core-concepts/interface-system.md)
+- [Store System](core-concepts/store/README.md)
+    - [Actor API](core-concepts/store/actor-api.md)
+    - [Usage Patterns](core-concepts/store/usage-patterns.md)
+
+# User Guide
+- [Configuration](user-guide/configuration.md)
+- [CLI](user-guide/cli.md)
+- [Troubleshooting](user-guide/troubleshooting.md)
 
 # Development
-- [Building Actors](building-actors.md)
-- [Building Host Functions](building-host-functions.md)
-- [Making Changes](making-changes.md)
+- [Building Actors](development/building-actors.md)
+- [Building Host Functions](development/building-host-functions.md)
+- [Making Changes](development/making-changes.md)
 
 # Services
-- [HTTP Framework](http-framework.md)
-- [WebSocket Server](websocket-server.md)
-- [Host Services](host-services.md)
-- [Handlers](handlers.md)
+- [HTTP Framework](services/http-framework.md)
+- [WebSocket Server](services/websocket-server.md)
+- [Host Services](services/host-services.md)
+- [Handlers](services/handlers.md)
 
 # API Reference
-- [API Documentation](api.md)
+- [API Documentation](api-reference/api.md)
