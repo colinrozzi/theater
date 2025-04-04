@@ -32,6 +32,15 @@
 - [WebSocket Server](services/websocket-server.md)
 - [Host Services](services/host-services.md)
 - [Handlers](services/handlers.md)
+  - [Handler System](services/handlers/README.md)
+  - [Message Server](services/handlers/message-server.md)
+  - [HTTP Client](services/handlers/http-client.md)
+  - [HTTP Framework](services/handlers/http-framework.md)
+  - [Filesystem](services/handlers/filesystem.md)
+  - [Supervisor](services/handlers/supervisor.md)
+  - [Store](services/handlers/store.md)
+  - [Runtime](services/handlers/runtime.md)
+  - [Timing](services/handlers/timing.md)
 
 # API Reference
 - [API Documentation](api-reference/api.md)
