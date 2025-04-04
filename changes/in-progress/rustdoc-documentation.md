@@ -166,8 +166,8 @@ We're now moving into documenting the remaining core actor system components and
 
 At the end of the first week of our documentation effort, we have:
 
-1. **Documented 13 key components**:
-   - 9 core Rust modules
+1. **Documented 14 key components**:
+   - 10 core Rust modules
    - 4 WebAssembly interface files
 
 2. **Aligned with the Phase 1 targets** from our original proposal:
@@ -175,7 +175,7 @@ At the end of the first week of our documentation effort, we have:
    - Made significant progress on WebAssembly interfaces documentation
    - Established consistent style and format across documents
 
-3. **Added over 1,800 lines of documentation** across the codebase, including:
+3. **Added over 2,200 lines of documentation** across the codebase, including:
    - Module-level overviews
    - Function and parameter descriptions
    - Example code
@@ -190,18 +190,17 @@ All documentation follows the standardized format from the proposal, providing a
 For week 2 (April 7-11), we plan to focus on:
 
 1. ✅ Documentation for WebAssembly integration (`wasm.rs`) - Completed ahead of schedule!
-2. Documenting the remaining WIT interfaces:
+2. ✅ Documentation for the chain system (`chain/mod.rs`) - Completed ahead of schedule!
+3. ✅ Documentation for the events system (`events/mod.rs`) - Completed ahead of schedule!
+4. Documenting the remaining WIT interfaces:
    - `http.wit`
    - `message-server.wit`
    - `runtime.wit`
    - `store.wit`
    - `timing.wit`
    - `websocket.wit`
-3. **Chain and Events**
-   - ✅ `chain/mod.rs` (completed April 4, 2025)
-   - `events/mod.rs`
-4. Documenting the remaining core data structures:
+5. Documenting the remaining core data structures:
    - `messages.rs`
    - `config.rs`
 
-With our early completion of Phase 1, we are ahead of schedule and well-positioned to complete the full documentation effort within or ahead of the original 4-week timeframe.
+With the early completion of Phase 1 and significant progress on Phase 2, we are well ahead of schedule and positioned to complete the full documentation effort ahead of the original 4-week timeframe.
