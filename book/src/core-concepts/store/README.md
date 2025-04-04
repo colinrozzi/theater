@@ -7,9 +7,10 @@ Theater's store system provides a persistent, content-addressable storage mechan
 The store is designed around a few key concepts:
 
 1. **Content-Addressable Storage**: All data is stored using SHA-1 hashes of its content as identifiers
-2. **Concurrency-Safe Operations**: Store operations run in their own thread with message-passing interface
+2. **Multiple Store Instances**: Each store has a unique UUID identifier
 3. **Label System**: Friendly names can be attached to content references for easy retrieval
 4. **Actor Integration**: Seamless integration with actor state management and the hash chain system
+5. **Event Tracking**: Comprehensive event tracking for all store operations
 
 ## Core Components
 
@@ -28,36 +29,72 @@ ContentRefs are used to:
 - Reference content across system components
 - Track content through labels and other organizational structures
 
+### Label
+
+A named reference to content in the store:
+
+```rust
+pub struct Label {
+    name: String,
+}
+```
+
+Labels provide:
+- Human-readable names for content references
+- Easy access to frequently used content
+- Organizational structure for content management
+
 ### ContentStore
 
-The client interface for interacting with the store. It provides methods for:
+The core interface for interacting with a store instance:
 
+```rust
+pub struct ContentStore {
+    pub id: String,
+}
+```
+
+The ContentStore provides methods for:
 - **Content Operations**: Store, retrieve, and check existence of content
 - **Label Management**: Create, list, and remove content labels
 - **Store Management**: Calculate size, list all content, etc.
 
-The `ContentStore` runs as a separate task, communicating via message passing to ensure thread safety.
-
 ## Directory Structure
 
-The store organizes data in a simple directory structure:
+The store organizes data in a UUID-based directory structure:
 
 ```
 store/
-├── data/         # Content files stored by hash
-│   ├── 0044950809b9af88e64d8d0f809e24936ca96ebc
-│   ├── 00746f46516b19261181d0b9c7f69764d8f3d307
-│   └── ...
-└── labels/       # Labels pointing to content hashes
-    ├── 07e5472c-fdb9-43e2-a93d-33f5fdc8cbb2:chain-head
-    ├── 162ffc76-15c4-4d2a-8c31-3999a816f8be:chain-head
-    └── ...
+├── <store-uuid1>/         # Store instance 1
+│   ├── data/             # Content files stored by hash
+│   │   ├── <hash1>
+│   │   ├── <hash2>
+│   │   └── ...
+│   └── labels/           # Labels pointing to content hashes
+│       ├── <label1>
+│       ├── <label2>
+│       └── ...
+├── <store-uuid2>/         # Store instance 2
+...
+└── manifest/             # System metadata
 ```
 
-- Each file in `data/` contains the raw content, with the filename being the content's SHA-1 hash
-- Each file in `labels/` contains one or more hash references, allowing lookup by label name
+- Each store instance has its own UUID-based directory
+- Each file in the `data/` directory contains raw content, with the filename being the content's SHA-1 hash
+- Each file in the `labels/` directory contains the hash of the content it references
 
 ## Usage Examples
+
+### Creating a Store
+
+```rust
+// Create a new store with a generated UUID
+let store = ContentStore::new();
+println!("Created store with ID: {}", store.id());
+
+// Create a store with a specific ID
+let store = ContentStore::from_id("my-store-id");
+```
 
 ### Basic Content Storage
 
@@ -67,11 +104,11 @@ let content = b"Hello, world!".to_vec();
 let content_ref = store.store(content).await?;
 
 // Retrieve the content later
-let retrieved = store.get(content_ref.clone()).await?;
+let retrieved = store.get(&content_ref).await?;
 assert_eq!(retrieved, b"Hello, world!".to_vec());
 
 // Check if content exists
-let exists = store.exists(content_ref).await?;
+let exists = store.exists(&content_ref).await;
 assert!(exists);
 ```
 
@@ -81,19 +118,44 @@ assert!(exists);
 // Store content with a label
 let content = b"Important data".to_vec();
 let content_ref = store.store(content).await?;
-store.label("important-data".to_string(), content_ref.clone()).await?;
+store.label("important-data", &content_ref).await?;
 
 // Retrieve by label
-let refs = store.get_by_label("important-data".to_string()).await?;
-let retrieved = store.get(refs[0].clone()).await?;
+let content_ref_opt = store.get_by_label("important-data").await?;
+if let Some(content_ref) = content_ref_opt {
+    let retrieved = store.get(&content_ref).await?;
+    println!("Retrieved labeled content: {} bytes", retrieved.len());
+}
 
 // Store and label in one operation
 let content = b"New data".to_vec();
-let content_ref = store.put_at_label("new-data".to_string(), content).await?;
+let content_ref = store.store_at_label("new-data", content).await?;
 
 // Replace content at a label
 let updated = b"Updated data".to_vec();
-store.replace_content_at_label("new-data".to_string(), updated).await?;
+let new_content_ref = store.replace_content_at_label("new-data", updated).await?;
+
+// Replace content reference at a label
+store.replace_at_label("new-data", &some_existing_content_ref).await?;
+
+// Remove a label
+store.remove_label("temporary-data").await?;
+```
+
+### Content Management
+
+```rust
+// List all labels
+let labels = store.list_labels().await?;
+println!("Store has {} labels", labels.len());
+
+// List all content
+let contents = store.list_all_content().await?;
+println!("Store has {} content items", contents.len());
+
+// Calculate total storage size
+let size = store.calculate_total_size().await?;
+println!("Total storage size: {} bytes", size);
 ```
 
 ### Integration with Actors
@@ -102,95 +164,78 @@ Actors use the store for both state persistence and content sharing:
 
 ```rust
 // In actor initialization
-let store = actor_store.content_store.clone();
+// Get store ID from host functions
+let store_id = store::new()?;
+let store = ContentStore::from_id(&store_id);
 
 // Store actor-specific data
 let data = serialize_data(&my_data)?;
 let content_ref = store.store(data).await?;
 
 // Label with actor ID for easy retrieval
-store.label(format!("actor:{}", actor_id), content_ref).await?;
+store.label(format!("actor:{}", actor_id), &content_ref).await?;
 ```
 
-## State Chain Integration
+## Store Host Functions
 
-The store system is tightly integrated with Theater's state chain mechanism:
-
-1. **Chain Persistence**: State chains are stored using content references
-2. **Chain Head Tracking**: The latest state in a chain is tracked via labels
-3. **Event Storage**: Individual chain events are stored with content references
-
-### Chain Events and Labels
-
-Chain heads are tracked with specific label patterns:
-
-```
-{actor-id}:chain-head
-```
-
-This allows for efficient retrieval of the current state of any actor by its ID.
-
-## Advanced Features
-
-### Content Resolution
-
-The store provides a flexible resolution system for content references:
+The store system exposes a set of host functions to WebAssembly actors through the `ntwk:theater/store` interface:
 
 ```rust
-// Different ways to refer to content
-let content1 = store.resolve_reference("store:my-label").await?;
-let content2 = store.resolve_reference("store:hash:a1b2c3...").await?;
-let content3 = store.resolve_reference("/path/to/file").await?;
-```
+// Create a new store
+let store_id = store::new()?;
 
-This allows for a unified interface to access content from different sources.
+// Store content
+let content_ref = store::store(store_id, content)?;
 
-### Store Management
+// Get content
+let content = store::get(store_id, content_ref)?;
 
-Operations for managing the store itself:
+// Check if content exists
+let exists = store::exists(store_id, content_ref)?;
 
-```rust
+// Label content
+store::label(store_id, "my-label", content_ref)?;
+
+// Get content reference by label
+let content_ref_opt = store::get_by_label(store_id, "my-label")?;
+
+// Store and label in one operation
+let content_ref = store::store_at_label(store_id, "my-label", content)?;
+
+// Replace content at a label
+let new_content_ref = store::replace_content_at_label(store_id, "my-label", new_content)?;
+
+// Replace content reference at a label
+store::replace_at_label(store_id, "my-label", existing_content_ref)?;
+
 // List all labels
-let labels = store.list_labels().await?;
+let labels = store::list_labels(store_id)?;
+
+// Remove a label
+store::remove_label(store_id, "my-label")?;
 
 // Calculate total storage size
-let size_bytes = store.calculate_total_size().await?;
+let size = store::calculate_total_size(store_id)?;
 
 // List all content references
-let all_refs = store.list_all_content().await?;
+let content_refs = store::list_all_content(store_id)?;
 ```
 
-## Concurrency and Safety
+## Event Tracking
 
-The store implements a thread-safe design using Tokio's message passing:
+All store operations are tracked with detailed events in the actor's state chain:
 
-1. All operations are sent as messages to a dedicated store thread
-2. Responses are returned via oneshot channels
-3. The store implementation handles concurrency internally
+1. **Call Events**: Record when operations are called
+2. **Result Events**: Record the results of successful operations
+3. **Error Events**: Record any errors that occur
 
-This design ensures that:
-- Multiple actors can safely interact with the store concurrently
-- Long-running operations don't block the actor system
-- Store operations are properly sequenced
-
-## Configuration
-
-The store system supports configuration through:
-
-1. **Base Path**: The root directory for the store
-2. **THEATER_HOME**: Environment variable for locating the store
-
-Example configuration:
-
-```rust
-// Create store with explicit path
-let store = ContentStore::start(PathBuf::from("/path/to/store"));
-
-// Using THEATER_HOME environment variable
-// THEATER_HOME=/home/user/theater
-let store = ContentStore::start(PathBuf::from("store"));
-// This will use /home/user/theater/store
-```
+Each event includes:
+- Store ID
+- Operation type
+- Content reference (when applicable)
+- Label name (when applicable)
+- Success/failure status
+- Detailed error messages (for failures)
 
 ## Best Practices
 
