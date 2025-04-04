@@ -60,7 +60,7 @@ config = {}
 
 [[handlers]]
 type = "filesystem"
-config = { path = "data", new_dir = true }
+config = { new_dir = true }
 ```
 
 Each handler entry includes:

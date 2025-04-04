@@ -28,9 +28,6 @@
 - [Making Changes](development/making-changes.md)
 
 # Services
-- [HTTP Framework](services/http-framework.md)
-- [WebSocket Server](services/websocket-server.md)
-- [Host Services](services/host-services.md)
 - [Handlers](services/handlers.md)
   - [Handler System](services/handlers/README.md)
   - [Message Server](services/handlers/message-server.md)
