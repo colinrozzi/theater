@@ -166,8 +166,8 @@ We're now moving into documenting the remaining core actor system components and
 
 At the end of the first week of our documentation effort, we have:
 
-1. **Documented 12 key components**:
-   - 8 core Rust modules
+1. **Documented 13 key components**:
+   - 9 core Rust modules
    - 4 WebAssembly interface files
 
 2. **Aligned with the Phase 1 targets** from our original proposal:
@@ -197,9 +197,8 @@ For week 2 (April 7-11), we plan to focus on:
    - `store.wit`
    - `timing.wit`
    - `websocket.wit`
-3. Documenting the chain and events subsystem:
-   - `chain/mod.rs`
-   - `chain/state_chain.rs`
+3. **Chain and Events**
+   - ✅ `chain/mod.rs` (completed April 4, 2025)
    - `events/mod.rs`
 4. Documenting the remaining core data structures:
    - `messages.rs`
