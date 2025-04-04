@@ -14,5 +14,5 @@ additional-css = ["css/custom.css"]
 # Add a custom entry in the navigation menu linking to API docs
 [output.html.navbar]
 additional-items = [
-    { url = "../api/theater/index.html", text = "API Reference" }
+    { url = "/theater/api/theater/index.html", text = "API Reference" }
 ]
