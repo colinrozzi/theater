@@ -1,6 +1,6 @@
 # Theater API Documentation
 
-This page provides an overview of the Theater API. For detailed reference documentation, you can check out the [auto-generated rustdoc API Reference](../api/theater/index.html).
+This page provides an overview of the Theater API. For detailed reference documentation, you can check out the [auto-generated rustdoc API Reference](/theater/api/theater/index.html).
 
 <div class="api-note">
 <p><strong>Note:</strong> The rustdoc API Reference provides detailed information about all types, functions, and modules directly from the code annotations.</p>
@@ -14,11 +14,11 @@ Theater uses WebAssembly components to create isolated, deterministic actors tha
 
 Here are some key components in the API:
 
-- [ActorRuntime](../api/theater/actor_runtime/struct.ActorRuntime.html) - Manages the lifecycle of an actor
-- [ActorExecutor](../api/theater/actor_executor/struct.ActorExecutor.html) - Executes actor code in WebAssembly
-- [StateChain](../api/theater/chain/struct.StateChain.html) - Maintains the verifiable chain of state changes
-- [TheaterId](../api/theater/id/struct.TheaterId.html) - Unique identifier for actors
-- [ContentStore](../api/theater/store/struct.ContentStore.html) - Content-addressable storage system
+- [ActorRuntime](/theater/api/theater/actor_runtime/struct.ActorRuntime.html) - Manages the lifecycle of an actor
+- [ActorExecutor](/theater/api/theater/actor_executor/struct.ActorExecutor.html) - Executes actor code in WebAssembly
+- [StateChain](/theater/api/theater/chain/struct.StateChain.html) - Maintains the verifiable chain of state changes
+- [TheaterId](/theater/api/theater/id/struct.TheaterId.html) - Unique identifier for actors
+- [ContentStore](/theater/api/theater/store/struct.ContentStore.html) - Content-addressable storage system
 
 ## Core Actor Interface
 
@@ -98,7 +98,7 @@ bindings::export!(Component with_types_in bindings);
 
 ## Available Host Functions
 
-Theater provides several host functions that actors can use. For complete details, see the [host module documentation](../api/theater/host/index.html).
+Theater provides several host functions that actors can use. For complete details, see the [host module documentation](/theater/api/theater/host/index.html).
 
 ### Runtime Interface
 
@@ -138,7 +138,7 @@ interface http-server {
 }
 ```
 
-The [HttpFramework](../api/theater/host/framework/struct.HttpFramework.html) provides the implementation of this interface.
+The [HttpFramework](/theater/api/theater/host/framework/struct.HttpFramework.html) provides the implementation of this interface.
 
 ### WebSocket Server Interface
 
@@ -210,7 +210,7 @@ impl HttpGuest for Component {
 }
 ```
 
-For more details on HTTP handling, see the [HTTP Client documentation](../api/theater/host/http_client/struct.HttpClientHost.html).
+For more details on HTTP handling, see the [HTTP Client documentation](/theater/api/theater/host/http_client/struct.HttpClientHost.html).
 
 ### WebSocket Server Handler
 
@@ -252,7 +252,7 @@ impl WebSocketGuest for Component {
 
 ## Actor Configuration
 
-Actors are configured using TOML manifests. See the [ManifestConfig](../api/theater/config/struct.ManifestConfig.html) for details on the configuration options.
+Actors are configured using TOML manifests. See the [ManifestConfig](/theater/api/theater/config/struct.ManifestConfig.html) for details on the configuration options.
 
 ```toml
 name = "example-actor"
@@ -272,7 +272,7 @@ level = "debug"
 
 ## Hash Chain Integration
 
-Theater uses a hash chain to track state transitions. See the [StateChain](../api/theater/chain/struct.StateChain.html) for more details.
+Theater uses a hash chain to track state transitions. See the [StateChain](/theater/api/theater/chain/struct.StateChain.html) for more details.
 
 ## Best Practices
 

@@ -1,9 +1,9 @@
 /* Add a visual indicator for API doc links */
-a[href^="../api"] {
+a[href^="/theater/api"] {
     position: relative;
 }
 
-a[href^="../api"]::after {
+a[href^="/theater/api"]::after {
     content: "📚";
     margin-left: 4px;
     font-size: 0.85em;
