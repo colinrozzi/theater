@@ -32,7 +32,7 @@ jobs:
         run: mdbook build
       
       - name: Build API docs
-        run: cargo doc --no-deps --all-features
+        run: cargo doc --no-deps --all-features --document-private-items
       
       # Create redirect index.html
       - name: Create landing page
