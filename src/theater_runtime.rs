@@ -1,3 +1,9 @@
+//! # Theater Runtime
+//!
+//! The `theater_runtime` module implements the core runtime environment for the Theater
+//! actor system. It manages actor lifecycle, message passing, and event handling across
+//! the entire system.
+
 use crate::actor_executor::{ActorError, ActorOperation};
 use crate::actor_runtime::{ActorRuntime, StartActorResult};
 use crate::chain::ChainEvent;
@@ -20,28 +26,136 @@ use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
 use tracing::{debug, error, info, warn};
 
+/// # TheaterRuntime
+///
+/// The central runtime for the Theater actor system, responsible for managing actors and their lifecycles.
+///
+/// ## Purpose
+///
+/// TheaterRuntime is the core component that coordinates actors within the Theater system.
+/// It handles actor creation, destruction, communication, and provides the foundation for
+/// the actor supervision system. The runtime also manages channels for communication between
+/// actors and external systems.
+///
+/// ## Example
+///
+/// ```rust,no_run
+/// use theater::theater_runtime::TheaterRuntime;
+/// use theater::messages::TheaterCommand;
+/// use tokio::sync::mpsc;
+/// use anyhow::Result;
+///
+/// async fn example() -> Result<()> {
+///     // Create channels for theater commands
+///     let (theater_tx, theater_rx) = mpsc::channel(100);
+///     
+///     // Initialize the runtime
+///     let mut runtime = TheaterRuntime::new(theater_tx.clone(), theater_rx, None).await?;
+///     
+///     // Start a background task to run the runtime
+///     let runtime_handle = tokio::spawn(async move {
+///         runtime.run().await
+///     });
+///     
+///     // Use the theater_tx to send commands to the runtime
+///     // ...
+///     
+///     Ok(())
+/// }
+/// ```
+///
+/// ## Safety
+///
+/// TheaterRuntime provides a safe interface to the WebAssembly actors. All potentially unsafe
+/// operations involving WebAssembly execution are handled in the ActorRuntime and ActorExecutor
+/// components with appropriate checks and validations.
+///
+/// ## Security
+///
+/// TheaterRuntime enforces sandbox boundaries for actors, preventing unauthorized
+/// access to system resources. Each actor runs in an isolated WebAssembly environment with
+/// controlled capabilities defined in its manifest.
+///
+/// ## Implementation Notes
+///
+/// The runtime uses a command-based architecture where all operations are sent as messages
+/// through channels. This allows for asynchronous processing and helps maintain isolation
+/// between components.
 pub struct TheaterRuntime {
+    /// Map of active actors indexed by their ID
     actors: HashMap<TheaterId, ActorProcess>,
+    /// Sender for commands to the runtime
     pub theater_tx: Sender<TheaterCommand>,
+    /// Receiver for commands to the runtime
     theater_rx: Receiver<TheaterCommand>,
+    /// Map of event subscriptions for actors
     subscriptions: HashMap<TheaterId, Vec<Sender<ChainEvent>>>,
+    /// Map of active communication channels
     channels: HashMap<ChannelId, HashSet<ChannelParticipant>>,
-    // Optional channel to send channel events back to the server
+    /// Optional channel to send channel events back to the server
     channel_events_tx: Option<Sender<crate::theater_server::ChannelEvent>>,
 }
 
+/// # ActorProcess
+///
+/// A container for the running actor and its associated channels and metadata.
+///
+/// ## Purpose
+///
+/// ActorProcess encapsulates all the runtime information needed to manage a single actor,
+/// including communication channels, status information, and relationships to other actors.
+///
+/// ## Implementation Notes
+///
+/// The ActorProcess is maintained by the TheaterRuntime and typically not accessed directly
+/// by users of the library. It contains internal channels used to communicate with the actor's
+/// execution environment.
 pub struct ActorProcess {
+    /// Unique identifier for the actor
     pub actor_id: TheaterId,
+    /// Task handle for the running actor
     pub process: JoinHandle<ActorRuntime>,
+    /// Channel for sending messages to the actor
     pub mailbox_tx: mpsc::Sender<ActorMessage>,
+    /// Channel for sending operations to the actor
     pub operation_tx: mpsc::Sender<ActorOperation>,
+    /// Set of child actor IDs
     pub children: HashSet<TheaterId>,
+    /// Current status of the actor
     pub status: ActorStatus,
+    /// Path to the actor's manifest
     pub manifest_path: String,
+    /// Controller for graceful shutdown
     pub shutdown_controller: ShutdownController,
 }
 
 impl TheaterRuntime {
+    /// Creates a new TheaterRuntime with the given communication channels.
+    ///
+    /// ## Parameters
+    ///
+    /// * `theater_tx` - Sender for commands to the runtime
+    /// * `theater_rx` - Receiver for commands to the runtime
+    /// * `channel_events_tx` - Optional channel for sending events to external systems
+    ///
+    /// ## Returns
+    ///
+    /// A new TheaterRuntime instance ready to be started.
+    ///
+    /// ## Example
+    ///
+    /// ```rust,no_run
+    /// # use theater::theater_runtime::TheaterRuntime;
+    /// # use theater::messages::TheaterCommand;
+    /// # use tokio::sync::mpsc;
+    /// # use anyhow::Result;
+    /// #
+    /// # async fn example() -> Result<()> {
+    /// let (theater_tx, theater_rx) = mpsc::channel::<TheaterCommand>(100);
+    /// let runtime = TheaterRuntime::new(theater_tx, theater_rx, None).await?;
+    /// # Ok(())
+    /// # }
+    /// ```
     pub async fn new(
         theater_tx: Sender<TheaterCommand>,
         theater_rx: Receiver<TheaterCommand>,
@@ -59,6 +173,24 @@ impl TheaterRuntime {
         })
     }
 
+    /// Starts the runtime's main event loop, processing commands until shutdown.
+    ///
+    /// ## Purpose
+    ///
+    /// This method runs the main event loop of the runtime, processing commands from
+    /// the `theater_rx` channel and dispatching them to the appropriate handlers.
+    /// It will continue running until the channel is closed or an error occurs.
+    ///
+    /// ## Returns
+    ///
+    /// * `Ok(())` - The runtime has shut down gracefully
+    /// * `Err(anyhow::Error)` - An error occurred during runtime execution
+    ///
+    /// ## Implementation Notes
+    ///
+    /// This method is typically run in a separate task and should be considered the
+    /// main execution context for the runtime. It handles all commands asynchronously
+    /// and manages actor lifecycles.
     pub async fn run(&mut self) -> Result<()> {
         info!("Theater runtime starting");
 
@@ -584,6 +716,28 @@ impl TheaterRuntime {
         Ok(())
     }
 
+    /// Spawns a new actor from a manifest with optional initialization data.
+    ///
+    /// ## Parameters
+    ///
+    /// * `manifest_path` - Path to the actor's manifest file or manifest content
+    /// * `init_bytes` - Optional initialization data for the actor
+    /// * `parent_id` - Optional ID of the parent actor
+    /// * `init` - Whether to initialize the actor (true) or resume it (false)
+    ///
+    /// ## Returns
+    ///
+    /// * `Ok(TheaterId)` - The ID of the newly spawned actor
+    /// * `Err(anyhow::Error)` - An error occurred during actor spawn
+    ///
+    /// ## Implementation Notes
+    ///
+    /// This method handles the entire process of spawning a new actor, including:
+    /// - Loading and parsing the manifest
+    /// - Creating communication channels
+    /// - Spawning the actor runtime in a new task
+    /// - Registering the actor with the runtime
+    /// - Setting up parent-child relationships
     async fn spawn_actor(
         &mut self,
         manifest_path: String,
@@ -743,6 +897,26 @@ impl TheaterRuntime {
         Ok(())
     }
 
+    /// Stops an actor and its children gracefully.
+    ///
+    /// ## Parameters
+    ///
+    /// * `actor_id` - The ID of the actor to stop
+    ///
+    /// ## Returns
+    ///
+    /// * `Ok(())` - The actor was successfully stopped
+    /// * `Err(anyhow::Error)` - An error occurred during the stop process
+    ///
+    /// ## Implementation Notes
+    ///
+    /// This method stops an actor and all its children recursively. It follows these steps:
+    /// 1. Stop all children of the actor
+    /// 2. Signal the actor to shut down gracefully
+    /// 3. Wait for a grace period to allow cleanup
+    /// 4. Force abort the actor's task if still running
+    /// 5. Remove the actor from the runtime's registries
+    /// 6. Clean up any channel registrations
     async fn stop_actor(&mut self, actor_id: TheaterId) -> Result<()> {
         debug!("Stopping actor: {:?}", actor_id);
 
@@ -951,6 +1125,29 @@ impl TheaterRuntime {
             .collect()
     }
 
+    /// Stops the entire runtime and all actors gracefully.
+    ///
+    /// ## Returns
+    ///
+    /// * `Ok(())` - The runtime was successfully stopped
+    /// * `Err(anyhow::Error)` - An error occurred during the stop process
+    ///
+    /// ## Example
+    ///
+    /// ```rust,no_run
+    /// # use theater::theater_runtime::TheaterRuntime;
+    /// # use anyhow::Result;
+    /// #
+    /// # async fn example(mut runtime: TheaterRuntime) -> Result<()> {
+    /// // Shut down the runtime
+    /// runtime.stop().await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    ///
+    /// ## Implementation Notes
+    ///
+    /// This method stops all actors managed by the runtime and cleans up any resources.
     pub async fn stop(&mut self) -> Result<()> {
         info!("Initiating theater runtime shutdown");
 
