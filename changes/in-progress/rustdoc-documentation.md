@@ -57,7 +57,14 @@ We have implemented documentation for several key components of the Theater code
      - `start()`: Starting a new actor runtime
      - `stop()`: Gracefully shutting down an actor
 
-7. **WIT Interfaces**: Core WebAssembly interfaces
+7. **actor_store.rs**: The resource sharing container for actors
+   - Added module-level documentation describing the store's purpose and role
+   - Documented the `ActorStore` struct and its fields with detailed descriptions
+   - Documented all public methods with examples, parameters, and return values
+   - Added security considerations related to the event chain and state management
+   - Added implementation notes about thread safety and locking behavior
+
+8. **WIT Interfaces**: Core WebAssembly interfaces
    - **supervisor.wit**: The actor supervision interface
      - Added interface-level documentation describing the supervision system
      - Documented all functions with parameters and return values
@@ -73,6 +80,12 @@ We have implemented documentation for several key components of the Theater code
      - Documented each type with its purpose and usage
      - Added example usage in Rust
      - Added implementation notes about serialization considerations
+   - **filesystem.wit**: The filesystem access interface
+     - Added interface-level documentation describing filesystem operations
+     - Documented all file and directory manipulation functions
+     - Documented command execution functions with security considerations
+     - Added examples of file operations and command execution
+     - Added detailed security guidance for each filesystem operation
 
 ## Documentation Style
 
@@ -97,18 +110,15 @@ All public items have been documented with appropriate level of detail:
 According to the priority list from the original proposal, the following modules should be documented next:
 
 1. **Remaining Core Actor System**
-   - `actor_store.rs`
-
-2. **WebAssembly Integration**
    - `wasm.rs`
-   - Remaining WIT interfaces in `/wit` directory:
-     - `filesystem.wit`
-     - `http.wit`
-     - `message-server.wit`
-     - `runtime.wit`
-     - `store.wit`
-     - `timing.wit`
-     - `websocket.wit`
+
+2. **Remaining WIT interfaces** in `/wit` directory:
+   - `http.wit`
+   - `message-server.wit`
+   - `runtime.wit`
+   - `store.wit`
+   - `timing.wit`
+   - `websocket.wit`
 
 3. **Chain and Events**
    - `chain/mod.rs`
@@ -123,17 +133,17 @@ According to the priority list from the original proposal, the following modules
 We've made significant progress on the documentation effort according to our original plan:
 
 1. **Core Module Documentation (Phase 1)**
-   - Completed: `lib.rs`, `actor_handle.rs`, `actor_executor.rs`, `actor_runtime.rs`
-   - Remaining: `actor_store.rs`, `wasm.rs`
-   - Progress: 67% complete
+   - Completed: `lib.rs`, `actor_handle.rs`, `actor_executor.rs`, `actor_runtime.rs`, `actor_store.rs`
+   - Remaining: `wasm.rs`
+   - Progress: 83% complete
 
 2. **WIT Interface Documentation**
-   - Completed: `supervisor.wit`, `actor.wit`, `types.wit`
-   - Remaining: 6 interfaces
-   - Progress: 33% complete
+   - Completed: `supervisor.wit`, `actor.wit`, `types.wit`, `filesystem.wit`
+   - Remaining: 5 interfaces
+   - Progress: 44% complete
 
 3. **Overall Documentation**
-   - Completed: 9 key modules/interfaces
+   - Completed: 11 key modules/interfaces
    - Remaining: According to prioritization plan
    - Progress: On track with the original 4-week timeline
 
@@ -156,16 +166,16 @@ We're now moving into documenting the remaining core actor system components and
 
 At the end of the first week of our documentation effort, we have:
 
-1. **Documented 9 key components**:
-   - 6 core Rust modules
-   - 3 WebAssembly interface files
+1. **Documented 11 key components**:
+   - 7 core Rust modules
+   - 4 WebAssembly interface files
 
 2. **Aligned with the Phase 1 targets** from our original proposal:
    - Completed full documentation of core actors and runtime
-   - Started on WebAssembly interfaces documentation
+   - Made significant progress on WebAssembly interfaces documentation
    - Established consistent style and format across documents
 
-3. **Added over 1,000 lines of documentation** across the codebase, including:
+3. **Added over 1,500 lines of documentation** across the codebase, including:
    - Module-level overviews
    - Function and parameter descriptions
    - Example code

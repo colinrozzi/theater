@@ -1,32 +1,454 @@
+// # Filesystem Interface
+//
+// Provides access to the host filesystem from within WebAssembly components.
+// This interface allows Theater actors to perform file operations in a controlled
+// and sandboxed manner.
+//
+// ## Purpose
+//
+// The filesystem interface serves as a bridge between WebAssembly components and
+// the host filesystem. It provides essential file operations while maintaining
+// security through proper sandboxing and access controls. This enables actors to:
+//
+// - Read and write files for persistent storage
+// - Manage directory structures
+// - Execute system commands in a controlled environment
+// - Interact with the local filesystem within defined boundaries
+//
+// ## Security
+//
+// This interface represents a potential security boundary between the WebAssembly
+// sandbox and the host system. Important security considerations include:
+//
+// - All paths should be validated and normalized before use
+// - Access should be restricted to specific directories (jail/chroot pattern)
+// - Command execution must be carefully controlled to prevent injection attacks
+// - Error messages should not leak sensitive system information
+//
+// ## Example
+//
+// In a Rust actor implementation:
+//
+// ```rust
+// use ntwk::theater::filesystem;
+//
+// fn read_config_file() -> Result<String, String> {
+//     // Read a configuration file
+//     let bytes = filesystem::read_file("config.json")?;
+//     
+//     // Convert to string
+//     let content = String::from_utf8(bytes)
+//         .map_err(|e| format!("Invalid UTF-8 in config file: {}", e))?;
+//     
+//     Ok(content)
+// }
+//
+// fn save_results(data: &str) -> Result<(), String> {
+//     // Ensure the directory exists
+//     filesystem::create_dir("results")?;
+//     
+//     // Write data to a file
+//     filesystem::write_file("results/output.txt", data)?;
+//     
+//     Ok(())
+// }
+// ```
+
 package ntwk:theater;
 
 interface filesystem {
-    // Basic file operations
+    // # Read File
+    //
+    // Reads the entire contents of a file into memory.
+    //
+    // ## Parameters
+    //
+    // * `path` - Path to the file to read
+    //
+    // ## Returns
+    //
+    // * `Ok(list<u8>)` - The file contents as a byte array
+    // * `Err(string)` - An error message if the file cannot be read
+    //
+    // ## Example
+    //
+    // ```rust
+    // let bytes = filesystem::read_file("data.json")?;
+    // ```
+    //
+    // ## Security
+    //
+    // Paths are relative to the actor's working directory and should be
+    // sanitized to prevent path traversal attacks.
+    //
+    // ## Implementation Notes
+    //
+    // This function reads the entire file into memory, so it should be used
+    // with caution for large files. The Theater runtime may impose size limits.
     read-file: func(path: string) -> result<list<u8>, string>;
+
+    // # Write File
+    //
+    // Writes content to a file, creating it if it doesn't exist or
+    // overwriting it if it does.
+    //
+    // ## Parameters
+    //
+    // * `path` - Path to the file to write
+    // * `content` - String content to write to the file
+    //
+    // ## Returns
+    //
+    // * `Ok(_)` - Success (unit type)
+    // * `Err(string)` - An error message if the file cannot be written
+    //
+    // ## Example
+    //
+    // ```rust
+    // filesystem::write_file("config.json", json_string)?;
+    // ```
+    //
+    // ## Security
+    //
+    // This operation should be restricted to specific directories to
+    // prevent actors from writing to sensitive system areas.
+    //
+    // ## Implementation Notes
+    //
+    // The content is provided as a string, which means it's best suited for
+    // text files. For binary files, consider implementing a separate function
+    // that accepts a byte array.
     write-file: func(path: string, content: string) -> result<_, string>;
+
+    // # List Files
+    //
+    // Lists all files and directories in the specified directory.
+    //
+    // ## Parameters
+    //
+    // * `path` - Path to the directory to list
+    //
+    // ## Returns
+    //
+    // * `Ok(list<string>)` - List of filenames in the directory
+    // * `Err(string)` - An error message if the directory cannot be read
+    //
+    // ## Example
+    //
+    // ```rust
+    // let files = filesystem::list_files("./data")?;
+    // for file in files {
+    //     println!("Found file: {}", file);
+    // }
+    // ```
+    //
+    // ## Security
+    //
+    // This operation may expose sensitive information about the filesystem.
+    // The implementation should ensure it only lists files within allowed directories.
+    //
+    // ## Implementation Notes
+    //
+    // The returned filenames are just the names, not full paths. The caller is
+    // responsible for constructing full paths if needed.
     list-files: func(path: string) -> result<list<string>, string>;
+
+    // # Delete File
+    //
+    // Deletes a file from the filesystem.
+    //
+    // ## Parameters
+    //
+    // * `path` - Path to the file to delete
+    //
+    // ## Returns
+    //
+    // * `Ok(_)` - Success (unit type)
+    // * `Err(string)` - An error message if the file cannot be deleted
+    //
+    // ## Example
+    //
+    // ```rust
+    // filesystem::delete_file("temp.txt")?;
+    // ```
+    //
+    // ## Security
+    //
+    // This is a destructive operation that should be carefully controlled.
+    // The implementation should validate paths to prevent deletion of system files.
+    //
+    // ## Implementation Notes
+    //
+    // If the file doesn't exist, implementations may either return an error
+    // or succeed silently (idempotent behavior).
     delete-file: func(path: string) -> result<_, string>;
+
+    // # Create Directory
+    //
+    // Creates a new directory at the specified path.
+    //
+    // ## Parameters
+    //
+    // * `path` - Path where the directory should be created
+    //
+    // ## Returns
+    //
+    // * `Ok(_)` - Success (unit type)
+    // * `Err(string)` - An error message if the directory cannot be created
+    //
+    // ## Example
+    //
+    // ```rust
+    // filesystem::create_dir("results/2025/q1")?;
+    // ```
+    //
+    // ## Security
+    //
+    // The implementation should ensure actors can only create directories
+    // within their allowed workspace.
+    //
+    // ## Implementation Notes
+    //
+    // This function might not create parent directories automatically.
+    // For nested directory creation, the actor may need to create each level
+    // explicitly or use a recursive directory creation pattern.
     create-dir: func(path: string) -> result<_, string>;
+
+    // # Delete Directory
+    //
+    // Deletes a directory and all its contents.
+    //
+    // ## Parameters
+    //
+    // * `path` - Path to the directory to delete
+    //
+    // ## Returns
+    //
+    // * `Ok(_)` - Success (unit type)
+    // * `Err(string)` - An error message if the directory cannot be deleted
+    //
+    // ## Example
+    //
+    // ```rust
+    // filesystem::delete_dir("temp")?;
+    // ```
+    //
+    // ## Security
+    //
+    // This is a highly destructive operation that recursively removes content.
+    // The implementation must carefully validate paths to prevent deletion of
+    // critical system directories.
+    //
+    // ## Implementation Notes
+    //
+    // This operation typically performs a recursive delete, removing all
+    // files and subdirectories. The behavior should be clearly documented
+    // whether it's recursive or requires the directory to be empty.
     delete-dir: func(path: string) -> result<_, string>;
+
+    // # Check Path Exists
+    //
+    // Checks if a file or directory exists at the specified path.
+    //
+    // ## Parameters
+    //
+    // * `path` - Path to check
+    //
+    // ## Returns
+    //
+    // * `Ok(bool)` - True if the path exists, false otherwise
+    // * `Err(string)` - An error message if the check cannot be performed
+    //
+    // ## Example
+    //
+    // ```rust
+    // if filesystem::path_exists("config.json")? {
+    //     // File exists, proceed with reading it
+    // } else {
+    //     // Create a default configuration
+    // }
+    // ```
+    //
+    // ## Security
+    //
+    // This function allows probing the filesystem structure, which could be
+    // used for information gathering. The implementation should restrict
+    // which paths can be checked.
+    //
+    // ## Implementation Notes
+    //
+    // This function typically doesn't distinguish between files and directories.
+    // If that distinction is important, additional functions could be added.
     path-exists: func(path: string) -> result<bool, string>;
 
-    // Command Types
+    // # Command Result Data Structure
+    //
+    // Represents the successful result of a command execution.
+    //
+    // ## Fields
+    //
+    // * `stdout` - Standard output from the command
+    // * `stderr` - Standard error output from the command
+    // * `exit-code` - Exit code returned by the command
+    //
+    // ## Example
+    //
+    // ```rust
+    // match result {
+    //     CommandResult::Success(cmd) => {
+    //         println!("Command output: {}", cmd.stdout);
+    //         println!("Exit code: {}", cmd.exit_code);
+    //     }
+    //     // ...
+    // }
+    // ```
+    //
+    // ## Security
+    //
+    // Command output may contain sensitive system information.
+    // The implementation should sanitize or filter this output as appropriate.
     record command-success {   
         stdout: string,
         stderr: string,
         exit-code: s32,
     }
 
+    // # Command Error Data Structure
+    //
+    // Represents an error that occurred during command execution.
+    //
+    // ## Fields
+    //
+    // * `message` - Description of the error
+    //
+    // ## Example
+    //
+    // ```rust
+    // match result {
+    //     CommandResult::Error(err) => {
+    //         println!("Command failed: {}", err.message);
+    //     }
+    //     // ...
+    // }
+    // ```
+    //
+    // ## Security
+    //
+    // Error messages should be informative but not reveal sensitive
+    // system details or implementation specifics.
     record command-error {
         message: string,
     }
 
+    // # Command Result Variant
+    //
+    // Represents the possible outcomes of a command execution.
+    //
+    // ## Variants
+    //
+    // * `success` - Command executed successfully
+    // * `error` - An error occurred during execution
+    //
+    // ## Example
+    //
+    // ```rust
+    // match execute_command(".", "ls", vec!["-la"])? {
+    //     CommandResult::Success(result) => {
+    //         println!("Files: {}", result.stdout);
+    //     }
+    //     CommandResult::Error(err) => {
+    //         println!("Failed to list files: {}", err.message);
+    //     }
+    // }
+    // ```
     variant command-result {
         success(command-success),
         error(command-error),
     }
     
-    // Command execution functions
+    // # Execute Command
+    //
+    // Executes a system command with the specified arguments.
+    //
+    // ## Parameters
+    //
+    // * `dir` - Working directory for the command
+    // * `command` - Name of the command to execute
+    // * `args` - List of arguments to pass to the command
+    //
+    // ## Returns
+    //
+    // * `Ok(command-result)` - The result of the command execution
+    // * `Err(string)` - An error message if the command could not be executed
+    //
+    // ## Example
+    //
+    // ```rust
+    // let result = filesystem::execute_command(".", "grep", vec!["pattern", "file.txt"])?;
+    // match result {
+    //     CommandResult::Success(cmd) => {
+    //         println!("Matching lines: {}", cmd.stdout);
+    //     }
+    //     CommandResult::Error(err) => {
+    //         println!("Search failed: {}", err.message);
+    //     }
+    // }
+    // ```
+    //
+    // ## Security
+    //
+    // Command execution is a significant security risk. The implementation should:
+    // - Validate and sanitize all command and argument inputs
+    // - Restrict which commands can be executed
+    // - Consider using an allowlist approach for permitted commands
+    // - Set appropriate resource limits
+    //
+    // ## Implementation Notes
+    //
+    // The command execution is typically synchronous and blocks until completion.
+    // For long-running commands, consider implementing asynchronous alternatives.
     execute-command: func(dir: string, command: string, args: list<string>) -> result<command-result, string>;
+
+    // # Execute Nix Command
+    //
+    // Executes a command through the Nix package manager.
+    //
+    // ## Parameters
+    //
+    // * `dir` - Working directory for the command
+    // * `command` - The Nix command string to execute
+    //
+    // ## Returns
+    //
+    // * `Ok(command-result)` - The result of the command execution
+    // * `Err(string)` - An error message if the command could not be executed
+    //
+    // ## Example
+    //
+    // ```rust
+    // let result = filesystem::execute_nix_command(".", "nix-shell -p python3 --run 'python -c \"print(1+1)\"'")?;
+    // match result {
+    //     CommandResult::Success(cmd) => {
+    //         println!("Python output: {}", cmd.stdout.trim());
+    //     }
+    //     CommandResult::Error(err) => {
+    //         println!("Failed to run Python: {}", err.message);
+    //     }
+    // }
+    // ```
+    //
+    // ## Security
+    //
+    // Nix command execution inherits all the security concerns of regular
+    // command execution, with additional considerations:
+    // - Nix commands can download and execute code from the internet
+    // - They can potentially modify the system's Nix store
+    // - They may have different permission models than regular commands
+    //
+    // ## Implementation Notes
+    //
+    // This function is specifically for environments where Nix is available.
+    // It allows leveraging Nix's package and environment management features
+    // from within Theater actors.
     execute-nix-command: func(dir: string, command: string) -> result<command-result, string>;
 }
