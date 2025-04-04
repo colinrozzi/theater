@@ -1,55 +1,44 @@
 # Summary
 
-[Introduction](introduction.md)
+[Theater Documentation](README.md)
 
-# Getting Started
-- [Quick Start Guide](getting-started/quick-start.md)
-- [Installation](getting-started/installation.md)
-- [Your First Actor](getting-started/first-actor.md)
-- [Key Concepts](getting-started/key-concepts.md)
+# Introduction
+- [Overview](introduction/README.md)
+- [Why Theater?](introduction/why-theater.md)
 
 # Core Concepts
-- [Why Theater](concepts/why-theater.md)
-- [Actor Model](concepts/actor-model.md)
-- [Supervision System](concepts/supervision.md)
-- [State Traceability](concepts/state-traceability.md)
-- [WebAssembly Components](concepts/wasm-components.md)
+- [Architecture](core-concepts/architecture.md)
+- [Actors](core-concepts/actors.md)
+- [Actor IDs](core-concepts/actor-ids.md)
+- [Event Chain](core-concepts/event-chain.md)
+- [State Management](core-concepts/state-management.md)
+- [Supervision](core-concepts/supervision.md)
+- [Interface System](core-concepts/interface-system.md)
+- [Store System](core-concepts/store/README.md)
+    - [Actor API](core-concepts/store/actor-api.md)
+    - [Usage Patterns](core-concepts/store/usage-patterns.md)
 
-# CLI Reference
-- [Overview](cli/overview.md)
-- [Project Commands](cli/project-commands.md)
-- [Runtime Commands](cli/runtime-commands.md)
-- [Monitoring](cli/monitoring.md)
+# User Guide
+- [Configuration](user-guide/configuration.md)
+- [CLI](user-guide/cli.md)
+- [Troubleshooting](user-guide/troubleshooting.md)
 
-# Actor Development
-- [Actor Lifecycle](development/lifecycle.md)
-- [Writing Actors in Rust](development/rust-actors.md)
-- [Actor Interfaces](development/interfaces.md)
-- [Actor Manifests](development/manifests.md)
-- [Message Handling](development/message-handling.md)
-- [HTTP Capabilities](development/http-capabilities.md)
+# Development
+- [Building Actors](development/building-actors.md)
+- [Building Host Functions](development/building-host-functions.md)
+- [Making Changes](development/making-changes.md)
 
-# Advanced Topics
-- [The Store System](advanced/store-system.md)
-- [Debugging Actors](advanced/debugging.md)
-- [Testing Strategies](advanced/testing.md)
-- [State Chain Verification](advanced/state-chain.md)
-- [Security Considerations](advanced/security.md)
+# Services
+- [Handlers](services/handlers.md)
+  - [Handler System](services/handlers/README.md)
+  - [Message Server](services/handlers/message-server.md)
+  - [HTTP Client](services/handlers/http-client.md)
+  - [HTTP Framework](services/handlers/http-framework.md)
+  - [Filesystem](services/handlers/filesystem.md)
+  - [Supervisor](services/handlers/supervisor.md)
+  - [Store](services/handlers/store.md)
+  - [Runtime](services/handlers/runtime.md)
+  - [Timing](services/handlers/timing.md)
 
-# Use Cases
-- [AI-Generated Code](use-cases/ai-generated-code.md)
-- [Microservices](use-cases/microservices.md)
-- [Critical Systems](use-cases/critical-systems.md)
-- [Educational Use](use-cases/educational.md)
-
-# Contributing
-- [Development Setup](contributing/setup.md)
-- [Contribution Guidelines](contributing/guidelines.md)
-- [Code Style](contributing/code-style.md)
-- [Testing Requirements](contributing/testing.md)
-
-# Appendix
-- [Glossary](appendix/glossary.md)
-- [Troubleshooting](appendix/troubleshooting.md)
-- [Related Projects](appendix/related-projects.md)
-- [Future Directions](appendix/future.md)
+# API Reference
+- [API Documentation](api-reference/api.md)

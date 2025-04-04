@@ -2,7 +2,25 @@
 
 This document provides practical examples of common usage patterns for Theater's content store system. These patterns can be applied in both host-side Rust code and in WebAssembly actors.
 
-## 1. Basic Content Storage & Retrieval
+## 1. Creating and Managing Stores
+
+The store system supports multiple store instances, each with a unique ID:
+
+```rust
+// Create a new store with a generated UUID
+let store = ContentStore::new();
+println!("Created store with ID: {}", store.id());
+
+// Create a store with a specific ID
+let store = ContentStore::from_id("my-store-id");
+
+// For actors using host functions
+let store_id = store::new()?;
+```
+
+**When to use**: When you need separate storage instances for different use cases or actors.
+
+## 2. Basic Content Storage & Retrieval
 
 The most fundamental pattern is storing and retrieving content:
 
@@ -12,28 +30,35 @@ let content = "Important information".as_bytes().to_vec();
 let content_ref = store.store(content).await?;
 
 // Save the reference for later use
-println!("Stored content with ref: {}", content_ref.hash());
+println!("Stored content with hash: {}", content_ref.hash());
 
 // Later, retrieve the content using its reference
-let retrieved = store.get(content_ref).await?;
+let retrieved = store.get(&content_ref).await?;
 let text = String::from_utf8(retrieved)?;
 ```
 
 **When to use**: For any data that needs persistence beyond an actor's memory.
 
-## 2. Content Tagging with Labels
+## 3. Content Tagging with Labels
 
 Labels provide a way to give meaningful names to content:
 
 ```rust
 // Store and label in one operation
 let config_data = serde_json::to_vec(&config)?;
-let content_ref = store.put_at_label("app:config".to_string(), config_data).await?;
+let content_ref = store.store_at_label("app:config", config_data).await?;
 
 // Retrieve by label later
-let refs = store.get_by_label("app:config".to_string()).await?;
-if let Some(ref_id) = refs.first() {
-    let config_data = store.get(ref_id.clone()).await?;
+let content_ref_opt = store.get_by_label("app:config").await?;
+if let Some(content_ref) = content_ref_opt {
+    let config_data = store.get(&content_ref).await?;
+    let config: Config = serde_json::from_slice(&config_data)?;
+    // Use the config...
+}
+
+// Alternative: directly get content by label
+let config_data_opt = store.get_content_by_label("app:config").await?;
+if let Some(config_data) = config_data_opt {
     let config: Config = serde_json::from_slice(&config_data)?;
     // Use the config...
 }
@@ -41,7 +66,7 @@ if let Some(ref_id) = refs.first() {
 
 **When to use**: When you need to retrieve content by name rather than hash reference.
 
-## 3. Actor-Specific Storage
+## 4. Actor-Specific Storage
 
 Actors can maintain their own namespace in the store:
 
@@ -50,13 +75,13 @@ Actors can maintain their own namespace in the store:
 let actor_id = "7e3f4a21-9c8b-4e5d-a6f7-1b2c3d4e5f6a";
 let data = serialize_data(&my_data)?;
 let label = format!("actor:{}:state", actor_id);
-store.put_at_label(label, data).await?;
+store.store_at_label(&label, data).await?;
 
 // Later, retrieve the actor's data
 let label = format!("actor:{}:state", actor_id);
-let refs = store.get_by_label(label).await?;
-if let Some(ref_id) = refs.first() {
-    let data = store.get(ref_id.clone()).await?;
+let content_ref_opt = store.get_by_label(&label).await?;
+if let Some(content_ref) = content_ref_opt {
+    let data = store.get(&content_ref).await?;
     let my_data = deserialize_data(&data)?;
     // Use the data...
 }
@@ -64,7 +89,7 @@ if let Some(ref_id) = refs.first() {
 
 **When to use**: For actor-specific state that needs to persist across restarts or be accessible by parent actors.
 
-## 4. Versioned Content
+## 5. Versioned Content
 
 Implement simple versioning with labeled content:
 
@@ -75,22 +100,22 @@ let version = 2;
 
 // Store with version-specific label
 let version_label = format!("document:v{}", version);
-let content_ref = store.put_at_label(version_label, document.clone()).await?;
+let content_ref = store.store_at_label(&version_label, document.clone()).await?;
 
 // Update the "latest" pointer
-store.replace_at_label("document:latest".to_string(), content_ref).await?;
+store.replace_at_label("document:latest", &content_ref).await?;
 
 // Retrieve a specific version
 let version_label = format!("document:v{}", 1);
-let v1_refs = store.get_by_label(version_label).await?;
+let v1_ref_opt = store.get_by_label(&version_label).await?;
 
 // Retrieve the latest version
-let latest_refs = store.get_by_label("document:latest".to_string()).await?;
+let latest_ref_opt = store.get_by_label("document:latest").await?;
 ```
 
 **When to use**: When you need to maintain history of changes to content.
 
-## 5. Content Deduplication
+## 6. Content Deduplication
 
 Take advantage of content-addressing for automatic deduplication:
 
@@ -106,30 +131,36 @@ let ref2 = store.store(content2).await?;
 assert_eq!(ref1.hash(), ref2.hash());
 
 // Label both references
-store.label("reference1".to_string(), ref1.clone()).await?;
-store.label("reference2".to_string(), ref2.clone()).await?;
+store.label("reference1", &ref1).await?;
+store.label("reference2", &ref2).await?;
 
 // Both labels point to the same content
-let content1 = store.get(ref1).await?;
-let content2 = store.get(ref2).await?;
+let content1 = store.get(&ref1).await?;
+let content2 = store.get(&ref2).await?;
 assert_eq!(content1, content2);
 ```
 
 **When to use**: When dealing with potentially duplicate data to save storage space.
 
-## 6. Shared Resources Between Actors
+## 7. Shared Resources Between Actors
 
 Share data between actors using the store:
 
 ```rust
 // Actor 1: Create and share data
+let store = ContentStore::new();
+let store_id = store.id().to_string();
 let shared_data = serialize_data(&some_data)?;
-let content_ref = store.put_at_label("shared:resource".to_string(), shared_data).await?;
+let content_ref = store.store_at_label("shared:resource", shared_data).await?;
+
+// Send the store_id to Actor 2
+send_to_actor_2(store_id);
 
 // Actor 2: Access the shared data
-let refs = store.get_by_label("shared:resource".to_string()).await?;
-if let Some(ref_id) = refs.first() {
-    let shared_data = store.get(ref_id.clone()).await?;
+let store = ContentStore::from_id(&received_store_id);
+let content_ref_opt = store.get_by_label("shared:resource").await?;
+if let Some(content_ref) = content_ref_opt {
+    let shared_data = store.get(&content_ref).await?;
     let some_data = deserialize_data(&shared_data)?;
     // Use the shared data...
 }
@@ -137,7 +168,7 @@ if let Some(ref_id) = refs.first() {
 
 **When to use**: When multiple actors need access to the same data.
 
-## 7. Content-Based Data Structures
+## 8. Content-Based Data Structures
 
 Implement data structures using content references:
 
@@ -176,25 +207,26 @@ let node1_bytes = serde_json::to_vec(&node1)?;
 let node1_ref = store.store(node1_bytes).await?;
 
 // Label the head of the list
-store.label("list:head".to_string(), node1_ref).await?;
+store.label("list:head", &node1_ref).await?;
 
 // Traverse the list
-let mut current_ref = store.get_by_label("list:head".to_string()).await?[0].clone();
-while let Ok(node_bytes) = store.get(current_ref.clone()).await {
+let mut current_ref_opt = store.get_by_label("list:head").await?;
+while let Some(current_ref) = current_ref_opt {
+    let node_bytes = store.get(&current_ref).await?;
     let node: Node = serde_json::from_slice(&node_bytes)?;
     println!("Node value: {}", node.value);
     
     if let Some(next_hash) = node.next {
-        current_ref = ContentRef::new(next_hash);
+        current_ref_opt = Some(ContentRef::new(next_hash));
     } else {
-        break;
+        current_ref_opt = None;
     }
 }
 ```
 
 **When to use**: For implementing persistent data structures where content doesn't change (immutable structures).
 
-## 8. Cached Computation Results
+## 9. Cached Computation Results
 
 Cache expensive computation results:
 
@@ -207,10 +239,9 @@ let param2 = 42;
 let cache_key = format!("cache:func:{}:{}", param1, param2);
 
 // Check if we have a cached result
-let cached_refs = store.get_by_label(cache_key.clone()).await?;
-if let Some(ref_id) = cached_refs.first() {
+let cached_content_opt = store.get_content_by_label(&cache_key).await?;
+if let Some(result_bytes) = cached_content_opt {
     // Return cached result
-    let result_bytes = store.get(ref_id.clone()).await?;
     let result: ComputationResult = serde_json::from_slice(&result_bytes)?;
     return Ok(result);
 }
@@ -220,14 +251,14 @@ let result = expensive_computation(param1, param2)?;
 
 // Cache the result
 let result_bytes = serde_json::to_vec(&result)?;
-store.put_at_label(cache_key, result_bytes).await?;
+store.store_at_label(&cache_key, result_bytes).await?;
 
 Ok(result)
 ```
 
 **When to use**: For memoizing expensive computations that may be repeated with the same inputs.
 
-## 9. Snapshot and Restore
+## 10. Snapshot and Restore
 
 Save and restore application state:
 
@@ -239,15 +270,15 @@ let state_bytes = serde_json::to_vec(&app_state)?;
 // Store with timestamp
 let timestamp = chrono::Utc::now().timestamp();
 let snapshot_label = format!("snapshot:{}", timestamp);
-let content_ref = store.put_at_label(snapshot_label.clone(), state_bytes).await?;
+let content_ref = store.store_at_label(&snapshot_label, state_bytes).await?;
 
 // Update the "latest" snapshot pointer
-store.replace_at_label("snapshot:latest".to_string(), content_ref).await?;
+store.replace_at_label("snapshot:latest", &content_ref).await?;
 
 // Later, restore from a snapshot
-let refs = store.get_by_label("snapshot:latest".to_string()).await?;
-if let Some(ref_id) = refs.first() {
-    let state_bytes = store.get(ref_id.clone()).await?;
+let ref_opt = store.get_by_label("snapshot:latest").await?;
+if let Some(content_ref) = ref_opt {
+    let state_bytes = store.get(&content_ref).await?;
     let app_state: AppState = serde_json::from_slice(&state_bytes)?;
     restore_state(app_state);
 }
@@ -255,27 +286,33 @@ if let Some(ref_id) = refs.first() {
 
 **When to use**: For applications that need point-in-time recovery or state rollback capabilities.
 
-## 10. Content-Based Messaging
+## 11. Content-Based Messaging
 
 Use the store for message passing with large payloads:
 
 ```rust
 // Actor 1: Prepare a large message
+let store = ContentStore::new();
+let store_id = store.id().to_string();
 let large_data = generate_large_data();
 let content_ref = store.store(large_data).await?;
 
-// Send only the reference to Actor 2
+// Send only the reference and store ID to Actor 2
 send_message_to_actor("actor-2", Message {
     command: "process_data",
+    store_id: store_id,
     data_ref: content_ref.hash(),
 });
 
 // Actor 2: Receive message and load data
 fn handle_message(msg: Message) -> Result<(), Error> {
     if msg.command == "process_data" {
+        // Create store instance from the ID
+        let store = ContentStore::from_id(&msg.store_id);
+        
         // Load the referenced data
         let content_ref = ContentRef::new(msg.data_ref);
-        let data = store.get(content_ref).await?;
+        let data = store.get(&content_ref).await?;
         
         // Process the data
         process_large_data(data)?;
@@ -287,11 +324,15 @@ fn handle_message(msg: Message) -> Result<(), Error> {
 
 **When to use**: When actors need to exchange large amounts of data efficiently.
 
-## 11. Dependency Injection for Actors
+## 12. Dependency Injection for Actors
 
 Configure actors with store-based dependencies:
 
 ```rust
+// Create store for configuration
+let store = ContentStore::new();
+let store_id = store.id().to_string();
+
 // Store configuration for different environments
 let dev_config = Config { url: "http://localhost:8080".to_string(), /* ... */ };
 let prod_config = Config { url: "https://production.example.com".to_string(), /* ... */ };
@@ -300,17 +341,22 @@ let prod_config = Config { url: "https://production.example.com".to_string(), /*
 let dev_bytes = serde_json::to_vec(&dev_config)?;
 let prod_bytes = serde_json::to_vec(&prod_config)?;
 
-store.put_at_label("config:environment:dev".to_string(), dev_bytes).await?;
-store.put_at_label("config:environment:prod".to_string(), prod_bytes).await?;
+store.store_at_label("config:environment:dev", dev_bytes).await?;
+store.store_at_label("config:environment:prod", prod_bytes).await?;
+
+// Send store ID to actors
+spawn_actor(actor_params.with_store_id(store_id));
 
 // Actor initialization
-fn init(environment: &str) -> Result<(), Error> {
+fn init(store_id: &str, environment: &str) -> Result<(), Error> {
+    // Create store from ID
+    let store = ContentStore::from_id(store_id);
+    
     // Load appropriate configuration
     let config_label = format!("config:environment:{}", environment);
-    let refs = store.get_by_label(config_label).await?;
+    let config_opt = store.get_content_by_label(&config_label).await?;
     
-    if let Some(ref_id) = refs.first() {
-        let config_bytes = store.get(ref_id.clone()).await?;
+    if let Some(config_bytes) = config_opt {
         let config: Config = serde_json::from_slice(&config_bytes)?;
         
         // Configure actor with loaded config
@@ -323,119 +369,118 @@ fn init(environment: &str) -> Result<(), Error> {
 
 **When to use**: For configuring actors differently based on environment or runtime conditions.
 
-## 12. Append-Only Logs
+## 13. Append-Only Logs
 
 Implement append-only logs with the store:
 
 ```rust
 // Add a log entry
-fn append_log_entry(log_name: &str, entry: LogEntry) -> Result<(), Error> {
+async fn append_log_entry(store: &ContentStore, log_name: &str, entry: LogEntry) -> Result<(), Error> {
     // Serialize the entry
     let entry_bytes = serde_json::to_vec(&entry)?;
     let entry_ref = store.store(entry_bytes).await?;
     
     // Get current log entries
     let log_label = format!("log:{}", log_name);
-    let current_refs = store.get_by_label(log_label.clone()).await?;
+    let current_content_opt = store.get_content_by_label(&log_label).await?;
     
     // Create or update the log file
-    if current_refs.is_empty() {
-        // New log - initialize with a list containing one entry
-        let log = vec![entry_ref.hash()];
-        let log_bytes = serde_json::to_vec(&log)?;
-        store.put_at_label(log_label, log_bytes).await?;
-    } else {
+    if let Some(log_bytes) = current_content_opt {
         // Existing log - append to the list
-        let mut log: Vec<String> = serde_json::from_slice(&store.get(current_refs[0].clone()).await?)?;
-        log.push(entry_ref.hash());
+        let mut log: Vec<String> = serde_json::from_slice(&log_bytes)?;
+        log.push(entry_ref.hash().to_string());
         
+        let updated_log_bytes = serde_json::to_vec(&log)?;
+        store.replace_content_at_label(&log_label, updated_log_bytes).await?;
+    } else {
+        // New log - initialize with a list containing one entry
+        let log = vec![entry_ref.hash().to_string()];
         let log_bytes = serde_json::to_vec(&log)?;
-        store.replace_content_at_label(log_label, log_bytes).await?;
+        store.store_at_label(&log_label, log_bytes).await?;
     }
     
     Ok(())
 }
 
 // Read log entries
-fn read_log_entries(log_name: &str) -> Result<Vec<LogEntry>, Error> {
+async fn read_log_entries(store: &ContentStore, log_name: &str) -> Result<Vec<LogEntry>, Error> {
     let log_label = format!("log:{}", log_name);
-    let refs = store.get_by_label(log_label).await?;
+    let log_content_opt = store.get_content_by_label(&log_label).await?;
     
-    if refs.is_empty() {
-        return Ok(Vec::new());
+    if let Some(log_bytes) = log_content_opt {
+        // Get the log index
+        let log_refs: Vec<String> = serde_json::from_slice(&log_bytes)?;
+        
+        // Load all entries
+        let mut entries = Vec::new();
+        for entry_hash in log_refs {
+            let entry_ref = ContentRef::new(entry_hash);
+            let entry_bytes = store.get(&entry_ref).await?;
+            let entry: LogEntry = serde_json::from_slice(&entry_bytes)?;
+            entries.push(entry);
+        }
+        
+        Ok(entries)
+    } else {
+        Ok(Vec::new())
     }
-    
-    // Get the log index
-    let log_bytes = store.get(refs[0].clone()).await?;
-    let log_refs: Vec<String> = serde_json::from_slice(&log_bytes)?;
-    
-    // Load all entries
-    let mut entries = Vec::new();
-    for entry_hash in log_refs {
-        let entry_ref = ContentRef::new(entry_hash);
-        let entry_bytes = store.get(entry_ref).await?;
-        let entry: LogEntry = serde_json::from_slice(&entry_bytes)?;
-        entries.push(entry);
-    }
-    
-    Ok(entries)
 }
 ```
 
 **When to use**: For keeping an ordered record of events or changes that must be preserved in sequence.
 
-## 13. Actor Migration and State Transfer
+## 14. Actor Migration and State Transfer
 
 Migrate actor state during upgrades or transfers:
 
 ```rust
 // Export actor state for migration
-fn export_state_for_migration(actor_id: &str) -> Result<String, Error> {
+async fn export_state_for_migration(store: &ContentStore, actor_id: &str) -> Result<String, Error> {
     // Get current actor state
     let state_label = format!("actor:{}:state", actor_id);
-    let refs = store.get_by_label(state_label).await?;
+    let state_ref_opt = store.get_by_label(&state_label).await?;
     
-    if refs.is_empty() {
-        return Err(Error::new("No state found for actor"));
+    if let Some(state_ref) = state_ref_opt {
+        // Create migration package with metadata
+        let migration = MigrationPackage {
+            actor_id: actor_id.to_string(),
+            state_ref: state_ref.hash().to_string(),
+            timestamp: chrono::Utc::now().timestamp(),
+            version: "1.0".to_string(),
+        };
+        
+        let package_bytes = serde_json::to_vec(&migration)?;
+        let package_ref = store.store(package_bytes).await?;
+        
+        // Label the migration package
+        let migration_label = format!("migration:{}:{}", actor_id, migration.timestamp);
+        store.label(&migration_label, &package_ref).await?;
+        
+        Ok(package_ref.hash().to_string())
+    } else {
+        Err(Error::new("No state found for actor"))
     }
-    
-    // Create migration package with metadata
-    let migration = MigrationPackage {
-        actor_id: actor_id.to_string(),
-        state_ref: refs[0].hash(),
-        timestamp: chrono::Utc::now().timestamp(),
-        version: "1.0".to_string(),
-    };
-    
-    let package_bytes = serde_json::to_vec(&migration)?;
-    let package_ref = store.store(package_bytes).await?;
-    
-    // Label the migration package
-    let migration_label = format!("migration:{}:{}", actor_id, migration.timestamp);
-    store.label(migration_label, package_ref.clone()).await?;
-    
-    Ok(package_ref.hash())
 }
 
 // Import migrated state
-fn import_migrated_state(migration_ref: &str) -> Result<(), Error> {
+async fn import_migrated_state(store: &ContentStore, migration_hash: &str) -> Result<(), Error> {
     // Get migration package
-    let package_ref = ContentRef::new(migration_ref.to_string());
-    let package_bytes = store.get(package_ref).await?;
+    let package_ref = ContentRef::new(migration_hash.to_string());
+    let package_bytes = store.get(&package_ref).await?;
     let package: MigrationPackage = serde_json::from_slice(&package_bytes)?;
     
     // Get state from the package
     let state_ref = ContentRef::new(package.state_ref);
-    let state_bytes = store.get(state_ref).await?;
+    let state_bytes = store.get(&state_ref).await?;
     
     // Apply to the new actor
     let new_actor_id = generate_new_actor_id();
     let state_label = format!("actor:{}:state", new_actor_id);
-    store.put_at_label(state_label, state_bytes).await?;
+    store.store_at_label(&state_label, state_bytes).await?;
     
     // Record migration history
     let history_label = format!("actor:{}:migration-history", new_actor_id);
-    store.label(history_label, package_ref).await?;
+    store.label(&history_label, &package_ref).await?;
     
     Ok(())
 }
@@ -443,13 +488,13 @@ fn import_migrated_state(migration_ref: &str) -> Result<(), Error> {
 
 **When to use**: During actor upgrades, system migrations, or when transferring state between systems.
 
-## 14. Content Synchronization
+## 15. Content Synchronization
 
 Synchronize content between different store instances:
 
 ```rust
 // Export content for synchronization
-fn export_content_for_sync(label_pattern: &str) -> Result<Vec<u8>, Error> {
+async fn export_content_for_sync(store: &ContentStore, label_pattern: &str) -> Result<Vec<u8>, Error> {
     // Find all matching labels
     let all_labels = store.list_labels().await?;
     let matching_labels: Vec<String> = all_labels
@@ -464,14 +509,13 @@ fn export_content_for_sync(label_pattern: &str) -> Result<Vec<u8>, Error> {
     };
     
     for label in &matching_labels {
-        let refs = store.get_by_label(label.clone()).await?;
-        if !refs.is_empty() {
+        let ref_opt = store.get_by_label(label).await?;
+        if let Some(content_ref) = ref_opt {
             // Add the label and content to the package
-            let content_ref = refs[0].clone();
-            let content = store.get(content_ref.clone()).await?;
+            let content = store.get(&content_ref).await?;
             
-            sync_package.labels.push((label.clone(), content_ref.hash()));
-            sync_package.content.insert(content_ref.hash(), content);
+            sync_package.labels.push((label.clone(), content_ref.hash().to_string()));
+            sync_package.content.insert(content_ref.hash().to_string(), content);
         }
     }
     
@@ -482,14 +526,14 @@ fn export_content_for_sync(label_pattern: &str) -> Result<Vec<u8>, Error> {
 }
 
 // Import synchronized content
-fn import_sync_package(package_bytes: Vec<u8>) -> Result<(), Error> {
+async fn import_sync_package(store: &ContentStore, package_bytes: Vec<u8>) -> Result<(), Error> {
     // Deserialize the package
     let package: SyncPackage = bincode::deserialize(&package_bytes)?;
     
     // Store all content
     for (hash, content) in package.content {
         let content_ref = ContentRef::new(hash.clone());
-        if !store.exists(content_ref.clone()).await? {
+        if !store.exists(&content_ref).await {
             store.store(content).await?;
         }
     }
@@ -497,7 +541,7 @@ fn import_sync_package(package_bytes: Vec<u8>) -> Result<(), Error> {
     // Apply all labels
     for (label, hash) in package.labels {
         let content_ref = ContentRef::new(hash);
-        store.label(label, content_ref).await?;
+        store.label(&label, &content_ref).await?;
     }
     
     Ok(())
@@ -505,64 +549,6 @@ fn import_sync_package(package_bytes: Vec<u8>) -> Result<(), Error> {
 ```
 
 **When to use**: When synchronizing data between different Theater instances or for backup/restore.
-
-## 15. Resource Pools
-
-Implement reusable resource pools with the store:
-
-```rust
-// Claim a resource from a pool
-fn claim_resource(pool_name: &str) -> Result<Resource, Error> {
-    let pool_label = format!("resource-pool:{}", pool_name);
-    
-    // Get the current pool state
-    let pool_refs = store.get_by_label(pool_label.clone()).await?;
-    if pool_refs.is_empty() {
-        return Err(Error::new("Resource pool not found"));
-    }
-    
-    // Update pool atomically
-    let pool_bytes = store.get(pool_refs[0].clone()).await?;
-    let mut pool: ResourcePool = serde_json::from_slice(&pool_bytes)?;
-    
-    // Find an available resource
-    if let Some(resource) = pool.claim_available_resource() {
-        // Update the pool
-        let updated_pool_bytes = serde_json::to_vec(&pool)?;
-        store.replace_content_at_label(pool_label, updated_pool_bytes).await?;
-        
-        Ok(resource)
-    } else {
-        Err(Error::new("No available resources in the pool"))
-    }
-}
-
-// Release a resource back to the pool
-fn release_resource(pool_name: &str, resource_id: &str) -> Result<(), Error> {
-    let pool_label = format!("resource-pool:{}", pool_name);
-    
-    // Get the current pool state
-    let pool_refs = store.get_by_label(pool_label.clone()).await?;
-    if pool_refs.is_empty() {
-        return Err(Error::new("Resource pool not found"));
-    }
-    
-    // Update pool atomically
-    let pool_bytes = store.get(pool_refs[0].clone()).await?;
-    let mut pool: ResourcePool = serde_json::from_slice(&pool_bytes)?;
-    
-    // Release the resource
-    pool.release_resource(resource_id);
-    
-    // Update the pool
-    let updated_pool_bytes = serde_json::to_vec(&pool)?;
-    store.replace_content_at_label(pool_label, updated_pool_bytes).await?;
-    
-    Ok(())
-}
-```
-
-**When to use**: For managing shared, limited resources among multiple actors.
 
 ## Summary
 

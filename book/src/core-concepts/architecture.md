@@ -1,0 +1,33 @@
+## Architecture
+
+Theater's architecture is carefully designed to manage the lifecycle and execution of WASM actors securely and efficiently. At the heart of the system lies the **Theater Runtime** (`theater_runtime.rs`), which acts as the central coordinator for all actors within a Theater instance. It manages the overall actor pool, handling tasks like spawning new actors based on their configuration manifests. The Runtime is also responsible for routing messages between actors or between external clients and actors, managing structured communication "Channels", overseeing the supervision hierarchy by propagating failure notifications, and orchestrating state persistence and resumption logic.
+
+External interaction with the system typically occurs through the **Theater Server** (`theater_server.rs`). This component provides the main interface, often listening for management commands over a network connection (like TCP). It receives requests to start, stop, inspect, or send messages to actors and communicates these requests onward to the `TheaterRuntime` for execution.
+
+To manage an individual actor, the `TheaterRuntime` relies on an **Actor Runtime** (`actor_runtime.rs`). Each actor instance gets its own `ActorRuntime`, which is responsible for loading the actor's specific WASM component, as defined in its manifest. Crucially, the `ActorRuntime` sets up the secure environment for the actor, provisioning the specific host capabilities (like filesystem access or network permissions) that the actor is permitted to use. It manages the actor's lifecycle, including initialization, message handling, and eventual shutdown.
+
+The actual execution of the actor's WASM code is delegated to the **Actor Executor** (`actor_executor.rs`). This low-level engine, powered by the `Wasmtime` library, handles the intricacies of running WASM. It manages the `Wasmtime` Store, Linker, and Instance for the specific actor, executes its functions (like `init` or `handle_message`), and enforces resource limits, such as execution fuel, to prevent potential abuse or infinite loops.
+
+Defining *what* an actor is and *how* it should run is the role of the **Actor Manifest** (`ManifestConfig`). This configuration file specifies the path to the actor's WASM code and declares the capabilities it requires. It also defines parameters like the actor's supervision strategy. The `TheaterRuntime` uses this manifest as the blueprint for creating and configuring new actor instances.
+
+Internally, Theater may utilize a processing **Chain** (`chain/mod.rs`). This mechanism appears to provide a structured way to handle requests or events as they flow through the system, potentially passing through multiple steps or handlers. This could be used for implementing middleware-like logic for host capabilities or internal routing, and might form the basis for the auditable "Chain of Interactions" feature.
+
+## Core Concepts in Theater
+
+This architecture supports several core concepts that define Theater's approach to building reliable systems.
+
+**Actors: Isolated Units of Computation**
+
+The fundamental unit within Theater is the **Actor**. An actor comprises its logic, compiled into a **WebAssembly (WASM) component**, and an associated **Manifest** defining its identity, permissions, and runtime requirements. Each actor operates within a strict WASM sandbox, managed by its dedicated `ActorRuntime` and `ActorExecutor`. This provides strong memory **isolation**, preventing actors from interfering with each other or the host system beyond their explicitly granted permissions. Actors cannot perform I/O directly; instead, they interact with the outside world through **capabilities** defined in their manifest and provided by the host `ActorRuntime`. These capabilities act as controlled gateways for actions like filesystem access or network communication. Actors can maintain internal **state**, and Theater includes mechanisms for persisting this state, enabling resumption after stops or crashes.
+
+**Supervision: Building Fault-Tolerant Systems**
+
+Drawing inspiration from Erlang/OTP, Theater implements a **hierarchical supervision** model to enhance fault tolerance. Actors can spawn child actors, thereby becoming their **supervisors**. When a child actor fails unexpectedly, its supervisor is notified. Based on a predefined strategy, the supervisor can then react – perhaps by restarting the child (potentially restoring its last known state), terminating it cleanly, or escalating the failure notification further up the hierarchy. This "let it crash" philosophy, combined with automated restart strategies managed by the `TheaterRuntime`, allows the system to gracefully recover from many kinds of transient errors without catastrophic failure, promoting self-healing capabilities.
+
+**Chain of Interactions: Auditable and Replayable Execution**
+
+A cornerstone of Theater is **auditability**. Every interaction an actor has with its environment – receiving a message, invoking a host capability, emitting an event – is meticulously tracked. These interactions form a **linked chain**, creating a verifiable record of the sequence of events and data flow that influenced the actor's state over time. This chain enables **deterministic replay**: because WASM execution itself is deterministic, possessing this chain of inputs allows the actor's behavior to be reproduced exactly, which is immensely valuable for debugging complex issues. Furthermore, this verifiable history opens the door to advanced techniques like cryptographic proofs, demonstrating that an actor reached its current state solely through an authorized sequence of operations.
+
+**Host Filesystem Access (Example Capability)**
+
+Consider how an actor might interact with the host filesystem. It doesn't get direct access. Instead, its **Manifest** must explicitly declare the need for filesystem operations, specifying precisely which paths and permissions (e.g., read-only for `/config.toml`, read/write for `/data/`) are required. During setup, the `ActorRuntime` provisions a corresponding **filesystem capability** – essentially, a host function exposed to the WASM module. When the actor's code attempts a filesystem operation (like reading a file) by calling this function, the host capability intercepts the request. It checks the request against the permissions granted in the manifest. If allowed, the host performs the operation on the actor's behalf and returns the result (or an error status) back into the WASM sandbox. This mechanism ensures actors remain strictly confined to their designated boundaries, enforcing the principle of least privilege.
