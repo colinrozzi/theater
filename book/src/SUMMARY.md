@@ -10,6 +10,7 @@
 - [Architecture](core-concepts/architecture.md)
 - [Actors](core-concepts/actors.md)
 - [Actor IDs](core-concepts/actor-ids.md)
+- [Event Chain](core-concepts/event-chain.md)
 - [State Management](core-concepts/state-management.md)
 - [Supervision](core-concepts/supervision.md)
 - [Interface System](core-concepts/interface-system.md)

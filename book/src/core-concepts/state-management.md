@@ -1,256 +1,155 @@
-# State Management & Hash Chains
+# State Management System
 
-Theater's state management system provides cryptographic verification of all state transitions while maintaining simplicity and debuggability. This document describes the current implementation and planned enhancements.
+## Overview
 
-## Current Implementation
+The State Management system in Theater provides a structured approach to handling actor state throughout the lifecycle of WebAssembly actors. By separating state management from business logic, Theater creates a foundation for powerful capabilities like state introspection, migration, and recovery.
 
-The `StateChain` struct in `chain/mod.rs` forms the foundation of the state management system, providing:
+## Core Principles
 
-1. **Event Chain Structure**:
-   - Each event is cryptographically linked to its predecessor
-   - SHA-1 is used as the hashing algorithm
-   - Every event contains:
-     - Hash: SHA-1 hash of the event
-     - Parent Hash: Reference to previous event (or None for initial event)
-     - Event Type: String identifier for the operation
-     - Data: Serialized event data as bytes
-     - Timestamp: When the event occurred
+1. **Runtime-Managed State**: The actor's state is managed by the runtime rather than the actor itself, allowing for greater control and flexibility.
 
-2. **Chain Verification**:
-   - The `verify()` method validates the entire chain integrity
-   - Each event hash is recomputed and compared to stored hash
-   - Any tampering with past events will break the chain
+2. **Transparent State Passing**: State is automatically passed as the first argument to handler functions and received as the first result, making state management largely transparent to actor developers.
 
-3. **Core Operations**:
-   - `add_event()`: Record new events in the chain
-   - `get_last_event()`: Retrieve the most recent event
-   - `get_events()`: Access the complete event history
-   - `save_to_file()`: Persist chain to disk
-   - `load_from_file()`: Restore chain from disk
+3. **Immutable State Transitions**: Each state change is recorded as an immutable transition, creating a clear lineage of state evolution.
 
-### StateChain Structure
+4. **WebAssembly Integration**: The state system leverages WebAssembly's component model to pass state in and out of the sandbox in a type-safe manner.
 
-In code, the `StateChain` implementation looks like:
-
-```rust
-pub struct StateChain {
-    events: Vec<ChainEvent>,
-    current_hash: Option<Vec<u8>>,
-}
-
-pub struct ChainEvent {
-    pub hash: Vec<u8>,
-    pub parent_hash: Option<Vec<u8>>,
-    pub event_type: String,
-    pub data: Vec<u8>,
-    pub timestamp: u64,
-}
-```
-
-The `ChainEvent` struct directly maps to the WIT interface definition, ensuring compatibility between host and WebAssembly components.
-
-### Hash Chain Visualization
+## State Flow in Function Calls
 
 ```
-Event0 (Initial) ─────> Hash0 = SHA1(Data0)
-       ↓
-Event1 + Hash0 ───────> Hash1 = SHA1(Hash0 + Data1)
-                         ↓
-Event2 + Hash1 ───────> Hash2 = SHA1(Hash1 + Data2)
+Current State + Message Parameters → WebAssembly Handler → New State + Response
 ```
 
-Each event's hash is computed using:
-1. The previous event's hash (if any)
-2. The current event's data
+This pattern appears throughout the Theater system:
 
-This creates a tamper-evident chain where modifying any past event would invalidate all subsequent hashes.
+1. The `ActorExecutor` retrieves the current state before each function call
+2. The state is passed as the first parameter to the WebAssembly function
+3. The WebAssembly function returns both a new state and its response
+4. The `ActorExecutor` updates the stored state with the returned value
 
-### Actor State Management
+## Implementation Details
 
-For actors, state is managed through a cycle of:
+### State Passing in WebAssembly
 
-1. **State Storage**:
-   - Actor instance stores state as optional bytes
-   - State is typically serialized JSON or other format
-   - State can be empty (None) for stateless actors
-
-2. **Function Execution**:
-   - Current state is passed to WebAssembly function
-   - Function processes input and returns new state
-   - State updates are recorded in hash chain
-
-3. **State Retrieval**:
-   - Latest state can be accessed from actor
-   - Complete event history is available for inspection
-   - Parent actors can access child state via supervision interface
-
-Example from `actor_executor.rs`:
-
-```rust
-// Execute the call with current state
-let (new_state, results) = self.actor_instance.call_function(&name, state, params).await?;
-
-// Update stored state
-self.actor_instance.store.data_mut().set_state(new_state);
-```
-
-## Working with State
-
-### Adding Events
-
-To add a new event to the chain:
-
-```rust
-// Create event and update chain
-let event = chain.add_event("increment".to_string(), increment_data);
-```
-
-This automatically:
-1. Computes the new hash based on previous state
-2. Records timestamp and event metadata
-3. Adds the event to the chain
-4. Updates the current hash pointer
-
-### Verifying Chain Integrity
-
-The entire chain can be verified with:
-
-```rust
-// Check if chain is valid
-let is_valid = chain.verify();
-```
-
-This recalculates all hashes and ensures:
-1. Each event's stored hash matches its computed hash
-2. Parent hash references form an unbroken chain
-3. No events have been tampered with or reordered
-
-### Accessing Event History
-
-Complete event history is available:
-
-```rust
-// Get all events
-let events = chain.get_events();
-
-// Get most recent event
-let last_event = chain.get_last_event();
-```
-
-This enables:
-- Inspection of state transitions
-- Debugging of state-related issues
-- Verification of specific events
-
-### Persistence
-
-Chains can be saved and loaded using the [Store System](store/README.md) for content-addressable storage:
-
-```rust
-// Save chain to disk
-chain.save_to_file(path)?;
-
-// Load chain from disk
-let loaded_chain = StateChain::load_from_file(path)?;
-```
-
-This facilitates:
-- Persistence across restarts
-- Chain migration between systems
-- Backup and restore operations
-
-## Integration with Actor Model
-
-The state chain is deeply integrated with Theater's actor model:
-
-1. **Actor Initialization**:
-   - Initial state is empty or loaded from storage
-   - First event is "init" with initial parameters
-   - Chain is established with actor creation
-
-2. **Message Handling**:
-   - Each message creates a new event
-   - State transitions are recorded in chain
-   - Responses include new state reference
-
-3. **Supervision**:
-   - Parent actors can access child state chains
-   - State verification occurs during supervision
-   - Chain events propagate through supervision tree
-
-4. **Actor Shutdown**:
-   - Final state is recorded in chain
-   - Chain may be persisted for later use
-   - Completed chains can be archived or analyzed
-
-## WebAssembly Interface
-
-The WIT interface for chains looks like:
+The WebAssembly interface for handler functions follows this pattern:
 
 ```wit
-record chain-event {
-    hash: list<u8>,
-    parent-hash: option<list<u8>>,
-    event-type: string,
-    data: list<u8>,
-    timestamp: u64
-}
+handle-request: func(state: option<json>, params: tuple<json>) -> result<tuple<option<json>, tuple<json>>, string>;
 ```
 
-This allows WebAssembly components to:
-- Receive and process chain events
-- Create properly formatted events
-- Maintain compatibility with host chain implementation
+This signature shows:
+- The `state` parameter is optional (can be `null` for initialization)
+- The function returns a tuple containing the new state and the response data
+- The result is wrapped in a `Result` type for error handling
+
+### Type-Safe Function Calls
+
+The `ActorInstance` implementation manages type-safe function calls through:
+
+```rust
+pub async fn call_function(
+    &mut self,
+    name: &str,
+    state: Option<Vec<u8>>,
+    params: Vec<u8>,
+) -> Result<(Option<Vec<u8>>, Vec<u8>)>
+```
+
+This function:
+1. Looks up the appropriate typed function handler
+2. Passes the current state and parameters to the WebAssembly component
+3. Receives and returns the new state and response
+
+### State Storage
+
+Actor state is stored in the `ActorStore` which:
+- Maintains the current state as a serialized blob
+- Tracks state changes through the event chain
+- Provides access to the state for inspection and manipulation
+
+## State Lifecycle
+
+### Initialization
+
+1. The actor starts with a `None` (null) state
+2. The initialization function is called with this null state
+3. The function returns the initial state for the actor
+4. This initial state is recorded in the event chain
+
+### Updates
+
+1. Each message handler receives the current state
+2. The handler can modify the state as needed
+3. The new state is returned along with the handler's response
+4. The state change is recorded in the event chain
+
+### Retrieval
+
+Parent actors or the runtime can retrieve an actor's state:
+- Through supervisor interfaces for parent actors
+- Via management commands for the runtime
+- For debugging or monitoring purposes
+
+## Benefits of Runtime-Managed State
+
+### Supervision Capabilities
+
+The runtime-managed state enables powerful supervision features:
+- Parent actors can inspect child state at any time
+- Supervisors can restart actors with preserved state
+- The runtime can migrate actors between systems
+
+### Resilience and Recovery
+
+By managing state outside the actor:
+- Actors can be restarted after crashes without losing state
+- Known-good states can be restored when issues occur
+- State can be persisted independently of the actor
+
+### Transparency and Debugging
+
+The explicit state management provides:
+- Clear visibility into state changes over time
+- Ability to correlate state changes with specific events
+- Tools for debugging state-related issues
+
+## Future Directions
+
+The state management system is designed to enable future capabilities:
+
+1. **Migration**: Actors can be moved between host systems by transferring their state and event chain
+2. **State Rollback**: Actors can revert to previous states when errors occur
+3. **State Validation**: Supervisors can apply validation rules to state changes
+4. **Optimized Storage**: State can be stored in different backends based on size and access patterns
+5. **Distributed State**: Actor state could be synchronized across multiple systems
+
+## WebAssembly State Interface
+
+The WebAssembly Interface Type (WIT) definition for state management:
+
+```wit
+interface actor {
+    use types.{state};
+    
+    // Initialize actor with parameters
+    init: func(state: state, params: tuple<string>) -> result<tuple<state>, string>;
+}
+
+interface message-server-client {
+    use types.{json, event};
+    
+    // Handle asynchronous messages (no response)
+    handle-send: func(state: option<json>, params: tuple<json>) -> result<tuple<option<json>>, string>;
+    
+    // Handle synchronous requests (with response)
+    handle-request: func(state: option<json>, params: tuple<json>) -> result<tuple<option<json>, tuple<json>>, string>;
+}
+```
 
 ## Best Practices
 
-1. **State Design**
-   - Keep state minimal and focused
-   - Use structured formats (JSON, MessagePack, etc.)
-   - Include metadata for easier debugging
-   - Consider versioning for schema evolution
-
-2. **Event Types**
-   - Use descriptive event type names
-   - Follow consistent naming patterns
-   - Document event type meanings
-   - Consider event type registries for complex systems
-
-3. **Chain Management**
-   - Verify chains regularly
-   - Monitor chain growth
-   - Implement appropriate retention policies
-   - Backup important chains
-
-4. **Performance Considerations**
-   - Monitor chain length in long-running actors
-   - Consider state snapshots for large histories
-   - Profile hash computation overhead
-   - Optimize serialization formats
-
-## Planned Enhancements
-
-Future versions of Theater will expand the state management system with:
-
-1. **Advanced Verification**:
-   - Merkle tree-based verification for efficient proofs
-   - Cross-actor state verification protocols
-   - State invariant checking and enforcement
-
-2. **Debugging Tools**:
-   - Time travel debugging through chain traversal
-   - Event visualization and analysis
-   - Anomaly detection in state transitions
-   - Comparison tools for chain divergence
-
-3. **Performance Optimizations**:
-   - Chain pruning and compression
-   - Partial chain verification
-   - Optimized hash algorithms
-   - Incremental state updates
-
-4. **Distribution Features**:
-   - Chain replication across nodes
-   - Consensus protocols for shared chains
-   - Partial chain synchronization
-   - Federated chain verification
+1. **Treat State as Immutable**: Always return a new state object rather than modifying the existing one
+2. **Keep State Serializable**: Ensure all state can be properly serialized and deserialized
+3. **Limit State Size**: Keep state compact to improve performance
+4. **Use Appropriate Data Structures**: Structure state for efficient access patterns
+5. **Separate Concerns**: Divide state logically between different actors in a supervision tree
