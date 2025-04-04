@@ -1,0 +1,33 @@
+/* Add a visual indicator for API doc links */
+a[href^="../api"] {
+    position: relative;
+}
+
+a[href^="../api"]::after {
+    content: "📚";
+    margin-left: 4px;
+    font-size: 0.85em;
+}
+
+/* Style API reference button in navbar */
+.nav-chapters {
+    background-color: var(--sidebar-bg);
+}
+
+/* Add styling for code samples */
+pre {
+    border-radius: 4px;
+}
+
+/* Add styling for API note callouts */
+.api-note {
+    background-color: #f0f7ff;
+    border-left: 4px solid #428bca;
+    padding: 10px 15px;
+    margin: 15px 0;
+    border-radius: 0 4px 4px 0;
+}
+
+.api-note p {
+    margin: 0;
+}
