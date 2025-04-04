@@ -1,27 +1,160 @@
+// # Supervisor Interface
+//
+// Defines the interface for actor supervision in the Theater system. This allows parent actors
+// to manage the lifecycle and monitor the state of their child actors.
+//
+// ## Purpose
+//
+// The supervisor interface enables an important part of the Theater architecture: the supervision
+// tree. Similar to Erlang's supervision system, this allows actors to monitor and manage other
+// actors, creating a hierarchical structure that enhances fault tolerance and system management.
+//
+// Through this interface, parent actors can:
+// - Spawn new child actors
+// - Monitor child actor status and state
+// - Restart failed child actors
+// - Access child actor event history
+//
+// ## Example
+//
+// In a typical Theater actor, supervision capabilities would be used like this:
+//
+// ```rust
+// use ntwk::theater::supervisor;
+// 
+// // Spawn a new child actor from a manifest
+// let child_id = supervisor::spawn("child_manifest.toml", None)?;
+// 
+// // Later, restart the child if needed
+// supervisor::restart_child(child_id)?;
+// 
+// // Get the current state of the child
+// let state = supervisor::get_child_state(child_id)?;
+// ```
+//
+// ## Security
+//
+// The supervisor interface has significant privileges, as it can control other actors and
+// access their state. The Theater runtime ensures that an actor can only supervise its
+// direct children, enforcing proper hierarchy boundaries.
+//
+// ## Implementation Notes
+//
+// The interface uses string-based actor identifiers and returns results that can contain
+// errors as strings. This allows for human-readable error messages and flexible actor
+// identification across the system.
+
 package ntwk:theater;
 
 interface supervisor {
-    // Spawn a new child actor
+    // # Spawn a new child actor
+    //
+    // Creates and starts a new actor from the specified manifest file.
+    //
+    // ## Parameters
+    //
+    // * `manifest` - Path or content of the manifest file describing the actor
+    // * `init-bytes` - Optional initial state for the actor (serialized bytes)
+    //
+    // ## Returns
+    //
+    // * `Ok(string)` - ID of the newly created actor
+    // * `Err(string)` - Error message if spawning fails
     spawn: func(manifest: string, init-bytes: option<list<u8>>) -> result<string, string>;
 
-    // Resume a previously stopped child actor
+    // # Resume a previously stopped child actor
+    //
+    // Restarts a previously created actor using an existing manifest but with a potentially
+    // new initial state.
+    //
+    // ## Parameters
+    //
+    // * `manifest` - Path or content of the manifest file describing the actor
+    // * `init-state` - Optional new initial state for the actor (serialized bytes)
+    //
+    // ## Returns
+    //
+    // * `Ok(string)` - ID of the resumed actor
+    // * `Err(string)` - Error message if resuming fails
     resume: func(manifest: string, init-state: option<list<u8>>) -> result<string, string>;
     
-    // Get list of child IDs
+    // # List all child actors
+    //
+    // Retrieves a list of all children directly managed by this actor.
+    //
+    // ## Returns
+    //
+    // * `list<string>` - IDs of all child actors
     list-children: func() -> list<string>;
     
-    // Stop a specific child
+    // # Stop a specific child actor
+    //
+    // Gracefully stops a child actor identified by its ID.
+    //
+    // ## Parameters
+    //
+    // * `child-id` - ID of the child actor to stop
+    //
+    // ## Returns
+    //
+    // * `Ok(_)` - Child was successfully stopped
+    // * `Err(string)` - Error message if stopping fails
     stop-child: func(child-id: string) -> result<_, string>;
     
-    // Restart a specific child
+    // # Restart a specific child actor
+    //
+    // Stops and then starts a child actor, maintaining its ID but resetting its state.
+    //
+    // ## Parameters
+    //
+    // * `child-id` - ID of the child actor to restart
+    //
+    // ## Returns
+    //
+    // * `Ok(_)` - Child was successfully restarted
+    // * `Err(string)` - Error message if restarting fails
     restart-child: func(child-id: string) -> result<_, string>;
     
-    // Get latest state of a child
+    // # Get the latest state of a child actor
+    //
+    // Retrieves the current serialized state of a specified child actor.
+    //
+    // ## Parameters
+    //
+    // * `child-id` - ID of the child actor
+    //
+    // ## Returns
+    //
+    // * `Ok(option<list<u8>>)` - Current state of the child (None if no state)
+    // * `Err(string)` - Error message if retrieving state fails
     get-child-state: func(child-id: string) -> result<option<list<u8>>, string>;
     
-    // Get event history of a child
+    // # Get event history of a child actor
+    //
+    // Retrieves the chain of events that have occurred in a child actor,
+    // providing visibility into its execution history.
+    //
+    // ## Parameters
+    //
+    // * `child-id` - ID of the child actor
+    //
+    // ## Returns
+    //
+    // * `Ok(list<chain-event>)` - List of events in the child's chain
+    // * `Err(string)` - Error message if retrieving events fails
     get-child-events: func(child-id: string) -> result<list<chain-event>, string>;
 
+    // # Event in a chain
+    //
+    // Represents a single event in an actor's chain (audit log).
+    //
+    // ## Fields
+    //
+    // * `hash` - Unique identifier/hash for this event
+    // * `parent-hash` - Hash of the previous event in the chain (None for first event)
+    // * `event-type` - Type of event (e.g., "wasm", "http", "message")
+    // * `data` - Serialized event data
+    // * `timestamp` - Timestamp when the event occurred (milliseconds since epoch)
     record chain-event {
         hash: list<u8>,
         parent-hash: option<list<u8>>,

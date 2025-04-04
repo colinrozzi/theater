@@ -1,3 +1,23 @@
+
+//! # Actor Runtime
+//!
+//! The Actor Runtime is responsible for initializing, running, and managing the lifecycle
+//! of WebAssembly actors within the Theater system. It coordinates the various components
+//! that an actor needs to function, including handlers, the executor, and communication channels.
+//!
+//! ## Purpose
+//!
+//! The Actor Runtime serves as the glue between the Theater system and individual actors by:
+//!
+//! - Managing the full lifecycle of an actor from instantiation to shutdown
+//! - Setting up host function handlers that provide capabilities to the actor
+//! - Initializing the actor with its configuration and state
+//! - Propagating shutdown signals from parent to child components
+//! - Coordinating the execution of all components that make up an actor's environment
+//!
+//! Each actor in the system has its own dedicated runtime, providing isolation and independent
+//! management of resources.
+
 use crate::actor_executor::ActorExecutor;
 use crate::actor_executor::ActorOperation;
 use crate::actor_handle::ActorHandle;
@@ -24,23 +44,183 @@ use tokio::sync::mpsc::{Receiver, Sender};
 use tokio::task::JoinHandle;
 use tracing::{debug, error, info, warn};
 
+/// Maximum time to wait for graceful shutdown before forceful termination
 #[allow(dead_code)]
 const SHUTDOWN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
+/// # ActorRuntime
+///
+/// Coordinates the execution and lifecycle of a single WebAssembly actor within the Theater system.
+///
+/// ## Purpose
+///
+/// `ActorRuntime` manages the various components that make up an actor's execution environment,
+/// including the executor, handlers, and communication channels. It's responsible for starting
+/// the actor, setting up its capabilities via handlers, and ensuring proper shutdown.
+///
+/// ## Example
+///
+/// ```rust
+/// use theater::actor_runtime::ActorRuntime;
+/// use theater::config::ManifestConfig;
+/// use theater::id::TheaterId;
+/// use tokio::sync::mpsc;
+///
+/// async fn start_actor(
+///     id: TheaterId,
+///     config: &ManifestConfig,
+///     theater_tx: mpsc::Sender<TheaterCommand>,
+///     shutdown_receiver: ShutdownReceiver,
+/// ) -> Result<(), Box<dyn std::error::Error>> {
+///     // Create the necessary channels
+///     let (actor_sender, _) = mpsc::channel(32);
+///     let (_, actor_mailbox) = mpsc::channel(32);
+///     let (operation_tx, operation_rx) = mpsc::channel(32);
+///     let (response_tx, mut response_rx) = mpsc::channel(1);
+///     
+///     // Start the actor runtime
+///     let mut runtime = ActorRuntime::start(
+///         id.clone(),
+///         config,
+///         None, // No initial state
+///         theater_tx,
+///         actor_sender,
+///         actor_mailbox,
+///         operation_rx,
+///         operation_tx,
+///         true, // Initialize the actor
+///         shutdown_receiver,
+///         response_tx,
+///     ).await?;
+///     
+///     // Wait for the start result
+///     match response_rx.recv().await {
+///         Some(StartActorResult::Success(actor_id)) => {
+///             println!("Actor started successfully: {}", actor_id);
+///         }
+///         Some(StartActorResult::Failure(actor_id, error)) => {
+///             println!("Actor {} failed to start: {}", actor_id, error);
+///             return Err(error.into());
+///         }
+///         None => {
+///             println!("No response received from actor start");
+///             return Err("No response".into());
+///         }
+///     }
+///     
+///     // Later, stop the actor
+///     runtime.stop().await?;
+///     
+///     Ok(())
+/// }
+/// ```
+///
+/// ## Safety
+///
+/// While `ActorRuntime` itself is safe to use, it manages WebAssembly execution which is
+/// inherently unsafe. The runtime ensures isolation between actors and proper handling of 
+/// errors from WebAssembly code.
+///
+/// ## Security
+///
+/// The runtime enforces security boundaries by:
+/// - Setting up appropriate handler capabilities based on the actor's configuration
+/// - Ensuring proper isolation between actors
+/// - Managing resource allocation and cleanup
+/// - Recording events for auditing
+///
+/// ## Implementation Notes
+///
+/// The runtime uses Tokio tasks for concurrent execution of the actor's components:
+/// - One task for the actor executor
+/// - Separate tasks for each handler
+/// - A monitoring task for shutdown propagation
 pub struct ActorRuntime {
+    /// Unique identifier for this actor
     pub actor_id: TheaterId,
+    /// Handles to the running handler tasks
     handler_tasks: Vec<JoinHandle<()>>,
+    /// Handle to the actor executor task
     actor_executor_task: JoinHandle<()>,
+    /// Controller for graceful shutdown of all components
     shutdown_controller: ShutdownController,
 }
 
+/// # Result of starting an actor
+///
+/// Represents the outcome of attempting to start an actor.
+///
+/// ## Purpose
+///
+/// This enum provides detailed information about whether an actor was successfully
+/// started or encountered errors during initialization. It includes the actor's ID
+/// in both success and failure cases, and detailed error information in the failure case.
+///
+/// ## Example
+///
+/// ```rust
+/// use theater::actor_runtime::StartActorResult;
+/// use theater::id::TheaterId;
+///
+/// fn handle_start_result(result: StartActorResult) {
+///     match result {
+///         StartActorResult::Success(id) => {
+///             println!("Actor {} started successfully", id);
+///             // Proceed with using the actor
+///         }
+///         StartActorResult::Failure(id, error) => {
+///             eprintln!("Actor {} failed to start: {}", id, error);
+///             // Handle the error or try recovery
+///         }
+///     }
+/// }
+/// ```
 #[derive(Debug)]
 pub enum StartActorResult {
+    /// Actor successfully started
     Success(TheaterId),
+    /// Actor failed to start with error message
     Failure(TheaterId, String),
 }
 
 impl ActorRuntime {
+    /// # Start a new actor runtime
+    ///
+    /// Initializes and starts an actor runtime with the specified configuration,
+    /// setting up all necessary components for the actor to run.
+    ///
+    /// ## Parameters
+    ///
+    /// * `id` - Unique identifier for the actor
+    /// * `config` - Configuration for the actor from its manifest
+    /// * `state_bytes` - Optional initial state for the actor
+    /// * `theater_tx` - Channel for sending commands back to the Theater runtime
+    /// * `actor_sender` - Channel for sending messages to the actor
+    /// * `actor_mailbox` - Channel for receiving messages from other actors
+    /// * `operation_rx` - Channel for receiving operations to perform
+    /// * `operation_tx` - Channel for sending operations to the executor
+    /// * `init` - Whether to initialize the actor (call the init function)
+    /// * `parent_shutdown_receiver` - Receiver for shutdown signals from the parent
+    /// * `response_tx` - Channel for sending the start result back to the caller
+    ///
+    /// ## Returns
+    ///
+    /// * `Ok(ActorRuntime)` - The started actor runtime
+    /// * `Err(anyhow::Error)` - Error that occurred during startup
+    ///
+    /// ## Implementation Notes
+    ///
+    /// This method performs the following steps:
+    /// 1. Creates the actor store for state management
+    /// 2. Records the actor load event in the chain
+    /// 3. Sets up handlers based on the configuration
+    /// 4. Creates and instantiates the WebAssembly component
+    /// 5. Initializes the actor if requested
+    /// 6. Starts the executor and handlers
+    /// 7. Sets up shutdown signal propagation
+    ///
+    /// The method is asynchronous and returns once the actor is fully initialized
+    /// and ready to accept operations.
     pub async fn start(
         id: TheaterId,
         config: &ManifestConfig,
@@ -286,6 +466,36 @@ impl ActorRuntime {
         })
     }
 
+    /// # Stop the actor runtime
+    ///
+    /// Gracefully shuts down the actor runtime and all its components,
+    /// including the executor and handlers.
+    ///
+    /// ## Returns
+    ///
+    /// * `Ok(())` - The runtime was successfully shut down
+    /// * `Err(anyhow::Error)` - An error occurred during shutdown
+    ///
+    /// ## Example
+    ///
+    /// ```rust
+    /// async fn stop_actor(runtime: &mut ActorRuntime) -> Result<(), Box<dyn std::error::Error>> {
+    ///     // Signal shutdown to all components and wait for completion
+    ///     runtime.stop().await?;
+    ///     println!("Actor has been shut down");
+    ///     Ok(())
+    /// }
+    /// ```
+    ///
+    /// ## Implementation Notes
+    ///
+    /// This method performs the following steps:
+    /// 1. Signals shutdown to all components via the shutdown controller
+    /// 2. Waits briefly for tasks to shut down gracefully
+    /// 3. Forcefully aborts any tasks that didn't shut down gracefully
+    ///
+    /// The method is designed to ensure that resources are properly cleaned up
+    /// even if some components fail to shut down gracefully.
     pub async fn stop(&mut self) -> Result<()> {
         info!("Initiating actor runtime shutdown");
 
