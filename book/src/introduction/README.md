@@ -18,20 +18,9 @@ Theater builds some guarantees into the structure of the software system itself 
 
 ## Who Is Theater For?
 
-Theater is currently an experimental project best suited for:
-
-- Hobbyists interested in exploring new programming paradigms
-- Hackers looking to push the boundaries of WebAssembly and actor systems
-- Pioneers willing to work with early-stage technology
-- Researchers investigating safer ways to run untrusted or AI-generated code
-- Developers curious about alternative foundations for building software systems
-
-Right now, Theater is not production-ready, but offers a playground for experimentation and exploration. It's perfect for those who want to be on the cutting edge of reimagining how software could be built in the future.
+Theater is currently an experimental project for hobbyists, hackers, and pioneers to push the boundaries of software. It is not intended for production use at this time.
 
 ## About This Book
 
-This book serves as the comprehensive guide to Theater. It starts with practical getting-started guides, dives into the core concepts that underpin the system, and then explores advanced topics for those looking to push the boundaries of what's possible.
+This book should be a friendly introduction to the Theater system. It is meant for programmers new to Theater with programming experience. For a more in-depth and precise understanding of the system and its component parts, please refer to the [reference](/theater/api/theater/index.html)
 
-Each chapter builds upon the previous ones, but feel free to jump to the sections most relevant to your immediate needs. The examples are designed to be practical and applicable to real-world scenarios.
-
-Let's begin exploring how Theater can transform the way we build and reason about software in the age of AI-generated code.

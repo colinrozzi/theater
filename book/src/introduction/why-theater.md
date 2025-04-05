@@ -15,10 +15,11 @@ This shift raises several critical challenges:
 
 These challenges aren't merely theoretical. They represent real problems that organizations will face as they integrate more AI-generated code into their workflows.
 
-## Old Solutions
+## Building on Past Progress: The Drive for Guarantees
 
-It is not like we have been existing in complete free-for-all. The history of software has been a history of building guarantees higher and higher in the abstraction stack. Type systems are a very good example of this. Instead of trusting the developer to write good code, you offload a significant amount of trust to a type system so if the program compiles, you have some guarantees that you have removed some classes of bugs. Automatic memory management is another example, as is something like rust's borrow checker. By building these guarantees into the language, you can offload some of the trust to the compiler.
-The Theater is just an attempt to continue that trend into the runtime. We want to make sure that our computers are safe when they are running code, that they code is as close to correct as we can get it, and that we can trust the code to do what it says it will do. We want to make sure that we can run arbitrary, untrusted code in a safe way, and to be able to recover from failures gracefully.
+The pursuit of more reliable software is not new. Throughout the history of computing, we’ve progressively built stronger guarantees into our tools and languages to reduce reliance on fallible human oversight. Type systems, for example, shift some trust from the developer to the compiler, eliminating entire classes of bugs before runtime. Automatic memory management and innovations like Rust’s borrow checker represent similar advancements, embedding safety directly into the language constructs. Each step pushes guarantees higher up the abstraction stack.
+
+Theater continues this vital trend, extending the focus on verifiable guarantees from the compile-time domain into the complexities of runtime execution. The goal remains consistent: to create environments where code execution is safer, correctness is more attainable, and systems can gracefully handle failures, even when dealing with potentially untrusted components.
 
 ## The Theater Solution
 
