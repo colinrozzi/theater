@@ -1,8 +1,8 @@
 # Why Theater?
 
-## The Challenge of Trust in Modern Software
+## The Challenge of Trust in the AI-Generated Code Era
 
-Software has always been built on a foundation of trust. We trust programmers to write code that works correctly, we trust organizations to review that code, and we trust the ecosystem to catch and fix bugs. This trust model has worked reasonably well, but it's about to be severely tested.
+Software has always been built on a foundation of trust. We trust programmers to write correct code, organizations to review that code, and the ecosystem to catch and fix bugs. This trust model has worked reasonably well, but it's about to be severely tested.
 
 As Large Language Models (LLMs) begin to generate more and more code, we're entering an era where much of the software running in production may never have been reviewed by human eyes. The programmer, that essential link in the chain of trust, is increasingly being replaced by an AI system with different strengths and weaknesses than a human developer.
 
@@ -15,40 +15,59 @@ This shift raises several critical challenges:
 
 These challenges aren't merely theoretical. They represent real problems that organizations will face as they integrate more AI-generated code into their workflows.
 
-## Building on Past Progress: The Drive for Guarantees
+## Shifting Trust from Code to System
 
-The pursuit of more reliable software is not new. Throughout the history of computing, we’ve progressively built stronger guarantees into our tools and languages to reduce reliance on fallible human oversight. Type systems, for example, shift some trust from the developer to the compiler, eliminating entire classes of bugs before runtime. Automatic memory management and innovations like Rust’s borrow checker represent similar advancements, embedding safety directly into the language constructs. Each step pushes guarantees higher up the abstraction stack.
+The traditional approach to software reliability has been to focus on making the code itself more correct through code reviews, testing, and careful design. This approach assumes that humans will create, review, and validate the code.
 
-Theater continues this vital trend, extending the focus on verifiable guarantees from the compile-time domain into the complexities of runtime execution. The goal remains consistent: to create environments where code execution is safer, correctness is more attainable, and systems can gracefully handle failures, even when dealing with potentially untrusted components.
+Theater takes a different approach. Rather than assuming all code is trustworthy, Theater shifts trust to the system itself. By providing strong guarantees at the system level, Theater creates an environment where even potentially flawed or untrusted code can run safely.
 
-## The Theater Solution
+This shift parallels other advancements in computing history:
+- Type systems shifted trust from developers to compilers
+- Memory management shifted trust from manual allocation to automatic systems
+- Rust's borrow checker shifted trust from runtime checks to compile-time verification
 
-Theater uses three key ideas to provide some guarantees about the code that is running in the system. These ideas are:
+Theater continues this evolution by shifting trust from code quality to system-level guarantees.
 
-### 1. WebAssembly Sandboxing
+## The Three Pillars of Theater
 
-Theater uses WebAssembly Components as its foundation, providing several critical benefits:
+Theater uses three key pillars to provide guarantees about code running in the system:
 
-- **Strong Isolation**: Each actor runs in its own sandbox, preventing direct access to the host system or other actors.
-- **Deterministic Execution**: WebAssembly's deterministic nature ensures that the same inputs always produce the same outputs, making systems easier to test and debug.
-- **Language Agnosticism**: While Theater is built in Rust, actors can be written in any language that compiles to WebAssembly, expanding the ecosystem.
+### 1. WebAssembly Components & Sandboxing
 
-### 2. Erlang-Inspired Supervision
+Theater uses WebAssembly Components as its foundation, providing:
 
-Taking inspiration from Erlang/OTP, Theater implements a comprehensive supervision system:
+- **Strong Isolation**: Each actor runs in its own sandbox, preventing direct access to the host system or other actors
+- **Deterministic Execution**: The same inputs always produce the same outputs, making systems easier to test and debug
+- **Language Agnosticism**: Actors can be written in any language that compiles to WebAssembly
+- **Capability-Based Security**: Actors only get access to capabilities explicitly granted to them
 
-- **Hierarchical Recovery**: Parent actors can monitor their children and restart them if they fail, containing failures to small parts of the system.
-- **Explicit Error Handling**: The supervision system makes error handling a first-class concern, not an afterthought.
-- **Lifetime Isolation**: When an actor fails, its state and chain are preserved, allowing for anything from detailed debugging to the resumption of the actor with a previous good state.
+### 2. Actor Model & Supervision
 
-### 3. Chain of Interactions
+Taking inspiration from Erlang/OTP, Theater implements a comprehensive actor system:
+
+- **Message Passing**: All communication happens through explicit messages
+- **Hierarchical Supervision**: Parent actors monitor children and can restart them upon failure
+- **Failure Isolation**: Problems in one actor don't affect siblings or unrelated parts of the system
+- **Explicit Error Handling**: Error handling becomes a first-class concern in the system design
+
+### 3. Traceability & Verification
 
 Theater tracks all information that enters or leaves the WebAssembly sandbox:
 
-- **Event Chaining**: Each event is linked to its predecessor, allowing for easy tracing of how a particular state was reached.
-- **Deterministic Replay**: Because WebAssembly is sandboxed and deterministic, any sequence of events can be replayed exactly on any system.
-- **Verification**: Each state transition is cryptographically linked to its predecessors, so state received from an external source can be verified.
+- **Event Chain**: All system actions are recorded in a verifiable chain
+- **Deterministic Replay**: Any sequence of events can be replayed exactly
+- **State Verification**: Each state transition is cryptographically linked to its predecessors
+- **Comprehensive Debugging**: The complete history of actor interactions is available for inspection
 
-By providing a structured environment with strong guarantees, Theater enables developers to build more trustworthy systems, even when the components themselves might not be fully trusted.
+## Building for an AI-First World
 
-In the following chapters, we'll explore how to use Theater in practice, diving into the details of its architecture and showing how it can be applied to real-world problems.
+By providing a structured environment with strong system-level guarantees, Theater enables developers to build more trustworthy systems, even when individual components might not be fully trusted. This approach is particularly valuable as we move into an era where more code is generated by AI systems.
+
+Theater doesn't try to make AI-generated code perfect. Instead, it creates an environment where:
+
+- The impact of bugs is contained
+- Failures can be recovered from automatically
+- System behavior is transparent and verifiable
+- Security boundaries are enforced by the runtime
+
+In the following chapters, we'll explore how Theater implements these principles in practice, starting with the core concepts that form the foundation of the system.

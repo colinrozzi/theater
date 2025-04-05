@@ -1,14 +1,20 @@
 # Theater Architecture
 
-This section provides a detailed technical overview of the Theater system architecture, explaining how its components work together to create a secure, reliable runtime for WebAssembly actors.
+This section provides a detailed explanation of how Theater works internally. It covers the implementation details, component relationships, and design decisions that form the foundation of the system.
 
-Theater is built with a layered approach where components have clear responsibilities and well-defined interfaces. This design enables strong isolation boundaries between actors while maintaining high performance and reliability.
+While the "Core Concepts" section focuses on what Theater is and its fundamental ideas, this section delves into how those concepts are implemented.
 
-## In This Section
+## Who Is This Section For?
 
-- [Component Overview](component-overview.md) - Detailed explanation of Theater's core components and their relationships
-- [Runtime Implementation](runtime-implementation.md) - How the Theater runtime manages actor lifecycle and communication
-- [WebAssembly Integration](wasm-integration.md) - Details of the WebAssembly component model implementation
-- [Security Model](security-model.md) - How Theater enforces isolation and secure execution
+- **Contributors** who want to understand the codebase to make modifications or extensions
+- **Advanced users** seeking a deeper understanding of the internal workings
+- **Those implementing similar systems** who want to learn from Theater's design
 
-Understanding the architecture is helpful for those who want to contribute to Theater's development or need to integrate Theater with other systems. However, if you're just getting started, we recommend beginning with the [Core Concepts](../core-concepts/README.md) section first.
+## What's Covered
+
+This section explains:
+
+- **Component Relationships**: How different parts of Theater interact
+- **Internal Design Decisions**: Why specific technical approaches were chosen
+- **Data Flow**: How information moves through the system
+- **Implementation Details**: Technical specifics of key subsystems

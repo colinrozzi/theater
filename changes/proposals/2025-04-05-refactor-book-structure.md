@@ -75,33 +75,46 @@ Structure the book to follow a natural progression:
 This restructuring will enhance the Theater documentation's effectiveness by providing a more intuitive learning path while maintaining access to detailed technical information for those who need it.
 
 ## Working Notes
-*(This section to be filled in during the implementation)*
 
 - **Tasks:**
-    - [ ] Create the new "Architecture" top-level section in SUMMARY.md
-    - [ ] Move and potentially rename architecture.md to the new section
-    - [ ] Reorganize core-concepts files around the three pillars
-    - [ ] Create new files as needed for missing content
-    - [ ] Update cross-references in all affected files
-    - [ ] Review the flow and readability of the revised structure
-    - [ ] Ensure proper navigation between sections
+    - [x] Create the new "Architecture" top-level section in SUMMARY.md
+    - [x] Move and potentially rename architecture.md to the new section
+    - [x] Reorganize core-concepts files around the three pillars
+    - [x] Create new files as needed for missing content
+    - [x] Update cross-references in all affected files
+    - [x] Review the flow and readability of the revised structure
+    - [x] Ensure proper navigation between sections
 
 - **Decisions:**
-    - *Decision needed:* Final names for core concept files
-    - *Decision needed:* Structure of the Architecture section (subsections?)
-    - *Decision needed:* Additional content needed for any section
+    - *Decision made:* Core concept files named after the three pillars: wasm-components.md, actor-model.md, traceability.md
+    - *Decision made:* Architecture section includes: overview.md, components.md, data-flow.md, implementation.md
+    - *Decision made:* Created comprehensive content for all new sections
 
 - **Challenges:**
-    - *(Track any issues encountered here)*
+    - Maintaining a balance between conceptual explanations and technical details
+    - Ensuring consistency in terminology across all sections
+    - Avoiding duplication while ensuring each section can stand on its own
 
 ## Final Notes
-*(This section to be filled in upon completion)*
 
 - **Final implementation details:**
-    - *(Summary of what was actually done)*
+    - Created a new Architecture section with 4 pages (README.md, overview.md, components.md, data-flow.md, implementation.md)
+    - Created 3 new core concept pages focused on the pillars (wasm-components.md, actor-model.md, traceability.md)
+    - Updated introduction pages to align with the new structure
+    - Updated the main README.md to reflect the three pillars approach
+    - Updated SUMMARY.md with the new navigation structure
+
 - **Deviations from original plan:**
-    - *(Note any changes made during implementation)*
+    - We didn't include a separate "Getting Started" section yet, leaving this for a future enhancement
+    - Core concepts retained the existing detailed pages (actor-ids.md, state-management.md, etc.) to maintain existing content while adding the pillar-focused pages
+
 - **Lessons learned:**
-    - *(Any insights gained)*
+    - A clear conceptual structure makes it easier to organize detailed content
+    - The three pillars approach provides a strong narrative thread throughout the documentation
+    - Separating "what" from "how" makes the material more accessible to different audience types
+
 - **Future considerations:**
-    - *(Any follow-up tasks or related improvements)*
+    - Add a dedicated "Getting Started" section with quick examples
+    - Review and potentially consolidate detailed pages in Core Concepts
+    - Add more diagrams to illustrate concepts and architecture
+    - Consider a glossary for key Theater terminology

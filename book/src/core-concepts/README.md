@@ -1,28 +1,51 @@
 # Core Concepts
 
-This section introduces the fundamental concepts behind Theater. Rather than diving into implementation details, the focus here is on the key ideas and principles that make Theater unique.
+Theater is built on three fundamental pillars that work together to create a system that is secure, reliable, and transparent. This section explains what Theater is and the key concepts that make it unique.
 
-Theater is built on three core pillars:
+## The Three Pillars of Theater
 
-## 1. WebAssembly Components
-By leveraging WebAssembly Components as its foundation, Theater provides strong sandboxing, deterministic execution, and language-agnostic interfaces. This ensures that code runs consistently regardless of the environment and cannot access resources it shouldn't.
+### [WebAssembly Components & Sandboxing](./wasm-components.md)
 
-- [Sandboxing and Security](wasm-components/sandboxing.md)
-- [Deterministic Execution](wasm-components/determinism.md)
-- [Component Interfaces](wasm-components/interfaces.md)
+WebAssembly provides the foundation for Theater's security and determinism guarantees:
 
-## 2. Actor Model with Supervision
-The actor model provides a natural way to structure concurrent systems. Each actor is a self-contained unit with isolated state that communicates through message passing. Theater adds Erlang-inspired supervision for robust failure handling.
+- Security boundaries through sandboxing
+- Deterministic execution
+- Language-agnostic components
+- Capability-based security model
 
-- [Actor Basics](actor-model/actors.md)
-- [Actor Communication](actor-model/communication.md)
-- [Supervision System](actor-model/supervision.md)
+### [Actor Model & Supervision](./actor-model.md)
 
-## 3. Complete Traceability
-Every interaction with an actor is recorded in a cryptographically-linked chain of events. This gives Theater powerful capabilities for debugging, verification, and recovery.
+The Actor Model enables Theater's approach to concurrency, isolation, and fault tolerance:
 
-- [Event Chain](traceability/event-chain.md)
-- [State Verification](traceability/verification.md)
-- [Debugging and Inspection](traceability/debugging.md)
+- Actors as fundamental units of computation
+- Message-passing for all communication
+- Isolated state management
+- Hierarchical supervision for fault tolerance
 
-Understanding these core concepts will help you build reliable, maintainable systems with Theater, even as the ecosystem of AI-generated code continues to grow.
+### [Traceability & Verification](./traceability.md)
+
+Traceability ensures that Theater systems are transparent, auditable, and debuggable:
+
+- Event Chain capturing all system activities
+- Deterministic replay for verification
+- State management for consistent snapshots
+- Comprehensive tools for inspection and debugging
+
+## How The Pillars Work Together
+
+These three pillars complement each other to create Theater's unique properties:
+
+- **WebAssembly + Actor Model**: Provides strong isolation with clear communication patterns
+- **WebAssembly + Traceability**: Enables deterministic replay and verification
+- **Actor Model + Traceability**: Supports fault diagnosis and recovery
+
+By understanding these core concepts, you'll have a solid foundation for using Theater effectively and making the most of its capabilities.
+
+## Detailed Concepts
+
+Beyond the three pillars, this section explores key concepts in more detail:
+
+- [Actor IDs](./actor-ids.md): How actors are identified in the system
+- [State Management](./state-management.md): How actors maintain and access state
+- [Interface System](./interface-system.md): How actors define and implement interfaces
+- [Store System](./store/README.md): Theater's content-addressable storage system
