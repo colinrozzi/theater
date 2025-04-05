@@ -11,19 +11,11 @@
 - [WebAssembly Components & Sandboxing](core-concepts/wasm-components.md)
 - [Actor Model & Supervision](core-concepts/actor-model.md)
 - [Traceability & Verification](core-concepts/traceability.md)
-- [Actor IDs](core-concepts/actor-ids.md)
+- [Supervision](core-concepts/supervision.md)
 - [State Management](core-concepts/state-management.md)
-- [Interface System](core-concepts/interface-system.md)
 - [Store System](core-concepts/store/README.md)
     - [Actor API](core-concepts/store/actor-api.md)
     - [Usage Patterns](core-concepts/store/usage-patterns.md)
-
-# Architecture
-- [Overview](architecture/README.md)
-- [System Design](architecture/overview.md)
-- [Component Relationships](architecture/components.md)
-- [Data Flow](architecture/data-flow.md)
-- [Implementation Details](architecture/implementation.md)
 
 # User Guide
 - [Configuration](user-guide/configuration.md)
@@ -34,6 +26,13 @@
 - [Building Actors](development/building-actors.md)
 - [Building Host Functions](development/building-host-functions.md)
 - [Making Changes](development/making-changes.md)
+- [System Internals](development/system-internals/README.md)
+    - [System Architecture](development/system-internals/architecture.md)
+    - [Component Relationships](development/system-internals/components.md)
+    - [Data Flow](development/system-internals/data-flow.md)
+    - [Implementation Details](development/system-internals/implementation.md)
+    - [Actor ID System](development/system-internals/actor-ids.md)
+    - [Interface System](development/system-internals/interface-system.md)
 
 # Services
 - [Handlers](services/handlers.md)
