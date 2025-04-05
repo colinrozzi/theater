@@ -139,34 +139,217 @@ pub struct StoreHandlerConfig {}
 pub struct HttpFrameworkHandlerConfig {}
 
 impl ManifestConfig {
+    /// Loads a manifest configuration from a TOML file.
+    ///
+    /// ## Purpose
+    ///
+    /// This method reads a manifest file from disk, parses it as TOML, and constructs
+    /// a ManifestConfig instance. It's the primary way to load actor configurations
+    /// from the filesystem.
+    ///
+    /// ## Parameters
+    ///
+    /// * `path` - Path to the TOML manifest file
+    ///
+    /// ## Returns
+    ///
+    /// * `Ok(ManifestConfig)` - The successfully parsed configuration
+    /// * `Err(anyhow::Error)` - If the file cannot be read or contains invalid TOML
+    ///
+    /// ## Example
+    ///
+    /// ```rust
+    /// use theater::config::ManifestConfig;
+    /// use std::path::Path;
+    ///
+    /// fn example() -> anyhow::Result<()> {
+    ///     let config = ManifestConfig::from_file(Path::new("manifest.toml"))?;
+    ///     println!("Loaded actor: {}", config.name);
+    ///     Ok(())
+    /// }
+    /// ```
     pub fn from_file<P: AsRef<std::path::Path>>(path: P) -> anyhow::Result<Self> {
         let content = std::fs::read_to_string(path)?;
         let config: ManifestConfig = toml::from_str(&content)?;
         Ok(config)
     }
 
+    /// Loads a manifest configuration from a TOML string.
+    ///
+    /// ## Purpose
+    ///
+    /// This method parses a string containing TOML data and constructs a ManifestConfig
+    /// instance. This is useful when the manifest content is available in memory rather
+    /// than in a file.
+    ///
+    /// ## Parameters
+    ///
+    /// * `content` - TOML string containing the manifest configuration
+    ///
+    /// ## Returns
+    ///
+    /// * `Ok(ManifestConfig)` - The successfully parsed configuration
+    /// * `Err(anyhow::Error)` - If the string contains invalid TOML
+    ///
+    /// ## Example
+    ///
+    /// ```rust
+    /// use theater::config::ManifestConfig;
+    ///
+    /// fn example() -> anyhow::Result<()> {
+    ///     let toml_content = r#"
+    ///         name = "example-actor"
+    ///         component_path = "./example.wasm"
+    ///     "#;
+    ///     
+    ///     let config = ManifestConfig::from_str(toml_content)?;
+    ///     println!("Loaded actor: {}", config.name);
+    ///     Ok(())
+    /// }
+    /// ```
     pub fn from_str(content: &str) -> anyhow::Result<Self> {
         let config: ManifestConfig = toml::from_str(content)?;
         Ok(config)
     }
 
+    /// Loads a manifest configuration from a byte vector.
+    ///
+    /// ## Purpose
+    ///
+    /// This method converts a byte vector to a UTF-8 string, parses it as TOML,
+    /// and constructs a ManifestConfig instance. This is useful when the manifest
+    /// content is available as raw bytes, such as when loaded from a content store.
+    ///
+    /// ## Parameters
+    ///
+    /// * `content` - Byte vector containing UTF-8 encoded TOML data
+    ///
+    /// ## Returns
+    ///
+    /// * `Ok(ManifestConfig)` - The successfully parsed configuration
+    /// * `Err(anyhow::Error)` - If the bytes cannot be converted to valid UTF-8 or contain invalid TOML
+    ///
+    /// ## Example
+    ///
+    /// ```rust
+    /// use theater::config::ManifestConfig;
+    ///
+    /// fn example() -> anyhow::Result<()> {
+    ///     let bytes = vec![/* ... */];
+    ///     let config = ManifestConfig::from_vec(bytes)?;
+    ///     println!("Loaded actor: {}", config.name);
+    ///     Ok(())
+    /// }
+    /// ```
     pub fn from_vec(content: Vec<u8>) -> anyhow::Result<Self> {
         let config: ManifestConfig = toml::from_str(&String::from_utf8(content)?)?;
         Ok(config)
     }
 
+    /// Gets the name of the actor.
+    ///
+    /// ## Purpose
+    ///
+    /// This method provides access to the actor's name, which is its primary
+    /// identifier in logs and diagnostics.
+    ///
+    /// ## Returns
+    ///
+    /// A string reference to the actor's name
+    ///
+    /// ## Example
+    ///
+    /// ```rust
+    /// # use theater::config::ManifestConfig;
+    /// # fn example(config: &ManifestConfig) {
+    /// println!("Actor name: {}", config.name());
+    /// # }
+    /// ```
     pub fn name(&self) -> &str {
         &self.name
     }
 
+    /// Checks if the actor implements a specific interface.
+    ///
+    /// ## Purpose
+    ///
+    /// This method checks whether the actor implements a particular WebAssembly
+    /// interface. This is used to verify capability compatibility before attaching
+    /// handlers to an actor.
+    ///
+    /// ## Parameters
+    ///
+    /// * `interface_name` - The name of the interface to check for
+    ///
+    /// ## Returns
+    ///
+    /// * `true` - If the actor implements the specified interface
+    /// * `false` - If the actor does not implement the specified interface
+    ///
+    /// ## Example
+    ///
+    /// ```rust
+    /// # use theater::config::ManifestConfig;
+    /// # fn example(config: &ManifestConfig) {
+    /// if config.implements_interface("http-server") {
+    ///     println!("Actor can handle HTTP requests");
+    /// }
+    /// # }
+    /// ```
     pub fn implements_interface(&self, interface_name: &str) -> bool {
         self.interface.implements == interface_name
     }
 
+    /// Gets the primary interface implemented by the actor.
+    ///
+    /// ## Purpose
+    ///
+    /// This method returns the name of the primary interface that the actor
+    /// implements, which determines its core capabilities and behavior.
+    ///
+    /// ## Returns
+    ///
+    /// A string reference to the interface name
+    ///
+    /// ## Example
+    ///
+    /// ```rust
+    /// # use theater::config::ManifestConfig;
+    /// # fn example(config: &ManifestConfig) {
+    /// println!("Actor implements interface: {}", config.interface());
+    /// # }
+    /// ```
     pub fn interface(&self) -> &str {
         &self.interface.implements
     }
 
+    /// Loads the initial state data for the actor.
+    ///
+    /// ## Purpose
+    ///
+    /// This method reads the initial state data from the file specified in the
+    /// `init_state` field, if present. This data is used to initialize the actor
+    /// when it starts.
+    ///
+    /// ## Returns
+    ///
+    /// * `Ok(Some(Vec<u8>))` - The initial state data if specified and successfully loaded
+    /// * `Ok(None)` - If no initial state file is specified
+    /// * `Err(anyhow::Error)` - If the initial state file cannot be read
+    ///
+    /// ## Example
+    ///
+    /// ```rust
+    /// # use theater::config::ManifestConfig;
+    /// # fn example(config: &ManifestConfig) -> anyhow::Result<()> {
+    /// if let Some(state_data) = config.load_init_state()? {
+    ///     println!("Loaded initial state: {} bytes", state_data.len());
+    /// } else {
+    ///     println!("No initial state specified");
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
     pub fn load_init_state(&self) -> anyhow::Result<Option<Vec<u8>>> {
         match &self.init_state {
             Some(path) => {
@@ -177,10 +360,33 @@ impl ManifestConfig {
         }
     }
 
-    // This is intended to store a manifest in the content store in a such a way that there is only
-    // one representation per possible manifest. I don't know if toml::to_string does this, but I
-    // am going to go forward for now, because this is more a nice to have than need to have at
-    // this point.
+    /// Converts the manifest to a fixed byte representation.
+    ///
+    /// ## Purpose
+    ///
+    /// This method serializes the manifest to a standardized byte representation
+    /// suitable for content-addressed storage. The goal is to ensure that identical
+    /// manifests produce identical byte representations, enabling deduplication.
+    ///
+    /// ## Returns
+    ///
+    /// A byte vector containing the serialized manifest
+    ///
+    /// ## Example
+    ///
+    /// ```rust
+    /// # use theater::config::ManifestConfig;
+    /// # fn example(config: ManifestConfig) {
+    /// let bytes = config.into_fixed_bytes();
+    /// println!("Serialized manifest: {} bytes", bytes.len());
+    /// # }
+    /// ```
+    ///
+    /// ## Implementation Notes
+    ///
+    /// This is intended to store a manifest in the content store in such a way that there is only
+    /// one representation per possible manifest. The current implementation uses TOML serialization,
+    /// but this might be refined in the future to guarantee consistent representations.
     pub fn into_fixed_bytes(self) -> Vec<u8> {
         toml::to_string(&self).unwrap().into_bytes()
     }
