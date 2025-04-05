@@ -1,33 +1,295 @@
-## Architecture
+# Theater Architecture
 
-Theater's architecture is carefully designed to manage the lifecycle and execution of WASM actors securely and efficiently. At the heart of the system lies the **Theater Runtime** (`theater_runtime.rs`), which acts as the central coordinator for all actors within a Theater instance. It manages the overall actor pool, handling tasks like spawning new actors based on their configuration manifests. The Runtime is also responsible for routing messages between actors or between external clients and actors, managing structured communication "Channels", overseeing the supervision hierarchy by propagating failure notifications, and orchestrating state persistence and resumption logic.
+This document describes the technical architecture of Theater, explaining how its components are structured and interact to create a secure, reliable runtime for WebAssembly actors.
 
-External interaction with the system typically occurs through the **Theater Server** (`theater_server.rs`). This component provides the main interface, often listening for management commands over a network connection (like TCP). It receives requests to start, stop, inspect, or send messages to actors and communicates these requests onward to the `TheaterRuntime` for execution.
+## System Overview
 
-To manage an individual actor, the `TheaterRuntime` relies on an **Actor Runtime** (`actor_runtime.rs`). Each actor instance gets its own `ActorRuntime`, which is responsible for loading the actor's specific WASM component, as defined in its manifest. Crucially, the `ActorRuntime` sets up the secure environment for the actor, provisioning the specific host capabilities (like filesystem access or network permissions) that the actor is permitted to use. It manages the actor's lifecycle, including initialization, message handling, and eventual shutdown.
+Theater follows a layered architecture with clear separation of responsibilities between components:
 
-The actual execution of the actor's WASM code is delegated to the **Actor Executor** (`actor_executor.rs`). This low-level engine, powered by the `Wasmtime` library, handles the intricacies of running WASM. It manages the `Wasmtime` Store, Linker, and Instance for the specific actor, executes its functions (like `init` or `handle_message`), and enforces resource limits, such as execution fuel, to prevent potential abuse or infinite loops.
+![Theater Architecture Diagram](/path/to/diagram.png)
 
-Defining *what* an actor is and *how* it should run is the role of the **Actor Manifest** (`ManifestConfig`). This configuration file specifies the path to the actor's WASM code and declares the capabilities it requires. It also defines parameters like the actor's supervision strategy. The `TheaterRuntime` uses this manifest as the blueprint for creating and configuring new actor instances.
+## Core Components
 
-Internally, Theater may utilize a processing **Chain** (`chain/mod.rs`). This mechanism appears to provide a structured way to handle requests or events as they flow through the system, potentially passing through multiple steps or handlers. This could be used for implementing middleware-like logic for host capabilities or internal routing, and might form the basis for the auditable "Chain of Interactions" feature.
+### Theater Runtime
 
-## Core Concepts in Theater
+The **Theater Runtime** (`theater_runtime.rs`) is the central coordination component that manages the overall actor system. It's responsible for:
 
-This architecture supports several core concepts that define Theater's approach to building reliable systems.
+- Managing the global actor pool and lifecycle events
+- Routing messages between actors or between external clients and actors
+- Orchestrating structured communication through "Channels"
+- Propagating failure notifications through the supervision hierarchy
+- Coordinating state persistence and restoration
 
-**Actors: Isolated Units of Computation**
+The Theater Runtime exists as a singleton within a Theater instance and maintains references to all active actors.
 
-The fundamental unit within Theater is the **Actor**. An actor comprises its logic, compiled into a **WebAssembly (WASM) component**, and an associated **Manifest** defining its identity, permissions, and runtime requirements. Each actor operates within a strict WASM sandbox, managed by its dedicated `ActorRuntime` and `ActorExecutor`. This provides strong memory **isolation**, preventing actors from interfering with each other or the host system beyond their explicitly granted permissions. Actors cannot perform I/O directly; instead, they interact with the outside world through **capabilities** defined in their manifest and provided by the host `ActorRuntime`. These capabilities act as controlled gateways for actions like filesystem access or network communication. Actors can maintain internal **state**, and Theater includes mechanisms for persisting this state, enabling resumption after stops or crashes.
+### Theater Server
 
-**Supervision: Building Fault-Tolerant Systems**
+The **Theater Server** (`theater_server.rs`) exposes Theater's functionality to the outside world through network interfaces. It:
 
-Drawing inspiration from Erlang/OTP, Theater implements a **hierarchical supervision** model to enhance fault tolerance. Actors can spawn child actors, thereby becoming their **supervisors**. When a child actor fails unexpectedly, its supervisor is notified. Based on a predefined strategy, the supervisor can then react – perhaps by restarting the child (potentially restoring its last known state), terminating it cleanly, or escalating the failure notification further up the hierarchy. This "let it crash" philosophy, combined with automated restart strategies managed by the `TheaterRuntime`, allows the system to gracefully recover from many kinds of transient errors without catastrophic failure, promoting self-healing capabilities.
+- Listens for management commands over HTTP/WebSocket
+- Authenticates and authorizes external requests
+- Processes commands to start, stop, inspect, or message actors
+- Communicates with the Theater Runtime to execute these requests
+- Streams events and logs back to clients
 
-**Chain of Interactions: Auditable and Replayable Execution**
+The Server is configurable to run with different transport protocols and security settings.
 
-A cornerstone of Theater is **auditability**. Every interaction an actor has with its environment – receiving a message, invoking a host capability, emitting an event – is meticulously tracked. These interactions form a **linked chain**, creating a verifiable record of the sequence of events and data flow that influenced the actor's state over time. This chain enables **deterministic replay**: because WASM execution itself is deterministic, possessing this chain of inputs allows the actor's behavior to be reproduced exactly, which is immensely valuable for debugging complex issues. Furthermore, this verifiable history opens the door to advanced techniques like cryptographic proofs, demonstrating that an actor reached its current state solely through an authorized sequence of operations.
+### Actor Runtime
 
-**Host Filesystem Access (Example Capability)**
+Each actor gets its own **Actor Runtime** (`actor_runtime.rs`) instance, which:
 
-Consider how an actor might interact with the host filesystem. It doesn't get direct access. Instead, its **Manifest** must explicitly declare the need for filesystem operations, specifying precisely which paths and permissions (e.g., read-only for `/config.toml`, read/write for `/data/`) are required. During setup, the `ActorRuntime` provisions a corresponding **filesystem capability** – essentially, a host function exposed to the WASM module. When the actor's code attempts a filesystem operation (like reading a file) by calling this function, the host capability intercepts the request. It checks the request against the permissions granted in the manifest. If allowed, the host performs the operation on the actor's behalf and returns the result (or an error status) back into the WASM sandbox. This mechanism ensures actors remain strictly confined to their designated boundaries, enforcing the principle of least privilege.
+- Loads and initializes the actor's WebAssembly component
+- Provisions host capabilities based on the manifest configuration
+- Manages the actor's entire lifecycle (init, message handling, shutdown)
+- Maintains the actor's state and event chain
+- Enforces resource quotas and limits
+
+The Actor Runtime creates a secure boundary around each actor, controlling what it can access and how it interacts with the rest of the system.
+
+### Actor Executor
+
+The **Actor Executor** (`actor_executor.rs`) handles the low-level execution of WebAssembly code:
+
+- Creates and configures the Wasmtime execution environment
+- Manages the Wasmtime Store containing the actor's memory and state
+- Links the permitted host functions to the WebAssembly module
+- Executes specific actor functions when requested
+- Translates between host and WebAssembly data representations
+- Enforces execution limits like fuel (instruction counting)
+
+Multiple actor instances of the same type can share a single compiled module but will have separate Stores for isolation.
+
+### WebAssembly Interface
+
+The **WebAssembly Interface** (`wasm.rs`) provides the critical bridge between the host runtime and WebAssembly components. It:
+
+- Handles loading and instantiation of WebAssembly components
+- Manages type-safe function calls across the WebAssembly boundary
+- Implements memory isolation and safety checks
+- Tracks resource usage of WebAssembly instances
+- Provides error handling for WebAssembly operations
+
+The interface consists of several key abstractions:
+
+1. **ActorComponent**: Represents a loaded WebAssembly component ready for instantiation
+2. **ActorInstance**: An instantiated component with registered functions
+3. **TypedFunction**: A trait for type-safe function calls with various signatures
+4. **MemoryStats**: Structure for tracking memory usage of WebAssembly components
+
+This interface ensures that all interactions with WebAssembly code are safe, secure, and properly tracked.
+
+### Actor Manifest
+
+The **Actor Manifest** (`ManifestConfig`) defines what an actor is and how it should run:
+
+- Specifies the path to the actor's WebAssembly component file
+- Declares required capabilities (HTTP, filesystem, etc.) and their configurations
+- Sets up handlers for different types of inputs (messages, HTTP requests)
+- Defines supervision policies and recovery strategies
+- Specifies state persistence requirements
+
+Manifests are typically stored as TOML files and loaded by the Theater Runtime during actor creation.
+
+### Chain System
+
+The **Chain** system (`chain/mod.rs`) implements Theater's traceability features:
+
+- Records all inputs and outputs crossing the WebAssembly boundary
+- Creates a cryptographically verified chain of events and state changes
+- Provides the foundation for deterministic replay and verification
+- Supports both in-memory and persistent storage of event history
+- Implements rollback and restoration of actor state
+
+The Chain system is integrated with the Actor Runtime to automatically track all interactions.
+
+## Data Flow
+
+### Actor Lifecycle
+
+1. An actor begins with a manifest being submitted to the Theater Server
+2. The Server forwards the manifest to the Theater Runtime
+3. The Runtime creates a new Actor Runtime instance
+4. The Actor Runtime uses the Actor Executor to load the WebAssembly component
+5. The Executor initializes the actor by calling its `init` function
+6. The Actor Runtime records the initialization in the Chain
+7. The actor is now ready to process messages and requests
+
+### Message Handling
+
+1. A message arrives at the Theater Server from an external client
+2. The Server forwards it to the Theater Runtime with the target actor ID
+3. The Runtime locates the appropriate Actor Runtime
+4. The Actor Runtime:
+   - Records the incoming message in the Chain
+   - Uses the Actor Executor to call the actor's message handler function
+   - Records any capability invocations and their results
+   - Records the handler's response in the Chain
+5. The response is returned to the client through the Theater Runtime and Server
+
+### Capability Invocation
+
+1. The actor's WebAssembly code calls a host function (e.g., HTTP request)
+2. The Actor Executor intercepts this call and:
+   - Verifies the capability is permitted according to the manifest
+   - Translates WebAssembly parameters to host types
+   - Records the invocation request in the Chain
+3. The Actor Runtime processes the capability request
+4. The result is:
+   - Recorded in the Chain
+   - Translated back to WebAssembly types
+   - Returned to the actor's code
+
+### Supervision and Recovery
+
+1. If an actor fails during execution:
+   - The Actor Executor catches the exception
+   - The Actor Runtime records the failure in the Chain
+   - The Theater Runtime is notified of the failure
+2. The Theater Runtime:
+   - Identifies the actor's supervisor (parent actor or the system)
+   - Notifies the supervisor of the failure
+3. Based on the supervision strategy, the system may:
+   - Restart the actor with its previous state
+   - Terminate the actor
+   - Escalate the failure to a higher-level supervisor
+
+## Implementation Details
+
+### WebAssembly Component Model
+
+Theater uses the WebAssembly Component Model to define actor interfaces:
+
+```rust
+// Inside wasm.rs
+fn load_component(path: &Path, engine: &Engine) -> Result<Component, Error> {
+    let component_bytes = std::fs::read(path)?;
+    let component = Component::new(engine, component_bytes)?;
+    Ok(component)
+}
+```
+
+Components implement standardized interfaces defined using WIT (WebAssembly Interface Types), allowing actors to be written in any language that can target WebAssembly.
+
+### Type-Safe WebAssembly Function Calls
+
+The WebAssembly interface provides type safety for function calls:
+
+```rust
+// Inside wasm.rs
+pub trait TypedFunction: Send + Sync + 'static {
+    fn call_func<'a>(
+        &'a self,
+        store: &'a mut Store<ActorStore>,
+        state: Option<Vec<u8>>,
+        params: Vec<u8>,
+    ) -> Pin<Box<dyn Future<Output = Result<(Option<Vec<u8>>, Vec<u8>)>> + Send + 'a>>;
+}
+```
+
+This trait ensures that all function calls across the WebAssembly boundary are properly typed and safely handled.
+
+### Capability Provisioning
+
+Capabilities are provisioned according to manifest specifications:
+
+```rust
+// Inside actor_runtime.rs
+fn provision_capabilities(&mut self, manifest: &ManifestConfig) -> Result<(), Error> {
+    for handler_config in &manifest.handlers {
+        match handler_config.handler_type {
+            HandlerType::HttpServer => {
+                self.add_capability(
+                    HttpServerCapability::new(&handler_config.config)?
+                )?;
+            },
+            HandlerType::FileSystem => {
+                self.add_capability(
+                    FileSystemCapability::new(&handler_config.config)?
+                )?;
+            },
+            // Other capability types...
+        }
+    }
+    Ok(())
+}
+```
+
+Each capability is implemented as a module that exposes host functions to the WebAssembly environment while enforcing security and resource constraints.
+
+### Event Chain Implementation
+
+The Chain system uses cryptographic linking to ensure integrity:
+
+```rust
+// Inside chain.rs
+fn append_event(&mut self, event: Event) -> Result<EventId, Error> {
+    // Get the previous event's ID
+    let prev_id = match self.events.last() {
+        Some((id, _)) => *id,
+        None => EventId::genesis(),
+    };
+    
+    // Create a new event ID based on the previous ID and event content
+    let id = EventId::new(&prev_id, &event);
+    
+    // Store the event
+    self.events.push((id, event));
+    self.persist()?;
+    
+    Ok(id)
+}
+```
+
+This creates a tamper-evident history that can be verified and used for deterministic replay.
+
+### Message Routing
+
+The Theater Runtime implements message routing between actors:
+
+```rust
+// Inside theater_runtime.rs
+fn route_message(&self, from: Option<ActorId>, to: ActorId, message: Message) -> Result<(), Error> {
+    // Find the target actor
+    let actor = self.actors.get(&to)?;
+    
+    // Record message in sender's outbox and receiver's inbox
+    if let Some(sender) = from {
+        let sender_actor = self.actors.get(&sender)?;
+        sender_actor.record_outgoing_message(&to, &message)?;
+    }
+    
+    // Deliver message to recipient
+    actor.handle_message(from, message)
+}
+```
+
+This ensures all inter-actor communication is properly tracked and delivered.
+
+### WebAssembly Instance Management
+
+The WebAssembly interface manages actor instances and their lifecycle:
+
+```rust
+// Inside wasm.rs
+pub async fn instantiate(self) -> Result<ActorInstance> {
+    let mut store = Store::new(&self.engine, self.actor_store.clone());
+
+    let instance = self
+        .linker
+        .instantiate_async(&mut store, &self.component)
+        .await
+        .map_err(|e| WasmError::WasmError {
+            context: "instantiation",
+            message: e.to_string(),
+        })?;
+
+    Ok(ActorInstance {
+        actor_component: self,
+        instance,
+        store,
+        functions: HashMap::new(),
+    })
+}
+```
+
+This creates an isolated WebAssembly instance with its own memory space and execution context.
