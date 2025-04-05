@@ -14,6 +14,11 @@ Theater is an attempt to move a lot of the trust from the code and its author to
 2. **Actor Model with Supervision** implements an Erlang-style supervision system for isolation and fault-tolerance
 3. **Chain** tracks all information that enters or leaves the WebAssembly sandbox
 
+### Read more
+
+- **[Guide](https://colinrozzi.github.io/theater/)** - A comprehensive guide to Theater
+- **[Reference](https://colinrozzi.github.io/theater/api/)** - Full rustdoc documentation
+
 ## Quick Start with Theater CLI
 
 Theater includes a powerful CLI tool for managing the entire actor lifecycle:
@@ -46,10 +51,10 @@ theater start manifest.toml --id-only | theater subscribe -
 
 ## Documentation
 
-- [Why Theater](book/src/why-theater.md) - Core concepts and motivation
-- [CLI Documentation](book/src/cli.md) - Complete guide to the Theater CLI
-- [Store System](book/src/store/README.md) - Content-addressable storage documentation
-- [Making Changes](book/src/making-changes.md) - Guide for contributing changes
+- [Why Theater](book/src/introduction/why-theater.md) - Core concepts and motivation
+- [CLI Documentation](book/src/user-guide/cli.md) - Complete guide to the Theater CLI
+- [Store System](book/src/core-concepts/store/README.md) - Content-addressable storage documentation
+- [Making Changes](book/src/development/making-changes.md) - Guide for contributing changes
 - [Current Changes](/changes/in-progress.md) - Overview of work in progress
 
 ## Supervision System
