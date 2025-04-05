@@ -18,14 +18,15 @@ Theater builds some guarantees into the structure of the software system itself 
 
 ## Who Is Theater For?
 
-Theater is designed for developers and organizations who:
+Theater is currently an experimental project best suited for:
 
-- Want to safely run untrusted code, including AI-generated components
-- Need to build systems with high reliability and fault tolerance
-- Are developing microservices that require strong isolation
-- Want to learn and experiment with actor models and distributed systems
+- Hobbyists interested in exploring new programming paradigms
+- Hackers looking to push the boundaries of WebAssembly and actor systems
+- Pioneers willing to work with early-stage technology
+- Researchers investigating safer ways to run untrusted or AI-generated code
+- Developers curious about alternative foundations for building software systems
 
-Whether you're integrating AI-generated code into your workflow, building critical systems, or simply exploring new paradigms in software architecture, Theater provides a robust framework for building more trustworthy systems.
+Right now, Theater is not production-ready, but offers a playground for experimentation and exploration. It's perfect for those who want to be on the cutting edge of reimagining how software could be built in the future.
 
 ## About This Book
 
