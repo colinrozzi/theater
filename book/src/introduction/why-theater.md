@@ -4,7 +4,7 @@
 
 Software has always been built on a foundation of trust. We trust programmers to write code that works correctly, we trust organizations to review that code, and we trust the ecosystem to catch and fix bugs. This trust model has worked reasonably well, but it's about to be severely tested.
 
-As Large Language Models (LLMs) begin to generate more and more code, we're entering an era where much of the software running in production may never have been reviewed by human eyes. The programmer—that essential link in the chain of trust—is increasingly being replaced by an AI system with different strengths and weaknesses than a human developer.
+As Large Language Models (LLMs) begin to generate more and more code, we're entering an era where much of the software running in production may never have been reviewed by human eyes. The programmer, that essential link in the chain of trust, is increasingly being replaced by an AI system with different strengths and weaknesses than a human developer.
 
 This shift raises several critical challenges:
 
