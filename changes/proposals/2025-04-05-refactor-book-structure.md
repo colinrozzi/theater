@@ -1,50 +1,95 @@
-# Refactor Book Structure for Core Concepts and Architecture
+# Book Structure Refinement Proposal
 
-## Description
+## Overview
 
-- **What is being changed:**
-    - Reorganize the Theater book structure, specifically the `core-concepts` section and the placement of the detailed architecture documentation.
-    - The `core-concepts` section will be refocused to cover the three fundamental pillars identified in the project introduction:
-        1. WebAssembly Components (Sandboxing, Determinism, Interfaces)
-        2. Actor Model with Supervision (Isolation, Communication, Recovery)
-        3. Complete Traceability (Event Chain, Debugging, Verification)
-    - The detailed technical architecture documentation (currently residing in `core-concepts/architecture.md`) will be moved to a new, dedicated top-level section, likely named "Architecture" or "System Internals", placed logically after "Core Concepts".
-    - The file `core-concepts/architecture.md` will be moved and potentially renamed (e.g., `component-overview.md`) within the new section.
+This proposal aims to refine the Theater documentation structure to better serve both newcomers and experienced users by creating a clearer separation between conceptual understanding and technical implementation.
 
-- **Why this change is necessary:**
-    - The current structure mixes high-level conceptual explanations with low-level technical architecture details within the `core-concepts` section.
-    - This can be confusing for new users trying to grasp the fundamental ideas of Theater first.
-    - Aligning the book structure more closely with the introductory material ("Why Theater?") provides a clearer learning path: Introduction (Why) -> Core Concepts (What) -> Architecture (How).
+## Motivation
 
-- **Expected benefits:**
-    - Improved onboarding experience for programmers new to Theater.
-    - Clearer separation between fundamental concepts and implementation details.
-    - More logical flow and easier navigation through the book.
-    - Better alignment between the book's structure and the project's stated goals and principles.
+The current book organization mixes high-level concepts with detailed implementation specifics, which can create confusion for users trying to grasp Theater's fundamental ideas. By restructuring the documentation to follow a more natural learning progression, we can improve comprehension and user experience.
 
-- **Potential risks:**
-    - Requires careful updating of `SUMMARY.md` to reflect the new structure.
-    - Internal cross-references within markdown files might need updating to point to the new locations.
-    - Minor risk of temporarily broken links if updates are not managed carefully during implementation.
+## Proposed Changes
 
-- **Alternatives considered:**
-    - Considered simply reorganizing the content *within* the existing `core-concepts` section, but decided that separating the detailed architecture into its own top-level section provides superior clarity and structure.
+### 1. Refocus Core Concepts Around Three Pillars
+
+Reorganize the "Core Concepts" section to explicitly highlight Theater's three foundational pillars:
+
+**WebAssembly Components & Sandboxing**
+- Security boundaries and capabilities
+- Deterministic execution
+- Interface definitions
+- Language-agnostic components
+
+**Actor Model & Supervision**
+- Actor lifecycle and isolation
+- Message-passing communication
+- Hierarchical supervision
+- Fault tolerance strategies
+
+**Traceability & Verification**
+- Event Chain system
+- Deterministic replay
+- State management
+- Debugging and inspection
+
+### 2. Create a New "Architecture" Section
+
+Move detailed implementation specifics from "Core Concepts" to a new top-level "Architecture" section that explains:
+- Component relationships
+- Internal design decisions
+- Data flow between subsystems
+- Implementation details
+
+### 3. Logical Reading Path
+
+Structure the book to follow a natural progression:
+1. **Introduction**: Why Theater exists (problem space)
+2. **Getting Started**: Quick practical examples
+3. **Core Concepts**: What Theater is (fundamental ideas)
+4. **Architecture**: How Theater works (implementation)
+5. **User Guide**: How to use Theater (practical usage)
+6. **Development**: How to extend Theater (building on it)
+
+## Benefits
+
+1. **Clearer Mental Model**: Readers develop a solid conceptual understanding before encountering implementation details.
+
+2. **Targeted Information**: Different audiences can more easily find the content relevant to their needs:
+   - New users can focus on concepts and getting started
+   - Users can reference the user guide for day-to-day operations
+   - Contributors can dive into architecture for implementation details
+
+3. **Reduced Cognitive Load**: By separating "what" from "how," readers can build a mental model without being overwhelmed by technical specifics.
+
+4. **Improved Documentation Maintainability**: Clearer separation makes it easier to update either conceptual or implementation documentation as the project evolves.
+
+## Implementation Plan
+
+1. Create new architecture section with current architecture.md as its foundation
+2. Restructure core-concepts around the three pillars
+3. Update cross-references and navigation
+4. Review content flow and continuity
+
+## Conclusion
+
+This restructuring will enhance the Theater documentation's effectiveness by providing a more intuitive learning path while maintaining access to detailed technical information for those who need it.
 
 ## Working Notes
 *(This section to be filled in during the implementation)*
 
 - **Tasks:**
-    - [ ] Finalize the exact name for the new top-level section ("Architecture", "System Internals", etc.).
-    - [ ] Identify which existing files will be used/merged/refined for each of the three pillars in `core-concepts`.
-    - [ ] Draft the content/structure for the updated `core-concepts` pages.
-    - [ ] Move and potentially rename `architecture.md` to the new section.
-    - [ ] Update `SUMMARY.md` to reflect the new book structure.
-    - [ ] Review all affected markdown files for broken cross-references and update as needed.
-    - [ ] Read through the modified sections to ensure flow and clarity.
+    - [ ] Create the new "Architecture" top-level section in SUMMARY.md
+    - [ ] Move and potentially rename architecture.md to the new section
+    - [ ] Reorganize core-concepts files around the three pillars
+    - [ ] Create new files as needed for missing content
+    - [ ] Update cross-references in all affected files
+    - [ ] Review the flow and readability of the revised structure
+    - [ ] Ensure proper navigation between sections
 
 - **Decisions:**
-    - *Decision needed:* Exact name for the new section. (Leaning towards "Architecture" for simplicity).
-    - *Decision needed:* Final filenames within the refocused `core-concepts`.
+    - *Decision needed:* Final names for core concept files
+    - *Decision needed:* Structure of the Architecture section (subsections?)
+    - *Decision needed:* Additional content needed for any section
 
 - **Challenges:**
     - *(Track any issues encountered here)*
