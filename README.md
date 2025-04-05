@@ -17,7 +17,7 @@ Theater is an attempt to move a lot of the trust from the code and its author to
 ### Read more
 
 - **[Guide](https://colinrozzi.github.io/theater/)** - A comprehensive guide to Theater
-- **[Reference](https://colinrozzi.github.io/theater/api/)** - Full rustdoc documentation
+- **[Reference](https://colinrozzi.github.io/theater/api/theater)** - Full rustdoc documentation
 
 ## Quick Start with Theater CLI
 
