@@ -2,6 +2,13 @@
 
 Traceability is Theater's approach to ensuring transparency, auditability, and reproducibility of system behavior. This pillar explains how Theater tracks all system activities to enable verification and debugging.
 
+
+Now, we have isolated, deterministic actors that communicate through message-passing. We have very clear distinctions between what is inside and outside an actor. Inside an actor we have a sandboxed, deterministic environment. Our traceability system is built to essentially sit on the barrier between the outside world and the inside world, and track everything that passes through that barrier. This is the Event Chain.
+The Event Chain captures all inputs and outputs of every function call into an actor. Because state is returned by the actor in each of its function calls, this means the Event Chain captures all state changes. Each event in the chain is hashed, and each new event includes the hash of the previous event in its contents. This creates a chain of events that is cryptographically verifiable. If any event at any point in the chain is modified, the resulting hash of the chain will change.
+Because wasm execution is deterministic, sandboxed, and portable, any actor can be replayed anywhere else and will produce the same result. To start, this will be invaluable for debugging and iteration. If an actor runs into an error, the chain can be saved, a new version of the actor can be created, and the actor can be replayed with the same chain until the error is fixed. This will allow for rapid iteration and debugging of actors, as well as the ability to reproduce errors in a controlled environment. Hopefully, this will enable us to find and fix bugs faster than we can in a traditional system, and allow for some level of automated improvement of our systems.
+
+
+
 ## The Event Chain System
 
 At the core of Theater's traceability is the Event Chain:

@@ -40,12 +40,3 @@ These three pillars complement each other to create Theater's unique properties:
 - **Actor Model + Traceability**: Supports fault diagnosis and recovery
 
 By understanding these core concepts, you'll have a solid foundation for using Theater effectively and making the most of its capabilities.
-
-## Detailed Concepts
-
-Beyond the three pillars, this section explores key concepts in more detail:
-
-- [Actor IDs](./actor-ids.md): How actors are identified in the system
-- [State Management](./state-management.md): How actors maintain and access state
-- [Interface System](./interface-system.md): How actors define and implement interfaces
-- [Store System](./store/README.md): Theater's content-addressable storage system

@@ -2,6 +2,10 @@
 
 The Actor Model provides Theater's approach to concurrency, isolation, and fault tolerance. This pillar explains how Theater uses actors and supervision hierarchies to create resilient systems.
 
+
+Ultimately, the actor model provides isolation. Each actor runs in its own process, with its own memory space. All of the benefits of the actor system are derived from this isolation. Actors can be restarted, stopped, or even replaced with new versions without affecting the rest of the system. This allows for a high degree of flexibility and adaptability in the face of change. Errors can be contained to the actor that caused them, and actors can be restarted or replaced without affecting the rest of the system. Actors can be developed and deployed independently, as the system is running, so the system can be continuously improved and updated without downtime. Also, by managing the state of the actors in the runtime, actors can be taken down and re-deployed without losing their state, meaning the state of an application can be preserved while the application is in active development, as long as breaking changes are not made. Finally, the actor model allows for a high degree of parallelism, as actors can be run in parallel on different threads or even different machines. This allows for a high degree of scalability and performance, as the system can take advantage of all available resources to process messages and perform work.
+
+
 ## What is the Actor Model?
 
 The Actor Model is a conceptual framework for designing concurrent systems:
