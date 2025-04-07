@@ -11,11 +11,6 @@
 - [WebAssembly Components & Sandboxing](core-concepts/wasm-components.md)
 - [Actor Model & Supervision](core-concepts/actor-model.md)
 - [Traceability & Verification](core-concepts/traceability.md)
-- [Supervision](core-concepts/supervision.md)
-- [State Management](core-concepts/state-management.md)
-- [Store System](core-concepts/store/README.md)
-    - [Actor API](core-concepts/store/actor-api.md)
-    - [Usage Patterns](core-concepts/store/usage-patterns.md)
 
 # User Guide
 - [Configuration](user-guide/configuration.md)
