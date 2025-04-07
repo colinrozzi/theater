@@ -39,7 +39,7 @@ jobs:
         run: |
           mkdir -p combined-docs
           # Copy mdBook output directly to the root of combined-docs
-          cp -r book/book/* combined-docs/
+          cp -r book/book/* combined-docs/guide
           # Create api directory and copy API docs there
           mkdir -p combined-docs/api
           cp -r target/doc/* combined-docs/api/
