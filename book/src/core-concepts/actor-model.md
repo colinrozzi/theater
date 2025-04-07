@@ -1,70 +1,59 @@
-# Actor Model & Supervision
+# Core Concept: Actor Model & Supervision
 
-The Actor Model provides Theater's approach to concurrency, isolation, and fault tolerance. This pillar explains how Theater uses actors and supervision hierarchies to create resilient systems.
+The Actor Model is the second pillar of Theater, providing a robust framework for concurrency, state management, communication, and fault tolerance. Inspired by systems like Erlang/OTP, Theater implements actors with hierarchical supervision to build resilient and scalable applications.
 
+## Actors: Isolated Units of Computation
 
-Ultimately, the actor model provides isolation. Each actor runs in its own process, with its own memory space. All of the benefits of the actor system are derived from this isolation. Actors can be restarted, stopped, or even replaced with new versions without affecting the rest of the system. This allows for a high degree of flexibility and adaptability in the face of change. Errors can be contained to the actor that caused them, and actors can be restarted or replaced without affecting the rest of the system. Actors can be developed and deployed independently, as the system is running, so the system can be continuously improved and updated without downtime. Also, by managing the state of the actors in the runtime, actors can be taken down and re-deployed without losing their state, meaning the state of an application can be preserved while the application is in active development, as long as breaking changes are not made. Finally, the actor model allows for a high degree of parallelism, as actors can be run in parallel on different threads or even different machines. This allows for a high degree of scalability and performance, as the system can take advantage of all available resources to process messages and perform work.
+In Theater, the fundamental unit of computation and state is the *actor*. Each actor is an independent entity characterized by:
 
+1.  **Private State**: An actor maintains its own internal state, which cannot be directly accessed or modified by other actors. This isolation is a cornerstone of the model.
+2.  **Mailbox**: Each actor has a mailbox where incoming messages are queued.
+3.  **Behavior**: An actor defines how it processes incoming messages, potentially changing its state, sending messages to other actors, or creating new actors.
+4.  **Address**: Actors have unique addresses used to send messages to them.
 
-## What is the Actor Model?
+Crucially, in Theater, each actor instance corresponds to a running [WebAssembly Component](./wasm-components.md), benefiting from the security and isolation guarantees provided by Wasm.
 
-The Actor Model is a conceptual framework for designing concurrent systems:
+## Communication via Asynchronous Message Passing
 
-- **Actors as Fundamental Units**: Every computation is encapsulated in an actor
-- **Message-Passing Communication**: Actors communicate only through messages
-- **Isolated State**: Each actor manages its own private state
-- **Concurrent Execution**: Actors can process messages concurrently
+All interaction between actors in Theater occurs exclusively through asynchronous message passing.
 
-In Theater, each WebAssembly component instance is an actor with a well-defined lifecycle and communication pattern.
+-   **No Shared Memory**: Actors do not share memory. To communicate, an actor sends an immutable message to another actor's address.
+-   **Asynchronous & Non-Blocking**: When an actor sends a message, it does not wait for the recipient to process it. This allows actors to work concurrently without blocking each other.
+-   **Location Transparency**: Actors communicate using addresses, without needing to know the physical location (e.g., thread, process, machine) of the recipient actor. (Note: While Theater currently runs actors within a single process, the model allows for future distribution).
+-   **Explicit and Traceable**: All interactions are explicit message sends, which are captured by Theater's [Traceability](./traceability.md) system.
 
-## Actor Lifecycle
+This communication style simplifies concurrency management, eliminating many common issues like race conditions and deadlocks found in shared-state concurrency models.
 
-Actors in Theater have a clear lifecycle:
+## Isolation: The Core Benefit
 
-1. **Creation**: Actors are created by other actors or the system
-2. **Initialization**: Actor initializes its state and registers message handlers
-3. **Operation**: Actor processes messages and performs work
-4. **Termination**: Actor is stopped, either gracefully or due to failure
+The strict isolation provided by the Actor Model (actors having their own state and communicating only via messages) is the source of many of Theater's resilience and flexibility features:
 
-The system tracks this lifecycle and ensures proper resource management at each stage.
+-   **Fault Isolation**: If an actor encounters an error and crashes, the failure is contained within that actor. It does not directly affect the state or operation of other actors in the system.
+-   **Independent Lifecycle**: Actors can be started, stopped, restarted, or even upgraded independently without necessarily affecting unrelated parts of the system.
+-   **State Management**: Because state is encapsulated, Theater can manage actor state persistence and recovery more easily. State can potentially be preserved across restarts or deployments under certain conditions.
 
-## Message-Passing Communication
+## Hierarchical Supervision for Fault Tolerance
 
-Communication in Theater happens exclusively through messages:
+Theater adopts Erlang/OTP's concept of hierarchical supervision to manage failures gracefully.
 
-- **Asynchronous**: Senders don't wait for receivers to process messages
-- **Immutable**: Messages cannot be modified after sending
-- **Explicit**: All communication is visible and traceable
-- **Typed**: Messages follow defined interface specifications
+-   **Supervision Trees**: Actors are organized into a tree structure where parent actors *supervise* their child actors.
+-   **Monitoring**: Supervisors monitor the health of their children.
+-   **Recovery Strategies**: When a child actor fails (e.g., crashes due to an unhandled error), its supervisor is notified and decides how to handle the failure based on a defined strategy. Common strategies include:
+    * **Restart**: Restart the failed child, potentially restoring its last known good state.
+    * **Stop**: Terminate the failed child permanently if it's deemed unrecoverable or non-essential.
+    * **Escalate**: If the supervisor cannot handle the failure, it can fail itself, escalating the problem to *its* supervisor.
+    * **Restart Siblings**: In some cases, a failure in one child might require restarting other related children (siblings).
 
-This message-passing approach eliminates many concurrency issues that plague shared-state systems.
-
-## Hierarchical Supervision
-
-Inspired by Erlang/OTP, Theater implements a supervision system:
-
-- **Supervision Trees**: Actors are arranged in parent-child hierarchies
-- **Fault Isolation**: Failures in one actor don't affect siblings
-- **Recovery Strategies**: Parents decide how to handle child failures
-- **Escalation**: Unhandled failures can be escalated up the tree
-
-### Supervision Strategies
-
-Parents can implement different strategies for handling child failures:
-
-- **Restart**: Restart the failed child, preserving its identity
-- **Stop**: Terminate the failed child
-- **Escalate**: Report the failure to the parent's supervisor
-- **Custom**: Implement application-specific recovery logic
+This structure allows developers to define how the system should react to failures, building self-healing capabilities directly into the application architecture. Error handling becomes a primary architectural concern, rather than an afterthought.
 
 ## Benefits for Theater
 
-The Actor Model with supervision provides Theater with:
+Integrating the Actor Model with supervision provides Theater with:
 
-1. **Concurrency**: Natural way to express parallel computations
-2. **Fault Tolerance**: Localize and recover from failures
-3. **Scalability**: Distribute actors across resources
-4. **Simplicity**: Clear communication patterns reduce complexity
-5. **Resilience**: Systems can continue despite partial failures
+1.  **Simplified Concurrency**: A natural model for handling many simultaneous operations without shared-state complexity.
+2.  **Enhanced Fault Tolerance**: The ability to contain failures and automatically recover parts of the system.
+3.  **Scalability**: Actors can potentially be distributed across cores or machines to handle increased load (though current implementation specifics may vary).
+4.  **Resilience**: Systems can remain partially or fully operational even when individual actors fail.
+5.  **Maintainability**: Actors can often be developed, deployed, and updated independently, facilitating continuous improvement without system downtime (depending on the nature of changes).
 
-These properties make Theater particularly well-suited for building resilient systems that can recover from failures automatically, which is essential when running potentially unreliable AI-generated code.
+Combined with Wasm components, the Actor Model allows Theater to manage potentially unreliable code units within a structure designed for resilience and recovery.
