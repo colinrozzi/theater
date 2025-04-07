@@ -1,4 +1,4 @@
-# Core Concept: Actor Model & Supervision
+# Actor Model & Supervision
 
 The Actor Model is the second pillar of Theater, providing a robust framework for concurrency, state management, communication, and fault tolerance. Inspired by systems like Erlang/OTP, Theater implements actors with hierarchical supervision to build resilient and scalable applications.
 

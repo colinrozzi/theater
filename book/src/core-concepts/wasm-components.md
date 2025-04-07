@@ -1,4 +1,4 @@
-# Core Concept: WebAssembly Components & Sandboxing
+# WebAssembly Components & Sandboxing
 
 WebAssembly (Wasm) Components form the foundational pillar for Theater's security, isolation, and determinism. By leveraging the Wasm Component Model, Theater creates sandboxed environments where actors can execute predictably and securely, regardless of their origin or the language they were written in.
 

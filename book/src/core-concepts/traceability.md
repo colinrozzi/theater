@@ -1,4 +1,4 @@
-# Core Concept: Traceability & Verification
+# Traceability & Verification
 
 Traceability and verification form the third pillar of Theater, ensuring transparency, auditability, and reproducibility of system behavior. Theater achieves this by meticulously recording all significant events and state changes in a verifiable structure known as the Event Chain. This provides unprecedented insight into system execution, crucial for debugging, analysis, and building trust, especially when dealing with complex or AI-generated code.
 
