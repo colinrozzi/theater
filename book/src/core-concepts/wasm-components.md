@@ -2,6 +2,12 @@
 
 WebAssembly Components form the foundation of Theater's security and determinism guarantees. This pillar explains how Theater uses WebAssembly to create isolated, predictable execution environments.
 
+
+webassembly provides us with security guarantees that are not available other places. The instruction set has been intentionally limited to remvoe jump-to-address, removing entire classes of bugs. Also, the instruction set is sandboxed, meaning it can only access the host system through a limited set of APIs provided by the runtime. Also, wasm is somewhat deterministic, meaning that at the function level the same inputs will always produce the same outputs.
+wasm also is a target for many languages, meaning components can be written in any language the developer prefers and compiled to wasm. Then, the component model allows for the components to be composed together, meaning a actor can be made of multiple components that are all written in different languages. This allows for a high degree of flexibility and adaptability in the face of change. The Component model is still in development and is most mature in rust, but most languages are building support for it.
+
+
+
 ## What are WebAssembly Components?
 
 WebAssembly Components are a standards-based approach to packaging, distributing, and executing code in a sandboxed environment. They build on core WebAssembly to provide:
