@@ -24,31 +24,6 @@
 //!
 //! ## Example Usage
 //!
-//! ```rust,no_run
-//! use theater::theater_runtime::TheaterRuntime;
-//! use theater::config::TheaterConfig;
-//! use anyhow::Result;
-//!
-//! async fn example() -> Result<()> {
-//!     // Create a new Theater runtime with default configuration
-//!     let config = TheaterConfig::default();
-//!     let runtime = TheaterRuntime::new(config)?;
-//!     
-//!     // Start an actor from a manifest file
-//!     let actor_id = runtime.start_actor("path/to/manifest.toml", None).await?;
-//!     
-//!     // Get a handle to interact with the actor
-//!     let handle = runtime.get_actor_handle(&actor_id)?;
-//!     
-//!     // Call a function on the actor
-//!     let result = handle.call_function("greet", ("World",)).await?;
-//!     
-//!     // Later, stop the actor
-//!     runtime.stop_actor(&actor_id).await?;
-//!     
-//!     Ok(())
-//! }
-//! ```
 //!
 //! ## Security and Safety
 //!
