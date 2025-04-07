@@ -1,0 +1,58 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Actor Store"><title>theater::actor_store - Rust</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../static.files/rustdoc-6c3ea77c.css"><meta name="rustdoc-vars" data-root-path="../../" data-static-root-path="../../static.files/" data-current-crate="theater" data-themes="" data-resource-suffix="" data-rustdoc-version="1.86.0 (05f9846f8 2025-03-31)" data-channel="1.86.0" data-search-js="search-581efc7a.js" data-settings-js="settings-6dad6058.js" ><script src="../../static.files/storage-3a5871a4.js"></script><script defer src="../sidebar-items.js"></script><script defer src="../../static.files/main-4d63596a.js"></script><noscript><link rel="stylesheet" href="../../static.files/noscript-893ab5e7.css"></noscript><link rel="alternate icon" type="image/png" href="../../static.files/favicon-32x32-6580c154.png"><link rel="icon" type="image/svg+xml" href="../../static.files/favicon-044be391.svg"></head><body class="rustdoc mod"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle" title="show sidebar"></button></nav><nav class="sidebar"><div class="sidebar-crate"><h2><a href="../../theater/index.html">theater</a><span class="version">0.1.0</span></h2></div><div class="sidebar-elems"><section id="rustdoc-toc"><h2 class="location"><a href="#">Module actor_<wbr>store</a></h2><h3><a href="#">Sections</a></h3><ul class="block top-toc"><li><a href="#actor-store" title="Actor Store">Actor Store</a><ul><li><a href="#purpose" title="Purpose">Purpose</a></li><li><a href="#example" title="Example">Example</a></li><li><a href="#security" title="Security">Security</a></li><li><a href="#implementation-notes" title="Implementation Notes">Implementation Notes</a></li></ul></li></ul><h3><a href="#structs">Module Items</a></h3><ul class="block"><li><a href="#structs" title="Structs">Structs</a></li></ul></section><div id="rustdoc-modnav"><h2 class="in-crate"><a href="../index.html">In crate theater</a></h2></div></div></nav><div class="sidebar-resizer"></div><main><div class="width-limiter"><rustdoc-search></rustdoc-search><section id="main-content" class="content"><div class="main-heading"><div class="rustdoc-breadcrumbs"><a href="../index.html">theater</a></div><h1>Module <span>actor_store</span><button id="copy-path" title="Copy item path to clipboard">Copy item path</button></h1><rustdoc-toolbar></rustdoc-toolbar><span class="sub-heading"><a class="src" href="../../src/theater/actor_store.rs.html#2-519">Source</a> </span></div><details class="toggle top-doc" open><summary class="hideme"><span>Expand description</span></summary><div class="docblock"><h2 id="actor-store"><a class="doc-anchor" href="#actor-store">§</a>Actor Store</h2>
+<p>This module provides an abstraction for sharing resources between an actor and the Theater runtime system.
+The ActorStore serves as a container for state, event chains, and communication channels that are
+needed for WASM host functions to interface with the Actor system.</p>
+<h3 id="purpose"><a class="doc-anchor" href="#purpose">§</a>Purpose</h3>
+<p>The ActorStore provides a centralized location for storing and managing resources that need to be shared
+across different parts of the Theater system, particularly between the main runtime and the WebAssembly
+host functions. It maintains:</p>
+<ul>
+<li>The actor’s persistent state</li>
+<li>The event chain for auditing and verification</li>
+<li>Communication channels to the main Theater runtime</li>
+<li>Actor identity and references</li>
+</ul>
+<h3 id="example"><a class="doc-anchor" href="#example">§</a>Example</h3>
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="kw">use </span>theater::actor_store::ActorStore;
+<span class="kw">use </span>theater::id::TheaterId;
+<span class="kw">use </span>theater::messages::TheaterCommand;
+<span class="kw">use </span>theater::actor_handle::ActorHandle;
+<span class="kw">use </span>tokio::sync::mpsc;
+
+<span class="kw">async fn </span>example_usage() {
+    <span class="comment">// Create a channel for Theater commands
+    </span><span class="kw">let </span>(tx, <span class="kw-2">mut </span>rx) = mpsc::channel(<span class="number">100</span>);
+     
+    <span class="comment">// Create an actor ID
+    </span><span class="kw">let </span>id = TheaterId::generate();
+     
+    <span class="comment">// Create an actor handle (simplified for example)
+    </span><span class="kw">let </span>handle = ActorHandle::new(id.clone(), tx.clone());
+     
+    <span class="comment">// Create the actor store
+    </span><span class="kw">let </span>store = ActorStore::new(id, tx, handle);
+     
+    <span class="comment">// Use the store to save state
+    </span><span class="kw">let </span><span class="kw-2">mut </span>store_clone = store.clone();
+    store_clone.set_state(<span class="prelude-val">Some</span>(<span class="string">b"Hello, Theater!"</span>.to_vec()));
+     
+    <span class="comment">// Use the store to record events
+    </span><span class="kw">use </span>theater::events::ChainEventData;
+    <span class="kw">let </span>event = store.record_event(ChainEventData::StateUpdated {
+        previous_hash: <span class="macro">vec!</span>[],
+        new_state: <span class="string">b"Updated state"</span>.to_vec(),
+    });
+}</code></pre></div>
+<h3 id="security"><a class="doc-anchor" href="#security">§</a>Security</h3>
+<p>The ActorStore is a critical component in Theater’s security model. It:</p>
+<ul>
+<li>Maintains the integrity of the event chain through cryptographic verification</li>
+<li>Provides controlled access to the actor’s state</li>
+<li>Creates a boundary between the WebAssembly execution environment and the host system</li>
+</ul>
+<h3 id="implementation-notes"><a class="doc-anchor" href="#implementation-notes">§</a>Implementation Notes</h3>
+<p>The ActorStore uses thread-safe containers (Arc&lt;Mutex&lt;&gt;&gt;) to ensure safe concurrent access
+to shared resources. It clones data when necessary to avoid shared mutable state. The event
+chain is a critical data structure for tracking and auditing actor behavior, and the store
+provides methods to manipulate and verify it.</p>
+</div></details><h2 id="structs" class="section-header">Structs<a href="#structs" class="anchor">§</a></h2><dl class="item-table"><dt><a class="struct" href="struct.ActorStore.html" title="struct theater::actor_store::ActorStore">Actor<wbr>Store</a></dt><dd>ActorStore</dd></dl></section></div></main></body></html>
