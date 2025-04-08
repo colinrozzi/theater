@@ -1,3 +1,5 @@
+package ntwk:theater;
+
 /// # WebSocket Server Interface
 ///
 /// The `websocket-server` interface provides capabilities for handling WebSocket connections,
@@ -38,7 +40,6 @@
 /// The actor must implement the `handle_message` function, which is called for every
 /// WebSocket event (connection, message, disconnection). The actor maintains its state
 /// across these invocations, allowing it to track connected clients and conversation history.
-package ntwk:theater;
 
 /// Interface for handling WebSocket connections and messages
 interface websocket-server {

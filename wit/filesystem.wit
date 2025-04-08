@@ -1,3 +1,5 @@
+package ntwk:theater;
+
 // # Filesystem Interface
 //
 // Provides access to the host filesystem from within WebAssembly components.
@@ -53,8 +55,6 @@
 //     Ok(())
 // }
 // ```
-
-package ntwk:theater;
 
 interface filesystem {
     // # Read File

@@ -1,3 +1,5 @@
+package ntwk:theater;
+
 // # Common Type Definitions
 //
 // Defines shared types used across multiple interfaces in the Theater system.
@@ -46,8 +48,6 @@
 // - Most types are designed to be serialization-format agnostic
 // - The `list<u8>` (byte array) representation allows for flexible serialization
 // - Actors typically use serde-compatible formats for serialization/deserialization
-
-package ntwk:theater;
 
 // Define a shared type for messages
 interface types {

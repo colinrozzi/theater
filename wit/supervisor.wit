@@ -1,3 +1,5 @@
+package ntwk:theater;
+
 // # Supervisor Interface
 //
 // Defines the interface for actor supervision in the Theater system. This allows parent actors
@@ -43,8 +45,6 @@
 // The interface uses string-based actor identifiers and returns results that can contain
 // errors as strings. This allows for human-readable error messages and flexible actor
 // identification across the system.
-
-package ntwk:theater;
 
 interface supervisor {
     // # Spawn a new child actor

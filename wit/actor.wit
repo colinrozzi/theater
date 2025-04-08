@@ -1,3 +1,5 @@
+package ntwk:theater;
+
 // # Actor Interface
 //
 // Defines the core interface that all Theater actors must implement. This is the
@@ -69,8 +71,6 @@
 // - Actors are responsible for managing their own state format and serialization.
 // - The parameters tuple allows for flexible initialization with a variety of data types.
 // - Returning an error string from the init function will cause the actor to fail to start.
-
-package ntwk:theater;
 
 interface actor {
     use types.{state};

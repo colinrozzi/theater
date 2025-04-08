@@ -1,3 +1,5 @@
+package ntwk:theater;
+
 /// # Runtime Interface
 ///
 /// The `runtime` interface provides core runtime capabilities to actors in the Theater system.
@@ -31,7 +33,6 @@
 /// This interface is typically implemented by the Theater runtime and automatically
 /// provided to all actors. No special configuration is required to use it, though
 /// logging behavior can be controlled through manifest settings.
-package ntwk:theater;
 
 interface runtime {
     use types.{json, chain, actor-id};
