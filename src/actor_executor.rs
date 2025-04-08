@@ -1,4 +1,3 @@
-
 //! # Actor Executor
 //!
 //! The Actor Executor is responsible for managing the execution of individual WebAssembly actors
@@ -97,6 +96,9 @@ pub enum ActorError {
     /// Failed to serialize or deserialize data
     #[error("Serialization error")]
     SerializationError,
+
+    #[error("Failed to update component: {0}")]
+    UpdateComponentError(String),
 }
 
 /// # ActorOperation
@@ -169,6 +171,12 @@ pub enum ActorOperation {
     GetState {
         /// Channel to send state back to the caller
         response_tx: oneshot::Sender<Result<Option<Vec<u8>>, ActorError>>,
+    },
+    UpdateComponent {
+        /// Address of the component to update
+        component_address: String,
+        /// Channel to send the result back to the caller
+        response_tx: oneshot::Sender<Result<(), ActorError>>,
     },
 }
 
@@ -493,6 +501,9 @@ impl ActorExecutor {
                             ActorOperation::GetState { response_tx } => {
                                 let _ = response_tx.send(Err(ActorError::ShuttingDown));
                             }
+                            ActorOperation::UpdateComponent { response_tx, .. } => {
+                                let _ = response_tx.send(Err(ActorError::ShuttingDown));
+                            }
                         }
                         continue;
                     }
@@ -516,6 +527,9 @@ impl ActorExecutor {
                             ActorOperation::GetState { response_tx } => {
                                 let _ = response_tx.send(Err(ActorError::ShuttingDown));
                             }
+                            ActorOperation::UpdateComponent { response_tx, .. } => {
+                                let _ = response_tx.send(Err(ActorError::ShuttingDown));
+                            }
                         }
                         continue;
                     }
@@ -534,7 +548,7 @@ impl ActorExecutor {
                                         error!("Failed to send function call error response for operation '{}': {:?}", name, send_err);
                                     }
                                 }
-                }
+                            }
                         }
 
                         ActorOperation::GetMetrics { response_tx } => {
@@ -577,6 +591,23 @@ impl ActorExecutor {
                             }
                             info!("Breaking from operation loop to begin shutdown process");
                             break;
+                        }
+
+                        ActorOperation::UpdateComponent { component_address, response_tx } => {
+                            debug!("Processing UpdateComponent operation");
+                            match self.actor_instance.update_component(&component_address).await {
+                                Ok(_) => {
+                                    if let Err(e) = response_tx.send(Ok(())) {
+                                        error!("Failed to send update component response: {:?}", e);
+                                    }
+                                }
+                                Err(e) => {
+                                    error!("UpdateComponent operation failed: {:?}", e);
+                                    if let Err(send_err) = response_tx.send(Err(e.to_string())) {
+                                        error!("Failed to send update component error response: {:?}", send_err);
+                                    }
+                                }
+                            }
                         }
                     }
                 }

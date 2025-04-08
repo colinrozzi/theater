@@ -329,6 +329,23 @@ impl TheaterRuntime {
                         }
                     }
                 }
+                TheaterCommand::UpdateActorComponent {
+                    actor_id,
+                    component,
+                    response_tx,
+                } => {
+                    debug!("Updating actor component: {:?}", actor_id);
+                    match self.update_actor_component(actor_id, component).await {
+                        Ok(_) => {
+                            info!("Actor component updated successfully");
+                            let _ = response_tx.send(Ok(()));
+                        }
+                        Err(e) => {
+                            error!("Failed to update actor component: {}", e);
+                            let _ = response_tx.send(Err(e));
+                        }
+                    }
+                }
                 TheaterCommand::SendMessage {
                     actor_id,
                     actor_message,
@@ -1001,6 +1018,37 @@ impl TheaterRuntime {
         for channel_id in channels_to_remove {
             self.channels.remove(&channel_id);
             debug!("Removed empty channel {:?}", channel_id);
+        }
+
+        Ok(())
+    }
+
+    async fn update_actor_component(
+        &mut self,
+        actor_id: TheaterId,
+        component: String,
+    ) -> Result<()> {
+        debug!("Updating actor component for: {:?}", actor_id);
+
+        if let Some(proc) = self.actors.get(&actor_id) {
+            // Send a message to update the actor's component
+            let (tx, rx): (
+                oneshot::Sender<Result<(), ActorError>>,
+                oneshot::Receiver<Result<(), ActorError>>,
+            ) = oneshot::channel();
+            proc.operation_tx
+                .send(ActorOperation::UpdateComponent {
+                    component_address: component,
+                    response_tx: tx,
+                })
+                .await?;
+
+            match rx.await {
+                Ok(result) => result?,
+                Err(e) => return Err(anyhow::anyhow!("Failed to receive update result: {}", e)),
+            }
+        } else {
+            return Err(anyhow::anyhow!("Actor not found"));
         }
 
         Ok(())

@@ -60,10 +60,9 @@
 /// ## Implementation Notes
 ///
 /// The messaging system is built on top of Tokio's `mpsc` and `oneshot` channels
-/// to provide asynchronous communication without blocking. Response channels 
+/// to provide asynchronous communication without blocking. Response channels
 /// (`oneshot::Sender`) are used extensively to allow commands to return results
 /// to their callers.
-
 use crate::chain::ChainEvent;
 use crate::id::TheaterId;
 use crate::metrics::ActorMetrics;
@@ -126,7 +125,7 @@ pub enum TheaterCommand {
         response_tx: oneshot::Sender<Result<TheaterId>>,
         parent_id: Option<TheaterId>,
     },
-    
+
     /// # Resume an existing actor
     ///
     /// Restarts an actor from a manifest and optionally restores its previous state.
@@ -143,7 +142,7 @@ pub enum TheaterCommand {
         response_tx: oneshot::Sender<Result<TheaterId>>,
         parent_id: Option<TheaterId>,
     },
-    
+
     /// # Stop an actor
     ///
     /// Gracefully stops a running actor.
@@ -156,7 +155,20 @@ pub enum TheaterCommand {
         actor_id: TheaterId,
         response_tx: oneshot::Sender<Result<()>>,
     },
-    
+
+    /// # Update an actor's component
+    ///
+    /// ## Parameters
+    ///
+    /// * `actor_id` - ID of the actor to update
+    /// * `component` - The new component address
+    /// * `response_tx` - Channel to receive the result (success or error)
+    UpdateActorComponent {
+        actor_id: TheaterId,
+        component: String,
+        response_tx: oneshot::Sender<Result<()>>,
+    },
+
     /// # Send a message to an actor
     ///
     /// Sends a message to a specific actor for processing.
@@ -169,7 +181,7 @@ pub enum TheaterCommand {
         actor_id: TheaterId,
         actor_message: ActorMessage,
     },
-    
+
     /// # Record a new event
     ///
     /// Records an event in an actor's event chain.
@@ -182,7 +194,7 @@ pub enum TheaterCommand {
         actor_id: TheaterId,
         event: ChainEvent,
     },
-    
+
     /// # Record an actor error
     ///
     /// Records an error event in an actor's event chain.
@@ -195,7 +207,7 @@ pub enum TheaterCommand {
         actor_id: TheaterId,
         event: ChainEvent,
     },
-    
+
     /// # Get all actors
     ///
     /// Retrieves a list of all actor IDs in the system.
@@ -206,7 +218,7 @@ pub enum TheaterCommand {
     GetActors {
         response_tx: oneshot::Sender<Result<Vec<TheaterId>>>,
     },
-    
+
     /// # Get actor status
     ///
     /// Retrieves the current status of an actor.
@@ -219,7 +231,7 @@ pub enum TheaterCommand {
         actor_id: TheaterId,
         response_tx: oneshot::Sender<Result<ActorStatus>>,
     },
-    
+
     /// # List child actors
     ///
     /// Retrieves a list of all child actors for a given parent.
@@ -237,7 +249,7 @@ pub enum TheaterCommand {
         parent_id: TheaterId,
         response_tx: oneshot::Sender<Vec<TheaterId>>,
     },
-    
+
     /// # Restart an actor
     ///
     /// Restarts a failed or stopped actor.
@@ -254,7 +266,7 @@ pub enum TheaterCommand {
         actor_id: TheaterId,
         response_tx: oneshot::Sender<Result<()>>,
     },
-    
+
     /// # Get actor state
     ///
     /// Retrieves the current state of an actor.
@@ -271,7 +283,7 @@ pub enum TheaterCommand {
         actor_id: TheaterId,
         response_tx: oneshot::Sender<Result<Option<Vec<u8>>>>,
     },
-    
+
     /// # Get actor events
     ///
     /// Retrieves the event history of an actor.
@@ -288,7 +300,7 @@ pub enum TheaterCommand {
         actor_id: TheaterId,
         response_tx: oneshot::Sender<Result<Vec<ChainEvent>>>,
     },
-    
+
     /// # Get actor metrics
     ///
     /// Retrieves performance and resource usage metrics for an actor.
@@ -301,7 +313,7 @@ pub enum TheaterCommand {
         actor_id: TheaterId,
         response_tx: oneshot::Sender<Result<ActorMetrics>>,
     },
-    
+
     /// # Subscribe to actor events
     ///
     /// Creates a subscription to receive all future events from an actor.
@@ -318,7 +330,7 @@ pub enum TheaterCommand {
         actor_id: TheaterId,
         event_tx: Sender<ChainEvent>,
     },
-    
+
     /// # Open a communication channel
     ///
     /// Opens a bidirectional communication channel between two participants.
@@ -337,7 +349,7 @@ pub enum TheaterCommand {
         initial_message: Vec<u8>,
         response_tx: oneshot::Sender<Result<bool>>,
     },
-    
+
     /// # Send a message on a channel
     ///
     /// Sends data through an established channel.
@@ -352,7 +364,7 @@ pub enum TheaterCommand {
         sender_id: ChannelParticipant,
         message: Vec<u8>,
     },
-    
+
     /// # Close a channel
     ///
     /// Closes an open communication channel.
@@ -360,10 +372,8 @@ pub enum TheaterCommand {
     /// ## Parameters
     ///
     /// * `channel_id` - The ID of the channel to close
-    ChannelClose {
-        channel_id: ChannelId,
-    },
-    
+    ChannelClose { channel_id: ChannelId },
+
     /// # List active channels
     ///
     /// Retrieves a list of all active communication channels.
@@ -379,7 +389,7 @@ pub enum TheaterCommand {
     ListChannels {
         response_tx: oneshot::Sender<Result<Vec<(ChannelId, Vec<ChannelParticipant>)>>>,
     },
-    
+
     /// # Get channel status
     ///
     /// Retrieves information about a specific channel.
@@ -397,7 +407,7 @@ pub enum TheaterCommand {
         channel_id: ChannelId,
         response_tx: oneshot::Sender<Result<Option<Vec<ChannelParticipant>>>>,
     },
-    
+
     /// # Register a new channel
     ///
     /// Registers a new channel in the system (internal use).
@@ -442,6 +452,13 @@ impl TheaterCommand {
             }
             TheaterCommand::ResumeActor { manifest_path, .. } => {
                 format!("ResumeActor: {}", manifest_path)
+            }
+            TheaterCommand::UpdateActorComponent {
+                actor_id,
+                component,
+                ..
+            } => {
+                format!("UpdateActorComponent: {} -> {}", actor_id, component)
             }
             TheaterCommand::StopActor { actor_id, .. } => {
                 format!("StopActor: {:?}", actor_id)
@@ -551,7 +568,7 @@ impl TheaterCommand {
 /// - Hashes of both participant identities
 /// - Current timestamp
 /// - Random value
-/// 
+///
 /// This provides strong uniqueness guarantees even with high channel creation rates.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub struct ChannelId(pub String);
