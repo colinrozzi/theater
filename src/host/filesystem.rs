@@ -1,12 +1,12 @@
-use crate::actor_executor::ActorError;
-use crate::actor_handle::ActorHandle;
+use crate::actor::types::ActorError;
+use crate::actor::handle::ActorHandle;
+use crate::actor::store::ActorStore;
 use crate::config::FileSystemHandlerConfig;
 use crate::events::filesystem::{CommandError, CommandResult, CommandSuccess, FilesystemEventData};
 use crate::events::{ChainEventData, EventData};
 use crate::shutdown::ShutdownReceiver;
 use crate::wasm::ActorComponent;
 use crate::wasm::ActorInstance;
-use crate::ActorStore;
 use anyhow::Result;
 use rand::Rng;
 use serde::{Deserialize, Serialize};

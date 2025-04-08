@@ -18,7 +18,6 @@
 //!
 //! * `TheaterRuntime`: The central runtime that manages the lifecycle of actors
 //! * `ActorRuntime`: Manages the execution environment for a single actor
-//! * `ActorExecutor`: Handles the actual execution of WebAssembly code
 //! * `ActorHandle`: Provides an interface for interacting with actors
 //! * `StateChain`: Tracks the history of state changes for an actor
 //!
@@ -33,10 +32,7 @@
 
 use anyhow::Result;
 
-pub mod actor_executor;
-pub mod actor_handle;
-pub mod actor_runtime;
-pub mod actor_store;
+pub mod actor;
 pub mod chain;
 pub mod config;
 pub mod events;
@@ -52,7 +48,12 @@ pub mod theater_server;
 pub mod utils;
 mod wasm;
 
-pub use actor_store::ActorStore;
+pub use actor::ActorStore;
+pub use actor::ActorHandle;
+pub use actor::ActorRuntime;
+pub use actor::ActorError;
+pub use actor::ActorOperation;
+pub use actor::StartActorResult;
 pub use chain::{ChainEvent, StateChain};
 pub use config::{HandlerConfig, HttpServerHandlerConfig, ManifestConfig, MessageServerConfig};
 pub use id::TheaterId;

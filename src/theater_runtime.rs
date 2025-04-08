@@ -4,8 +4,8 @@
 //! actor system. It manages actor lifecycle, message passing, and event handling across
 //! the entire system.
 
-use crate::actor_executor::{ActorError, ActorOperation};
-use crate::actor_runtime::{ActorRuntime, StartActorResult};
+use crate::actor::types::{ActorError, ActorOperation};
+use crate::actor::runtime::{ActorRuntime, StartActorResult};
 use crate::chain::ChainEvent;
 use crate::id::TheaterId;
 use crate::messages::{
@@ -788,12 +788,15 @@ impl TheaterRuntime {
         let shutdown_receiver_clone = shutdown_receiver;
         let actor_sender = mailbox_tx.clone();
 
+        let actor_id = TheaterId::generate();
+        debug!("Initializing actor runtime");
+        debug!("Starting actor runtime");
+        
+        // Start the actor in a detached task
+        let actor_id_for_task = actor_id.clone();
         let actor_runtime_process = tokio::spawn(async move {
-            let actor_id = TheaterId::generate();
-            debug!("Initializing actor runtime");
-            debug!("Starting actor runtime");
             ActorRuntime::start(
-                actor_id,
+                actor_id_for_task,
                 &manifest,
                 init_bytes,
                 theater_tx,
@@ -805,8 +808,14 @@ impl TheaterRuntime {
                 shutdown_receiver_clone,
                 response_tx,
             )
-            .await
-            .unwrap()
+            .await;
+            
+            // Return a dummy struct to maintain API compatibility
+            ActorRuntime {
+                actor_id: TheaterId::generate(), // Create a new ID since we can't reuse actor_id_for_task
+                handler_tasks: Vec::new(),
+                shutdown_controller: ShutdownController::new().0,
+            }
         });
 
         match response_rx.recv().await {

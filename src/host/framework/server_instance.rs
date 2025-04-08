@@ -1,4 +1,4 @@
-use crate::actor_handle::ActorHandle;
+use crate::actor::handle::ActorHandle;
 use anyhow::{anyhow, Result};
 use axum::{
     extract::{State, WebSocketUpgrade},

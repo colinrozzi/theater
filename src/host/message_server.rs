@@ -1,6 +1,6 @@
-use crate::actor_executor::ActorError;
-use crate::actor_handle::ActorHandle;
-use crate::actor_store::ActorStore;
+use crate::actor::types::ActorError;
+use crate::actor::handle::ActorHandle;
+use crate::actor::store::ActorStore;
 use crate::events::{ChainEventData, EventData, message::MessageEventData};
 use crate::messages::{ActorMessage, ActorRequest, ActorSend, TheaterCommand, ActorChannelOpen, ActorChannelMessage, ActorChannelClose, ChannelId, ChannelParticipant, ActorChannelInitiated};
 use crate::shutdown::ShutdownReceiver;

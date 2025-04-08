@@ -1,4 +1,4 @@
-use crate::actor_handle::ActorHandle;
+use crate::actor::handle::ActorHandle;
 use crate::host::filesystem::FileSystemHost;
 use crate::host::framework::HttpFramework;
 use crate::host::http_client::HttpClientHost;

@@ -1,5 +1,5 @@
-use crate::actor_handle::ActorHandle;
-use crate::actor_store::ActorStore;
+use crate::actor::handle::ActorHandle;
+use crate::actor::store::ActorStore;
 use crate::events::http::HttpEventData;
 use crate::events::{ChainEventData, EventData};
 use crate::shutdown::ShutdownReceiver;
