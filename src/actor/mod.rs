@@ -8,7 +8,6 @@
 //! actor system with isolation, supervision, and fault tolerance capabilities.
 
 pub mod runtime;
-pub mod operations;
 pub mod types;
 pub mod handle;
 pub mod store;
