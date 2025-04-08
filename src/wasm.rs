@@ -256,17 +256,21 @@ impl ActorComponent {
     ///
     /// This method performs validation on the WebAssembly binary to ensure it adheres to
     /// the component model specification and doesn't contain prohibited instructions.
-    pub async fn new(config: &ManifestConfig, actor_store: ActorStore) -> Result<Self> {
+    pub async fn new(
+        name: String,
+        component_path: String,
+        actor_store: ActorStore,
+    ) -> Result<Self> {
         // Load WASM component
         let engine = Engine::new(wasmtime::Config::new().async_support(true))?;
-        info!("Loading WASM component from: {}", config.component_path);
-        let wasm_bytes = resolve_reference(&config.component_path).await?;
+        info!("Loading WASM component from: {}", component_path);
+        let wasm_bytes = resolve_reference(&component_path).await?;
 
         let component = Component::new(&engine, &wasm_bytes)?;
         let linker = Linker::new(&engine);
 
         Ok(ActorComponent {
-            name: config.name.clone(),
+            name: name,
             component,
             actor_store,
             linker,
@@ -298,7 +302,7 @@ impl ActorComponent {
     /// ```rust
     /// # use theater::wasm::{ActorComponent, WasmError};
     /// # use wasmtime::component::ComponentExportIndex;
-    /// 
+    ///
     /// fn get_function_index(component: &mut ActorComponent) -> Result<ComponentExportIndex, WasmError> {
     ///     // Find the 'greet' function in the 'example:greeter/hello' interface
     ///     component.find_function_export("example:greeter/hello", "greet")
@@ -411,7 +415,7 @@ impl ActorComponent {
     /// ```rust
     /// # use theater::wasm::{ActorComponent, ActorInstance};
     /// # use anyhow::Result;
-    /// 
+    ///
     /// async fn create_instance(component: ActorComponent) -> Result<ActorInstance> {
     ///     // Instantiate the component
     ///     let instance = component.instantiate().await?;
@@ -476,7 +480,7 @@ impl ActorComponent {
 /// ```rust
 /// use theater::wasm::ActorInstance;
 /// use anyhow::Result;
-/// 
+///
 /// async fn interact_with_instance(mut instance: ActorInstance) -> Result<()> {
 ///     // Register a function with parameters and results
 ///     instance.register_function::<(String,), String>("my:interface", "greet")?;
@@ -537,7 +541,7 @@ impl ActorInstance {
     ///
     /// ```rust
     /// # use theater::wasm::ActorInstance;
-    /// 
+    ///
     /// fn check_function(instance: &ActorInstance) {
     ///     if instance.has_function("ntwk:theater/actor.init") {
     ///         println!("The init function is available");
@@ -566,7 +570,7 @@ impl ActorInstance {
     ///
     /// ```rust
     /// # use theater::wasm::ActorInstance;
-    /// 
+    ///
     /// fn log_actor_id(instance: &ActorInstance) {
     ///     let id = instance.id();
     ///     println!("Working with actor: {}", id);
@@ -600,7 +604,7 @@ impl ActorInstance {
     /// ```rust
     /// # use theater::wasm::ActorInstance;
     /// # use anyhow::Result;
-    /// 
+    ///
     /// async fn invoke_actor(mut instance: ActorInstance) -> Result<()> {
     ///     // Prepare parameters
     ///     let params = serde_json::to_vec(&("Hello, WebAssembly!",))?;
@@ -686,7 +690,7 @@ impl ActorInstance {
     /// ```rust
     /// # use theater::wasm::ActorInstance;
     /// # use anyhow::Result;
-    /// 
+    ///
     /// fn register_functions(mut instance: &mut ActorInstance) -> Result<()> {
     ///     // Register a function with string parameter and result
     ///     instance.register_function::<(String,), String>("example:greeter/hello", "greet")?;

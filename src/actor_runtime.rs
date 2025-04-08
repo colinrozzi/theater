@@ -1,4 +1,3 @@
-
 //! # Actor Runtime
 //!
 //! The Actor Runtime is responsible for initializing, running, and managing the lifecycle
@@ -118,7 +117,7 @@ const SHUTDOWN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 /// ## Safety
 ///
 /// While `ActorRuntime` itself is safe to use, it manages WebAssembly execution which is
-/// inherently unsafe. The runtime ensures isolation between actors and proper handling of 
+/// inherently unsafe. The runtime ensures isolation between actors and proper handling of
 /// errors from WebAssembly code.
 ///
 /// ## Security
@@ -285,7 +284,13 @@ impl ActorRuntime {
             handlers.push(handler);
         }
 
-        let mut actor_component = match ActorComponent::new(config, actor_store).await {
+        let mut actor_component = match ActorComponent::new(
+            config.name.clone(),
+            config.component_path.clone(),
+            actor_store,
+        )
+        .await
+        {
             Ok(component) => component,
             Err(e) => {
                 let error_message = format!(
