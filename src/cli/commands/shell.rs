@@ -25,6 +25,7 @@ pub struct ShellArgs {
 }
 
 // Command entered by the user
+#[allow(dead_code)]
 struct ShellCommand {
     full_line: String,
     command: String,

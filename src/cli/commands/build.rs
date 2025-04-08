@@ -183,6 +183,7 @@ pub fn execute(args: &BuildArgs, verbose: bool, json: bool) -> Result<()> {
 }
 
 /// Run a command with optional verbose output
+#[allow(dead_code)]
 fn run_command(cmd: &mut Command, verbose: bool) -> Result<std::process::ExitStatus> {
     debug!("Running command: {:?}", cmd);
 

@@ -25,7 +25,7 @@ pub struct InspectArgs {
     pub detailed: bool,
 }
 
-pub fn execute(args: &InspectArgs, verbose: bool, json: bool) -> Result<()> {
+pub fn execute(args: &InspectArgs, _verbose: bool, json: bool) -> Result<()> {
     debug!("Inspecting actor: {}", args.actor_id);
     debug!("Connecting to server at: {}", args.address);
 

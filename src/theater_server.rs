@@ -149,6 +149,7 @@ pub enum ManagementResponse {
 }
 
 #[derive(Debug)]
+#[allow(dead_code)]
 struct Subscription {
     id: Uuid,
     client_tx: mpsc::Sender<ManagementResponse>,
@@ -181,6 +182,7 @@ pub enum ChannelEvent {
 
 // Structure to track active channel subscriptions
 #[derive(Debug)]
+#[allow(dead_code)]
 struct ChannelSubscription {
     channel_id: String,
     initiator_id: ChannelParticipant,
@@ -196,6 +198,7 @@ pub struct TheaterServer {
     // Field to track channel subscriptions
     channel_subscriptions: Arc<Mutex<HashMap<String, ChannelSubscription>>>,
     // Channel for runtime to send channel events back to server
+    #[allow(dead_code)]
     channel_events_tx: mpsc::Sender<ChannelEvent>,
 }
 

@@ -916,11 +916,11 @@ impl TheaterRuntime {
         Ok(())
     }
 
-    async fn handle_actor_error(&mut self, actor_id: TheaterId, event: ChainEvent) -> Result<()> {
+    async fn handle_actor_error(&mut self, actor_id: TheaterId, _event: ChainEvent) -> Result<()> {
         debug!("Handling error event for actor: {:?}", actor_id);
         todo!();
-
-        Ok(())
+        // Return will never be reached due to todo!()
+        // Ok(())
     }
 
     /// Stops an actor and its children gracefully.

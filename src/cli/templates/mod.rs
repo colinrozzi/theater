@@ -7,6 +7,7 @@ use tracing::{debug, info, warn};
 
 /// Template metadata
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct Template {
     pub name: String,
     pub description: String,

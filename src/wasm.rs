@@ -44,7 +44,7 @@ use wasmtime::component::{
 use wasmtime::{Engine, Store};
 
 use crate::actor::store::ActorStore;
-use crate::config::ManifestConfig;
+// use crate::config::ManifestConfig;
 use crate::id::TheaterId;
 use crate::utils::resolve_reference;
 use tracing::{debug, error, info};

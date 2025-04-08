@@ -66,7 +66,7 @@ pub struct EventsArgs {
     pub timeline: bool,
 }
 
-pub fn execute(args: &EventsArgs, verbose: bool, json: bool) -> Result<()> {
+pub fn execute(args: &EventsArgs, _verbose: bool, json: bool) -> Result<()> {
     debug!("Getting events for actor: {}", args.actor_id);
     debug!("Connecting to server at: {}", args.address);
 
@@ -669,6 +669,7 @@ fn format_timestamp(timestamp: u64) -> String {
 }
 
 // Helper function to print a hex dump of binary data
+#[allow(dead_code)]
 fn print_hex_dump(data: &[u8], bytes_per_line: usize) {
     let mut offset = 0;
     while offset < data.len() {

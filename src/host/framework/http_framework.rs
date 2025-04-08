@@ -25,6 +25,7 @@ use super::server_instance::ServerInstance;
 use super::types::*;
 
 #[derive(Error, Debug)]
+#[allow(dead_code)]
 pub enum HttpFrameworkError {
     #[error("Server not found: {0}")]
     ServerNotFound(u64),
@@ -68,6 +69,7 @@ fn is_valid_method(method: &str) -> bool {
     }
 }
 
+#[allow(dead_code)]
 struct ServerHandle {
     shutdown_tx: Option<oneshot::Sender<()>>,
     task: Option<JoinHandle<()>>,
@@ -102,12 +104,12 @@ impl HttpFramework {
         info!("Setting up HTTP framework host functions");
 
         let servers_clone = self.servers.clone();
-        let handlers_clone = self.handlers.clone();
+        let _handlers_clone = self.handlers.clone();
         let next_server_id = self.next_server_id.clone();
-        let next_handler_id = self.next_handler_id.clone();
-        let next_route_id = self.next_route_id.clone();
-        let next_middleware_id = self.next_middleware_id.clone();
-        let server_handles_clone = self.server_handles.clone();
+        let _next_handler_id = self.next_handler_id.clone();
+        let _next_route_id = self.next_route_id.clone();
+        let _next_middleware_id = self.next_middleware_id.clone();
+        let _server_handles_clone = self.server_handles.clone();
 
         let mut interface = actor_component
             .linker
@@ -1129,7 +1131,7 @@ impl HttpFramework {
                 debug!("HTTP Framework shutting down {} servers", count);
 
                 // Get server IDs
-                let server_ids: Vec<u64> = servers.keys().cloned().collect();
+                let _server_ids: Vec<u64> = servers.keys().cloned().collect();
                 count
             };
 

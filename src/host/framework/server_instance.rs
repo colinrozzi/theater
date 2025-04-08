@@ -19,6 +19,7 @@ use super::types::*;
 
 // Route configuration
 #[derive(Clone)]
+#[allow(dead_code)]
 pub struct RouteConfig {
     pub id: u64,
     pub path: String,
@@ -28,6 +29,7 @@ pub struct RouteConfig {
 
 // Middleware configuration
 #[derive(Clone)]
+#[allow(dead_code)]
 pub struct MiddlewareConfig {
     pub id: u64,
     pub path: String,
@@ -37,6 +39,7 @@ pub struct MiddlewareConfig {
 
 // WebSocket configuration
 #[derive(Clone)]
+#[allow(dead_code)]
 pub struct WebSocketConfig {
     pub path: String,
     pub connect_handler_id: Option<u64>,
@@ -767,6 +770,7 @@ impl ServerInstance {
 }
 
 // Helper struct for router state
+#[allow(dead_code)]
 pub struct ServerState {
     pub id: u64,
     pub actor_handle: ActorHandle,

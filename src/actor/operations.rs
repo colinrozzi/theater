@@ -15,7 +15,7 @@ use crate::wasm::ActorInstance;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 use tokio::time::Instant;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info};
 
 /// # Operations Processor
 ///
@@ -57,6 +57,7 @@ impl OperationsProcessor {
                     info!("Actor runtime received shutdown signal");
                     debug!("Actor runtime starting shutdown sequence");
                     shutdown_initiated = true;
+                    debug!("Shutdown status: {}", shutdown_initiated);
                     debug!("Actor runtime marked as shutting down, will reject new operations");
                     break;
                 }
@@ -137,6 +138,7 @@ impl OperationsProcessor {
                         ActorOperation::Shutdown { response_tx } => {
                             info!("Processing shutdown request");
                             shutdown_initiated = true;
+                            debug!("Shutdown status: {}", shutdown_initiated);
                             if let Err(e) = response_tx.send(Ok(())) {
                                 error!("Failed to send shutdown confirmation: {:?}", e);
                             } else {
@@ -146,7 +148,7 @@ impl OperationsProcessor {
                             break;
                         }
 
-                        ActorOperation::UpdateComponent { component_address, response_tx } => {
+                        ActorOperation::UpdateComponent { component_address: _, response_tx } => {
                             debug!("Processing UpdateComponent operation");
                             // TODO: Implement update_component method on ActorInstance
                             match Ok::<(), ActorError>(()) {

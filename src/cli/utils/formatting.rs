@@ -95,6 +95,7 @@ pub fn format_event_summary(event: &ChainEvent) -> String {
 }
 
 /// Create a table with headers and rows
+#[allow(dead_code)]
 pub fn format_table(headers: &[&str], rows: &[Vec<String>], indent: usize) -> String {
     if rows.is_empty() {
         return "No data available".to_string();

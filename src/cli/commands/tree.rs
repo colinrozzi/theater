@@ -35,7 +35,7 @@ struct ActorNode {
     name: String, // Actor name (from manifest if available)
 }
 
-pub fn execute(args: &TreeArgs, verbose: bool, json: bool) -> Result<()> {
+pub fn execute(args: &TreeArgs, _verbose: bool, json: bool) -> Result<()> {
     debug!("Generating actor tree");
     debug!("Connecting to server at: {}", args.address);
     
