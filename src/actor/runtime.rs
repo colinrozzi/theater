@@ -26,7 +26,7 @@ use crate::messages::{ActorMessage, TheaterCommand};
 use crate::metrics::MetricsCollector;
 use crate::shutdown::{ShutdownController, ShutdownReceiver};
 use crate::store::ContentStore;
-use crate::wasm::ActorComponent;
+use crate::wasm::{ActorComponent, ActorInstance};
 use crate::Result;
 use tokio::sync::mpsc::{Receiver, Sender};
 use tokio::task::JoinHandle;
@@ -102,6 +102,97 @@ impl ActorRuntime {
         response_tx: Sender<StartActorResult>,
     ) {
         let actor_handle = ActorHandle::new(operation_tx.clone());
+
+        // Setup actor store and manifest
+        let (actor_store, manifest_id) = match Self::setup_actor_store(
+            id.clone(),
+            theater_tx.clone(),
+            actor_handle.clone(),
+            config,
+            &response_tx,
+        )
+        .await
+        {
+            Ok(result) => result,
+            Err(_) => return, // Error already reported
+        };
+
+        // Create handlers
+        let handlers =
+            Self::create_handlers(actor_sender, actor_mailbox, theater_tx.clone(), config);
+
+        // Create component
+        let mut actor_component =
+            match Self::create_actor_component(config, actor_store, id.clone(), &response_tx).await
+            {
+                Ok(component) => component,
+                Err(_) => return, // Error already reported
+            };
+
+        // Setup host functions
+        let mut handlers = match Self::setup_host_functions(
+            &mut actor_component,
+            handlers,
+            id.clone(),
+            &response_tx,
+        )
+        .await
+        {
+            Ok(handlers) => handlers,
+            Err(_) => return, // Error already reported
+        };
+
+        // Instantiate component
+        let mut actor_instance =
+            match Self::instantiate_component(actor_component, id.clone(), &response_tx).await {
+                Ok(instance) => instance,
+                Err(_) => return, // Error already reported
+            };
+
+        // Setup export functions
+        if let Err(_) =
+            Self::setup_export_functions(&mut actor_instance, &handlers, id.clone(), &response_tx)
+                .await
+        {
+            return; // Error already reported
+        }
+
+        // Initialize state if needed
+        let init_state = if init {
+            match Self::initialize_state(config, state_bytes, id.clone(), &response_tx).await {
+                Ok(state) => state,
+                Err(_) => return, // Error already reported
+            }
+        } else {
+            None
+        };
+
+        actor_instance.store.data_mut().set_state(init_state);
+
+        // Start runtime
+        Self::start_runtime(
+            actor_instance,
+            actor_handle.clone(),
+            handlers,
+            operation_rx,
+            parent_shutdown_receiver,
+            theater_tx,
+            id.clone(),
+            init,
+            response_tx,
+        )
+        .await;
+    }
+
+    /// Sets up the actor store and stores the manifest
+    async fn setup_actor_store(
+        id: TheaterId,
+        theater_tx: Sender<TheaterCommand>,
+        actor_handle: ActorHandle,
+        config: &ManifestConfig,
+        response_tx: &Sender<StartActorResult>,
+    ) -> Result<(ActorStore, String)> {
+        // Create actor store
         let actor_store =
             match ActorStore::new(id.clone(), theater_tx.clone(), actor_handle.clone()) {
                 Ok(store) => store,
@@ -114,10 +205,11 @@ impl ActorRuntime {
                     {
                         error!("Failed to send failure response: {}", send_err);
                     }
-                    return;
+                    return Err(e.into());
                 }
             };
 
+        // Store manifest
         let manifest_store = ContentStore::from_id("manifest");
         let manifest_id = match manifest_store
             .store(config.clone().into_fixed_bytes())
@@ -133,7 +225,7 @@ impl ActorRuntime {
                 {
                     error!("Failed to send failure response: {}", send_err);
                 }
-                return;
+                return Err(e.into());
             }
         };
 
@@ -146,8 +238,16 @@ impl ActorRuntime {
             description: format!("Loading actor [{}] from manifest [{}] ", id, manifest_id).into(),
         });
 
-        // Create a local shutdown controller for this runtime
-        let (shutdown_controller, _) = ShutdownController::new();
+        Ok((actor_store, manifest_id.to_string()))
+    }
+
+    /// Creates all the handlers needed by the actor
+    fn create_handlers(
+        actor_sender: Sender<ActorMessage>,
+        actor_mailbox: Receiver<ActorMessage>,
+        theater_tx: Sender<TheaterCommand>,
+        config: &ManifestConfig,
+    ) -> Vec<Handler> {
         let mut handlers = Vec::new();
 
         handlers.push(Handler::MessageServer(MessageServerHost::new(
@@ -180,14 +280,24 @@ impl ActorRuntime {
             handlers.push(handler);
         }
 
-        let mut actor_component = match ActorComponent::new(
+        handlers
+    }
+
+    /// Creates and initializes the actor component
+    async fn create_actor_component(
+        config: &ManifestConfig,
+        actor_store: ActorStore,
+        id: TheaterId,
+        response_tx: &Sender<StartActorResult>,
+    ) -> Result<ActorComponent> {
+        match ActorComponent::new(
             config.name.clone(),
             config.component_path.clone(),
             actor_store,
         )
         .await
         {
-            Ok(component) => component,
+            Ok(component) => Ok(component),
             Err(e) => {
                 let error_message = format!(
                     "Failed to create actor component for actor {}: {}",
@@ -201,41 +311,51 @@ impl ActorRuntime {
                 {
                     error!("Failed to send failure response: {}", send_err);
                 }
-                return;
-            }
-        };
-
-        // Add the host functions to the linker of the actor
-        {
-            for handler in &mut handlers {
-                info!(
-                    "Setting up host functions for handler: {:?}",
-                    handler.name()
-                );
-                match handler.setup_host_functions(&mut actor_component).await {
-                    Ok(_) => {} // Successfully set up host functions
-                    Err(e) => {
-                        let error_message = format!(
-                            "Failed to set up host functions for handler {}: {}",
-                            handler.name(),
-                            e
-                        );
-                        error!("{}", error_message);
-                        // Send failure result back to spawner with detailed error message
-                        if let Err(send_err) = response_tx
-                            .send(StartActorResult::Failure(id.clone(), error_message))
-                            .await
-                        {
-                            error!("Failed to send failure response: {}", send_err);
-                        }
-                        return;
-                    }
-                }
+                Err(e.into())
             }
         }
+    }
 
-        let mut actor_instance = match actor_component.instantiate().await {
-            Ok(instance) => instance,
+    /// Sets up host functions for all handlers
+    async fn setup_host_functions(
+        actor_component: &mut ActorComponent,
+        mut handlers: Vec<Handler>,
+        id: TheaterId,
+        response_tx: &Sender<StartActorResult>,
+    ) -> Result<Vec<Handler>> {
+        for handler in &mut handlers {
+            info!(
+                "Setting up host functions for handler: {:?}",
+                handler.name()
+            );
+            if let Err(e) = handler.setup_host_functions(actor_component).await {
+                let error_message = format!(
+                    "Failed to set up host functions for handler {}: {}",
+                    handler.name(),
+                    e
+                );
+                error!("{}", error_message);
+                // Send failure result back to spawner with detailed error message
+                if let Err(send_err) = response_tx
+                    .send(StartActorResult::Failure(id.clone(), error_message))
+                    .await
+                {
+                    error!("Failed to send failure response: {}", send_err);
+                }
+                return Err(e.into());
+            }
+        }
+        Ok(handlers)
+    }
+
+    /// Instantiates the actor component
+    async fn instantiate_component(
+        actor_component: ActorComponent,
+        id: TheaterId,
+        response_tx: &Sender<StartActorResult>,
+    ) -> Result<ActorInstance> {
+        match actor_component.instantiate().await {
+            Ok(instance) => Ok(instance),
             Err(e) => {
                 let error_message = format!("Failed to instantiate actor {}: {}", id, e);
                 error!("{}", error_message);
@@ -246,74 +366,95 @@ impl ActorRuntime {
                 {
                     error!("Failed to send failure response: {}", send_err);
                 }
-                return;
-            }
-        };
-
-        {
-            for handler in &handlers {
-                info!("Creating functions for handler: {:?}", handler.name());
-                match handler.add_export_functions(&mut actor_instance).await {
-                    Ok(_) => {} // Successfully added export functions
-                    Err(e) => {
-                        let error_message = format!(
-                            "Failed to create export functions for handler {}: {}",
-                            handler.name(),
-                            e
-                        );
-                        error!("{}", error_message);
-                        // Send failure result back to spawner with detailed error message
-                        if let Err(send_err) = response_tx
-                            .send(StartActorResult::Failure(id.clone(), error_message))
-                            .await
-                        {
-                            error!("Failed to send failure response: {}", send_err);
-                        }
-                        return;
-                    }
-                }
+                Err(e.into())
             }
         }
+    }
 
-        // Actor handle already created above
-        let mut init_state = None;
-        if init {
-            info!("Loading init state for actor: {:?}", id);
-
-            // Get state from config if available
-            let config_state = config.load_init_state().unwrap_or(None);
-
-            // Merge with provided state
-            init_state = match crate::utils::merge_initial_states(config_state, state_bytes) {
-                Ok(state) => state,
-                Err(e) => {
-                    let error_message = format!("Failed to merge initial states: {}", e);
-                    error!("{}", error_message);
-                    if let Err(send_err) = response_tx
-                        .send(StartActorResult::Failure(id.clone(), error_message))
-                        .await
-                    {
-                        error!("Failed to send failure response: {}", send_err);
-                    }
-                    return;
+    /// Sets up export functions for all handlers
+    async fn setup_export_functions(
+        actor_instance: &mut ActorInstance,
+        handlers: &[Handler],
+        id: TheaterId,
+        response_tx: &Sender<StartActorResult>,
+    ) -> Result<()> {
+        for handler in handlers {
+            info!("Creating functions for handler: {:?}", handler.name());
+            if let Err(e) = handler.add_export_functions(actor_instance).await {
+                let error_message = format!(
+                    "Failed to create export functions for handler {}: {}",
+                    handler.name(),
+                    e
+                );
+                error!("{}", error_message);
+                // Send failure result back to spawner with detailed error message
+                if let Err(send_err) = response_tx
+                    .send(StartActorResult::Failure(id.clone(), error_message))
+                    .await
+                {
+                    error!("Failed to send failure response: {}", send_err);
                 }
-            };
-
-            info!("Final init state ready: {:?}", init_state.is_some());
+                return Err(e.into());
+            }
         }
+        Ok(())
+    }
 
-        actor_instance.store.data_mut().set_state(init_state);
+    /// Initializes and merges actor state
+    async fn initialize_state(
+        config: &ManifestConfig,
+        state_bytes: Option<Vec<u8>>,
+        id: TheaterId,
+        response_tx: &Sender<StartActorResult>,
+    ) -> Result<Option<Vec<u8>>> {
+        info!("Loading init state for actor: {:?}", id);
 
-        // Create handler tasks
-        let mut handler_tasks: Vec<JoinHandle<()>> = Vec::new();
+        // Get state from config if available
+        let config_state = config.load_init_state().unwrap_or(None);
+
+        // Merge with provided state
+        match crate::utils::merge_initial_states(config_state, state_bytes) {
+            Ok(state) => {
+                info!("Final init state ready: {:?}", state.is_some());
+                Ok(state)
+            }
+            Err(e) => {
+                let error_message = format!("Failed to merge initial states: {}", e);
+                error!("{}", error_message);
+                if let Err(send_err) = response_tx
+                    .send(StartActorResult::Failure(id.clone(), error_message))
+                    .await
+                {
+                    error!("Failed to send failure response: {}", send_err);
+                }
+                Err(e.into())
+            }
+        }
+    }
+
+    /// Starts the runtime, handlers, and operations processor
+    async fn start_runtime(
+        mut actor_instance: ActorInstance,
+        actor_handle: ActorHandle,
+        handlers: Vec<Handler>,
+        operation_rx: Receiver<ActorOperation>,
+        parent_shutdown_receiver: ShutdownReceiver,
+        theater_tx: Sender<TheaterCommand>,
+        id: TheaterId,
+        init: bool,
+        response_tx: Sender<StartActorResult>,
+    ) {
+        // Create a local shutdown controller for this runtime
+        let (shutdown_controller, _) = ShutdownController::new();
 
         // Start the handlers
+        let mut handler_tasks: Vec<JoinHandle<()>> = Vec::new();
         for mut handler in handlers {
             info!("Starting handler: {:?}", handler.name());
-            let actor_handle = actor_handle.clone();
+            let handler_actor_handle = actor_handle.clone();
             let handler_shutdown = shutdown_controller.subscribe();
             let handler_task = tokio::spawn(async move {
-                if let Err(e) = handler.start(actor_handle, handler_shutdown).await {
+                if let Err(e) = handler.start(handler_actor_handle, handler_shutdown).await {
                     warn!("Handler failed: {:?}", e);
                 }
             });
@@ -402,3 +543,4 @@ impl ActorRuntime {
         Ok(())
     }
 }
+
