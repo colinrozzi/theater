@@ -41,7 +41,7 @@ const SHUTDOWN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 /// Coordinates the execution and lifecycle of a single WebAssembly actor within the Theater system.
 ///
 /// `ActorRuntime` manages the various components that make up an actor's execution environment,
-/// including handlers and communication channels. It's responsible for starting the actor, 
+/// including handlers and communication channels. It's responsible for starting the actor,
 /// setting up its capabilities via handlers, executing operations, and ensuring proper shutdown.
 pub struct ActorRuntime {
     /// Unique identifier for this actor
@@ -102,23 +102,27 @@ impl ActorRuntime {
         response_tx: Sender<StartActorResult>,
     ) {
         let actor_handle = ActorHandle::new(operation_tx.clone());
-        let actor_store = match ActorStore::new(id.clone(), theater_tx.clone(), actor_handle.clone()) {
-            Ok(store) => store,
-            Err(e) => {
-                let error_message = format!("Failed to create actor store: {}", e);
-                error!("{}", error_message);
-                if let Err(send_err) = response_tx
-                    .send(StartActorResult::Failure(id.clone(), error_message))
-                    .await
-                {
-                    error!("Failed to send failure response: {}", send_err);
+        let actor_store =
+            match ActorStore::new(id.clone(), theater_tx.clone(), actor_handle.clone()) {
+                Ok(store) => store,
+                Err(e) => {
+                    let error_message = format!("Failed to create actor store: {}", e);
+                    error!("{}", error_message);
+                    if let Err(send_err) = response_tx
+                        .send(StartActorResult::Failure(id.clone(), error_message))
+                        .await
+                    {
+                        error!("Failed to send failure response: {}", send_err);
+                    }
+                    return;
                 }
-                return;
-            }
-        };
+            };
 
         let manifest_store = ContentStore::from_id("manifest");
-        let manifest_id = match manifest_store.store(config.clone().into_fixed_bytes()).await {
+        let manifest_id = match manifest_store
+            .store(config.clone().into_fixed_bytes())
+            .await
+        {
             Ok(id) => id,
             Err(e) => {
                 let error_message = format!("Failed to store manifest: {}", e);
@@ -325,26 +329,6 @@ impl ActorRuntime {
             // Even though we couldn't send the response, we'll continue since setup was successful
         }
 
-        // Initialize the actor if needed
-        if init {
-            match actor_handle
-                .call_function::<(String,), ()>(
-                    "ntwk:theater/actor.init".to_string(),
-                    (id.to_string(),),
-                )
-                .await
-            {
-                Ok(_) => {} // Successfully called init function
-                Err(e) => {
-                    let error_message =
-                        format!("Failed to call init function for actor {}: {}", id, e);
-                    error!("{}", error_message);
-                    // We already notified success, so we can't send a failure now
-                    // The best we can do is log the error
-                }
-            }
-        }
-
         // Prepare metrics collector
         let metrics = MetricsCollector::new();
 
@@ -361,6 +345,29 @@ impl ActorRuntime {
             )
             .await;
         });
+
+        // Initialize the actor if needed
+        if init {
+            info!("Calling init function for actor: {:?}", id);
+            match actor_handle
+                .call_function::<(String,), ()>(
+                    "ntwk:theater/actor.init".to_string(),
+                    (id.to_string(),),
+                )
+                .await
+            {
+                Ok(_) => {
+                    debug!("Successfully called init function for actor: {:?}", id);
+                } // Successfully called init function
+                Err(e) => {
+                    let error_message =
+                        format!("Failed to call init function for actor {}: {}", id, e);
+                    error!("{}", error_message);
+                    // We already notified success, so we can't send a failure now
+                    // The best we can do is log the error
+                }
+            }
+        }
     }
 
     /// # Stop the actor runtime

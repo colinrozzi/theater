@@ -247,6 +247,7 @@ impl HttpFramework {
                                     debug!("Stored handle for server {}", server_id);
                                 });
 
+                                debug!("Started server {} on port {}", server_id, port);
                                 Ok((Ok(port),))
                             }
                             Err(e) => {
