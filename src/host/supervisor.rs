@@ -16,6 +16,7 @@ use tokio::sync::oneshot;
 use tracing::{error, info};
 use wasmtime::StoreContextMut;
 
+#[derive(Clone)]
 pub struct SupervisorHost {}
 
 #[derive(Error, Debug)]

@@ -22,6 +22,7 @@ pub struct MessageServerHost {
     active_channels: HashMap<ChannelId, ChannelState>,
 }
 
+#[derive(Clone)]
 struct ChannelState {
     is_open: bool,
 }

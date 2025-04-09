@@ -1,6 +1,6 @@
-use crate::actor::types::ActorError;
 use crate::actor::handle::ActorHandle;
 use crate::actor::store::ActorStore;
+use crate::actor::types::ActorError;
 use crate::config::FileSystemHandlerConfig;
 use crate::events::filesystem::{CommandError, CommandResult, CommandSuccess, FilesystemEventData};
 use crate::events::{ChainEventData, EventData};
@@ -56,6 +56,7 @@ pub enum FileSystemError {
     SerializationError(#[from] serde_json::Error),
 }
 
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct FileSystemHost {
     path: PathBuf,
     allowed_commands: Option<Vec<String>>,

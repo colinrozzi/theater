@@ -5,14 +5,14 @@
 //! that an actor needs to function, including execution, handlers, and communication channels.
 
 use crate::actor::handle::ActorHandle;
-use crate::actor::types::ActorError;
 use crate::actor::store::ActorStore;
+use crate::actor::types::ActorError;
 use crate::actor::types::ActorOperation;
 use crate::config::HandlerConfig;
 use crate::config::ManifestConfig;
 use crate::events::theater_runtime::TheaterRuntimeEventData;
-use crate::events::{ChainEventData, EventData};
 use crate::events::wasm::WasmEventData;
+use crate::events::{ChainEventData, EventData};
 use crate::host::filesystem::FileSystemHost;
 use crate::host::framework::HttpFramework;
 use crate::host::handler::Handler;
@@ -182,6 +182,7 @@ impl ActorRuntime {
             id.clone(),
             init,
             response_tx,
+            config,
         )
         .await;
     }
@@ -445,6 +446,7 @@ impl ActorRuntime {
         id: TheaterId,
         init: bool,
         response_tx: Sender<StartActorResult>,
+        config: &ManifestConfig,
     ) {
         // Create a local shutdown controller for this runtime
         let (shutdown_controller, _) = ShutdownController::new();
@@ -475,6 +477,8 @@ impl ActorRuntime {
         // Prepare metrics collector
         let metrics = MetricsCollector::new();
 
+        let config = config.clone();
+
         // Spawn the main runtime task that runs and processes operations
         tokio::spawn(async move {
             Self::run_operations_loop(
@@ -485,6 +489,7 @@ impl ActorRuntime {
                 theater_tx,
                 shutdown_controller,
                 handler_tasks,
+                config,
             )
             .await;
         });
@@ -536,6 +541,7 @@ impl ActorRuntime {
         theater_tx: mpsc::Sender<TheaterCommand>,
         shutdown_controller: crate::shutdown::ShutdownController,
         handler_tasks: Vec<JoinHandle<()>>,
+        config: ManifestConfig,
     ) {
         info!("Actor runtime starting operation processing loop");
         let mut shutdown_initiated = false;
@@ -638,18 +644,19 @@ impl ActorRuntime {
                             break;
                         }
 
-                        ActorOperation::UpdateComponent { component_address: _, response_tx } => {
-                            debug!("Processing UpdateComponent operation");
-                            // TODO: Implement update_component method on ActorInstance
-                            match Ok::<(), ActorError>(()) {
+                        ActorOperation::UpdateComponent { component_address, response_tx } => {
+                            debug!("Processing UpdateComponent operation for component: {}", component_address);
+
+                            match Self::update_component(&mut actor_instance, &component_address, &config).await {
                                 Ok(_) => {
+                                    debug!("Component update successful");
                                     if let Err(e) = response_tx.send(Ok(())) {
                                         error!("Failed to send update component response: {:?}", e);
                                     }
                                 }
                                 Err(e) => {
                                     error!("UpdateComponent operation failed: {:?}", e);
-                                    if let Err(send_err) = response_tx.send(Err(ActorError::UpdateComponentError(e.to_string()))) {
+                                    if let Err(send_err) = response_tx.send(Err(e)) {
                                         error!("Failed to send update component error response: {:?}", send_err);
                                     }
                                 }
@@ -716,19 +723,14 @@ impl ActorRuntime {
                 event_type: "wasm".to_string(),
                 timestamp: start.elapsed().as_secs(),
                 description: Some(format!("Wasm call to function '{}'", name)),
-                data: EventData::Wasm(
-                    WasmEventData::WasmCall {
-                        function_name: name.clone(),
-                        params: params.clone(),
-                    },
-                ),
+                data: EventData::Wasm(WasmEventData::WasmCall {
+                    function_name: name.clone(),
+                    params: params.clone(),
+                }),
             });
 
         // Execute the call
-        let (new_state, results) = match actor_instance
-            .call_function(&name, state, params)
-            .await
-        {
+        let (new_state, results) = match actor_instance.call_function(&name, state, params).await {
             Ok(result) => {
                 actor_instance
                     .store
@@ -737,12 +739,10 @@ impl ActorRuntime {
                         event_type: "wasm".to_string(),
                         timestamp: start.elapsed().as_secs(),
                         description: Some(format!("Wasm call to function '{}' completed", name)),
-                        data: EventData::Wasm(
-                            WasmEventData::WasmResult {
-                                function_name: name.clone(),
-                                result: result.clone(),
-                            },
-                        ),
+                        data: EventData::Wasm(WasmEventData::WasmResult {
+                            function_name: name.clone(),
+                            result: result.clone(),
+                        }),
                     });
                 result
             }
@@ -754,12 +754,10 @@ impl ActorRuntime {
                         event_type: "wasm".to_string(),
                         timestamp: start.elapsed().as_secs(),
                         description: Some(format!("Wasm call to function '{}' failed", name)),
-                        data: EventData::Wasm(
-                            WasmEventData::WasmError {
-                                function_name: name.clone(),
-                                message: e.to_string(),
-                            },
-                        ),
+                        data: EventData::Wasm(WasmEventData::WasmError {
+                            function_name: name.clone(),
+                            message: e.to_string(),
+                        }),
                     });
 
                 // Notify the theater runtime the actor has failed
@@ -787,6 +785,178 @@ impl ActorRuntime {
         metrics.record_operation(duration, true).await;
 
         Ok(results)
+    }
+
+    /// Updates the WebAssembly component of an actor instance.
+    ///
+    /// This method implements hot-swapping of the WebAssembly component while preserving
+    /// the actor's state and reusing the existing setup logic.
+    ///
+    /// ## Parameters
+    ///
+    /// * `actor_instance` - Mutable reference to the actor instance to update
+    /// * `component_address` - The address of the new component to load
+    /// * `handlers` - The existing handlers
+    ///
+    /// ## Returns
+    ///
+    /// * `Ok(())` - If the component was successfully updated
+    /// * `Err(ActorError)` - If the update failed
+    async fn update_component(
+        actor_instance: &mut ActorInstance,
+        component_address: &str,
+        config: &ManifestConfig,
+    ) -> Result<(), ActorError> {
+        let actor_id = actor_instance.id();
+        info!(
+            "Updating component for actor {} to: {}",
+            actor_id, component_address
+        );
+
+        let mut new_config = config.clone();
+
+        // Get current state before updating
+        let current_state = actor_instance.store.data().get_state();
+
+        // Record update started event
+        actor_instance
+            .store
+            .data_mut()
+            .record_event(ChainEventData {
+                event_type: "theater-runtime".to_string(),
+                data: EventData::TheaterRuntime(TheaterRuntimeEventData::ActorUpdateStart {
+                    new_component_address: component_address.to_string(),
+                }),
+                timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                description: format!("Starting update to component [{}]", component_address).into(),
+            });
+
+        // Create a temporary config for the new component
+        new_config.component_path = component_address.to_string();
+
+        // Create a temporary response channel for error handling during setup
+        let (response_tx, _) = mpsc::channel::<StartActorResult>(1);
+
+        // Set up actor store - reuse the existing one without creating a new one
+        let actor_store = actor_instance.actor_component.actor_store.clone();
+
+        let (actor_sender_spoof, actor_mailbox_spoof) = mpsc::channel::<ActorMessage>(1);
+        let (theater_tx_spoof, _) = mpsc::channel::<TheaterCommand>(1);
+        let handlers = Self::create_handlers(
+            actor_sender_spoof,
+            actor_mailbox_spoof,
+            theater_tx_spoof,
+            &new_config,
+        );
+
+        // Create new component - reusing existing method
+        let mut new_actor_component = match Self::create_actor_component(
+            &new_config,
+            actor_store,
+            actor_id.clone(),
+            &response_tx,
+        )
+        .await
+        {
+            Ok(component) => component,
+            Err(e) => {
+                let error_message = format!("Failed to create actor component: {}", e);
+                Self::record_update_error(actor_instance, component_address, &error_message);
+                return Err(ActorError::UpdateComponentError(error_message));
+            }
+        };
+
+        // Setup host functions - reusing existing method
+        let handlers = match Self::setup_host_functions(
+            &mut new_actor_component,
+            handlers,
+            actor_id.clone(),
+            &response_tx,
+        )
+        .await
+        {
+            Ok(handlers) => handlers,
+            Err(e) => {
+                let error_message = format!("Failed to setup host functions: {}", e);
+                Self::record_update_error(actor_instance, component_address, &error_message);
+                return Err(ActorError::UpdateComponentError(error_message));
+            }
+        };
+
+        // Instantiate component - reusing existing method
+        let mut new_instance =
+            match Self::instantiate_component(new_actor_component, actor_id.clone(), &response_tx)
+                .await
+            {
+                Ok(instance) => instance,
+                Err(e) => {
+                    let error_message = format!("Failed to instantiate component: {}", e);
+                    Self::record_update_error(actor_instance, component_address, &error_message);
+                    return Err(ActorError::UpdateComponentError(error_message));
+                }
+            };
+
+        // Setup export functions - reusing existing method
+        if let Err(e) = Self::setup_export_functions(
+            &mut new_instance,
+            &handlers,
+            actor_id.clone(),
+            &response_tx,
+        )
+        .await
+        {
+            let error_message = format!("Failed to setup export functions: {}", e);
+            Self::record_update_error(actor_instance, component_address, &error_message);
+            return Err(ActorError::UpdateComponentError(error_message));
+        }
+
+        // Swap the instance
+        std::mem::swap(actor_instance, &mut new_instance);
+
+        // Restore state
+        actor_instance.store.data_mut().set_state(current_state);
+
+        // Record update success
+        actor_instance
+            .store
+            .data_mut()
+            .record_event(ChainEventData {
+                event_type: "theater-runtime".to_string(),
+                data: EventData::TheaterRuntime(TheaterRuntimeEventData::ActorUpdateComplete {
+                    new_component_address: component_address.to_string(),
+                }),
+                timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                description: format!("Successfully updated to component [{}]", component_address)
+                    .into(),
+            });
+
+        info!("Component updated successfully for actor {}", actor_id);
+        Ok(())
+    }
+
+    /// Helper method to record update errors in the actor's chain
+    fn record_update_error(
+        actor_instance: &mut ActorInstance,
+        component_address: &str,
+        error_message: &str,
+    ) {
+        error!("{}", error_message);
+        actor_instance
+            .store
+            .data_mut()
+            .record_event(ChainEventData {
+                event_type: "theater-runtime".to_string(),
+                data: EventData::TheaterRuntime(TheaterRuntimeEventData::ActorUpdateError {
+                    new_component_address: component_address.to_string(),
+                    error: error_message.to_string(),
+                }),
+                timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                description: format!(
+                    "Failed to update to component [{}]: {}",
+                    component_address, error_message
+                )
+                .into(),
+            });
     }
 
     /// # Perform final cleanup when shutting down
@@ -818,7 +988,7 @@ impl ActorRuntime {
         // Log final metrics
         let final_metrics = metrics.get_metrics().await;
         info!("Final metrics at shutdown: {:?}", final_metrics);
-        
+
         info!("Actor runtime cleanup complete");
     }
 
@@ -854,4 +1024,3 @@ impl ActorRuntime {
         Ok(())
     }
 }
-

@@ -25,6 +25,7 @@ pub enum StoreError {
     SerializationError(#[from] serde_json::Error),
 }
 
+#[derive(Clone)]
 pub struct StoreHost {
 }
 

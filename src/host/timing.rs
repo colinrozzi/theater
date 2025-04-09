@@ -14,6 +14,7 @@ use tokio::time::{sleep, Duration};
 use tracing::{error, info};
 use wasmtime::StoreContextMut;
 
+#[derive(Clone)]
 pub struct TimingHost {
     config: TimingHostConfig,
 }
