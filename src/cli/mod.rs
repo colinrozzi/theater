@@ -85,6 +85,10 @@ pub enum Commands {
     #[command(name = "restart")]
     Restart(commands::restart::RestartArgs),
 
+    /// Update an actor's component
+    #[command(name = "update")]
+    Update(commands::update::UpdateArgs),
+
     /// Send a message to an actor
     #[command(name = "message")]
     Message(commands::message::MessageArgs),
@@ -118,6 +122,7 @@ pub fn run() -> anyhow::Result<()> {
         Commands::Start(args) => commands::start::execute(args, cli.verbose, cli.json),
         Commands::Stop(args) => commands::stop::execute(args, cli.verbose, cli.json),
         Commands::Restart(args) => commands::restart::execute(args, cli.verbose, cli.json),
+        Commands::Update(args) => commands::update::execute(args, cli.verbose, cli.json),
         Commands::Message(args) => commands::message::execute(args, cli.verbose, cli.json),
         Commands::Watch(args) => commands::watch::execute(args, cli.verbose, cli.json),
         Commands::Channel(args) => match &args.command {

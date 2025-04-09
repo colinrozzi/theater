@@ -258,6 +258,20 @@ impl TheaterClient {
         }
     }
 
+    /// Update an actor's component
+    pub async fn update_actor_component(&mut self, id: TheaterId, component: String) -> Result<()> {
+        let command = ManagementCommand::UpdateActorComponent { id, component };
+        let response = self.send_command(command).await?;
+
+        match response {
+            ManagementResponse::ActorComponentUpdated { .. } => Ok(()),
+            ManagementResponse::Error { message } => {
+                Err(anyhow!("Error updating actor component: {}", message))
+            }
+            _ => Err(anyhow!("Unexpected response")),
+        }
+    }
+
     /// Open a channel to an actor
     pub async fn open_channel(
         &mut self,

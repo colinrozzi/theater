@@ -57,6 +57,10 @@ pub enum ManagementCommand {
     GetActorMetrics {
         id: TheaterId,
     },
+    UpdateActorComponent {
+        id: TheaterId,
+        component: String,
+    },
     // Channel management commands
     OpenChannel {
         actor_id: ChannelParticipant,
@@ -124,6 +128,9 @@ pub enum ManagementResponse {
     ActorMetrics {
         id: TheaterId,
         metrics: serde_json::Value,
+    },
+    ActorComponentUpdated {
+        id: TheaterId,
     },
     // Channel management responses
     ChannelOpened {
@@ -674,6 +681,24 @@ impl TheaterServer {
                     ManagementResponse::ActorMetrics {
                         id,
                         metrics: serde_json::to_value(metrics?)?,
+                    }
+                },
+                ManagementCommand::UpdateActorComponent { id, component } => {
+                    info!("Updating component for actor {:?} to {}", id, component);
+                    let (cmd_tx, cmd_rx) = tokio::sync::oneshot::channel();
+                    runtime_tx
+                        .send(TheaterCommand::UpdateActorComponent {
+                            actor_id: id.clone(),
+                            component: component.clone(),
+                            response_tx: cmd_tx,
+                        })
+                        .await?;
+
+                    match cmd_rx.await? {
+                        Ok(_) => ManagementResponse::ActorComponentUpdated { id },
+                        Err(e) => ManagementResponse::Error {
+                            message: format!("Failed to update actor component: {}", e),
+                        },
                     }
                 }
                 // Handle channel management commands
