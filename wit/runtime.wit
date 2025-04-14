@@ -60,7 +60,7 @@ interface runtime {
     ///
     /// Log messages are subject to the logging level configuration specified in the actor's
     /// manifest. The Theater runtime may filter or redirect logs based on this configuration.
-    log: func(msg: string) -> ();
+    log: func(msg: string);
 
     /// Retrieves the actor's event chain.
     ///
