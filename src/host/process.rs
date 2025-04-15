@@ -6,7 +6,7 @@ use crate::events::{ChainEventData, EventData};
 use crate::shutdown::ShutdownReceiver;
 use crate::wasm::{ActorComponent, ActorInstance};
 use anyhow::Result;
-// No serde imports needed here
+use serde;
 use std::collections::HashMap;
 use std::future::Future;
 use std::sync::{Arc, Mutex};
@@ -59,6 +59,23 @@ pub enum OutputMode {
     Chunked = 3,
 }
 
+impl From<u8> for OutputMode {
+    fn from(value: u8) -> Self {
+        match value {
+            1 => OutputMode::LineByLine,
+            2 => OutputMode::Json,
+            3 => OutputMode::Chunked,
+            _ => OutputMode::Raw,
+        }
+    }
+}
+
+impl From<OutputMode> for u8 {
+    fn from(mode: OutputMode) -> Self {
+        mode as u8
+    }
+}
+
 /// Represents an OS process managed by Theater
 struct ManagedProcess {
     /// Unique ID for this process (within Theater)
@@ -84,23 +101,30 @@ struct ManagedProcess {
 }
 
 /// Configuration for a process
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize, wasmtime::component::ComponentType, wasmtime::component::Lift, wasmtime::component::Lower)]
+#[component(record)]
 pub struct ProcessConfig {
     /// Executable path
     pub program: String,
     /// Command line arguments
     pub args: Vec<String>,
     /// Working directory
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub cwd: Option<String>,
     /// Environment variables
     pub env: Vec<(String, String)>,
     /// Buffer size for stdout/stderr
+    #[component(name = "buffer-size")]
     pub buffer_size: u32,
     /// How to process stdout
-    pub stdout_mode: OutputMode,
+    #[component(name = "stdout-mode")]
+    pub stdout_mode: u8,
     /// How to process stderr
-    pub stderr_mode: OutputMode,
+    #[component(name = "stderr-mode")]
+    pub stderr_mode: u8,
     /// Chunk size for chunked mode
+    #[component(name = "chunk-size")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub chunk_size: Option<u32>,
 }
 
@@ -122,72 +146,7 @@ pub struct ProcessStatus {
     pub memory_usage: u64,
 }
 
-/// Parse process configuration from WIT components
-fn parse_process_config(config_wit: serde_json::Value) -> ProcessConfig {
-    let program = config_wit["program"].as_str().unwrap_or("").to_string();
-    
-    let args = if let Some(args_array) = config_wit["args"].as_array() {
-        args_array.iter()
-            .filter_map(|arg| arg.as_str())
-            .map(|s| s.to_string())
-            .collect()
-    } else {
-        Vec::new()
-    };
-    
-    let cwd = config_wit["cwd"].as_str().map(|s| s.to_string());
-    
-    let env = if let Some(env_array) = config_wit["env"].as_array() {
-        env_array.iter()
-            .filter_map(|pair| {
-                if let Some(pair_array) = pair.as_array() {
-                    if pair_array.len() == 2 {
-                        let key = pair_array[0].as_str()?.to_string();
-                        let value = pair_array[1].as_str()?.to_string();
-                        Some((key, value))
-                    } else {
-                        None
-                    }
-                } else {
-                    None
-                }
-            })
-            .collect()
-    } else {
-        Vec::new()
-    };
-    
-    let buffer_size = config_wit["buffer-size"].as_u64().unwrap_or(4096) as u32;
-    
-    let stdout_mode = match config_wit["stdout-mode"].as_u64().unwrap_or(0) {
-        0 => OutputMode::Raw,
-        1 => OutputMode::LineByLine,
-        2 => OutputMode::Json,
-        3 => OutputMode::Chunked,
-        _ => OutputMode::Raw,
-    };
-    
-    let stderr_mode = match config_wit["stderr-mode"].as_u64().unwrap_or(0) {
-        0 => OutputMode::Raw,
-        1 => OutputMode::LineByLine,
-        2 => OutputMode::Json,
-        3 => OutputMode::Chunked,
-        _ => OutputMode::Raw,
-    };
-    
-    let chunk_size = config_wit["chunk-size"].as_u64().map(|v| v as u32);
-    
-    ProcessConfig {
-        program,
-        args,
-        cwd,
-        env,
-        buffer_size,
-        stdout_mode,
-        stderr_mode,
-        chunk_size,
-    }
-}
+// Parse process config function no longer needed since we're using structs directly
 
 /// Host handler for spawning and managing OS processes
 #[derive(Clone)]
@@ -511,35 +470,16 @@ impl ProcessHost {
         interface.func_wrap_async(
             "os-spawn",
             move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore>,
-                  (process_config_str,): (String,)|  // Process configuration from WebAssembly as JSON string
+                  (process_config,): (ProcessConfig,)|  // Process configuration from WebAssembly as struct
                   -> Box<dyn Future<Output = Result<(Result<u64, String>,)>> + Send> {
                 let processes = processes.clone();
                 let next_process_id = next_process_id.clone();
                 let config = config.clone();
                 
                 Box::new(async move {
-                    // Parse JSON string into serde_json::Value
-                    let process_config_wit = match serde_json::from_str::<serde_json::Value>(&process_config_str) {
-                        Ok(value) => value,
-                        Err(e) => {
-                            // Record error event
-                            ctx.data_mut().record_event(ChainEventData {
-                                event_type: "process/spawn".to_string(),
-                                data: EventData::Process(ProcessEventData::Error {
-                                    process_id: None,
-                                    operation: "spawn".to_string(),
-                                    message: format!("Invalid JSON configuration: {}", e),
-                                }),
-                                timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                                description: Some(format!("Failed to parse process configuration: {}", e)),
-                            });
-                            
-                            return Ok((Err(format!("Invalid JSON configuration: {}", e)),));
-                        }
-                    };
-                    
-                    // Parse wit parameters into native types
-                    let process_config = parse_process_config(process_config_wit);
+                    // Convert u8 modes to OutputMode enum
+                    let stdout_mode = OutputMode::from(process_config.stdout_mode);
+                    let stderr_mode = OutputMode::from(process_config.stderr_mode);
                     
                     let program = process_config.program.clone();
                     let args = process_config.args.clone();
@@ -658,7 +598,7 @@ impl ProcessHost {
                             
                             // Set up stdout reader
                             let stdout_handle = if let Some(stdout) = child.stdout.take() {
-                                let stdout_mode = process_config.stdout_mode;
+                                let stdout_mode = stdout_mode;
                                 let buffer_size = process_config.buffer_size as usize;
                                 let process_id_clone = process_id;
                                 let actor_id_clone = actor_id.clone();
@@ -681,7 +621,7 @@ impl ProcessHost {
                             
                             // Set up stderr reader
                             let stderr_handle = if let Some(stderr) = child.stderr.take() {
-                                let stderr_mode = process_config.stderr_mode;
+                                let stderr_mode = stderr_mode;
                                 let buffer_size = process_config.buffer_size as usize;
                                 let process_id_clone = process_id;
                                 let actor_id_clone = actor_id.clone();
@@ -750,7 +690,11 @@ impl ProcessHost {
                                 id: process_id,
                                 child: None, // We'll move the actual child to the monitoring task
                                 os_pid: os_pid,
-                                config: process_config.clone(),
+                                config: ProcessConfig {
+                                    stdout_mode: process_config.stdout_mode,
+                                    stderr_mode: process_config.stderr_mode,
+                                    ..process_config.clone()
+                                },
                                 start_time: SystemTime::now(),
                                 stdin_writer: Some(stdin_writer),
                                 stdin_tx: Some(stdin_tx),
