@@ -3,6 +3,7 @@ use crate::host::filesystem::FileSystemHost;
 use crate::host::framework::HttpFramework;
 use crate::host::http_client::HttpClientHost;
 use crate::host::message_server::MessageServerHost;
+use crate::host::process::ProcessHost;
 use crate::host::runtime::RuntimeHost;
 use crate::host::store::StoreHost;
 use crate::host::supervisor::SupervisorHost;
@@ -15,7 +16,8 @@ pub enum Handler {
     MessageServer(MessageServerHost),
     FileSystem(FileSystemHost),
     HttpClient(HttpClientHost),
-    HttpFramework(HttpFramework), // New handler for our HTTP Framework
+    HttpFramework(HttpFramework),
+    Process(ProcessHost),
     Runtime(RuntimeHost),
     Supervisor(SupervisorHost),
     Store(StoreHost),
@@ -45,6 +47,10 @@ impl Handler {
                 .start(actor_handle, shutdown_receiver)
                 .await
                 .expect("Error starting http framework")),
+            Handler::Process(h) => Ok(h
+                .start(actor_handle, shutdown_receiver)
+                .await
+                .expect("Error starting process handler")),
             Handler::Runtime(h) => Ok(h
                 .start(actor_handle, shutdown_receiver)
                 .await
@@ -85,6 +91,10 @@ impl Handler {
                 .setup_host_functions(actor_component)
                 .await
                 .expect("Error setting up http framework host functions")),
+            Handler::Process(h) => Ok(h
+                .setup_host_functions(actor_component)
+                .await
+                .expect("Error setting up process host functions")),
             Handler::Runtime(h) => Ok(h
                 .setup_host_functions(actor_component)
                 .await
@@ -122,6 +132,10 @@ impl Handler {
                 .add_export_functions(actor_instance)
                 .await
                 .expect("Error adding functions to http framework")),
+            Handler::Process(handler) => Ok(handler
+                .add_export_functions(actor_instance)
+                .await
+                .expect("Error adding functions to process handler")),
             Handler::Runtime(handler) => Ok(handler
                 .add_export_functions(actor_instance)
                 .await
@@ -147,6 +161,7 @@ impl Handler {
             Handler::FileSystem(_) => "filesystem",
             Handler::HttpClient(_) => "http-client",
             Handler::HttpFramework(_) => "http-framework",
+            Handler::Process(_) => "process",
             Handler::Runtime(_) => "runtime",
             Handler::Supervisor(_) => "supervisor",
             Handler::Store(_) => "store",

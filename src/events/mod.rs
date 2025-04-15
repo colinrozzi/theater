@@ -1,3 +1,4 @@
+
 use crate::chain::ChainEvent;
 use serde::{Deserialize, Serialize};
 
@@ -99,6 +100,8 @@ pub enum EventData {
     Http(http::HttpEventData),
     /// Actor-to-actor messaging events for communication between actors.
     Message(message::MessageEventData),
+    /// OS Process management events, such as spawning processes and I/O.
+    Process(process::ProcessEventData),
     /// Runtime lifecycle events, such as initialization, state changes, and shutdown.
     Runtime(runtime::RuntimeEventData),
     /// Supervision events related to actor parent-child relationships.
@@ -281,6 +284,7 @@ impl ChainEventData {
 pub mod filesystem;
 pub mod http;
 pub mod message;
+pub mod process;
 pub mod runtime;
 pub mod store;
 pub mod supervisor;

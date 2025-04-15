@@ -83,6 +83,8 @@ pub enum HandlerConfig {
     Store(StoreHandlerConfig),
     #[serde(rename = "timing")]
     Timing(TimingHostConfig),
+    #[serde(rename = "process")]
+    Process(ProcessHostConfig),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -137,6 +139,26 @@ pub struct StoreHandlerConfig {}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HttpFrameworkHandlerConfig {}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProcessHostConfig {
+    #[serde(default = "default_max_processes")]
+    pub max_processes: usize,
+    #[serde(default = "default_max_output_buffer")]
+    pub max_output_buffer: usize,
+    pub allowed_programs: Option<Vec<String>>,
+    pub allowed_paths: Option<Vec<String>>,
+}
+
+fn default_max_processes() -> usize {
+    // Default to 10 processes per actor
+    10
+}
+
+fn default_max_output_buffer() -> usize {
+    // Default to 1MB max output buffer per process
+    1024 * 1024
+}
 
 impl ManifestConfig {
     /// Loads a manifest configuration from a TOML file.
