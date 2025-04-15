@@ -6,10 +6,11 @@ use crate::events::{ChainEventData, EventData};
 use crate::shutdown::ShutdownReceiver;
 use crate::wasm::{ActorComponent, ActorInstance};
 use anyhow::Result;
-use serde;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::future::Future;
 use std::sync::{Arc, Mutex};
+use wasmtime::component::{ComponentType, Lift, Lower};
 use std::time::SystemTime;
 use thiserror::Error;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -50,30 +51,17 @@ pub enum ProcessError {
 }
 
 /// Output processing mode for process stdout/stderr
-#[derive(Debug, Clone, Copy, PartialEq)]
-#[repr(u8)]
+#[derive(Debug, Clone, Copy, PartialEq, ComponentType, Lift, Lower, Deserialize, Serialize)]
+#[component(variant)]
 pub enum OutputMode {
-    Raw = 0,
-    LineByLine = 1,
-    Json = 2,
-    Chunked = 3,
-}
-
-impl From<u8> for OutputMode {
-    fn from(value: u8) -> Self {
-        match value {
-            1 => OutputMode::LineByLine,
-            2 => OutputMode::Json,
-            3 => OutputMode::Chunked,
-            _ => OutputMode::Raw,
-        }
-    }
-}
-
-impl From<OutputMode> for u8 {
-    fn from(mode: OutputMode) -> Self {
-        mode as u8
-    }
+    #[component(name = "raw")]
+    Raw,
+    #[component(name = "line-by-line")]
+    LineByLine,
+    #[component(name = "json")]
+    Json,
+    #[component(name = "chunked")]
+    Chunked,
 }
 
 /// Represents an OS process managed by Theater
@@ -101,7 +89,7 @@ struct ManagedProcess {
 }
 
 /// Configuration for a process
-#[derive(Debug, Clone, serde::Deserialize, serde::Serialize, wasmtime::component::ComponentType, wasmtime::component::Lift, wasmtime::component::Lower)]
+#[derive(Debug, Clone, Deserialize, Serialize, ComponentType, Lift, Lower)]
 #[component(record)]
 pub struct ProcessConfig {
     /// Executable path
@@ -109,7 +97,6 @@ pub struct ProcessConfig {
     /// Command line arguments
     pub args: Vec<String>,
     /// Working directory
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub cwd: Option<String>,
     /// Environment variables
     pub env: Vec<(String, String)>,
@@ -118,13 +105,12 @@ pub struct ProcessConfig {
     pub buffer_size: u32,
     /// How to process stdout
     #[component(name = "stdout-mode")]
-    pub stdout_mode: u8,
+    pub stdout_mode: OutputMode,
     /// How to process stderr
     #[component(name = "stderr-mode")]
-    pub stderr_mode: u8,
+    pub stderr_mode: OutputMode,
     /// Chunk size for chunked mode
     #[component(name = "chunk-size")]
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub chunk_size: Option<u32>,
 }
 
@@ -137,13 +123,11 @@ pub struct ProcessStatus {
     /// Whether the process is running
     pub running: bool,
     /// Exit code if not running
+    #[component(name = "exit-code")]
     pub exit_code: Option<i32>,
     /// Start time in milliseconds since epoch
+    #[component(name = "start-time")]
     pub start_time: u64,
-    /// CPU usage percentage (not implemented yet)
-    pub cpu_usage: f32,
-    /// Memory usage in bytes (not implemented yet)
-    pub memory_usage: u64,
 }
 
 // Parse process config function no longer needed since we're using structs directly
@@ -190,21 +174,21 @@ impl ProcessHost {
         // Register the process handler export functions
         actor_instance
             .register_function_no_result::<(u64, Vec<u8>)>(
-                "process",
+                "ntwk:theater/process-handlers",
                 "handle-stdout",
             )
             .expect("Failed to register handle-stdout function");
             
         actor_instance
             .register_function_no_result::<(u64, Vec<u8>)>(
-                "process",
+                "ntwk:theater/process-handlers",
                 "handle-stderr",
             )
             .expect("Failed to register handle-stderr function");
             
         actor_instance
             .register_function_no_result::<(u64, i32)>(
-                "process",
+                "ntwk:theater/process-handlers",
                 "handle-exit",
             )
             .expect("Failed to register handle-exit function");
@@ -463,6 +447,28 @@ impl ProcessHost {
             .instance("ntwk:theater/process")
             .expect("Could not instantiate ntwk:theater/process");
 
+        interface.func_wrap(
+            "os-test-output-mode",
+            move |_ctx: wasmtime::StoreContextMut<'_, ActorStore>,
+                  (mode,): (OutputMode,)|
+                  -> Result<(Result<(), String>,)> {
+                info!("[ACTOR] [{}] os-test-output-mode: {:?}", _ctx.data().id, mode);
+                Ok((Ok(()),))
+            },
+        ).expect("Failed to wrap os-test-output-mode function");
+
+        interface.func_wrap(
+            "os-test-process-config",
+            move |_ctx: wasmtime::StoreContextMut<'_, ActorStore>,
+                  (config,): (ProcessConfig,)|
+                  -> Result<(Result<(), String>,)> {
+                // Just return the config as a string
+                let config_str = format!("{:?}", config);
+                info!("[ACTOR] [{}] os-test-process-config: {}", _ctx.data().id, config_str);
+                Ok((Ok(()),))
+            },
+        ).expect("Failed to wrap os-test-process-config function");
+
         // Implementation for os-spawn
         let processes = self.processes.clone();
         let next_process_id = self.next_process_id.clone();
@@ -478,8 +484,8 @@ impl ProcessHost {
                 
                 Box::new(async move {
                     // Convert u8 modes to OutputMode enum
-                    let stdout_mode = OutputMode::from(process_config.stdout_mode);
-                    let stderr_mode = OutputMode::from(process_config.stderr_mode);
+                    let stdout_mode = process_config.stdout_mode;
+                    let stderr_mode = process_config.stderr_mode;
                     
                     let program = process_config.program.clone();
                     let args = process_config.args.clone();
@@ -846,8 +852,6 @@ impl ProcessHost {
                                 running: process.child.is_some(),
                                 exit_code: process.exit_code,
                                 start_time,
-                                cpu_usage: 0.0, // Not implemented yet
-                                memory_usage: 0, // Not implemented yet
                             })
                         } else {
                             None

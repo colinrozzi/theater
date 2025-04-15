@@ -1,10 +1,10 @@
 
 /// OS Process handler interface for managing operating system processes
 interface process {
-    use types.{state};
+    use types.{json};
 
     /// Output processing mode
-    enum output-mode {
+    variant output-mode {
         /// Process raw bytes without any special handling
         raw,
         /// Process output line by line
@@ -45,10 +45,6 @@ interface process {
         exit-code: option<s32>,
         /// Start time in milliseconds since epoch
         start-time: u64,
-        /// CPU usage percentage
-        cpu-usage: f32,
-        /// Memory usage in bytes
-        memory-usage: u64,
     }
 
     /// Start a new OS process
@@ -69,14 +65,14 @@ interface process {
 
 /// Process handler export interface
 interface process-handlers {
-    use types.{state};
-
+    use types.{json};
+    
     /// Process output event
-    handle-stdout: func(state: state, params: tuple<u64, list<u8>>) -> result<tuple<state>, string>;
+    handle-stdout: func(state: option<json>, params: tuple<u64, list<u8>>) -> result<tuple<option<json>>, string>;
     
     /// Process error output event
-    handle-stderr: func(state: state, params: tuple<u64, list<u8>>) -> result<tuple<state>, string>;
+    handle-stderr: func(state: option<json>, params: tuple<u64, list<u8>>) -> result<tuple<option<json>>, string>;
     
     /// Process exit event
-    handle-exit: func(state: state, params: tuple<u64, s32>) -> result<tuple<state>, string>;
+    handle-exit: func(state: option<json>, params: tuple<u64, s32>) -> result<tuple<option<json>>, string>;
 }
