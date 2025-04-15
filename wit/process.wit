@@ -46,7 +46,7 @@ interface process {
         /// Start time in milliseconds since epoch
         start-time: u64,
         /// CPU usage percentage
-        cpu-usage: float32,
+        cpu-usage: f32,
         /// Memory usage in bytes
         memory-usage: u64,
     }
@@ -61,20 +61,22 @@ interface process {
     os-status: func(pid: u64) -> result<process-status, string>;
 
     /// Send a signal to a process
-    os-signal: func(pid: u64, signal: u32) -> result<unit, string>;
+    os-signal: func(pid: u64, signal: u32) -> result<_, string>;
 
     /// Terminate a process
-    os-kill: func(pid: u64) -> result<unit, string>;
+    os-kill: func(pid: u64) -> result<_, string>;
 }
 
 /// Process handler export interface
 interface process-handlers {
+    use types.{state};
+
     /// Process output event
-    handle-stdout: func(state: state, params: (u64, list<u8>)) -> result<(state,), string>;
+    handle-stdout: func(state: state, params: tuple<u64, list<u8>>) -> result<tuple<state>, string>;
     
     /// Process error output event
-    handle-stderr: func(state: state, params: (u64, list<u8>)) -> result<(state,), string>;
+    handle-stderr: func(state: state, params: tuple<u64, list<u8>>) -> result<tuple<state>, string>;
     
     /// Process exit event
-    handle-exit: func(state: state, params: (u64, s32)) -> result<(state,), string>;
+    handle-exit: func(state: state, params: tuple<u64, s32>) -> result<tuple<state>, string>;
 }
