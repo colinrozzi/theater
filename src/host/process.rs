@@ -52,6 +52,7 @@ pub enum ProcessError {
 
 /// Output processing mode for process stdout/stderr
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[repr(u8)]
 pub enum OutputMode {
     Raw,
     LineByLine,
@@ -105,7 +106,8 @@ pub struct ProcessConfig {
 }
 
 /// Status of a running process
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, wasmtime::component::ComponentType, wasmtime::component::Lift, wasmtime::component::Lower)]
+#[component(record)]
 pub struct ProcessStatus {
     /// Process ID (within Theater)
     pub pid: u64,
@@ -132,6 +134,85 @@ pub struct ProcessHost {
     next_process_id: Arc<Mutex<u64>>,
     /// Actor handle for sending events
     actor_handle: Option<ActorHandle>,
+}
+
+/// Parse process configuration from WIT components
+fn parse_process_config(config_wit: serde_json::Value) -> ProcessConfig {
+    let program = config_wit["program"].as_str().unwrap_or("").to_string();
+    
+    let args = if let Some(args_array) = config_wit["args"].as_array() {
+        args_array.iter()
+            .filter_map(|arg| arg.as_str())
+            .map(|s| s.to_string())
+            .collect()
+    } else {
+        Vec::new()
+    };
+    
+    let cwd = config_wit["cwd"].as_str().map(|s| s.to_string());
+    
+    let env = if let Some(env_array) = config_wit["env"].as_array() {
+        env_array.iter()
+            .filter_map(|pair| {
+                if let Some(pair_array) = pair.as_array() {
+                    if pair_array.len() == 2 {
+                        let key = pair_array[0].as_str()?.to_string();
+                        let value = pair_array[1].as_str()?.to_string();
+                        Some((key, value))
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
+    
+    let buffer_size = config_wit["buffer-size"].as_u64().unwrap_or(4096) as u32;
+    
+    let stdout_mode = match config_wit["stdout-mode"].as_u64().unwrap_or(0) {
+        0 => OutputMode::Raw,
+        1 => OutputMode::LineByLine,
+        2 => OutputMode::Json,
+        3 => {
+            if let Some(chunk_size) = config_wit["chunk-size"].as_u64() {
+                OutputMode::Chunked(chunk_size as usize)
+            } else {
+                OutputMode::Chunked(4096)
+            }
+        },
+        _ => OutputMode::Raw,
+    };
+    
+    let stderr_mode = match config_wit["stderr-mode"].as_u64().unwrap_or(0) {
+        0 => OutputMode::Raw,
+        1 => OutputMode::LineByLine,
+        2 => OutputMode::Json,
+        3 => {
+            if let Some(chunk_size) = config_wit["chunk-size"].as_u64() {
+                OutputMode::Chunked(chunk_size as usize)
+            } else {
+                OutputMode::Chunked(4096)
+            }
+        },
+        _ => OutputMode::Raw,
+    };
+    
+    let chunk_size = config_wit["chunk-size"].as_u64().map(|v| v as u32);
+    
+    ProcessConfig {
+        program,
+        args,
+        cwd,
+        env,
+        buffer_size,
+        stdout_mode,
+        stderr_mode,
+        chunk_size,
+    }
 }
 
 impl ProcessHost {
@@ -172,7 +253,8 @@ impl ProcessHost {
         interface.func_wrap_async(
             "os-spawn",
             move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore>,
-                  (process_config,)|  // Process configuration from WebAssembly
+                  (process_config_wit,)|  // Process configuration from WebAssembly
+                  // Convert WIT params into our native types
                   -> Box<dyn Future<Output = Result<(Result<u64, String>,)>> + Send> {
                 let processes = processes.clone();
                 let next_process_id = next_process_id.clone();
@@ -253,11 +335,15 @@ impl ProcessHost {
                     };
                     
                     // Parse output modes
+                    // Parse wit parameters into native types
+                    let process_config = parse_process_config(process_config_wit);
+                    
+                    // Get configuration parameters
                     let stdout_mode = match process_config.stdout_mode {
-                        0 => OutputMode::Raw,
-                        1 => OutputMode::LineByLine,
-                        2 => OutputMode::Json,
-                        3 => {
+                        OutputMode::Raw => OutputMode::Raw,
+                        OutputMode::LineByLine => OutputMode::LineByLine,
+                        OutputMode::Json => OutputMode::Json,
+                        OutputMode::Chunked(_) => {
                             if let Some(chunk_size) = process_config.chunk_size {
                                 OutputMode::Chunked(chunk_size as usize)
                             } else {
@@ -267,11 +353,12 @@ impl ProcessHost {
                         _ => OutputMode::Raw,
                     };
                     
+                    // Convert WIT output mode to our enum
                     let stderr_mode = match process_config.stderr_mode {
-                        0 => OutputMode::Raw,
-                        1 => OutputMode::LineByLine,
-                        2 => OutputMode::Json,
-                        3 => {
+                        OutputMode::Raw => OutputMode::Raw,
+                        OutputMode::LineByLine => OutputMode::LineByLine,
+                        OutputMode::Json => OutputMode::Json,
+                        OutputMode::Chunked(_) => {
                             if let Some(chunk_size) = process_config.chunk_size {
                                 OutputMode::Chunked(chunk_size as usize)
                             } else {
@@ -386,15 +473,47 @@ impl ProcessHost {
                             let process_id_clone = process_id;
                             let actor_id_clone = actor_id.clone();
                             let theater_tx_clone = theater_tx.clone();
+                            // We need to clone certain data for the child process management
                             let processes_clone = processes.clone();
                             
+                            // Store the OS PID before moving the child to another thread
+                            let os_pid = child.id();
+                            
+                            // Create a mutable clone for calling wait() in a new thread
+                            let mut child_for_wait = command.spawn().expect("Failed to spawn process");
+                            
+                            // We'll store the original child in the ManagedProcess
+                            // and create a new instance for the monitoring thread
+                            let child_for_storage = Some(child);
+                            
+                            // Create the managed process early
+                            let managed_process = ManagedProcess {
+                                id: process_id,
+                                child: child_for_storage,
+                                os_pid,
+                                config: process_config.clone(),
+                                start_time: SystemTime::now(),
+                                stdin_writer: Some(stdin_writer),
+                                stdin_tx: Some(stdin_tx),
+                                stdout_reader: stdout_handle,
+                                stderr_reader: stderr_handle,
+                                exit_code: None,
+                            };
+                            
+                            // Store the managed process
+                            {
+                                let mut processes = processes.lock().unwrap();
+                                processes.insert(process_id, managed_process);
+                            }
+                            
                             tokio::spawn(async move {
-                                match child.wait().await {
+                                let wait_result = child_for_wait.wait().await;
+                                match wait_result {
                                     Ok(status) => {
                                         let exit_code = status.code().unwrap_or(-1);
                                         
                                         // Send exit event to the actor
-                                        let _ = theater_tx_clone.send(crate::messages::TheaterCommand::SendEvent {
+                                        let _ = theater_tx_clone.send(crate::messages::TheaterCommand::NewEvent {
                                             actor_id: actor_id_clone,
                                             event: ChainEventData {
                                                 event_type: "process/exit".to_string(),
@@ -404,7 +523,7 @@ impl ProcessHost {
                                                 }),
                                                 timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                                 description: Some(format!("Process {} exited with code {}", process_id_clone, exit_code)),
-                                            },
+                                            }.to_chain_event(None),
                                         }).await;
                                         
                                         // Update process status
@@ -420,24 +539,7 @@ impl ProcessHost {
                                 }
                             });
                             
-                            // Create the managed process
-                            let managed_process = ManagedProcess {
-                                id: process_id,
-                                child: Some(child),
-                                os_pid,
-                                config: process_config.clone(),
-                                start_time: SystemTime::now(),
-                                stdin_writer: Some(stdin_writer),
-                                stdin_tx: Some(stdin_tx),
-                                stdout_reader: stdout_handle,
-                                stderr_reader: stderr_handle,
-                                exit_code: None,
-                            };
-                            
-                            // Store the managed process
-                            {
-                                let mut processes = processes.lock().unwrap();
-                                processes.insert(process_id, managed_process);
+                            // Record spawn event
                             }
                             
                             // Record spawn event
@@ -734,11 +836,19 @@ impl ProcessHost {
                 let processes = processes.clone();
                 
                 Box::new(async move {
-                    let mut processes = processes.lock().unwrap();
+                    // Get a clone of the child process to kill
+                    let child_opt = {
+                        let mut processes = processes.lock().unwrap();
+                        if let Some(process) = processes.get_mut(&pid) {
+                            process.child.take()
+                        } else {
+                            None
+                        }
+                    };
                     
-                    if let Some(process) = processes.get_mut(&pid) {
-                        if let Some(child) = &mut process.child {
-                            match child.kill().await {
+                    // Kill the process if we have a handle
+                    if let Some(mut child) = child_opt {
+                        match child.kill().await {
                                 Ok(_) => {
                                     // Record kill event
                                     ctx.data_mut().record_event(ChainEventData {
@@ -749,6 +859,14 @@ impl ProcessHost {
                                         timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                         description: Some(format!("Killed process {}", pid)),
                                     });
+                                    
+                                    // Update the process status to reflect it's been killed
+                                    {
+                                        let mut processes = processes.lock().unwrap();
+                                        if let Some(process) = processes.get_mut(&pid) {
+                                            process.exit_code = Some(-1); // Killed
+                                        }
+                                    }
                                     
                                     Ok((Ok(()),))
                                 },
@@ -808,32 +926,29 @@ impl ProcessHost {
         info!("Adding export functions for process handling");
 
         // Register the process handler export functions
-        let exports = actor_instance.exports.clone();
-        let actor_store = actor_instance.store.data_mut();
+        info!("Registering process handler export functions");
         
-        // Get the handle-stdout export
-        if let Some(handle_stdout) = exports.get_async_function("handle-stdout") {
-            info!("Registered handle-stdout export function");
-            actor_store.register_export("handle-stdout".to_string(), handle_stdout);
-        } else {
-            warn!("No handle-stdout export function found in actor");
-        }
-        
-        // Get the handle-stderr export
-        if let Some(handle_stderr) = exports.get_async_function("handle-stderr") {
-            info!("Registered handle-stderr export function");
-            actor_store.register_export("handle-stderr".to_string(), handle_stderr);
-        } else {
-            warn!("No handle-stderr export function found in actor");
-        }
-        
-        // Get the handle-exit export
-        if let Some(handle_exit) = exports.get_async_function("handle-exit") {
-            info!("Registered handle-exit export function");
-            actor_store.register_export("handle-exit".to_string(), handle_exit);
-        } else {
-            warn!("No handle-exit export function found in actor");
-        }
+        // Register the export functions
+        actor_instance
+            .register_function_no_result::<(u64, Vec<u8>)>(
+                "process",
+                "handle-stdout",
+            )
+            .expect("Failed to register handle-stdout function");
+            
+        actor_instance
+            .register_function_no_result::<(u64, Vec<u8>)>(
+                "process",
+                "handle-stderr",
+            )
+            .expect("Failed to register handle-stderr function");
+            
+        actor_instance
+            .register_function_no_result::<(u64, i32)>(
+                "process",
+                "handle-exit",
+            )
+            .expect("Failed to register handle-exit function");
 
         Ok(())
     }
@@ -874,10 +989,11 @@ impl ProcessHost {
                             // Send the output to the actor
                             let data = buffer[0..n].to_vec();
                             let _ = theater_tx
-                                .send(crate::messages::TheaterCommand::CallExport {
+                                .send(crate::messages::TheaterCommand::SendMessage {
                                     actor_id: actor_id.clone(),
-                                    export_name: if is_stdout { "handle-stdout" } else { "handle-stderr" },
-                                    args: (process_id, data),
+                                    actor_message: crate::messages::ActorMessage::Send(crate::messages::ActorSend {
+                                        data: serde_json::to_vec(&(if is_stdout { "handle-stdout" } else { "handle-stderr" }, process_id, data)).unwrap(),
+                                    }),
                                 })
                                 .await;
                         },
@@ -917,10 +1033,11 @@ impl ProcessHost {
                                     // Send the line to the actor
                                     let data = line.clone();
                                     let _ = theater_tx
-                                        .send(crate::messages::TheaterCommand::CallExport {
+                                        .send(crate::messages::TheaterCommand::SendMessage {
                                             actor_id: actor_id.clone(),
-                                            export_name: if is_stdout { "handle-stdout" } else { "handle-stderr" },
-                                            args: (process_id, data),
+                                            actor_message: crate::messages::ActorMessage::Send(crate::messages::ActorSend {
+                                                data: serde_json::to_vec(&(if is_stdout { "handle-stdout" } else { "handle-stderr" }, process_id, data)).unwrap(),
+                                            }),
                                         })
                                         .await;
                                     
@@ -948,10 +1065,11 @@ impl ProcessHost {
                                     // Send the partial line to the actor
                                     let data = line.clone();
                                     let _ = theater_tx
-                                        .send(crate::messages::TheaterCommand::CallExport {
+                                        .send(crate::messages::TheaterCommand::SendMessage {
                                             actor_id: actor_id.clone(),
-                                            export_name: if is_stdout { "handle-stdout" } else { "handle-stderr" },
-                                            args: (process_id, data),
+                                            actor_message: crate::messages::ActorMessage::Send(crate::messages::ActorSend {
+                                                data: serde_json::to_vec(&(if is_stdout { "handle-stdout" } else { "handle-stderr" }, process_id, data)).unwrap(),
+                                            }),
                                         })
                                         .await;
                                     
@@ -979,10 +1097,11 @@ impl ProcessHost {
                                 // Send the line to the actor
                                 let data = line.clone();
                                 let _ = theater_tx
-                                    .send(crate::messages::TheaterCommand::CallExport {
+                                    .send(crate::messages::TheaterCommand::SendMessage {
                                         actor_id: actor_id.clone(),
-                                        export_name: if is_stdout { "handle-stdout" } else { "handle-stderr" },
-                                        args: (process_id, data),
+                                        actor_message: crate::messages::ActorMessage::Send(crate::messages::ActorSend {
+                                            data: serde_json::to_vec(&(if is_stdout { "handle-stdout" } else { "handle-stderr" }, process_id, data)).unwrap(),
+                                        }),
                                     })
                                     .await;
                             }
@@ -1008,19 +1127,21 @@ impl ProcessHost {
                             
                             // Process complete JSON objects
                             while let Some(pos) = buffer.find('\n') {
-                                let line = buffer[0..pos].trim();
-                                buffer = buffer[pos+1..].to_string();
+                                let line = buffer[0..pos].trim().to_string();
+                                let remaining = buffer[pos+1..].to_string();
+                                buffer = remaining;
                                 
                                 if !line.is_empty() {
                                     // Validate JSON
-                                    if let Ok(_) = serde_json::from_str::<serde_json::Value>(line) {
+                                    if let Ok(_) = serde_json::from_str::<serde_json::Value>(&line) {
                                         // Valid JSON, send it
                                         let data = line.as_bytes().to_vec();
                                         let _ = theater_tx
-                                            .send(crate::messages::TheaterCommand::CallExport {
+                                            .send(crate::messages::TheaterCommand::SendMessage {
                                                 actor_id: actor_id.clone(),
-                                                export_name: if is_stdout { "handle-stdout" } else { "handle-stderr" },
-                                                args: (process_id, data),
+                                                actor_message: crate::messages::ActorMessage::Send(crate::messages::ActorSend {
+                                                    data: serde_json::to_vec(&(if is_stdout { "handle-stdout" } else { "handle-stderr" }, process_id, data)).unwrap(),
+                                                }),
                                             })
                                             .await;
                                     }
@@ -1032,10 +1153,11 @@ impl ProcessHost {
                                 // Buffer too large, flush it as raw data
                                 let data = buffer.as_bytes().to_vec();
                                 let _ = theater_tx
-                                    .send(crate::messages::TheaterCommand::CallExport {
+                                    .send(crate::messages::TheaterCommand::SendMessage {
                                         actor_id: actor_id.clone(),
-                                        export_name: if is_stdout { "handle-stdout" } else { "handle-stderr" },
-                                        args: (process_id, data),
+                                        actor_message: crate::messages::ActorMessage::Send(crate::messages::ActorSend {
+                                            data: serde_json::to_vec(&(if is_stdout { "handle-stdout" } else { "handle-stderr" }, process_id, data)).unwrap(),
+                                        }),
                                     })
                                     .await;
                                 
@@ -1047,10 +1169,11 @@ impl ProcessHost {
                             if !buffer.is_empty() {
                                 let data = buffer.as_bytes().to_vec();
                                 let _ = theater_tx
-                                    .send(crate::messages::TheaterCommand::CallExport {
+                                    .send(crate::messages::TheaterCommand::SendMessage {
                                         actor_id: actor_id.clone(),
-                                        export_name: if is_stdout { "handle-stdout" } else { "handle-stderr" },
-                                        args: (process_id, data),
+                                        actor_message: crate::messages::ActorMessage::Send(crate::messages::ActorSend {
+                                            data: serde_json::to_vec(&(if is_stdout { "handle-stdout" } else { "handle-stderr" }, process_id, data)).unwrap(),
+                                        }),
                                     })
                                     .await;
                             }
@@ -1087,10 +1210,11 @@ impl ProcessHost {
                             // Send the chunk to the actor
                             let data = buffer.clone();
                             let _ = theater_tx
-                                .send(crate::messages::TheaterCommand::CallExport {
+                                .send(crate::messages::TheaterCommand::SendMessage {
                                     actor_id: actor_id.clone(),
-                                    export_name: if is_stdout { "handle-stdout" } else { "handle-stderr" },
-                                    args: (process_id, data),
+                                    actor_message: crate::messages::ActorMessage::Send(crate::messages::ActorSend {
+                                        data: serde_json::to_vec(&(if is_stdout { "handle-stdout" } else { "handle-stderr" }, process_id, data)).unwrap(),
+                                    }),
                                 })
                                 .await;
                         },
@@ -1116,10 +1240,11 @@ impl ProcessHost {
                                     // Send the partial chunk to the actor
                                     let data = partial_buffer[0..n].to_vec();
                                     let _ = theater_tx
-                                        .send(crate::messages::TheaterCommand::CallExport {
+                                        .send(crate::messages::TheaterCommand::SendMessage {
                                             actor_id: actor_id.clone(),
-                                            export_name: if is_stdout { "handle-stdout" } else { "handle-stderr" },
-                                            args: (process_id, data),
+                                            actor_message: crate::messages::ActorMessage::Send(crate::messages::ActorSend {
+                                                data: serde_json::to_vec(&(if is_stdout { "handle-stdout" } else { "handle-stderr" }, process_id, data)).unwrap(),
+                                            }),
                                         })
                                         .await;
                                 }
