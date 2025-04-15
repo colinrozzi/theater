@@ -6,7 +6,7 @@ use crate::events::{ChainEventData, EventData};
 use crate::shutdown::ShutdownReceiver;
 use crate::wasm::{ActorComponent, ActorInstance};
 use anyhow::Result;
-use serde::{Deserialize, Serialize};
+// No serde imports needed here
 use std::collections::HashMap;
 use std::future::Future;
 use std::sync::{Arc, Mutex};
@@ -16,7 +16,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::process::{Child, Command};
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
-use tracing::{error, info, warn};
+use tracing::{error, info};
 
 /// Errors that can occur in the ProcessHost
 #[derive(Error, Debug)]
@@ -273,7 +273,7 @@ impl ProcessHost {
                     match reader.read(&mut buffer).await {
                         Ok(n) if n > 0 => {
                             // Create event data
-                            let event_data = if is_stdout {
+                            let _event_data = if is_stdout {
                                 EventData::Process(ProcessEventData::StdoutOutput {
                                     process_id,
                                     bytes: n,
@@ -511,13 +511,33 @@ impl ProcessHost {
         interface.func_wrap_async(
             "os-spawn",
             move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore>,
-                  (process_config_wit,)|  // Process configuration from WebAssembly
+                  (process_config_str,): (String,)|  // Process configuration from WebAssembly as JSON string
                   -> Box<dyn Future<Output = Result<(Result<u64, String>,)>> + Send> {
                 let processes = processes.clone();
                 let next_process_id = next_process_id.clone();
                 let config = config.clone();
                 
                 Box::new(async move {
+                    // Parse JSON string into serde_json::Value
+                    let process_config_wit = match serde_json::from_str::<serde_json::Value>(&process_config_str) {
+                        Ok(value) => value,
+                        Err(e) => {
+                            // Record error event
+                            ctx.data_mut().record_event(ChainEventData {
+                                event_type: "process/spawn".to_string(),
+                                data: EventData::Process(ProcessEventData::Error {
+                                    process_id: None,
+                                    operation: "spawn".to_string(),
+                                    message: format!("Invalid JSON configuration: {}", e),
+                                }),
+                                timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                                description: Some(format!("Failed to parse process configuration: {}", e)),
+                            });
+                            
+                            return Ok((Err(format!("Invalid JSON configuration: {}", e)),));
+                        }
+                    };
+                    
                     // Parse wit parameters into native types
                     let process_config = parse_process_config(process_config_wit);
                     
@@ -613,7 +633,7 @@ impl ProcessHost {
                     // Spawn the process
                     match command.spawn() {
                         Ok(mut child) => {
-                            let os_pid = child.id();
+                            let _os_pid = child.id(); // We capture this for debugging purposes
                             
                             let actor_id = ctx.data().id.clone();
                             let theater_tx = ctx.data().theater_tx.clone();
@@ -682,18 +702,20 @@ impl ProcessHost {
                                 None
                             };
                             
-                            // Capture the child for waiting
-                            let mut wait_child = child.clone();
-                            
                             // Create separate task for monitoring
                             let processes_clone = processes.clone();
                             let process_id_clone = process_id;
                             let actor_id_clone = actor_id.clone();
                             let theater_tx_clone = theater_tx.clone();
                             
+                            // Create a mutable copy of the child for waiting (we'll take ownership later)
+                            // But first store properties we need to keep in the ManagedProcess
+                            let os_pid = child.id();
+                            
                             // Spawn a task to wait for the process to exit
                             tokio::spawn(async move {
-                                if let Ok(status) = wait_child.wait().await {
+                                // Move ownership of the child into this task
+                                if let Ok(status) = child.wait().await {
                                     let exit_code = status.code().unwrap_or(-1);
                                     
                                     // Create the event data
@@ -722,10 +744,11 @@ impl ProcessHost {
                                 }
                             });
                             
-                            // Create the managed process
+                            // Create the managed process with the child's details but not the child itself
+                            // Since we'll move the child to the monitoring task
                             let managed_process = ManagedProcess {
                                 id: process_id,
-                                child: Some(child),
+                                child: None, // We'll move the actual child to the monitoring task
                                 os_pid: os_pid,
                                 config: process_config.clone(),
                                 start_time: SystemTime::now(),
