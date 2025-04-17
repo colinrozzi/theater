@@ -17,7 +17,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::process::{Child, Command};
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
-use tracing::{error, info};
+use tracing::{error, info, debug};
 
 /// Errors that can occur in the ProcessHost
 #[derive(Error, Debug)]
@@ -447,28 +447,6 @@ impl ProcessHost {
             .instance("ntwk:theater/process")
             .expect("Could not instantiate ntwk:theater/process");
 
-        interface.func_wrap(
-            "os-test-output-mode",
-            move |_ctx: wasmtime::StoreContextMut<'_, ActorStore>,
-                  (mode,): (OutputMode,)|
-                  -> Result<(Result<(), String>,)> {
-                info!("[ACTOR] [{}] os-test-output-mode: {:?}", _ctx.data().id, mode);
-                Ok((Ok(()),))
-            },
-        ).expect("Failed to wrap os-test-output-mode function");
-
-        interface.func_wrap(
-            "os-test-process-config",
-            move |_ctx: wasmtime::StoreContextMut<'_, ActorStore>,
-                  (config,): (ProcessConfig,)|
-                  -> Result<(Result<(), String>,)> {
-                // Just return the config as a string
-                let config_str = format!("{:?}", config);
-                info!("[ACTOR] [{}] os-test-process-config: {}", _ctx.data().id, config_str);
-                Ok((Ok(()),))
-            },
-        ).expect("Failed to wrap os-test-process-config function");
-
         // Implementation for os-spawn
         let processes = self.processes.clone();
         let next_process_id = self.next_process_id.clone();
@@ -590,7 +568,9 @@ impl ProcessHost {
                             
                             // Handle stdin writes in a separate task
                             let stdin_writer = tokio::spawn(async move {
+                                debug!("Starting stdin writer task for process {}", process_id);
                                 while let Some(data) = stdin_rx.recv().await {
+                                    debug!("Stdin writer received {} bytes for process {}", data.len(), process_id);
                                     if let Err(e) = stdin.write_all(&data).await {
                                         error!("Failed to write to process stdin: {}", e);
                                         break;
@@ -599,6 +579,7 @@ impl ProcessHost {
                                         error!("Failed to flush process stdin: {}", e);
                                         break;
                                     }
+                                    debug!("Stdin writer Wrote {} bytes to stdin of process {}", data.len(), process_id);
                                 }
                             });
                             
@@ -758,7 +739,8 @@ impl ProcessHost {
                   (pid, data): (u64, Vec<u8>)|
                   -> Box<dyn Future<Output = Result<(Result<u32, String>,)>> + Send> {
                 let processes = processes.clone();
-                
+                debug!("Writing to stdin of process {}", pid);
+
                 Box::new(async move {
                     let stdin_tx = {
                         // We need to drop the mutex guard before the async operation
@@ -766,11 +748,14 @@ impl ProcessHost {
                         
                         if let Some(process) = processes.get(&pid) {
                             if let Some(tx) = &process.stdin_tx {
+                                debug!("Found stdin channel for process {}", pid);
                                 Some(tx.clone())
                             } else {
+                                debug!("No stdin channel for process {}", pid);
                                 None
                             }
                         } else {
+                            debug!("Process {} not found", pid);
                             None
                         }
                     };
@@ -780,6 +765,7 @@ impl ProcessHost {
                         let bytes_written = data.len() as u32;
                         match stdin_tx.send(data).await {
                             Ok(_) => {
+                                debug!("Wrote {} bytes to stdin of process {}", bytes_written, pid);
                                 // Record stdin write event
                                 ctx.data_mut().record_event(ChainEventData {
                                     event_type: "process/write-stdin".to_string(),
@@ -794,6 +780,7 @@ impl ProcessHost {
                                 Ok((Ok(bytes_written),))
                             },
                             Err(e) => {
+                                error!("Failed to write to stdin of process {}: {}", pid, e);
                                 // Record error event
                                 ctx.data_mut().record_event(ChainEventData {
                                     event_type: "process/write-stdin".to_string(),
@@ -810,6 +797,7 @@ impl ProcessHost {
                             }
                         }
                     } else {
+                        error!("Process {} not found or stdin not available", pid);
                         // Process not found or stdin not available
                         ctx.data_mut().record_event(ChainEventData {
                             event_type: "process/write-stdin".to_string(),
