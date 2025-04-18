@@ -14,12 +14,14 @@ use thiserror::Error;
 use tokio::sync::mpsc::{Receiver, Sender};
 use tracing::{debug, error, info, warn};
 use wasmtime::component::{ComponentType, Lift, Lower};
+use uuid::Uuid;
 
 pub struct MessageServerHost {
     mailbox_tx: Sender<ActorMessage>,
     mailbox_rx: Receiver<ActorMessage>,
     theater_tx: Sender<TheaterCommand>,
     active_channels: HashMap<ChannelId, ChannelState>,
+    outstanding_requests: HashMap<String, tokio::sync::oneshot::Sender<Vec<u8>>>,
 }
 
 #[derive(Clone)]
@@ -53,6 +55,7 @@ impl MessageServerHost {
             mailbox_rx,
             theater_tx,
             active_channels: HashMap::new(),
+            outstanding_requests: HashMap::new(),
         }
     }
 
@@ -557,7 +560,7 @@ impl MessageServerHost {
             )
             .expect("Failed to register handle-send function");
         actor_instance
-            .register_function::<(Vec<u8>,), (Vec<u8>,)>(
+            .register_function::<(Vec<u8>,), (String, Option<Vec<u8>>)>(
                 "ntwk:theater/message-server-client",
                 "handle-request",
             )
@@ -628,15 +631,20 @@ impl MessageServerHost {
                     .await?;
             }
             ActorMessage::Request(ActorRequest { response_tx, data }) => {
-                info!("Got request: {:?}", data);
+                let request_id = Uuid::new_v4().to_string();
+                info!("Got request: id={}, data size={}", request_id, data.len());
                 let response = actor_handle
-                    .call_function::<(Vec<u8>,), (Vec<u8>,)>(
+                    .call_function::<(String, Vec<u8>), (Option<Vec<u8>>,)>(
                         "ntwk:theater/message-server-client.handle-request".to_string(),
-                        (data,),
+                        (request_id.clone(), data),
                     )
                     .await?;
-                info!("Got response: {:?}", response);
-                let _ = response_tx.send(response.0);
+                info!("Got request response: id={}, data size={}", request_id, response.0.as_ref().map_or(0, |v| v.len()));
+                if response.0.is_some() {
+                    let _ = response_tx.send(response.0.unwrap());
+                } else {
+                    self.outstanding_requests.insert(request_id, response_tx);
+                }
             }
             ActorMessage::ChannelOpen(ActorChannelOpen { channel_id, response_tx, data }) => {
                 info!("Got channel open request: channel={:?}, data size={}", channel_id, data.len());
