@@ -97,30 +97,31 @@ interface message-server-client {
     ///
     /// * `state` - The current actor state or None if not initialized
     /// * `params` - Tuple containing:
+    ///   * `string` - The request ID
     ///   * `json` - The request payload
     ///
     /// ## Returns
     ///
-    /// * `Ok((option<json>, (json,)))` - Tuple containing:
-    ///   * Updated actor state (or None to retain current state)
-    ///   * Response message to send back
+    /// * `Ok((option<json>, (option<json>,)))` - Tuple containing:
+    ///   * Updated actor state (or None)
+    ///   * Response message to send back (or None to send a response yet)
     /// * `Err(string)` - Error message if request handling fails
     ///
     /// ## Example
     ///
     /// ```rust
-    /// fn handle_request(state: Option<Value>, params: (Value,)) 
-    ///         -> Result<(Option<Value>, (Value,)), String> {
-    ///     let (request,) = params;
+    /// fn handle_request(state: Option<Vec<u8>>, params: (String, Vec<u8>)) 
+    ///         -> Result<(Option<Vec<u8>>, (Option<Vec<u8>>,)), String> {
+    ///     let (request_id, request) = params;
     ///     
     ///     // Process the request...
     ///     let response = json!({"status": "success", "data": "result"});
     ///     
     ///     // Return updated state and response
-    ///     Ok((Some(updated_state), (response,)))
+    ///     Ok((Some(updated_state), (Some(response),)))
     /// }
     /// ```
-    handle-request: func(state: option<json>, params: tuple<json>) -> result<tuple<option<json>, tuple<json>>, string>;
+    handle-request: func(state: option<json>, params: tuple<string, json>) -> result<tuple<option<json>, tuple<option<json>>>, string>;
     
     /// # Handle channel open request
     ///
@@ -475,4 +476,97 @@ interface message-server-host {
     /// Closing a channel is a final operation - once closed, a channel cannot be reopened.
     /// Both participants receive a notification when a channel is closed.
     close-channel: func(channel-id: channel-id) -> result<_, string>;
+    
+    /// # List outstanding requests
+    ///
+    /// Retrieves a list of all pending request IDs that haven't been responded to yet.
+    ///
+    /// ## Returns
+    ///
+    /// * `list<string>` - List of outstanding request IDs
+    ///
+    /// ## Example
+    ///
+    /// ```rust
+    /// use ntwk::theater::message_server_host;
+    ///
+    /// // Get all pending requests
+    /// let pending_requests = message_server_host::list_outstanding_requests();
+    /// for request_id in pending_requests {
+    ///     println!("Pending request: {}", request_id);
+    /// }
+    /// ```
+    ///
+    /// ## Implementation Notes
+    ///
+    /// This function is useful for actors that need to track and manage asynchronous
+    /// request processing. It allows actors to check for pending requests and decide
+    /// which ones to process next.
+    list-outstanding-requests: func() -> list<string>;
+    
+    /// # Respond to a specific request
+    ///
+    /// Sends a response to a previously received request identified by its ID.
+    ///
+    /// ## Parameters
+    ///
+    /// * `request-id` - ID of the request to respond to
+    /// * `response` - JSON response payload to send
+    ///
+    /// ## Returns
+    ///
+    /// * `Ok(_)` - Response was successfully sent
+    /// * `Err(string)` - Error message if response fails
+    ///
+    /// ## Example
+    ///
+    /// ```rust
+    /// use ntwk::theater::message_server_host;
+    /// use serde_json::json;
+    ///
+    /// // Respond to a specific request
+    /// let response = json!({
+    ///     "status": "success",
+    ///     "data": {
+    ///         "result": 42
+    ///     }
+    /// });
+    /// message_server_host::respond_to_request("req-123", response)?;
+    /// ```
+    ///
+    /// ## Implementation Notes
+    ///
+    /// This function allows actors to implement asynchronous request handling patterns,
+    /// where requests are received, processed in the background, and responded to later.
+    /// If the request ID is not found, an error is returned.
+    respond-to-request: func(request-id: string, response: json) -> result<_, string>;
+    
+    /// # Cancel a pending request
+    ///
+    /// Explicitly cancels a pending request without sending a response.
+    ///
+    /// ## Parameters
+    ///
+    /// * `request-id` - ID of the request to cancel
+    ///
+    /// ## Returns
+    ///
+    /// * `Ok(_)` - Request was successfully canceled
+    /// * `Err(string)` - Error message if cancellation fails
+    ///
+    /// ## Example
+    ///
+    /// ```rust
+    /// use ntwk::theater::message_server_host;
+    ///
+    /// // Cancel a request that can't be fulfilled
+    /// message_server_host::cancel_request("req-123")?;
+    /// ```
+    ///
+    /// ## Implementation Notes
+    ///
+    /// Canceling a request causes the requester to receive an error indicating that
+    /// the request was canceled. This is useful for cleanup operations and handling
+    /// error cases where a proper response cannot be generated.
+    cancel-request: func(request-id: string) -> result<_, string>;
 }

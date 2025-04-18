@@ -2,6 +2,7 @@ use crate::actor::types::ActorError;
 use crate::actor::handle::ActorHandle;
 use crate::actor::store::ActorStore;
 use crate::events::{ChainEventData, EventData, message::MessageEventData};
+use std::sync::{Arc, Mutex};
 use crate::messages::{ActorMessage, ActorRequest, ActorSend, TheaterCommand, ActorChannelOpen, ActorChannelMessage, ActorChannelClose, ChannelId, ChannelParticipant, ActorChannelInitiated};
 use crate::shutdown::ShutdownReceiver;
 use crate::wasm::{ActorComponent, ActorInstance};
@@ -14,12 +15,14 @@ use thiserror::Error;
 use tokio::sync::mpsc::{Receiver, Sender};
 use tracing::{debug, error, info, warn};
 use wasmtime::component::{ComponentType, Lift, Lower};
+use uuid::Uuid;
 
 pub struct MessageServerHost {
     mailbox_tx: Sender<ActorMessage>,
     mailbox_rx: Receiver<ActorMessage>,
     theater_tx: Sender<TheaterCommand>,
     active_channels: HashMap<ChannelId, ChannelState>,
+    outstanding_requests: Arc<Mutex<HashMap<String, tokio::sync::oneshot::Sender<Vec<u8>>>>>,
 }
 
 #[derive(Clone)]
@@ -53,6 +56,7 @@ impl MessageServerHost {
             mailbox_rx,
             theater_tx,
             active_channels: HashMap::new(),
+            outstanding_requests: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -109,6 +113,8 @@ impl MessageServerHost {
                     };
                     let theater_tx = theater_tx.clone();
                     let address_clone = address.clone();
+                    
+                    // This line causes an error, there's no outstanding_requests in this scope
                     
                     Box::new(async move {
                         match theater_tx.send(actor_message).await {
@@ -249,6 +255,183 @@ impl MessageServerHost {
                 },
             )
             .expect("Failed to wrap async request function");
+
+        // Use a thread-safe reference to the outstanding_requests field
+        let outstanding_requests = self.outstanding_requests.clone();
+        
+        interface
+            .func_wrap_async(
+                "list-outstanding-requests",
+                move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore>, _: ()|
+                      -> Box<dyn Future<Output = Result<(Vec<String>,)>> + Send> {
+                    
+                    // Record the list-outstanding-requests event
+                    ctx.data_mut().record_event(ChainEventData {
+                        event_type: "ntwk:theater/message-server-host/list-outstanding-requests".to_string(),
+                        data: EventData::Message(MessageEventData::ListOutstandingRequestsCall {}),
+                        timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                        description: Some("Listing outstanding requests".to_string()),
+                    });
+                    
+                    let outstanding_clone = outstanding_requests.clone();
+                    Box::new(async move {
+                        // Get the keys from the outstanding_requests map with proper locking
+                        let requests = outstanding_clone.lock().unwrap();
+                        let ids: Vec<String> = requests.keys().cloned().collect();
+                        
+                        // Record the list-outstanding-requests result
+                        ctx.data_mut().record_event(ChainEventData {
+                            event_type: "ntwk:theater/message-server-host/list-outstanding-requests".to_string(),
+                            data: EventData::Message(MessageEventData::ListOutstandingRequestsResult {
+                                request_count: ids.len(),
+                                request_ids: ids.clone(),
+                            }),
+                            timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                            description: Some(format!("Found {} outstanding requests", ids.len())),
+                        });
+                        
+                        Ok((ids,))
+                    })
+                },
+            )
+            .expect("Failed to wrap async list-outstanding-requests function");
+
+        // Use a thread-safe reference to the outstanding_requests field
+        let outstanding_requests = self.outstanding_requests.clone();
+        
+        interface
+            .func_wrap_async(
+                "respond-to-request",
+                move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore>,
+                      (request_id, response_data): (String, Vec<u8>)|
+                      -> Box<dyn Future<Output = Result<(Result<(), String>,)>> + Send> {
+                    
+                    let request_id_clone = request_id.clone();
+                    
+                    // Record the respond-to-request event
+                    ctx.data_mut().record_event(ChainEventData {
+                        event_type: "ntwk:theater/message-server-host/respond-to-request".to_string(),
+                        data: EventData::Message(MessageEventData::RespondToRequestCall {
+                            request_id: request_id.clone(),
+                            response_size: response_data.len(),
+                        }),
+                        timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                        description: Some(format!("Responding to request {}", request_id)),
+                    });
+                    
+                    let outstanding_clone = outstanding_requests.clone();
+                    Box::new(async move {
+                        // Use mutable access to remove the request with proper locking
+                        let mut requests = outstanding_clone.lock().unwrap();
+                        if let Some(sender) = requests.remove(&request_id) {
+                            match sender.send(response_data) {
+                                Ok(_) => {
+                                    // Record successful response
+                                    ctx.data_mut().record_event(ChainEventData {
+                                        event_type: "ntwk:theater/message-server-host/respond-to-request".to_string(),
+                                        data: EventData::Message(MessageEventData::RespondToRequestResult {
+                                            request_id: request_id_clone.clone(),
+                                            success: true,
+                                        }),
+                                        timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                                        description: Some(format!("Successfully responded to request {}", request_id_clone)),
+                                    });
+                                    Ok((Ok(()),))
+                                },
+                                Err(e) => {
+                                    let err_msg = format!("Failed to send response: {:?}", e);
+                                    ctx.data_mut().record_event(ChainEventData {
+                                        event_type: "ntwk:theater/message-server-host/respond-to-request".to_string(),
+                                        data: EventData::Message(MessageEventData::Error {
+                                            operation: "respond-to-request".to_string(),
+                                            recipient: None,
+                                            message: err_msg.clone(),
+                                        }),
+                                        timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                                        description: Some(format!("Error responding to request {}: {}", request_id_clone, err_msg)),
+                                    });
+                                    Ok((Err(err_msg),))
+                                }
+                            }
+                        } else {
+                            let err_msg = format!("Request ID not found: {}", request_id);
+                            ctx.data_mut().record_event(ChainEventData {
+                                event_type: "ntwk:theater/message-server-host/respond-to-request".to_string(),
+                                data: EventData::Message(MessageEventData::Error {
+                                    operation: "respond-to-request".to_string(),
+                                    recipient: None,
+                                    message: err_msg.clone(),
+                                }),
+                                timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                                description: Some(format!("Error responding to request {}: {}", request_id_clone, err_msg)),
+                            });
+                            Ok((Err(err_msg),))
+                        }
+                    })
+                },
+            )
+            .expect("Failed to wrap async respond-to-request function");
+
+        // Use a thread-safe reference to the outstanding_requests field
+        let outstanding_requests = self.outstanding_requests.clone();
+        
+        interface
+            .func_wrap_async(
+                "cancel-request",
+                move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore>,
+                      (request_id,): (String,)|
+                      -> Box<dyn Future<Output = Result<(Result<(), String>,)>> + Send> {
+                    
+                    let request_id_clone = request_id.clone();
+                    
+                    // Record the cancel-request event
+                    ctx.data_mut().record_event(ChainEventData {
+                        event_type: "ntwk:theater/message-server-host/cancel-request".to_string(),
+                        data: EventData::Message(MessageEventData::CancelRequestCall {
+                            request_id: request_id.clone(),
+                        }),
+                        timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                        description: Some(format!("Canceling request {}", request_id)),
+                    });
+                    
+                    let outstanding_clone = outstanding_requests.clone();
+                    Box::new(async move {
+                        // Use mutable access to remove the request with proper locking
+                        let mut requests = outstanding_clone.lock().unwrap();
+                        if let Some(sender) = requests.remove(&request_id) {
+                            // Don't send a response, just drop the sender
+                            // This will cause the requester to receive an error
+                            drop(sender);
+                            
+                            // Record successful cancellation
+                            ctx.data_mut().record_event(ChainEventData {
+                                event_type: "ntwk:theater/message-server-host/cancel-request".to_string(),
+                                data: EventData::Message(MessageEventData::CancelRequestResult {
+                                    request_id: request_id_clone.clone(),
+                                    success: true,
+                                }),
+                                timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                                description: Some(format!("Successfully canceled request {}", request_id_clone)),
+                            });
+                            Ok((Ok(()),))
+                        } else {
+                            let err_msg = format!("Request ID not found: {}", request_id);
+                            ctx.data_mut().record_event(ChainEventData {
+                                event_type: "ntwk:theater/message-server-host/cancel-request".to_string(),
+                                data: EventData::Message(MessageEventData::Error {
+                                    operation: "cancel-request".to_string(),
+                                    recipient: None,
+                                    message: err_msg.clone(),
+                                }),
+                                timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                                description: Some(format!("Error canceling request {}: {}", request_id_clone, err_msg)),
+                            });
+                            Ok((Err(err_msg),))
+                        }
+                    })
+                },
+            )
+            .expect("Failed to wrap async cancel-request function");
 
         let theater_tx = self.theater_tx.clone();
         let mailbox_tx = self.mailbox_tx.clone();
@@ -557,7 +740,7 @@ impl MessageServerHost {
             )
             .expect("Failed to register handle-send function");
         actor_instance
-            .register_function::<(Vec<u8>,), (Vec<u8>,)>(
+            .register_function::<(String, Vec<u8>), (Option<Vec<u8>>,)>(
                 "ntwk:theater/message-server-client",
                 "handle-request",
             )
@@ -628,15 +811,20 @@ impl MessageServerHost {
                     .await?;
             }
             ActorMessage::Request(ActorRequest { response_tx, data }) => {
-                info!("Got request: {:?}", data);
+                let request_id = Uuid::new_v4().to_string();
+                info!("Got request: id={}, data size={}", request_id, data.len());
                 let response = actor_handle
-                    .call_function::<(Vec<u8>,), (Vec<u8>,)>(
+                    .call_function::<(String, Vec<u8>), (Option<Vec<u8>>,)>(
                         "ntwk:theater/message-server-client.handle-request".to_string(),
-                        (data,),
+                        (request_id.clone(), data),
                     )
                     .await?;
-                info!("Got response: {:?}", response);
-                let _ = response_tx.send(response.0);
+                info!("Got request response: id={}, data size={}", request_id, response.0.as_ref().map_or(0, |v| v.len()));
+                if response.0.is_some() {
+                    let _ = response_tx.send(response.0.unwrap());
+                } else {
+                    self.outstanding_requests.lock().unwrap().insert(request_id, response_tx);
+                }
             }
             ActorMessage::ChannelOpen(ActorChannelOpen { channel_id, response_tx, data }) => {
                 info!("Got channel open request: channel={:?}, data size={}", channel_id, data.len());

@@ -102,6 +102,28 @@ pub enum MessageEventData {
         success: bool,
     },
 
+    // Request management events
+    ListOutstandingRequestsCall {},
+    ListOutstandingRequestsResult {
+        request_count: usize,
+        request_ids: Vec<String>,
+    },
+    RespondToRequestCall {
+        request_id: String,
+        response_size: usize,
+    },
+    RespondToRequestResult {
+        request_id: String,
+        success: bool,
+    },
+    CancelRequestCall {
+        request_id: String,
+    },
+    CancelRequestResult {
+        request_id: String,
+        success: bool,
+    },
+
     // Error events
     Error {
         operation: String,
