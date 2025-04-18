@@ -2,6 +2,7 @@ use crate::actor::types::ActorError;
 use crate::actor::handle::ActorHandle;
 use crate::actor::store::ActorStore;
 use crate::events::{ChainEventData, EventData, message::MessageEventData};
+use std::sync::{Arc, Mutex};
 use crate::messages::{ActorMessage, ActorRequest, ActorSend, TheaterCommand, ActorChannelOpen, ActorChannelMessage, ActorChannelClose, ChannelId, ChannelParticipant, ActorChannelInitiated};
 use crate::shutdown::ShutdownReceiver;
 use crate::wasm::{ActorComponent, ActorInstance};
@@ -21,7 +22,7 @@ pub struct MessageServerHost {
     mailbox_rx: Receiver<ActorMessage>,
     theater_tx: Sender<TheaterCommand>,
     active_channels: HashMap<ChannelId, ChannelState>,
-    outstanding_requests: HashMap<String, tokio::sync::oneshot::Sender<Vec<u8>>>,
+    outstanding_requests: Arc<Mutex<HashMap<String, tokio::sync::oneshot::Sender<Vec<u8>>>>>,
 }
 
 #[derive(Clone)]
@@ -55,7 +56,7 @@ impl MessageServerHost {
             mailbox_rx,
             theater_tx,
             active_channels: HashMap::new(),
-            outstanding_requests: HashMap::new(),
+            outstanding_requests: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -112,6 +113,8 @@ impl MessageServerHost {
                     };
                     let theater_tx = theater_tx.clone();
                     let address_clone = address.clone();
+                    
+                    // This line causes an error, there's no outstanding_requests in this scope
                     
                     Box::new(async move {
                         match theater_tx.send(actor_message).await {
@@ -253,15 +256,14 @@ impl MessageServerHost {
             )
             .expect("Failed to wrap async request function");
 
-        // Add list-outstanding-requests function
-        let outstanding_requests = Arc::new(Mutex::new(self.outstanding_requests.clone()));
+        // Use a thread-safe reference to the outstanding_requests field
+        let outstanding_requests = self.outstanding_requests.clone();
         
         interface
             .func_wrap_async(
                 "list-outstanding-requests",
-                move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore>|
+                move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore>, _: ()|
                       -> Box<dyn Future<Output = Result<(Vec<String>,)>> + Send> {
-                    let outstanding_requests = outstanding_requests.clone();
                     
                     // Record the list-outstanding-requests event
                     ctx.data_mut().record_event(ChainEventData {
@@ -271,8 +273,10 @@ impl MessageServerHost {
                         description: Some("Listing outstanding requests".to_string()),
                     });
                     
+                    let outstanding_clone = outstanding_requests.clone();
                     Box::new(async move {
-                        let requests = outstanding_requests.lock().await;
+                        // Get the keys from the outstanding_requests map with proper locking
+                        let requests = outstanding_clone.lock().unwrap();
                         let ids: Vec<String> = requests.keys().cloned().collect();
                         
                         // Record the list-outstanding-requests result
@@ -292,8 +296,8 @@ impl MessageServerHost {
             )
             .expect("Failed to wrap async list-outstanding-requests function");
 
-        // Add respond-to-request function
-        let outstanding_requests = Arc::new(Mutex::new(self.outstanding_requests.clone()));
+        // Use a thread-safe reference to the outstanding_requests field
+        let outstanding_requests = self.outstanding_requests.clone();
         
         interface
             .func_wrap_async(
@@ -301,7 +305,7 @@ impl MessageServerHost {
                 move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore>,
                       (request_id, response_data): (String, Vec<u8>)|
                       -> Box<dyn Future<Output = Result<(Result<(), String>,)>> + Send> {
-                    let outstanding_requests = outstanding_requests.clone();
+                    
                     let request_id_clone = request_id.clone();
                     
                     // Record the respond-to-request event
@@ -315,9 +319,10 @@ impl MessageServerHost {
                         description: Some(format!("Responding to request {}", request_id)),
                     });
                     
+                    let outstanding_clone = outstanding_requests.clone();
                     Box::new(async move {
-                        let mut requests = outstanding_requests.lock().await;
-                        
+                        // Use mutable access to remove the request with proper locking
+                        let mut requests = outstanding_clone.lock().unwrap();
                         if let Some(sender) = requests.remove(&request_id) {
                             match sender.send(response_data) {
                                 Ok(_) => {
@@ -334,7 +339,7 @@ impl MessageServerHost {
                                     Ok((Ok(()),))
                                 },
                                 Err(e) => {
-                                    let err_msg = format!("Failed to send response: {}", e);
+                                    let err_msg = format!("Failed to send response: {:?}", e);
                                     ctx.data_mut().record_event(ChainEventData {
                                         event_type: "ntwk:theater/message-server-host/respond-to-request".to_string(),
                                         data: EventData::Message(MessageEventData::Error {
@@ -367,8 +372,8 @@ impl MessageServerHost {
             )
             .expect("Failed to wrap async respond-to-request function");
 
-        // Add cancel-request function
-        let outstanding_requests = Arc::new(Mutex::new(self.outstanding_requests.clone()));
+        // Use a thread-safe reference to the outstanding_requests field
+        let outstanding_requests = self.outstanding_requests.clone();
         
         interface
             .func_wrap_async(
@@ -376,7 +381,7 @@ impl MessageServerHost {
                 move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore>,
                       (request_id,): (String,)|
                       -> Box<dyn Future<Output = Result<(Result<(), String>,)>> + Send> {
-                    let outstanding_requests = outstanding_requests.clone();
+                    
                     let request_id_clone = request_id.clone();
                     
                     // Record the cancel-request event
@@ -389,9 +394,10 @@ impl MessageServerHost {
                         description: Some(format!("Canceling request {}", request_id)),
                     });
                     
+                    let outstanding_clone = outstanding_requests.clone();
                     Box::new(async move {
-                        let mut requests = outstanding_requests.lock().await;
-                        
+                        // Use mutable access to remove the request with proper locking
+                        let mut requests = outstanding_clone.lock().unwrap();
                         if let Some(sender) = requests.remove(&request_id) {
                             // Don't send a response, just drop the sender
                             // This will cause the requester to receive an error
@@ -734,7 +740,7 @@ impl MessageServerHost {
             )
             .expect("Failed to register handle-send function");
         actor_instance
-            .register_function::<(Vec<u8>,), (String, Option<Vec<u8>>)>(
+            .register_function::<(String, Vec<u8>), (Option<Vec<u8>>,)>(
                 "ntwk:theater/message-server-client",
                 "handle-request",
             )
@@ -817,7 +823,7 @@ impl MessageServerHost {
                 if response.0.is_some() {
                     let _ = response_tx.send(response.0.unwrap());
                 } else {
-                    self.outstanding_requests.insert(request_id, response_tx);
+                    self.outstanding_requests.lock().unwrap().insert(request_id, response_tx);
                 }
             }
             ActorMessage::ChannelOpen(ActorChannelOpen { channel_id, response_tx, data }) => {
