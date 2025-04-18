@@ -204,7 +204,8 @@ impl ProcessHost {
         process_id: u64,
         actor_id: crate::id::TheaterId,
         theater_tx: tokio::sync::mpsc::Sender<crate::messages::TheaterCommand>,
-        is_stdout: bool,
+        actor_handle: ActorHandle,
+        handler: String,
     ) where
         R: AsyncReadExt + Unpin + Send + 'static,
     {
@@ -215,29 +216,12 @@ impl ProcessHost {
                 loop {
                     match reader.read(&mut buffer).await {
                         Ok(n) if n > 0 => {
-                            // Create event data
-                            let _event_data = if is_stdout {
-                                EventData::Process(ProcessEventData::StdoutOutput {
-                                    process_id,
-                                    bytes: n,
-                                })
-                            } else {
-                                EventData::Process(ProcessEventData::StderrOutput {
-                                    process_id,
-                                    bytes: n,
-                                })
-                            };
-                            
                             // Send the output to the actor
                             let data = buffer[0..n].to_vec();
-                            let _ = theater_tx
-                                .send(crate::messages::TheaterCommand::SendMessage {
-                                    actor_id: actor_id.clone(),
-                                    actor_message: crate::messages::ActorMessage::Send(crate::messages::ActorSend {
-                                        data: serde_json::to_vec(&(if is_stdout { "handle-stdout" } else { "handle-stderr" }, process_id, data)).unwrap(),
-                                    }),
-                                })
-                                .await;
+                            actor_handle.call_function::<(u64, Vec<u8>), ()>(
+                                handler.clone(),
+                                (process_id, data),
+                            ).await.expect("Failed to send chunk to actor");
                         },
                         Ok(_) => break, // EOF
                         Err(e) => {
@@ -260,14 +244,10 @@ impl ProcessHost {
                                 if !line.is_empty() {
                                     // Send the line to the actor
                                     let data = line.clone();
-                                    let _ = theater_tx
-                                        .send(crate::messages::TheaterCommand::SendMessage {
-                                            actor_id: actor_id.clone(),
-                                            actor_message: crate::messages::ActorMessage::Send(crate::messages::ActorSend {
-                                                data: serde_json::to_vec(&(if is_stdout { "handle-stdout" } else { "handle-stderr" }, process_id, data)).unwrap(),
-                                            }),
-                                        })
-                                        .await;
+                                    actor_handle.call_function::<(u64, Vec<u8>), ()>(
+                                        handler.clone(),
+                                        (process_id, data),
+                                    ).await.expect("Failed to send chunk to actor");
                                     
                                     line.clear();
                                 }
@@ -278,14 +258,10 @@ impl ProcessHost {
                                 if line.len() >= buffer_size {
                                     // Send the partial line to the actor
                                     let data = line.clone();
-                                    let _ = theater_tx
-                                        .send(crate::messages::TheaterCommand::SendMessage {
-                                            actor_id: actor_id.clone(),
-                                            actor_message: crate::messages::ActorMessage::Send(crate::messages::ActorSend {
-                                                data: serde_json::to_vec(&(if is_stdout { "handle-stdout" } else { "handle-stderr" }, process_id, data)).unwrap(),
-                                            }),
-                                        })
-                                        .await;
+                                    actor_handle.call_function::<(u64, Vec<u8>), ()>(
+                                        handler.clone(),
+                                        (process_id, data),
+                                    ).await.expect("Failed to send chunk to actor");
                                     
                                     line.clear();
                                 }
@@ -296,14 +272,10 @@ impl ProcessHost {
                             if !line.is_empty() {
                                 // Send the line to the actor
                                 let data = line.clone();
-                                let _ = theater_tx
-                                    .send(crate::messages::TheaterCommand::SendMessage {
-                                        actor_id: actor_id.clone(),
-                                        actor_message: crate::messages::ActorMessage::Send(crate::messages::ActorSend {
-                                            data: serde_json::to_vec(&(if is_stdout { "handle-stdout" } else { "handle-stderr" }, process_id, data)).unwrap(),
-                                        }),
-                                    })
-                                    .await;
+                                actor_handle.call_function::<(u64, Vec<u8>), ()>(
+                                    handler.clone(),
+                                    (process_id, data),
+                                ).await.expect("Failed to send chunk to actor");
                             }
                             break;
                         },
@@ -336,14 +308,10 @@ impl ProcessHost {
                                     if let Ok(_) = serde_json::from_str::<serde_json::Value>(&line) {
                                         // Valid JSON, send it
                                         let data = line.as_bytes().to_vec();
-                                        let _ = theater_tx
-                                            .send(crate::messages::TheaterCommand::SendMessage {
-                                                actor_id: actor_id.clone(),
-                                                actor_message: crate::messages::ActorMessage::Send(crate::messages::ActorSend {
-                                                    data: serde_json::to_vec(&(if is_stdout { "handle-stdout" } else { "handle-stderr" }, process_id, data)).unwrap(),
-                                                }),
-                                            })
-                                            .await;
+                                        actor_handle.call_function::<(u64, Vec<u8>), ()>(
+                                            handler.clone(),
+                                            (process_id, data),
+                                        ).await.expect("Failed to send chunk to actor");
                                     }
                                 }
                             }
@@ -352,14 +320,10 @@ impl ProcessHost {
                             if buffer.len() > buffer_size {
                                 // Buffer too large, flush it as raw data
                                 let data = buffer.as_bytes().to_vec();
-                                let _ = theater_tx
-                                    .send(crate::messages::TheaterCommand::SendMessage {
-                                        actor_id: actor_id.clone(),
-                                        actor_message: crate::messages::ActorMessage::Send(crate::messages::ActorSend {
-                                            data: serde_json::to_vec(&(if is_stdout { "handle-stdout" } else { "handle-stderr" }, process_id, data)).unwrap(),
-                                        }),
-                                    })
-                                    .await;
+                                actor_handle.call_function::<(u64, Vec<u8>), ()>(
+                                    handler.clone(),
+                                    (process_id, data),
+                                ).await.expect("Failed to send chunk to actor");
                                 
                                 buffer.clear();
                             }
@@ -368,14 +332,10 @@ impl ProcessHost {
                             // EOF - send any remaining data
                             if !buffer.is_empty() {
                                 let data = buffer.as_bytes().to_vec();
-                                let _ = theater_tx
-                                    .send(crate::messages::TheaterCommand::SendMessage {
-                                        actor_id: actor_id.clone(),
-                                        actor_message: crate::messages::ActorMessage::Send(crate::messages::ActorSend {
-                                            data: serde_json::to_vec(&(if is_stdout { "handle-stdout" } else { "handle-stderr" }, process_id, data)).unwrap(),
-                                        }),
-                                    })
-                                    .await;
+                                actor_handle.call_function::<(u64, Vec<u8>), ()>(
+                                    handler.clone(),
+                                    (process_id, data),
+                                ).await.expect("Failed to send chunk to actor");
                             }
                             break;
                         },
@@ -400,14 +360,10 @@ impl ProcessHost {
                         Ok(_) => {
                             // Send the chunk to the actor
                             let data = buffer.clone();
-                            let _ = theater_tx
-                                .send(crate::messages::TheaterCommand::SendMessage {
-                                    actor_id: actor_id.clone(),
-                                    actor_message: crate::messages::ActorMessage::Send(crate::messages::ActorSend {
-                                        data: serde_json::to_vec(&(if is_stdout { "handle-stdout" } else { "handle-stderr" }, process_id, data)).unwrap(),
-                                    }),
-                                })
-                                .await;
+                            actor_handle.call_function::<(u64, Vec<u8>), ()>(
+                                handler.clone(),
+                                (process_id, data),
+                            ).await.expect("Failed to send chunk to actor");
                         },
                         Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => {
                             // Partial chunk - read what's available
@@ -416,14 +372,10 @@ impl ProcessHost {
                                 if n > 0 {
                                     // Send the partial chunk to the actor
                                     let data = partial_buffer[0..n].to_vec();
-                                    let _ = theater_tx
-                                        .send(crate::messages::TheaterCommand::SendMessage {
-                                            actor_id: actor_id.clone(),
-                                            actor_message: crate::messages::ActorMessage::Send(crate::messages::ActorSend {
-                                                data: serde_json::to_vec(&(if is_stdout { "handle-stdout" } else { "handle-stderr" }, process_id, data)).unwrap(),
-                                            }),
-                                        })
-                                        .await;
+                                    actor_handle.call_function::<(u64, Vec<u8>), ()>(
+                                        handler.clone(),
+                                        (process_id, data),
+                                    ).await.expect("Failed to send chunk to actor");
                                 }
                             }
                             break;
@@ -451,6 +403,7 @@ impl ProcessHost {
         let processes = self.processes.clone();
         let next_process_id = self.next_process_id.clone();
         let config = self.config.clone();
+        let actor_handle = self.actor_handle.clone();
         interface.func_wrap_async(
             "os-spawn",
             move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore>,
@@ -459,6 +412,7 @@ impl ProcessHost {
                 let processes = processes.clone();
                 let next_process_id = next_process_id.clone();
                 let config = config.clone();
+                let actor_handle = actor_handle.clone();
                 
                 Box::new(async move {
                     // Convert u8 modes to OutputMode enum
@@ -590,6 +544,7 @@ impl ProcessHost {
                                 let process_id_clone = process_id;
                                 let actor_id_clone = actor_id.clone();
                                 let theater_tx_clone = theater_tx.clone();
+                                let actor_handle = actor_handle.clone().expect("Failed to clone actor handle");
                                 
                                 Some(tokio::spawn(async move {
                                     Self::process_output(
@@ -599,7 +554,8 @@ impl ProcessHost {
                                         process_id_clone,
                                         actor_id_clone,
                                         theater_tx_clone,
-                                        true, // is stdout
+                                        actor_handle.clone(),
+                                        "handle-stdout".to_string(),
                                     ).await;
                                 }))
                             } else {
@@ -613,6 +569,7 @@ impl ProcessHost {
                                 let process_id_clone = process_id;
                                 let actor_id_clone = actor_id.clone();
                                 let theater_tx_clone = theater_tx.clone();
+                                let actor_handle = actor_handle.clone().expect("Failed to clone actor handle");
                                 
                                 Some(tokio::spawn(async move {
                                     Self::process_output(
@@ -622,7 +579,8 @@ impl ProcessHost {
                                         process_id_clone,
                                         actor_id_clone,
                                         theater_tx_clone,
-                                        false, // not stdout (stderr)
+                                        actor_handle.clone(),
+                                        "handle-stderr".to_string(),
                                     ).await;
                                 }))
                             } else {
