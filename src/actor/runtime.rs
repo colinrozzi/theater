@@ -555,6 +555,7 @@ impl ActorRuntime {
     ) {
         info!("Actor runtime starting operation processing loop");
         let mut shutdown_initiated = false;
+        let mut paused = false;
 
         loop {
             tokio::select! {
@@ -590,10 +591,55 @@ impl ActorRuntime {
                             ActorOperation::UpdateComponent { response_tx, .. } => {
                                 let _ = response_tx.send(Err(ActorError::ShuttingDown));
                             }
+                            ActorOperation::Pause { response_tx } => {
+                                let _ = response_tx.send(Err(ActorError::ShuttingDown));
+                            }
+                            ActorOperation::Resume { response_tx } => {
+                                let _ = response_tx.send(Err(ActorError::ShuttingDown));
+                            }
                         }
                         continue;
                     }
                     debug!("Processing actor operation");
+
+                    if paused {
+                            debug!("Actor is paused, rejecting operation");
+                            match op {
+                                ActorOperation::CallFunction { response_tx, .. } => {
+                                    let _ = response_tx.send(Err(ActorError::Paused));
+                                }
+                                ActorOperation::GetMetrics { response_tx } => {
+                                    let _ = response_tx.send(Err(ActorError::Paused));
+                                }
+                                ActorOperation::GetChain { response_tx } => {
+                                    let _ = response_tx.send(Err(ActorError::Paused));
+                                }
+                                ActorOperation::GetState { response_tx } => {
+                                    let _ = response_tx.send(Err(ActorError::Paused));
+                                }
+                                ActorOperation::UpdateComponent { response_tx, .. } => {
+                                    let _ = response_tx.send(Err(ActorError::Paused));
+                                }
+                                ActorOperation::Shutdown { response_tx } => {
+                                    info!("Shutdown operation received while paused");
+                                    shutdown_initiated = true;
+                                    let _ = response_tx.send(Ok(()));
+                                    continue;
+                                }
+                                ActorOperation::Pause { response_tx } => {
+                                    let _ = response_tx.send(Err(ActorError::Paused));
+                                }
+                                ActorOperation::Resume { response_tx } => {
+                                    debug!("Resuming actor");
+                                    paused = false;
+                                    if let Err(e) = response_tx.send(Ok(())) {
+                                        error!("Failed to send resume response: {:?}", e);
+                                    } else {
+                                        info!("Actor resumed successfully");
+                                    }
+                                }
+                            }
+                        } else {
 
                     match op {
                         ActorOperation::CallFunction { name, params, response_tx } => {
@@ -603,11 +649,22 @@ impl ActorRuntime {
                                         error!("Failed to send function call response for operation '{}': {:?}", name, e);
                                     }
                                 }
-                                Err(e) => {
-                                    error!("Operation '{}' failed with error: {:?}", name, e);
-                                    if let Err(send_err) = response_tx.send(Err(e)) {
+                                Err(actor_error) => {
+                                    // Notify the theater runtime about the error
+                                    let _ = theater_tx
+                                        .send(TheaterCommand::ActorError {
+                                            actor_id: actor_instance.id().clone(),
+                                            error: actor_error.clone(),
+                                        })
+                                        .await;
+
+                                    error!("Operation '{}' failed with error: {:?}", name, actor_error);
+                                    if let Err(send_err) = response_tx.send(Err(actor_error)) {
                                         error!("Failed to send function call error response for operation '{}': {:?}", name, send_err);
                                     }
+
+                                    // Pause the actor
+                                    paused = true;
                                 }
                             }
                         }
@@ -672,7 +729,26 @@ impl ActorRuntime {
                                 }
                             }
                         }
+
+                        ActorOperation::Pause { response_tx } => {
+                            debug!("Processing Pause operation");
+                            paused = true;
+                            if let Err(e) = response_tx.send(Ok(())) {
+                                error!("Failed to send pause response: {:?}", e);
+                            }
+                            debug!("Actor paused successfully");
+                        }
+
+                                ActorOperation::Resume { response_tx } => {
+                            debug!("Processing Resume operation");
+                            paused = false;
+                            if let Err(e) = response_tx.send(Ok(())) {
+                                error!("Failed to send resume response: {:?}", e);
+                            }
+                            debug!("Actor resumed successfully");
+                                }
                     }
+                        }
                 }
 
                 else => {
@@ -770,16 +846,8 @@ impl ActorRuntime {
                         }),
                     });
 
-                // Notify the theater runtime the actor has failed
-                let _ = theater_tx
-                    .send(TheaterCommand::ActorError {
-                        actor_id: actor_instance.id().clone(),
-                        event,
-                    })
-                    .await;
-
                 error!("Failed to execute function '{}': {}", name, e);
-                return Err(ActorError::Internal(e));
+                return Err(ActorError::Internal(event));
             }
         };
 

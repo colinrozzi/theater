@@ -682,7 +682,7 @@ impl TheaterServer {
                         id,
                         metrics: serde_json::to_value(metrics?)?,
                     }
-                },
+                }
                 ManagementCommand::UpdateActorComponent { id, component } => {
                     info!("Updating component for actor {:?} to {}", id, component);
                     let (cmd_tx, cmd_rx) = tokio::sync::oneshot::channel();

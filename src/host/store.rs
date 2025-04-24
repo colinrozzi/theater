@@ -1,11 +1,11 @@
-use crate::actor::types::ActorError;
 use crate::actor::handle::ActorHandle;
-use crate::shutdown::ShutdownReceiver;
 use crate::actor::store::ActorStore;
+use crate::actor::types::ActorError;
 use crate::config::StoreHandlerConfig;
-use crate::events::{ChainEventData, EventData};
 use crate::events::store::StoreEventData;
-use crate::store::{ContentStore, ContentRef};
+use crate::events::{ChainEventData, EventData};
+use crate::shutdown::ShutdownReceiver;
+use crate::store::{ContentRef, ContentStore};
 use crate::wasm::{ActorComponent, ActorInstance};
 use anyhow::Result;
 use std::future::Future;
@@ -26,12 +26,11 @@ pub enum StoreError {
 }
 
 #[derive(Clone)]
-pub struct StoreHost {
-}
+pub struct StoreHost {}
 
 impl StoreHost {
     pub fn new(_config: StoreHandlerConfig) -> Self {
-        Self { }
+        Self {}
     }
 
     pub async fn setup_host_functions(&self, actor_component: &mut ActorComponent) -> Result<()> {
@@ -42,7 +41,6 @@ impl StoreHost {
             .instance("ntwk:theater/store")
             .expect("could not instantiate ntwk:theater/store");
 
-
         interface.func_wrap(
             "new",
             move |mut ctx: StoreContextMut<'_, ActorStore>,
@@ -51,8 +49,7 @@ impl StoreHost {
                 // Record store call event
                 ctx.data_mut().record_event(ChainEventData {
                     event_type: "ntwk:theater/store/store".to_string(),
-                    data: EventData::Store(StoreEventData::NewStoreCall {
-                    }),
+                    data: EventData::Store(StoreEventData::NewStoreCall {}),
                     timestamp: chrono::Utc::now().timestamp_millis() as u64,
                     description: Some("Creating new content store".to_string()),
                 });
@@ -71,11 +68,8 @@ impl StoreHost {
                 });
 
                 Ok((Ok(store.id().to_string()),))
-                            
             },
         )?;
-
-
 
         interface.func_wrap_async(
             "store",
@@ -196,8 +190,9 @@ impl StoreHost {
 
         interface.func_wrap_async(
             "exists",
-            move |mut ctx: StoreContextMut<'_, ActorStore>, (store_id, content_ref,): (String, ContentRef,)| 
-                -> Box<dyn Future<Output = Result<(Result<bool, String>,)>> + Send> {
+            move |mut ctx: StoreContextMut<'_, ActorStore>,
+                  (store_id, content_ref): (String, ContentRef)|
+                  -> Box<dyn Future<Output = Result<(Result<bool, String>,)>> + Send> {
                 // Record exists call event
                 ctx.data_mut().record_event(ChainEventData {
                     event_type: "ntwk:theater/store/exists".to_string(),
@@ -206,17 +201,20 @@ impl StoreHost {
                         content_ref: content_ref.clone(),
                     }),
                     timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                    description: Some(format!("Checking if content with hash {} exists", content_ref.hash())),
+                    description: Some(format!(
+                        "Checking if content with hash {} exists",
+                        content_ref.hash()
+                    )),
                 });
-                
+
                 let store = ContentStore::from_id(&store_id);
-                
+
                 Box::new(async move {
                     // Perform the operation
                     match store.exists(&content_ref).await {
                         exists => {
                             debug!("Content existence checked successfully");
-                            
+
                             // Record exists result event
                             ctx.data_mut().record_event(ChainEventData {
                                 event_type: "ntwk:theater/store/exists".to_string(),
@@ -227,12 +225,15 @@ impl StoreHost {
                                     success: true,
                                 }),
                                 timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                                description: Some(format!("Content with hash {} exists: {}", content_ref.hash(), exists)),
+                                description: Some(format!(
+                                    "Content with hash {} exists: {}",
+                                    content_ref.hash(),
+                                    exists
+                                )),
                             });
-                            
-                            Ok((Ok(exists),))
-                        },
 
+                            Ok((Ok(exists),))
+                        }
                     }
                 })
             },
@@ -240,8 +241,9 @@ impl StoreHost {
 
         interface.func_wrap_async(
             "label",
-            move |mut ctx: StoreContextMut<'_, ActorStore>, (store_id, label, content_ref): (String, String, ContentRef)| 
-                -> Box<dyn Future<Output = Result<(Result<(), String>,)>> + Send> {
+            move |mut ctx: StoreContextMut<'_, ActorStore>,
+                  (store_id, label, content_ref): (String, String, ContentRef)|
+                  -> Box<dyn Future<Output = Result<(Result<(), String>,)>> + Send> {
                 // Record label call event
                 ctx.data_mut().record_event(ChainEventData {
                     event_type: "ntwk:theater/store/label".to_string(),
@@ -251,18 +253,22 @@ impl StoreHost {
                         content_ref: content_ref.clone(),
                     }),
                     timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                    description: Some(format!("Labeling content with hash {} as '{}'", content_ref.hash(), label)),
+                    description: Some(format!(
+                        "Labeling content with hash {} as '{}'",
+                        content_ref.hash(),
+                        label
+                    )),
                 });
-                
+
                 let store = ContentStore::from_id(&store_id);
                 let label_clone = label.clone();
-                
+
                 Box::new(async move {
                     // Perform the operation
                     match store.label(&label, &content_ref).await {
                         Ok(_) => {
                             debug!("Content labeled successfully");
-                            
+
                             // Record label result event
                             ctx.data_mut().record_event(ChainEventData {
                                 event_type: "ntwk:theater/store/label".to_string(),
@@ -273,14 +279,18 @@ impl StoreHost {
                                     success: true,
                                 }),
                                 timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                                description: Some(format!("Successfully labeled content with hash {} as '{}'", content_ref.hash(), label_clone)),
+                                description: Some(format!(
+                                    "Successfully labeled content with hash {} as '{}'",
+                                    content_ref.hash(),
+                                    label_clone
+                                )),
                             });
-                            
+
                             Ok((Ok(()),))
-                        },
+                        }
                         Err(e) => {
                             error!("Error labeling content: {}", e);
-                            
+
                             // Record label error event
                             ctx.data_mut().record_event(ChainEventData {
                                 event_type: "ntwk:theater/store/label".to_string(),
@@ -289,9 +299,14 @@ impl StoreHost {
                                     message: e.to_string(),
                                 }),
                                 timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                                description: Some(format!("Error labeling content with hash {} as '{}': {}", content_ref.hash(), label_clone, e)),
+                                description: Some(format!(
+                                    "Error labeling content with hash {} as '{}': {}",
+                                    content_ref.hash(),
+                                    label_clone,
+                                    e
+                                )),
                             });
-                            
+
                             Ok((Err(e.to_string()),))
                         }
                     }
@@ -301,8 +316,11 @@ impl StoreHost {
 
         interface.func_wrap_async(
             "get-by-label",
-            move |mut ctx: StoreContextMut<'_, ActorStore>, (store_id, label): (String, String)| 
-                -> Box<dyn Future<Output = Result<(Result<Option<ContentRef>, String>,)>> + Send> {
+            move |mut ctx: StoreContextMut<'_, ActorStore>,
+                  (store_id, label): (String, String)|
+                  -> Box<
+                dyn Future<Output = Result<(Result<Option<ContentRef>, String>,)>> + Send,
+            > {
                 // Record get-by-label call event
                 ctx.data_mut().record_event(ChainEventData {
                     event_type: "ntwk:theater/store/get-by-label".to_string(),
@@ -313,16 +331,16 @@ impl StoreHost {
                     timestamp: chrono::Utc::now().timestamp_millis() as u64,
                     description: Some(format!("Getting content reference by label: {}", label)),
                 });
-                
+
                 let store = ContentStore::from_id(&store_id);
                 let label_clone = label.clone();
-                
+
                 Box::new(async move {
                     // Perform the operation
                     match store.get_by_label(&label).await {
                         Ok(content_ref_opt) => {
                             debug!("Content reference by label retrieved successfully");
-                            
+
                             // Record get-by-label result event
                             ctx.data_mut().record_event(ChainEventData {
                                 event_type: "ntwk:theater/store/get-by-label".to_string(),
@@ -333,14 +351,17 @@ impl StoreHost {
                                     success: true,
                                 }),
                                 timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                                description: Some(format!("Successfully retrieved content reference {:?} for label '{}'", content_ref_opt, label_clone)),
+                                description: Some(format!(
+                                    "Successfully retrieved content reference {:?} for label '{}'",
+                                    content_ref_opt, label_clone
+                                )),
                             });
-                            
+
                             Ok((Ok(content_ref_opt),))
-                        },
+                        }
                         Err(e) => {
                             error!("Error retrieving content reference by label: {}", e);
-                            
+
                             // Record get-by-label error event
                             ctx.data_mut().record_event(ChainEventData {
                                 event_type: "ntwk:theater/store/get-by-label".to_string(),
@@ -349,9 +370,12 @@ impl StoreHost {
                                     message: e.to_string(),
                                 }),
                                 timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                                description: Some(format!("Error retrieving content reference for label '{}': {}", label_clone, e)),
+                                description: Some(format!(
+                                    "Error retrieving content reference for label '{}': {}",
+                                    label_clone, e
+                                )),
                             });
-                            
+
                             Ok((Err(e.to_string()),))
                         }
                     }
@@ -361,8 +385,9 @@ impl StoreHost {
 
         interface.func_wrap_async(
             "remove-label",
-            move |mut ctx: StoreContextMut<'_, ActorStore>, (store_id, label): (String, String)| 
-                -> Box<dyn Future<Output = Result<(Result<(), String>,)>> + Send> {
+            move |mut ctx: StoreContextMut<'_, ActorStore>,
+                  (store_id, label): (String, String)|
+                  -> Box<dyn Future<Output = Result<(Result<(), String>,)>> + Send> {
                 // Record remove-label call event
                 ctx.data_mut().record_event(ChainEventData {
                     event_type: "ntwk:theater/store/remove-label".to_string(),
@@ -373,16 +398,16 @@ impl StoreHost {
                     timestamp: chrono::Utc::now().timestamp_millis() as u64,
                     description: Some(format!("Removing label: {}", label)),
                 });
-                
+
                 let store = ContentStore::from_id(&store_id);
                 let label_clone = label.clone();
-                
+
                 Box::new(async move {
                     // Perform the operation
                     match store.remove_label(&label).await {
                         Ok(_) => {
                             debug!("Label removed successfully");
-                            
+
                             // Record remove-label result event
                             ctx.data_mut().record_event(ChainEventData {
                                 event_type: "ntwk:theater/store/remove-label".to_string(),
@@ -392,14 +417,17 @@ impl StoreHost {
                                     success: true,
                                 }),
                                 timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                                description: Some(format!("Successfully removed label '{}'", label_clone)),
+                                description: Some(format!(
+                                    "Successfully removed label '{}'",
+                                    label_clone
+                                )),
                             });
-                            
+
                             Ok((Ok(()),))
-                        },
+                        }
                         Err(e) => {
                             error!("Error removing label: {}", e);
-                            
+
                             // Record remove-label error event
                             ctx.data_mut().record_event(ChainEventData {
                                 event_type: "ntwk:theater/store/remove-label".to_string(),
@@ -408,9 +436,12 @@ impl StoreHost {
                                     message: e.to_string(),
                                 }),
                                 timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                                description: Some(format!("Error removing label '{}': {}", label_clone, e)),
+                                description: Some(format!(
+                                    "Error removing label '{}': {}",
+                                    label_clone, e
+                                )),
                             });
-                            
+
                             Ok((Err(e.to_string()),))
                         }
                     }
@@ -605,8 +636,11 @@ impl StoreHost {
 
         interface.func_wrap_async(
             "list-all-content",
-            move |mut ctx: StoreContextMut<'_, ActorStore>, (store_id,): (String,)| 
-                -> Box<dyn Future<Output = Result<(Result<Vec<ContentRef>, String>,)>> + Send> {
+            move |mut ctx: StoreContextMut<'_, ActorStore>,
+                  (store_id,): (String,)|
+                  -> Box<
+                dyn Future<Output = Result<(Result<Vec<ContentRef>, String>,)>> + Send,
+            > {
                 // Record list-all-content call event
                 ctx.data_mut().record_event(ChainEventData {
                     event_type: "ntwk:theater/store/list-all-content".to_string(),
@@ -616,15 +650,15 @@ impl StoreHost {
                     timestamp: chrono::Utc::now().timestamp_millis() as u64,
                     description: Some("Listing all content references".to_string()),
                 });
-                
+
                 let store = ContentStore::from_id(&store_id);
-                
+
                 Box::new(async move {
                     // Perform the operation
                     match store.list_all_content().await {
                         Ok(content_refs) => {
                             debug!("All content references listed successfully");
-                            
+
                             // Record list-all-content result event
                             ctx.data_mut().record_event(ChainEventData {
                                 event_type: "ntwk:theater/store/list-all-content".to_string(),
@@ -634,14 +668,17 @@ impl StoreHost {
                                     success: true,
                                 }),
                                 timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                                description: Some(format!("Successfully listed {} content references", content_refs.len())),
+                                description: Some(format!(
+                                    "Successfully listed {} content references",
+                                    content_refs.len()
+                                )),
                             });
-                            
+
                             Ok((Ok(content_refs),))
-                        },
+                        }
                         Err(e) => {
                             error!("Error listing all content references: {}", e);
-                            
+
                             // Record list-all-content error event
                             ctx.data_mut().record_event(ChainEventData {
                                 event_type: "ntwk:theater/store/list-all-content".to_string(),
@@ -650,9 +687,12 @@ impl StoreHost {
                                     message: e.to_string(),
                                 }),
                                 timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                                description: Some(format!("Error listing all content references: {}", e)),
+                                description: Some(format!(
+                                    "Error listing all content references: {}",
+                                    e
+                                )),
                             });
-                            
+
                             Ok((Err(e.to_string()),))
                         }
                     }
@@ -662,8 +702,9 @@ impl StoreHost {
 
         interface.func_wrap_async(
             "calculate-total-size",
-            move |mut ctx: StoreContextMut<'_, ActorStore>, (store_id,): (String,)| 
-                -> Box<dyn Future<Output = Result<(Result<u64, String>,)>> + Send> {
+            move |mut ctx: StoreContextMut<'_, ActorStore>,
+                  (store_id,): (String,)|
+                  -> Box<dyn Future<Output = Result<(Result<u64, String>,)>> + Send> {
                 // Record calculate-total-size call event
                 ctx.data_mut().record_event(ChainEventData {
                     event_type: "ntwk:theater/store/calculate-total-size".to_string(),
@@ -673,7 +714,7 @@ impl StoreHost {
                     timestamp: chrono::Utc::now().timestamp_millis() as u64,
                     description: Some("Calculating total size of all content".to_string()),
                 });
-                
+
                 let store = ContentStore::from_id(&store_id);
 
                 Box::new(async move {
@@ -681,7 +722,7 @@ impl StoreHost {
                     match store.calculate_total_size().await {
                         Ok(total_size) => {
                             debug!("Total size calculated successfully");
-                            
+
                             // Record calculate-total-size result event
                             ctx.data_mut().record_event(ChainEventData {
                                 event_type: "ntwk:theater/store/calculate-total-size".to_string(),
@@ -691,14 +732,17 @@ impl StoreHost {
                                     success: true,
                                 }),
                                 timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                                description: Some(format!("Successfully calculated total content size: {} bytes", total_size)),
+                                description: Some(format!(
+                                    "Successfully calculated total content size: {} bytes",
+                                    total_size
+                                )),
                             });
-                            
+
                             Ok((Ok(total_size),))
-                        },
+                        }
                         Err(e) => {
                             error!("Error calculating total content size: {}", e);
-                            
+
                             // Record calculate-total-size error event
                             ctx.data_mut().record_event(ChainEventData {
                                 event_type: "ntwk:theater/store/calculate-total-size".to_string(),
@@ -707,9 +751,12 @@ impl StoreHost {
                                     message: e.to_string(),
                                 }),
                                 timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                                description: Some(format!("Error calculating total content size: {}", e)),
+                                description: Some(format!(
+                                    "Error calculating total content size: {}",
+                                    e
+                                )),
                             });
-                            
+
                             Ok((Err(e.to_string()),))
                         }
                     }
@@ -782,7 +829,11 @@ impl StoreHost {
         Ok(())
     }
 
-    pub async fn start(&self, _actor_handle: ActorHandle, _shutdown_receiver: ShutdownReceiver) -> Result<()> {
+    pub async fn start(
+        &self,
+        _actor_handle: ActorHandle,
+        _shutdown_receiver: ShutdownReceiver,
+    ) -> Result<()> {
         info!("STORE handler starting...");
         Ok(())
     }

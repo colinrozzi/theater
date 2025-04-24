@@ -1,6 +1,6 @@
-use crate::actor::types::ActorError;
 use crate::actor::handle::ActorHandle;
 use crate::actor::store::ActorStore;
+use crate::actor::types::ActorError;
 use crate::config::TimingHostConfig;
 use crate::events::timing::TimingEventData;
 use crate::events::{ChainEventData, EventData};
@@ -59,7 +59,7 @@ impl TimingHost {
                 "now",
                 move |mut ctx: StoreContextMut<'_, ActorStore>, ()| -> Result<(u64,)> {
                     let now = Utc::now().timestamp_millis() as u64;
-                    
+
                     // Record now call event
                     ctx.data_mut().record_event(ChainEventData {
                         event_type: "ntwk:theater/timing/now".to_string(),
@@ -67,7 +67,7 @@ impl TimingHost {
                         timestamp: now,
                         description: Some("Getting current timestamp".to_string()),
                     });
-                    
+
                     // Record now result event
                     ctx.data_mut().record_event(ChainEventData {
                         event_type: "ntwk:theater/timing/now".to_string(),
@@ -75,7 +75,7 @@ impl TimingHost {
                         timestamp: now,
                         description: Some(format!("Current timestamp: {}", now)),
                     });
-                    
+
                     Ok((now,))
                 },
             )
@@ -263,7 +263,11 @@ impl TimingHost {
         Ok(())
     }
 
-    pub async fn start(&self, _actor_handle: ActorHandle, _shutdown_receiver: ShutdownReceiver) -> Result<()> {
+    pub async fn start(
+        &self,
+        _actor_handle: ActorHandle,
+        _shutdown_receiver: ShutdownReceiver,
+    ) -> Result<()> {
         info!("Starting timing host");
         Ok(())
     }

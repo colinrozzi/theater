@@ -4,8 +4,8 @@
 //! actor system. It manages actor lifecycle, message passing, and event handling across
 //! the entire system.
 
-use crate::actor::types::{ActorError, ActorOperation};
 use crate::actor::runtime::{ActorRuntime, StartActorResult};
+use crate::actor::types::{ActorError, ActorOperation};
 use crate::chain::ChainEvent;
 use crate::id::TheaterId;
 use crate::messages::{
@@ -369,10 +369,10 @@ impl TheaterRuntime {
                         error!("Failed to handle actor event: {}", e);
                     }
                 }
-                TheaterCommand::ActorError { actor_id, event } => {
+                TheaterCommand::ActorError { actor_id, error } => {
                     debug!("Received error event from actor {:?}", actor_id);
 
-                    if let Err(e) = self.handle_actor_error(actor_id, event).await {
+                    if let Err(e) = self.handle_actor_error(actor_id, error).await {
                         error!("Failed to handle actor error event: {}", e);
                     }
                 }
@@ -791,12 +791,12 @@ impl TheaterRuntime {
         let actor_id = TheaterId::generate();
         debug!("Initializing actor runtime");
         debug!("Starting actor runtime");
-        
+
         // Start the actor in a detached task
         let actor_id_for_task = actor_id.clone();
         let actor_runtime_process = tokio::spawn(async move {
             ActorRuntime::start(
-                actor_id_for_task,
+                actor_id_for_task.clone(),
                 &manifest,
                 init_bytes,
                 theater_tx,
@@ -809,10 +809,10 @@ impl TheaterRuntime {
                 response_tx,
             )
             .await;
-            
+
             // Return a dummy struct to maintain API compatibility
             ActorRuntime {
-                actor_id: TheaterId::generate(), // Create a new ID since we can't reuse actor_id_for_task
+                actor_id: actor_id_for_task,
                 handler_tasks: Vec::new(),
                 shutdown_controller: ShutdownController::new().0,
             }
@@ -916,11 +916,13 @@ impl TheaterRuntime {
         Ok(())
     }
 
-    async fn handle_actor_error(&mut self, actor_id: TheaterId, _event: ChainEvent) -> Result<()> {
+    async fn handle_actor_error(&mut self, actor_id: TheaterId, error: ActorError) -> Result<()> {
         debug!("Handling error event for actor: {:?}", actor_id);
-        todo!();
-        // Return will never be reached due to todo!()
-        // Ok(())
+
+        // notify the actors parents
+
+        // notify any actor subscribers
+        todo!()
     }
 
     /// Stops an actor and its children gracefully.

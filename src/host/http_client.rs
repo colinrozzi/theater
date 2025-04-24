@@ -1,22 +1,21 @@
 use crate::actor::handle::ActorHandle;
-use crate::shutdown::ShutdownReceiver;
-use crate::actor::types::ActorError;
 use crate::actor::store::ActorStore;
+use crate::actor::types::ActorError;
 use crate::config::HttpClientHandlerConfig;
 use crate::events::http::HttpEventData;
 use crate::events::{ChainEventData, EventData};
+use crate::shutdown::ShutdownReceiver;
 use crate::wasm::{ActorComponent, ActorInstance};
-use std::future::Future;
 use anyhow::Result;
 use reqwest::Method;
 use serde::{Deserialize, Serialize};
+use std::future::Future;
 use thiserror::Error;
-use tracing::{info, error};
-use wasmtime::component::{Lift, Lower, ComponentType};
+use tracing::{error, info};
+use wasmtime::component::{ComponentType, Lift, Lower};
 
 #[derive(Clone)]
-pub struct HttpClientHost {
-}
+pub struct HttpClientHost {}
 
 #[derive(Debug, Clone, Deserialize, Serialize, ComponentType, Lift, Lower)]
 #[component(record)]
@@ -39,23 +38,23 @@ pub struct HttpResponse {
 pub enum HttpClientError {
     #[error("Request error: {0}")]
     RequestError(String),
-    
+
     #[error("Actor error: {0}")]
     ActorError(#[from] ActorError),
-    
+
     #[error("Serialization error: {0}")]
     SerializationError(#[from] serde_json::Error),
-    
+
     #[error("HTTP error: {0}")]
     HttpError(#[from] reqwest::Error),
-    
+
     #[error("Invalid method: {0}")]
     InvalidMethod(String),
 }
 
 impl HttpClientHost {
     pub fn new(_config: HttpClientHandlerConfig) -> Self {
-        Self { }
+        Self {}
     }
 
     pub async fn setup_host_functions(&self, actor_component: &mut ActorComponent) -> Result<()> {
@@ -200,7 +199,7 @@ impl HttpClientHost {
                 })
             },
         )?;
-        
+
         info!("Host functions set up for http-client");
 
         Ok(())
@@ -210,7 +209,11 @@ impl HttpClientHost {
         Ok(())
     }
 
-    pub async fn start(&self, _actor_handle: ActorHandle, _shutdown_receiver: ShutdownReceiver) -> Result<()> {
+    pub async fn start(
+        &self,
+        _actor_handle: ActorHandle,
+        _shutdown_receiver: ShutdownReceiver,
+    ) -> Result<()> {
         Ok(())
     }
 }

@@ -1,4 +1,3 @@
-
 use crate::chain::ChainEvent;
 use serde::{Deserialize, Serialize};
 
@@ -139,10 +138,10 @@ impl ChainEventData {
     /// #     timestamp: 0,
     /// #     description: None,
     /// # };
-    /// 
+    ///
     /// let event_type = event.event_type();
     /// println!("Event type: {}", event_type);
-    /// 
+    ///
     /// // Filter events based on type
     /// if event_type.starts_with("runtime.") {
     ///     println!("This is a runtime event");
@@ -177,7 +176,7 @@ impl ChainEventData {
     /// #     timestamp: 0,
     /// #     description: Some("Actor initialized".to_string()),
     /// # };
-    /// 
+    ///
     /// let description = event.description();
     /// println!("Event description: {}", description);
     /// ```
@@ -212,7 +211,7 @@ impl ChainEventData {
     /// #     timestamp: 0,
     /// #     description: None,
     /// # };
-    /// 
+    ///
     /// match event.to_json() {
     ///     Ok(json_bytes) => {
     ///         println!("Serialized event: {} bytes", json_bytes.len());
@@ -255,7 +254,7 @@ impl ChainEventData {
     /// #     timestamp: 0,
     /// #     description: None,
     /// # };
-    /// 
+    ///
     /// // Convert to a chain event with no parent (root event)
     /// let chain_event = event_data.to_chain_event(None);
     ///

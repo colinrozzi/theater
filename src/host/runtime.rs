@@ -1,10 +1,10 @@
-use crate::actor::types::ActorError;
 use crate::actor::handle::ActorHandle;
-use crate::shutdown::ShutdownReceiver;
 use crate::actor::store::ActorStore;
+use crate::actor::types::ActorError;
 use crate::config::RuntimeHostConfig;
 use crate::events::runtime::RuntimeEventData;
 use crate::events::{ChainEventData, EventData};
+use crate::shutdown::ShutdownReceiver;
 use crate::wasm::{ActorComponent, ActorInstance};
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
@@ -169,7 +169,11 @@ impl RuntimeHost {
         actor_instance.register_function_no_result::<(String,)>("ntwk:theater/actor", "init")
     }
 
-    pub async fn start(&self, _actor_handle: ActorHandle, _shutdown_receiver: ShutdownReceiver) -> Result<()> {
+    pub async fn start(
+        &self,
+        _actor_handle: ActorHandle,
+        _shutdown_receiver: ShutdownReceiver,
+    ) -> Result<()> {
         info!("Runtime host starting");
         Ok(())
     }

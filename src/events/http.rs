@@ -19,7 +19,7 @@ pub enum HttpEventData {
     ServerDestroy {
         server_id: u64,
     },
-    
+
     // HTTP framework route events
     RouteAdd {
         route_id: u64,
@@ -32,7 +32,7 @@ pub enum HttpEventData {
         route_id: u64,
         server_id: u64,
     },
-    
+
     // HTTP framework middleware events
     MiddlewareAdd {
         middleware_id: u64,
@@ -44,7 +44,7 @@ pub enum HttpEventData {
         middleware_id: u64,
         server_id: u64,
     },
-    
+
     // HTTP framework WebSocket events
     WebSocketEnable {
         server_id: u64,
@@ -72,7 +72,7 @@ pub enum HttpEventData {
         message_type: String,
         message_size: usize,
     },
-    
+
     // HTTP framework handler events
     HandlerRegister {
         handler_id: u64,
@@ -82,7 +82,7 @@ pub enum HttpEventData {
         handler_id: u64,
         handler_type: String,
     },
-    
+
     // Original Request handling events
     HttpRequestCall {
         method: String,

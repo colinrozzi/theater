@@ -1,21 +1,24 @@
-use crate::actor::types::ActorError;
 use crate::actor::handle::ActorHandle;
 use crate::actor::store::ActorStore;
-use crate::events::{ChainEventData, EventData, message::MessageEventData};
-use std::sync::{Arc, Mutex};
-use crate::messages::{ActorMessage, ActorRequest, ActorSend, TheaterCommand, ActorChannelOpen, ActorChannelMessage, ActorChannelClose, ChannelId, ChannelParticipant, ActorChannelInitiated};
+use crate::actor::types::ActorError;
+use crate::events::{message::MessageEventData, ChainEventData, EventData};
+use crate::messages::{
+    ActorChannelClose, ActorChannelInitiated, ActorChannelMessage, ActorChannelOpen, ActorMessage,
+    ActorRequest, ActorSend, ChannelId, ChannelParticipant, TheaterCommand,
+};
 use crate::shutdown::ShutdownReceiver;
 use crate::wasm::{ActorComponent, ActorInstance};
 use crate::TheaterId;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
-use std::future::Future;
 use std::collections::HashMap;
+use std::future::Future;
+use std::sync::{Arc, Mutex};
 use thiserror::Error;
 use tokio::sync::mpsc::{Receiver, Sender};
 use tracing::{debug, error, info, warn};
-use wasmtime::component::{ComponentType, Lift, Lower};
 use uuid::Uuid;
+use wasmtime::component::{ComponentType, Lift, Lower};
 
 pub struct MessageServerHost {
     mailbox_tx: Sender<ActorMessage>,
@@ -50,7 +53,11 @@ struct ChannelAccept {
 }
 
 impl MessageServerHost {
-    pub fn new(mailbox_tx: Sender<ActorMessage>, mailbox_rx: Receiver<ActorMessage>, theater_tx: Sender<TheaterCommand>) -> Self {
+    pub fn new(
+        mailbox_tx: Sender<ActorMessage>,
+        mailbox_rx: Receiver<ActorMessage>,
+        theater_tx: Sender<TheaterCommand>,
+    ) -> Self {
         Self {
             mailbox_tx,
             mailbox_rx,
@@ -60,7 +67,10 @@ impl MessageServerHost {
         }
     }
 
-    pub async fn setup_host_functions(&mut self, actor_component: &mut ActorComponent) -> Result<()> {
+    pub async fn setup_host_functions(
+        &mut self,
+        actor_component: &mut ActorComponent,
+    ) -> Result<()> {
         info!("Setting up message server host functions");
 
         let mut interface = actor_component
@@ -258,38 +268,43 @@ impl MessageServerHost {
 
         // Use a thread-safe reference to the outstanding_requests field
         let outstanding_requests = self.outstanding_requests.clone();
-        
+
         interface
             .func_wrap_async(
                 "list-outstanding-requests",
-                move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore>, _: ()|
+                move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore>,
+                      _: ()|
                       -> Box<dyn Future<Output = Result<(Vec<String>,)>> + Send> {
-                    
                     // Record the list-outstanding-requests event
                     ctx.data_mut().record_event(ChainEventData {
-                        event_type: "ntwk:theater/message-server-host/list-outstanding-requests".to_string(),
+                        event_type: "ntwk:theater/message-server-host/list-outstanding-requests"
+                            .to_string(),
                         data: EventData::Message(MessageEventData::ListOutstandingRequestsCall {}),
                         timestamp: chrono::Utc::now().timestamp_millis() as u64,
                         description: Some("Listing outstanding requests".to_string()),
                     });
-                    
+
                     let outstanding_clone = outstanding_requests.clone();
                     Box::new(async move {
                         // Get the keys from the outstanding_requests map with proper locking
                         let requests = outstanding_clone.lock().unwrap();
                         let ids: Vec<String> = requests.keys().cloned().collect();
-                        
+
                         // Record the list-outstanding-requests result
                         ctx.data_mut().record_event(ChainEventData {
-                            event_type: "ntwk:theater/message-server-host/list-outstanding-requests".to_string(),
-                            data: EventData::Message(MessageEventData::ListOutstandingRequestsResult {
-                                request_count: ids.len(),
-                                request_ids: ids.clone(),
-                            }),
+                            event_type:
+                                "ntwk:theater/message-server-host/list-outstanding-requests"
+                                    .to_string(),
+                            data: EventData::Message(
+                                MessageEventData::ListOutstandingRequestsResult {
+                                    request_count: ids.len(),
+                                    request_ids: ids.clone(),
+                                },
+                            ),
                             timestamp: chrono::Utc::now().timestamp_millis() as u64,
                             description: Some(format!("Found {} outstanding requests", ids.len())),
                         });
-                        
+
                         Ok((ids,))
                     })
                 },
@@ -298,7 +313,7 @@ impl MessageServerHost {
 
         // Use a thread-safe reference to the outstanding_requests field
         let outstanding_requests = self.outstanding_requests.clone();
-        
+
         interface
             .func_wrap_async(
                 "respond-to-request",
@@ -374,7 +389,7 @@ impl MessageServerHost {
 
         // Use a thread-safe reference to the outstanding_requests field
         let outstanding_requests = self.outstanding_requests.clone();
-        
+
         interface
             .func_wrap_async(
                 "cancel-request",
@@ -435,7 +450,7 @@ impl MessageServerHost {
 
         let theater_tx = self.theater_tx.clone();
         let mailbox_tx = self.mailbox_tx.clone();
-        
+
         // Add open-channel function
         interface
             .func_wrap_async(
@@ -586,10 +601,10 @@ impl MessageServerHost {
                 },
             )
             .expect("Failed to wrap async open-channel function");
-        
+
         // Add send-on-channel function
         let theater_tx = self.theater_tx.clone();
-        
+
         interface
             .func_wrap_async(
                 "send-on-channel",
@@ -662,10 +677,10 @@ impl MessageServerHost {
                 },
             )
             .expect("Failed to wrap async send-on-channel function");
-        
+
         // Add close-channel function
         let theater_tx = self.theater_tx.clone();
-        
+
         interface
             .func_wrap_async(
                 "close-channel",
@@ -728,7 +743,7 @@ impl MessageServerHost {
                 },
             )
             .expect("Failed to wrap async close-channel function");
-        
+
         Ok(())
     }
 
@@ -745,7 +760,7 @@ impl MessageServerHost {
                 "handle-request",
             )
             .expect("Failed to register handle-request function");
-            
+
         // Register channel functions
         actor_instance
             .register_function::<(Vec<u8>,), (ChannelAccept,)>(
@@ -765,11 +780,15 @@ impl MessageServerHost {
                 "handle-channel-close",
             )
             .expect("Failed to register handle-channel-close function");
-            
+
         Ok(())
     }
 
-    pub async fn start(&mut self, actor_handle: ActorHandle, mut shutdown_receiver: ShutdownReceiver) -> Result<()> {
+    pub async fn start(
+        &mut self,
+        actor_handle: ActorHandle,
+        mut shutdown_receiver: ShutdownReceiver,
+    ) -> Result<()> {
         info!("Starting message server");
         loop {
             tokio::select! {
@@ -819,43 +838,62 @@ impl MessageServerHost {
                         (request_id.clone(), data),
                     )
                     .await?;
-                info!("Got request response: id={}, data size={}", request_id, response.0.as_ref().map_or(0, |v| v.len()));
+                info!(
+                    "Got request response: id={}, data size={}",
+                    request_id,
+                    response.0.as_ref().map_or(0, |v| v.len())
+                );
                 if response.0.is_some() {
                     let _ = response_tx.send(response.0.unwrap());
                 } else {
-                    self.outstanding_requests.lock().unwrap().insert(request_id, response_tx);
+                    self.outstanding_requests
+                        .lock()
+                        .unwrap()
+                        .insert(request_id, response_tx);
                 }
             }
-            ActorMessage::ChannelOpen(ActorChannelOpen { channel_id, response_tx, data }) => {
-                info!("Got channel open request: channel={:?}, data size={}", channel_id, data.len());
-                
+            ActorMessage::ChannelOpen(ActorChannelOpen {
+                channel_id,
+                response_tx,
+                data,
+            }) => {
+                info!(
+                    "Got channel open request: channel={:?}, data size={}",
+                    channel_id,
+                    data.len()
+                );
+
                 let result = actor_handle
                     .call_function::<(Vec<u8>,), (ChannelAccept,)>(
                         "ntwk:theater/message-server-client.handle-channel-open".to_string(),
                         (data,),
                     )
                     .await?;
-                
+
                 let accepted = result.0.accepted;
-                
+
                 if accepted {
                     // Store channel in active channels
-                    self.active_channels.insert(channel_id.clone(), ChannelState {
-                        is_open: true,
-                    });
+                    self.active_channels
+                        .insert(channel_id.clone(), ChannelState { is_open: true });
                 }
-                
+
                 let _ = response_tx.send(Ok(accepted));
             }
             ActorMessage::ChannelMessage(ActorChannelMessage { channel_id, data }) => {
                 // Find the channel
                 if let Some(channel) = self.active_channels.get(&channel_id) {
                     if channel.is_open {
-                        info!("Got channel message: channel={:?}, data size={}", channel_id, data.len());
-                        
+                        info!(
+                            "Got channel message: channel={:?}, data size={}",
+                            channel_id,
+                            data.len()
+                        );
+
                         actor_handle
                             .call_function::<(String, Vec<u8>), ()>(
-                                "ntwk:theater/message-server-client.handle-channel-message".to_string(),
+                                "ntwk:theater/message-server-client.handle-channel-message"
+                                    .to_string(),
                                 (channel_id.to_string(), data),
                             )
                             .await?;
@@ -868,11 +906,11 @@ impl MessageServerHost {
             }
             ActorMessage::ChannelClose(ActorChannelClose { channel_id }) => {
                 info!("Got channel close: channel={:?}", channel_id);
-                
+
                 // Find and close the channel
                 if let Some(channel) = self.active_channels.get_mut(&channel_id) {
                     channel.is_open = false;
-                    
+
                     actor_handle
                         .call_function::<(String,), ()>(
                             "ntwk:theater/message-server-client.handle-channel-close".to_string(),
@@ -883,13 +921,21 @@ impl MessageServerHost {
                     warn!("Received close for unknown channel: {}", channel_id);
                 }
             }
-            ActorMessage::ChannelInitiated(ActorChannelInitiated { channel_id, target_id, initial_msg }) => {
-                info!("Channel initiated: channel={:?}, target={:?}, initial_msg size={}", channel_id, target_id, initial_msg.len());
-                
+            ActorMessage::ChannelInitiated(ActorChannelInitiated {
+                channel_id,
+                target_id,
+                initial_msg,
+            }) => {
+                info!(
+                    "Channel initiated: channel={:?}, target={:?}, initial_msg size={}",
+                    channel_id,
+                    target_id,
+                    initial_msg.len()
+                );
+
                 // Store channel in active channels
-                self.active_channels.insert(channel_id.clone(), ChannelState {
-                    is_open: true,
-                });
+                self.active_channels
+                    .insert(channel_id.clone(), ChannelState { is_open: true });
             }
         }
         Ok(())

@@ -1,5 +1,5 @@
-use tokio::sync::broadcast;
 use std::time::Duration;
+use tokio::sync::broadcast;
 use tracing::debug;
 
 /// Default timeout for waiting for a component to shutdown gracefully
@@ -18,22 +18,22 @@ impl ShutdownController {
     /// Create a new ShutdownController and a ShutdownReceiver
     pub fn new() -> (Self, ShutdownReceiver) {
         let (sender, receiver) = broadcast::channel(8);
-        (
-            Self { sender },
-            ShutdownReceiver { receiver },
-        )
+        (Self { sender }, ShutdownReceiver { receiver })
     }
-    
+
     /// Get a new receiver for this controller
     pub fn subscribe(&self) -> ShutdownReceiver {
         ShutdownReceiver {
             receiver: self.sender.subscribe(),
         }
     }
-    
+
     /// Signal all receivers to shutdown
     pub fn signal_shutdown(&self) {
-        debug!("Broadcasting shutdown signal to {} receivers", self.sender.receiver_count());
+        debug!(
+            "Broadcasting shutdown signal to {} receivers",
+            self.sender.receiver_count()
+        );
         let send_count = self.sender.send(ShutdownSignal {}).unwrap_or(0);
         debug!("Shutdown signal sent to {} receivers", send_count);
     }
@@ -52,7 +52,7 @@ impl ShutdownReceiver {
             Ok(signal) => {
                 debug!("Received shutdown signal");
                 signal
-            },
+            }
             Err(e) => {
                 debug!("Shutdown channel error: {}, using default signal", e);
                 ShutdownSignal {} // Default if channel closed

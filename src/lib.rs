@@ -48,11 +48,11 @@ pub mod theater_server;
 pub mod utils;
 mod wasm;
 
-pub use actor::ActorStore;
-pub use actor::ActorHandle;
-pub use actor::ActorRuntime;
 pub use actor::ActorError;
+pub use actor::ActorHandle;
 pub use actor::ActorOperation;
+pub use actor::ActorRuntime;
+pub use actor::ActorStore;
 pub use actor::StartActorResult;
 pub use chain::{ChainEvent, StateChain};
 pub use config::{HandlerConfig, HttpServerHandlerConfig, ManifestConfig, MessageServerConfig};

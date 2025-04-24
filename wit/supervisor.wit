@@ -47,6 +47,7 @@ package ntwk:theater;
 // identification across the system.
 
 interface supervisor {
+    use types.{chain-event};
     // # Spawn a new child actor
     //
     // Creates and starts a new actor from the specified manifest file.
@@ -143,23 +144,23 @@ interface supervisor {
     // * `Ok(list<chain-event>)` - List of events in the child's chain
     // * `Err(string)` - Error message if retrieving events fails
     get-child-events: func(child-id: string) -> result<list<chain-event>, string>;
+}
 
-    // # Event in a chain
+interface supervisor-handlers {
+    use types.{json, actor-error};
+    
+    // # Handle a child actor error
     //
-    // Represents a single event in an actor's chain (audit log).
+    // Processes an error from a child actor, allowing the parent to react or log the error.
     //
-    // ## Fields
+    // ## Parameters
     //
-    // * `hash` - Unique identifier/hash for this event
-    // * `parent-hash` - Hash of the previous event in the chain (None for first event)
-    // * `event-type` - Type of event (e.g., "wasm", "http", "message")
-    // * `data` - Serialized event data
-    // * `timestamp` - Timestamp when the event occurred (milliseconds since epoch)
-    record chain-event {
-        hash: list<u8>,
-        parent-hash: option<list<u8>>,
-        event-type: string,
-        data: list<u8>,
-        timestamp: u64
-    }
+    // * `state` - Optional state of the parent actor (for context)
+    // * `params` - Tuple containing the child ID and error data
+    //
+    // ## Returns
+    //
+    // * `Ok(tuple<option<json>, string>)` - Updated state and result message
+    // * `Err(string)` - Error message if handling fails
+    handle-child-error: func(state: option<json>, params: tuple<string, actor-error>) -> result<tuple<option<json>, string>, string>;
 }

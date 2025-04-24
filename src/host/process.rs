@@ -10,14 +10,14 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::future::Future;
 use std::sync::{Arc, Mutex};
-use wasmtime::component::{ComponentType, Lift, Lower};
 use std::time::SystemTime;
 use thiserror::Error;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::process::{Child, Command};
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
-use tracing::{error, info, debug};
+use tracing::{debug, error, info};
+use wasmtime::component::{ComponentType, Lift, Lower};
 
 /// Errors that can occur in the ProcessHost
 #[derive(Error, Debug)]
@@ -115,7 +115,13 @@ pub struct ProcessConfig {
 }
 
 /// Status of a running process
-#[derive(Debug, Clone, wasmtime::component::ComponentType, wasmtime::component::Lift, wasmtime::component::Lower)]
+#[derive(
+    Debug,
+    Clone,
+    wasmtime::component::ComponentType,
+    wasmtime::component::Lift,
+    wasmtime::component::Lower,
+)]
 #[component(record)]
 pub struct ProcessStatus {
     /// Process ID (within Theater)
@@ -177,14 +183,14 @@ impl ProcessHost {
                 "handle-stdout",
             )
             .expect("Failed to register handle-stdout function");
-            
+
         actor_instance
             .register_function_no_result::<(u64, Vec<u8>)>(
                 "ntwk:theater/process-handlers",
                 "handle-stderr",
             )
             .expect("Failed to register handle-stderr function");
-            
+
         actor_instance
             .register_function_no_result::<(u64, i32)>(
                 "ntwk:theater/process-handlers",
@@ -217,11 +223,14 @@ impl ProcessHost {
                         Ok(n) if n > 0 => {
                             // Send the output to the actor
                             let data = buffer[0..n].to_vec();
-                            actor_handle.call_function::<(u64, Vec<u8>), ()>(
-                                handler.clone(),
-                                (process_id, data),
-                            ).await.expect("Failed to send chunk to actor");
-                        },
+                            actor_handle
+                                .call_function::<(u64, Vec<u8>), ()>(
+                                    handler.clone(),
+                                    (process_id, data),
+                                )
+                                .await
+                                .expect("Failed to send chunk to actor");
+                        }
                         Ok(_) => break, // EOF
                         Err(e) => {
                             error!("Error reading process output: {}", e);
@@ -229,12 +238,12 @@ impl ProcessHost {
                         }
                     }
                 }
-            },
+            }
             OutputMode::LineByLine => {
                 // Process output line by line
                 let mut line = vec![];
                 let mut buffer = vec![0; 1]; // Read one byte at a time for line processing
-                
+
                 loop {
                     match reader.read(&mut buffer).await {
                         Ok(n) if n > 0 => {
@@ -243,127 +252,149 @@ impl ProcessHost {
                                 if !line.is_empty() {
                                     // Send the line to the actor
                                     let data = line.clone();
-                                    actor_handle.call_function::<(u64, Vec<u8>), ()>(
-                                        handler.clone(),
-                                        (process_id, data),
-                                    ).await.expect("Failed to send chunk to actor");
-                                    
+                                    actor_handle
+                                        .call_function::<(u64, Vec<u8>), ()>(
+                                            handler.clone(),
+                                            (process_id, data),
+                                        )
+                                        .await
+                                        .expect("Failed to send chunk to actor");
+
                                     line.clear();
                                 }
                             } else {
                                 line.push(buffer[0]);
-                                
+
                                 // Check if line is too long
                                 if line.len() >= buffer_size {
                                     // Send the partial line to the actor
                                     let data = line.clone();
-                                    actor_handle.call_function::<(u64, Vec<u8>), ()>(
-                                        handler.clone(),
-                                        (process_id, data),
-                                    ).await.expect("Failed to send chunk to actor");
-                                    
+                                    actor_handle
+                                        .call_function::<(u64, Vec<u8>), ()>(
+                                            handler.clone(),
+                                            (process_id, data),
+                                        )
+                                        .await
+                                        .expect("Failed to send chunk to actor");
+
                                     line.clear();
                                 }
                             }
-                        },
+                        }
                         Ok(_) => {
                             // EOF - send any remaining data
                             if !line.is_empty() {
                                 // Send the line to the actor
                                 let data = line.clone();
-                                actor_handle.call_function::<(u64, Vec<u8>), ()>(
-                                    handler.clone(),
-                                    (process_id, data),
-                                ).await.expect("Failed to send chunk to actor");
+                                actor_handle
+                                    .call_function::<(u64, Vec<u8>), ()>(
+                                        handler.clone(),
+                                        (process_id, data),
+                                    )
+                                    .await
+                                    .expect("Failed to send chunk to actor");
                             }
                             break;
-                        },
+                        }
                         Err(e) => {
                             error!("Error reading process output: {}", e);
                             break;
                         }
                     }
                 }
-            },
+            }
             OutputMode::Json => {
                 // Process output as JSON objects (newline-delimited)
                 let mut buffer = String::new();
                 let mut temp_buffer = vec![0; 1024]; // Read in chunks
-                
+
                 loop {
                     match reader.read(&mut temp_buffer).await {
                         Ok(n) if n > 0 => {
                             let chunk = String::from_utf8_lossy(&temp_buffer[0..n]);
                             buffer.push_str(&chunk);
-                            
+
                             // Process complete JSON objects
                             while let Some(pos) = buffer.find('\n') {
                                 let line = buffer[0..pos].trim().to_string();
-                                let remaining = buffer[pos+1..].to_string();
+                                let remaining = buffer[pos + 1..].to_string();
                                 buffer = remaining;
-                                
+
                                 if !line.is_empty() {
                                     // Validate JSON
-                                    if let Ok(_) = serde_json::from_str::<serde_json::Value>(&line) {
+                                    if let Ok(_) = serde_json::from_str::<serde_json::Value>(&line)
+                                    {
                                         // Valid JSON, send it
                                         let data = line.as_bytes().to_vec();
-                                        actor_handle.call_function::<(u64, Vec<u8>), ()>(
-                                            handler.clone(),
-                                            (process_id, data),
-                                        ).await.expect("Failed to send chunk to actor");
+                                        actor_handle
+                                            .call_function::<(u64, Vec<u8>), ()>(
+                                                handler.clone(),
+                                                (process_id, data),
+                                            )
+                                            .await
+                                            .expect("Failed to send chunk to actor");
                                     }
                                 }
                             }
-                            
+
                             // Check if buffer is too large
                             if buffer.len() > buffer_size {
                                 // Buffer too large, flush it as raw data
                                 let data = buffer.as_bytes().to_vec();
-                                actor_handle.call_function::<(u64, Vec<u8>), ()>(
-                                    handler.clone(),
-                                    (process_id, data),
-                                ).await.expect("Failed to send chunk to actor");
-                                
+                                actor_handle
+                                    .call_function::<(u64, Vec<u8>), ()>(
+                                        handler.clone(),
+                                        (process_id, data),
+                                    )
+                                    .await
+                                    .expect("Failed to send chunk to actor");
+
                                 buffer.clear();
                             }
-                        },
+                        }
                         Ok(_) => {
                             // EOF - send any remaining data
                             if !buffer.is_empty() {
                                 let data = buffer.as_bytes().to_vec();
-                                actor_handle.call_function::<(u64, Vec<u8>), ()>(
-                                    handler.clone(),
-                                    (process_id, data),
-                                ).await.expect("Failed to send chunk to actor");
+                                actor_handle
+                                    .call_function::<(u64, Vec<u8>), ()>(
+                                        handler.clone(),
+                                        (process_id, data),
+                                    )
+                                    .await
+                                    .expect("Failed to send chunk to actor");
                             }
                             break;
-                        },
+                        }
                         Err(e) => {
                             error!("Error reading process output: {}", e);
                             break;
                         }
                     }
                 }
-            },
+            }
             OutputMode::Chunked => {
                 // Read in fixed-size chunks
                 let chunk_size = match mode {
                     OutputMode::Chunked => buffer_size,
                     _ => unreachable!(), // We're in the Chunked match arm
                 };
-                
+
                 let mut buffer = vec![0; chunk_size];
-                
+
                 loop {
                     match reader.read_exact(&mut buffer).await {
                         Ok(_) => {
                             // Send the chunk to the actor
                             let data = buffer.clone();
-                            actor_handle.call_function::<(u64, Vec<u8>), ()>(
-                                handler.clone(),
-                                (process_id, data),
-                            ).await.expect("Failed to send chunk to actor");
-                        },
+                            actor_handle
+                                .call_function::<(u64, Vec<u8>), ()>(
+                                    handler.clone(),
+                                    (process_id, data),
+                                )
+                                .await
+                                .expect("Failed to send chunk to actor");
+                        }
                         Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => {
                             // Partial chunk - read what's available
                             let mut partial_buffer = vec![0; chunk_size];
@@ -371,14 +402,17 @@ impl ProcessHost {
                                 if n > 0 {
                                     // Send the partial chunk to the actor
                                     let data = partial_buffer[0..n].to_vec();
-                                    actor_handle.call_function::<(u64, Vec<u8>), ()>(
-                                        handler.clone(),
-                                        (process_id, data),
-                                    ).await.expect("Failed to send chunk to actor");
+                                    actor_handle
+                                        .call_function::<(u64, Vec<u8>), ()>(
+                                            handler.clone(),
+                                            (process_id, data),
+                                        )
+                                        .await
+                                        .expect("Failed to send chunk to actor");
                                 }
                             }
                             break;
-                        },
+                        }
                         Err(e) => {
                             error!("Error reading process output: {}", e);
                             break;
@@ -702,7 +736,7 @@ impl ProcessHost {
                     let stdin_tx = {
                         // We need to drop the mutex guard before the async operation
                         let processes = processes.lock().unwrap();
-                        
+
                         if let Some(process) = processes.get(&pid) {
                             if let Some(tx) = &process.stdin_tx {
                                 debug!("Found stdin channel for process {}", pid);
@@ -716,7 +750,7 @@ impl ProcessHost {
                             None
                         }
                     };
-                    
+
                     if let Some(stdin_tx) = stdin_tx {
                         // Send data to the stdin writer
                         let bytes_written = data.len() as u32;
@@ -731,11 +765,14 @@ impl ProcessHost {
                                         bytes_written,
                                     }),
                                     timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                                    description: Some(format!("Wrote {} bytes to process {} stdin", bytes_written, pid)),
+                                    description: Some(format!(
+                                        "Wrote {} bytes to process {} stdin",
+                                        bytes_written, pid
+                                    )),
                                 });
-                                
+
                                 Ok((Ok(bytes_written),))
-                            },
+                            }
                             Err(e) => {
                                 error!("Failed to write to stdin of process {}: {}", pid, e);
                                 // Record error event
@@ -747,9 +784,12 @@ impl ProcessHost {
                                         message: e.to_string(),
                                     }),
                                     timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                                    description: Some(format!("Failed to write to process {} stdin: {}", pid, e)),
+                                    description: Some(format!(
+                                        "Failed to write to process {} stdin: {}",
+                                        pid, e
+                                    )),
                                 });
-                                
+
                                 Ok((Err(format!("Failed to write to stdin: {}", e)),))
                             }
                         }
@@ -764,9 +804,12 @@ impl ProcessHost {
                                 message: "Process stdin not available".to_string(),
                             }),
                             timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                            description: Some(format!("Failed to write to process {}: stdin not available", pid)),
+                            description: Some(format!(
+                                "Failed to write to process {}: stdin not available",
+                                pid
+                            )),
                         });
-                        
+
                         Ok((Err("Process stdin not available".to_string()),))
                     }
                 })
@@ -832,7 +875,7 @@ impl ProcessHost {
                   (pid,): (u64,)|
                   -> Box<dyn Future<Output = Result<(Result<(), String>,)>> + Send> {
                 let processes = processes.clone();
-                
+
                 Box::new(async move {
                     // Get a clone of the child process to kill
                     let child_opt = {
@@ -843,7 +886,7 @@ impl ProcessHost {
                             None
                         }
                     };
-                    
+
                     // Kill the process if we have a handle
                     if let Some(mut child) = child_opt {
                         match child.kill().await {
@@ -857,7 +900,7 @@ impl ProcessHost {
                                     timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                     description: Some(format!("Killed process {}", pid)),
                                 });
-                                
+
                                 // Update the process status to reflect it's been killed
                                 {
                                     let mut processes = processes.lock().unwrap();
@@ -865,9 +908,9 @@ impl ProcessHost {
                                         process.exit_code = Some(-1); // Killed
                                     }
                                 }
-                                
+
                                 Ok((Ok(()),))
-                            },
+                            }
                             Err(e) => {
                                 // Record error event
                                 ctx.data_mut().record_event(ChainEventData {
@@ -878,9 +921,12 @@ impl ProcessHost {
                                         message: e.to_string(),
                                     }),
                                     timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                                    description: Some(format!("Failed to kill process {}: {}", pid, e)),
+                                    description: Some(format!(
+                                        "Failed to kill process {}: {}",
+                                        pid, e
+                                    )),
                                 });
-                                
+
                                 Ok((Err(format!("Failed to kill process: {}", e)),))
                             }
                         }
@@ -894,13 +940,13 @@ impl ProcessHost {
                             timestamp: chrono::Utc::now().timestamp_millis() as u64,
                             description: Some(format!("Process {} is already terminated", pid)),
                         });
-                        
+
                         Ok((Ok(()),))
                     }
                 })
             },
         )?;
-        
+
         // Implementation for os-signal
         let processes = self.processes.clone();
         interface.func_wrap_async(
@@ -1011,7 +1057,7 @@ impl ProcessHost {
                 })
             },
         )?;
-        
+
         Ok(())
     }
 }

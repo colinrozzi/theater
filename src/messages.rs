@@ -1,3 +1,4 @@
+use crate::actor::ActorError;
 /// # Theater Message System
 ///
 /// Defines the message types used for communication between different components
@@ -205,7 +206,7 @@ pub enum TheaterCommand {
     /// * `event` - The error event to record
     ActorError {
         actor_id: TheaterId,
-        event: ChainEvent,
+        error: ActorError,
     },
 
     /// # Get all actors

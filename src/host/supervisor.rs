@@ -1,13 +1,15 @@
-use crate::actor::types::ActorError;
 use crate::actor::handle::ActorHandle;
-use crate::shutdown::ShutdownReceiver;
 use crate::actor::store::ActorStore;
+use crate::actor::types::ActorError;
 use crate::config::SupervisorHostConfig;
 use crate::events::supervisor::SupervisorEventData;
 use crate::events::{ChainEventData, EventData};
 use crate::messages::TheaterCommand;
+use crate::shutdown::ShutdownReceiver;
 use crate::wasm::{ActorComponent, ActorInstance};
 use crate::ChainEvent;
+use crate::TheaterId;
+use tokio::sync::mpsc::Receiver;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::future::Future;
@@ -16,8 +18,8 @@ use tokio::sync::oneshot;
 use tracing::{error, info};
 use wasmtime::StoreContextMut;
 
-#[derive(Clone)]
-pub struct SupervisorHost {}
+pub struct SupervisorHost {
+}
 
 #[derive(Error, Debug)]
 pub enum SupervisorError {
@@ -40,7 +42,8 @@ struct SupervisorEvent {
 
 impl SupervisorHost {
     pub fn new(_config: SupervisorHostConfig) -> Self {
-        Self {}
+        Self {
+        }
     }
 
     pub async fn setup_host_functions(&self, actor_component: &mut ActorComponent) -> Result<()> {
@@ -263,7 +266,8 @@ impl SupervisorHost {
             .func_wrap_async(
                 "list-children",
                 move |mut ctx: StoreContextMut<'_, ActorStore>,
-                      ()| -> Box<dyn Future<Output = Result<(Vec<String>,)>> + Send> {
+                      ()|
+                      -> Box<dyn Future<Output = Result<(Vec<String>,)>> + Send> {
                     // Record list children call event
                     ctx.data_mut().record_event(ChainEventData {
                         event_type: "ntwk:theater/supervisor/list-children".to_string(),
@@ -271,7 +275,7 @@ impl SupervisorHost {
                         timestamp: chrono::Utc::now().timestamp_millis() as u64,
                         description: Some("Listing children".to_string()),
                     });
-                    
+
                     let store = ctx.data_mut();
                     let theater_tx = store.theater_tx.clone();
                     let parent_id = store.id.clone();
@@ -287,37 +291,45 @@ impl SupervisorHost {
                         {
                             Ok(_) => match response_rx.await {
                                 Ok(children) => {
-                                    let children_str: Vec<String> = children
-                                        .into_iter()
-                                        .map(|id| id.to_string())
-                                        .collect();
-                                    
+                                    let children_str: Vec<String> =
+                                        children.into_iter().map(|id| id.to_string()).collect();
+
                                     // Record list children result event
                                     ctx.data_mut().record_event(ChainEventData {
-                                        event_type: "ntwk:theater/supervisor/list-children".to_string(),
-                                        data: EventData::Supervisor(SupervisorEventData::ListChildrenResult {
-                                            children_count: children_str.len(),
-                                            success: true,
-                                        }),
+                                        event_type: "ntwk:theater/supervisor/list-children"
+                                            .to_string(),
+                                        data: EventData::Supervisor(
+                                            SupervisorEventData::ListChildrenResult {
+                                                children_count: children_str.len(),
+                                                success: true,
+                                            },
+                                        ),
                                         timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                                        description: Some(format!("Found {} children", children_str.len())),
+                                        description: Some(format!(
+                                            "Found {} children",
+                                            children_str.len()
+                                        )),
                                     });
-                                    
+
                                     Ok((children_str,))
                                 }
                                 Err(e) => {
                                     // Record list children error event
                                     ctx.data_mut().record_event(ChainEventData {
-                                        event_type: "ntwk:theater/supervisor/list-children".to_string(),
+                                        event_type: "ntwk:theater/supervisor/list-children"
+                                            .to_string(),
                                         data: EventData::Supervisor(SupervisorEventData::Error {
                                             operation: "list-children".to_string(),
                                             child_id: None,
                                             message: e.to_string(),
                                         }),
                                         timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                                        description: Some(format!("Failed to receive children list: {}", e)),
+                                        description: Some(format!(
+                                            "Failed to receive children list: {}",
+                                            e
+                                        )),
                                     });
-                                    
+
                                     Err(anyhow::anyhow!("Failed to receive children list: {}", e))
                                 }
                             },
@@ -331,9 +343,12 @@ impl SupervisorHost {
                                         message: e.to_string(),
                                     }),
                                     timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                                    description: Some(format!("Failed to send list children command: {}", e)),
+                                    description: Some(format!(
+                                        "Failed to send list children command: {}",
+                                        e
+                                    )),
                                 });
-                                
+
                                 Err(anyhow::anyhow!(
                                     "Failed to send list children command: {}",
                                     e
@@ -458,7 +473,7 @@ impl SupervisorHost {
                 },
             )
             .expect("Failed to wrap restart-child function");
-            
+
         // stop-child implementation
         let _ = interface
             .func_wrap_async(
@@ -579,7 +594,9 @@ impl SupervisorHost {
                 "get-child-state",
                 move |mut ctx: StoreContextMut<'_, ActorStore>,
                       (child_id,): (String,)|
-                      -> Box<dyn Future<Output = Result<(Result<Option<Vec<u8>>, String>,)>> + Send> {
+                      -> Box<
+                    dyn Future<Output = Result<(Result<Option<Vec<u8>>, String>,)>> + Send,
+                > {
                     // Record get child state call event
                     ctx.data_mut().record_event(ChainEventData {
                         event_type: "ntwk:theater/supervisor/get-child-state".to_string(),
@@ -589,7 +606,7 @@ impl SupervisorHost {
                         timestamp: chrono::Utc::now().timestamp_millis() as u64,
                         description: Some(format!("Getting state for child: {}", child_id)),
                     });
-                    
+
                     let store = ctx.data_mut();
                     let theater_tx = store.theater_tx.clone();
                     let child_id_clone = child_id.clone();
@@ -603,16 +620,22 @@ impl SupervisorHost {
                                     Err(e) => {
                                         // Record error event
                                         ctx.data_mut().record_event(ChainEventData {
-                                            event_type: "ntwk:theater/supervisor/get-child-state".to_string(),
-                                            data: EventData::Supervisor(SupervisorEventData::Error {
-                                                operation: "get-child-state".to_string(),
-                                                child_id: Some(child_id_clone.clone()),
-                                                message: e.to_string(),
-                                            }),
+                                            event_type: "ntwk:theater/supervisor/get-child-state"
+                                                .to_string(),
+                                            data: EventData::Supervisor(
+                                                SupervisorEventData::Error {
+                                                    operation: "get-child-state".to_string(),
+                                                    child_id: Some(child_id_clone.clone()),
+                                                    message: e.to_string(),
+                                                },
+                                            ),
                                             timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                                            description: Some(format!("Failed to parse child ID: {}", e)),
+                                            description: Some(format!(
+                                                "Failed to parse child ID: {}",
+                                                e
+                                            )),
                                         });
-                                        
+
                                         return Ok((Err(format!("Invalid child ID: {}", e)),));
                                     }
                                 },
@@ -625,66 +648,80 @@ impl SupervisorHost {
                                     // Record get child state result event
                                     let state_size = state.as_ref().map_or(0, |s| s.len());
                                     ctx.data_mut().record_event(ChainEventData {
-                                        event_type: "ntwk:theater/supervisor/get-child-state".to_string(),
-                                        data: EventData::Supervisor(SupervisorEventData::GetChildStateResult {
-                                            child_id: child_id_clone.clone(),
-                                            state_size,
-                                            success: true,
-                                        }),
+                                        event_type: "ntwk:theater/supervisor/get-child-state"
+                                            .to_string(),
+                                        data: EventData::Supervisor(
+                                            SupervisorEventData::GetChildStateResult {
+                                                child_id: child_id_clone.clone(),
+                                                state_size,
+                                                success: true,
+                                            },
+                                        ),
                                         timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                         description: Some(format!(
-                                            "Successfully retrieved state for child {}: {} bytes", 
-                                            child_id_clone, 
-                                            state_size
+                                            "Successfully retrieved state for child {}: {} bytes",
+                                            child_id_clone, state_size
                                         )),
                                     });
-                                    
+
                                     Ok((Ok(state),))
                                 }
                                 Ok(Err(e)) => {
                                     // Record get child state error event
                                     ctx.data_mut().record_event(ChainEventData {
-                                        event_type: "ntwk:theater/supervisor/get-child-state".to_string(),
+                                        event_type: "ntwk:theater/supervisor/get-child-state"
+                                            .to_string(),
                                         data: EventData::Supervisor(SupervisorEventData::Error {
                                             operation: "get-child-state".to_string(),
                                             child_id: Some(child_id_clone.clone()),
                                             message: e.to_string(),
                                         }),
                                         timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                                        description: Some(format!("Failed to get child state: {}", e)),
+                                        description: Some(format!(
+                                            "Failed to get child state: {}",
+                                            e
+                                        )),
                                     });
-                                    
+
                                     Ok((Err(e.to_string()),))
                                 }
                                 Err(e) => {
                                     // Record get child state error event
                                     ctx.data_mut().record_event(ChainEventData {
-                                        event_type: "ntwk:theater/supervisor/get-child-state".to_string(),
+                                        event_type: "ntwk:theater/supervisor/get-child-state"
+                                            .to_string(),
                                         data: EventData::Supervisor(SupervisorEventData::Error {
                                             operation: "get-child-state".to_string(),
                                             child_id: Some(child_id_clone.clone()),
                                             message: e.to_string(),
                                         }),
                                         timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                                        description: Some(format!("Failed to receive state: {}", e)),
+                                        description: Some(format!(
+                                            "Failed to receive state: {}",
+                                            e
+                                        )),
                                     });
-                                    
+
                                     Ok((Err(format!("Failed to receive state: {}", e)),))
                                 }
                             },
                             Err(e) => {
                                 // Record get child state error event
                                 ctx.data_mut().record_event(ChainEventData {
-                                    event_type: "ntwk:theater/supervisor/get-child-state".to_string(),
+                                    event_type: "ntwk:theater/supervisor/get-child-state"
+                                        .to_string(),
                                     data: EventData::Supervisor(SupervisorEventData::Error {
                                         operation: "get-child-state".to_string(),
                                         child_id: Some(child_id_clone.clone()),
                                         message: e.to_string(),
                                     }),
                                     timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                                    description: Some(format!("Failed to send state request: {}", e)),
+                                    description: Some(format!(
+                                        "Failed to send state request: {}",
+                                        e
+                                    )),
                                 });
-                                
+
                                 Ok((Err(format!("Failed to send state request: {}", e)),))
                             }
                         }
@@ -699,7 +736,9 @@ impl SupervisorHost {
                 "get-child-events",
                 move |mut ctx: StoreContextMut<'_, ActorStore>,
                       (child_id,): (String,)|
-                      -> Box<dyn Future<Output = Result<(Result<Vec<ChainEvent>, String>,)>> + Send> {
+                      -> Box<
+                    dyn Future<Output = Result<(Result<Vec<ChainEvent>, String>,)>> + Send,
+                > {
                     // Record get child events call event
                     ctx.data_mut().record_event(ChainEventData {
                         event_type: "ntwk:theater/supervisor/get-child-events".to_string(),
@@ -709,7 +748,7 @@ impl SupervisorHost {
                         timestamp: chrono::Utc::now().timestamp_millis() as u64,
                         description: Some(format!("Getting events for child: {}", child_id)),
                     });
-                    
+
                     let store = ctx.data_mut();
                     let theater_tx = store.theater_tx.clone();
                     let child_id_clone = child_id.clone();
@@ -723,16 +762,22 @@ impl SupervisorHost {
                                     Err(e) => {
                                         // Record error event
                                         ctx.data_mut().record_event(ChainEventData {
-                                            event_type: "ntwk:theater/supervisor/get-child-events".to_string(),
-                                            data: EventData::Supervisor(SupervisorEventData::Error {
-                                                operation: "get-child-events".to_string(),
-                                                child_id: Some(child_id_clone.clone()),
-                                                message: e.to_string(),
-                                            }),
+                                            event_type: "ntwk:theater/supervisor/get-child-events"
+                                                .to_string(),
+                                            data: EventData::Supervisor(
+                                                SupervisorEventData::Error {
+                                                    operation: "get-child-events".to_string(),
+                                                    child_id: Some(child_id_clone.clone()),
+                                                    message: e.to_string(),
+                                                },
+                                            ),
                                             timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                                            description: Some(format!("Failed to parse child ID: {}", e)),
+                                            description: Some(format!(
+                                                "Failed to parse child ID: {}",
+                                                e
+                                            )),
                                         });
-                                        
+
                                         return Ok((Err(format!("Invalid child ID: {}", e)),));
                                     }
                                 },
@@ -744,66 +789,81 @@ impl SupervisorHost {
                                 Ok(Ok(events)) => {
                                     // Record get child events result event
                                     ctx.data_mut().record_event(ChainEventData {
-                                        event_type: "ntwk:theater/supervisor/get-child-events".to_string(),
-                                        data: EventData::Supervisor(SupervisorEventData::GetChildEventsResult {
-                                            child_id: child_id_clone.clone(),
-                                            events_count: events.len(),
-                                            success: true,
-                                        }),
+                                        event_type: "ntwk:theater/supervisor/get-child-events"
+                                            .to_string(),
+                                        data: EventData::Supervisor(
+                                            SupervisorEventData::GetChildEventsResult {
+                                                child_id: child_id_clone.clone(),
+                                                events_count: events.len(),
+                                                success: true,
+                                            },
+                                        ),
                                         timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                         description: Some(format!(
-                                            "Successfully retrieved {} events for child {}", 
-                                            events.len(), 
+                                            "Successfully retrieved {} events for child {}",
+                                            events.len(),
                                             child_id_clone
                                         )),
                                     });
-                                    
+
                                     Ok((Ok(events),))
                                 }
                                 Ok(Err(e)) => {
                                     // Record get child events error event
                                     ctx.data_mut().record_event(ChainEventData {
-                                        event_type: "ntwk:theater/supervisor/get-child-events".to_string(),
+                                        event_type: "ntwk:theater/supervisor/get-child-events"
+                                            .to_string(),
                                         data: EventData::Supervisor(SupervisorEventData::Error {
                                             operation: "get-child-events".to_string(),
                                             child_id: Some(child_id_clone.clone()),
                                             message: e.to_string(),
                                         }),
                                         timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                                        description: Some(format!("Failed to get child events: {}", e)),
+                                        description: Some(format!(
+                                            "Failed to get child events: {}",
+                                            e
+                                        )),
                                     });
-                                    
+
                                     Ok((Err(e.to_string()),))
                                 }
                                 Err(e) => {
                                     // Record get child events error event
                                     ctx.data_mut().record_event(ChainEventData {
-                                        event_type: "ntwk:theater/supervisor/get-child-events".to_string(),
+                                        event_type: "ntwk:theater/supervisor/get-child-events"
+                                            .to_string(),
                                         data: EventData::Supervisor(SupervisorEventData::Error {
                                             operation: "get-child-events".to_string(),
                                             child_id: Some(child_id_clone.clone()),
                                             message: e.to_string(),
                                         }),
                                         timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                                        description: Some(format!("Failed to receive events: {}", e)),
+                                        description: Some(format!(
+                                            "Failed to receive events: {}",
+                                            e
+                                        )),
                                     });
-                                    
+
                                     Ok((Err(format!("Failed to receive events: {}", e)),))
                                 }
                             },
                             Err(e) => {
                                 // Record get child events error event
                                 ctx.data_mut().record_event(ChainEventData {
-                                    event_type: "ntwk:theater/supervisor/get-child-events".to_string(),
+                                    event_type: "ntwk:theater/supervisor/get-child-events"
+                                        .to_string(),
                                     data: EventData::Supervisor(SupervisorEventData::Error {
                                         operation: "get-child-events".to_string(),
                                         child_id: Some(child_id_clone.clone()),
                                         message: e.to_string(),
                                     }),
                                     timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                                    description: Some(format!("Failed to send events request: {}", e)),
+                                    description: Some(format!(
+                                        "Failed to send events request: {}",
+                                        e
+                                    )),
                                 });
-                                
+
                                 Ok((Err(format!("Failed to send events request: {}", e)),))
                             }
                         }
@@ -822,7 +882,11 @@ impl SupervisorHost {
         Ok(())
     }
 
-    pub async fn start(&self, _actor_handle: ActorHandle, _shutdown_receiver: ShutdownReceiver) -> Result<()> {
+    pub async fn start(
+        &self,
+        _actor_handle: ActorHandle,
+        _shutdown_receiver: ShutdownReceiver,
+    ) -> Result<()> {
         info!("Starting supervisor host");
         Ok(())
     }

@@ -1,6 +1,6 @@
+use serde_json;
 use thiserror::Error;
 use tracing::info;
-use serde_json;
 
 use crate::store::{ContentRef, ContentStore};
 use anyhow::Result;
@@ -77,7 +77,10 @@ pub async fn resolve_reference(reference: &str) -> Result<Vec<u8>, ReferenceErro
 /// - If config_state is None and override_state is Some, returns override_state
 /// - If both are Some but either is not a valid JSON object, returns override_state
 /// - If both are Some and both are valid JSON objects, merges them with override_state taking precedence
-pub fn merge_initial_states(config_state: Option<Vec<u8>>, override_state: Option<Vec<u8>>) -> Result<Option<Vec<u8>>> {
+pub fn merge_initial_states(
+    config_state: Option<Vec<u8>>,
+    override_state: Option<Vec<u8>>,
+) -> Result<Option<Vec<u8>>> {
     match (config_state, override_state) {
         (None, None) => Ok(None),
         (Some(state), None) => Ok(Some(state)),
@@ -86,17 +89,20 @@ pub fn merge_initial_states(config_state: Option<Vec<u8>>, override_state: Optio
             // Parse both states
             let config_json_result = serde_json::from_slice(&config_state);
             let override_json_result = serde_json::from_slice(&override_state);
-            
+
             match (config_json_result, override_json_result) {
                 (Ok(mut config_json), Ok(override_json)) => {
                     // Ensure both are objects
-                    if let (serde_json::Value::Object(ref mut config_map), serde_json::Value::Object(override_map)) = 
-                        (&mut config_json, &override_json) {
+                    if let (
+                        serde_json::Value::Object(ref mut config_map),
+                        serde_json::Value::Object(override_map),
+                    ) = (&mut config_json, &override_json)
+                    {
                         // Merge override values into config
                         for (key, value) in override_map {
                             config_map.insert(key.clone(), value.clone());
                         }
-                        
+
                         // Serialize the merged result
                         Ok(Some(serde_json::to_vec(&config_json)?))
                     } else {
@@ -104,10 +110,12 @@ pub fn merge_initial_states(config_state: Option<Vec<u8>>, override_state: Optio
                         info!("Either initial state is not a JSON object, using override state");
                         Ok(Some(override_state))
                     }
-                },
+                }
                 _ => {
                     // If either parsing fails, just use the override
-                    info!("Failed to parse one of the initial states as JSON, using override state");
+                    info!(
+                        "Failed to parse one of the initial states as JSON, using override state"
+                    );
                     Ok(Some(override_state))
                 }
             }

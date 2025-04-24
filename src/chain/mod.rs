@@ -60,7 +60,7 @@ use crate::TheaterId;
 /// ```rust
 /// use theater::chain::ChainEvent;
 /// use theater::events::ChainEventData;
-/// 
+///
 /// // Create an event
 /// let data = vec![1, 2, 3, 4]; // Example binary data
 /// let event = ChainEvent {
@@ -215,7 +215,7 @@ impl PartialEq for ChainEvent {
 /// use theater::events::{ChainEventData, EventData};
 /// use theater::id::TheaterId;
 /// use tokio::sync::mpsc;
-/// 
+///
 /// async fn example() {
 ///     // Create channels for theater commands
 ///     let (theater_tx, _) = mpsc::channel(100);
@@ -266,7 +266,7 @@ impl StateChain {
     /// Creates a new empty state chain for an actor.
     ///
     /// ## Purpose
-    /// 
+    ///
     /// This constructor initializes a new state chain for an actor, establishing
     /// the event history tracking for that actor. The chain starts empty with no
     /// events, and will build up as the actor performs actions.

@@ -7,15 +7,15 @@
 //! state handling, and operation execution. Together, these components form a robust
 //! actor system with isolation, supervision, and fault tolerance capabilities.
 
-pub mod runtime;
-pub mod types;
 pub mod handle;
+pub mod runtime;
 pub mod store;
+pub mod types;
 
 // Public re-exports
+pub use handle::ActorHandle;
 pub use runtime::ActorRuntime;
 pub use runtime::StartActorResult;
+pub use store::ActorStore;
 pub use types::ActorError;
 pub use types::ActorOperation;
-pub use handle::ActorHandle;
-pub use store::ActorStore;

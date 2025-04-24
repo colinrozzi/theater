@@ -105,7 +105,9 @@ impl ActorHandle {
             },
             Err(_) => {
                 error!("Operation timed out after {:?}", DEFAULT_OPERATION_TIMEOUT);
-                Err(ActorError::OperationTimeout(DEFAULT_OPERATION_TIMEOUT))
+                Err(ActorError::OperationTimeout(
+                    DEFAULT_OPERATION_TIMEOUT.as_secs(),
+                ))
             }
         }
     }
@@ -146,7 +148,9 @@ impl ActorHandle {
                     "GetState operation timed out after {:?}",
                     DEFAULT_OPERATION_TIMEOUT
                 );
-                Err(ActorError::OperationTimeout(DEFAULT_OPERATION_TIMEOUT))
+                Err(ActorError::OperationTimeout(
+                    DEFAULT_OPERATION_TIMEOUT.as_secs(),
+                ))
             }
         }
     }
@@ -186,7 +190,9 @@ impl ActorHandle {
                     "GetChain operation timed out after {:?}",
                     DEFAULT_OPERATION_TIMEOUT
                 );
-                Err(ActorError::OperationTimeout(DEFAULT_OPERATION_TIMEOUT))
+                Err(ActorError::OperationTimeout(
+                    DEFAULT_OPERATION_TIMEOUT.as_secs(),
+                ))
             }
         }
     }
@@ -226,7 +232,9 @@ impl ActorHandle {
                     "GetMetrics operation timed out after {:?}",
                     DEFAULT_OPERATION_TIMEOUT
                 );
-                Err(ActorError::OperationTimeout(DEFAULT_OPERATION_TIMEOUT))
+                Err(ActorError::OperationTimeout(
+                    DEFAULT_OPERATION_TIMEOUT.as_secs(),
+                ))
             }
         }
     }
@@ -266,7 +274,9 @@ impl ActorHandle {
                     "Shutdown operation timed out after {:?}",
                     DEFAULT_OPERATION_TIMEOUT
                 );
-                Err(ActorError::OperationTimeout(DEFAULT_OPERATION_TIMEOUT))
+                Err(ActorError::OperationTimeout(
+                    DEFAULT_OPERATION_TIMEOUT.as_secs(),
+                ))
             }
         }
     }
