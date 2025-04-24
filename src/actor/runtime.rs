@@ -121,8 +121,13 @@ impl ActorRuntime {
         };
 
         // Create handlers
-        let handlers =
-            Self::create_handlers(actor_sender, actor_mailbox, theater_tx.clone(), config);
+        let handlers = Self::create_handlers(
+            actor_sender,
+            actor_mailbox,
+            theater_tx.clone(),
+            config,
+            actor_handle.clone(),
+        );
 
         // Create component
         let mut actor_component =
@@ -251,6 +256,7 @@ impl ActorRuntime {
         actor_mailbox: Receiver<ActorMessage>,
         theater_tx: Sender<TheaterCommand>,
         config: &ManifestConfig,
+        actor_handle: ActorHandle,
     ) -> Vec<Handler> {
         let mut handlers = Vec::new();
 
@@ -278,7 +284,9 @@ impl ActorRuntime {
                 HandlerConfig::Supervisor(config) => {
                     Handler::Supervisor(SupervisorHost::new(config.clone()))
                 }
-                HandlerConfig::Process(config) => Handler::Process(ProcessHost::new(config.clone())),
+                HandlerConfig::Process(config) => {
+                    Handler::Process(ProcessHost::new(config.clone(), actor_handle.clone()))
+                }
                 HandlerConfig::Store(config) => Handler::Store(StoreHost::new(config.clone())),
                 HandlerConfig::Timing(config) => Handler::Timing(TimingHost::new(config.clone())),
             };
@@ -849,6 +857,10 @@ impl ActorRuntime {
             actor_mailbox_spoof,
             theater_tx_spoof,
             &new_config,
+            actor_instance
+                .actor_component
+                .actor_store
+                .get_actor_handle(),
         );
 
         // Create new component - reusing existing method

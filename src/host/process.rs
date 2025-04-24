@@ -142,17 +142,17 @@ pub struct ProcessHost {
     /// Next process ID to assign
     next_process_id: Arc<Mutex<u64>>,
     /// Actor handle for sending events
-    actor_handle: Option<ActorHandle>,
+    actor_handle: ActorHandle,
 }
 
 impl ProcessHost {
     /// Create a new ProcessHost with the given configuration
-    pub fn new(config: ProcessHostConfig) -> Self {
+    pub fn new(config: ProcessHostConfig, actor_handle: ActorHandle) -> Self {
         Self {
             config,
             processes: Arc::new(Mutex::new(HashMap::new())),
             next_process_id: Arc::new(Mutex::new(1)),
-            actor_handle: None,
+            actor_handle,
         }
     }
 
@@ -163,7 +163,6 @@ impl ProcessHost {
         _shutdown_receiver: ShutdownReceiver,
     ) -> Result<()> {
         info!("Starting ProcessHost");
-        self.actor_handle = Some(actor_handle);
         Ok(())
     }
 
@@ -544,7 +543,7 @@ impl ProcessHost {
                                 let process_id_clone = process_id;
                                 let actor_id_clone = actor_id.clone();
                                 let theater_tx_clone = theater_tx.clone();
-                                let actor_handle = actor_handle.clone().expect("Failed to clone actor handle");
+                                let actor_handle = actor_handle.clone();
                                 
                                 Some(tokio::spawn(async move {
                                     Self::process_output(
@@ -555,7 +554,7 @@ impl ProcessHost {
                                         actor_id_clone,
                                         theater_tx_clone,
                                         actor_handle.clone(),
-                                        "handle-stdout".to_string(),
+                                        "ntwk:theater/process-handlers.handle-stdout".to_string(),
                                     ).await;
                                 }))
                             } else {
@@ -569,7 +568,7 @@ impl ProcessHost {
                                 let process_id_clone = process_id;
                                 let actor_id_clone = actor_id.clone();
                                 let theater_tx_clone = theater_tx.clone();
-                                let actor_handle = actor_handle.clone().expect("Failed to clone actor handle");
+                                let actor_handle = actor_handle.clone();
                                 
                                 Some(tokio::spawn(async move {
                                     Self::process_output(
@@ -580,7 +579,7 @@ impl ProcessHost {
                                         actor_id_clone,
                                         theater_tx_clone,
                                         actor_handle.clone(),
-                                        "handle-stderr".to_string(),
+                                        "ntwk:theater/process-handlers.handle-stderr".to_string(),
                                     ).await;
                                 }))
                             } else {

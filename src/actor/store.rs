@@ -1,7 +1,7 @@
 //! # Actor Store
 //!
 //! This module provides an abstraction for sharing resources between an actor and the Theater runtime system.
-//! The ActorStore serves as a container for state, event chains, and communication channels that are 
+//! The ActorStore serves as a container for state, event chains, and communication channels that are
 //! needed for WASM host functions to interface with the Actor system.
 
 use crate::actor::handle::ActorHandle;
@@ -27,16 +27,16 @@ use tokio::sync::mpsc::Sender;
 pub struct ActorStore {
     /// Unique identifier for the actor
     pub id: TheaterId,
-    
+
     /// Channel for sending commands to the Theater runtime
     pub theater_tx: Sender<TheaterCommand>,
-    
+
     /// The event chain that records all actor operations for verification and audit
     pub chain: Arc<Mutex<StateChain>>,
-    
+
     /// The current state of the actor, stored as a binary blob
     pub state: Option<Vec<u8>>,
-    
+
     /// Handle to interact with the actor
     pub actor_handle: ActorHandle,
 }
@@ -201,5 +201,9 @@ impl ActorStore {
         let chain = self.chain.lock().unwrap();
         chain.save_to_file(path)?;
         Ok(())
+    }
+
+    pub fn get_actor_handle(&self) -> ActorHandle {
+        self.actor_handle.clone()
     }
 }
