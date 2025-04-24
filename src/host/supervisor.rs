@@ -8,8 +8,6 @@ use crate::messages::TheaterCommand;
 use crate::shutdown::ShutdownReceiver;
 use crate::wasm::{ActorComponent, ActorInstance};
 use crate::ChainEvent;
-use crate::TheaterId;
-use tokio::sync::mpsc::Receiver;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::future::Future;
