@@ -1,4 +1,5 @@
 use crate::messages::{ActorMessage, ActorRequest, ActorSend, ActorStatus, ChannelParticipant};
+use crate::ActorError;
 use crate::ChainEvent;
 use anyhow::Result;
 use bytes::Bytes;
@@ -99,6 +100,10 @@ pub enum ManagementResponse {
     ActorEvent {
         id: TheaterId,
         event: ChainEvent,
+    },
+    ActorError {
+        id: TheaterId,
+        error: ActorError,
     },
     Error {
         message: String,
@@ -528,9 +533,15 @@ impl TheaterServer {
                         );
                         while let Some(event) = event_rx.recv().await {
                             debug!("Received event for subscription {}", subscription_id);
-                            let response = ManagementResponse::ActorEvent {
-                                id: actor_id_clone.clone(),
-                                event,
+                            let response = match event {
+                                Ok(event) => ManagementResponse::ActorEvent {
+                                    id: actor_id_clone.clone(),
+                                    event,
+                                },
+                                Err(e) => ManagementResponse::ActorError {
+                                    id: actor_id_clone.clone(),
+                                    error: e,
+                                },
                             };
                             if let Err(e) = client_tx_clone.send(response).await {
                                 debug!("Failed to forward event to client: {}", e);

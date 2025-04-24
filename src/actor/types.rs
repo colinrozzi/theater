@@ -6,6 +6,7 @@
 
 use crate::metrics::ActorMetrics;
 use crate::ChainEvent;
+use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
 use thiserror::Error;
 use tokio::sync::oneshot;
@@ -22,7 +23,7 @@ pub const DEFAULT_OPERATION_TIMEOUT: Duration = Duration::from_secs(3000);
 /// This enum provides detailed error information for various failure modes that
 /// might occur when interacting with an actor. These errors are propagated back
 /// to callers to help diagnose and handle problems.
-#[derive(Error, Debug, Clone, ComponentType, Lift, Lower)]
+#[derive(Error, Debug, Clone, ComponentType, Lift, Lower, Serialize, Deserialize)]
 #[component(variant)]
 pub enum ActorError {
     /// Operation exceeded the maximum allowed execution time

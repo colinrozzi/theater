@@ -9,7 +9,8 @@ use crate::actor::types::{ActorError, ActorOperation};
 use crate::chain::ChainEvent;
 use crate::id::TheaterId;
 use crate::messages::{
-    ActorChannelClose, ActorChannelMessage, ActorChannelOpen, ChannelId, ChannelParticipant,
+    ActorChannelClose, ActorChannelMessage, ActorChannelOpen, ActorSend, ChannelId,
+    ChannelParticipant, ChildError,
 };
 use crate::messages::{ActorMessage, ActorStatus, TheaterCommand};
 use crate::metrics::ActorMetrics;
@@ -89,7 +90,7 @@ pub struct TheaterRuntime {
     /// Receiver for commands to the runtime
     theater_rx: Receiver<TheaterCommand>,
     /// Map of event subscriptions for actors
-    subscriptions: HashMap<TheaterId, Vec<Sender<ChainEvent>>>,
+    subscriptions: HashMap<TheaterId, Vec<Sender<Result<ChainEvent, ActorError>>>>,
     /// Map of active communication channels
     channels: HashMap<ChannelId, HashSet<ChannelParticipant>>,
     /// Optional channel to send channel events back to the server
@@ -121,6 +122,8 @@ pub struct ActorProcess {
     pub operation_tx: mpsc::Sender<ActorOperation>,
     /// Set of child actor IDs
     pub children: HashSet<TheaterId>,
+    /// Parent actor ID (if any)
+    pub parent_id: Option<TheaterId>,
     /// Current status of the actor
     pub status: ActorStatus,
     /// Path to the actor's manifest
@@ -830,6 +833,7 @@ impl TheaterRuntime {
                     mailbox_tx,
                     operation_tx,
                     children: HashSet::new(),
+                    parent_id: parent_id.clone(),
                     status: ActorStatus::Running,
                     manifest_path: manifest_path.clone(),
                     shutdown_controller,
@@ -885,7 +889,7 @@ impl TheaterRuntime {
 
             // Send events and track failures
             for (index, subscriber) in subscribers.iter().enumerate() {
-                if let Err(e) = subscriber.send(event.clone()).await {
+                if let Err(e) = subscriber.send(Ok(event.clone())).await {
                     error!("Failed to send event to subscriber: {}", e);
                     to_remove.push(index);
                 }
@@ -920,9 +924,58 @@ impl TheaterRuntime {
         debug!("Handling error event for actor: {:?}", actor_id);
 
         // notify the actors parents
+        if let Some(proc) = self.actors.get(&actor_id) {
+            if let Some(parent_id) = &proc.parent_id {
+                if let Some(parent_proc) = self.actors.get_mut(&parent_id.clone()) {
+                    let child_error = ChildError {
+                        actor_id: actor_id.clone(),
+                        error: error.clone(),
+                    };
+                    let error_message = ActorMessage::Send(ActorSend {
+                        data: serde_json::to_vec(&child_error).unwrap(),
+                    });
+                    if let Err(e) = parent_proc.mailbox_tx.send(error_message).await {
+                        error!("Failed to send error message to parent actor: {}", e);
+                    }
+                }
+            }
+        }
+
+        // pause the actor's children
+        if let Some(proc) = self.actors.get(&actor_id) {
+            for child_id in &proc.children.clone() {
+                if let Some(child_proc) = self.actors.get_mut(&child_id.clone()) {
+                    debug!("Pausing child actor: {:?}", child_id);
+                    let (response_tx, response_rx) = oneshot::channel();
+                    if let Err(e) = child_proc
+                        .operation_tx
+                        .send(ActorOperation::Pause { response_tx })
+                        .await
+                    {
+                        error!("Failed to send error message to child actor: {}", e);
+                    }
+                    if let Ok(result) = response_rx.await {
+                        match result {
+                            Ok(_) => debug!("Child actor {:?} paused successfully", child_id),
+                            Err(e) => error!("Failed to pause child actor: {}", e),
+                        }
+                    } else {
+                        error!("Failed to receive response for pause operation");
+                    }
+                }
+            }
+        }
 
         // notify any actor subscribers
-        todo!()
+        if let Some(subscribers) = self.subscriptions.get(&actor_id) {
+            for subscriber in subscribers {
+                if let Err(e) = subscriber.send(Err(error.clone())).await {
+                    error!("Failed to send error event to subscriber: {}", e);
+                }
+            }
+        }
+
+        Ok(())
     }
 
     /// Stops an actor and its children gracefully.

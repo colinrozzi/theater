@@ -329,7 +329,7 @@ pub enum TheaterCommand {
     /// This operation is only available to the actor's supervisor or to the system itself.
     SubscribeToActor {
         actor_id: TheaterId,
-        event_tx: Sender<ChainEvent>,
+        event_tx: Sender<Result<ChainEvent, ActorError>>,
     },
 
     /// # Open a communication channel
@@ -871,4 +871,10 @@ pub enum ActorStatus {
     Stopped,
     /// Actor has experienced an error or crash
     Failed,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChildError {
+    pub actor_id: TheaterId,
+    pub error: ActorError,
 }
