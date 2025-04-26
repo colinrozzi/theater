@@ -1,12 +1,16 @@
 use console::style;
+use std::time::Duration;
 use theater::id::TheaterId;
 use theater::messages::ActorStatus;
 use theater::ChainEvent;
-use std::time::Duration;
 
 /// Format an actor ID in a consistent way
 pub fn format_id(id: &TheaterId) -> String {
     style(id.to_string()).cyan().to_string()
+}
+
+pub fn format_name(name: &String) -> String {
+    style(name.to_string()).white().to_string()
 }
 
 /// Format a short version of an actor ID (first 8 chars)
@@ -35,28 +39,28 @@ pub fn format_timestamp(timestamp: &u64) -> String {
 /// Format a duration in a human-readable form
 pub fn format_duration(duration: Duration) -> String {
     let total_secs = duration.as_secs();
-    
+
     if total_secs < 60 {
         return format!("{}s", total_secs);
     }
-    
+
     let mins = total_secs / 60;
     let secs = total_secs % 60;
-    
+
     if mins < 60 {
         return format!("{}m {}s", mins, secs);
     }
-    
+
     let hours = mins / 60;
     let mins = mins % 60;
-    
+
     if hours < 24 {
         return format!("{}h {}m {}s", hours, mins, secs);
     }
-    
+
     let days = hours / 24;
     let hours = hours % 24;
-    
+
     format!("{}d {}h {}m {}s", days, hours, mins, secs)
 }
 
@@ -64,7 +68,7 @@ pub fn format_duration(duration: Duration) -> String {
 pub fn format_hash(hash: &[u8], shorten: bool) -> String {
     let hex = hex::encode(hash);
     if shorten && hex.len() > 16 {
-        format!("{}..{}", &hex[0..8], &hex[hex.len()-8..])
+        format!("{}..{}", &hex[0..8], &hex[hex.len() - 8..])
     } else {
         hex
     }
@@ -72,7 +76,11 @@ pub fn format_hash(hash: &[u8], shorten: bool) -> String {
 
 /// Format a section header
 pub fn format_section(title: &str) -> String {
-    format!("\n{}\n{}", style(title).bold().underlined(), style("─".repeat(title.len())).dim())
+    format!(
+        "\n{}\n{}",
+        style(title).bold().underlined(),
+        style("─".repeat(title.len())).dim()
+    )
 }
 
 /// Format a key-value pair for display
@@ -85,7 +93,7 @@ pub fn format_event_summary(event: &ChainEvent) -> String {
     let event_type = style(&event.event_type).yellow();
     let timestamp = format_timestamp(&event.timestamp);
     let hash = format_hash(&event.hash, true);
-    
+
     format!(
         "{} at {} (hash: {})",
         event_type,
@@ -100,10 +108,10 @@ pub fn format_table(headers: &[&str], rows: &[Vec<String>], indent: usize) -> St
     if rows.is_empty() {
         return "No data available".to_string();
     }
-    
+
     // Calculate column widths
     let mut widths: Vec<usize> = headers.iter().map(|h| h.len()).collect();
-    
+
     for row in rows {
         for (i, cell) in row.iter().enumerate() {
             if i < widths.len() {
@@ -111,17 +119,18 @@ pub fn format_table(headers: &[&str], rows: &[Vec<String>], indent: usize) -> St
             }
         }
     }
-    
+
     // Format the header
     let mut result = " ".repeat(indent);
     for (i, header) in headers.iter().enumerate() {
-        result.push_str(&format!("{:<width$} ", 
+        result.push_str(&format!(
+            "{:<width$} ",
             style(*header).bold(),
             width = widths[i]
         ));
     }
     result.push('\n');
-    
+
     // Add separator
     result.push_str(&" ".repeat(indent));
     for width in &widths {
@@ -129,7 +138,7 @@ pub fn format_table(headers: &[&str], rows: &[Vec<String>], indent: usize) -> St
         result.push(' ');
     }
     result.push('\n');
-    
+
     // Format rows
     for row in rows {
         result.push_str(&" ".repeat(indent));
@@ -140,7 +149,7 @@ pub fn format_table(headers: &[&str], rows: &[Vec<String>], indent: usize) -> St
         }
         result.push('\n');
     }
-    
+
     result
 }
 

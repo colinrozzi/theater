@@ -11,16 +11,12 @@ pub struct ComponentConfig {
 pub struct ManifestConfig {
     pub name: String,
     pub component_path: String,
+    pub short_description: Option<String>,
+    pub long_description: Option<String>,
     #[serde(default)]
     pub init_state: Option<String>,
     #[serde(default)]
-    pub interface: InterfacesConfig,
-    #[serde(default)]
     pub handlers: Vec<HandlerConfig>,
-    #[serde(default)]
-    pub logging: LoggingConfig,
-    #[serde(default)]
-    pub event_server: Option<EventServerConfig>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -289,60 +285,6 @@ impl ManifestConfig {
     /// ```
     pub fn name(&self) -> &str {
         &self.name
-    }
-
-    /// Checks if the actor implements a specific interface.
-    ///
-    /// ## Purpose
-    ///
-    /// This method checks whether the actor implements a particular WebAssembly
-    /// interface. This is used to verify capability compatibility before attaching
-    /// handlers to an actor.
-    ///
-    /// ## Parameters
-    ///
-    /// * `interface_name` - The name of the interface to check for
-    ///
-    /// ## Returns
-    ///
-    /// * `true` - If the actor implements the specified interface
-    /// * `false` - If the actor does not implement the specified interface
-    ///
-    /// ## Example
-    ///
-    /// ```rust
-    /// # use theater::config::ManifestConfig;
-    /// # fn example(config: &ManifestConfig) {
-    /// if config.implements_interface("http-server") {
-    ///     println!("Actor can handle HTTP requests");
-    /// }
-    /// # }
-    /// ```
-    pub fn implements_interface(&self, interface_name: &str) -> bool {
-        self.interface.implements == interface_name
-    }
-
-    /// Gets the primary interface implemented by the actor.
-    ///
-    /// ## Purpose
-    ///
-    /// This method returns the name of the primary interface that the actor
-    /// implements, which determines its core capabilities and behavior.
-    ///
-    /// ## Returns
-    ///
-    /// A string reference to the interface name
-    ///
-    /// ## Example
-    ///
-    /// ```rust
-    /// # use theater::config::ManifestConfig;
-    /// # fn example(config: &ManifestConfig) {
-    /// println!("Actor implements interface: {}", config.interface());
-    /// # }
-    /// ```
-    pub fn interface(&self) -> &str {
-        &self.interface.implements
     }
 
     /// Loads the initial state data for the actor.

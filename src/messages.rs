@@ -65,6 +65,7 @@ use crate::actor::ActorError;
 /// (`oneshot::Sender`) are used extensively to allow commands to return results
 /// to their callers.
 use crate::chain::ChainEvent;
+use crate::config::ManifestConfig;
 use crate::id::TheaterId;
 use crate::metrics::ActorMetrics;
 use crate::store::ContentStore;
@@ -217,7 +218,12 @@ pub enum TheaterCommand {
     ///
     /// * `response_tx` - Channel to receive the result (list of actor IDs)
     GetActors {
-        response_tx: oneshot::Sender<Result<Vec<TheaterId>>>,
+        response_tx: oneshot::Sender<Result<Vec<(TheaterId, String)>>>,
+    },
+
+    GetActorManifest {
+        actor_id: TheaterId,
+        response_tx: oneshot::Sender<Result<ManifestConfig>>,
     },
 
     /// # Get actor status
@@ -474,6 +480,9 @@ impl TheaterCommand {
                 format!("ActorError: {:?}", actor_id)
             }
             TheaterCommand::GetActors { .. } => "GetActors".to_string(),
+            TheaterCommand::GetActorManifest { actor_id, .. } => {
+                format!("GetActorManifest: {:?}", actor_id)
+            }
             TheaterCommand::GetActorStatus { actor_id, .. } => {
                 format!("GetActorStatus: {:?}", actor_id)
             }

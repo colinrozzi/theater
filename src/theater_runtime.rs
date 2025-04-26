@@ -114,6 +114,8 @@ pub struct TheaterRuntime {
 pub struct ActorProcess {
     /// Unique identifier for the actor
     pub actor_id: TheaterId,
+    /// Actor Name
+    pub name: String,
     /// Task handle for the running actor
     pub process: JoinHandle<ActorRuntime>,
     /// Channel for sending messages to the actor
@@ -128,6 +130,8 @@ pub struct ActorProcess {
     pub status: ActorStatus,
     /// Path to the actor's manifest
     pub manifest_path: String,
+    /// Actor Manifest
+    pub manifest: ManifestConfig,
     /// Controller for graceful shutdown
     pub shutdown_controller: ShutdownController,
 }
@@ -381,9 +385,28 @@ impl TheaterRuntime {
                 }
                 TheaterCommand::GetActors { response_tx } => {
                     debug!("Getting list of actors");
-                    let actors = self.actors.keys().cloned().collect();
-                    if let Err(e) = response_tx.send(Ok(actors)) {
-                        error!("Failed to send actor list: {:?}", e);
+                    let actor_info: Vec<_> = self
+                        .actors
+                        .iter()
+                        .map(|(id, proc)| (id.clone(), proc.name.clone()))
+                        .collect();
+                    if let Err(e) = response_tx.send(Ok(actor_info)) {
+                        error!("Failed to send actor info list: {:?}", e);
+                    }
+                }
+                TheaterCommand::GetActorManifest {
+                    actor_id,
+                    response_tx,
+                } => {
+                    debug!("Getting manifest for actor: {:?}", actor_id);
+                    if let Some(proc) = self.actors.get(&actor_id) {
+                        let manifest = proc.manifest.clone();
+                        if let Err(e) = response_tx.send(Ok(manifest)) {
+                            error!("Failed to send actor manifest: {:?}", e);
+                        }
+                    } else {
+                        warn!("Actor {:?} not found", actor_id);
+                        let _ = response_tx.send(Err(anyhow::anyhow!("Actor not found")));
                     }
                 }
                 TheaterCommand::GetActorStatus {
@@ -797,10 +820,12 @@ impl TheaterRuntime {
 
         // Start the actor in a detached task
         let actor_id_for_task = actor_id.clone();
+        let actor_name = manifest.name.clone();
+        let manifest_clone = manifest.clone();
         let actor_runtime_process = tokio::spawn(async move {
             ActorRuntime::start(
                 actor_id_for_task.clone(),
-                &manifest,
+                &manifest_clone,
                 init_bytes,
                 theater_tx,
                 actor_sender,
@@ -829,6 +854,7 @@ impl TheaterRuntime {
                 );
                 let process = ActorProcess {
                     actor_id: actor_id.clone(),
+                    name: actor_name,
                     process: actor_runtime_process,
                     mailbox_tx,
                     operation_tx,
@@ -836,6 +862,7 @@ impl TheaterRuntime {
                     parent_id: parent_id.clone(),
                     status: ActorStatus::Running,
                     manifest_path: manifest_path.clone(),
+                    manifest,
                     shutdown_controller,
                 };
 

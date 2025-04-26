@@ -1,6 +1,7 @@
 use crate::messages::{ActorMessage, ActorRequest, ActorSend, ActorStatus, ChannelParticipant};
 use crate::ActorError;
 use crate::ChainEvent;
+use crate::ManifestConfig;
 use anyhow::Result;
 use bytes::Bytes;
 use futures::sink::SinkExt;
@@ -42,6 +43,9 @@ pub enum ManagementCommand {
     RequestActorMessage {
         id: TheaterId,
         data: Vec<u8>,
+    },
+    GetActorManifest {
+        id: TheaterId,
     },
     GetActorStatus {
         id: TheaterId,
@@ -88,7 +92,7 @@ pub enum ManagementResponse {
         id: TheaterId,
     },
     ActorList {
-        actors: Vec<TheaterId>,
+        actors: Vec<(TheaterId, String)>,
     },
     Subscribed {
         id: TheaterId,
@@ -121,6 +125,10 @@ pub enum ManagementResponse {
     },
     Restarted {
         id: TheaterId,
+    },
+    ActorManifest {
+        id: TheaterId,
+        manifest: ManifestConfig,
     },
     ActorState {
         id: TheaterId,
@@ -614,6 +622,22 @@ impl TheaterServer {
                     ManagementResponse::RequestedMessage {
                         id,
                         message: response,
+                    }
+                }
+                ManagementCommand::GetActorManifest { id } => {
+                    info!("Getting manifest for actor: {:?}", id);
+                    let (cmd_tx, cmd_rx) = tokio::sync::oneshot::channel();
+                    runtime_tx
+                        .send(TheaterCommand::GetActorManifest {
+                            actor_id: id.clone(),
+                            response_tx: cmd_tx,
+                        })
+                        .await?;
+
+                    let manifest = cmd_rx.await?;
+                    ManagementResponse::ActorManifest {
+                        id,
+                        manifest: manifest?,
                     }
                 }
                 ManagementCommand::GetActorStatus { id } => {

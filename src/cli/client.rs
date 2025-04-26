@@ -109,7 +109,7 @@ impl TheaterClient {
     }
 
     /// List all running actors
-    pub async fn list_actors(&mut self) -> Result<Vec<TheaterId>> {
+    pub async fn list_actors(&mut self) -> Result<Vec<(TheaterId, String)>> {
         let command = ManagementCommand::ListActors;
         let response = self.send_command(command).await?;
 
