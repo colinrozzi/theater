@@ -1,7 +1,0 @@
-name = "streaming-producer"
-description = "Example actor that demonstrates producing data over a channel"
-component_path = "producer.wasm"
-
-[[handlers]]
-type = "message-server"
-config = {}

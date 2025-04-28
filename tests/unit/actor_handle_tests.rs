@@ -171,4 +171,3 @@ async fn test_get_chain() {
     assert_eq!(result[1].event_type, "event-1");
     assert_eq!(result[2].event_type, "event-2");
 }
-

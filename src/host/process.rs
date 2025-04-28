@@ -65,6 +65,7 @@ pub enum OutputMode {
 }
 
 /// Represents an OS process managed by Theater
+#[allow(dead_code)]
 struct ManagedProcess {
     /// Unique ID for this process (within Theater)
     id: u64,
@@ -165,7 +166,7 @@ impl ProcessHost {
     /// Start the process host
     pub async fn start(
         &mut self,
-        actor_handle: ActorHandle,
+        _actor_handle: ActorHandle,
         _shutdown_receiver: ShutdownReceiver,
     ) -> Result<()> {
         info!("Starting ProcessHost");
@@ -207,8 +208,8 @@ impl ProcessHost {
         mode: OutputMode,
         buffer_size: usize,
         process_id: u64,
-        actor_id: crate::id::TheaterId,
-        theater_tx: tokio::sync::mpsc::Sender<crate::messages::TheaterCommand>,
+        _actor_id: crate::id::TheaterId,
+        _theater_tx: tokio::sync::mpsc::Sender<crate::messages::TheaterCommand>,
         actor_handle: ActorHandle,
         handler: String,
     ) where

@@ -2,8 +2,8 @@ use chrono::Utc;
 use theater::actor_executor::ActorOperation;
 use theater::chain::StateChain;
 use theater::config::{HandlerConfig, ManifestConfig, MessageServerConfig};
-use theater::events::{ChainEventData, EventData};
 use theater::events::message::MessageEventData;
+use theater::events::{ChainEventData, EventData};
 use theater::id::TheaterId;
 use theater::messages::{ActorMessage, TheaterCommand};
 use theater::shutdown::{ShutdownController, ShutdownReceiver};
@@ -34,10 +34,12 @@ pub fn create_test_manifest(name: &str) -> ManifestConfig {
         logging: Default::default(),
         event_server: None,
     };
-    
+
     // Add a message server handler
-    config.handlers.push(HandlerConfig::MessageServer(MessageServerConfig {}));
-    
+    config
+        .handlers
+        .push(HandlerConfig::MessageServer(MessageServerConfig {}));
+
     config
 }
 
@@ -45,14 +47,14 @@ pub fn create_test_manifest(name: &str) -> ManifestConfig {
 pub async fn create_test_chain(actor_id: TheaterId, num_events: usize) -> StateChain {
     let (tx, _) = mpsc::channel(10);
     let mut chain = StateChain::new(actor_id, tx);
-    
+
     // Add events to the chain
     for i in 0..num_events {
         let data = format!("event data {}", i);
         let event_data = create_test_event_data(&format!("event-{}", i), data.as_bytes());
         chain.add_typed_event(event_data).unwrap();
     }
-    
+
     chain
 }
 
@@ -65,15 +67,15 @@ pub async fn setup_actor_test() -> (
     mpsc::Sender<ActorOperation>,
     mpsc::Receiver<ActorOperation>,
     ShutdownController,
-    ShutdownReceiver
+    ShutdownReceiver,
 ) {
     let actor_id = TheaterId::generate();
-    
+
     let (theater_tx, _) = mpsc::channel(10);
     let (actor_tx, actor_rx) = mpsc::channel(10);
     let (op_tx, op_rx) = mpsc::channel(10);
     let (shutdown_controller, shutdown_receiver) = ShutdownController::new();
-    
+
     (
         actor_id,
         theater_tx,
@@ -82,6 +84,6 @@ pub async fn setup_actor_test() -> (
         op_tx,
         op_rx,
         shutdown_controller,
-        shutdown_receiver
+        shutdown_receiver,
     )
 }

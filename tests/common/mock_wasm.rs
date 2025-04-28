@@ -49,11 +49,7 @@ impl MockActorComponent {
     }
 
     /// Set the result for a function call
-    pub fn set_function_result(
-        &self,
-        function_name: &str,
-        result: MockFunctionResult,
-    ) {
+    pub fn set_function_result(&self, function_name: &str, result: MockFunctionResult) {
         let mut results = self.function_results.lock().unwrap();
         results.insert(function_name.to_string(), result);
     }
@@ -76,16 +72,16 @@ impl MockActorInstance {
     {
         // Convert parameters to JSON
         let params_json = serde_json::to_vec(&params)?;
-        
+
         // Look up the function result
         let results = self.function_results.lock().unwrap();
-        
+
         if let Some(result) = results.get(name) {
             // Check for error
             if let Some(error) = &result.error {
                 return Err(anyhow::anyhow!("Function error: {}", error));
             }
-            
+
             // Return result
             let result_value = serde_json::from_slice(&result.result)?;
             Ok(result_value)
@@ -93,12 +89,12 @@ impl MockActorInstance {
             Err(anyhow::anyhow!("Function not found: {}", name))
         }
     }
-    
+
     /// Get the store
     pub fn store_data(&self) -> &ActorStore {
         &self.store
     }
-    
+
     /// Get mutable store
     pub fn store_data_mut(&mut self) -> &mut ActorStore {
         &mut self.store
@@ -115,15 +111,15 @@ impl MockActorComponentFactory {
         function_results: HashMap<String, MockFunctionResult>,
     ) -> Result<MockActorComponent> {
         let component = MockActorComponent::new(config, store).await?;
-        
+
         // Set function results
         for (name, result) in function_results {
             component.set_function_result(&name, result);
         }
-        
+
         Ok(component)
     }
-    
+
     /// Create a basic component with standard function results
     pub async fn create_basic_component(store: ActorStore) -> Result<MockActorComponent> {
         let config = ManifestConfig {
@@ -135,20 +131,17 @@ impl MockActorComponentFactory {
             logging: Default::default(),
             event_server: None,
         };
-        
+
         let component = MockActorComponent::new(&config, store).await?;
-        
+
         // Set up standard functions
-        component.set_function_result(
-            "ntwk:theater/actor.init",
-            mock_function_result(()).unwrap(),
-        );
-        
+        component.set_function_result("ntwk:theater/actor.init", mock_function_result(()).unwrap());
+
         component.set_function_result(
             "ntwk:theater/actor.handle_message",
             mock_function_result(true).unwrap(),
         );
-        
+
         Ok(component)
     }
 }

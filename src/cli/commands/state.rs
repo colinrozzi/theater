@@ -5,8 +5,8 @@ use std::net::SocketAddr;
 use tracing::debug;
 
 use crate::cli::client::TheaterClient;
-use theater::id::TheaterId;
 use std::str::FromStr;
+use theater::id::TheaterId;
 
 #[derive(Debug, Parser)]
 pub struct StateArgs {
@@ -17,7 +17,7 @@ pub struct StateArgs {
     /// Address of the theater server
     #[arg(short, long, default_value = "127.0.0.1:9000")]
     pub address: SocketAddr,
-    
+
     /// Output format (raw, json, pretty)
     #[arg(short, long, default_value = "pretty")]
     pub format: String,
@@ -26,23 +26,23 @@ pub struct StateArgs {
 pub fn execute(args: &StateArgs, _verbose: bool, json: bool) -> Result<()> {
     debug!("Getting state for actor: {}", args.actor_id);
     debug!("Connecting to server at: {}", args.address);
-    
+
     // Parse the actor ID
     let actor_id = TheaterId::from_str(&args.actor_id)
         .map_err(|_| anyhow!("Invalid actor ID: {}", args.actor_id))?;
-    
+
     // Create runtime and connect to the server
     let runtime = tokio::runtime::Runtime::new()?;
-    
+
     runtime.block_on(async {
         let mut client = TheaterClient::new(args.address);
-        
+
         // Connect to the server
         client.connect().await?;
-        
+
         // Get the actor state
         let state = client.get_actor_state(actor_id.clone()).await?;
-        
+
         // Output the result based on format
         match state {
             Some(state_bytes) => {
@@ -66,8 +66,10 @@ pub fn execute(args: &StateArgs, _verbose: bool, json: bool) -> Result<()> {
                                     println!("{}", serde_json::to_string_pretty(&json_value)?);
                                 }
                                 Err(_) => {
-                                    println!("{} (non-JSON data, displaying as hex)", 
-                                        style("⚠ Failed to parse state as JSON").yellow());
+                                    println!(
+                                        "{} (non-JSON data, displaying as hex)",
+                                        style("⚠ Failed to parse state as JSON").yellow()
+                                    );
                                     println!("{}", hex::encode(&state_bytes));
                                 }
                             }
@@ -81,7 +83,8 @@ pub fn execute(args: &StateArgs, _verbose: bool, json: bool) -> Result<()> {
                                 }
                                 Err(_) => {
                                     // Try to display as UTF-8 string
-                                    if let Ok(string_value) = String::from_utf8(state_bytes.clone()) {
+                                    if let Ok(string_value) = String::from_utf8(state_bytes.clone())
+                                    {
                                         println!("{}", string_value);
                                     } else {
                                         println!("Binary data ({} bytes):", state_bytes.len());
@@ -105,9 +108,9 @@ pub fn execute(args: &StateArgs, _verbose: bool, json: bool) -> Result<()> {
                 }
             }
         }
-        
+
         Ok::<(), anyhow::Error>(())
     })?;
-    
+
     Ok(())
 }

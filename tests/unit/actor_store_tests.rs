@@ -1,8 +1,8 @@
 use chrono::Utc;
 use theater::actor_handle::ActorHandle;
 use theater::actor_store::ActorStore;
-use theater::events::{ChainEventData, EventData};
 use theater::events::message::MessageEventData;
+use theater::events::{ChainEventData, EventData};
 use theater::id::TheaterId;
 use tokio::sync::mpsc;
 
@@ -25,17 +25,17 @@ async fn test_actor_store_state_management() {
     let (tx, _rx) = mpsc::channel(10);
     let (op_tx, _op_rx) = mpsc::channel(10);
     let actor_handle = ActorHandle::new(op_tx);
-    
+
     let mut store = ActorStore::new(id.clone(), tx, actor_handle);
-    
+
     // Test initial state
     assert_eq!(store.get_state(), Some(vec![]));
-    
+
     // Test state update
     let new_state = b"updated state".to_vec();
     store.set_state(Some(new_state.clone()));
     assert_eq!(store.get_state(), Some(new_state));
-    
+
     // Test state clearing
     store.set_state(None);
     assert_eq!(store.get_state(), None);
@@ -47,24 +47,24 @@ async fn test_actor_store_event_recording() {
     let (tx, _rx) = mpsc::channel(10);
     let (op_tx, _op_rx) = mpsc::channel(10);
     let actor_handle = ActorHandle::new(op_tx);
-    
+
     let store = ActorStore::new(id.clone(), tx, actor_handle);
-    
+
     // Record event and check it's properly stored
     let event_data = create_test_event_data("test-event");
     let recorded_event = store.record_event(event_data);
-    
+
     assert_eq!(recorded_event.event_type, "test-event");
     assert!(!recorded_event.hash.is_empty());
-    
+
     // Verify chain integrity
     assert!(store.verify_chain());
-    
+
     // Get events and verify
     let all_events = store.get_all_events();
     assert_eq!(all_events.len(), 1);
     assert_eq!(all_events[0].event_type, "test-event");
-    
+
     // Latest event should match
     let last_event = store.get_last_event().unwrap();
     assert_eq!(last_event.event_type, "test-event");
@@ -77,27 +77,27 @@ async fn test_actor_store_multiple_events() {
     let (tx, _rx) = mpsc::channel(10);
     let (op_tx, _op_rx) = mpsc::channel(10);
     let actor_handle = ActorHandle::new(op_tx);
-    
+
     let store = ActorStore::new(id.clone(), tx, actor_handle);
-    
+
     // Record multiple events
     for i in 0..5 {
         let event_data = create_test_event_data(&format!("event-{}", i));
         store.record_event(event_data);
     }
-    
+
     // Verify chain integrity
     assert!(store.verify_chain());
-    
+
     // Get events and verify
     let all_events = store.get_all_events();
     assert_eq!(all_events.len(), 5);
-    
+
     // Verify correct order
     for i in 0..5 {
         assert_eq!(all_events[i].event_type, format!("event-{}", i));
     }
-    
+
     // Get chain and verify it's the same as all_events
     let chain = store.get_chain();
     assert_eq!(chain.len(), 5);

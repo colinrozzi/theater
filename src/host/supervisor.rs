@@ -16,8 +16,7 @@ use tokio::sync::oneshot;
 use tracing::{error, info};
 use wasmtime::StoreContextMut;
 
-pub struct SupervisorHost {
-}
+pub struct SupervisorHost {}
 
 #[derive(Error, Debug)]
 pub enum SupervisorError {
@@ -40,8 +39,7 @@ struct SupervisorEvent {
 
 impl SupervisorHost {
     pub fn new(_config: SupervisorHostConfig) -> Self {
-        Self {
-        }
+        Self {}
     }
 
     pub async fn setup_host_functions(&self, actor_component: &mut ActorComponent) -> Result<()> {

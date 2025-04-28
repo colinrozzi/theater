@@ -1,7 +1,7 @@
 use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 use theater::actor_executor::ActorOperation;
 use tokio::sync::mpsc;
-use std::sync::{Arc, Mutex};
 
 /// Mock actor handle for testing
 pub struct MockActorHandle {
@@ -22,7 +22,10 @@ impl MockActorHandle {
     }
 
     pub fn with_response(self, operation: &str, response: Vec<u8>) -> Self {
-        self.response_map.lock().unwrap().insert(operation.to_string(), response);
+        self.response_map
+            .lock()
+            .unwrap()
+            .insert(operation.to_string(), response);
         self
     }
 

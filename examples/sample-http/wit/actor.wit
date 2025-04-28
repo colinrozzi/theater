@@ -1,7 +1,0 @@
-package ntwk:theater;
-
-interface actor {
-    use types.{state};
-    
-    init: func(state: state, params: tuple<string>) -> result<tuple<state>, string>;
-}

@@ -73,7 +73,7 @@ pub fn execute(args: &TreeArgs, _verbose: bool, json: bool) -> Result<()> {
         let mut nodes: HashMap<TheaterId, ActorNode> = HashMap::new();
 
         // First pass: collect basic information
-        for (actor_id, name) in &actors {
+        for (actor_id, _name) in &actors {
             debug!("Getting information for actor: {}", actor_id);
 
             // Get actor status

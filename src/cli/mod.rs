@@ -96,7 +96,7 @@ pub enum Commands {
     /// Watch a directory and redeploy actor on changes
     #[command(name = "watch")]
     Watch(commands::watch::WatchArgs),
-    
+
     /// Channel operations
     #[command(name = "channel")]
     Channel(commands::channel::ChannelArgs),

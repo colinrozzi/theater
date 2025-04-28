@@ -112,7 +112,7 @@ async fn test_content_store_delete() {
     assert!(store.exists(&content_ref).await); // Content still exists
     let label_ref_after = store.get_by_label(label_name).await.unwrap();
     assert_eq!(None, label_ref_after); // Label is gone
-    
+
     // Getting content by label should return None
     let result = store.get_content_by_label(label_name).await.unwrap();
     assert_eq!(None, result);
@@ -174,4 +174,3 @@ async fn test_label_operations() {
     // In current implementation Label is not publicly derivable
     // or serializable, so we'll skip these tests
 }
-

@@ -10,7 +10,6 @@ use theater::metrics::{ActorMetrics, OperationMetrics, ResourceMetrics};
 use theater::shutdown::ShutdownController;
 use tokio::sync::mpsc;
 
-
 /// Helper to create a test manifest
 fn create_test_manifest() -> ManifestConfig {
     ManifestConfig {
@@ -55,13 +54,13 @@ async fn test_actor_runtime_basic() {
     // Create basic test components
     let actor_id = TheaterId::generate();
     let _config = create_test_manifest();
-    
+
     let (theater_tx, mut theater_rx) = mpsc::channel(10);
     let (actor_tx, _actor_rx) = mpsc::channel::<ActorMessage>(10);
     let (op_tx, _op_rx) = mpsc::channel::<ActorOperation>(10);
     let (shutdown_controller, _shutdown_receiver) = ShutdownController::new();
     let (_result_tx, _result_rx) = mpsc::channel::<StartActorResult>(1);
-    
+
     // Set up a monitor for TheaterCommands
     tokio::spawn(async move {
         while let Some(cmd) = theater_rx.recv().await {
@@ -73,24 +72,24 @@ async fn test_actor_runtime_basic() {
             }
         }
     });
-    
+
     // TODO: Implement actual test with ActorRuntime
     // This would require more complex mocking of the component creation process
-    
+
     // For now, just verify the basics
     let actor_handle = theater::actor_handle::ActorHandle::new(op_tx.clone());
     let _actor_store = ActorStore::new(actor_id.clone(), theater_tx.clone(), actor_handle.clone());
-    
+
     // Send a test message
     let test_message = ActorMessage::Send(ActorSend {
         data: b"test message".to_vec(),
     });
-    
+
     actor_tx.send(test_message).await.unwrap();
-    
+
     // Signal shutdown
     shutdown_controller.signal_shutdown();
-    
+
     // Wait a bit for shutdown to propagate
     tokio::time::sleep(Duration::from_millis(100)).await;
 }

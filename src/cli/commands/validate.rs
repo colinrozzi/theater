@@ -64,41 +64,51 @@ pub struct ValidateArgs {
 
 pub fn execute(args: &ValidateArgs, verbose: bool, json: bool) -> Result<()> {
     debug!("Validating manifest file: {}", args.manifest.display());
-    
+
     // Check if the manifest file exists
     if !args.manifest.exists() {
-        return Err(anyhow!("Manifest file not found: {}", args.manifest.display()));
+        return Err(anyhow!(
+            "Manifest file not found: {}",
+            args.manifest.display()
+        ));
     }
-    
+
     // Read and parse the manifest file
     let manifest_content = std::fs::read_to_string(&args.manifest)?;
-    
+
     // Try to parse as TOML
     let manifest: Result<ActorManifest, _> = toml::from_str(&manifest_content);
-    
+
     // Collect validation results
     let mut errors = Vec::new();
     let mut warnings = Vec::new();
     let mut infos = Vec::new();
-    
+
     match manifest {
         Ok(manifest) => {
             debug!("Successfully parsed manifest");
-            
+
             // Validate the manifest content
-            validate_manifest(&manifest, &args.manifest, args.check_paths, args.check_interfaces, 
-                            &mut errors, &mut warnings, &mut infos)?;
-        },
+            validate_manifest(
+                &manifest,
+                &args.manifest,
+                args.check_paths,
+                args.check_interfaces,
+                &mut errors,
+                &mut warnings,
+                &mut infos,
+            )?;
+        }
         Err(e) => {
             // Add parse error
             errors.push(ValidationResult {
                 level: ValidationLevel::Error,
                 message: format!("Failed to parse manifest: {}", e),
-                line: None,  // In a more advanced implementation, we could extract line numbers from TOML parse errors
+                line: None, // In a more advanced implementation, we could extract line numbers from TOML parse errors
             });
         }
     }
-    
+
     // JSON output
     if json {
         let output = json!({
@@ -117,32 +127,34 @@ pub fn execute(args: &ValidateArgs, verbose: bool, json: bool) -> Result<()> {
                 "line": r.line
             })).collect::<Vec<_>>()
         });
-        
+
         println!("{}", serde_json::to_string_pretty(&output)?);
         return Ok(());
     }
-    
+
     // Human-readable output
     println!("{}", formatting::format_section("MANIFEST VALIDATION"));
     println!("Manifest: {}\n", args.manifest.display());
-    
+
     // Print summary
     if errors.is_empty() && warnings.is_empty() {
         println!("{}", formatting::format_success("Manifest is valid."));
     } else {
         if !errors.is_empty() {
-            println!("{}", formatting::format_error(
-                &format!("Manifest has {} error(s).", errors.len())
-            ));
+            println!(
+                "{}",
+                formatting::format_error(&format!("Manifest has {} error(s).", errors.len()))
+            );
         }
-        
+
         if !warnings.is_empty() {
-            println!("{}", formatting::format_warning(
-                &format!("Manifest has {} warning(s).", warnings.len())
-            ));
+            println!(
+                "{}",
+                formatting::format_warning(&format!("Manifest has {} warning(s).", warnings.len()))
+            );
         }
     }
-    
+
     // Print errors
     if !errors.is_empty() {
         println!("\n{}", formatting::format_section("ERRORS"));
@@ -150,7 +162,7 @@ pub fn execute(args: &ValidateArgs, verbose: bool, json: bool) -> Result<()> {
             print_validation_result(i + 1, error);
         }
     }
-    
+
     // Print warnings
     if !warnings.is_empty() {
         println!("\n{}", formatting::format_section("WARNINGS"));
@@ -158,7 +170,7 @@ pub fn execute(args: &ValidateArgs, verbose: bool, json: bool) -> Result<()> {
             print_validation_result(i + 1, warning);
         }
     }
-    
+
     // Print info
     if !infos.is_empty() && verbose {
         println!("\n{}", formatting::format_section("INFORMATION"));
@@ -166,7 +178,7 @@ pub fn execute(args: &ValidateArgs, verbose: bool, json: bool) -> Result<()> {
             print_validation_result(i + 1, info);
         }
     }
-    
+
     Ok(())
 }
 
@@ -178,7 +190,7 @@ fn validate_manifest(
     check_interfaces: bool,
     errors: &mut Vec<ValidationResult>,
     warnings: &mut Vec<ValidationResult>,
-    infos: &mut Vec<ValidationResult>
+    infos: &mut Vec<ValidationResult>,
 ) -> Result<()> {
     // 1. Validate name
     if manifest.name.is_empty() {
@@ -187,14 +199,18 @@ fn validate_manifest(
             message: "Actor name cannot be empty".to_string(),
             line: None,
         });
-    } else if !manifest.name.chars().all(|c| c.is_alphanumeric() || c == '-' || c == '_') {
+    } else if !manifest
+        .name
+        .chars()
+        .all(|c| c.is_alphanumeric() || c == '-' || c == '_')
+    {
         warnings.push(ValidationResult {
             level: ValidationLevel::Warning,
             message: format!("Actor name '{}' contains characters other than alphanumeric, hyphen, or underscore", manifest.name),
             line: None,
         });
     }
-    
+
     // 2. Validate component path
     if manifest.component_path.is_empty() {
         errors.push(ValidationResult {
@@ -210,15 +226,21 @@ fn validate_manifest(
                 message: format!("Component file not found: {}", manifest.component_path),
                 line: None,
             });
-        } else if !component_path.extension().map_or(false, |ext| ext == "wasm") {
+        } else if !component_path
+            .extension()
+            .map_or(false, |ext| ext == "wasm")
+        {
             warnings.push(ValidationResult {
                 level: ValidationLevel::Warning,
-                message: format!("Component file does not have .wasm extension: {}", manifest.component_path),
+                message: format!(
+                    "Component file does not have .wasm extension: {}",
+                    manifest.component_path
+                ),
                 line: None,
             });
         }
     }
-    
+
     // 3. Validate interface
     if let Some(interface) = &manifest.interface {
         if interface.implements.is_empty() {
@@ -228,7 +250,7 @@ fn validate_manifest(
                 line: None,
             });
         }
-        
+
         // Check interface compatibility if requested
         if check_interfaces {
             // This would involve checking the actual WebAssembly component
@@ -248,14 +270,14 @@ fn validate_manifest(
             line: None,
         });
     }
-    
+
     // 4. Validate handlers
     for (i, handler) in manifest.handlers.iter().enumerate() {
         // Check handler type
         match handler.handler_type.as_str() {
             "message-server" | "http-server" | "supervisor" => {
                 // These are known handler types
-            },
+            }
             _ => {
                 warnings.push(ValidationResult {
                     level: ValidationLevel::Warning,
@@ -264,7 +286,7 @@ fn validate_manifest(
                 });
             }
         }
-        
+
         // Check handler configuration
         match handler.handler_type.as_str() {
             "message-server" => {
@@ -272,25 +294,31 @@ fn validate_manifest(
                 if !handler.config.get("port").is_some() {
                     warnings.push(ValidationResult {
                         level: ValidationLevel::Warning,
-                        message: format!("Handler {} (message-server) is missing port configuration", i),
+                        message: format!(
+                            "Handler {} (message-server) is missing port configuration",
+                            i
+                        ),
                         line: None,
                     });
                 }
-            },
+            }
             "http-server" => {
                 // Check for port configuration
                 if !handler.config.get("port").is_some() {
                     warnings.push(ValidationResult {
                         level: ValidationLevel::Warning,
-                        message: format!("Handler {} (http-server) is missing port configuration", i),
+                        message: format!(
+                            "Handler {} (http-server) is missing port configuration",
+                            i
+                        ),
                         line: None,
                     });
                 }
-            },
+            }
             _ => {} // Other handler types don't need specific validation
         }
     }
-    
+
     Ok(())
 }
 
@@ -301,12 +329,12 @@ fn print_validation_result(index: usize, result: &ValidationResult) {
         ValidationLevel::Warning => formatting::format_warning(&format!("{}.", index)),
         ValidationLevel::Info => formatting::format_info(&format!("{}.", index)),
     };
-    
+
     let location = if let Some(line) = result.line {
         format!(" (line {})", line)
     } else {
         String::new()
     };
-    
+
     println!("{} {}{}", prefix, result.message, location);
 }

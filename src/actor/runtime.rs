@@ -608,18 +608,53 @@ impl ActorRuntime {
                                 ActorOperation::CallFunction { response_tx, .. } => {
                                     let _ = response_tx.send(Err(ActorError::Paused));
                                 }
-                                ActorOperation::GetMetrics { response_tx } => {
-                                    let _ = response_tx.send(Err(ActorError::Paused));
+                        ActorOperation::GetMetrics { response_tx } => {
+                            debug!("Processing GetMetrics operation");
+                            let metrics = metrics.get_metrics().await;
+                            if let Err(e) = response_tx.send(Ok(metrics)) {
+                                error!("Failed to send metrics response: {:?}", e);
+                            }
+                            debug!("GetMetrics operation completed");
+                        }
+
+                        ActorOperation::GetChain { response_tx } => {
+                            debug!("Processing GetChain operation");
+                            let chain = actor_instance.store.data().get_chain();
+                            debug!("Retrieved chain with {} events", chain.len());
+                            if let Err(e) = response_tx.send(Ok(chain)) {
+                                error!("Failed to send chain response: {:?}", e);
+                            }
+                            debug!("GetChain operation completed");
+                        }
+
+                        ActorOperation::GetState { response_tx } => {
+                            debug!("Processing GetState operation");
+                            let state = actor_instance.store.data().get_state();
+                            debug!("Retrieved state with size: {:?}", state.as_ref().map(|s| s.len()).unwrap_or(0));
+                            if let Err(e) = response_tx.send(Ok(state)) {
+                                error!("Failed to send state response: {:?}", e);
+                            }
+                            debug!("GetState operation completed");
+                        }
+
+                        ActorOperation::UpdateComponent { component_address, response_tx } => {
+                            debug!("Processing UpdateComponent operation for component: {}", component_address);
+
+                            match Self::update_component(&mut actor_instance, &component_address, &config).await {
+                                Ok(_) => {
+                                    debug!("Component update successful");
+                                    if let Err(e) = response_tx.send(Ok(())) {
+                                        error!("Failed to send update component response: {:?}", e);
+                                    }
                                 }
-                                ActorOperation::GetChain { response_tx } => {
-                                    let _ = response_tx.send(Err(ActorError::Paused));
+                                Err(e) => {
+                                    error!("UpdateComponent operation failed: {:?}", e);
+                                    if let Err(send_err) = response_tx.send(Err(e)) {
+                                        error!("Failed to send update component error response: {:?}", send_err);
+                                    }
                                 }
-                                ActorOperation::GetState { response_tx } => {
-                                    let _ = response_tx.send(Err(ActorError::Paused));
-                                }
-                                ActorOperation::UpdateComponent { response_tx, .. } => {
-                                    let _ = response_tx.send(Err(ActorError::Paused));
-                                }
+                            }
+                        }
                                 ActorOperation::Shutdown { response_tx } => {
                                     info!("Shutdown operation received while paused");
                                     shutdown_initiated = true;
@@ -784,7 +819,7 @@ impl ActorRuntime {
         actor_instance: &mut ActorInstance,
         name: &String,
         params: Vec<u8>,
-        theater_tx: &mpsc::Sender<TheaterCommand>,
+        _theater_tx: &mpsc::Sender<TheaterCommand>,
         metrics: &MetricsCollector,
     ) -> Result<Vec<u8>, ActorError> {
         // Validate the function exists

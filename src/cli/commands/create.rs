@@ -24,37 +24,47 @@ pub struct CreateArgs {
 pub fn execute(args: &CreateArgs, _verbose: bool, json: bool) -> Result<()> {
     debug!("Creating new actor project: {}", args.name);
     debug!("Using template: {}", args.template);
-    
+
     // Check if the name is valid
     if !is_valid_project_name(&args.name) {
         return Err(anyhow!("Invalid project name: {}. Project names must only contain alphanumeric characters, hyphens, and underscores.", args.name));
     }
-    
+
     // Get the output directory
     let output_dir = match &args.output_dir {
         Some(dir) => dir.clone(),
         None => std::env::current_dir()?,
     };
-    
+
     debug!("Output directory: {}", output_dir.display());
-    
+
     // Get available templates
     let templates_list = templates::available_templates();
-    
+
     // Check if the template exists
     if !templates_list.contains_key(&args.template) {
-        let available_templates = templates_list.keys().cloned().collect::<Vec<_>>().join(", ");
-        return Err(anyhow!("Template '{}' not found. Available templates: {}", args.template, available_templates));
+        let available_templates = templates_list
+            .keys()
+            .cloned()
+            .collect::<Vec<_>>()
+            .join(", ");
+        return Err(anyhow!(
+            "Template '{}' not found. Available templates: {}",
+            args.template,
+            available_templates
+        ));
     }
-    
+
     // Create the project
     templates::create_project(&args.template, &args.name, &output_dir)?;
-    
+
     if !json {
-        println!("{} Created new actor project: {}", 
+        println!(
+            "{} Created new actor project: {}",
             style("✓").green().bold(),
-            style(&args.name).cyan());
-        
+            style(&args.name).cyan()
+        );
+
         println!("\nTo build and run your new actor:");
         println!("  cd {}", args.name);
         println!("  cargo build --target wasm32-unknown-unknown --release");
@@ -68,11 +78,12 @@ pub fn execute(args: &CreateArgs, _verbose: bool, json: bool) -> Result<()> {
         });
         println!("{}", serde_json::to_string_pretty(&output)?);
     }
-    
+
     Ok(())
 }
 
 fn is_valid_project_name(name: &str) -> bool {
     // Check that the name only contains alphanumeric characters, hyphens, and underscores
-    name.chars().all(|c| c.is_alphanumeric() || c == '-' || c == '_')
+    name.chars()
+        .all(|c| c.is_alphanumeric() || c == '-' || c == '_')
 }
