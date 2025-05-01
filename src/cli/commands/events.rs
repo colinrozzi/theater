@@ -474,9 +474,11 @@ fn pretty_stringify_event(event: &ChainEvent, full: bool) -> String {
 
     if let Ok(text) = std::str::from_utf8(&event.data) {
         if !full {
+            // Do either the 57 chars or the max length of the string
+            let max_len = std::cmp::min(text.len(), 57);
             output.push_str(&format!(
                 "  Data: {}... ({} bytes total)\n",
-                &text[0..57],
+                &text[0..max_len],
                 event.data.len()
             ));
         } else {

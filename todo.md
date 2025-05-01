@@ -18,7 +18,8 @@
 [ ] events - need to implement some sort of config controlled saving/throwing away of events so that they don't accumulate too much
 [ ] need to implement some sort of permissions. Right now anything is allowed to do anything. IDK.
       I am almost thinking each entity should have some public/private key, or some unique way of identifying itself. Then, we can add that identity to lists of things that are allowed to do things. Entities in this sense being actors and the external interface. For any machine maybe the external interface or some other way of identifying the user would be the most priveleged user, and would have to give out permissions to other entities?
-[ ] 
+[ ] make the theater build command go to nix and update the manifest accordingly
+[ ] add nix flakes to the default projects
 
 ### today
 
