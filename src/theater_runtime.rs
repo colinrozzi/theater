@@ -934,7 +934,6 @@ impl TheaterRuntime {
             // Check if we should remove the entire entry
             subscribers.is_empty()
         } else {
-            warn!("No subscribers found for actor: {:?}", actor_id);
             false
         };
 

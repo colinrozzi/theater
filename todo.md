@@ -20,6 +20,7 @@
       I am almost thinking each entity should have some public/private key, or some unique way of identifying itself. Then, we can add that identity to lists of things that are allowed to do things. Entities in this sense being actors and the external interface. For any machine maybe the external interface or some other way of identifying the user would be the most priveleged user, and would have to give out permissions to other entities?
 [ ] make the theater build command go to nix and update the manifest accordingly
 [ ] add nix flakes to the default projects
+[ ] I really want a better events thing. I should be able to click through an actors events, view them fullscreen, access them by event id, stuff like that
 
 ### today
 
