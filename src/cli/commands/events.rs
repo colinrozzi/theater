@@ -42,7 +42,7 @@ pub struct EventsArgs {
     pub search: Option<String>,
 
     /// Output format (pretty, compact, json, csv)
-    #[arg(short, long, default_value = "pretty")]
+    #[arg(short, long, default_value = "compact")]
     pub format: String,
 
     /// Export events to file

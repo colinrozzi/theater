@@ -102,13 +102,13 @@ pub enum HttpEventData {
         method: String,
         url: String,
         headers_count: usize,
-        body_size: usize,
+        body: Option<String>,
     },
     HttpClientRequestResult {
         status: u16,
         headers_count: usize,
-        body_size: usize,
         success: bool,
+        body: Option<String>,
     },
 
     // Error events

@@ -72,14 +72,13 @@ impl HttpClientHost {
                   -> Box<dyn Future<Output = Result<(Result<HttpResponse, String>,)>> + Send> {
                 
                 // Record HTTP client request call event
-                let body_size = req.body.as_ref().map_or(0, |b| b.len());
                 ctx.data_mut().record_event(ChainEventData {
                     event_type: "ntwk:theater/http-client/send-http".to_string(),
                     data: EventData::Http(HttpEventData::HttpClientRequestCall {
                         method: req.method.clone(),
                         url: req.uri.clone(),
                         headers_count: req.headers.len(),
-                        body_size,
+                        body: req.body.clone().map(|b| String::from_utf8_lossy(&b).to_string()),
                     }),
                     timestamp: chrono::Utc::now().timestamp_millis() as u64,
                     description: Some(format!("Sending {} request to {}", req.method, req.uri)),
@@ -163,13 +162,12 @@ impl HttpClientHost {
                             };
                             
                             // Record HTTP client request result event
-                            let body_size = body.as_ref().map_or(0, |b| b.len());
                             ctx.data_mut().record_event(ChainEventData {
                                 event_type: "ntwk:theater/http-client/send-http".to_string(),
                                 data: EventData::Http(HttpEventData::HttpClientRequestResult {
                                     status,
                                     headers_count: resp.headers.len(),
-                                    body_size,
+                                    body: body.clone().map(|b| String::from_utf8_lossy(&b).to_string()),
                                     success: true,
                                 }),
                                 timestamp: chrono::Utc::now().timestamp_millis() as u64,
