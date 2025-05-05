@@ -6,7 +6,7 @@ pub enum MessageEventData {
     SendMessageCall {
         recipient: String,
         message_type: String,
-        size: usize,
+        data: Vec<u8>,
     },
     SendMessageResult {
         recipient: String,
@@ -17,11 +17,11 @@ pub enum MessageEventData {
     RequestMessageCall {
         recipient: String,
         message_type: String,
-        size: usize,
+        data: Vec<u8>,
     },
     RequestMessageResult {
         recipient: String,
-        response_size: usize,
+        data: Vec<u8>,
         success: bool,
     },
 

@@ -92,7 +92,7 @@ impl MessageServerHost {
                         data: EventData::Message(MessageEventData::SendMessageCall {
                             recipient: address.clone(),
                             message_type: "binary".to_string(), // Could be enhanced to detect type
-                            size: msg.len(),
+                            data: msg.clone(),
                         }),
                         timestamp: chrono::Utc::now().timestamp_millis() as u64,
                         description: Some(format!("Sending message to {}", address)),
@@ -176,7 +176,7 @@ impl MessageServerHost {
                         data: EventData::Message(MessageEventData::RequestMessageCall {
                             recipient: address.clone(),
                             message_type: "binary".to_string(), // Could be enhanced to detect type
-                            size: msg.len(),
+                            data: msg.clone(),
                         }),
                         timestamp: chrono::Utc::now().timestamp_millis() as u64,
                         description: Some(format!("Requesting message from {}", address)),
@@ -220,7 +220,7 @@ impl MessageServerHost {
                                             event_type: "ntwk:theater/message-server-host/request".to_string(),
                                             data: EventData::Message(MessageEventData::RequestMessageResult {
                                                 recipient: address_clone.clone(),
-                                                response_size: response.len(),
+                                                data: response.clone(),
                                                 success: true,
                                             }),
                                             timestamp: chrono::Utc::now().timestamp_millis() as u64,
