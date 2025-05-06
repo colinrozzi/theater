@@ -45,6 +45,7 @@ pub fn setup_global_logging(
             .with_file(true)
             .with_target(true)
             .with_ansi(true)
+            .pretty()
             .with_filter(EnvFilter::builder().parse(&enhanced_filter)?);
 
         tracing_subscriber::registry()
