@@ -9,8 +9,8 @@ use crate::actor::types::{ActorError, ActorOperation};
 use crate::chain::ChainEvent;
 use crate::id::TheaterId;
 use crate::messages::{
-    ActorChannelClose, ActorChannelMessage, ActorChannelOpen, ActorSend, ChannelId,
-    ChannelParticipant, ChildError,
+    ActorChannelClose, ActorChannelMessage, ActorChannelOpen, ChannelId, ChannelParticipant,
+    ChildError,
 };
 use crate::messages::{ActorMessage, ActorStatus, TheaterCommand};
 use crate::metrics::ActorMetrics;
@@ -134,6 +134,8 @@ pub struct ActorProcess {
     pub manifest: ManifestConfig,
     /// Controller for graceful shutdown
     pub shutdown_controller: ShutdownController,
+    /// Optional supervisor channel for actor supervision
+    pub supervisor_tx: Option<Sender<ChildError>>,
 }
 
 impl TheaterRuntime {
@@ -263,13 +265,20 @@ impl TheaterRuntime {
                     init_bytes,
                     parent_id,
                     response_tx,
+                    supervisor_tx,
                 } => {
                     debug!(
                         "Processing SpawnActor command for manifest: {:?}",
                         manifest_path
                     );
                     match self
-                        .spawn_actor(manifest_path.clone(), init_bytes, parent_id, true)
+                        .spawn_actor(
+                            manifest_path.clone(),
+                            init_bytes,
+                            parent_id,
+                            true,
+                            supervisor_tx,
+                        )
                         .await
                     {
                         Ok(actor_id) => {
@@ -294,13 +303,20 @@ impl TheaterRuntime {
                     state_bytes,
                     response_tx,
                     parent_id,
+                    supervisor_tx,
                 } => {
                     debug!(
                         "Processing ResumeActor command for manifest: {:?}",
                         manifest_path
                     );
                     match self
-                        .spawn_actor(manifest_path.clone(), state_bytes, parent_id, false)
+                        .spawn_actor(
+                            manifest_path.clone(),
+                            state_bytes,
+                            parent_id,
+                            false,
+                            supervisor_tx,
+                        )
                         .await
                     {
                         Ok(actor_id) => {
@@ -787,6 +803,7 @@ impl TheaterRuntime {
         init_bytes: Option<Vec<u8>>,
         parent_id: Option<TheaterId>,
         init: bool,
+        supervisor_tx: Option<Sender<ChildError>>,
     ) -> Result<TheaterId> {
         debug!(
             "Starting actor spawn process from manifest: {:?}",
@@ -864,6 +881,7 @@ impl TheaterRuntime {
                     manifest_path: manifest_path.clone(),
                     manifest,
                     shutdown_controller,
+                    supervisor_tx,
                 };
 
                 if let Some(parent_id) = parent_id {
@@ -951,18 +969,13 @@ impl TheaterRuntime {
 
         // notify the actors parents
         if let Some(proc) = self.actors.get(&actor_id) {
-            if let Some(parent_id) = &proc.parent_id {
-                if let Some(parent_proc) = self.actors.get_mut(&parent_id.clone()) {
-                    let child_error = ChildError {
-                        actor_id: actor_id.clone(),
-                        error: error.clone(),
-                    };
-                    let error_message = ActorMessage::Send(ActorSend {
-                        data: serde_json::to_vec(&child_error).unwrap(),
-                    });
-                    if let Err(e) = parent_proc.mailbox_tx.send(error_message).await {
-                        error!("Failed to send error message to parent actor: {}", e);
-                    }
+            if let Some(supervisor_tx) = &proc.supervisor_tx {
+                let error_message = ChildError {
+                    actor_id: actor_id.clone(),
+                    error: error.clone(),
+                };
+                if let Err(e) = supervisor_tx.send(error_message).await {
+                    error!("Failed to send error message to supervisor: {}", e);
                 }
             }
         }
@@ -1147,42 +1160,7 @@ impl TheaterRuntime {
     async fn restart_actor(&mut self, actor_id: TheaterId) -> Result<()> {
         debug!("Starting actor restart process for: {:?}", actor_id);
 
-        // Get the actor's info before stopping it
-        let (manifest_path, parent_id) = if let Some(proc) = self.actors.get(&actor_id) {
-            let manifest = proc.manifest_path.clone();
-
-            // Find the parent ID
-            let parent_id = self.actors.iter().find_map(|(id, proc)| {
-                if proc.children.contains(&actor_id) {
-                    Some(id.clone())
-                } else {
-                    None
-                }
-            });
-
-            (manifest, parent_id)
-        } else {
-            return Err(anyhow::anyhow!("Actor not found"));
-        };
-
-        // Get the actor's state
-        let state_bytes = self
-            .get_actor_state(actor_id.clone())
-            .await
-            .expect("Failed to get actor state");
-
-        // Stop the actor
-        self.stop_actor(actor_id).await?;
-
-        // THIS IS WRONG!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-        // we need to rethink how the restart works. is this even the place to have it? How should
-        // we handle the state? I don't know.
-
-        // Spawn it again
-        self.spawn_actor(manifest_path, state_bytes, parent_id, false)
-            .await?;
-
-        Ok(())
+        Err(anyhow::anyhow!("Actor restart not implemented"))
     }
 
     async fn get_actor_state(&self, actor_id: TheaterId) -> Result<Option<Vec<u8>>> {

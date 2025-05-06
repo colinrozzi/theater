@@ -126,6 +126,7 @@ pub enum TheaterCommand {
         init_bytes: Option<Vec<u8>>,
         response_tx: oneshot::Sender<Result<TheaterId>>,
         parent_id: Option<TheaterId>,
+        supervisor_tx: Option<Sender<ChildError>>,
     },
 
     /// # Resume an existing actor
@@ -143,6 +144,7 @@ pub enum TheaterCommand {
         state_bytes: Option<Vec<u8>>,
         response_tx: oneshot::Sender<Result<TheaterId>>,
         parent_id: Option<TheaterId>,
+        supervisor_tx: Option<Sender<ChildError>>,
     },
 
     /// # Stop an actor

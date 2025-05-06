@@ -4,7 +4,7 @@ use crate::actor::types::ActorError;
 use crate::config::SupervisorHostConfig;
 use crate::events::supervisor::SupervisorEventData;
 use crate::events::{ChainEventData, EventData};
-use crate::messages::TheaterCommand;
+use crate::messages::{TheaterCommand, ChildError};
 use crate::shutdown::ShutdownReceiver;
 use crate::wasm::{ActorComponent, ActorInstance};
 use crate::ChainEvent;
@@ -16,7 +16,11 @@ use tokio::sync::oneshot;
 use tracing::{error, info};
 use wasmtime::StoreContextMut;
 
-pub struct SupervisorHost {}
+
+pub struct SupervisorHost {
+    channel_tx: tokio::sync::mpsc::Sender<ChildError>,
+    channel_rx: tokio::sync::mpsc::Receiver<ChildError>,
+}
 
 #[derive(Error, Debug)]
 pub enum SupervisorError {
@@ -39,7 +43,11 @@ struct SupervisorEvent {
 
 impl SupervisorHost {
     pub fn new(_config: SupervisorHostConfig) -> Self {
-        Self {}
+        let (channel_tx, channel_rx) = tokio::sync::mpsc::channel(100);
+        Self {
+            channel_tx,
+            channel_rx,
+        }
     }
 
     pub async fn setup_host_functions(&self, actor_component: &mut ActorComponent) -> Result<()> {
@@ -50,6 +58,7 @@ impl SupervisorHost {
             .instance("ntwk:theater/supervisor")
             .expect("Could not instantiate ntwk:theater/supervisor");
 
+        let supervisor_tx = self.channel_tx.clone();
         // spawn-child implementation
         let _ = interface
             .func_wrap_async(
@@ -70,6 +79,7 @@ impl SupervisorHost {
                     let store = ctx.data_mut();
                     let theater_tx = store.theater_tx.clone();
                     let parent_id = store.id.clone();
+                    let supervisor_tx = supervisor_tx.clone();
 
                     Box::new(async move {
                         let (response_tx, response_rx) = oneshot::channel();
@@ -79,6 +89,7 @@ impl SupervisorHost {
                                 init_bytes,
                                 response_tx,
                                 parent_id: Some(parent_id),
+                                supervisor_tx: Some(supervisor_tx),
                             })
                             .await
                         {
@@ -153,6 +164,7 @@ impl SupervisorHost {
             )
             .expect("Failed to wrap spawn function");
 
+        let supervisor_tx = self.channel_tx.clone();
         // spawn-child implementation
         let _ = interface
             .func_wrap_async(
@@ -174,6 +186,7 @@ impl SupervisorHost {
                     let store = ctx.data_mut();
                     let theater_tx = store.theater_tx.clone();
                     let parent_id = store.id.clone();
+                    let supervisor_tx = supervisor_tx.clone();
 
                     Box::new(async move {
                         let (response_tx, response_rx) = oneshot::channel();
@@ -183,6 +196,7 @@ impl SupervisorHost {
                                 state_bytes,
                                 response_tx,
                                 parent_id: Some(parent_id),
+                                supervisor_tx: Some(supervisor_tx),
                             })
                             .await
                         {
@@ -791,7 +805,7 @@ impl SupervisorHost {
                                             SupervisorEventData::GetChildEventsResult {
                                                 child_id: child_id_clone.clone(),
                                                 events_count: events.len(),
-                                                success: true,
+                                 success: true,
                                             },
                                         ),
                                         timestamp: chrono::Utc::now().timestamp_millis() as u64,
@@ -873,17 +887,44 @@ impl SupervisorHost {
         Ok(())
     }
 
-    pub async fn add_export_functions(&self, _actor_instance: &mut ActorInstance) -> Result<()> {
+    pub async fn add_export_functions(&self, actor_instance: &mut ActorInstance) -> Result<()> {
         info!("No export functions needed for supervisor");
+
+        actor_instance.register_function_no_result::<(String, ActorError)>("ntwk:theater/supervisor", "handle-child-event").expect("Failed to register handle-child-event function");
+
         Ok(())
     }
 
     pub async fn start(
-        &self,
-        _actor_handle: ActorHandle,
-        _shutdown_receiver: ShutdownReceiver,
+        &mut self,
+        actor_handle: ActorHandle,
+        mut shutdown_receiver: ShutdownReceiver,
     ) -> Result<()> {
         info!("Starting supervisor host");
+
+        loop {
+            tokio::select! {
+                Some(child_error) = self.channel_rx.recv() => {
+                    self.process_child_error(actor_handle.clone(), child_error).await?;
+                }
+                _ = shutdown_receiver.wait_for_shutdown() => {
+                    info!("Shutdown signal received");
+                    break;
+                }
+            }
+        }
+        info!("Supervisor host shut down complete");
+        Ok(())
+    }
+
+    async fn process_child_error(&self, actor_handle: ActorHandle, child_error: ChildError) -> Result<()> {
+        info!("Processing child error: {:?}", child_error);
+
+        actor_handle.call_function::<(String, ActorError), ()>(
+            "ntwk:theater/supervisor.handle-child-event".to_string(),
+            (child_error.actor_id.to_string(), child_error.error),
+        ).await?;
+
         Ok(())
     }
 }

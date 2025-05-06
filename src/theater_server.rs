@@ -427,6 +427,7 @@ impl TheaterServer {
                             init_bytes: initial_state,
                             response_tx: cmd_tx,
                             parent_id: None,
+                            supervisor_tx: None,
                         })
                         .await
                     {
