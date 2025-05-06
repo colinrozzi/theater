@@ -162,5 +162,5 @@ interface supervisor-handlers {
     //
     // * `Ok(tuple<option<json>, string>)` - Updated state and result message
     // * `Err(string)` - Error message if handling fails
-    handle-child-error: func(state: option<json>, params: tuple<string, actor-error>) -> result<tuple<option<json>, string>, string>;
+    handle-child-error: func(state: option<json>, params: tuple<string, actor-error>) -> result<tuple<option<json>>, string>;
 }
