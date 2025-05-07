@@ -140,16 +140,21 @@ interface types {
         timestamp: u64
     }
 
+    record wit-actor-error {
+        error-type: wit-error-type,
+        data: option<list<u8>>,
+    }
+
     /// Actor error
-    variant actor-error {
-        operation-timeout(u64),
+    enum wit-error-type {
+        operation-timeout,
         channel-closed,
         shutting-down,
-        function-not-found(string),
-        type-mismatch(string),
-        internal(chain-event),
+        function-not-found,
+        type-mismatch,
+        internal,
         serialization-error,
-        update-component-error(string),
+        update-component-error,
         paused
     }
 }

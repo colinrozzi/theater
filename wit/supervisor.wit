@@ -147,7 +147,7 @@ interface supervisor {
 }
 
 interface supervisor-handlers {
-    use types.{json, actor-error};
+    use types.{json, wit-actor-error};
     
     // # Handle a child actor error
     //
@@ -162,5 +162,5 @@ interface supervisor-handlers {
     //
     // * `Ok(tuple<option<json>, string>)` - Updated state and result message
     // * `Err(string)` - Error message if handling fails
-    handle-child-error: func(state: option<json>, params: tuple<string, actor-error>) -> result<tuple<option<json>>, string>;
+    handle-child-error: func(state: option<json>, params: tuple<string, wit-actor-error>) -> result<tuple<option<json>>, string>;
 }
