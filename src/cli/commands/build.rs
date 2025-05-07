@@ -342,12 +342,9 @@ pub fn execute(args: &BuildArgs, verbose: bool, json: bool) -> Result<()> {
         return Err(anyhow!("Failed to determine nix store path"));
     }
 
-    // Get the package name from Cargo.toml
-    let package_name = get_package_name(&cargo_toml_path)?;
-
     // Construct the WASM file path
     // The filename in the nix store will match the actor name (with hyphens)
-    let wasm_file_name = format!("{}.wasm", package_name.replace('_', "-"));
+    let wasm_file_name = "component.wasm";
     let wasm_path = format!("{}/lib/{}", nix_store_path, wasm_file_name);
 
     // Check if the WASM file exists
