@@ -984,23 +984,26 @@ impl TheaterRuntime {
         if let Some(proc) = self.actors.get(&actor_id) {
             for child_id in &proc.children.clone() {
                 if let Some(child_proc) = self.actors.get_mut(&child_id.clone()) {
-                    debug!("Pausing child actor: {:?}", child_id);
-                    let (response_tx, response_rx) = oneshot::channel();
-                    if let Err(e) = child_proc
-                        .operation_tx
-                        .send(ActorOperation::Pause { response_tx })
-                        .await
-                    {
-                        error!("Failed to send error message to child actor: {}", e);
-                    }
-                    if let Ok(result) = response_rx.await {
-                        match result {
-                            Ok(_) => debug!("Child actor {:?} paused successfully", child_id),
-                            Err(e) => error!("Failed to pause child actor: {}", e),
+                    let child_id = child_proc.actor_id.clone();
+                    let operation_tx = child_proc.operation_tx.clone();
+                    tokio::spawn(async move {
+                        debug!("Pausing child actor: {:?}", child_id);
+                        let (response_tx, response_rx) = oneshot::channel();
+                        if let Err(e) = operation_tx
+                            .send(ActorOperation::Pause { response_tx })
+                            .await
+                        {
+                            error!("Failed to send error message to child actor: {}", e);
                         }
-                    } else {
-                        error!("Failed to receive response for pause operation");
-                    }
+                        if let Ok(result) = response_rx.await {
+                            match result {
+                                Ok(_) => debug!("Child actor {:?} paused successfully", child_id),
+                                Err(e) => error!("Failed to pause child actor: {}", e),
+                            }
+                        } else {
+                            error!("Failed to receive response for pause operation");
+                        }
+                    });
                 }
             }
         }

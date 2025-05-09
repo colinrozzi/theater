@@ -506,25 +506,27 @@ impl ActorRuntime {
 
         // Initialize the actor if needed
         if init {
-            info!("Calling init function for actor: {:?}", id);
-            match actor_handle
-                .call_function::<(String,), ()>(
-                    "ntwk:theater/actor.init".to_string(),
-                    (id.to_string(),),
-                )
-                .await
-            {
-                Ok(_) => {
-                    debug!("Successfully called init function for actor: {:?}", id);
-                } // Successfully called init function
-                Err(e) => {
-                    let error_message =
-                        format!("Failed to call init function for actor {}: {}", id, e);
-                    error!("{}", error_message);
-                    // We already notified success, so we can't send a failure now
-                    // The best we can do is log the error
+            tokio::spawn(async move {
+                info!("Calling init function for actor: {:?}", id);
+                match actor_handle
+                    .call_function::<(String,), ()>(
+                        "ntwk:theater/actor.init".to_string(),
+                        (id.to_string(),),
+                    )
+                    .await
+                {
+                    Ok(_) => {
+                        debug!("Successfully called init function for actor: {:?}", id);
+                    } // Successfully called init function
+                    Err(e) => {
+                        let error_message =
+                            format!("Failed to call init function for actor {}: {}", id, e);
+                        error!("{}", error_message);
+                        // We already notified success, so we can't send a failure now
+                        // The best we can do is log the error
+                    }
                 }
-            }
+            });
         }
     }
 

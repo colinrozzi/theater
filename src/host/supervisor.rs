@@ -888,9 +888,10 @@ impl SupervisorHost {
     }
 
     pub async fn add_export_functions(&self, actor_instance: &mut ActorInstance) -> Result<()> {
-        info!("No export functions needed for supervisor");
+        info!("Adding export functions for supervisor");
 
         actor_instance.register_function_no_result::<(String, WitActorError)>("ntwk:theater/supervisor-handlers", "handle-child-error").expect("Failed to register handle-child-error function");
+        info!("Added export function for handle-child-error");
 
         Ok(())
     }
