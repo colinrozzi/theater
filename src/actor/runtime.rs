@@ -459,7 +459,7 @@ impl ActorRuntime {
         config: &ManifestConfig,
     ) {
         // Create a local shutdown controller for this runtime
-        let (shutdown_controller, _) = ShutdownController::new();
+        let mut shutdown_controller = ShutdownController::new();
 
         // Start the handlers
         let mut handler_tasks: Vec<JoinHandle<()>> = Vec::new();
@@ -562,7 +562,7 @@ impl ActorRuntime {
         loop {
             tokio::select! {
                 // Monitor shutdown channel
-                _ = shutdown_receiver.wait_for_shutdown() => {
+                _ = &mut shutdown_receiver.receiver => {
                     info!("Actor runtime received shutdown signal");
                     debug!("Actor runtime starting shutdown sequence");
                     shutdown_initiated = true;
@@ -796,7 +796,7 @@ impl ActorRuntime {
         }
 
         info!("Actor runtime operation loop shutting down");
-        Self::perform_cleanup(&shutdown_controller, handler_tasks, &metrics).await;
+        Self::perform_cleanup(shutdown_controller, handler_tasks, &metrics).await;
     }
 
     /// # Execute a function call in the WebAssembly actor
@@ -1083,7 +1083,7 @@ impl ActorRuntime {
     /// This method is called during shutdown to release resources and log
     /// final metrics before the actor terminates.
     async fn perform_cleanup(
-        shutdown_controller: &crate::shutdown::ShutdownController,
+        shutdown_controller: ShutdownController,
         handler_tasks: Vec<JoinHandle<()>>,
         metrics: &MetricsCollector,
     ) {
@@ -1091,10 +1091,7 @@ impl ActorRuntime {
 
         // Signal shutdown to all handler components
         info!("Signaling shutdown to all handler components");
-        shutdown_controller.signal_shutdown();
-
-        // Wait briefly for handlers to shut down gracefully
-        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        shutdown_controller.signal_shutdown().await;
 
         // If any handlers are still running, abort them
         for task in handler_tasks {
@@ -1121,12 +1118,12 @@ impl ActorRuntime {
     ///
     /// * `Ok(())` - The runtime was successfully shut down
     /// * `Err(anyhow::Error)` - An error occurred during shutdown
-    pub async fn stop(&mut self) -> Result<()> {
+    pub async fn stop(mut self) -> Result<()> {
         info!("Initiating actor runtime shutdown");
 
         // Signal shutdown to all components
         info!("Signaling shutdown to all components");
-        self.shutdown_controller.signal_shutdown();
+        self.shutdown_controller.signal_shutdown().await;
 
         // Wait a bit for graceful shutdown
         tokio::time::sleep(std::time::Duration::from_millis(200)).await;

@@ -822,11 +822,12 @@ impl TheaterRuntime {
         // start the actor in a new process
         let (response_tx, mut response_rx) = mpsc::channel(1);
         // Create a shutdown controller for this specific actor
-        let (shutdown_controller, shutdown_receiver) = ShutdownController::new();
+        let mut shutdown_controller = ShutdownController::new();
         let (mailbox_tx, mailbox_rx) = mpsc::channel(100);
         let (operation_tx, operation_rx) = mpsc::channel(100);
         let theater_tx = self.theater_tx.clone();
 
+        let shutdown_receiver = shutdown_controller.subscribe();
         let actor_operation_tx = operation_tx.clone();
         let shutdown_receiver_clone = shutdown_receiver;
         let actor_sender = mailbox_tx.clone();
@@ -859,7 +860,7 @@ impl TheaterRuntime {
             ActorRuntime {
                 actor_id: actor_id_for_task,
                 handler_tasks: Vec::new(),
-                shutdown_controller: ShutdownController::new().0,
+                shutdown_controller: ShutdownController::new(),
             }
         });
 
@@ -1071,38 +1072,17 @@ impl TheaterRuntime {
 
         // Signal this specific actor to shutdown - we need to get the actor again since
         // we may have changed the actors map when stopping children
-        if let Some(proc) = self.actors.get(&actor_id) {
-            debug!("Sending shutdown signal to actor {:?}", actor_id);
-            proc.shutdown_controller.signal_shutdown();
-            debug!(
-                "Shutdown signal sent to actor {:?}, waiting for grace period",
-                actor_id
-            );
+        let proc = self.actors.remove(&actor_id);
 
-            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-            debug!("Grace period for actor {:?} complete", actor_id);
-        } else {
-            debug!(
-                "Actor {:?} no longer exists after stopping children",
-                actor_id
-            );
-            return Ok(());
-        }
-
-        // Force abort if still running
-        if let Some(proc) = self.actors.get(&actor_id) {
-            debug!(
-                "Force aborting actor {:?} task after grace period",
-                actor_id
-            );
-            proc.process.abort();
-            debug!("Actor {:?} task aborted", actor_id);
-        }
-
-        // Remove from actors map
-        if let Some(mut removed_proc) = self.actors.remove(&actor_id) {
-            removed_proc.status = ActorStatus::Stopped;
-            debug!("Actor {:?} stopped and removed from runtime", actor_id);
+        match proc {
+            Some(proc) => {
+                debug!("Signaling actor {:?} to shutdown", actor_id);
+                proc.shutdown_controller.signal_shutdown().await;
+            }
+            None => {
+                debug!("Actor {:?} not found during shutdown", actor_id);
+                return Ok(());
+            }
         }
 
         // Remove actor from any channel registrations

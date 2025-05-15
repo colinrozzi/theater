@@ -793,7 +793,7 @@ impl MessageServerHost {
         loop {
             tokio::select! {
                 // Monitor shutdown channel
-                _ = shutdown_receiver.wait_for_shutdown() => {
+                _ = &mut shutdown_receiver.receiver => {
                     info!("Message server received shutdown signal");
                     debug!("Message server shutting down");
                     break;

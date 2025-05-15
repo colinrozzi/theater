@@ -1109,7 +1109,7 @@ impl HttpFramework {
     pub async fn start(
         &self,
         _actor_handle: ActorHandle,
-        mut shutdown_receiver: ShutdownReceiver,
+        shutdown_receiver: ShutdownReceiver,
     ) -> Result<()> {
         // Create task to monitor shutdown signal
         let servers_ref = self.servers.clone();

@@ -908,7 +908,7 @@ impl SupervisorHost {
                 Some(child_error) = self.channel_rx.recv() => {
                     self.process_child_error(actor_handle.clone(), child_error).await?;
                 }
-                _ = shutdown_receiver.wait_for_shutdown() => {
+                _ = &mut shutdown_receiver.receiver => {
                     info!("Shutdown signal received");
                     break;
                 }
