@@ -1,73 +1,77 @@
 # Why Theater?
 
-## The Challenge of Trust in the AI-Generated Code Era
+## The Challenge of Trust in the AI Agent Era
 
-Software has always been built on a foundation of trust. We trust programmers to write correct code, organizations to review that code, and the ecosystem to catch and fix bugs. This trust model has worked reasonably well, but it's about to be severely tested.
+As AI systems become more capable, we're rapidly moving towards a world of autonomous AI agents - software entities that can perform complex tasks, make decisions, and interact with digital systems on our behalf. These agents promise enormous benefits in productivity and automation, but they also present significant challenges that our current software infrastructure isn't designed to address.
 
-As Large Language Models (LLMs) begin to generate more and more code, we're entering an era where much of the software running in production may never have been reviewed by human eyes. The programmer, that essential link in the chain of trust, is increasingly being replaced by an AI system with different strengths and weaknesses than a human developer.
+These challenges include:
 
-This shift raises several critical challenges:
+1. **Security Boundaries**: How do we ensure agents only access systems and data they're explicitly allowed to?
+2. **Visibility and Transparency**: How do we observe, audit, and understand what agents are doing?
+3. **Coordination and Cooperation**: How do we enable multiple specialized agents to work together safely?
+4. **Failure Management**: How do we handle agents that encounter errors or behave in unexpected ways?
+5. **Trust and Verification**: How do we build confidence in agent-based systems, especially in critical applications?
 
-1. **Quality Validation**: How do we validate the correctness of code when there's simply too much of it to review?
-2. **Failure Containment**: When AI-generated code fails, how do we prevent it from taking down entire systems?
-3. **Debugging Complexity**: How do we debug issues in code we didn't write and may not fully understand?
-4. **Security Boundaries**: How do we ensure that untrusted code can't access or manipulate data it shouldn't?
+These aren't merely theoretical concerns. They represent real, practical challenges that must be solved before AI agents can be deployed widely and safely in production environments.
 
-These challenges aren't merely theoretical. They represent real problems that organizations will face as they integrate more AI-generated code into their workflows.
+## Shifting Trust from Agents to Infrastructure
 
-## Shifting Trust from Code to System
+The traditional approach to software reliability has focused on extensive testing and validation of individual components. This approach assumes that once software passes quality checks, it can be trusted to behave correctly.
 
-The traditional approach to software reliability has been to focus on making the code itself more correct through code reviews, testing, and careful design. This approach assumes that humans will create, review, and validate the code.
+With AI agents, this assumption becomes problematic. Agents may exhibit emergent behaviors, make unexpected decisions, or encounter edge cases that weren't anticipated during development. Their behavior can be complex and sometimes opaque, making traditional validation insufficient.
 
-Theater takes a different approach. Rather than assuming all code is trustworthy, Theater shifts trust to the system itself. By providing strong guarantees at the system level, Theater creates an environment where even potentially flawed or untrusted code can run safely.
+Theater takes a different approach. Rather than assuming all agents will behave perfectly, Theater shifts trust to the infrastructure itself. By providing strong guarantees at the system level, Theater creates an environment where even agents with unpredictable behaviors can operate safely.
 
 This shift parallels other advancements in computing history:
-- Type systems shifted trust from developers to compilers
-- Memory management shifted trust from manual allocation to automatic systems
-- Rust's borrow checker shifted trust from runtime checks to compile-time verification
+- Virtual machines shifted trust from applications to hypervisors
+- Containers shifted trust from monoliths to orchestration platforms
+- Serverless shifted trust from server management to cloud providers
 
-Theater continues this evolution by shifting trust from code quality to system-level guarantees.
+Theater continues this evolution by shifting trust from agent behavior to system-level guarantees.
 
-## The Three Pillars of Theater
+## The Three Pillars of Theater for AI Agents
 
-Theater uses three key pillars to provide guarantees about code running in the system:
+Theater uses three key pillars to provide guarantees about agents running in the system:
 
 ### 1. WebAssembly Components & Sandboxing
 
 Theater uses WebAssembly Components as its foundation, providing:
 
-- **Strong Isolation**: Each actor runs in its own sandbox, preventing direct access to the host system or other actors
-- **Deterministic Execution**: The same inputs always produce the same outputs, making systems easier to test and debug
-- **Language Agnosticism**: Actors can be written in any language that compiles to WebAssembly
-- **Capability-Based Security**: Actors only get access to capabilities explicitly granted to them
+- **Strict Capability Boundaries**: Agents only have access to capabilities explicitly granted to them
+- **Resource Isolation**: Each agent runs in its own sandbox, preventing direct access to the host system or other agents
+- **Deterministic Execution**: The same inputs always produce the same outputs, making behavior predictable and reproducible
+- **Language Agnosticism**: Agents can be implemented in any language that compiles to WebAssembly
 
 ### 2. Actor Model & Supervision
 
 Taking inspiration from Erlang/OTP, Theater implements a comprehensive actor system:
 
-- **Message Passing**: All communication happens through explicit messages
-- **Hierarchical Supervision**: Parent actors monitor children and can restart them upon failure
-- **Failure Isolation**: Problems in one actor don't affect siblings or unrelated parts of the system
-- **Explicit Error Handling**: Error handling becomes a first-class concern in the system design
+- **Agent-to-Agent Communication**: All communication happens through explicit message passing
+- **Hierarchical Supervision**: Parent agents monitor children and can restart them upon failure
+- **Failure Isolation**: Problems in one agent don't affect siblings or unrelated parts of the system
+- **Specialized Roles**: Agents can be designed with specific capabilities and responsibilities, forming natural hierarchies
 
 ### 3. Traceability & Verification
 
-Theater tracks all information that enters or leaves the WebAssembly sandbox:
+Theater tracks every action that agents take:
 
-- **Event Chain**: All system actions are recorded in a verifiable chain
-- **Deterministic Replay**: Any sequence of events can be replayed exactly
-- **State Verification**: Each state transition is cryptographically linked to its predecessors
-- **Comprehensive Debugging**: The complete history of actor interactions is available for inspection
+- **Event Chain**: All agent actions are recorded in a verifiable chain
+- **Complete Auditability**: Every decision and action can be traced back to its causes
+- **Deterministic Replay**: Any sequence of events can be replayed exactly for debugging
+- **Explainable Behavior**: The complete history of agent interactions is available for inspection and analysis
 
-## Building for an AI-First World
+## Building for an AI Agent Ecosystem
 
-By providing a structured environment with strong system-level guarantees, Theater enables developers to build more trustworthy systems, even when individual components might not be fully trusted. This approach is particularly valuable as we move into an era where more code is generated by AI systems.
+By providing a structured environment with strong system-level guarantees, Theater enables developers to build more trustworthy agent systems. This approach is particularly valuable as we move into an era where autonomous agents become increasingly important in our software landscape.
 
-Theater doesn't try to make AI-generated code perfect. Instead, it creates an environment where:
+Theater doesn't try to make agent behavior perfectly predictable. Instead, it creates an environment where:
 
-- The impact of bugs is contained
-- Failures can be recovered from automatically
-- System behavior is transparent and verifiable
-- Security boundaries are enforced by the runtime
+- Agents can only access what they're explicitly permitted to
+- Every agent action is recorded and auditable
+- Failed agents can be automatically restarted or replaced
+- Complex tasks can be broken down across multiple specialized agents
+- The entire system behavior is transparent and verifiable
+
+Theater provides the infrastructure necessary to deploy AI agents with confidence, knowing that no matter how sophisticated the agents become, the system provides guardrails to ensure they operate safely and reliably.
 
 In the following chapters, we'll explore how Theater implements these principles in practice, starting with the core concepts that form the foundation of the system.

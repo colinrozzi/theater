@@ -1,18 +1,23 @@
 # Theater
 
-A WebAssembly actor system designed for the AI-generated code era.
+A WebAssembly actor system designed for secure, transparent, and reliable AI agent infrastructure.
 
 ## The Challenge
 
-LLMs present incredible opportunities for software, but they also present significant challenges. It's realistic to assume that in the very near future, significantly more software will be written, and much of it may never see human review. Because of this, many assumptions we've made in building the software ecosystem are no longer valid.
+AI agents present incredible opportunities for automation and intelligence, but they also introduce significant challenges. As autonomous AI agents become more capable and ubiquitous, we need infrastructure that can:
+
+1. **Contain and secure** agents with precise permission boundaries
+2. **Trace and verify** all agent actions for auditability and debugging
+3. **Manage failures** gracefully in complex agent systems
+4. **Orchestrate cooperation** between specialized agents with different capabilities
 
 ## The Theater Approach
 
-Theater is an attempt to move a lot of the trust from the code and its author to the system itself. Similar to how rust provides memory safety at the language level, Theater provides guarantees at the system level. If your application runs in Theater, you can be sure that it is sandboxed, deterministic, traceable, and fault-tolerant.
+Theater provides infrastructure specifically designed for AI agent systems. It moves trust from the individual agents to the system itself, providing guarantees at the infrastructure level:
 
-1. **WebAssembly Components** provide sandboxing and determinism
-2. **Actor Model with Supervision** implements an Erlang-style supervision system for isolation and fault-tolerance
-3. **Chain** tracks all information that enters or leaves the WebAssembly sandbox
+1. **WebAssembly Components** provide sandboxing and deterministic execution, ensuring agents can only access explicitly granted capabilities
+2. **Actor Model with Supervision** implements an Erlang-style supervision hierarchy for fault-tolerance and structured agent cooperation
+3. **Event Chain** captures every agent action in a verifiable record, enabling complete traceability and deterministic replay
 
 ### Read more
 
@@ -21,79 +26,88 @@ Theater is an attempt to move a lot of the trust from the code and its author to
 
 ## Quick Start with Theater CLI
 
-Theater includes a powerful CLI tool for managing the entire actor lifecycle:
+Theater includes a powerful CLI tool for managing the entire agent lifecycle:
 
 ```bash
-# Create a new actor project
-theater create my-actor
+# Create a new agent project
+theater create my-agent
 
-# Build the WebAssembly actor
-cd my-actor
+# Build the WebAssembly agent
+cd my-agent
 theater build
 
 # Start a Theater server in another terminal
 theater server
 
-# Start the actor
+# Start the agent
 theater start manifest.toml
 
-# List running actors
+# List running agents
 theater list
 
-# View actor logs
-theater events <actor-id>
+# View agent logs
+theater events <agent-id>
 
-# Start actor and subscribe to its events in one command
+# Start agent and subscribe to its events in one command
 theater start manifest.toml --id-only | theater subscribe -
 ```
 
 [See complete CLI documentation →](book/src/cli.md)
 
-## Documentation
+## Agent System Architecture
 
-- [Why Theater](book/src/introduction/why-theater.md) - Core concepts and motivation
-- [CLI Documentation](book/src/user-guide/cli.md) - Complete guide to the Theater CLI
-- [Store System](book/src/core-concepts/store/README.md) - Content-addressable storage documentation
-- [Making Changes](book/src/development/making-changes.md) - Guide for contributing changes
-- [Current Changes](/changes/in-progress.md) - Overview of work in progress
+Theater enables sophisticated agent architectures through its actor model:
 
-## Supervision System
+- **Agent Hierarchy**: Structure agents in parent-child relationships where parent agents can spawn, monitor, and control child agents
+- **Specialized Agents**: Create purpose-built agents with specific capabilities and knowledge domains
+- **Secure Communication**: Enable agent-to-agent communication through explicit message passing
+- **Capability Controls**: Grant agents precisely the capabilities they need through configurable handlers
 
-Theater provides a robust supervision system that enables parent actors to manage their children:
+## Agent Supervision
+
+Theater's supervision system enables robust agent management:
 
 ```toml
-# Parent actor manifest
-name = "parent-actor"
-component_path = "parent.wasm"
+# Parent agent manifest
+name = "supervisor-agent"
+component_path = "supervisor.wasm"
 
 [[handlers]]
 type = "supervisor"
 config = {}
 ```
 
-Parent actors can:
-- Spawn new child actors
-- List their children
-- Monitor child status
-- Stop and restart children
-- Access child state and event history
+Supervisor agents can:
+- Spawn new specialized agents
+- Monitor agent status and performance
+- Restart failed agents automatically
+- Access agent state and event history
 
-Example usage in a parent actor:
+Example usage in a supervisor agent:
 
 ```rust
 use theater::supervisor::*;
 
-// Spawn a child actor
-let child_id = supervisor::spawn_child("child_manifest.toml")?;
+// Spawn a specialized agent
+let agent_id = supervisor::spawn_child("researcher_agent.toml")?;
 
-// Get child status
-let status = supervisor::get_child_status(&child_id)?;
+// Get agent status
+let status = supervisor::get_child_status(&agent_id)?;
 
-// Restart child if needed
+// Restart agent if needed
 if status != ActorStatus::Running {
-    supervisor::restart_child(&child_id)?;
+    supervisor::restart_child(&agent_id)?;
 }
 ```
+
+## Complete Traceability
+
+Theater captures every action agents take in a verifiable event chain:
+
+- All messages between agents are recorded
+- Every external API call is logged with inputs and outputs
+- State changes are tracked with causal relationships
+- The entire system can be deterministically replayed for debugging
 
 ## Development Setup
 
@@ -102,7 +116,7 @@ if status != ActorStatus::Running {
 Theater uses Nix with flakes for reproducible development environments. Here's how to get started:
 
 1. First, install Nix:
-https://nixos.org/download/
+   https://nixos.org/download/
 
 2. Enable flakes by either:
    - Adding to your `/etc/nix/nix.conf`:
@@ -160,4 +174,4 @@ cargo build
 
 ## Status
 
-This project is in active development and not yet ready for production use. Most of the code is undocumented, untested, and subject to change. If you are interested at all in the project or have questions, please reach out to me at colinrozzi@gmail.com.
+This project is in active development. Most features are focused on providing infrastructure for AI agent systems with security, traceability, and reliability as primary goals. If you are interested in the project or have questions, please reach out to me at colinrozzi@gmail.com.
