@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["DEFAULT_SHUTDOWN_TIMEOUT"],"struct":["ShutdownController","ShutdownReceiver","ShutdownSignal"]};
