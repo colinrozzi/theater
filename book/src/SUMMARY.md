@@ -17,6 +17,10 @@
 - [CLI](user-guide/cli.md)
 - [Troubleshooting](user-guide/troubleshooting.md)
 
+# Use Cases
+- [Building AI Agent Systems](use-cases/ai-agents.md)
+- [Running AI-Generated Code](use-cases/ai-generated-code.md)
+
 # Development
 - [Building Actors](development/building-actors.md)
 - [Building Host Functions](development/building-host-functions.md)
