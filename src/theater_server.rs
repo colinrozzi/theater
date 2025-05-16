@@ -210,7 +210,7 @@ impl From<TheaterRuntimeError> for ManagementError {
             TheaterRuntimeError::ActorOperationFailed(msg) => ManagementError::RuntimeError(format!("Actor operation failed: {}", msg)),
             TheaterRuntimeError::ActorError(e) => ManagementError::ActorError(e.to_string()),
             TheaterRuntimeError::ChannelError(msg) => ManagementError::CommunicationError(msg),
-            TheaterRuntimeError::ChannelNotFound(id) => ManagementError::ChannelNotFound,
+            TheaterRuntimeError::ChannelNotFound(_) => ManagementError::ChannelNotFound,
             TheaterRuntimeError::ChannelRejected => ManagementError::ChannelRejected,
             TheaterRuntimeError::SerializationError(msg) => ManagementError::SerializationError(msg),
             TheaterRuntimeError::InternalError(msg) => ManagementError::InternalError(msg),

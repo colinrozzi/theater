@@ -1181,7 +1181,8 @@ impl TheaterRuntime {
                 Err(e) => Err(anyhow::anyhow!("Failed to receive state: {}", e)),
             }
         } else {
-            Err(TheaterRuntimeError::ActorNotFound(actor_id))
+            // The error here needs to be anyhow::Error since that's what the function returns
+            Err(anyhow::Error::new(TheaterRuntimeError::ActorNotFound(actor_id)))
         }
     }
 
@@ -1207,7 +1208,7 @@ impl TheaterRuntime {
                 Err(e) => Err(TheaterRuntimeError::ChannelError(format!("Failed to receive events: {}", e))),
             }
         } else {
-            Err(anyhow::anyhow!("Actor not found"))
+            Err(TheaterRuntimeError::ActorNotFound(actor_id))
         }
     }
 

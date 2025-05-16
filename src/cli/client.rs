@@ -61,15 +61,12 @@ impl TheaterClient {
             .send(Bytes::from(command_bytes))
             .await
             .expect("Failed to send command");
-        println!("Command sent: {:?}", command);
         debug!("Command sent, awaiting response");
 
         // Receive and deserialize the response
         if let Some(response_bytes) = connection.next().await {
-            println!("Received response bytes");
             let response_bytes = response_bytes?;
             let response: ManagementResponse = serde_json::from_slice(&response_bytes)?;
-            println!("Received response: {:?}", response);
             debug!("Received response: {:?}", response);
             Ok(response)
         } else {
@@ -239,7 +236,7 @@ impl TheaterClient {
     /// Get the events of an actor, falling back to filesystem if the actor is not running
     pub async fn get_actor_events(&mut self, id: TheaterId) -> Result<Vec<ChainEvent>> {
         let command = ManagementCommand::GetActorEvents { id: id.clone() };
-        
+
         // Try to send the command to the server
         let response = match self.send_command(command).await {
             Ok(resp) => resp,

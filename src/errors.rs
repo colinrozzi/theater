@@ -66,19 +66,9 @@ impl From<ActorError> for TheaterRuntimeError {
     }
 }
 
-// Allow converting from generic errors to TheaterRuntimeError
-impl<E> From<E> for TheaterRuntimeError 
-where
-    E: std::error::Error + 'static,
-{
-    fn from(error: E) -> Self {
+// Helper method to convert from other errors
+impl TheaterRuntimeError {
+    pub fn from_error<E: std::error::Error + 'static>(error: E) -> Self {
         Self::InternalError(error.to_string())
-    }
-}
-
-// Converting from TheaterRuntimeError to anyhow::Error for backward compatibility
-impl From<TheaterRuntimeError> for anyhow::Error {
-    fn from(error: TheaterRuntimeError) -> Self {
-        anyhow::anyhow!("{}", error)
     }
 }
