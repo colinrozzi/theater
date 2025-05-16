@@ -135,32 +135,34 @@ impl RuntimeHost {
 
         interface
             .func_wrap(
-                "init",
+                "shutdown",
                 move |mut ctx: StoreContextMut<'_, ActorStore>,
-                      (params,): (String,)|
+                      (reason,): (String,)|
                       -> Result<()> {
-                    // Record init call event
+                    // Record shutdown call event
                     ctx.data_mut().record_event(ChainEventData {
-                        event_type: "ntwk:theater/runtime/init".to_string(),
-                        data: EventData::Runtime(RuntimeEventData::InitCall {
-                            params: params.clone(),
+                        event_type: "ntwk:theater/runtime/shutdown".to_string(),
+                        data: EventData::Runtime(RuntimeEventData::ShutdownCall {
+                            reason: reason.clone(),
                         }),
                         timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                        description: Some(format!("Actor initialization with params: {}", params)),
+                        description: Some(format!("Actor shutdown with reason: {}", reason)),
                     });
 
-                    // Record init result event
+                    // Record shutdown result event
                     ctx.data_mut().record_event(ChainEventData {
-                        event_type: "ntwk:theater/runtime/init".to_string(),
-                        data: EventData::Runtime(RuntimeEventData::InitResult { success: true }),
+                        event_type: "ntwk:theater/runtime/shutdown".to_string(),
+                        data: EventData::Runtime(RuntimeEventData::ShutdownResult {
+                            success: true,
+                        }),
                         timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                        description: Some("Actor initialization successful".to_string()),
+                        description: Some("Actor shutdown successful".to_string()),
                     });
 
                     Ok(())
                 },
             )
-            .expect("Failed to wrap init function");
+            .expect("Failed to wrap shutdown function");
 
         Ok(())
     }

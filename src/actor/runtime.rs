@@ -29,6 +29,7 @@ use crate::metrics::MetricsCollector;
 use crate::shutdown::{ShutdownController, ShutdownReceiver};
 use crate::store::ContentStore;
 use crate::wasm::{ActorComponent, ActorInstance};
+use crate::MessageServerConfig;
 use crate::Result;
 use tokio::sync::mpsc::{self, Receiver, Sender};
 use tokio::task::JoinHandle;
@@ -260,37 +261,52 @@ impl ActorRuntime {
     ) -> Vec<Handler> {
         let mut handlers = Vec::new();
 
-        handlers.push(Handler::MessageServer(MessageServerHost::new(
-            actor_sender,
-            actor_mailbox,
-            theater_tx.clone(),
-        )));
+        if config
+            .handlers
+            .contains(&HandlerConfig::MessageServer(MessageServerConfig {}))
+        {
+            handlers.push(Handler::MessageServer(MessageServerHost::new(
+                actor_sender,
+                actor_mailbox,
+                theater_tx.clone(),
+            )));
+        }
 
         for handler_config in &config.handlers {
             let handler = match handler_config {
                 HandlerConfig::MessageServer(_) => {
-                    panic!("MessageServer handler is already added")
+                    debug!("MessageServer handler already created");
+                    None
                 }
                 HandlerConfig::FileSystem(config) => {
-                    Handler::FileSystem(FileSystemHost::new(config.clone()))
+                    Some(Handler::FileSystem(FileSystemHost::new(config.clone())))
                 }
                 HandlerConfig::HttpClient(config) => {
-                    Handler::HttpClient(HttpClientHost::new(config.clone()))
+                    Some(Handler::HttpClient(HttpClientHost::new(config.clone())))
                 }
-                HandlerConfig::HttpFramework(_) => Handler::HttpFramework(HttpFramework::new()),
+                HandlerConfig::HttpFramework(_) => {
+                    Some(Handler::HttpFramework(HttpFramework::new()))
+                }
                 HandlerConfig::Runtime(config) => {
-                    Handler::Runtime(RuntimeHost::new(config.clone()))
+                    Some(Handler::Runtime(RuntimeHost::new(config.clone())))
                 }
                 HandlerConfig::Supervisor(config) => {
-                    Handler::Supervisor(SupervisorHost::new(config.clone()))
+                    Some(Handler::Supervisor(SupervisorHost::new(config.clone())))
                 }
-                HandlerConfig::Process(config) => {
-                    Handler::Process(ProcessHost::new(config.clone(), actor_handle.clone()))
+                HandlerConfig::Process(config) => Some(Handler::Process(ProcessHost::new(
+                    config.clone(),
+                    actor_handle.clone(),
+                ))),
+                HandlerConfig::Store(config) => {
+                    Some(Handler::Store(StoreHost::new(config.clone())))
                 }
-                HandlerConfig::Store(config) => Handler::Store(StoreHost::new(config.clone())),
-                HandlerConfig::Timing(config) => Handler::Timing(TimingHost::new(config.clone())),
+                HandlerConfig::Timing(config) => {
+                    Some(Handler::Timing(TimingHost::new(config.clone())))
+                }
             };
-            handlers.push(handler);
+            if let Some(handler) = handler {
+                handlers.push(handler);
+            }
         }
 
         handlers

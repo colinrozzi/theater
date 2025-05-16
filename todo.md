@@ -21,6 +21,7 @@
 [ ] make the theater build command go to nix and update the manifest accordingly
 [ ] add nix flakes to the default projects
 [ ] I really want a better events thing. I should be able to click through an actors events, view them fullscreen, access them by event id, stuff like that
+[ ] rethink the message-server-host thing, the send/request are mixed in with the server functions like respond-to-request
 
 ### today
 
