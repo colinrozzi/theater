@@ -93,4 +93,6 @@ interface runtime {
     /// cannot tamper with their event history. This provides a secure audit trail of all
     /// actor actions.
     get-chain: func() -> chain;
+
+    shutdown: func();
 }
