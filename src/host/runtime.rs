@@ -144,8 +144,7 @@ impl RuntimeHost {
         interface
             .func_wrap_async(
                 "shutdown",
-                move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore>,
-                      (reason,): (String,)|
+                move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore>, (reason,): (String,)|
                       -> Box<dyn Future<Output = Result<(Result<(), String>,)>> + Send> {
                     // Record shutdown call event
                     ctx.data_mut().record_event(ChainEventData {
@@ -156,17 +155,16 @@ impl RuntimeHost {
                         timestamp: chrono::Utc::now().timestamp_millis() as u64,
                         description: Some(format!("Actor shutdown with reason: {}", reason)),
                     });
-                    
+
                     info!(
                         "[ACTOR] [{}] [{}] Shutdown requested: {}",
                         ctx.data().id,
                         name,
                         reason
                     );
-                    let (response_tx, response_rx) = tokio::sync::oneshot::channel();
-
+                    let (response_tx, _response_rx) = tokio::sync::oneshot::channel();
                     let theater_tx = theater_tx.clone();
-                    
+
                     Box::new(async move {
                         match theater_tx
                             .send(TheaterCommand::StopActor {
@@ -176,54 +174,37 @@ impl RuntimeHost {
                             .await
                         {
                             Ok(_) => {
-
-                                match response_rx.await {
-                                    Ok(_) => {
-                                        // Record shutdown result event
-                                        ctx.data_mut().record_event(ChainEventData {
-                                            event_type: "ntwk:theater/runtime/shutdown".to_string(),
-                                            data: EventData::Runtime(RuntimeEventData::ShutdownResult {
-                                                success: true,
-                                            }),
-                                            timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                                            description: Some("Actor shutdown successful".to_string()),
-                                        });
-                                        Ok((Ok(()),))
-                                    }
-                                    Err(e) => {
-                                        let err = e.to_string();
-                                        // Record failed shutdown result event
-                                        ctx.data_mut().record_event(ChainEventData {
-                                            event_type: "ntwk:theater/runtime/shutdown".to_string(),
-                                            data: EventData::Runtime(RuntimeEventData::ShutdownResult {
-                                                success: false,
-                                            }),
-                                            timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                                            description: Some(format!("Failed to send shutdown command: {}", err)),
-                                        });
-                                        Ok((Err(err),))
-                                    }
-                                }
+                                ctx.data_mut().record_event(ChainEventData {
+                                    event_type: "ntwk:theater/runtime/shutdown".to_string(),
+                                    data: EventData::Runtime(RuntimeEventData::ShutdownRequested {
+                                        success: true,
+                                    }),
+                                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                                    description: Some("Shutdown command sent successfully".to_string()),
+                                });
+                                Ok((Ok(()),))
                             }
                             Err(e) => {
                                 let err = e.to_string();
                                 // Record failed shutdown result event
                                 ctx.data_mut().record_event(ChainEventData {
                                     event_type: "ntwk:theater/runtime/shutdown".to_string(),
-                                    data: EventData::Runtime(RuntimeEventData::ShutdownResult {
+                                    data: EventData::Runtime(RuntimeEventData::ShutdownRequested {
                                         success: false,
                                     }),
                                     timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                                    description: Some(format!("Failed to send shutdown command: {}", err)),
+                                    description: Some(format!(
+                                        "Failed to send shutdown command: {}",
+                                        err
+                                    )),
                                 });
                                 Ok((Err(err),))
                             }
                         }
-
-
                     })
                 },
-            ).expect("Failed to wrap shutdown function");
+            )
+            .expect("Failed to wrap shutdown function");
 
         Ok(())
     }

@@ -56,6 +56,11 @@ pub enum ActorError {
     #[component(name = "internal-error")]
     Internal(ChainEvent),
 
+    /// Unexpected error
+    #[error("Unexpected error: {0}")]
+    #[component(name = "unexpected-error")]
+    UnexpectedError(String),
+
     /// Failed to serialize or deserialize data
     #[error("Serialization error")]
     #[component(name = "serialization-error")]
@@ -126,6 +131,7 @@ impl From<ActorError> for WitActorError {
                 (WitErrorType::UpdateComponentError, Some(data.into_bytes()))
             }
             ActorError::Paused => (WitErrorType::Paused, None),
+            ActorError::UnexpectedError(data) => (WitErrorType::Internal, Some(data.into_bytes())),
         };
         Self { error_type, data }
     }
@@ -162,6 +168,9 @@ pub enum ActorOperation {
     GetChain {
         /// Channel to send chain events back to the caller
         response_tx: oneshot::Sender<Result<Vec<crate::ChainEvent>, ActorError>>,
+    },
+    SaveChain {
+        response_tx: oneshot::Sender<Result<(), ActorError>>,
     },
     /// Retrieve the actor's current state
     GetState {

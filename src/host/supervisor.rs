@@ -4,7 +4,7 @@ use crate::actor::types::{ActorError, WitActorError};
 use crate::config::SupervisorHostConfig;
 use crate::events::supervisor::SupervisorEventData;
 use crate::events::{ChainEventData, EventData};
-use crate::messages::{TheaterCommand, ChildError};
+use crate::messages::{ChildError, TheaterCommand};
 use crate::shutdown::ShutdownReceiver;
 use crate::wasm::{ActorComponent, ActorInstance};
 use crate::ChainEvent;
@@ -15,7 +15,6 @@ use thiserror::Error;
 use tokio::sync::oneshot;
 use tracing::{error, info};
 use wasmtime::StoreContextMut;
-
 
 pub struct SupervisorHost {
     channel_tx: tokio::sync::mpsc::Sender<ChildError>,
@@ -805,7 +804,7 @@ impl SupervisorHost {
                                             SupervisorEventData::GetChildEventsResult {
                                                 child_id: child_id_clone.clone(),
                                                 events_count: events.len(),
-                                 success: true,
+                                                success: true,
                                             },
                                         ),
                                         timestamp: chrono::Utc::now().timestamp_millis() as u64,
@@ -890,7 +889,12 @@ impl SupervisorHost {
     pub async fn add_export_functions(&self, actor_instance: &mut ActorInstance) -> Result<()> {
         info!("Adding export functions for supervisor");
 
-        actor_instance.register_function_no_result::<(String, WitActorError)>("ntwk:theater/supervisor-handlers", "handle-child-error").expect("Failed to register handle-child-error function");
+        actor_instance
+            .register_function_no_result::<(String, WitActorError)>(
+                "ntwk:theater/supervisor-handlers",
+                "handle-child-error",
+            )
+            .expect("Failed to register handle-child-error function");
         info!("Added export function for handle-child-error");
 
         Ok(())
@@ -918,16 +922,20 @@ impl SupervisorHost {
         Ok(())
     }
 
-    async fn process_child_error(&self, actor_handle: ActorHandle, child_error: ChildError) -> Result<()> {
+    async fn process_child_error(
+        &self,
+        actor_handle: ActorHandle,
+        child_error: ChildError,
+    ) -> Result<()> {
         info!("Processing child error: {:?}", child_error);
 
-        actor_handle.call_function::<(String, WitActorError), ()>(
-            "ntwk:theater/supervisor-handlers.handle-child-error".to_string(),
-            (child_error.actor_id.to_string(), child_error.error.into()),
-        ).await?;
+        actor_handle
+            .call_function::<(String, WitActorError), ()>(
+                "ntwk:theater/supervisor-handlers.handle-child-error".to_string(),
+                (child_error.actor_id.to_string(), child_error.error.into()),
+            )
+            .await?;
 
         Ok(())
     }
 }
-
-

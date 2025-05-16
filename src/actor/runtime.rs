@@ -616,6 +616,13 @@ impl ActorRuntime {
                             ActorOperation::Resume { response_tx } => {
                                 let _ = response_tx.send(Err(ActorError::ShuttingDown));
                             }
+                            ActorOperation::SaveChain { response_tx } => {
+                                let response = match actor_instance.save_chain() {
+                                    Ok(_) => Ok(()),
+                                    Err(e) => Err(ActorError::UnexpectedError(e.to_string())),
+                                };
+                                response_tx.send(response).expect("Failed to send save chain response");
+                            }
                         }
                         continue;
                     }
@@ -674,26 +681,41 @@ impl ActorRuntime {
                                 }
                             }
                         }
-                                ActorOperation::Shutdown { response_tx } => {
-                                    info!("Shutdown operation received while paused");
-                                    shutdown_initiated = true;
-                                    let _ = response_tx.send(Ok(()));
-                                    continue;
-                                }
-                                ActorOperation::Pause { response_tx } => {
-                                    let _ = response_tx.send(Err(ActorError::Paused));
-                                }
-                                ActorOperation::Resume { response_tx } => {
-                                    debug!("Resuming actor");
-                                    paused = false;
-                                    if let Err(e) = response_tx.send(Ok(())) {
-                                        error!("Failed to send resume response: {:?}", e);
-                                    } else {
-                                        info!("Actor resumed successfully");
-                                    }
+                        ActorOperation::Shutdown { response_tx } => {
+                            info!("Shutdown operation received while paused");
+                            shutdown_initiated = true;
+                            let _ = response_tx.send(Ok(()));
+                            continue;
+                        }
+                        ActorOperation::Pause { response_tx } => {
+                            let _ = response_tx.send(Err(ActorError::Paused));
+                        }
+                        ActorOperation::Resume { response_tx } => {
+                            debug!("Resuming actor");
+                            paused = false;
+                            if let Err(e) = response_tx.send(Ok(())) {
+                                error!("Failed to send resume response: {:?}", e);
+                            } else {
+                                info!("Actor resumed successfully");
+                            }
+                        }
+                        ActorOperation::SaveChain { response_tx } => {
+                                    match actor_instance.save_chain() {
+                                        Ok(_) => {
+                                            if let Err(e) = response_tx.send(Ok(())) {
+                                                error!("Failed to send save chain response: {:?}", e);
+                                            }
+                                        }
+                                        Err(e) => {
+                                            if let Err(send_err) = response_tx.send(Err(ActorError::UnexpectedError(e.to_string()))) {
+                                                error!("Failed to send save chain error response: {:?}", send_err);
+                                            }
                                 }
                             }
-                        } else {
+                }
+                            }
+                    } else {
+
 
                     match op {
                         ActorOperation::CallFunction { name, params, response_tx } => {
@@ -801,7 +823,23 @@ impl ActorRuntime {
                             }
                             debug!("Actor resumed successfully");
                                 }
-                    }
+                            ActorOperation::SaveChain { response_tx } => {
+                            debug!("Processing SaveChain operation");
+                            match actor_instance.save_chain() {
+                                Ok(_) => {
+                                    if let Err(e) = response_tx.send(Ok(())) {
+                                        error!("Failed to send save chain response: {:?}", e);
+                                    }
+                                }
+                                Err(e) => {
+                                    if let Err(send_err) = response_tx.send(Err(ActorError::UnexpectedError(e.to_string()))) {
+                                        error!("Failed to send save chain error response: {:?}", send_err);
+                                    }
+                                }
+                            }
+                            debug!("SaveChain operation completed");
+                            }
+                        }
                         }
                 }
 

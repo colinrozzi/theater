@@ -21,7 +21,7 @@ pub enum RuntimeEventData {
     ShutdownCall {
         reason: String,
     },
-    ShutdownResult {
+    ShutdownRequested {
         success: bool,
     },
 

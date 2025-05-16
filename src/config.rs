@@ -13,6 +13,7 @@ pub struct ManifestConfig {
     pub component_path: String,
     pub short_description: Option<String>,
     pub long_description: Option<String>,
+    pub save_chain: Option<bool>,
     #[serde(default)]
     pub init_state: Option<String>,
     #[serde(default)]
@@ -353,5 +354,9 @@ impl ManifestConfig {
     /// but this might be refined in the future to guarantee consistent representations.
     pub fn into_fixed_bytes(self) -> Vec<u8> {
         toml::to_string(&self).unwrap().into_bytes()
+    }
+
+    pub fn save_chain(&self) -> bool {
+        self.save_chain.unwrap_or(false)
     }
 }

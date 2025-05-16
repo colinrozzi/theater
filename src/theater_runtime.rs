@@ -1044,6 +1044,24 @@ impl TheaterRuntime {
     async fn stop_actor(&mut self, actor_id: TheaterId) -> Result<()> {
         debug!("Stopping actor: {:?}", actor_id);
 
+        // If the actor's manifest says we should save the chain, save it
+        if let Some(proc) = self.actors.get(&actor_id) {
+            if proc.manifest.save_chain() {
+                let (tx, rx): (
+                    oneshot::Sender<Result<(), ActorError>>,
+                    oneshot::Receiver<Result<(), ActorError>>,
+                ) = oneshot::channel();
+                proc.operation_tx
+                    .send(ActorOperation::SaveChain { response_tx: tx })
+                    .await?;
+
+                match rx.await {
+                    Ok(result) => result?,
+                    Err(e) => error!("Failed to receive save chain result: {}", e),
+                }
+            }
+        }
+
         // Find the actor's children to stop them first
         let children = if let Some(proc) = self.actors.get(&actor_id) {
             debug!(
