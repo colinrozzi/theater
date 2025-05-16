@@ -287,9 +287,10 @@ impl ActorRuntime {
                 HandlerConfig::HttpFramework(_) => {
                     Some(Handler::HttpFramework(HttpFramework::new()))
                 }
-                HandlerConfig::Runtime(config) => {
-                    Some(Handler::Runtime(RuntimeHost::new(config.clone())))
-                }
+                HandlerConfig::Runtime(config) => Some(Handler::Runtime(RuntimeHost::new(
+                    config.clone(),
+                    theater_tx.clone(),
+                ))),
                 HandlerConfig::Supervisor(config) => {
                     Some(Handler::Supervisor(SupervisorHost::new(config.clone())))
                 }
