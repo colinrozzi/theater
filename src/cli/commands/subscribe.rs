@@ -216,8 +216,8 @@ pub fn execute(args: &SubscribeArgs, _verbose: bool, json: bool) -> Result<()> {
                         println!("{} Actor error: {}", style("ERROR").bold().red(), error);
                     }
                 }
-                ManagementResponse::Error { message } => {
-                    return Err(anyhow!("Error from server: {}", message));
+                ManagementResponse::Error { error } => {
+                    return Err(anyhow!("Error from server: {:?}", error));
                 }
                 _ => {
                     debug!("Received unexpected response: {:?}", response);

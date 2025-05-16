@@ -170,14 +170,33 @@ pub enum ManagementResponse {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ManagementError {
+    // Actor-related errors
     ActorNotFound,
-    ChannelNotFound,
-    ChannelClosed,
-    ChannelRejected,
     ActorAlreadyExists,
     ActorNotRunning,
     ActorError(String),
+    
+    // Channel-related errors
+    ChannelNotFound,
+    ChannelClosed,
+    ChannelRejected,
+    
+    // Store-related errors
     StoreError(String),
+    
+    // Communication errors
+    CommunicationError(String),
+    
+    // Request handling errors
+    InvalidRequest(String),
+    Timeout,
+    
+    // System errors
+    RuntimeError(String),
+    InternalError(String),
+    
+    // Serialization/deserialization errors
+    SerializationError(String),
 }
 
 #[derive(Debug)]
@@ -454,14 +473,14 @@ impl TheaterServer {
                                     Err(e) => {
                                         error!("Runtime failed to start actor: {}", e);
                                         ManagementResponse::Error {
-                                            message: format!("Failed to start actor: {}", e),
+                                            error: ManagementError::RuntimeError(format!("Failed to start actor: {}", e)),
                                         }
                                     }
                                 },
                                 Err(e) => {
                                     error!("Failed to receive spawn response: {}", e);
                                     ManagementResponse::Error {
-                                        message: format!("Failed to receive spawn response: {}", e),
+                                        error: ManagementError::CommunicationError(format!("Failed to receive spawn response: {}", e)),
                                     }
                                 }
                             }
@@ -469,7 +488,7 @@ impl TheaterServer {
                         Err(e) => {
                             error!("Failed to send SpawnActor command: {}", e);
                             ManagementResponse::Error {
-                                message: format!("Failed to send spawn command: {}", e),
+                                error: ManagementError::CommunicationError(format!("Failed to send spawn command: {}", e)),
                             }
                         }
                     }
@@ -490,7 +509,7 @@ impl TheaterServer {
                             ManagementResponse::ActorStopped { id }
                         }
                         Err(e) => ManagementResponse::Error {
-                            message: format!("Failed to stop actor: {}", e),
+                            error: ManagementError::RuntimeError(format!("Failed to stop actor: {}", e)),
                         },
                     }
                 }
@@ -509,7 +528,7 @@ impl TheaterServer {
                             ManagementResponse::ActorList { actors }
                         }
                         Err(e) => ManagementResponse::Error {
-                            message: format!("Failed to list actors: {}", e),
+                            error: ManagementError::RuntimeError(format!("Failed to list actors: {}", e)),
                         },
                     }
                 }
@@ -682,7 +701,7 @@ impl TheaterServer {
                     match cmd_rx.await? {
                         Ok(_) => ManagementResponse::Restarted { id },
                         Err(e) => ManagementResponse::Error {
-                            message: format!("Failed to restart actor: {}", e),
+                            error: ManagementError::RuntimeError(format!("Failed to restart actor: {}", e)),
                         },
                     }
                 }
@@ -745,7 +764,7 @@ impl TheaterServer {
                     match cmd_rx.await? {
                         Ok(_) => ManagementResponse::ActorComponentUpdated { id },
                         Err(e) => ManagementResponse::Error {
-                            message: format!("Failed to update actor component: {}", e),
+                            error: ManagementError::RuntimeError(format!("Failed to update actor component: {}", e)),
                         },
                     }
                 }
@@ -811,17 +830,17 @@ impl TheaterServer {
                                     } else {
                                         // Channel rejected by target
                                         ManagementResponse::Error {
-                                            message: "Channel rejected by target actor".to_string(),
+                                            error: ManagementError::ChannelRejected,
                                         }
                                     }
                                 }
                                 Err(e) => ManagementResponse::Error {
-                                    message: format!("Error opening channel: {}", e),
+                                    error: ManagementError::RuntimeError(format!("Error opening channel: {}", e)),
                                 },
                             }
                         }
                         Err(e) => ManagementResponse::Error {
-                            message: format!("Failed to receive channel open response: {}", e),
+                            error: ManagementError::CommunicationError(format!("Failed to receive channel open response: {}", e)),
                         },
                     }
                 }
