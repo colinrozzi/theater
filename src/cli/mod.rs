@@ -97,6 +97,10 @@ pub enum Commands {
     #[command(name = "watch")]
     Watch(commands::watch::WatchArgs),
 
+    /// List stored actor IDs
+    #[command(name = "list-stored")]
+    ListStored(commands::list_stored::ListStoredArgs),
+    
     /// Channel operations
     #[command(name = "channel")]
     Channel(commands::channel::ChannelArgs),
@@ -130,5 +134,6 @@ pub fn run() -> anyhow::Result<()> {
                 commands::channel::open::execute(open_args, cli.verbose, cli.json)
             }
         },
+        Commands::ListStored(args) => commands::list_stored::execute(args, cli.verbose, cli.json),
     }
 }

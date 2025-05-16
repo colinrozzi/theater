@@ -4,6 +4,7 @@ pub mod create;
 pub mod events;
 pub mod inspect;
 pub mod list;
+pub mod list_stored;
 pub mod logs;
 pub mod message;
 pub mod restart;

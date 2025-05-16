@@ -110,7 +110,7 @@ pub enum ManagementResponse {
         error: ActorError,
     },
     Error {
-        message: String,
+        error: ManagementError,
     },
     RequestedMessage {
         id: TheaterId,
@@ -166,6 +166,18 @@ pub enum ManagementResponse {
     StoreCreated {
         store_id: String,
     },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum ManagementError {
+    ActorNotFound,
+    ChannelNotFound,
+    ChannelClosed,
+    ChannelRejected,
+    ActorAlreadyExists,
+    ActorNotRunning,
+    ActorError(String),
+    StoreError(String),
 }
 
 #[derive(Debug)]
