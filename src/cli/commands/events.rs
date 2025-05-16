@@ -38,7 +38,7 @@ pub struct EventsArgs {
     pub to: Option<String>,
 
     /// Search events for this text (in description and data)
-    #[arg(short, long)]
+    #[arg(long)]
     pub search: Option<String>,
 
     /// Output format (pretty, compact, json, csv)

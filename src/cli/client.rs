@@ -115,7 +115,7 @@ impl TheaterClient {
 
         match response {
             ManagementResponse::ActorList { actors } => Ok(actors),
-            ManagementResponse::Error { message } => {
+            ManagementResponse::Error { error } => {
                 Err(anyhow!("Error listing actors: {:?}", error))
             }
             _ => Err(anyhow!("Unexpected response")),
@@ -132,7 +132,7 @@ impl TheaterClient {
                 id: _,
                 subscription_id,
             } => Ok(subscription_id),
-            ManagementResponse::Error { message } => {
+            ManagementResponse::Error { error } => {
                 Err(anyhow!("Error subscribing to actor: {:?}", error))
             }
             _ => Err(anyhow!("Unexpected response")),
@@ -153,7 +153,7 @@ impl TheaterClient {
 
         match response {
             ManagementResponse::Unsubscribed { .. } => Ok(()),
-            ManagementResponse::Error { message } => {
+            ManagementResponse::Error { error } => {
                 Err(anyhow!("Error unsubscribing from actor: {:?}", error))
             }
             _ => Err(anyhow!("Unexpected response")),
@@ -167,7 +167,7 @@ impl TheaterClient {
 
         match response {
             ManagementResponse::SentMessage { .. } => Ok(()),
-            ManagementResponse::Error { message } => {
+            ManagementResponse::Error { error } => {
                 Err(anyhow!("Error sending message to actor: {:?}", error))
             }
             _ => Err(anyhow!("Unexpected response")),
@@ -181,7 +181,7 @@ impl TheaterClient {
 
         match response {
             ManagementResponse::RequestedMessage { message, .. } => Ok(message),
-            ManagementResponse::Error { message } => {
+            ManagementResponse::Error { error } => {
                 Err(anyhow!("Error requesting message from actor: {:?}", error))
             }
             _ => Err(anyhow!("Unexpected response")),
@@ -195,7 +195,7 @@ impl TheaterClient {
 
         match response {
             ManagementResponse::ActorStatus { status, .. } => Ok(status),
-            ManagementResponse::Error { message } => {
+            ManagementResponse::Error { error } => {
                 Err(anyhow!("Error getting actor status: {:?}", error))
             }
             _ => Err(anyhow!("Unexpected response")),
@@ -209,7 +209,7 @@ impl TheaterClient {
 
         match response {
             ManagementResponse::Restarted { .. } => Ok(()),
-            ManagementResponse::Error { message } => {
+            ManagementResponse::Error { error } => {
                 Err(anyhow!("Error restarting actor: {:?}", error))
             }
             _ => Err(anyhow!("Unexpected response")),
@@ -223,7 +223,7 @@ impl TheaterClient {
 
         match response {
             ManagementResponse::ActorState { state, .. } => Ok(state),
-            ManagementResponse::Error { message } => {
+            ManagementResponse::Error { error } => {
                 Err(anyhow!("Error getting actor state: {:?}", error))
             }
             _ => Err(anyhow!("Unexpected response")),
@@ -237,7 +237,7 @@ impl TheaterClient {
 
         match response {
             ManagementResponse::ActorEvents { events, .. } => Ok(events),
-            ManagementResponse::Error { message } => {
+            ManagementResponse::Error { error } => {
                 Err(anyhow!("Error getting actor events: {:?}", error))
             }
             _ => Err(anyhow!("Unexpected response")),
@@ -251,7 +251,7 @@ impl TheaterClient {
 
         match response {
             ManagementResponse::ActorMetrics { metrics, .. } => Ok(metrics),
-            ManagementResponse::Error { message } => {
+            ManagementResponse::Error { error } => {
                 Err(anyhow!("Error getting actor metrics: {:?}", error))
             }
             _ => Err(anyhow!("Unexpected response")),
@@ -265,7 +265,7 @@ impl TheaterClient {
 
         match response {
             ManagementResponse::ActorComponentUpdated { .. } => Ok(()),
-            ManagementResponse::Error { message } => {
+            ManagementResponse::Error { error } => {
                 Err(anyhow!("Error updating actor component: {:?}", error))
             }
             _ => Err(anyhow!("Unexpected response")),
@@ -286,7 +286,7 @@ impl TheaterClient {
 
         match response {
             ManagementResponse::ChannelOpened { channel_id, .. } => Ok(channel_id),
-            ManagementResponse::Error { message } => {
+            ManagementResponse::Error { error } => {
                 Err(anyhow!("Error opening channel: {:?}", error))
             }
             _ => Err(anyhow!("Unexpected response")),
@@ -303,7 +303,7 @@ impl TheaterClient {
 
         match response {
             ManagementResponse::MessageSent { .. } => Ok(()),
-            ManagementResponse::Error { message } => {
+            ManagementResponse::Error { error } => {
                 Err(anyhow!("Error sending on channel: {:?}", error))
             }
             _ => Err(anyhow!("Unexpected response")),
@@ -319,7 +319,7 @@ impl TheaterClient {
 
         match response {
             ManagementResponse::ChannelClosed { .. } => Ok(()),
-            ManagementResponse::Error { message } => {
+            ManagementResponse::Error { error } => {
                 Err(anyhow!("Error closing channel: {:?}", error))
             }
             _ => Err(anyhow!("Unexpected response")),
