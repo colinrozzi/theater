@@ -11,6 +11,7 @@ use crate::cli::client::TheaterClient;
 use theater::chain::ChainEvent;
 use theater::id::TheaterId;
 
+/// Get events for an actor (falls back to filesystem if actor is not running)
 #[derive(Debug, Parser)]
 pub struct EventsArgs {
     /// ID of the actor to get events from
@@ -80,8 +81,12 @@ pub fn execute(args: &EventsArgs, _verbose: bool, json: bool) -> Result<()> {
     runtime.block_on(async {
         let mut client = TheaterClient::new(args.address);
 
-        // Connect to the server
-        client.connect().await?;
+        // Try to connect to the server, but continue even if it fails
+        // (we'll automatically fall back to filesystem if needed)
+        let connected = client.connect().await.is_ok();
+        if !connected {
+            debug!("Failed to connect to server, will attempt to read events from filesystem");
+        }
 
         // Get the actor events
         let mut events = client.get_actor_events(actor_id.clone()).await?;
@@ -286,10 +291,17 @@ fn export_events(events: &[ChainEvent], path: &str, format: &str) -> Result<()> 
 
 // Display events in JSON format
 fn display_events_json(events: &[ChainEvent], actor_id: &TheaterId) -> Result<()> {
+    // Determine if events came from filesystem based on descriptions
+    let from_filesystem = events.iter().any(|e| {
+        e.description
+            .as_ref()
+            .map_or(false, |d| d.contains("(read from filesystem)"))
+    });
     let output = serde_json::json!({
         "actor_id": actor_id.to_string(),
         "events": events,
-        "count": events.len()
+        "count": events.len(),
+        "source": if from_filesystem { "filesystem" } else { "server" }
     });
     println!("{}", serde_json::to_string_pretty(&output)?);
     Ok(())
@@ -297,6 +309,17 @@ fn display_events_json(events: &[ChainEvent], actor_id: &TheaterId) -> Result<()
 
 // Display events in CSV format
 fn display_events_csv(events: &[ChainEvent]) -> Result<()> {
+    // Determine if events came from filesystem based on descriptions
+    let from_filesystem = events.iter().any(|e| {
+        e.description
+            .as_ref()
+            .map_or(false, |d| d.contains("(read from filesystem)"))
+    });
+
+    // Add a comment line indicating the source
+    if from_filesystem {
+        println!("# Events retrieved from filesystem");
+    }
     println!("timestamp,event_type,hash,parent_hash,description,data_size");
 
     for event in events {
@@ -326,10 +349,21 @@ fn display_events_csv(events: &[ChainEvent]) -> Result<()> {
 
 // Display events in compact format
 fn display_events_compact(events: &[ChainEvent], actor_id: &TheaterId) -> Result<()> {
+    // Determine if events came from filesystem based on descriptions
+    let from_filesystem = events.iter().any(|e| {
+        e.description
+            .as_ref()
+            .map_or(false, |d| d.contains("(read from filesystem)"))
+    });
     println!(
-        "{} Events for actor: {}",
+        "{} Events for actor: {} {}",
         style("ℹ").blue().bold(),
-        style(actor_id.to_string()).cyan()
+        style(actor_id.to_string()).cyan(),
+        if from_filesystem {
+            style("(retrieved from filesystem)").dim()
+        } else {
+            style("")
+        }
     );
 
     if events.is_empty() {
@@ -392,10 +426,21 @@ fn display_events_pretty(
     detailed: bool,
     limit: usize,
 ) -> Result<()> {
+    // Determine if events came from filesystem based on descriptions
+    let from_filesystem = events.iter().any(|e| {
+        e.description
+            .as_ref()
+            .map_or(false, |d| d.contains("(read from filesystem)"))
+    });
     println!(
-        "{} Events for actor: {}",
+        "{} Events for actor: {} {}",
         style("ℹ").blue().bold(),
-        style(actor_id.to_string()).cyan()
+        style(actor_id.to_string()).cyan(),
+        if from_filesystem {
+            style("(retrieved from filesystem)").dim()
+        } else {
+            style("")
+        }
     );
 
     if events.is_empty() {
@@ -497,10 +542,21 @@ fn pretty_stringify_event(event: &ChainEvent, full: bool) -> String {
 
 // Display events in timeline view
 fn display_events_timeline(events: &[ChainEvent], actor_id: &TheaterId) -> Result<()> {
+    // Determine if events came from filesystem based on descriptions
+    let from_filesystem = events.iter().any(|e| {
+        e.description
+            .as_ref()
+            .map_or(false, |d| d.contains("(read from filesystem)"))
+    });
     println!(
-        "{} Timeline for actor: {}",
+        "{} Timeline for actor: {} {}",
         style("ℹ").blue().bold(),
-        style(actor_id.to_string()).cyan()
+        style(actor_id.to_string()).cyan(),
+        if from_filesystem {
+            style("(retrieved from filesystem)").dim()
+        } else {
+            style("")
+        }
     );
 
     if events.is_empty() {

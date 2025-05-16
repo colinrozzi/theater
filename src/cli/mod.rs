@@ -57,7 +57,7 @@ pub enum Commands {
     #[command(name = "state")]
     State(commands::state::StateArgs),
 
-    /// Get actor events
+    /// Get actor events (from running actor or filesystem)
     #[command(name = "events")]
     Events(commands::events::EventsArgs),
 
