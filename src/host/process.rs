@@ -626,13 +626,14 @@ impl ProcessHost {
                             let process_id_clone = process_id;
                             let actor_id_clone = actor_id.clone();
                             let theater_tx_clone = theater_tx.clone();
+                            let actor_handle_clone = actor_handle.clone(); // Clone actor_handle for use in the monitoring task
                             
                             // Create a mutable copy of the child for waiting (we'll take ownership later)
                             // But first store properties we need to keep in the ManagedProcess
                             let os_pid = child.id();
                             
                             // Spawn a task to wait for the process to exit
-                            tokio::spawn(async move {
+                            tokio::spawn(async move { // actor_handle_clone is available in this scope
                                 // Move ownership of the child into this task
                                 if let Ok(status) = child.wait().await {
                                     let exit_code = status.code().unwrap_or(-1);
@@ -649,10 +650,25 @@ impl ProcessHost {
                                     };
                                     
                                     // Send exit event to the actor
-                                    let _ = theater_tx_clone.send(crate::messages::TheaterCommand::NewEvent {
-                                        actor_id: actor_id_clone,
+                                    match theater_tx_clone.send(crate::messages::TheaterCommand::NewEvent {
+                                        actor_id: actor_id_clone.clone(),
                                         event: event_data.to_chain_event(None),
-                                    }).await;
+                                    }).await {
+                                        Ok(_) => {
+                                            info!("Successfully sent exit event for process {} with code {}", process_id_clone, exit_code);
+                                            
+                                            // Now also explicitly call the actor's handle_exit function directly
+                                            // This provides redundancy in case the event system fails
+                                            match actor_handle_clone.call_function::<(u64, i32), ()>(
+                                                "ntwk:theater/process-handlers.handle-exit".to_string(),
+                                                (process_id_clone, exit_code)
+                                            ).await {
+                                                Ok(_) => info!("Successfully called handle_exit directly for process {}", process_id_clone),
+                                                Err(e) => error!("Failed to call handle_exit directly for process {}: {}", process_id_clone, e),
+                                            };
+                                        },
+                                        Err(e) => error!("Failed to send exit event for process {}: {}", process_id_clone, e),
+                                    };
                                     
                                     // Update process status
                                     let mut processes = processes_clone.lock().unwrap();
