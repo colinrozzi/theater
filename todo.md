@@ -22,6 +22,7 @@
 [ ] add nix flakes to the default projects
 [ ] I really want a better events thing. I should be able to click through an actors events, view them fullscreen, access them by event id, stuff like that
 [ ] rethink the message-server-host thing, the send/request are mixed in with the server functions like respond-to-request
+[ ] mmmmmmmm okay i really need to figure out how I'm going to do storing events and then gettting them back from the filesystem
 
 ### today
 

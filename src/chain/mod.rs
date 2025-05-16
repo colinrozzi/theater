@@ -559,6 +559,39 @@ impl StateChain {
         Ok(())
     }
 
+    pub fn save_chain(&self) -> Result<()> {
+        // this will be different than the save_to_file method, in that we are going to save each
+        // of the events at their hash in the THEATER_DIR/events/{event_id} path, and then the chain (the
+        // head of the chain) will be saved at the actor id in the THEATER_DIR/chains/{actor_id} path
+
+        let theater_dir = std::env::var("THEATER_HOME").expect(
+            "THEATER_DIR environment variable must be set to the directory where events are stored",
+        );
+        let events_dir = format!("{}/events", theater_dir);
+        let chains_dir = format!("{}/chains", theater_dir);
+        std::fs::create_dir_all(&events_dir)?;
+        std::fs::create_dir_all(&chains_dir)?;
+        let chain_path = format!("{}/{}", chains_dir, self.actor_id);
+
+        // Save each event to its own file
+        for event in &self.events {
+            let event_path = format!("{}/{}", events_dir, hex::encode(&event.hash));
+            std::fs::write(
+                event_path,
+                serde_json::to_string(event).expect("Failed to serialize event"),
+            )
+            .expect("Failed to write event file");
+        }
+
+        // Save the chain to a file
+        std::fs::write(
+            chain_path,
+            serde_json::to_string(&self.current_hash).expect("Failed to serialize current hash"),
+        )
+        .expect("Failed to write chain file");
+        Ok(())
+    }
+
     /// Gets the most recent event in the chain.
     ///
     /// ## Purpose

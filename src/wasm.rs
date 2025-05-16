@@ -34,7 +34,6 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::future::Future;
-use std::path::PathBuf;
 use std::pin::Pin;
 use thiserror::Error;
 use wasmtime::component::TypedFunc;
@@ -524,12 +523,7 @@ pub struct ActorInstance {
 
 impl ActorInstance {
     pub fn save_chain(&mut self) -> Result<()> {
-        let path = format!(
-            "{}/{}.json",
-            "/Users/colinrozzi/work/theater/chains", self.actor_component.actor_store.id,
-        );
-        let path = PathBuf::from(path);
-        self.actor_component.actor_store.save_chain(&path.clone())
+        self.actor_component.actor_store.save_chain()
     }
 
     /// Checks if a specific function has been registered in this instance.

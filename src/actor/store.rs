@@ -197,9 +197,9 @@ impl ActorStore {
     ///
     /// - `Ok(())` if the chain was successfully saved
     /// - `Err(anyhow::Error)` if an error occurred during saving
-    pub fn save_chain(&self, path: &std::path::Path) -> anyhow::Result<()> {
+    pub fn save_chain(&self) -> anyhow::Result<()> {
         let chain = self.chain.lock().unwrap();
-        chain.save_to_file(path)?;
+        chain.save_chain()?;
         Ok(())
     }
 
