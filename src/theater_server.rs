@@ -18,6 +18,7 @@ use uuid::Uuid;
 use crate::id::TheaterId;
 use crate::messages::{ChannelId, TheaterCommand};
 use crate::theater_runtime::TheaterRuntime;
+use crate::TheaterRuntimeError;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ManagementCommand {
@@ -197,6 +198,24 @@ pub enum ManagementError {
     
     // Serialization/deserialization errors
     SerializationError(String),
+}
+
+// Allow converting from TheaterRuntimeError to ManagementError
+impl From<TheaterRuntimeError> for ManagementError {
+    fn from(err: TheaterRuntimeError) -> Self {
+        match err {
+            TheaterRuntimeError::ActorNotFound(_) => ManagementError::ActorNotFound,
+            TheaterRuntimeError::ActorAlreadyExists(_) => ManagementError::ActorAlreadyExists,
+            TheaterRuntimeError::ActorNotRunning(_) => ManagementError::ActorNotRunning,
+            TheaterRuntimeError::ActorOperationFailed(msg) => ManagementError::RuntimeError(format!("Actor operation failed: {}", msg)),
+            TheaterRuntimeError::ActorError(e) => ManagementError::ActorError(e.to_string()),
+            TheaterRuntimeError::ChannelError(msg) => ManagementError::CommunicationError(msg),
+            TheaterRuntimeError::ChannelNotFound(id) => ManagementError::ChannelNotFound,
+            TheaterRuntimeError::ChannelRejected => ManagementError::ChannelRejected,
+            TheaterRuntimeError::SerializationError(msg) => ManagementError::SerializationError(msg),
+            TheaterRuntimeError::InternalError(msg) => ManagementError::InternalError(msg),
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -728,10 +747,23 @@ impl TheaterServer {
                         })
                         .await?;
 
-                    let events = cmd_rx.await?;
-                    ManagementResponse::ActorEvents {
-                        id,
-                        events: events?,
+                    match cmd_rx.await {
+                        Ok(result) => match result {
+                            Ok(events) => {
+                                debug!("Successfully retrieved {} events for actor {}", events.len(), id);
+                                ManagementResponse::ActorEvents { id, events }
+                            },
+                            Err(e) => {
+                                debug!("Error getting events for actor {}: {}", id, e);
+                                ManagementResponse::Error { error: e.into() }
+                            }
+                        },
+                        Err(e) => {
+                            error!("Failed to receive events response: {}", e);
+                            ManagementResponse::Error {
+                                error: ManagementError::CommunicationError(format!("Failed to receive events response: {}", e)),
+                            }
+                        }
                     }
                 }
                 ManagementCommand::GetActorMetrics { id } => {

@@ -5,6 +5,7 @@
 //! the entire system.
 
 use crate::actor::runtime::{ActorRuntime, StartActorResult};
+use crate::TheaterRuntimeError;
 use crate::actor::types::{ActorError, ActorOperation};
 use crate::chain::ChainEvent;
 use crate::id::TheaterId;
@@ -1180,24 +1181,30 @@ impl TheaterRuntime {
                 Err(e) => Err(anyhow::anyhow!("Failed to receive state: {}", e)),
             }
         } else {
-            Err(anyhow::anyhow!("Actor not found"))
+            Err(TheaterRuntimeError::ActorNotFound(actor_id))
         }
     }
 
-    async fn get_actor_events(&self, actor_id: TheaterId) -> Result<Vec<ChainEvent>> {
+    async fn get_actor_events(&self, actor_id: TheaterId) -> std::result::Result<Vec<ChainEvent>, TheaterRuntimeError> {
         if let Some(proc) = self.actors.get(&actor_id) {
             // Send a message to get the actor's events
             let (tx, rx): (
                 oneshot::Sender<Result<Vec<ChainEvent>, ActorError>>,
                 oneshot::Receiver<Result<Vec<ChainEvent>, ActorError>>,
             ) = oneshot::channel();
-            proc.operation_tx
+            
+            if let Err(e) = proc.operation_tx
                 .send(ActorOperation::GetChain { response_tx: tx })
-                .await?;
+                .await {
+                return Err(TheaterRuntimeError::ChannelError(format!("Failed to send GetChain operation: {}", e)));
+            }
 
             match rx.await {
-                Ok(events) => Ok(events?),
-                Err(e) => Err(anyhow::anyhow!("Failed to receive events: {}", e)),
+                Ok(events) => match events {
+                    Ok(events) => Ok(events),
+                    Err(e) => Err(TheaterRuntimeError::ActorError(e)),
+                },
+                Err(e) => Err(TheaterRuntimeError::ChannelError(format!("Failed to receive events: {}", e))),
             }
         } else {
             Err(anyhow::anyhow!("Actor not found"))

@@ -239,7 +239,16 @@ impl TheaterClient {
     /// Get the events of an actor, falling back to filesystem if the actor is not running
     pub async fn get_actor_events(&mut self, id: TheaterId) -> Result<Vec<ChainEvent>> {
         let command = ManagementCommand::GetActorEvents { id: id.clone() };
-        let response = self.send_command(command).await?;
+        
+        // Try to send the command to the server
+        let response = match self.send_command(command).await {
+            Ok(resp) => resp,
+            Err(e) => {
+                debug!("Failed to send command to server: {}", e);
+                debug!("Trying to read events from filesystem");
+                return self.read_events_from_filesystem(&id);
+            }
+        };
 
         match response {
             ManagementResponse::ActorEvents { events, .. } => {
@@ -251,7 +260,7 @@ impl TheaterClient {
                 Ok(events)
             }
             ManagementResponse::Error { error } => {
-                println!("Error getting actor events from server: {:?}", error);
+                debug!("Error getting actor events from server: {:?}", error);
                 match error {
                     ManagementError::ActorNotFound => {
                         // Actor not found in running system, try to read from filesystem

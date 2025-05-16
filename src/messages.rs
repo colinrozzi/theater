@@ -70,6 +70,7 @@ use crate::id::TheaterId;
 use crate::metrics::ActorMetrics;
 use crate::store::ContentStore;
 use crate::Result;
+use crate::TheaterRuntimeError;
 use serde::{Deserialize, Serialize};
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
@@ -307,7 +308,7 @@ pub enum TheaterCommand {
     /// This operation is only available to the actor's supervisor or to the system itself.
     GetActorEvents {
         actor_id: TheaterId,
-        response_tx: oneshot::Sender<Result<Vec<ChainEvent>>>,
+        response_tx: oneshot::Sender<std::result::Result<Vec<ChainEvent>, TheaterRuntimeError>>,
     },
 
     /// # Get actor metrics
