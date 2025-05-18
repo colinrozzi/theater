@@ -37,7 +37,7 @@ pub struct SubscribeArgs {
     /// Exit after timeout seconds with no events (0 for no timeout)
     #[arg(short, long, default_value = "0")]
     pub timeout: u64,
-    
+
     /// Output format (pretty, compact, json)
     #[arg(short, long, default_value = "compact")]
     pub format: String,
@@ -103,37 +103,25 @@ pub fn execute(args: &SubscribeArgs, _verbose: bool, json: bool) -> Result<()> {
 
         // If history flag is set, get and display historical events
         if args.history {
-            println!("{} Fetching historical events...", style("📜").yellow().bold());
-            
             // Get historical events
             let mut events = client.get_actor_events(actor_id.clone()).await?;
-            
+
             // Apply event type filter if specified
             if let Some(filter) = &args.event_type {
                 events.retain(|e| e.event_type.contains(filter));
             }
-            
+
             // Limit the number of historical events if requested
             if args.history_limit > 0 && events.len() > args.history_limit {
                 // If we have more events than the limit, take the most recent ones
                 let skip_count = events.len() - args.history_limit;
                 events = events.into_iter().skip(skip_count).collect();
             }
-            
+
             // If there are historical events, display them
-            if events.is_empty() {
-                println!("{} No historical events found.", style("ℹ").blue().bold());
-            } else {
-                println!(
-                    "{} Showing {} historical events:",
-                    style("ℹ").blue().bold(),
-                    events.len()
-                );
-                
+            if !events.is_empty() {
                 // Display events using the shared display function
                 events_count = display_events(&events, Some(&actor_id), &display_options, 0)?;
-                
-                println!("\n{} Now listening for new events...", style("🔄").green().bold());
             }
         }
 
@@ -144,7 +132,7 @@ pub fn execute(args: &SubscribeArgs, _verbose: bool, json: bool) -> Result<()> {
             "Subscribed to actor events with subscription ID: {}",
             subscription_id
         );
-        
+
         // If history was not requested or no events were found, we need to print the headers now
         if !args.history || events_count == 0 {
             if display_options.format == "compact" && !display_options.json {
@@ -154,7 +142,7 @@ pub fn execute(args: &SubscribeArgs, _verbose: bool, json: bool) -> Result<()> {
                 );
                 println!("{}", style("─".repeat(80)).dim());
             }
-            
+
             if !args.history {
                 println!("{} Waiting for events...\n", style("⏳").yellow().bold());
             }
@@ -207,10 +195,18 @@ pub fn execute(args: &SubscribeArgs, _verbose: bool, json: bool) -> Result<()> {
                     events_count += 1;
 
                     // Display the event using the shared display function
-                    display_single_event(&event, Some(&actor_id), Some(&id), 
-                        if display_options.json { "json" } else { &display_options.format },
-                        display_options.detailed, 
-                        events_count)?;
+                    display_single_event(
+                        &event,
+                        Some(&actor_id),
+                        Some(&id),
+                        if display_options.json {
+                            "json"
+                        } else {
+                            &display_options.format
+                        },
+                        display_options.detailed,
+                        events_count,
+                    )?;
 
                     // Check if we've hit the limit
                     if args.limit > 0 && events_count >= args.limit {
@@ -256,3 +252,4 @@ pub fn execute(args: &SubscribeArgs, _verbose: bool, json: bool) -> Result<()> {
 
     Ok(())
 }
+
