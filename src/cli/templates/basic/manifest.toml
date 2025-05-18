@@ -1,7 +1,7 @@
 name = "{{project_name}}"
 version = "0.1.0"
 description = "A basic Theater actor"
-component_path = "target/wasm32-unknown-unknown/release/{{project_name_snake}}.wasm"
+component_path = "not yet build"
 
 [interface]
 implements = "ntwk:theater/actor"

@@ -1,7 +1,6 @@
 
 /// OS Process handler interface for managing operating system processes
 interface process {
-    use types.{json};
 
     /// Output processing mode
     variant output-mode {

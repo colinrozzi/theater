@@ -35,7 +35,7 @@ package ntwk:theater;
 /// logging behavior can be controlled through manifest settings.
 
 interface runtime {
-    use types.{json, chain, actor-id};
+    use types.{chain, actor-id};
 
     /// Logs a message to the actor's log stream.
     ///
@@ -94,5 +94,5 @@ interface runtime {
     /// actor actions.
     get-chain: func() -> chain;
 
-    shutdown: func();
+    shutdown: func(finish-data: option<list<u8>>);
 }
