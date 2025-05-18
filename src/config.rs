@@ -10,8 +10,9 @@ pub struct ComponentConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ManifestConfig {
     pub name: String,
+    pub version: String,
     pub component_path: String,
-    pub short_description: Option<String>,
+    pub description: Option<String>,
     pub long_description: Option<String>,
     pub save_chain: Option<bool>,
     #[serde(default)]

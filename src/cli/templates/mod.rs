@@ -264,32 +264,6 @@ pub fn create_project(template_name: &str, project_name: &str, output_dir: &Path
             .replace("{{project_name}}", project_name)
             .replace("{{project_name_snake}}", &project_name.replace('-', "_"));
 
-        // If this is the manifest.toml file, replace the component_path with absolute path
-        if *file_path == "manifest.toml" {
-            // Construct the absolute path to the WASM file
-            let project_name_snake = project_name.replace('-', "_");
-            let wasm_rel_path = format!(
-                "target/wasm32-unknown-unknown/release/{}.wasm",
-                project_name_snake
-            );
-            let wasm_abs_path = project_dir.join(&wasm_rel_path);
-
-            // Replace the relative component_path with the absolute path
-            // First find the line with component_path
-            if let Some(start_pos) = content.find("component_path = ") {
-                let end_pos = content[start_pos..]
-                    .find('\n')
-                    .map_or(content.len(), |pos| start_pos + pos);
-                let original_line = &content[start_pos..end_pos];
-                let new_line = format!("component_path = \"{}\"", wasm_abs_path.display());
-
-                // Replace the specific line
-                content = content.replace(original_line, &new_line);
-            }
-
-            debug!("Set absolute component_path: {}", wasm_abs_path.display());
-        }
-
         // Write the file
         fs::write(&dest_path, content)?;
         debug!("Created file: {}", dest_path.display());

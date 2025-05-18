@@ -291,17 +291,10 @@ fn export_events(events: &[ChainEvent], path: &str, format: &str) -> Result<()> 
 
 // Display events in JSON format
 fn display_events_json(events: &[ChainEvent], actor_id: &TheaterId) -> Result<()> {
-    // Determine if events came from filesystem based on descriptions
-    let from_filesystem = events.iter().any(|e| {
-        e.description
-            .as_ref()
-            .map_or(false, |d| d.contains("(read from filesystem)"))
-    });
     let output = serde_json::json!({
         "actor_id": actor_id.to_string(),
         "events": events,
         "count": events.len(),
-        "source": if from_filesystem { "filesystem" } else { "server" }
     });
     println!("{}", serde_json::to_string_pretty(&output)?);
     Ok(())
@@ -309,17 +302,6 @@ fn display_events_json(events: &[ChainEvent], actor_id: &TheaterId) -> Result<()
 
 // Display events in CSV format
 fn display_events_csv(events: &[ChainEvent]) -> Result<()> {
-    // Determine if events came from filesystem based on descriptions
-    let from_filesystem = events.iter().any(|e| {
-        e.description
-            .as_ref()
-            .map_or(false, |d| d.contains("(read from filesystem)"))
-    });
-
-    // Add a comment line indicating the source
-    if from_filesystem {
-        println!("# Events retrieved from filesystem");
-    }
     println!("timestamp,event_type,hash,parent_hash,description,data_size");
 
     for event in events {
@@ -349,21 +331,11 @@ fn display_events_csv(events: &[ChainEvent]) -> Result<()> {
 
 // Display events in compact format
 fn display_events_compact(events: &[ChainEvent], actor_id: &TheaterId) -> Result<()> {
-    // Determine if events came from filesystem based on descriptions
-    let from_filesystem = events.iter().any(|e| {
-        e.description
-            .as_ref()
-            .map_or(false, |d| d.contains("(read from filesystem)"))
-    });
     println!(
         "{} Events for actor: {} {}",
         style("ℹ").blue().bold(),
         style(actor_id.to_string()).cyan(),
-        if from_filesystem {
-            style("(retrieved from filesystem)").dim()
-        } else {
-            style("")
-        }
+        style("")
     );
 
     if events.is_empty() {
@@ -426,21 +398,11 @@ fn display_events_pretty(
     detailed: bool,
     limit: usize,
 ) -> Result<()> {
-    // Determine if events came from filesystem based on descriptions
-    let from_filesystem = events.iter().any(|e| {
-        e.description
-            .as_ref()
-            .map_or(false, |d| d.contains("(read from filesystem)"))
-    });
     println!(
         "{} Events for actor: {} {}",
         style("ℹ").blue().bold(),
         style(actor_id.to_string()).cyan(),
-        if from_filesystem {
-            style("(retrieved from filesystem)").dim()
-        } else {
-            style("")
-        }
+        style("")
     );
 
     if events.is_empty() {
@@ -542,21 +504,11 @@ fn pretty_stringify_event(event: &ChainEvent, full: bool) -> String {
 
 // Display events in timeline view
 fn display_events_timeline(events: &[ChainEvent], actor_id: &TheaterId) -> Result<()> {
-    // Determine if events came from filesystem based on descriptions
-    let from_filesystem = events.iter().any(|e| {
-        e.description
-            .as_ref()
-            .map_or(false, |d| d.contains("(read from filesystem)"))
-    });
     println!(
         "{} Timeline for actor: {} {}",
         style("ℹ").blue().bold(),
         style(actor_id.to_string()).cyan(),
-        if from_filesystem {
-            style("(retrieved from filesystem)").dim()
-        } else {
-            style("")
-        }
+        style("")
     );
 
     if events.is_empty() {

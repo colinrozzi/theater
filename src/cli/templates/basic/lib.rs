@@ -20,7 +20,8 @@ impl Guest for Actor {
         let (self_id,) = params;
         log(&format!("Actor ID: {}", &self_id));
         log("Hello from {{project_name}} actor!");
-        shutdown(None);
+
+        shutdown("{{project_name}} actor shutting down");
 
         Ok((None,))
     }

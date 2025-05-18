@@ -322,18 +322,7 @@ impl TheaterClient {
             };
 
             let event = match serde_json::from_str::<ChainEvent>(&event_data) {
-                Ok(mut event) => {
-                    // Mark event as read from filesystem by adding a note to description
-                    if event.description.is_none() {
-                        event.description = Some("(read from filesystem)".to_string());
-                    } else {
-                        event.description = Some(format!(
-                            "{} (read from filesystem)",
-                            event.description.unwrap()
-                        ));
-                    }
-                    event
-                }
+                Ok(event) => event,
                 Err(e) => {
                     debug!("Failed to parse event from {}: {}", event_path, e);
                     break; // Break the chain if we can't parse an event
