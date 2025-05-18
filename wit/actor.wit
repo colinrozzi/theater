@@ -73,8 +73,6 @@ package ntwk:theater;
 // - Returning an error string from the init function will cause the actor to fail to start.
 
 interface actor {
-    use types.{state};
-    
     // # Initialize the actor
     //
     // Called when the actor is first started or restarted. This function is responsible
@@ -96,5 +94,5 @@ interface actor {
     // - If state contains data, the actor should validate and use that state
     // - The first parameter in the tuple is typically the actor's ID
     // - Any error returned will cause the actor to fail to start
-    init: func(state: state, params: tuple<string>) -> result<tuple<state>, string>;
+    init: func(state: option<list<u8>>, params: tuple<string>) -> result<tuple<option<list<u8>>>, string>;
 }

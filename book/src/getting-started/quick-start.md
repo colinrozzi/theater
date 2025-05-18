@@ -71,7 +71,7 @@ impl Component {
 }
 
 impl message_server::MessageServer for Component {
-    fn handle_message(&mut self, message: String) -> Result<String, String> {
+    fn handle_request(&mut self, message: String) -> Result<String, String> {
         let response = format!("Hello! You sent: {}", message);
         Ok(response)
     }
@@ -146,7 +146,7 @@ theater logs $ACTOR_ID
 theater subscribe $ACTOR_ID
 ```
 
-The `subscribe` command is particularly useful as it shows you all state changes and events in real-time.
+The `subscribe` command is particularly useful as it shows you all events in real-time.
 
 ## Modifying Your Actor
 

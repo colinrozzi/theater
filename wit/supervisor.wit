@@ -1,51 +1,5 @@
 package ntwk:theater;
 
-// # Supervisor Interface
-//
-// Defines the interface for actor supervision in the Theater system. This allows parent actors
-// to manage the lifecycle and monitor the state of their child actors.
-//
-// ## Purpose
-//
-// The supervisor interface enables an important part of the Theater architecture: the supervision
-// tree. Similar to Erlang's supervision system, this allows actors to monitor and manage other
-// actors, creating a hierarchical structure that enhances fault tolerance and system management.
-//
-// Through this interface, parent actors can:
-// - Spawn new child actors
-// - Monitor child actor status and state
-// - Restart failed child actors
-// - Access child actor event history
-//
-// ## Example
-//
-// In a typical Theater actor, supervision capabilities would be used like this:
-//
-// ```rust
-// use ntwk::theater::supervisor;
-// 
-// // Spawn a new child actor from a manifest
-// let child_id = supervisor::spawn("child_manifest.toml", None)?;
-// 
-// // Later, restart the child if needed
-// supervisor::restart_child(child_id)?;
-// 
-// // Get the current state of the child
-// let state = supervisor::get_child_state(child_id)?;
-// ```
-//
-// ## Security
-//
-// The supervisor interface has significant privileges, as it can control other actors and
-// access their state. The Theater runtime ensures that an actor can only supervise its
-// direct children, enforcing proper hierarchy boundaries.
-//
-// ## Implementation Notes
-//
-// The interface uses string-based actor identifiers and returns results that can contain
-// errors as strings. This allows for human-readable error messages and flexible actor
-// identification across the system.
-
 interface supervisor {
     use types.{chain-event};
     // # Spawn a new child actor
@@ -147,7 +101,7 @@ interface supervisor {
 }
 
 interface supervisor-handlers {
-    use types.{json, wit-actor-error};
+    use types.{wit-actor-error};
     
     // # Handle a child actor error
     //
@@ -160,7 +114,7 @@ interface supervisor-handlers {
     //
     // ## Returns
     //
-    // * `Ok(tuple<option<json>, string>)` - Updated state and result message
+    // * `Ok(tuple<option<list<u8>>, string>)` - Updated state and result message
     // * `Err(string)` - Error message if handling fails
-    handle-child-error: func(state: option<json>, params: tuple<string, wit-actor-error>) -> result<tuple<option<json>>, string>;
+    handle-child-error: func(state: option<list<u8>>, params: tuple<string, wit-actor-error>) -> result<tuple<option<list<u8>>>, string>;
 }

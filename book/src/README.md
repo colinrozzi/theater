@@ -4,7 +4,7 @@ Welcome to the official documentation for Theater, a WebAssembly actor system de
 
 ## How to Use This Documentation
 
-This documentation is organized into sections that follow a natural learning progression:
+This documentation is organized into sections:
 
 - **Introduction**: Understand why Theater exists and the challenges it addresses in AI agent systems
 - **Core Concepts**: Learn what Theater is and its fundamental principles

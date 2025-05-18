@@ -65,14 +65,12 @@ interface process {
 
 /// Process handler export interface
 interface process-handlers {
-    use types.{json};
-    
     /// Process output event
-    handle-stdout: func(state: option<json>, params: tuple<u64, list<u8>>) -> result<tuple<option<json>>, string>;
+    handle-stdout: func(state: option<list<u8>>, params: tuple<u64, list<u8>>) -> result<tuple<option<list<u8>>>, string>;
     
     /// Process error output event
-    handle-stderr: func(state: option<json>, params: tuple<u64, list<u8>>) -> result<tuple<option<json>>, string>;
+    handle-stderr: func(state: option<list<u8>>, params: tuple<u64, list<u8>>) -> result<tuple<option<list<u8>>>, string>;
     
     /// Process exit event
-    handle-exit: func(state: option<json>, params: tuple<u64, s32>) -> result<tuple<option<json>>, string>;
+    handle-exit: func(state: option<list<u8>>, params: tuple<u64, s32>) -> result<tuple<option<list<u8>>>, string>;
 }

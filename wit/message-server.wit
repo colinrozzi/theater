@@ -19,7 +19,7 @@ package ntwk:theater;
 ///
 /// ```rust
 /// use ntwk::theater::message_server_client::Guest;
-/// use ntwk::theater::types::{json, channel_accept, channel_id};
+/// use ntwk::theater::types::{channel_accept, channel_id};
 /// use serde_json::{json, Value};
 ///
 /// struct MyMessageHandler;
@@ -58,7 +58,7 @@ package ntwk:theater;
 /// - Errors returned from handlers are logged and may trigger supervision
 /// - Handler execution is tracked in the actor's event chain
 interface message-server-client {
-    use types.{json, event, channel-id, channel-accept};
+    use types.{event, channel-id, channel-accept};
 
     /// # Handle one-way message
     ///
@@ -72,7 +72,7 @@ interface message-server-client {
     ///
     /// ## Returns
     ///
-    /// * `Ok((option<json>,))` - Updated actor state (or None to retain current state)
+    /// * `Ok((option<list<u8>>,))` - Updated actor state (or None to retain current state)
     /// * `Err(string)` - Error message if message handling fails
     ///
     /// ## Example
@@ -87,7 +87,7 @@ interface message-server-client {
     ///     Ok((Some(updated_state),))
     /// }
     /// ```
-    handle-send: func(state: option<json>, params: tuple<json>) -> result<tuple<option<json>>, string>;
+    handle-send: func(state: option<list<u8>>, params: tuple<list<u8>>) -> result<tuple<option<list<u8>>>, string>;
     
     /// # Handle request-response message
     ///
@@ -102,7 +102,7 @@ interface message-server-client {
     ///
     /// ## Returns
     ///
-    /// * `Ok((option<json>, (option<json>,)))` - Tuple containing:
+    /// * `Ok((option<list<u8>>, (option<list<u8>>,)))` - Tuple containing:
     ///   * Updated actor state (or None)
     ///   * Response message to send back (or None to send a response yet)
     /// * `Err(string)` - Error message if request handling fails
@@ -121,7 +121,7 @@ interface message-server-client {
     ///     Ok((Some(updated_state), (Some(response),)))
     /// }
     /// ```
-    handle-request: func(state: option<json>, params: tuple<string, json>) -> result<tuple<option<json>, tuple<option<json>>>, string>;
+    handle-request: func(state: option<list<u8>>, params: tuple<string, list<u8>>) -> result<tuple<option<list<u8>>, tuple<option<list<u8>>>>, string>;
     
     /// # Handle channel open request
     ///
@@ -135,7 +135,7 @@ interface message-server-client {
     ///
     /// ## Returns
     ///
-    /// * `Ok((option<json>, (channel-accept,)))` - Tuple containing:
+    /// * `Ok((option<list<u8>>, (channel-accept,)))` - Tuple containing:
     ///   * Updated actor state (or None to retain current state)
     ///   * Channel acceptance decision
     /// * `Err(string)` - Error message if open handling fails
@@ -162,7 +162,7 @@ interface message-server-client {
     ///
     /// The actor should validate the channel request and only accept channels from
     /// trusted sources. The acceptance mechanism provides a security checkpoint.
-    handle-channel-open: func(state: option<json>, params: tuple<json>) -> result<tuple<option<json>, tuple<channel-accept>>, string>;
+    handle-channel-open: func(state: option<list<u8>>, params: tuple<list<u8>>) -> result<tuple<option<list<u8>>, tuple<channel-accept>>, string>;
     
     /// # Handle channel message
     ///
@@ -177,7 +177,7 @@ interface message-server-client {
     ///
     /// ## Returns
     ///
-    /// * `Ok((option<json>,))` - Updated actor state (or None to retain current state)
+    /// * `Ok((option<list<u8>>,))` - Updated actor state (or None to retain current state)
     /// * `Err(string)` - Error message if message handling fails
     ///
     /// ## Example
@@ -194,7 +194,7 @@ interface message-server-client {
     ///     Ok((Some(updated_state),))
     /// }
     /// ```
-    handle-channel-message: func(state: option<json>, params: tuple<channel-id, json>) -> result<tuple<option<json>>, string>;
+    handle-channel-message: func(state: option<list<u8>>, params: tuple<channel-id, list<u8>>) -> result<tuple<option<list<u8>>>, string>;
     
     /// # Handle channel close
     ///
@@ -208,7 +208,7 @@ interface message-server-client {
     ///
     /// ## Returns
     ///
-    /// * `Ok((option<json>,))` - Updated actor state (or None to retain current state)
+    /// * `Ok((option<list<u8>>,))` - Updated actor state (or None to retain current state)
     /// * `Err(string)` - Error message if close handling fails
     ///
     /// ## Example
@@ -230,7 +230,7 @@ interface message-server-client {
     ///
     /// This function should perform any necessary cleanup for the closed channel,
     /// such as releasing resources or updating internal state to reflect the channel closure.
-    handle-channel-close: func(state: option<json>, params: tuple<channel-id>) -> result<tuple<option<json>>, string>;
+    handle-channel-close: func(state: option<list<u8>>, params: tuple<channel-id>) -> result<tuple<option<list<u8>>>, string>;
 }
 
 /// # Message Server Host Interface
@@ -297,7 +297,7 @@ interface message-server-client {
 /// component. The runtime suspends the actor's execution as needed without blocking the
 /// entire system.
 interface message-server-host {
-    use types.{json, actor-id, channel-id};
+    use types.{actor-id, channel-id};
 
     /// # Send one-way message
     ///
@@ -334,7 +334,7 @@ interface message-server-host {
     ///
     /// The runtime verifies that the sender has permission to send messages to the
     /// target actor before delivery.
-    send: func(actor-id: actor-id, msg: json) -> result<_, string>;
+    send: func(actor-id: actor-id, msg: list<u8>) -> result<_, string>;
 
     /// # Send request and await response
     ///
@@ -371,7 +371,7 @@ interface message-server-host {
     /// This function suspends the calling actor's execution until a response is received
     /// or a timeout occurs. The runtime handles the suspension efficiently without
     /// blocking other actors.
-    request: func(actor-id: actor-id, msg: json) -> result<json, string>;
+    request: func(actor-id: actor-id, msg: list<u8>) -> result<list<u8>, string>;
     
     /// # Open communication channel
     ///
@@ -411,7 +411,7 @@ interface message-server-host {
     /// 2. The target actor explicitly accepts or rejects the channel
     ///
     /// This provides a security checkpoint to prevent unwanted channels.
-    open-channel: func(actor-id: actor-id, initial-msg: json) -> result<channel-id, string>;
+    open-channel: func(actor-id: actor-id, initial-msg: list<u8>) -> result<channel-id, string>;
     
     /// # Send message on channel
     ///
@@ -447,7 +447,7 @@ interface message-server-host {
     ///
     /// Messages sent on a channel are delivered in order. If the channel is closed
     /// or invalid, this function will return an error.
-    send-on-channel: func(channel-id: channel-id, msg: json) -> result<_, string>;
+    send-on-channel: func(channel-id: channel-id, msg: list<u8>) -> result<_, string>;
     
     /// # Close channel
     ///
@@ -539,7 +539,7 @@ interface message-server-host {
     /// This function allows actors to implement asynchronous request handling patterns,
     /// where requests are received, processed in the background, and responded to later.
     /// If the request ID is not found, an error is returned.
-    respond-to-request: func(request-id: string, response: json) -> result<_, string>;
+    respond-to-request: func(request-id: string, response: list<u8>) -> result<_, string>;
     
     /// # Cancel a pending request
     ///

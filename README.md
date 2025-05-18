@@ -2,6 +2,9 @@
 
 A WebAssembly actor system designed for secure, transparent, and reliable AI agent infrastructure.
 
+## > [!NOTE]
+This project is in early development, much of the documentation is incomplete or outdated, and the code is not yet stable. Please use at your own risk. If you run into any issues or have any ideas or just want to chat, feel free to reach out to me at theater.ntwk@gmail.com
+
 ## The Challenge
 
 AI agents present incredible opportunities for automation and intelligence, but they also introduce significant challenges. As autonomous AI agents become more capable and ubiquitous, we need infrastructure that can:
@@ -174,4 +177,4 @@ cargo build
 
 ## Status
 
-This project is in active development. Most features are focused on providing infrastructure for AI agent systems with security, traceability, and reliability as primary goals. If you are interested in the project or have questions, please reach out to me at colinrozzi@gmail.com.
+This project is in active development. Most features are focused on providing infrastructure for AI agent systems with security, traceability, and reliability as primary goals. If you are interested in the project or have questions, please reach out to me at theater.ntwk@gmail.com.

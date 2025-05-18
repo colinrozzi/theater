@@ -7,7 +7,7 @@ A basic Theater actor created from the template.
 To build the actor:
 
 ```bash
-cargo build --target wasm32-unknown-unknown --release
+theater build
 ```
 
 ## Running

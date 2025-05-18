@@ -1,7 +1,6 @@
 package ntwk:theater;
 
 interface http-framework {
-    use types.{state};
     use http-types.{http-request, http-response};
     use http-types.{server-config, server-info, tls-config};
     use websocket-types.{websocket-message};
@@ -41,17 +40,16 @@ interface http-framework {
 }
 
 interface http-handlers {
-    use types.{state};
     use http-types.{http-request, http-response};
     use websocket-types.{websocket-message};
     use http-types.{middleware-result};
     use http-framework.{handler-id};
 
-    handle-request: func(state: state, params: tuple<handler-id, http-request>) -> result<tuple<state, tuple<http-response>>, string>;
-    handle-middleware: func(state: state, params: tuple<handler-id, http-request>) -> result<tuple<state, tuple<middleware-result>>, string>;
-    handle-websocket-connect: func(state: state, params: tuple<handler-id, u64, string, option<string>>) -> result<tuple<state>, string>;
-    handle-websocket-message: func(state: state, params: tuple<handler-id, u64, websocket-message>) -> result<tuple<state, tuple<list<websocket-message>>>, string>;
-    handle-websocket-disconnect: func(state: state, params: tuple<handler-id, u64>) -> result<tuple<state>, string>;
+    handle-request: func(state: option<list<u8>>, params: tuple<handler-id, http-request>) -> result<tuple<option<list<u8>>, tuple<http-response>>, string>;
+    handle-middleware: func(state: option<list<u8>>, params: tuple<handler-id, http-request>) -> result<tuple<option<list<u8>>, tuple<middleware-result>>, string>;
+    handle-websocket-connect: func(state: option<list<u8>>, params: tuple<handler-id, u64, string, option<string>>) -> result<tuple<option<list<u8>>>, string>;
+    handle-websocket-message: func(state: option<list<u8>>, params: tuple<handler-id, u64, websocket-message>) -> result<tuple<option<list<u8>>, tuple<list<websocket-message>>>, string>;
+    handle-websocket-disconnect: func(state: option<list<u8>>, params: tuple<handler-id, u64>) -> result<tuple<option<list<u8>>>, string>;
 }
 
 interface http-client {

@@ -11,7 +11,6 @@ package ntwk:theater;
 // The types interface provides common data structures and type aliases used 
 // throughout the Theater system. These types represent core concepts such as:
 //
-// - Actor state
 // - Message formats
 // - Event chain structures
 // - Identifiers
@@ -24,18 +23,7 @@ package ntwk:theater;
 // These types are typically imported and used in actor implementations:
 //
 // ```rust
-// use ntwk::theater::types::{state, json, actor_id};
-//
-// // Using the state type for actor state
-// fn process_state(current_state: state) -> Result<state, String> {
-//     // Process the state
-//     Ok(current_state)
-// }
-//
-// // Using the json type for serialized data
-// fn create_message() -> json {
-//     serde_json::to_vec(&MyMessage { value: 42 }).unwrap()
-// }
+// use ntwk::theater::types::actor_id;
 //
 // // Using actor-id for referring to actors
 // fn get_actor_info(id: actor_id) -> String {
@@ -51,20 +39,6 @@ package ntwk:theater;
 
 // Define a shared type for messages
 interface types {
-    /// Generic message type as bytes that can be serialized/deserialized
-    /// 
-    /// Represents JSON-encoded data as a byte array. This type is used for
-    /// passing structured data between components that may need to be serialized
-    /// and deserialized.
-    type json = list<u8>;
-    
-    /// Actor state represented as an optional byte array
-    ///
-    /// This type represents the current state of an actor. The state is:
-    /// - None when an actor is first initialized and has no state yet
-    /// - Some(bytes) containing serialized state data when the actor has state
-    type state = option<list<u8>>;
-
     /// Unique identifier for an actor
     ///
     /// Actors are identified by string identifiers throughout the system. These
@@ -85,7 +59,7 @@ interface types {
         /// Whether the channel connection was accepted
         accepted: bool,
         /// Optional initial message to send on the channel
-        message: option<json>,
+        message: option<list<u8>>,
     }
 
     /// Complete event chain for an actor
@@ -118,7 +92,7 @@ interface types {
         /// Optional reference to parent event (previous in chain)
         parent: option<u64>,
         /// Serialized event data
-        data: json,
+        data: list<u8>,
     }
 
     // # Event in a chain

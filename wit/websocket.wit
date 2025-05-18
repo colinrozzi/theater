@@ -43,8 +43,6 @@ package ntwk:theater;
 
 /// Interface for handling WebSocket connections and messages
 interface websocket-server {
-    use types.{state};
-
     /// The type of WebSocket message/event
     ///
     /// ## Purpose
@@ -229,5 +227,5 @@ interface websocket-server {
     /// The function is called once for each WebSocket event. For efficient handling of multiple
     /// connections, the actor should store connection IDs or other identifying information in its
     /// state to track individual clients.
-    handle-message: func(state: state, params: tuple<websocket-message>) -> result<tuple<state, tuple<websocket-response>>, string>;
+    handle-message: func(state: option<list<u8>>, params: tuple<websocket-message>) -> result<tuple<option<list<u8>>, tuple<websocket-response>>, string>;
 }

@@ -433,7 +433,7 @@ pub fn execute(args: &BuildArgs, verbose: bool, json: bool) -> Result<()> {
         // Instructions for deployment if manifest exists
         if manifest_exists {
             println!("\nTo deploy your actor:");
-            println!("  theater deploy {}", manifest_path.display());
+            println!("  theater start {}", manifest_path.display());
         } else {
             println!("\nTo create a manifest for your actor:");
             println!(
