@@ -9,6 +9,7 @@ use tracing::{debug, info};
 
 use crate::cli::client::ManagementResponse;
 use crate::cli::client::TheaterClient;
+use theater::chain::ChainEvent;
 use theater::id::TheaterId;
 
 #[derive(Debug, Parser)]
@@ -36,10 +37,18 @@ pub struct SubscribeArgs {
     /// Exit after timeout seconds with no events (0 for no timeout)
     #[arg(short, long, default_value = "0")]
     pub timeout: u64,
-    
+
     /// Output format (pretty, compact, json)
     #[arg(short, long, default_value = "compact")]
     pub format: String,
+
+    /// Show historical events before subscribing to new events
+    #[arg(short = 'H', long)]
+    pub history: bool,
+
+    /// Number of historical events to show (0 for all)
+    #[arg(long, default_value = "10")]
+    pub history_limit: usize,
 }
 
 pub fn execute(args: &SubscribeArgs, _verbose: bool, json: bool) -> Result<()> {
@@ -82,6 +91,51 @@ pub fn execute(args: &SubscribeArgs, _verbose: bool, json: bool) -> Result<()> {
         // Connect to the server
         client.connect().await?;
 
+        // Determine output format
+        let format = if json {
+            "json".to_string()
+        } else {
+            args.format.clone()
+        };
+
+        // Initialize event counter
+        let mut events_count = 0;
+
+        // If history flag is set, get and display historical events
+        if args.history {
+            // Get historical events
+            let mut events = client.get_actor_events(actor_id.clone()).await?;
+
+            // Apply event type filter if specified
+            if let Some(filter) = &args.event_type {
+                events.retain(|e| e.event_type.contains(filter));
+            }
+
+            // Limit the number of historical events if requested
+            if args.history_limit > 0 && events.len() > args.history_limit {
+                // If we have more events than the limit, take the most recent ones
+                events = events
+                    .clone()
+                    .into_iter()
+                    .skip(events.len() - args.history_limit)
+                    .collect();
+            }
+            // Print header for compact format
+            if format == "compact" {
+                println!(
+                    "{:<5} {:<19} {:<30} {}",
+                    "#", "TIMESTAMP", "EVENT TYPE", "DESCRIPTION"
+                );
+                println!("{}", style("─".repeat(80)).dim());
+            }
+
+            // If there are historical events, display them
+            if !events.is_empty() {
+                // Display historical events
+                events_count = display_events(&events, format.as_str(), args.detailed, json, 0)?;
+            }
+        }
+
         // Subscribe to the actor's events
         let subscription_id = client.subscribe_to_actor(actor_id.clone()).await?;
 
@@ -89,11 +143,9 @@ pub fn execute(args: &SubscribeArgs, _verbose: bool, json: bool) -> Result<()> {
             "Subscribed to actor events with subscription ID: {}",
             subscription_id
         );
-        println!("{} Waiting for events...\n", style("⏳").yellow().bold());
 
-        // If using compact format, print the header
-        let format = if json { "json".to_string() } else { args.format.clone() };
-        if format == "compact" {
+        // If we haven't printed headers yet (no history or empty history), print them now
+        if format == "compact" && (!args.history || events_count == 0) {
             println!(
                 "{:<5} {:<19} {:<30} {}",
                 "#", "TIMESTAMP", "EVENT TYPE", "DESCRIPTION"
@@ -101,7 +153,10 @@ pub fn execute(args: &SubscribeArgs, _verbose: bool, json: bool) -> Result<()> {
             println!("{}", style("─".repeat(80)).dim());
         }
 
-        let mut events_count = 0;
+        if !args.history {
+            println!("{} Waiting for events...\n", style("⏳").yellow().bold());
+        }
+
         let mut last_event_time = std::time::Instant::now();
 
         // Listen for events
@@ -148,106 +203,15 @@ pub fn execute(args: &SubscribeArgs, _verbose: bool, json: bool) -> Result<()> {
                     last_event_time = std::time::Instant::now();
                     events_count += 1;
 
-                    // Format and display the event based on the selected format
-                    match format.as_str() {
-                        "json" => {
-                            let output = serde_json::json!({
-                                "actor_id": id.to_string(),
-                                "event": event,
-                            });
-                            println!("{}", serde_json::to_string_pretty(&output)?);
-                        },
-                        "compact" => {
-                            // Format timestamp as human-readable
-                            let timestamp = chrono::DateTime::from_timestamp(event.timestamp as i64, 0)
-                                .unwrap_or_else(|| chrono::DateTime::UNIX_EPOCH)
-                                .format("%Y-%m-%d %H:%M:%S")
-                                .to_string();
-
-                            // Get event type with color based on category
-                            let colored_type = match event.event_type.split('.').next().unwrap_or("") {
-                                "http" => style(&event.event_type).cyan(),
-                                "filesystem" => style(&event.event_type).green(),
-                                "message" => style(&event.event_type).magenta(),
-                                "runtime" => style(&event.event_type).blue(),
-                                "error" => style(&event.event_type).red(),
-                                _ => style(&event.event_type).yellow(),
-                            };
-
-                            // Get a concise description
-                            let description = event.description.clone().unwrap_or_else(|| {
-                                if let Ok(text) = std::str::from_utf8(&event.data) {
-                                    if text.len() > 40 {
-                                        format!("{}...", &text[0..37])
-                                    } else {
-                                        text.to_string()
-                                    }
-                                } else {
-                                    format!("{} bytes", event.data.len())
-                                }
-                            });
-
-                            println!(
-                                "{:<5} {:<19} {:<30} {}",
-                                events_count,
-                                timestamp,
-                                colored_type,
-                                description
-                            );
-                        },
-                        _ => { // pretty format (default)
-                            // Format timestamp
-                            let timestamp = chrono::DateTime::from_timestamp(event.timestamp as i64, 0)
-                                .unwrap_or_else(|| chrono::DateTime::UNIX_EPOCH)
-                                .format("%Y-%m-%d %H:%M:%S%.3f")
-                                .to_string();
-
-                            // Format event type with color based on category
-                            let colored_type = match event.event_type.split('.').next().unwrap_or("") {
-                                "http" => style(&event.event_type).cyan(),
-                                "filesystem" => style(&event.event_type).green(),
-                                "message" => style(&event.event_type).magenta(),
-                                "runtime" => style(&event.event_type).blue(),
-                                "error" => style(&event.event_type).red(),
-                                _ => style(&event.event_type).yellow(),
-                            };
-
-                            // Print basic event info
-                            println!(
-                                "{} [{}] {}",
-                                style("EVENT").bold().blue(),
-                                timestamp,
-                                colored_type
-                            );
-
-                            // Show event description if available
-                            if let Some(desc) = &event.description {
-                                println!("   {}", desc);
-                            }
-
-                            // Show additional details if requested
-                            if args.detailed {
-                                println!("   Hash: {}", hex::encode(&event.hash));
-
-                                if let Some(parent) = &event.parent_hash {
-                                    println!("   Parent: {}", hex::encode(parent));
-                                }
-
-                                // Try to pretty-print the event data as JSON
-                                if let Ok(text) = std::str::from_utf8(&event.data) {
-                                    if let Ok(json) = serde_json::from_str::<serde_json::Value>(text) {
-                                        println!("   Data: {}", serde_json::to_string_pretty(&json)?);
-                                    } else {
-                                        println!("   Data: {}", text);
-                                    }
-                                } else {
-                                    println!("   Data: {} bytes of binary data", event.data.len());
-                                }
-                            }
-
-                            println!("");
-                        }
-                    }
+                    // Display the event
+                    display_single_event(
+                        &id,
+                        &event,
+                        format.as_str(),
+                        args.detailed,
+                        json,
+                        events_count,
+                    )?;
 
                     // Check if we've hit the limit
                     if args.limit > 0 && events_count >= args.limit {
@@ -293,3 +257,231 @@ pub fn execute(args: &SubscribeArgs, _verbose: bool, json: bool) -> Result<()> {
 
     Ok(())
 }
+
+// Helper function to display a batch of events
+fn display_events(
+    events: &[ChainEvent],
+    format: &str,
+    detailed: bool,
+    json: bool,
+    start_count: usize,
+) -> Result<usize> {
+    let mut count = start_count;
+
+    for event in events {
+        count += 1;
+
+        match format {
+            "json" => {
+                let output = serde_json::json!({
+                    "event": event,
+                });
+                println!("{}", serde_json::to_string_pretty(&output)?);
+            }
+            "compact" => {
+                // Format timestamp as human-readable
+                let timestamp = chrono::DateTime::from_timestamp(event.timestamp as i64, 0)
+                    .unwrap_or_else(|| chrono::DateTime::UNIX_EPOCH)
+                    .format("%Y-%m-%d %H:%M:%S")
+                    .to_string();
+
+                // Get event type with color based on category
+                let colored_type = match event.event_type.split('.').next().unwrap_or("") {
+                    "http" => style(&event.event_type).cyan(),
+                    "filesystem" => style(&event.event_type).green(),
+                    "message" => style(&event.event_type).magenta(),
+                    "runtime" => style(&event.event_type).blue(),
+                    "error" => style(&event.event_type).red(),
+                    _ => style(&event.event_type).yellow(),
+                };
+
+                // Get a concise description
+                let description = event.description.clone().unwrap_or_else(|| {
+                    if let Ok(text) = std::str::from_utf8(&event.data) {
+                        if text.len() > 40 {
+                            format!("{}...", &text[0..37])
+                        } else {
+                            text.to_string()
+                        }
+                    } else {
+                        format!("{} bytes", event.data.len())
+                    }
+                });
+
+                println!(
+                    "{:<5} {:<19} {:<30} {}",
+                    count, timestamp, colored_type, description
+                );
+            }
+            _ => {
+                // pretty format
+                // Format timestamp
+                let timestamp = chrono::DateTime::from_timestamp(event.timestamp as i64, 0)
+                    .unwrap_or_else(|| chrono::DateTime::UNIX_EPOCH)
+                    .format("%Y-%m-%d %H:%M:%S%.3f")
+                    .to_string();
+
+                // Format event type with color based on category
+                let colored_type = match event.event_type.split('.').next().unwrap_or("") {
+                    "http" => style(&event.event_type).cyan(),
+                    "filesystem" => style(&event.event_type).green(),
+                    "message" => style(&event.event_type).magenta(),
+                    "runtime" => style(&event.event_type).blue(),
+                    "error" => style(&event.event_type).red(),
+                    _ => style(&event.event_type).yellow(),
+                };
+
+                // Print basic event info
+                println!(
+                    "{} [{}] {}",
+                    style("EVENT").bold().blue(),
+                    timestamp,
+                    colored_type
+                );
+
+                // Show event description if available
+                if let Some(desc) = &event.description {
+                    println!("   {}", desc);
+                }
+
+                // Show additional details if requested
+                if detailed {
+                    println!("   Hash: {}", hex::encode(&event.hash));
+
+                    if let Some(parent) = &event.parent_hash {
+                        println!("   Parent: {}", hex::encode(parent));
+                    }
+
+                    // Try to pretty-print the event data as JSON
+                    if let Ok(text) = std::str::from_utf8(&event.data) {
+                        if let Ok(json) = serde_json::from_str::<serde_json::Value>(text) {
+                            println!("   Data: {}", serde_json::to_string_pretty(&json)?);
+                        } else {
+                            println!("   Data: {}", text);
+                        }
+                    } else {
+                        println!("   Data: {} bytes of binary data", event.data.len());
+                    }
+                }
+
+                println!("");
+            }
+        }
+    }
+
+    Ok(count)
+}
+
+// Helper function to display a single event
+fn display_single_event(
+    id: &TheaterId,
+    event: &ChainEvent,
+    format: &str,
+    detailed: bool,
+    json: bool,
+    count: usize,
+) -> Result<()> {
+    match format {
+        "json" => {
+            let output = serde_json::json!({
+                "actor_id": id.to_string(),
+                "event": event,
+            });
+            println!("{}", serde_json::to_string_pretty(&output)?);
+        }
+        "compact" => {
+            // Format timestamp as human-readable
+            let timestamp = chrono::DateTime::from_timestamp(event.timestamp as i64, 0)
+                .unwrap_or_else(|| chrono::DateTime::UNIX_EPOCH)
+                .format("%Y-%m-%d %H:%M:%S")
+                .to_string();
+
+            // Get event type with color based on category
+            let colored_type = match event.event_type.split('.').next().unwrap_or("") {
+                "http" => style(&event.event_type).cyan(),
+                "filesystem" => style(&event.event_type).green(),
+                "message" => style(&event.event_type).magenta(),
+                "runtime" => style(&event.event_type).blue(),
+                "error" => style(&event.event_type).red(),
+                _ => style(&event.event_type).yellow(),
+            };
+
+            // Get a concise description
+            let description = event.description.clone().unwrap_or_else(|| {
+                if let Ok(text) = std::str::from_utf8(&event.data) {
+                    if text.len() > 40 {
+                        format!("{}...", &text[0..37])
+                    } else {
+                        text.to_string()
+                    }
+                } else {
+                    format!("{} bytes", event.data.len())
+                }
+            });
+
+            let hash = hex::encode(&event.hash);
+            println!("{}", hash);
+
+            println!(
+                "{:<5} {:<8} {:<19} {:<30} {}",
+                count, hash, timestamp, colored_type, description
+            );
+        }
+        _ => {
+            // pretty format
+            // Format timestamp
+            let timestamp = chrono::DateTime::from_timestamp(event.timestamp as i64, 0)
+                .unwrap_or_else(|| chrono::DateTime::UNIX_EPOCH)
+                .format("%Y-%m-%d %H:%M:%S%.3f")
+                .to_string();
+
+            // Format event type with color based on category
+            let colored_type = match event.event_type.split('.').next().unwrap_or("") {
+                "http" => style(&event.event_type).cyan(),
+                "filesystem" => style(&event.event_type).green(),
+                "message" => style(&event.event_type).magenta(),
+                "runtime" => style(&event.event_type).blue(),
+                "error" => style(&event.event_type).red(),
+                _ => style(&event.event_type).yellow(),
+            };
+
+            // Print basic event info
+            println!(
+                "{} [{}] {}",
+                style("EVENT").bold().blue(),
+                timestamp,
+                colored_type
+            );
+
+            // Show event description if available
+            if let Some(desc) = &event.description {
+                println!("   {}", desc);
+            }
+
+            // Show additional details if requested
+            if detailed {
+                println!("   Hash: {}", hex::encode(&event.hash));
+
+                if let Some(parent) = &event.parent_hash {
+                    println!("   Parent: {}", hex::encode(parent));
+                }
+
+                // Try to pretty-print the event data as JSON
+                if let Ok(text) = std::str::from_utf8(&event.data) {
+                    if let Ok(json) = serde_json::from_str::<serde_json::Value>(text) {
+                        println!("   Data: {}", serde_json::to_string_pretty(&json)?);
+                    } else {
+                        println!("   Data: {}", text);
+                    }
+                } else {
+                    println!("   Data: {} bytes of binary data", event.data.len());
+                }
+            }
+
+            println!("");
+        }
+    }
+
+    Ok(())
+}
+
