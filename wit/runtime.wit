@@ -94,5 +94,5 @@ interface runtime {
     /// actor actions.
     get-chain: func() -> chain;
 
-    shutdown: func(finish-data: option<list<u8>>);
+    shutdown: func(reason: option<string>);
 }
