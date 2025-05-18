@@ -44,10 +44,10 @@ pub fn display_events(
         }
 
         println!(
-            "{:<5} {:<19} {:<30} {}",
-            "#", "TIMESTAMP", "EVENT TYPE", "DESCRIPTION"
+            "{:<5} {:<19} {:<12} {:<12} {:<25} {}",
+            "#", "TIMESTAMP", "HASH", "PARENT", "EVENT TYPE", "DESCRIPTION"
         );
-        println!("{}", style("─".repeat(80)).dim());
+        println!("{}", style("─".repeat(100)).dim());
     }
 
     // If no events, show a message and return
@@ -99,6 +99,27 @@ pub fn display_single_event(
                 .format("%Y-%m-%d %H:%M:%S")
                 .to_string();
 
+            // Format event hash
+            let hash_str = hex::encode(&event.hash);
+            let short_hash = if hash_str.len() > 8 {
+                format!("{}..{}", &hash_str[0..4], &hash_str[hash_str.len() - 4..])
+            } else {
+                hash_str
+            };
+                
+            // Format parent hash
+            let parent_hash = match &event.parent_hash {
+                Some(hash) => {
+                    let parent_str = hex::encode(hash);
+                    if parent_str.len() > 8 {
+                        format!("{}..{}", &parent_str[0..4], &parent_str[parent_str.len() - 4..])
+                    } else {
+                        parent_str
+                    }
+                },
+                None => "-".to_string(),
+            };
+                
             // Get event type with color based on category
             let colored_type = match event.event_type.split('.').next().unwrap_or("") {
                 "http" => style(&event.event_type).cyan(),
@@ -123,9 +144,11 @@ pub fn display_single_event(
             });
 
             println!(
-                "{:<5} {:<19} {:<30} {}",
+                "{:<5} {:<19} {:<12} {:<12} {:<25} {}",
                 count,
                 timestamp,
+                style(&short_hash).dim(),
+                style(&parent_hash).dim(),
                 colored_type,
                 description
             );

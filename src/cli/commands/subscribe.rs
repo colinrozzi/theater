@@ -47,7 +47,7 @@ pub struct SubscribeArgs {
     pub history: bool,
 
     /// Number of historical events to show (0 for all)
-    #[arg(long, default_value = "10")]
+    #[arg(long, default_value = "0")]
     pub history_limit: usize,
 }
 
@@ -103,6 +103,11 @@ pub fn execute(args: &SubscribeArgs, _verbose: bool, json: bool) -> Result<()> {
 
         // If history flag is set, get and display historical events
         if args.history {
+            println!(
+                "{} Fetching historical events...",
+                style("📜").yellow().bold()
+            );
+
             // Get historical events
             let mut events = client.get_actor_events(actor_id.clone()).await?;
 
@@ -119,9 +124,22 @@ pub fn execute(args: &SubscribeArgs, _verbose: bool, json: bool) -> Result<()> {
             }
 
             // If there are historical events, display them
-            if !events.is_empty() {
+            if events.is_empty() {
+                println!("{} No historical events found.", style("ℹ").blue().bold());
+            } else {
+                println!(
+                    "{} Showing {} historical events:",
+                    style("ℹ").blue().bold(),
+                    events.len()
+                );
+
                 // Display events using the shared display function
                 events_count = display_events(&events, Some(&actor_id), &display_options, 0)?;
+
+                println!(
+                    "\n{} Now listening for new events...",
+                    style("🔄").green().bold()
+                );
             }
         }
 
@@ -137,10 +155,10 @@ pub fn execute(args: &SubscribeArgs, _verbose: bool, json: bool) -> Result<()> {
         if !args.history || events_count == 0 {
             if display_options.format == "compact" && !display_options.json {
                 println!(
-                    "{:<5} {:<19} {:<30} {}",
-                    "#", "TIMESTAMP", "EVENT TYPE", "DESCRIPTION"
+                    "{:<5} {:<19} {:<12} {:<12} {:<25} {}",
+                    "#", "TIMESTAMP", "HASH", "PARENT", "EVENT TYPE", "DESCRIPTION"
                 );
-                println!("{}", style("─".repeat(80)).dim());
+                println!("{}", style("─".repeat(100)).dim());
             }
 
             if !args.history {
