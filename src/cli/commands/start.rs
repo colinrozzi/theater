@@ -3,11 +3,10 @@ use clap::Parser;
 use console::style;
 use std::net::SocketAddr;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
 use tracing::debug;
 
 use crate::cli::client::{ManagementResponse, TheaterClient};
+use crate::cli::utils::event_display::display_single_event;
 
 #[derive(Debug, Parser)]
 pub struct StartArgs {
@@ -19,21 +18,25 @@ pub struct StartArgs {
     #[arg(short, long, default_value = "127.0.0.1:9000")]
     pub address: SocketAddr,
 
-    /// Wait for actor to start
-    #[arg(short, long, default_value = "true")]
-    pub wait: bool,
-
     /// Initial state as JSON string or path to JSON file
     #[arg(short, long)]
     pub initial_state: Option<String>,
 
-    /// Monitor actor events after starting
-    #[arg(long)]
-    pub monitor: bool,
+    /// Subscribe to actor events
+    #[arg(short, long)]
+    pub subscribe: bool,
+
+    /// Act as the actor's parent
+    #[arg(short, long)]
+    pub parent: bool,
 
     /// Output only the actor ID (useful for piping to other commands)
     #[arg(long)]
     pub id_only: bool,
+
+    /// Event format (pretty, compact, json)
+    #[arg(short, long, default_value = "compact")]
+    pub format: String,
 }
 
 pub fn execute(args: &StartArgs, _verbose: bool, json: bool) -> Result<()> {
@@ -76,131 +79,77 @@ pub fn execute(args: &StartArgs, _verbose: bool, json: bool) -> Result<()> {
         client.connect().await?;
 
         // Start the actor with initial state
-        let actor_id = client.start_actor(manifest_content, initial_state).await?;
+        client
+            .start_actor(manifest_content, initial_state, args.parent, args.subscribe)
+            .await?;
 
-        // Output the result
-        if args.id_only {
-            // Just print the actor ID for piping to other commands
-            println!("{}", actor_id);
-        } else if !json {
-            println!(
-                "{} Actor started successfully: {}",
-                style("✓").green().bold(),
-                style(actor_id.to_string()).cyan()
-            );
-        } else {
-            let output = serde_json::json!({
-                "success": true,
-                "actor_id": actor_id.to_string(),
-                "manifest": args.manifest.display().to_string()
-            });
-            println!("{}", serde_json::to_string_pretty(&output)?);
-        }
-
-        // If monitor flag is set, subscribe to and monitor events from the actor
-        if args.monitor && !json {
-            // Set up Ctrl+C handler
-            let running = Arc::new(AtomicBool::new(true));
-            let r = running.clone();
-
-            let ctrl_c_handler = tokio::spawn(async move {
-                let _ = tokio::signal::ctrl_c().await;
-                r.store(false, Ordering::SeqCst);
-            });
-
-            // Subscribe to actor events
-            println!(
-                "{} Monitoring events for actor: {}",
-                style("ℹ").blue().bold(),
-                style(actor_id.to_string()).cyan()
-            );
-            println!(
-                "{} Waiting for events (Press Ctrl+C to stop monitoring)",
-                style("i").dim()
-            );
-            println!(
-                "{} Note: You may need to trigger actions in the actor to generate events",
-                style("i").dim()
-            );
-
-            // Subscribe to actor events
-            let subscription_id = client.subscribe_to_actor(actor_id.clone()).await?;
-            debug!(
-                "Subscribed to actor events, subscription ID: {}",
-                subscription_id
-            );
-
-            // Setup to receive events
-            let mut event_count = 0;
-            let mut heartbeat_counter = 0;
-
-            // Keep receiving events until Ctrl+C is pressed
-            while running.load(Ordering::SeqCst) {
-                // Try to receive a response with a timeout to avoid blocking forever
-                if let Ok(response) = tokio::time::timeout(
-                    std::time::Duration::from_secs(1),
-                    client.receive_response(),
-                )
-                .await
-                {
-                    match response {
-                        Ok(ManagementResponse::ActorEvent { id, event }) => {
-                            if id == actor_id {
-                                event_count += 1;
-                                println!("{}. {}", event_count, event.event_type);
-                                println!("   Time: {}", event.timestamp);
-                                println!("   Hash: {}", hex::encode(&event.hash));
-                                if let Some(parent) = &event.parent_hash {
-                                    println!("   Parent: {}", hex::encode(parent));
+        loop {
+            tokio::select! {
+                data = client.next_response() => {
+                    if let Some(data) = data {
+                    match data {
+                        Ok(ManagementResponse::ActorStarted { id }) => {
+                            if args.id_only {
+                                println!("{}", id);
+                                break;
+                            } else {
+                                println!("----------------------");
+                                println!(
+                                    "[{}] actor started",
+                                    id
+                                );
+                                println!("----------------------");
+                                // if we are not subscribing or acting as a parent, break the loop
+                                if !(args.subscribe || args.parent) {
+                                    break;
                                 }
-                                println!();
                             }
                         }
-                        Ok(other) => {
-                            // Log other response types for debugging
-                            debug!("Received non-event response: {:?}", other);
+                        Ok(ManagementResponse::ActorEvent { event }) => {
+                            if args.subscribe {
+                                display_single_event(&event, &args.format, json).expect("Failed to display event");
+                            }
                         }
-                        Err(e) => {
-                            // Connection error or other issue
-                            debug!("Error receiving event: {:?}", e);
+                        Ok(ManagementResponse::ActorError { error }) => {
+                            if args.subscribe {
+                                println!("----------------------");
+                                println!(
+                                    "actor-error: {}",
+                                    error
+                                );
+                                println!("----------------------");
+                            }
+                        }
+                        Ok(ManagementResponse::ActorStopped { id }) => {
+                            println!("----------------------");
+                            println!("[{}] actor stopped", id);
+                            println!("----------------------");
                             break;
                         }
-                    }
-                } else {
-                    // Timeout occurred, but that's okay in this case
-                    debug!("Timeout waiting for events, still alive");
-
-                    // Increment heartbeat counter and show a heartbeat message every ~30 seconds
-                    heartbeat_counter += 1;
-                    if heartbeat_counter >= 30 {
-                        println!(
-                            "{} Still monitoring for events from actor: {}",
-                            style("⟳").dim(),
-                            style(&actor_id.to_string()[..8]).dim()
-                        );
-                        heartbeat_counter = 0;
+                        Ok(ManagementResponse::ActorResult(actor_result)) => {
+                            if args.parent {
+                                println!("----------------------");
+                                println!(
+                                    "{}",
+                                    actor_result
+                                );
+                                println!("----------------------");
+                            }
+                            break;
+                        }
+                        Err(e) => {
+                            println!("Error receiving data: {:?}", e);
+                        }
+                        _ => {
+                            println!("Received unknown data: {:?}", data);
+                        }
                     }
                 }
-                // Small delay to prevent CPU spinning, slightly longer
-                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                }
+                _ = tokio::signal::ctrl_c() => {
+                    break;
+                },
             }
-
-            // Clean up subscription before exiting
-            if let Err(e) = client
-                .unsubscribe_from_actor(actor_id.clone(), subscription_id)
-                .await
-            {
-                debug!("Error unsubscribing from actor events: {:?}", e);
-            }
-
-            println!(
-                "\n{} Stopped monitoring actor: {}",
-                style("✓").green().bold(),
-                style(actor_id.to_string()).cyan()
-            );
-
-            // Cancel the Ctrl+C handler
-            ctrl_c_handler.abort();
         }
 
         Ok::<(), anyhow::Error>(())

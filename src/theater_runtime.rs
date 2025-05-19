@@ -5,13 +5,12 @@
 //! the entire system.
 
 use crate::actor::runtime::{ActorRuntime, StartActorResult};
-use crate::TheaterRuntimeError;
 use crate::actor::types::{ActorError, ActorOperation};
 use crate::chain::ChainEvent;
 use crate::id::TheaterId;
 use crate::messages::{
-    ActorChannelClose, ActorChannelMessage, ActorChannelOpen, ChannelId, ChannelParticipant,
-    ChildError,
+    ActorChannelClose, ActorChannelMessage, ActorChannelOpen, ActorParent, ActorResult, ChannelId,
+    ChannelParticipant, ChildError, ChildResult,
 };
 use crate::messages::{ActorMessage, ActorStatus, TheaterCommand};
 use crate::metrics::ActorMetrics;
@@ -19,6 +18,7 @@ use crate::shutdown::ShutdownController;
 use crate::utils::resolve_reference;
 use crate::ManifestConfig;
 use crate::Result;
+use crate::TheaterRuntimeError;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -125,8 +125,6 @@ pub struct ActorProcess {
     pub operation_tx: mpsc::Sender<ActorOperation>,
     /// Set of child actor IDs
     pub children: HashSet<TheaterId>,
-    /// Parent actor ID (if any)
-    pub parent_id: Option<TheaterId>,
     /// Current status of the actor
     pub status: ActorStatus,
     /// Path to the actor's manifest
@@ -136,7 +134,7 @@ pub struct ActorProcess {
     /// Controller for graceful shutdown
     pub shutdown_controller: ShutdownController,
     /// Optional supervisor channel for actor supervision
-    pub supervisor_tx: Option<Sender<ChildError>>,
+    pub supervisor_tx: Option<Sender<ActorResult>>,
 }
 
 impl TheaterRuntime {
@@ -267,6 +265,7 @@ impl TheaterRuntime {
                     parent_id,
                     response_tx,
                     supervisor_tx,
+                    subscription_tx,
                 } => {
                     debug!(
                         "Processing SpawnActor command for manifest: {:?}",
@@ -279,6 +278,7 @@ impl TheaterRuntime {
                             parent_id,
                             true,
                             supervisor_tx,
+                            subscription_tx,
                         )
                         .await
                     {
@@ -305,6 +305,7 @@ impl TheaterRuntime {
                     response_tx,
                     parent_id,
                     supervisor_tx,
+                    subscription_tx,
                 } => {
                     debug!(
                         "Processing ResumeActor command for manifest: {:?}",
@@ -317,6 +318,7 @@ impl TheaterRuntime {
                             parent_id,
                             false,
                             supervisor_tx,
+                            subscription_tx,
                         )
                         .await
                     {
@@ -350,6 +352,17 @@ impl TheaterRuntime {
                         Err(e) => {
                             error!("Failed to stop actor: {}", e);
                             let _ = response_tx.send(Err(e));
+                        }
+                    }
+                }
+                TheaterCommand::ShuttingDown { actor_id, data } => {
+                    debug!("Shutting down actor: {:?}", actor_id);
+                    match self.shutdown_actor(actor_id, data).await {
+                        Ok(_) => {
+                            info!("Actor shut down successfully");
+                        }
+                        Err(e) => {
+                            error!("Failed to shut down actor: {}", e);
                         }
                     }
                 }
@@ -457,16 +470,8 @@ impl TheaterRuntime {
                 #[allow(unused_variables)]
                 TheaterCommand::SubscribeToActor { actor_id, event_tx } => {
                     debug!("Subscribing to events for actor: {:?}", actor_id);
-
-                    // Use entry API to handle the subscription map more elegantly
-                    match self.subscriptions.entry(actor_id.clone()) {
-                        std::collections::hash_map::Entry::Occupied(mut entry) => {
-                            entry.get_mut().push(event_tx);
-                        }
-                        std::collections::hash_map::Entry::Vacant(entry) => {
-                            entry.insert(vec![event_tx]);
-                        }
-                    }
+                    self.subscribe_to_actor(actor_id, event_tx)
+                        .expect("Failed to subscribe");
                 }
                 // Channel-related commands
                 TheaterCommand::ChannelOpen {
@@ -804,7 +809,8 @@ impl TheaterRuntime {
         init_bytes: Option<Vec<u8>>,
         parent_id: Option<TheaterId>,
         init: bool,
-        supervisor_tx: Option<Sender<ChildError>>,
+        supervisor_tx: Option<Sender<ActorResult>>,
+        subscription_tx: Option<Sender<Result<ChainEvent, ActorError>>>,
     ) -> Result<TheaterId> {
         debug!(
             "Starting actor spawn process from manifest: {:?}",
@@ -836,6 +842,11 @@ impl TheaterRuntime {
         let actor_id = TheaterId::generate();
         debug!("Initializing actor runtime");
         debug!("Starting actor runtime");
+
+        if let Some(tx) = subscription_tx {
+            self.subscribe_to_actor(actor_id.clone(), tx)
+                .expect("Failed to subscribe to actor");
+        }
 
         // Start the actor in a detached task
         let actor_id_for_task = actor_id.clone();
@@ -878,7 +889,6 @@ impl TheaterRuntime {
                     mailbox_tx,
                     operation_tx,
                     children: HashSet::new(),
-                    parent_id: parent_id.clone(),
                     status: ActorStatus::Running,
                     manifest_path: manifest_path.clone(),
                     manifest,
@@ -887,6 +897,7 @@ impl TheaterRuntime {
                 };
 
                 if let Some(parent_id) = parent_id {
+                    debug!("Adding actor {:?} as child of {:?}", actor_id, parent_id);
                     if let Some(parent) = self.actors.get_mut(&parent_id) {
                         parent.children.insert(actor_id.clone());
                         debug!("Added actor {:?} as child of {:?}", actor_id, parent_id);
@@ -922,6 +933,20 @@ impl TheaterRuntime {
                 ))
             }
         }
+    }
+
+    fn subscribe_to_actor(
+        &mut self,
+        actor_id: TheaterId,
+        subscription_tx: Sender<Result<ChainEvent, ActorError>>,
+    ) -> Result<()> {
+        if let Some(subscribers) = self.subscriptions.get_mut(&actor_id) {
+            subscribers.push(subscription_tx);
+        } else {
+            self.subscriptions
+                .insert(actor_id.clone(), vec![subscription_tx]);
+        }
+        Ok(())
     }
 
     async fn handle_actor_event(&mut self, actor_id: TheaterId, event: ChainEvent) -> Result<()> {
@@ -972,10 +997,10 @@ impl TheaterRuntime {
         // notify the actors parents
         if let Some(proc) = self.actors.get(&actor_id) {
             if let Some(supervisor_tx) = &proc.supervisor_tx {
-                let error_message = ChildError {
+                let error_message = ActorResult::Error(ChildError {
                     actor_id: actor_id.clone(),
                     error: error.clone(),
-                };
+                });
                 if let Err(e) = supervisor_tx.send(error_message).await {
                     error!("Failed to send error message to supervisor: {}", e);
                 }
@@ -1128,6 +1153,28 @@ impl TheaterRuntime {
         Ok(())
     }
 
+    /// Actor is shutting itself down
+    async fn shutdown_actor(&mut self, actor_id: TheaterId, data: Option<Vec<u8>>) -> Result<()> {
+        debug!("Shutting down actor: {:?}", actor_id);
+
+        // Notify the actor's supervisor if it has one
+        if let Some(proc) = self.actors.get(&actor_id) {
+            if let Some(supervisor_tx) = &proc.supervisor_tx {
+                let message = ActorResult::Success(ChildResult {
+                    actor_id: actor_id.clone(),
+                    result: data,
+                });
+                if let Err(e) = supervisor_tx.send(message).await {
+                    error!("Failed to send shutdown message to supervisor: {}", e);
+                }
+            }
+        }
+
+        self.stop_actor(actor_id).await?;
+
+        Ok(())
+    }
+
     async fn update_actor_component(
         &mut self,
         actor_id: TheaterId,
@@ -1182,22 +1229,32 @@ impl TheaterRuntime {
             }
         } else {
             // The error here needs to be anyhow::Error since that's what the function returns
-            Err(anyhow::Error::new(TheaterRuntimeError::ActorNotFound(actor_id)))
+            Err(anyhow::Error::new(TheaterRuntimeError::ActorNotFound(
+                actor_id,
+            )))
         }
     }
 
-    async fn get_actor_events(&self, actor_id: TheaterId) -> std::result::Result<Vec<ChainEvent>, TheaterRuntimeError> {
+    async fn get_actor_events(
+        &self,
+        actor_id: TheaterId,
+    ) -> std::result::Result<Vec<ChainEvent>, TheaterRuntimeError> {
         if let Some(proc) = self.actors.get(&actor_id) {
             // Send a message to get the actor's events
             let (tx, rx): (
                 oneshot::Sender<Result<Vec<ChainEvent>, ActorError>>,
                 oneshot::Receiver<Result<Vec<ChainEvent>, ActorError>>,
             ) = oneshot::channel();
-            
-            if let Err(e) = proc.operation_tx
+
+            if let Err(e) = proc
+                .operation_tx
                 .send(ActorOperation::GetChain { response_tx: tx })
-                .await {
-                return Err(TheaterRuntimeError::ChannelError(format!("Failed to send GetChain operation: {}", e)));
+                .await
+            {
+                return Err(TheaterRuntimeError::ChannelError(format!(
+                    "Failed to send GetChain operation: {}",
+                    e
+                )));
             }
 
             match rx.await {
@@ -1205,7 +1262,10 @@ impl TheaterRuntime {
                     Ok(events) => Ok(events),
                     Err(e) => Err(TheaterRuntimeError::ActorError(e)),
                 },
-                Err(e) => Err(TheaterRuntimeError::ChannelError(format!("Failed to receive events: {}", e))),
+                Err(e) => Err(TheaterRuntimeError::ChannelError(format!(
+                    "Failed to receive events: {}",
+                    e
+                ))),
             }
         } else {
             Err(TheaterRuntimeError::ActorNotFound(actor_id))

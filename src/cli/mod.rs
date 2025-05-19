@@ -73,10 +73,6 @@ pub enum Commands {
     #[command(name = "validate")]
     Validate(commands::validate::ValidateArgs),
 
-    /// Start interactive shell
-    #[command(name = "shell")]
-    Shell(commands::shell::ShellArgs),
-
     /// Stop a running actor
     #[command(name = "stop")]
     Stop(commands::stop::StopArgs),
@@ -93,14 +89,10 @@ pub enum Commands {
     #[command(name = "message")]
     Message(commands::message::MessageArgs),
 
-    /// Watch a directory and redeploy actor on changes
-    #[command(name = "watch")]
-    Watch(commands::watch::WatchArgs),
-
     /// List stored actor IDs
     #[command(name = "list-stored")]
     ListStored(commands::list_stored::ListStoredArgs),
-    
+
     /// Channel operations
     #[command(name = "channel")]
     Channel(commands::channel::ChannelArgs),
@@ -122,13 +114,11 @@ pub fn run() -> anyhow::Result<()> {
         Commands::Inspect(args) => commands::inspect::execute(args, cli.verbose, cli.json),
         Commands::Tree(args) => commands::tree::execute(args, cli.verbose, cli.json),
         Commands::Validate(args) => commands::validate::execute(args, cli.verbose, cli.json),
-        Commands::Shell(args) => commands::shell::execute(args, cli.verbose, cli.json),
         Commands::Start(args) => commands::start::execute(args, cli.verbose, cli.json),
         Commands::Stop(args) => commands::stop::execute(args, cli.verbose, cli.json),
         Commands::Restart(args) => commands::restart::execute(args, cli.verbose, cli.json),
         Commands::Update(args) => commands::update::execute(args, cli.verbose, cli.json),
         Commands::Message(args) => commands::message::execute(args, cli.verbose, cli.json),
-        Commands::Watch(args) => commands::watch::execute(args, cli.verbose, cli.json),
         Commands::Channel(args) => match &args.command {
             commands::channel::ChannelCommands::Open(open_args) => {
                 commands::channel::open::execute(open_args, cli.verbose, cli.json)

@@ -19,7 +19,7 @@ pub enum RuntimeEventData {
     },
 
     ShutdownCall {
-        reason: String,
+        data: Option<Vec<u8>>,
     },
     ShutdownRequested {
         success: bool,

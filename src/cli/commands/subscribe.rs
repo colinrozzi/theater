@@ -103,11 +103,6 @@ pub fn execute(args: &SubscribeArgs, _verbose: bool, json: bool) -> Result<()> {
 
         // If history flag is set, get and display historical events
         if args.history {
-            println!(
-                "{} Fetching historical events...",
-                style("📜").yellow().bold()
-            );
-
             // Get historical events
             let mut events = client.get_actor_events(actor_id.clone()).await?;
 
@@ -124,22 +119,9 @@ pub fn execute(args: &SubscribeArgs, _verbose: bool, json: bool) -> Result<()> {
             }
 
             // If there are historical events, display them
-            if events.is_empty() {
-                println!("{} No historical events found.", style("ℹ").blue().bold());
-            } else {
-                println!(
-                    "{} Showing {} historical events:",
-                    style("ℹ").blue().bold(),
-                    events.len()
-                );
-
+            if !events.is_empty() {
                 // Display events using the shared display function
                 events_count = display_events(&events, Some(&actor_id), &display_options, 0)?;
-
-                println!(
-                    "\n{} Now listening for new events...",
-                    style("🔄").green().bold()
-                );
             }
         }
 
@@ -155,8 +137,8 @@ pub fn execute(args: &SubscribeArgs, _verbose: bool, json: bool) -> Result<()> {
         if !args.history || events_count == 0 {
             if display_options.format == "compact" && !display_options.json {
                 println!(
-                    "{:<5} {:<19} {:<12} {:<12} {:<25} {}",
-                    "#", "TIMESTAMP", "HASH", "PARENT", "EVENT TYPE", "DESCRIPTION"
+                    "{:<12} {:<12} {:<25} {}",
+                    "HASH", "PARENT", "EVENT TYPE", "DESCRIPTION"
                 );
                 println!("{}", style("─".repeat(100)).dim());
             }
@@ -201,7 +183,7 @@ pub fn execute(args: &SubscribeArgs, _verbose: bool, json: bool) -> Result<()> {
 
             // Process the event
             match response {
-                ManagementResponse::ActorEvent { id, event } => {
+                ManagementResponse::ActorEvent { event } => {
                     // Skip if doesn't match filter
                     if let Some(filter) = &args.event_type {
                         if !event.event_type.contains(filter) {
@@ -210,20 +192,16 @@ pub fn execute(args: &SubscribeArgs, _verbose: bool, json: bool) -> Result<()> {
                     }
 
                     last_event_time = std::time::Instant::now();
-                    events_count += 1;
 
                     // Display the event using the shared display function
                     display_single_event(
                         &event,
-                        Some(&actor_id),
-                        Some(&id),
                         if display_options.json {
                             "json"
                         } else {
                             &display_options.format
                         },
                         display_options.detailed,
-                        events_count,
                     )?;
 
                     // Check if we've hit the limit
@@ -236,11 +214,11 @@ pub fn execute(args: &SubscribeArgs, _verbose: bool, json: bool) -> Result<()> {
                         break;
                     }
                 }
-                ManagementResponse::ActorError { id, error } => {
+                ManagementResponse::ActorError { error } => {
                     // Handle actor error
                     if json {
                         let output = serde_json::json!({
-                            "actor_id": id.to_string(),
+                            "actor_id": actor_id.to_string(),
                             "error": error,
                         });
                         println!("{}", serde_json::to_string_pretty(&output)?);
@@ -270,4 +248,3 @@ pub fn execute(args: &SubscribeArgs, _verbose: bool, json: bool) -> Result<()> {
 
     Ok(())
 }
-

@@ -4,7 +4,7 @@ use crate::actor::types::{ActorError, WitActorError};
 use crate::config::SupervisorHostConfig;
 use crate::events::supervisor::SupervisorEventData;
 use crate::events::{ChainEventData, EventData};
-use crate::messages::{ChildError, TheaterCommand};
+use crate::messages::{ActorResult, ChildError, TheaterCommand};
 use crate::shutdown::ShutdownReceiver;
 use crate::wasm::{ActorComponent, ActorInstance};
 use crate::ChainEvent;
@@ -17,8 +17,8 @@ use tracing::{error, info};
 use wasmtime::StoreContextMut;
 
 pub struct SupervisorHost {
-    channel_tx: tokio::sync::mpsc::Sender<ChildError>,
-    channel_rx: tokio::sync::mpsc::Receiver<ChildError>,
+    channel_tx: tokio::sync::mpsc::Sender<ActorResult>,
+    channel_rx: tokio::sync::mpsc::Receiver<ActorResult>,
 }
 
 #[derive(Error, Debug)]
@@ -89,6 +89,7 @@ impl SupervisorHost {
                                 response_tx,
                                 parent_id: Some(parent_id),
                                 supervisor_tx: Some(supervisor_tx),
+                                subscription_tx: None,
                             })
                             .await
                         {
@@ -196,6 +197,7 @@ impl SupervisorHost {
                                 response_tx,
                                 parent_id: Some(parent_id),
                                 supervisor_tx: Some(supervisor_tx),
+                                subscription_tx: None,
                             })
                             .await
                         {
@@ -895,8 +897,15 @@ impl SupervisorHost {
                 "handle-child-error",
             )
             .expect("Failed to register handle-child-error function");
-        info!("Added export function for handle-child-error");
 
+        actor_instance
+            .register_function_no_result::<(String, Option<Vec<u8>>)>(
+                "ntwk:theater/supervisor-handlers",
+                "handle-child-exit",
+            )
+            .expect("Failed to register handle-child-exit function");
+
+        info!("Added export functions for handle-child-error");
         Ok(())
     }
 
@@ -910,7 +919,7 @@ impl SupervisorHost {
         loop {
             tokio::select! {
                 Some(child_error) = self.channel_rx.recv() => {
-                    self.process_child_error(actor_handle.clone(), child_error).await?;
+                    self.process_child_result(actor_handle.clone(), child_error).await?;
                 }
                 _ = &mut shutdown_receiver.receiver => {
                     info!("Shutdown signal received");
@@ -922,19 +931,31 @@ impl SupervisorHost {
         Ok(())
     }
 
-    async fn process_child_error(
+    async fn process_child_result(
         &self,
         actor_handle: ActorHandle,
-        child_error: ChildError,
+        actor_result: ActorResult,
     ) -> Result<()> {
-        info!("Processing child error: {:?}", child_error);
+        info!("Processing child result");
 
-        actor_handle
-            .call_function::<(String, WitActorError), ()>(
-                "ntwk:theater/supervisor-handlers.handle-child-error".to_string(),
-                (child_error.actor_id.to_string(), child_error.error.into()),
-            )
-            .await?;
+        match actor_result {
+            ActorResult::Error(child_error) => {
+                actor_handle
+                    .call_function::<(String, WitActorError), ()>(
+                        "ntwk:theater/supervisor-handlers.handle-child-error".to_string(),
+                        (child_error.actor_id.to_string(), child_error.error.into()),
+                    )
+                    .await?;
+            }
+            ActorResult::Success(child_result) => {
+                info!("Child result: {:?}", child_result);
+                actor_handle.call_function::<(String, Option<Vec<u8>>), ()>(
+                    "ntwk:theater/supervisor-handlers.handle-child-exit".to_string(),
+                    (child_result.actor_id.to_string(), child_result.result.into()),
+                ).await?;
+            }
+        }
+
 
         Ok(())
     }

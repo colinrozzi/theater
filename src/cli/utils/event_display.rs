@@ -31,7 +31,11 @@ pub fn display_events(
     let mut count = start_count;
 
     // Use the effective format (JSON overrides format option)
-    let effective_format = if options.json { "json" } else { &options.format };
+    let effective_format = if options.json {
+        "json"
+    } else {
+        &options.format
+    };
 
     // Print the header for compact format if this is the first batch
     if effective_format == "compact" && start_count == 0 {
@@ -44,8 +48,8 @@ pub fn display_events(
         }
 
         println!(
-            "{:<5} {:<19} {:<12} {:<12} {:<25} {}",
-            "#", "TIMESTAMP", "HASH", "PARENT", "EVENT TYPE", "DESCRIPTION"
+            "{:<12} {:<12} {:<25} {}",
+            "HASH", "PARENT", "EVENT TYPE", "DESCRIPTION"
         );
         println!("{}", style("─".repeat(100)).dim());
     }
@@ -59,46 +63,23 @@ pub fn display_events(
     // Display all events according to format
     for event in events {
         count += 1;
-        display_single_event(event, actor_id, None, effective_format, options.detailed, count)?;
+        display_single_event(event, effective_format, options.detailed)?;
     }
 
     Ok(count)
 }
 
 /// Display a single event with formatting options
-pub fn display_single_event(
-    event: &ChainEvent,
-    actor_id: Option<&TheaterId>,
-    event_actor_id: Option<&TheaterId>, // Used when actor_id from event differs from display context
-    format: &str,
-    detailed: bool,
-    count: usize,
-) -> Result<()> {
+pub fn display_single_event(event: &ChainEvent, format: &str, detailed: bool) -> Result<()> {
     match format {
         "json" => {
-            let mut output = serde_json::json!({
+            let output = serde_json::json!({
                 "event": event,
             });
-
-            // Add actor_id to the output if provided
-            if let Some(id) = event_actor_id.or(actor_id) {
-                if let serde_json::Value::Object(ref mut map) = output {
-                    map.insert(
-                        "actor_id".to_string(),
-                        serde_json::Value::String(id.to_string()),
-                    );
-                }
-            }
 
             println!("{}", serde_json::to_string_pretty(&output)?);
         }
         "compact" => {
-            // Format timestamp as human-readable
-            let timestamp = chrono::DateTime::from_timestamp(event.timestamp as i64, 0)
-                .unwrap_or_else(|| chrono::DateTime::UNIX_EPOCH)
-                .format("%Y-%m-%d %H:%M:%S")
-                .to_string();
-
             // Format event hash
             let hash_str = hex::encode(&event.hash);
             let short_hash = if hash_str.len() > 8 {
@@ -106,20 +87,24 @@ pub fn display_single_event(
             } else {
                 hash_str
             };
-                
+
             // Format parent hash
             let parent_hash = match &event.parent_hash {
                 Some(hash) => {
                     let parent_str = hex::encode(hash);
                     if parent_str.len() > 8 {
-                        format!("{}..{}", &parent_str[0..4], &parent_str[parent_str.len() - 4..])
+                        format!(
+                            "{}..{}",
+                            &parent_str[0..4],
+                            &parent_str[parent_str.len() - 4..]
+                        )
                     } else {
                         parent_str
                     }
-                },
+                }
                 None => "-".to_string(),
             };
-                
+
             // Get event type with color based on category
             let colored_type = match event.event_type.split('.').next().unwrap_or("") {
                 "http" => style(&event.event_type).cyan(),
@@ -144,9 +129,7 @@ pub fn display_single_event(
             });
 
             println!(
-                "{:<5} {:<19} {:<12} {:<12} {:<25} {}",
-                count,
-                timestamp,
+                "{:<12} {:<12} {:<25} {}",
                 style(&short_hash).dim(),
                 style(&parent_hash).dim(),
                 colored_type,
@@ -255,7 +238,7 @@ pub fn display_events_timeline(events: &[ChainEvent], actor_id: &TheaterId) -> R
     // Get terminal width for timeline display
     let term_width = match term_size::dimensions() {
         Some((w, _)) => (w as f64 * 0.7) as usize, // Use 70% of terminal width for timeline
-        None => 80,                                 // Default to 80 if terminal size can't be determined
+        None => 80, // Default to 80 if terminal size can't be determined
     };
 
     println!(
@@ -475,3 +458,4 @@ pub fn print_hex_dump(data: &[u8], bytes_per_line: usize) {
         offset += bytes_per_line;
     }
 }
+

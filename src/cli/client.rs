@@ -76,25 +76,41 @@ impl TheaterClient {
         }
     }
 
+    pub async fn send_command_no_response(&mut self, command: ManagementCommand) -> Result<()> {
+        // Make sure we have an active connection
+        if self.connection.is_none() {
+            self.connect().await?;
+        }
+
+        let connection = self.connection.as_mut().unwrap();
+
+        // Serialize and send the command
+        debug!("Sending command: {:?}", command);
+        let command_bytes = serde_json::to_vec(&command)?;
+        connection
+            .send(Bytes::from(command_bytes))
+            .await
+            .expect("Failed to send command");
+        debug!("Command sent, no response expected");
+
+        Ok(())
+    }
+
     /// Start an actor from a manifest file with optional initial state
     pub async fn start_actor(
         &mut self,
         manifest: String,
         initial_state: Option<Vec<u8>>,
-    ) -> Result<TheaterId> {
+        parent: bool,
+        subscribe: bool,
+    ) -> Result<(), anyhow::Error> {
         let command = ManagementCommand::StartActor {
             manifest,
             initial_state,
+            parent,
+            subscribe,
         };
-        let response = self.send_command(command).await?;
-
-        match response {
-            ManagementResponse::ActorStarted { id } => Ok(id),
-            ManagementResponse::Error { error } => {
-                Err(anyhow!("Error starting actor: {:?}", error))
-            }
-            _ => Err(anyhow!("Unexpected response")),
-        }
+        self.send_command_no_response(command).await
     }
 
     /// Stop a running actor
@@ -466,6 +482,26 @@ impl TheaterClient {
             // Connection closed
             self.connection = None;
             Err(anyhow!("Connection closed by server"))
+        }
+    }
+
+    // This returns a future that can be used with select!
+    pub async fn next_response(&mut self) -> Option<Result<ManagementResponse>> {
+        if self.connection.is_none() {
+            return Some(Err(anyhow!("No active connection")));
+        }
+
+        let connection = self.connection.as_mut().unwrap();
+        match connection.next().await {
+            Some(Ok(bytes)) => match serde_json::from_slice::<ManagementResponse>(&bytes) {
+                Ok(response) => Some(Ok(response)),
+                Err(e) => Some(Err(anyhow!("Deserialization error: {}", e))),
+            },
+            Some(Err(e)) => Some(Err(anyhow!("Connection error: {}", e))),
+            None => {
+                self.connection = None;
+                Some(Err(anyhow!("Connection closed by server")))
+            }
         }
     }
 }

@@ -23,7 +23,9 @@ pub const DEFAULT_OPERATION_TIMEOUT: Duration = Duration::from_secs(3000);
 /// This enum provides detailed error information for various failure modes that
 /// might occur when interacting with an actor. These errors are propagated back
 /// to callers to help diagnose and handle problems.
-#[derive(Error, Debug, Clone, ComponentType, Lift, Lower, Serialize, Deserialize)]
+#[derive(
+    Error, Debug, Clone, ComponentType, Lift, Lower, Serialize, Deserialize, PartialEq, Hash, Eq,
+)]
 #[component(variant)]
 pub enum ActorError {
     /// Operation exceeded the maximum allowed execution time

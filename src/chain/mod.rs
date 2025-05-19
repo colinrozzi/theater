@@ -85,7 +85,7 @@ use crate::TheaterId;
 /// Events are serialized to JSON for storage and transmission. The `Display` implementation
 /// provides a human-readable representation of the event, making events easier to read in logs
 /// and debugging output.
-#[derive(Debug, Clone, Serialize, Deserialize, ComponentType, Lift, Lower)]
+#[derive(Debug, Clone, Serialize, Deserialize, ComponentType, Lift, Lower, Hash, Eq)]
 #[component(record)]
 pub struct ChainEvent {
     /// Cryptographic hash of this event's content, used as its identifier.

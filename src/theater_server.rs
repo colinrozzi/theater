@@ -1,4 +1,6 @@
-use crate::messages::{ActorMessage, ActorRequest, ActorSend, ActorStatus, ChannelParticipant};
+use crate::messages::{
+    ActorMessage, ActorRequest, ActorResult, ActorSend, ActorStatus, ChannelParticipant,
+};
 use crate::ActorError;
 use crate::ChainEvent;
 use crate::ManifestConfig;
@@ -25,6 +27,8 @@ pub enum ManagementCommand {
     StartActor {
         manifest: String,
         initial_state: Option<Vec<u8>>,
+        parent: bool,
+        subscribe: bool,
     },
     StopActor {
         id: TheaterId,
@@ -103,11 +107,10 @@ pub enum ManagementResponse {
         id: TheaterId,
     },
     ActorEvent {
-        id: TheaterId,
         event: ChainEvent,
     },
+    ActorResult(ActorResult),
     ActorError {
-        id: TheaterId,
         error: ActorError,
     },
     Error {
@@ -176,26 +179,26 @@ pub enum ManagementError {
     ActorAlreadyExists,
     ActorNotRunning,
     ActorError(String),
-    
+
     // Channel-related errors
     ChannelNotFound,
     ChannelClosed,
     ChannelRejected,
-    
+
     // Store-related errors
     StoreError(String),
-    
+
     // Communication errors
     CommunicationError(String),
-    
+
     // Request handling errors
     InvalidRequest(String),
     Timeout,
-    
+
     // System errors
     RuntimeError(String),
     InternalError(String),
-    
+
     // Serialization/deserialization errors
     SerializationError(String),
 }
@@ -207,12 +210,16 @@ impl From<TheaterRuntimeError> for ManagementError {
             TheaterRuntimeError::ActorNotFound(_) => ManagementError::ActorNotFound,
             TheaterRuntimeError::ActorAlreadyExists(_) => ManagementError::ActorAlreadyExists,
             TheaterRuntimeError::ActorNotRunning(_) => ManagementError::ActorNotRunning,
-            TheaterRuntimeError::ActorOperationFailed(msg) => ManagementError::RuntimeError(format!("Actor operation failed: {}", msg)),
+            TheaterRuntimeError::ActorOperationFailed(msg) => {
+                ManagementError::RuntimeError(format!("Actor operation failed: {}", msg))
+            }
             TheaterRuntimeError::ActorError(e) => ManagementError::ActorError(e.to_string()),
             TheaterRuntimeError::ChannelError(msg) => ManagementError::CommunicationError(msg),
             TheaterRuntimeError::ChannelNotFound(_) => ManagementError::ChannelNotFound,
             TheaterRuntimeError::ChannelRejected => ManagementError::ChannelRejected,
-            TheaterRuntimeError::SerializationError(msg) => ManagementError::SerializationError(msg),
+            TheaterRuntimeError::SerializationError(msg) => {
+                ManagementError::SerializationError(msg)
+            }
             TheaterRuntimeError::InternalError(msg) => ManagementError::InternalError(msg),
         }
     }
@@ -467,17 +474,63 @@ impl TheaterServer {
                 ManagementCommand::StartActor {
                     manifest,
                     initial_state,
+                    parent,
+                    subscribe,
                 } => {
                     info!("Starting actor from manifest: {:?}", manifest);
                     let (cmd_tx, cmd_rx) = tokio::sync::oneshot::channel();
                     debug!("Sending SpawnActor command to runtime");
+                    let supervisor_tx = if parent {
+                        let (supervisor_tx, mut supervisor_rx) = mpsc::channel(32);
+                        let cmd_client_tx = cmd_client_tx.clone();
+                        tokio::spawn(async move {
+                            while let Some(res) = supervisor_rx.recv().await {
+                                debug!("Received supervisor response: {:?}", res);
+                                if let Err(e) = cmd_client_tx
+                                    .send(ManagementResponse::ActorResult(res))
+                                    .await
+                                {
+                                    error!("Failed to send supervisor response: {}", e);
+                                    break;
+                                }
+                            }
+                        });
+                        Some(supervisor_tx)
+                    } else {
+                        None
+                    };
+                    let subscription_tx = if subscribe {
+                        let (event_tx, mut event_rx) = mpsc::channel(32);
+
+                        // set up a task to forward events to the client
+                        let cmd_client_tx = cmd_client_tx.clone();
+                        tokio::spawn(async move {
+                            while let Some(event) = event_rx.recv().await {
+                                debug!("Received event for subscription");
+                                let response = match event {
+                                    Ok(event) => ManagementResponse::ActorEvent { event },
+                                    Err(e) => ManagementResponse::ActorError { error: e },
+                                };
+                                if let Err(e) = cmd_client_tx.send(response).await {
+                                    debug!("Failed to forward event to client: {}", e);
+                                    break;
+                                }
+                            }
+                            debug!("Event forwarder for subscription stopped");
+                        });
+
+                        Some(event_tx)
+                    } else {
+                        None
+                    };
                     match runtime_tx
                         .send(TheaterCommand::SpawnActor {
                             manifest_path: manifest.clone(),
                             init_bytes: initial_state,
                             response_tx: cmd_tx,
                             parent_id: None,
-                            supervisor_tx: None,
+                            supervisor_tx,
+                            subscription_tx,
                         })
                         .await
                     {
@@ -492,14 +545,20 @@ impl TheaterServer {
                                     Err(e) => {
                                         error!("Runtime failed to start actor: {}", e);
                                         ManagementResponse::Error {
-                                            error: ManagementError::RuntimeError(format!("Failed to start actor: {}", e)),
+                                            error: ManagementError::RuntimeError(format!(
+                                                "Failed to start actor: {}",
+                                                e
+                                            )),
                                         }
                                     }
                                 },
                                 Err(e) => {
                                     error!("Failed to receive spawn response: {}", e);
                                     ManagementResponse::Error {
-                                        error: ManagementError::CommunicationError(format!("Failed to receive spawn response: {}", e)),
+                                        error: ManagementError::CommunicationError(format!(
+                                            "Failed to receive spawn response: {}",
+                                            e
+                                        )),
                                     }
                                 }
                             }
@@ -507,7 +566,10 @@ impl TheaterServer {
                         Err(e) => {
                             error!("Failed to send SpawnActor command: {}", e);
                             ManagementResponse::Error {
-                                error: ManagementError::CommunicationError(format!("Failed to send spawn command: {}", e)),
+                                error: ManagementError::CommunicationError(format!(
+                                    "Failed to send spawn command: {}",
+                                    e
+                                )),
                             }
                         }
                     }
@@ -528,7 +590,10 @@ impl TheaterServer {
                             ManagementResponse::ActorStopped { id }
                         }
                         Err(e) => ManagementResponse::Error {
-                            error: ManagementError::RuntimeError(format!("Failed to stop actor: {}", e)),
+                            error: ManagementError::RuntimeError(format!(
+                                "Failed to stop actor: {}",
+                                e
+                            )),
                         },
                     }
                 }
@@ -547,7 +612,10 @@ impl TheaterServer {
                             ManagementResponse::ActorList { actors }
                         }
                         Err(e) => ManagementResponse::Error {
-                            error: ManagementError::RuntimeError(format!("Failed to list actors: {}", e)),
+                            error: ManagementError::RuntimeError(format!(
+                                "Failed to list actors: {}",
+                                e
+                            )),
                         },
                     }
                 }
@@ -584,7 +652,6 @@ impl TheaterServer {
 
                     // Create a task to forward events to this client
                     let client_tx_clone = cmd_client_tx.clone();
-                    let actor_id_clone = id.clone();
                     tokio::spawn(async move {
                         debug!(
                             "Starting event forwarder for subscription {}",
@@ -593,14 +660,8 @@ impl TheaterServer {
                         while let Some(event) = event_rx.recv().await {
                             debug!("Received event for subscription {}", subscription_id);
                             let response = match event {
-                                Ok(event) => ManagementResponse::ActorEvent {
-                                    id: actor_id_clone.clone(),
-                                    event,
-                                },
-                                Err(e) => ManagementResponse::ActorError {
-                                    id: actor_id_clone.clone(),
-                                    error: e,
-                                },
+                                Ok(event) => ManagementResponse::ActorEvent { event },
+                                Err(e) => ManagementResponse::ActorError { error: e },
                             };
                             if let Err(e) = client_tx_clone.send(response).await {
                                 debug!("Failed to forward event to client: {}", e);
@@ -720,7 +781,10 @@ impl TheaterServer {
                     match cmd_rx.await? {
                         Ok(_) => ManagementResponse::Restarted { id },
                         Err(e) => ManagementResponse::Error {
-                            error: ManagementError::RuntimeError(format!("Failed to restart actor: {}", e)),
+                            error: ManagementError::RuntimeError(format!(
+                                "Failed to restart actor: {}",
+                                e
+                            )),
                         },
                     }
                 }
@@ -750,9 +814,13 @@ impl TheaterServer {
                     match cmd_rx.await {
                         Ok(result) => match result {
                             Ok(events) => {
-                                debug!("Successfully retrieved {} events for actor {}", events.len(), id);
+                                debug!(
+                                    "Successfully retrieved {} events for actor {}",
+                                    events.len(),
+                                    id
+                                );
                                 ManagementResponse::ActorEvents { id, events }
-                            },
+                            }
                             Err(e) => {
                                 debug!("Error getting events for actor {}: {}", id, e);
                                 ManagementResponse::Error { error: e.into() }
@@ -761,7 +829,10 @@ impl TheaterServer {
                         Err(e) => {
                             error!("Failed to receive events response: {}", e);
                             ManagementResponse::Error {
-                                error: ManagementError::CommunicationError(format!("Failed to receive events response: {}", e)),
+                                error: ManagementError::CommunicationError(format!(
+                                    "Failed to receive events response: {}",
+                                    e
+                                )),
                             }
                         }
                     }
@@ -796,7 +867,10 @@ impl TheaterServer {
                     match cmd_rx.await? {
                         Ok(_) => ManagementResponse::ActorComponentUpdated { id },
                         Err(e) => ManagementResponse::Error {
-                            error: ManagementError::RuntimeError(format!("Failed to update actor component: {}", e)),
+                            error: ManagementError::RuntimeError(format!(
+                                "Failed to update actor component: {}",
+                                e
+                            )),
                         },
                     }
                 }
@@ -867,12 +941,18 @@ impl TheaterServer {
                                     }
                                 }
                                 Err(e) => ManagementResponse::Error {
-                                    error: ManagementError::RuntimeError(format!("Error opening channel: {}", e)),
+                                    error: ManagementError::RuntimeError(format!(
+                                        "Error opening channel: {}",
+                                        e
+                                    )),
                                 },
                             }
                         }
                         Err(e) => ManagementResponse::Error {
-                            error: ManagementError::CommunicationError(format!("Failed to receive channel open response: {}", e)),
+                            error: ManagementError::CommunicationError(format!(
+                                "Failed to receive channel open response: {}",
+                                e
+                            )),
                         },
                     }
                 }

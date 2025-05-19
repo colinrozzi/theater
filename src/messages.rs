@@ -127,7 +127,8 @@ pub enum TheaterCommand {
         init_bytes: Option<Vec<u8>>,
         response_tx: oneshot::Sender<Result<TheaterId>>,
         parent_id: Option<TheaterId>,
-        supervisor_tx: Option<Sender<ChildError>>,
+        supervisor_tx: Option<Sender<ActorResult>>,
+        subscription_tx: Option<Sender<Result<ChainEvent, ActorError>>>,
     },
 
     /// # Resume an existing actor
@@ -145,7 +146,8 @@ pub enum TheaterCommand {
         state_bytes: Option<Vec<u8>>,
         response_tx: oneshot::Sender<Result<TheaterId>>,
         parent_id: Option<TheaterId>,
-        supervisor_tx: Option<Sender<ChildError>>,
+        supervisor_tx: Option<Sender<ActorResult>>,
+        subscription_tx: Option<Sender<Result<ChainEvent, ActorError>>>,
     },
 
     /// # Stop an actor
@@ -159,6 +161,11 @@ pub enum TheaterCommand {
     StopActor {
         actor_id: TheaterId,
         response_tx: oneshot::Sender<Result<()>>,
+    },
+
+    ShuttingDown {
+        actor_id: TheaterId,
+        data: Option<Vec<u8>>,
     },
 
     /// # Update an actor's component
@@ -473,6 +480,13 @@ impl TheaterCommand {
             TheaterCommand::StopActor { actor_id, .. } => {
                 format!("StopActor: {:?}", actor_id)
             }
+            TheaterCommand::ShuttingDown { actor_id, data } => {
+                format!(
+                    "ShuttingDown: {:?} (data: {:?})",
+                    actor_id,
+                    data.as_ref().map(|d| String::from_utf8_lossy(d))
+                )
+            }
             TheaterCommand::SendMessage { actor_id, .. } => {
                 format!("SendMessage: {:?}", actor_id)
             }
@@ -674,6 +688,12 @@ impl std::fmt::Display for ChannelParticipant {
             ChannelParticipant::External => write!(f, "External"),
         }
     }
+}
+
+#[derive(Debug, Clone)]
+pub enum ActorParent {
+    Actor(TheaterId),
+    External(Sender<ActorResult>),
 }
 
 /// # Actor Request
@@ -885,8 +905,50 @@ pub enum ActorStatus {
     Failed,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub struct ChildError {
     pub actor_id: TheaterId,
     pub error: ActorError,
+}
+
+impl std::fmt::Display for ChildError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "[{}] child-error: {}", self.actor_id, self.error)
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
+pub struct ChildResult {
+    pub actor_id: TheaterId,
+    pub result: Option<Vec<u8>>,
+}
+
+impl std::fmt::Display for ChildResult {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "[{}] child-result: {}",
+            self.actor_id,
+            self.result
+                .as_ref()
+                .map(|r| String::from_utf8_lossy(r))
+                .unwrap_or_else(|| "None".into())
+        )
+    }
+}
+
+/// # Actor Result
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum ActorResult {
+    Error(ChildError),
+    Success(ChildResult),
+}
+
+impl std::fmt::Display for ActorResult {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ActorResult::Error(err) => write!(f, "{}", err),
+            ActorResult::Success(res) => write!(f, "{}", res),
+        }
+    }
 }

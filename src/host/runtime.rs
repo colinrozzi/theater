@@ -144,32 +144,31 @@ impl RuntimeHost {
         interface
             .func_wrap_async(
                 "shutdown",
-                move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore>, (reason,): (String,)|
+                move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore>, (data,): (Option<Vec<u8>>,)|
                       -> Box<dyn Future<Output = Result<(Result<(), String>,)>> + Send> {
                     // Record shutdown call event
                     ctx.data_mut().record_event(ChainEventData {
                         event_type: "ntwk:theater/runtime/shutdown".to_string(),
                         data: EventData::Runtime(RuntimeEventData::ShutdownCall {
-                            reason: reason.clone(),
+                            data: data.clone(),
                         }),
                         timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                        description: Some(format!("Actor shutdown with reason: {}", reason)),
+                        description: Some(format!("Actor shutdown with data: {:?}", data)),
                     });
 
                     info!(
-                        "[ACTOR] [{}] [{}] Shutdown requested: {}",
+                        "[ACTOR] [{}] [{}] Shutdown requested: {:?}",
                         ctx.data().id,
                         name,
-                        reason
+                        data
                     );
-                    let (response_tx, _response_rx) = tokio::sync::oneshot::channel();
                     let theater_tx = theater_tx.clone();
 
                     Box::new(async move {
                         match theater_tx
-                            .send(TheaterCommand::StopActor {
+                            .send(TheaterCommand::ShuttingDown {
                                 actor_id: ctx.data().id.clone(),
-                                response_tx,
+                                data,
                             })
                             .await
                         {
