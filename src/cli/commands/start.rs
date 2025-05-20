@@ -140,7 +140,6 @@ pub fn execute(args: &StartArgs, _verbose: bool, json: bool) -> Result<()> {
                                 );
                                 println!("------------------------------------");
                             }
-                            break;
                         }
                         Err(e) => {
                             println!("Error receiving data: {:?}", e);
