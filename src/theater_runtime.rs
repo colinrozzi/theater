@@ -9,7 +9,7 @@ use crate::actor::types::{ActorError, ActorOperation};
 use crate::chain::ChainEvent;
 use crate::id::TheaterId;
 use crate::messages::{
-    ActorChannelClose, ActorChannelMessage, ActorChannelOpen, ActorParent, ActorResult, ChannelId,
+    ActorChannelClose, ActorChannelMessage, ActorChannelOpen, ActorResult, ChannelId,
     ChannelParticipant, ChildError, ChildResult,
 };
 use crate::messages::{ActorMessage, ActorStatus, TheaterCommand};

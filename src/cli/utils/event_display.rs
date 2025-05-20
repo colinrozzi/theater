@@ -355,14 +355,6 @@ pub fn display_csv_header() {
     println!("timestamp,event_type,hash,parent_hash,description,data_size");
 }
 
-pub fn display_compact_header() {
-    println!(
-        "{:<12} {:<12} {:<25} {}",
-        "HASH", "PARENT", "EVENT TYPE", "DESCRIPTION"
-    );
-    println!("{}", style("─".repeat(100)).dim());
-}
-
 /// Helper function to pretty-stringify an event for the pretty format
 pub fn pretty_stringify_event(event: &ChainEvent, full: bool) -> String {
     let timestamp = chrono::DateTime::from_timestamp(event.timestamp as i64, 0)

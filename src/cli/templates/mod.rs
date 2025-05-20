@@ -260,7 +260,7 @@ pub fn create_project(template_name: &str, project_name: &str, output_dir: &Path
         }
 
         // Replace template variables
-        let mut content = content
+        let content = content
             .replace("{{project_name}}", project_name)
             .replace("{{project_name_snake}}", &project_name.replace('-', "_"));
 

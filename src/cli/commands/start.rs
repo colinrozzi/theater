@@ -1,6 +1,5 @@
 use anyhow::{anyhow, Result};
 use clap::Parser;
-use console::style;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use tracing::debug;

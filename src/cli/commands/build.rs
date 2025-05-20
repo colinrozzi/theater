@@ -4,7 +4,7 @@ use console::style;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use tracing::{debug, info, error};
+use tracing::{debug, error, info};
 
 // Import Theater types for working with manifests
 use theater::config::ManifestConfig;
@@ -46,7 +46,7 @@ pub fn execute(args: &BuildArgs, verbose: bool, json: bool) -> Result<()> {
 
     // Get the package name from Cargo.toml
     let package_name = get_package_name(&cargo_toml_path)?;
-    
+
     // Check for manifest.toml
     let manifest_path = project_dir.join("manifest.toml");
     let manifest_exists = manifest_path.exists();
@@ -99,7 +99,7 @@ pub fn execute(args: &BuildArgs, verbose: bool, json: bool) -> Result<()> {
     build_cmd.current_dir(&project_dir);
 
     // Run the build command and capture output
-    let (status, stdout, stderr) = match run_command_with_output(&mut build_cmd, verbose) {
+    let (status, _stdout, stderr) = match run_command_with_output(&mut build_cmd, verbose) {
         Ok(result) => result,
         Err(e) => {
             error!("Failed to execute cargo component build: {}", e);
@@ -120,7 +120,7 @@ pub fn execute(args: &BuildArgs, verbose: bool, json: bool) -> Result<()> {
     // Handle build failures
     if !status.success() {
         error!("Cargo component build failed with status: {}", status);
-        
+
         if !json {
             println!("{} Build failed with errors:\n", style("✗").red().bold());
             eprintln!("{}", stderr);
@@ -146,7 +146,10 @@ pub fn execute(args: &BuildArgs, verbose: bool, json: bool) -> Result<()> {
 
     // Validate the wasm file exists
     if !wasm_path.exists() {
-        error!("Built WASM file not found at expected path: {}", wasm_path.display());
+        error!(
+            "Built WASM file not found at expected path: {}",
+            wasm_path.display()
+        );
         return Err(anyhow!(
             "Built WASM file not found at expected path: {}",
             wasm_path.display()
@@ -170,8 +173,11 @@ pub fn execute(args: &BuildArgs, verbose: bool, json: bool) -> Result<()> {
 
         fs::write(&manifest_path, updated_manifest)
             .context("Failed to write updated manifest.toml")?;
-            
-        info!("Updated manifest with component path: {}", wasm_path.display());
+
+        info!(
+            "Updated manifest with component path: {}",
+            wasm_path.display()
+        );
     }
 
     if !json {
@@ -239,15 +245,13 @@ fn run_command_with_output(
 
 /// Check if cargo-component is installed
 fn is_cargo_component_installed() -> bool {
-    let output = Command::new("cargo")
-        .args(["--list"])
-        .output();
-        
+    let output = Command::new("cargo").args(["--list"]).output();
+
     match output {
         Ok(output) => {
             let stdout = String::from_utf8_lossy(&output.stdout);
             stdout.contains("component")
-        },
+        }
         Err(_) => false,
     }
 }

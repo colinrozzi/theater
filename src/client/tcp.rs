@@ -41,7 +41,7 @@ impl TheaterConnection {
             connection: None,
         }
     }
-    
+
     /// Connect to the Theater server
     ///
     /// # Returns
@@ -52,20 +52,20 @@ impl TheaterConnection {
         if self.connection.is_some() {
             return Ok(());
         }
-        
+
         info!("Connecting to Theater server at {}", self.address);
         let socket = TcpStream::connect(self.address).await?;
-        
+
         let mut codec = LengthDelimitedCodec::new();
         codec.set_max_frame_length(32 * 1024 * 1024); // 32MB max frame size
         let framed = Framed::new(socket, codec);
-        
+
         self.connection = Some(framed);
         info!("Connected to Theater server");
-        
+
         Ok(())
     }
-    
+
     /// Send a command to the server
     ///
     /// # Arguments
@@ -81,20 +81,22 @@ impl TheaterConnection {
         if self.connection.is_none() {
             self.connect().await?;
         }
-        
+
         // Serialize and send the command
         debug!("Sending command: {:?}", command);
         let command_bytes = serde_json::to_vec(&command)?;
-        
-        let connection = self.connection.as_mut()
+
+        let connection = self
+            .connection
+            .as_mut()
             .ok_or_else(|| anyhow!("Connection lost"))?;
-            
+
         connection.send(Bytes::from(command_bytes)).await?;
         debug!("Command sent");
-        
+
         Ok(())
     }
-    
+
     /// Receive a response from the server
     ///
     /// This method will wait for the next response from the server.
@@ -109,10 +111,12 @@ impl TheaterConnection {
         if self.connection.is_none() {
             return Err(anyhow!("Not connected"));
         }
-        
-        let connection = self.connection.as_mut()
+
+        let connection = self
+            .connection
+            .as_mut()
             .ok_or_else(|| anyhow!("Connection lost"))?;
-            
+
         // Wait for the next message
         match connection.next().await {
             Some(Ok(bytes)) => {
@@ -120,12 +124,12 @@ impl TheaterConnection {
                 let response: ManagementResponse = serde_json::from_slice(&bytes)?;
                 debug!("Received response: {:?}", response);
                 Ok(response)
-            },
+            }
             Some(Err(e)) => {
                 error!("Error receiving response: {}", e);
                 self.connection = None;
                 Err(anyhow!("Connection error: {}", e))
-            },
+            }
             None => {
                 // Connection closed
                 debug!("Connection closed by server");
@@ -134,7 +138,7 @@ impl TheaterConnection {
             }
         }
     }
-    
+
     /// Check if the connection is active
     ///
     /// # Returns
@@ -144,7 +148,7 @@ impl TheaterConnection {
     pub fn is_connected(&self) -> bool {
         self.connection.is_some()
     }
-    
+
     /// Close the connection
     ///
     /// # Returns
@@ -162,57 +166,57 @@ impl TheaterConnection {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::Duration;
     use tokio::net::TcpListener;
     use tokio::sync::oneshot;
-    use std::time::Duration;
-    
+
     // Helper to run a mock server for testing
     async fn run_mock_server(addr: SocketAddr, shutdown_rx: oneshot::Receiver<()>) -> Result<()> {
         let listener = TcpListener::bind(addr).await?;
         let shutdown_future = shutdown_rx;
-        
+
         tokio::select! {
             _ = async {
                 while let Ok((socket, _)) = listener.accept().await {
                     let mut framed = Framed::new(socket, LengthDelimitedCodec::new());
-                    
+
                     // Echo back whatever we receive
                     while let Some(Ok(bytes)) = framed.next().await {
-                        framed.send(bytes).await?;
+                        framed.send(bytes.into()).await?;
                     }
                 }
                 Ok::<(), anyhow::Error>(())
             } => {},
             _ = shutdown_future => {},
         }
-        
+
         Ok(())
     }
-    
+
     #[tokio::test]
     async fn test_connection() -> Result<()> {
         // Bind to a random port
         let listener = TcpListener::bind("127.0.0.1:0").await?;
         let addr = listener.local_addr()?;
         drop(listener);
-        
+
         // Start mock server
         let (shutdown_tx, shutdown_rx) = oneshot::channel();
         let server_handle = tokio::spawn(run_mock_server(addr, shutdown_rx));
-        
+
         // Allow server to start
         tokio::time::sleep(Duration::from_millis(100)).await;
-        
+
         // Create client and connect
         let mut client = TheaterConnection::new(addr);
         client.connect().await?;
         assert!(client.is_connected());
-        
+
         // Clean up
         client.close().await?;
         let _ = shutdown_tx.send(());
         let _ = server_handle.await;
-        
+
         Ok(())
     }
 }

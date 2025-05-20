@@ -9,10 +9,6 @@ pub fn format_id(id: &TheaterId) -> String {
     style(id.to_string()).cyan().to_string()
 }
 
-pub fn format_name(name: &String) -> String {
-    style(name.to_string()).white().to_string()
-}
-
 /// Format a short version of an actor ID (first 8 chars)
 pub fn format_short_id(id: &TheaterId) -> String {
     let id_str = id.to_string();

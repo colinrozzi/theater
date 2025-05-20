@@ -8,8 +8,8 @@ use tracing::debug;
 
 use crate::cli::client::TheaterClient;
 use crate::cli::utils::event_display::{
-    display_csv_header, display_events, display_events_timeline, format_timestamp,
-    pretty_stringify_event, EventDisplayOptions,
+    display_csv_header, display_events, display_events_timeline, pretty_stringify_event,
+    EventDisplayOptions,
 };
 use theater::chain::ChainEvent;
 use theater::id::TheaterId;
@@ -199,8 +199,12 @@ pub fn execute(args: &EventsArgs, _verbose: bool, json: bool) -> Result<()> {
             display_events_timeline(&events, &actor_id)?
         } else {
             // If JSON flag is set, it overrides the format option
-            let format = if json { "json".to_string() } else { args.format.clone() };
-            
+            let format = if json {
+                "json".to_string()
+            } else {
+                args.format.clone()
+            };
+
             // Special handling for CSV format
             if format == "csv" {
                 display_csv_header();
@@ -310,7 +314,7 @@ fn order_events_by_chain(events: &[ChainEvent], reverse: bool) -> Vec<ChainEvent
     }
 
     use std::collections::HashMap;
-    
+
     // Find the root event (the one without a parent)
     let root = events.iter().find(|e| e.parent_hash.is_none());
 
@@ -358,3 +362,4 @@ fn order_events_by_chain(events: &[ChainEvent], reverse: bool) -> Vec<ChainEvent
 
     ordered_events
 }
+

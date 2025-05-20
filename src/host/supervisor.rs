@@ -4,7 +4,7 @@ use crate::actor::types::{ActorError, WitActorError};
 use crate::config::SupervisorHostConfig;
 use crate::events::supervisor::SupervisorEventData;
 use crate::events::{ChainEventData, EventData};
-use crate::messages::{ActorResult, ChildError, TheaterCommand};
+use crate::messages::{ActorResult, TheaterCommand};
 use crate::shutdown::ShutdownReceiver;
 use crate::wasm::{ActorComponent, ActorInstance};
 use crate::ChainEvent;
