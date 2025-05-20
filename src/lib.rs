@@ -34,6 +34,7 @@ use anyhow::Result;
 
 pub mod actor;
 pub mod chain;
+pub mod client;
 pub mod config;
 pub mod errors;
 pub mod events;
