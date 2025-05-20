@@ -216,6 +216,21 @@ pub fn display_single_event(event: &ChainEvent, format: &str, detailed: bool) ->
     Ok(())
 }
 
+pub fn display_events_header(format: &str) {
+    match format {
+        "compact" => {
+            println!(
+                "{:<12} {:<12} {:<25} {}",
+                "HASH", "PARENT", "EVENT TYPE", "DESCRIPTION"
+            );
+            println!("{}", style("─".repeat(100)).dim());
+        }
+        _ => {
+            println!("{} Events:", style("ℹ").blue().bold());
+        }
+    }
+}
+
 /// Display a timeline view of events
 pub fn display_events_timeline(events: &[ChainEvent], actor_id: &TheaterId) -> Result<()> {
     println!(
@@ -340,6 +355,14 @@ pub fn display_csv_header() {
     println!("timestamp,event_type,hash,parent_hash,description,data_size");
 }
 
+pub fn display_compact_header() {
+    println!(
+        "{:<12} {:<12} {:<25} {}",
+        "HASH", "PARENT", "EVENT TYPE", "DESCRIPTION"
+    );
+    println!("{}", style("─".repeat(100)).dim());
+}
+
 /// Helper function to pretty-stringify an event for the pretty format
 pub fn pretty_stringify_event(event: &ChainEvent, full: bool) -> String {
     let timestamp = chrono::DateTime::from_timestamp(event.timestamp as i64, 0)
@@ -458,4 +481,3 @@ pub fn print_hex_dump(data: &[u8], bytes_per_line: usize) {
         offset += bytes_per_line;
     }
 }
-

@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use tracing::debug;
 
 use crate::cli::client::{ManagementResponse, TheaterClient};
-use crate::cli::utils::event_display::display_single_event;
+use crate::cli::utils::event_display::{display_events_header, display_single_event};
 
 #[derive(Debug, Parser)]
 pub struct StartArgs {
@@ -83,6 +83,11 @@ pub fn execute(args: &StartArgs, _verbose: bool, json: bool) -> Result<()> {
             .start_actor(manifest_content, initial_state, args.parent, args.subscribe)
             .await?;
 
+        if args.subscribe && !json {
+            println!("");
+            display_events_header(&args.format);
+        }
+
         loop {
             tokio::select! {
                 data = client.next_response() => {
@@ -93,12 +98,12 @@ pub fn execute(args: &StartArgs, _verbose: bool, json: bool) -> Result<()> {
                                 println!("{}", id);
                                 break;
                             } else {
-                                println!("----------------------");
+                                println!("-----[actor started]-----------------");
                                 println!(
-                                    "[{}] actor started",
+                                    "     {}",
                                     id
                                 );
-                                println!("----------------------");
+                                println!("-------------------------------------");
                                 // if we are not subscribing or acting as a parent, break the loop
                                 if !(args.subscribe || args.parent) {
                                     break;
@@ -112,28 +117,28 @@ pub fn execute(args: &StartArgs, _verbose: bool, json: bool) -> Result<()> {
                         }
                         Ok(ManagementResponse::ActorError { error }) => {
                             if args.subscribe {
-                                println!("----------------------");
+                                println!("-----[actor error]-----------------");
                                 println!(
-                                    "actor-error: {}",
+                                    "     {}",
                                     error
                                 );
-                                println!("----------------------");
+                                println!("-----------------------------------");
                             }
                         }
                         Ok(ManagementResponse::ActorStopped { id }) => {
-                            println!("----------------------");
-                            println!("[{}] actor stopped", id);
-                            println!("----------------------");
+                            println!("-----[actor stopped]-----------------");
+                            println!("{}", id);
+                            println!("-------------------------------------");
                             break;
                         }
                         Ok(ManagementResponse::ActorResult(actor_result)) => {
                             if args.parent {
-                                println!("----------------------");
+                                println!("-----[actor result]-----------------");
                                 println!(
-                                    "{}",
+                                    "     {}",
                                     actor_result
                                 );
-                                println!("----------------------");
+                                println!("------------------------------------");
                             }
                             break;
                         }
