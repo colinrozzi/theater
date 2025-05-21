@@ -99,7 +99,7 @@ pub fn execute(args: &BuildArgs, verbose: bool, json: bool) -> Result<()> {
     build_cmd.current_dir(&project_dir);
 
     // Run the build command and capture output
-    let (status, _stdout, stderr) = match run_command_with_output(&mut build_cmd, verbose) {
+    let (status, stdout, stderr) = match run_command_with_output(&mut build_cmd, verbose) {
         Ok(result) => result,
         Err(e) => {
             error!("Failed to execute cargo component build: {}", e);
@@ -122,8 +122,17 @@ pub fn execute(args: &BuildArgs, verbose: bool, json: bool) -> Result<()> {
         error!("Cargo component build failed with status: {}", status);
 
         if !json {
+            // Use console's Term to ensure ANSI color codes are preserved
             println!("{} Build failed with errors:\n", style("✗").red().bold());
-            eprintln!("{}", stderr);
+
+            // Use console's Term to write directly to stderr with colors preserved
+            let term = console::Term::stderr();
+            let _ = term.write_str(&stdout);
+            let _ = term.write_str(&stderr);
+            // Make sure we end with a newline
+            if !stderr.ends_with('\n') {
+                let _ = term.write_str("\n");
+            }
         } else {
             let output = serde_json::json!({
                 "success": false,
@@ -219,6 +228,9 @@ fn run_command_with_output(
     verbose: bool,
 ) -> Result<(std::process::ExitStatus, String, String)> {
     debug!("Running command: {:?}", cmd);
+    cmd.env("RUST_BACKTRACE", "1");
+    cmd.env("RUST_COLOR", "always");
+    cmd.env("CARGO_TERM_COLOR", "always");
 
     if verbose {
         // For verbose mode, we'll just let the command output directly to the console
@@ -232,6 +244,7 @@ fn run_command_with_output(
         Ok((status, String::new(), String::new()))
     } else {
         // For non-verbose mode, capture the output but preserve ANSI color codes
+        // Capture the output
         let output = cmd
             .output()
             .map_err(|e| anyhow!("Failed to execute command: {}", e))?;
