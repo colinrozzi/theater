@@ -113,7 +113,7 @@ Theater captures every action agents take in a verifiable event chain:
 
 ## Development Setup
 
-### Using Nix (Recommended)
+### Using Nix [BROKEN]
 
 Theater uses Nix with flakes for reproducible development environments. Here's how to get started:
 
@@ -162,18 +162,3 @@ cd theater
 ```bash
 cargo build
 ```
-
-## Contributing
-
-1. Fork the repository
-2. Create your feature branch (`git checkout -b feature/amazing-feature`)
-3. Run the tests (`cargo test`)
-4. Run the linter (`cargo clippy`)
-5. Format your code (`cargo fmt`)
-6. Commit your changes (`git commit -m 'Add some amazing feature'`)
-7. Push to the branch (`git push origin feature/amazing-feature`)
-8. Open a Pull Request
-
-## Status
-
-This project is in active development. Most features are focused on providing infrastructure for AI agent systems with security, traceability, and reliability as primary goals. If you are interested in the project or have questions, please reach out to me at theater.ntwk@gmail.com.
