@@ -118,5 +118,5 @@ interface supervisor-handlers {
     // * `Err(string)` - Error message if handling fails
     handle-child-error: func(state: option<list<u8>>, params: tuple<string, wit-actor-error>) -> result<tuple<option<list<u8>>>, string>;
 
-    handle-child-exit: func(state: option<list<u8>>, params: tuple<string, list<u8>>) -> result<tuple<option<list<u8>>>, string>;
+    handle-child-exit: func(state: option<list<u8>>, params: tuple<string, option<list<u8>>>) -> result<tuple<option<list<u8>>>, string>;
 }
