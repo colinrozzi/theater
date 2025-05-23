@@ -12,15 +12,17 @@ pub enum ReferenceError {
 }
 
 /// Resolve a reference to a byte array.
-/// A reference can be a file path, a store path, or in the future a URL.
+/// A reference can be a file path, a store path, or a URL.
 /// The reference is resolved to a byte array.
 ///
-/// a store path is a reference to a file in the store and is prefixed with `store://`
-/// a store path can be either a hash or a path to a label.
-/// store://<store-id>/hash/<hash>
-/// store://<store-id>/<label>
+/// A store path is a reference to a file in the store and is prefixed with `store://`
+/// A store path can be either a hash or a path to a label:
+/// - store://<store-id>/hash/<hash>
+/// - store://<store-id>/<label>
 ///
-/// everything else is treated as a file path.
+/// A URL is any reference starting with `http://` or `https://`
+///
+/// Everything else is treated as a file path.
 pub async fn resolve_reference(reference: &str) -> Result<Vec<u8>, ReferenceError> {
     info!("Resolving reference: {}", reference);
 
@@ -35,7 +37,8 @@ pub async fn resolve_reference(reference: &str) -> Result<Vec<u8>, ReferenceErro
         }
         let store_id = parts[2];
         let store = ContentStore::from_id(store_id);
-        if parts.len() == 4 && parts[3] == "hash" {
+        
+        if parts.len() >= 5 && parts[3] == "hash" {
             // store path with hash
             let hash = parts[4];
             let content_ref = ContentRef::from_str(hash);
@@ -44,7 +47,7 @@ pub async fn resolve_reference(reference: &str) -> Result<Vec<u8>, ReferenceErro
                 .get(&content_ref)
                 .await
                 .map_err(|e| ReferenceError::ResolveError(e.to_string()))
-        } else {
+        } else if parts.len() >= 4 {
             // store path with label
             let label = parts[3];
             info!("Resolving store path with label: {}", label);
@@ -58,9 +61,43 @@ pub async fn resolve_reference(reference: &str) -> Result<Vec<u8>, ReferenceErro
                 },
                 Err(e) => Err(ReferenceError::ResolveError(e.to_string())),
             }
+        } else {
+            return Err(ReferenceError::ResolveError(format!(
+                "Invalid store path format: {}",
+                reference
+            )));
+        }
+    } else if reference.starts_with("http://") || reference.starts_with("https://") {
+        // HTTP/HTTPS URL
+        info!("Fetching from URL: {}", reference);
+        let client = reqwest::Client::new();
+        match client.get(reference).send().await {
+            Ok(response) => {
+                if response.status().is_success() {
+                    match response.bytes().await {
+                        Ok(bytes) => Ok(bytes.to_vec()),
+                        Err(e) => Err(ReferenceError::ResolveError(format!(
+                            "Failed to read response body from {}: {}",
+                            reference, e
+                        ))),
+                    }
+                } else {
+                    Err(ReferenceError::ResolveError(format!(
+                        "HTTP request failed for {}: {} {}",
+                        reference,
+                        response.status().as_u16(),
+                        response.status().canonical_reason().unwrap_or("Unknown error")
+                    )))
+                }
+            }
+            Err(e) => Err(ReferenceError::ResolveError(format!(
+                "Failed to fetch from {}: {}",
+                reference, e
+            ))),
         }
     } else {
         // file path
+        info!("Reading from file path: {}", reference);
         tokio::fs::read(reference)
             .await
             .map_err(|e| ReferenceError::ResolveError(e.to_string()))
