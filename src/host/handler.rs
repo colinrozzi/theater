@@ -1,4 +1,5 @@
 use crate::actor::handle::ActorHandle;
+use crate::host::environment::EnvironmentHost;
 use crate::host::filesystem::FileSystemHost;
 use crate::host::framework::HttpFramework;
 use crate::host::http_client::HttpClientHost;
@@ -14,6 +15,7 @@ use anyhow::Result;
 
 pub enum Handler {
     MessageServer(MessageServerHost),
+    Environment(EnvironmentHost),
     FileSystem(FileSystemHost),
     HttpClient(HttpClientHost),
     HttpFramework(HttpFramework),
@@ -35,6 +37,10 @@ impl Handler {
                 .start(actor_handle, shutdown_receiver)
                 .await
                 .expect("Error starting message server")),
+            Handler::Environment(h) => Ok(h
+                .start(actor_handle, shutdown_receiver)
+                .await
+                .expect("Error starting environment handler")),
             Handler::FileSystem(h) => Ok(h
                 .start(actor_handle, shutdown_receiver)
                 .await
@@ -79,6 +85,10 @@ impl Handler {
                 .setup_host_functions(actor_component)
                 .await
                 .expect("Error setting up message server host functions")),
+            Handler::Environment(h) => Ok(h
+                .setup_host_functions(actor_component)
+                .await
+                .expect("Error setting up environment host functions")),
             Handler::FileSystem(h) => Ok(h
                 .setup_host_functions(actor_component)
                 .await
@@ -120,6 +130,10 @@ impl Handler {
                 .add_export_functions(actor_instance)
                 .await
                 .expect("Error adding functions to message server")),
+            Handler::Environment(handler) => Ok(handler
+                .add_export_functions(actor_instance)
+                .await
+                .expect("Error adding functions to environment handler")),
             Handler::FileSystem(handler) => Ok(handler
                 .add_export_functions(actor_instance)
                 .await
@@ -158,6 +172,7 @@ impl Handler {
     pub fn name(&self) -> &str {
         match self {
             Handler::MessageServer(_) => "message-server",
+            Handler::Environment(_) => "environment",
             Handler::FileSystem(_) => "filesystem",
             Handler::HttpClient(_) => "http-client",
             Handler::HttpFramework(_) => "http-framework",

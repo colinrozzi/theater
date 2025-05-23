@@ -174,7 +174,7 @@ pub fn execute(args: &BuildArgs, verbose: bool, json: bool) -> Result<()> {
             toml::from_str(&manifest_content).context("Failed to parse manifest.toml")?;
 
         // Update the component path - use absolute path to the wasm file
-        manifest.component_path = wasm_path.to_string_lossy().to_string();
+        manifest.component = wasm_path.to_string_lossy().to_string();
 
         // Write the updated manifest
         let updated_manifest =

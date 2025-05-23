@@ -1,4 +1,5 @@
 pub mod filesystem;
+pub mod environment;
 pub mod framework;
 pub mod handler;
 pub mod http_client;
