@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
+use crate::utils::resolve_reference;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ComponentConfig {
     pub name: String,
@@ -183,8 +185,12 @@ impl EnvironmentHandlerConfig {
         }
 
         // If no restrictions are configured, allow all except denied
-        self.denied_vars.is_none() || 
-        !self.denied_vars.as_ref().unwrap().contains(&var_name.to_string())
+        self.denied_vars.is_none()
+            || !self
+                .denied_vars
+                .as_ref()
+                .unwrap()
+                .contains(&var_name.to_string())
     }
 }
 
@@ -356,10 +362,10 @@ impl ManifestConfig {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn load_init_state(&self) -> anyhow::Result<Option<Vec<u8>>> {
+    pub async fn load_init_state(&self) -> anyhow::Result<Option<Vec<u8>>> {
         match &self.init_state {
-            Some(path) => {
-                let data = std::fs::read(path)?;
+            Some(reference) => {
+                let data = resolve_reference(reference).await?;
                 Ok(Some(data))
             }
             None => Ok(None),

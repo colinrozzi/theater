@@ -439,7 +439,10 @@ impl ActorRuntime {
         info!("Loading init state for actor: {:?}", id);
 
         // Get state from config if available
-        let config_state = config.load_init_state().unwrap_or(None);
+        let config_state = config
+            .load_init_state()
+            .await
+            .expect("Failed to load init state");
 
         // Merge with provided state
         match crate::utils::merge_initial_states(config_state, state_bytes) {
