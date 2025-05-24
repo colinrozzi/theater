@@ -10,6 +10,8 @@ use tokio::io::AsyncWriteExt;
 use tracing::debug;
 use wasmtime::component::{ComponentType, Lift, Lower};
 
+use crate::utils;
+
 /// A reference to content in the store
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, ComponentType, Lift, Lower)]
 #[component(record)]
@@ -253,7 +255,8 @@ impl ContentStore {
     }
 
     pub fn base_path(&self) -> PathBuf {
-        PathBuf::from("$THEATER_HOME/store").join(&self.id)
+        let theater_home = utils::get_theater_home();
+        PathBuf::from(&theater_home).join("store").join(&self.id)
     }
 
     /// Store content and return its ContentRef

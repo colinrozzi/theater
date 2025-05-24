@@ -15,7 +15,7 @@ use crate::messages::{
 use crate::messages::{ActorMessage, ActorStatus, TheaterCommand};
 use crate::metrics::ActorMetrics;
 use crate::shutdown::ShutdownController;
-use crate::utils::resolve_reference;
+use crate::utils::{self, resolve_reference};
 use crate::ManifestConfig;
 use crate::Result;
 use crate::TheaterRuntimeError;
@@ -1276,7 +1276,10 @@ impl TheaterRuntime {
                 ))),
             }
         } else {
-            Err(TheaterRuntimeError::ActorNotFound(actor_id))
+            let events = utils::read_events_from_filesystem(&actor_id).map_err(|e| {
+                TheaterRuntimeError::ChannelError(format!("Failed to read events: {}", e))
+            })?;
+            Ok(events)
         }
     }
 
