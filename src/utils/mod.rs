@@ -1,9 +1,10 @@
 use serde_json;
 use thiserror::Error;
-use tracing::info;
+use tracing::{debug, info};
 
 use crate::store::{ContentRef, ContentStore};
-use anyhow::Result;
+use crate::{ChainEvent, TheaterId};
+use anyhow::{anyhow, Result};
 
 #[derive(Error, Debug)]
 pub enum ReferenceError {
@@ -37,7 +38,7 @@ pub async fn resolve_reference(reference: &str) -> Result<Vec<u8>, ReferenceErro
         }
         let store_id = parts[2];
         let store = ContentStore::from_id(store_id);
-        
+
         if parts.len() >= 5 && parts[3] == "hash" {
             // store path with hash
             let hash = parts[4];
@@ -86,7 +87,10 @@ pub async fn resolve_reference(reference: &str) -> Result<Vec<u8>, ReferenceErro
                         "HTTP request failed for {}: {} {}",
                         reference,
                         response.status().as_u16(),
-                        response.status().canonical_reason().unwrap_or("Unknown error")
+                        response
+                            .status()
+                            .canonical_reason()
+                            .unwrap_or("Unknown error")
                     )))
                 }
             }
@@ -158,4 +162,79 @@ pub fn merge_initial_states(
             }
         }
     }
+}
+
+pub fn get_theater_home() -> String {
+    std::env::var("THEATER_HOME").unwrap_or_else(|_| {
+        format!(
+            "{}/{}",
+            std::env::var("HOME").unwrap_or_default(),
+            ".theater"
+        )
+    })
+}
+
+/// Read events from filesystem for an actor that isn't currently running
+pub fn read_events_from_filesystem(actor_id: &TheaterId) -> Result<Vec<ChainEvent>> {
+    // Determine the Theater home directory
+    let theater_home = get_theater_home();
+
+    let chains_dir = format!("{}/chains", theater_home);
+    let events_dir = format!("{}/events", theater_home);
+
+    // Check if the actor's chain file exists
+    let chain_path = format!("{}/{}", chains_dir, actor_id);
+    if !std::path::Path::new(&chain_path).exists() {
+        debug!("No chain file found at: {}", chain_path);
+        return Err(anyhow!("No stored events found for actor: {}", actor_id));
+    }
+
+    // Read the chain head hash
+    let head_data = std::fs::read_to_string(&chain_path)?;
+    let head_hash: Option<Vec<u8>> = serde_json::from_str(&head_data)?;
+
+    if head_hash.is_none() {
+        debug!("Empty chain head for actor: {}", actor_id);
+        return Ok(Vec::new()); // Empty chain
+    }
+
+    // Reconstruct the full chain by following parent hash links
+    let mut events = Vec::new();
+    let mut current_hash = head_hash;
+
+    while let Some(hash) = current_hash {
+        let hash_hex = hex::encode(&hash);
+        let event_path = format!("{}/{}", events_dir, hash_hex);
+
+        // Read and parse the event
+        let event_data = match std::fs::read_to_string(&event_path) {
+            Ok(data) => data,
+            Err(e) => {
+                debug!("Failed to read event file {}: {}", event_path, e);
+                break; // Break the chain if we can't read an event file
+            }
+        };
+
+        let event = match serde_json::from_str::<ChainEvent>(&event_data) {
+            Ok(event) => event,
+            Err(e) => {
+                debug!("Failed to parse event from {}: {}", event_path, e);
+                break; // Break the chain if we can't parse an event
+            }
+        };
+
+        // Store the event and move to the parent
+        current_hash = event.parent_hash.clone();
+        events.push(event);
+    }
+
+    // Reverse the events to get them in chronological order (oldest first)
+    events.reverse();
+
+    debug!(
+        "Read {} events from filesystem for actor {}",
+        events.len(),
+        actor_id
+    );
+    Ok(events)
 }
