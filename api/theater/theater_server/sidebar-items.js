@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["ChannelEvent","ManagementCommand","ManagementError","ManagementResponse"],"struct":["ChannelSubscription","Subscription","TheaterServer"]};

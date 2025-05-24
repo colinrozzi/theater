@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["MessageType"],"fn":["is_valid_host","is_valid_method"],"struct":["HttpRequest","HttpResponse","MiddlewareResult","ServerConfig","ServerInfo","TlsConfig","WebSocketMessage"]};

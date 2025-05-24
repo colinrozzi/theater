@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["FileSystemCommand","FileSystemError","FileSystemResponse"],"fn":["execute_command","execute_nix_command"],"struct":["FileSystemHost"]};

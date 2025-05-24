@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["ActorMessage","ActorParent","ActorResult","ActorStatus","ChannelParticipant","TheaterCommand"],"struct":["ActorChannelClose","ActorChannelInitiated","ActorChannelMessage","ActorChannelOpen","ActorRequest","ActorSend","ChannelId","ChildError","ChildResult"]};
