@@ -763,7 +763,7 @@ impl MessageServerHost {
 
         // Register channel functions
         actor_instance
-            .register_function::<(Vec<u8>,), (ChannelAccept,)>(
+            .register_function::<(String, Vec<u8>), (ChannelAccept,)>(
                 "ntwk:theater/message-server-client",
                 "handle-channel-open",
             )
@@ -864,9 +864,9 @@ impl MessageServerHost {
                 );
 
                 let result = actor_handle
-                    .call_function::<(Vec<u8>,), (ChannelAccept,)>(
+                    .call_function::<(String, Vec<u8>,), (ChannelAccept,)>(
                         "ntwk:theater/message-server-client.handle-channel-open".to_string(),
-                        (data,),
+                        (channel_id.to_string(), data),
                     )
                     .await?;
 

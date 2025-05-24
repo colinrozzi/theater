@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
+use crate::utils::resolve_reference;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ComponentConfig {
     pub name: String,
@@ -11,7 +13,7 @@ pub struct ComponentConfig {
 pub struct ManifestConfig {
     pub name: String,
     pub version: String,
-    pub component_path: String,
+    pub component: String,
     pub description: Option<String>,
     pub long_description: Option<String>,
     pub save_chain: Option<bool>,
@@ -83,6 +85,8 @@ pub enum HandlerConfig {
     Timing(TimingHostConfig),
     #[serde(rename = "process")]
     Process(ProcessHostConfig),
+    #[serde(rename = "environment")]
+    Environment(EnvironmentHandlerConfig),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -146,6 +150,48 @@ pub struct ProcessHostConfig {
     pub max_output_buffer: usize,
     pub allowed_programs: Option<Vec<String>>,
     pub allowed_paths: Option<Vec<String>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct EnvironmentHandlerConfig {
+    /// Optional allowlist of environment variable names that can be accessed
+    pub allowed_vars: Option<Vec<String>>,
+    /// Optional denylist of environment variable names that cannot be accessed
+    pub denied_vars: Option<Vec<String>>,
+    /// Whether to allow listing all environment variables (default: false for security)
+    #[serde(default)]
+    pub allow_list_all: bool,
+    /// Optional prefix filter - only allow vars starting with these prefixes
+    pub allowed_prefixes: Option<Vec<String>>,
+}
+
+impl EnvironmentHandlerConfig {
+    pub fn is_variable_allowed(&self, var_name: &str) -> bool {
+        // Check denied list first
+        if let Some(denied) = &self.denied_vars {
+            if denied.contains(&var_name.to_string()) {
+                return false;
+            }
+        }
+
+        // Check allowed list
+        if let Some(allowed) = &self.allowed_vars {
+            return allowed.contains(&var_name.to_string());
+        }
+
+        // Check allowed prefixes
+        if let Some(prefixes) = &self.allowed_prefixes {
+            return prefixes.iter().any(|prefix| var_name.starts_with(prefix));
+        }
+
+        // If no restrictions are configured, allow all except denied
+        self.denied_vars.is_none()
+            || !self
+                .denied_vars
+                .as_ref()
+                .unwrap()
+                .contains(&var_name.to_string())
+    }
 }
 
 fn default_max_processes() -> usize {
@@ -316,10 +362,10 @@ impl ManifestConfig {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn load_init_state(&self) -> anyhow::Result<Option<Vec<u8>>> {
+    pub async fn load_init_state(&self) -> anyhow::Result<Option<Vec<u8>>> {
         match &self.init_state {
-            Some(path) => {
-                let data = std::fs::read(path)?;
+            Some(reference) => {
+                let data = resolve_reference(reference).await?;
                 Ok(Some(data))
             }
             None => Ok(None),

@@ -13,6 +13,7 @@ use crate::config::ManifestConfig;
 use crate::events::theater_runtime::TheaterRuntimeEventData;
 use crate::events::wasm::WasmEventData;
 use crate::events::{ChainEventData, EventData};
+use crate::host::environment::EnvironmentHost;
 use crate::host::filesystem::FileSystemHost;
 use crate::host::framework::HttpFramework;
 use crate::host::handler::Handler;
@@ -278,6 +279,9 @@ impl ActorRuntime {
                     debug!("MessageServer handler already created");
                     None
                 }
+                HandlerConfig::Environment(config) => {
+                    Some(Handler::Environment(EnvironmentHost::new(config.clone())))
+                }
                 HandlerConfig::FileSystem(config) => {
                     Some(Handler::FileSystem(FileSystemHost::new(config.clone())))
                 }
@@ -320,12 +324,7 @@ impl ActorRuntime {
         id: TheaterId,
         response_tx: &Sender<StartActorResult>,
     ) -> Result<ActorComponent> {
-        match ActorComponent::new(
-            config.name.clone(),
-            config.component_path.clone(),
-            actor_store,
-        )
-        .await
+        match ActorComponent::new(config.name.clone(), config.component.clone(), actor_store).await
         {
             Ok(component) => Ok(component),
             Err(e) => {
@@ -440,7 +439,10 @@ impl ActorRuntime {
         info!("Loading init state for actor: {:?}", id);
 
         // Get state from config if available
-        let config_state = config.load_init_state().unwrap_or(None);
+        let config_state = config
+            .load_init_state()
+            .await
+            .expect("Failed to load init state");
 
         // Merge with provided state
         match crate::utils::merge_initial_states(config_state, state_bytes) {
@@ -1002,7 +1004,7 @@ impl ActorRuntime {
             });
 
         // Create a temporary config for the new component
-        new_config.component_path = component_address.to_string();
+        new_config.component = component_address.to_string();
 
         // Create a temporary response channel for error handling during setup
         let (response_tx, _) = mpsc::channel::<StartActorResult>(1);

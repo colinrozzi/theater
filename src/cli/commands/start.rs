@@ -1,17 +1,18 @@
 use anyhow::{anyhow, Result};
 use clap::Parser;
 use std::net::SocketAddr;
-use std::path::PathBuf;
+
 use tracing::debug;
 
 use crate::cli::client::{ManagementResponse, TheaterClient};
 use crate::cli::utils::event_display::{display_events_header, display_single_event};
+use theater::utils::resolve_reference;
 
 #[derive(Debug, Parser)]
 pub struct StartArgs {
-    /// Path to the actor manifest file
+    /// Path or URL to the actor manifest file
     #[arg(required = true)]
-    pub manifest: PathBuf,
+    pub manifest: String,
 
     /// Address of the theater server
     #[arg(short, long, default_value = "127.0.0.1:9000")]
@@ -39,38 +40,41 @@ pub struct StartArgs {
 }
 
 pub fn execute(args: &StartArgs, _verbose: bool, json: bool) -> Result<()> {
-    debug!("Starting actor from manifest: {}", args.manifest.display());
+    debug!("Starting actor from manifest: {}", args.manifest);
     debug!("Connecting to server at: {}", args.address);
 
-    // Check if the manifest file exists
-    if !args.manifest.exists() {
-        return Err(anyhow!(
-            "Manifest file not found: {}",
-            args.manifest.display()
-        ));
-    }
-
-    // Read the manifest file
-    let manifest_content = std::fs::read_to_string(&args.manifest)?;
+    // Create runtime first to handle both sync and async operations
+    let runtime = tokio::runtime::Runtime::new()?;
+    
+    // Resolve the manifest reference (could be file path, URL, or store path)
+    let manifest_bytes = runtime.block_on(async {
+        resolve_reference(&args.manifest).await
+            .map_err(|e| anyhow!("Failed to resolve manifest reference '{}': {}", args.manifest, e))
+    })?;
+    
+    // Convert bytes to string
+    let manifest_content = String::from_utf8(manifest_bytes)
+        .map_err(|e| anyhow!("Manifest content is not valid UTF-8: {}", e))?;
 
     // Handle the initial state parameter
     let initial_state = if let Some(state_str) = &args.initial_state {
-        // Check if it's a file path
-        if std::path::Path::new(state_str).exists() {
-            debug!("Reading initial state from file: {}", state_str);
-            Some(std::fs::read(state_str)?)
-        } else {
-            // Assume it's a JSON string
-            debug!("Using provided JSON string as initial state");
-            Some(state_str.as_bytes().to_vec())
+        // Try to resolve as reference first (file path, URL, or store path)
+        match runtime.block_on(resolve_reference(state_str)) {
+            Ok(bytes) => {
+                debug!("Resolved initial state from reference: {}", state_str);
+                Some(bytes)
+            }
+            Err(_) => {
+                // If resolution fails, assume it's a JSON string
+                debug!("Using provided string as JSON initial state");
+                Some(state_str.as_bytes().to_vec())
+            }
         }
     } else {
         None
     };
 
-    // Create runtime and connect to the server
-    let runtime = tokio::runtime::Runtime::new()?;
-
+    // Connect to the server and start the actor
     runtime.block_on(async {
         let mut client = TheaterClient::new(args.address);
 

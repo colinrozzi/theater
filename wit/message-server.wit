@@ -162,7 +162,7 @@ interface message-server-client {
     ///
     /// The actor should validate the channel request and only accept channels from
     /// trusted sources. The acceptance mechanism provides a security checkpoint.
-    handle-channel-open: func(state: option<list<u8>>, params: tuple<list<u8>>) -> result<tuple<option<list<u8>>, tuple<channel-accept>>, string>;
+    handle-channel-open: func(state: option<list<u8>>, params: tuple<string, list<u8>>) -> result<tuple<option<list<u8>>, tuple<channel-accept>>, string>;
     
     /// # Handle channel message
     ///

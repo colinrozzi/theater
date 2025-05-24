@@ -819,12 +819,20 @@ impl TheaterRuntime {
 
         // check if the manifest is a valid path OR starts with store:
         let manifest: ManifestConfig;
-        if manifest_path.starts_with("store:") || PathBuf::from(manifest_path.clone()).exists() {
-            let manifest_bytes = resolve_reference(manifest_path.as_str()).await?;
+
+        if manifest_path.starts_with("store:")
+            || manifest_path.starts_with("https:")
+            || PathBuf::from(&manifest_path).exists()
+        {
+            debug!("Manifest path is a valid store reference or URL");
+            // Resolve the store reference
+            let manifest_bytes = resolve_reference(&manifest_path).await?;
             manifest = ManifestConfig::from_vec(manifest_bytes)?;
         } else {
-            manifest = ManifestConfig::from_str(manifest_path.as_str())?;
-        };
+            debug!("Manifest is a string");
+            // Load the manifest from the file system
+            manifest = ManifestConfig::from_str(&manifest_path.clone())?;
+        }
 
         // start the actor in a new process
         let (response_tx, mut response_rx) = mpsc::channel(1);

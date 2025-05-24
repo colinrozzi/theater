@@ -93,6 +93,8 @@ pub struct ChainEventData {
 /// that represents the specific event type.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum EventData {
+    /// Environment variable access events for reading host environment variables.
+    Environment(environment::EnvironmentEventData),
     /// File system access events, such as reading or writing files.
     Filesystem(filesystem::FilesystemEventData),
     /// HTTP-related events, including requests, responses, and WebSocket interactions.
@@ -280,6 +282,7 @@ impl ChainEventData {
     }
 }
 
+pub mod environment;
 pub mod filesystem;
 pub mod http;
 pub mod message;
