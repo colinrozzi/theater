@@ -1,3 +1,5 @@
+package ntwk:theater;
+
 interface environment {
     // Get a specific environment variable
     // Returns None if the variable doesn't exist or access is denied

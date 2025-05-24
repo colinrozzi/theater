@@ -38,7 +38,7 @@ impl EnvironmentHost {
     pub async fn start(
         &mut self,
         _actor_handle: ActorHandle,
-        mut shutdown_receiver: ShutdownReceiver,
+        shutdown_receiver: ShutdownReceiver,
     ) -> Result<()> {
         info!("Starting Environment handler (read-only)");
 
@@ -62,26 +62,23 @@ impl EnvironmentHost {
         interface.func_wrap(
             "get-var",
             move |mut ctx: StoreContextMut<'_, ActorStore>, (var_name,): (String,)| -> Result<(Option<String>,)> {
+                let now = Utc::now().timestamp_millis() as u64;
                 let is_allowed = config.is_variable_allowed(&var_name);
                 
                 if !is_allowed {
                     // Record access denial
-                    let event_data = EnvironmentEventData {
-                        operation: "get-var".to_string(),
-                        variable_name: var_name.clone(),
-                        success: false,
-                        value_found: false,
-                        timestamp: chrono::Utc::now(),
-                    };
-                    
-                    let chain_event = ChainEvent {
-                        data: EventData::Environment(event_data),
-                        chain_id: ctx.data().chain_id.clone(),
-                        sequence_number: ctx.data_mut().get_next_sequence_number(),
-                        timestamp: chrono::Utc::now(),
-                    };
-                    
-                    ctx.data_mut().add_event(chain_event);
+                    ctx.data_mut().record_event(ChainEventData {
+                        event_type: "ntwk:theater/environment/get-var".to_string(),
+                        data: EventData::Environment(EnvironmentEventData {
+                            operation: "get-var".to_string(),
+                            variable_name: var_name.clone(),
+                            success: false,
+                            value_found: false,
+                            timestamp: chrono::Utc::now(),
+                        }),
+                        timestamp: now,
+                        description: Some(format!("Access denied for environment variable: {}", var_name)),
+                    });
                     return Ok((None,));
                 }
 
@@ -89,22 +86,18 @@ impl EnvironmentHost {
                 let value_found = value.is_some();
 
                 // Record the access attempt
-                let event_data = EnvironmentEventData {
-                    operation: "get-var".to_string(),
-                    variable_name: var_name,
-                    success: true,
-                    value_found,
-                    timestamp: chrono::Utc::now(),
-                };
-                
-                let chain_event = ChainEvent {
-                    data: EventData::Environment(event_data),
-                    chain_id: ctx.data().chain_id.clone(),
-                    sequence_number: ctx.data_mut().get_next_sequence_number(),
-                    timestamp: chrono::Utc::now(),
-                };
-                
-                ctx.data_mut().add_event(chain_event);
+                ctx.data_mut().record_event(ChainEventData {
+                    event_type: "ntwk:theater/environment/get-var".to_string(),
+                    data: EventData::Environment(EnvironmentEventData {
+                        operation: "get-var".to_string(),
+                        variable_name: var_name.clone(),
+                        success: true,
+                        value_found,
+                        timestamp: chrono::Utc::now(),
+                    }),
+                    timestamp: now,
+                    description: Some(format!("Environment variable access: {} (found: {})", var_name, value_found)),
+                });
 
                 Ok((value,))
             },
@@ -116,48 +109,41 @@ impl EnvironmentHost {
         interface.func_wrap(
             "exists",
             move |mut ctx: StoreContextMut<'_, ActorStore>, (var_name,): (String,)| -> Result<(bool,)> {
+                let now = Utc::now().timestamp_millis() as u64;
                 let is_allowed = config_clone.is_variable_allowed(&var_name);
                 
                 if !is_allowed {
                     // Record access denial
-                    let event_data = EnvironmentEventData {
-                        operation: "exists".to_string(),
-                        variable_name: var_name,
-                        success: false,
-                        value_found: false,
-                        timestamp: chrono::Utc::now(),
-                    };
-                    
-                    let chain_event = ChainEvent {
-                        data: EventData::Environment(event_data),
-                        chain_id: ctx.data().chain_id.clone(),
-                        sequence_number: ctx.data_mut().get_next_sequence_number(),
-                        timestamp: chrono::Utc::now(),
-                    };
-                    
-                    ctx.data_mut().add_event(chain_event);
+                    ctx.data_mut().record_event(ChainEventData {
+                        event_type: "ntwk:theater/environment/exists".to_string(),
+                        data: EventData::Environment(EnvironmentEventData {
+                            operation: "exists".to_string(),
+                            variable_name: var_name.clone(),
+                            success: false,
+                            value_found: false,
+                            timestamp: chrono::Utc::now(),
+                        }),
+                        timestamp: now,
+                        description: Some(format!("Access denied for environment variable exists check: {}", var_name)),
+                    });
                     return Ok((false,));
                 }
 
                 let exists = env::var(&var_name).is_ok();
 
                 // Record the check
-                let event_data = EnvironmentEventData {
-                    operation: "exists".to_string(),
-                    variable_name: var_name,
-                    success: true,
-                    value_found: exists,
-                    timestamp: chrono::Utc::now(),
-                };
-                
-                let chain_event = ChainEvent {
-                    data: EventData::Environment(event_data),
-                    chain_id: ctx.data().chain_id.clone(),
-                    sequence_number: ctx.data_mut().get_next_sequence_number(),
-                    timestamp: chrono::Utc::now(),
-                };
-                
-                ctx.data_mut().add_event(chain_event);
+                ctx.data_mut().record_event(ChainEventData {
+                    event_type: "ntwk:theater/environment/exists".to_string(),
+                    data: EventData::Environment(EnvironmentEventData {
+                        operation: "exists".to_string(),
+                        variable_name: var_name.clone(),
+                        success: true,
+                        value_found: exists,
+                        timestamp: chrono::Utc::now(),
+                    }),
+                    timestamp: now,
+                    description: Some(format!("Environment variable exists check: {} (exists: {})", var_name, exists)),
+                });
 
                 Ok((exists,))
             },
@@ -169,24 +155,22 @@ impl EnvironmentHost {
         interface.func_wrap(
             "list-vars",
             move |mut ctx: StoreContextMut<'_, ActorStore>, (): ()| -> Result<(Vec<(String, String)>,)> {
+                let now = Utc::now().timestamp_millis() as u64;
+                
                 if !config_clone2.allow_list_all {
                     // Record denied list attempt
-                    let event_data = EnvironmentEventData {
-                        operation: "list-vars".to_string(),
-                        variable_name: "(list-all disabled)".to_string(),
-                        success: false,
-                        value_found: false,
-                        timestamp: chrono::Utc::now(),
-                    };
-                    
-                    let chain_event = ChainEvent {
-                        data: EventData::Environment(event_data),
-                        chain_id: ctx.data().chain_id.clone(),
-                        sequence_number: ctx.data_mut().get_next_sequence_number(),
-                        timestamp: chrono::Utc::now(),
-                    };
-                    
-                    ctx.data_mut().add_event(chain_event);
+                    ctx.data_mut().record_event(ChainEventData {
+                        event_type: "ntwk:theater/environment/list-vars".to_string(),
+                        data: EventData::Environment(EnvironmentEventData {
+                            operation: "list-vars".to_string(),
+                            variable_name: "(list-all disabled)".to_string(),
+                            success: false,
+                            value_found: false,
+                            timestamp: chrono::Utc::now(),
+                        }),
+                        timestamp: now,
+                        description: Some("Environment variable listing denied - allow_list_all is false".to_string()),
+                    });
                     return Ok((Vec::new(),));
                 }
 
@@ -200,22 +184,18 @@ impl EnvironmentHost {
 
                 // Record the list operation
                 let count = accessible_vars.len();
-                let event_data = EnvironmentEventData {
-                    operation: "list-vars".to_string(),
-                    variable_name: format!("(returned {} variables)", count),
-                    success: true,
-                    value_found: count > 0,
-                    timestamp: chrono::Utc::now(),
-                };
-                
-                let chain_event = ChainEvent {
-                    data: EventData::Environment(event_data),
-                    chain_id: ctx.data().chain_id.clone(),
-                    sequence_number: ctx.data_mut().get_next_sequence_number(),
-                    timestamp: chrono::Utc::now(),
-                };
-                
-                ctx.data_mut().add_event(chain_event);
+                ctx.data_mut().record_event(ChainEventData {
+                    event_type: "ntwk:theater/environment/list-vars".to_string(),
+                    data: EventData::Environment(EnvironmentEventData {
+                        operation: "list-vars".to_string(),
+                        variable_name: format!("(returned {} variables)", count),
+                        success: true,
+                        value_found: count > 0,
+                        timestamp: chrono::Utc::now(),
+                    }),
+                    timestamp: now,
+                    description: Some(format!("Environment variable listing returned {} accessible variables", count)),
+                });
 
                 Ok((accessible_vars,))
             },
