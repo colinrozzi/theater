@@ -253,7 +253,7 @@ impl ContentStore {
     }
 
     pub fn base_path(&self) -> PathBuf {
-        PathBuf::from("/Users/colinrozzi/work/theater/store").join(&self.id)
+        PathBuf::from("$THEATER_HOME/store").join(&self.id)
     }
 
     /// Store content and return its ContentRef

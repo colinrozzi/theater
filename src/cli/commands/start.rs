@@ -45,13 +45,18 @@ pub fn execute(args: &StartArgs, _verbose: bool, json: bool) -> Result<()> {
 
     // Create runtime first to handle both sync and async operations
     let runtime = tokio::runtime::Runtime::new()?;
-    
+
     // Resolve the manifest reference (could be file path, URL, or store path)
     let manifest_bytes = runtime.block_on(async {
-        resolve_reference(&args.manifest).await
-            .map_err(|e| anyhow!("Failed to resolve manifest reference '{}': {}", args.manifest, e))
+        resolve_reference(&args.manifest).await.map_err(|e| {
+            anyhow!(
+                "Failed to resolve manifest reference '{}': {}",
+                args.manifest,
+                e
+            )
+        })
     })?;
-    
+
     // Convert bytes to string
     let manifest_content = String::from_utf8(manifest_bytes)
         .map_err(|e| anyhow!("Manifest content is not valid UTF-8: {}", e))?;
@@ -146,6 +151,7 @@ pub fn execute(args: &StartArgs, _verbose: bool, json: bool) -> Result<()> {
                         }
                         Err(e) => {
                             println!("Error receiving data: {:?}", e);
+                            break;
                         }
                         _ => {
                             println!("Received unknown data: {:?}", data);

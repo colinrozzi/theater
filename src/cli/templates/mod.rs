@@ -111,7 +111,7 @@ fn get_theater_wit_dir() -> PathBuf {
 
     // Last resort - hardcode the path based on the expected project structure
     debug!("Could not find wit directory, using hardcoded path");
-    PathBuf::from("/Users/colinrozzi/work/theater/wit")
+    PathBuf::from("$THEATER_HOME/wit")
 }
 
 /// Copy a file from source to destination
