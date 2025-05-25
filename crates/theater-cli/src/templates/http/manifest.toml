@@ -1,0 +1,17 @@
+name = "{{project_name}}"
+version = "0.1.0"
+description = "An HTTP server Theater actor"
+component_path = "target/wasm32-unknown-unknown/release/{{project_name_snake}}.wasm"
+
+[interface]
+implements = "ntwk:theater/actor"
+requires = []
+
+[[handlers]]
+type = "runtime"
+config = {}
+
+[[handlers]]
+type = "http-framework"
+config = {}
+

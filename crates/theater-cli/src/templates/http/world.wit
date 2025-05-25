@@ -1,0 +1,10 @@
+package ntwk:theater;
+
+world single-chat {
+    import runtime;
+    export message-server-client;
+    export actor;
+
+    import http-framework;
+    export http-handlers;
+}
