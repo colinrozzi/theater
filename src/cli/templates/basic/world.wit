@@ -1,6 +1,0 @@
-package ntwk:theater;
-
-world hello-world {
-    import runtime;
-    export actor;
-}
