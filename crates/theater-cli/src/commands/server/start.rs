@@ -23,8 +23,8 @@ pub struct StartArgs {
     pub log_filter: Option<String>,
 
     /// log directory
-    #[arg(long, default_value = "logs/theater")]
-    pub log_dir: PathBuf,
+    #[arg(long, default_value = "$THEATER_HOME/logs/theater")]
+    pub log_dir: String,
 
     /// log to stdout
     #[arg(long, default_value = "false")]
@@ -33,7 +33,9 @@ pub struct StartArgs {
 
 pub async fn start_server(args: &StartArgs) -> Result<()> {
     // Create the runtime log file path
-    let log_path = args.log_dir.join("theater.log");
+    let log_path = shellexpand::env(&args.log_dir)
+        .map_err(|e| anyhow::anyhow!("Failed to expand log directory: {}", e))?;
+    let log_path = PathBuf::from(log_path.as_ref()).join("theater_server.log");
 
     // Determine filter string based on available args
     let filter_string = match &args.log_filter {
@@ -45,7 +47,7 @@ pub async fn start_server(args: &StartArgs) -> Result<()> {
         .expect("Failed to setup logging");
 
     info!("Starting theater server on {}", args.address);
-    info!("Logging to directory: {}", args.log_dir.display());
+    info!("Logging to directory: {}", args.log_dir);
 
     // Create and run the theater server
     let server = TheaterServer::new(args.address).await?;

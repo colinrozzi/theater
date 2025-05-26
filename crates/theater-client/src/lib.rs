@@ -6,3 +6,4 @@
 mod tcp;
 
 pub use tcp::TheaterConnection;
+pub use theater_server::{ManagementCommand, ManagementError, ManagementResponse, TheaterServer};
