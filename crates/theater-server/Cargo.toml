@@ -1,0 +1,30 @@
+[package]
+name = "theater-server"
+description = "HTTP server for Theater actor system management"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+# Internal dependencies
+theater.workspace = true
+
+# Core dependencies
+anyhow.workspace = true
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+uuid.workspace = true
+
+# Server-specific dependencies
+axum = { version = "0.8.1", features = ["ws"] }
+tower-http = { version = "0.5", features = ["cors", "tracing"] }
+warp = { version = "0.3", features = ["tls"] }
+
+# Additional server deps
+futures = "0.3"
+tokio-util = { version = "0.7.13", features = ["codec"] }
+bytes = "1.0"

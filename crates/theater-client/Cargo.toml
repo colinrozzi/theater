@@ -1,0 +1,29 @@
+[package]
+name = "theater-client"
+description = "Client library for Theater actor system"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+# Internal dependencies
+theater.workspace = true
+theater-server.workspace = true
+
+# Core dependencies  
+anyhow.workspace = true
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+uuid.workspace = true
+
+# Client-specific dependencies
+reqwest = { version = "0.11", features = ["json"] }
+
+# Additional client deps
+futures = "0.3"
+tokio-util = { version = "0.7.13", features = ["codec"] }
+bytes = "1.0"
