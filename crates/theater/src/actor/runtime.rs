@@ -106,6 +106,7 @@ impl ActorRuntime {
         init: bool,
         parent_shutdown_receiver: ShutdownReceiver,
         response_tx: Sender<StartActorResult>,
+        engine: wasmtime::Engine,
     ) {
         let actor_handle = ActorHandle::new(operation_tx.clone());
 
@@ -133,12 +134,18 @@ impl ActorRuntime {
         );
 
         // Create component
-        let mut actor_component =
-            match Self::create_actor_component(config, actor_store, id.clone(), &response_tx).await
-            {
-                Ok(component) => component,
-                Err(_) => return, // Error already reported
-            };
+        let mut actor_component = match Self::create_actor_component(
+            config,
+            actor_store,
+            id.clone(),
+            &response_tx,
+            engine.clone(),
+        )
+        .await
+        {
+            Ok(component) => component,
+            Err(_) => return, // Error already reported
+        };
 
         // Setup host functions
         let handlers = match Self::setup_host_functions(
@@ -192,6 +199,7 @@ impl ActorRuntime {
             init,
             response_tx,
             config,
+            engine,
         )
         .await;
     }
@@ -334,8 +342,15 @@ impl ActorRuntime {
         actor_store: ActorStore,
         id: TheaterId,
         response_tx: &Sender<StartActorResult>,
+        engine: wasmtime::Engine,
     ) -> Result<ActorComponent> {
-        match ActorComponent::new(config.name.clone(), config.component.clone(), actor_store).await
+        match ActorComponent::new(
+            config.name.clone(),
+            config.component.clone(),
+            actor_store,
+            engine,
+        )
+        .await
         {
             Ok(component) => Ok(component),
             Err(e) => {
@@ -487,6 +502,7 @@ impl ActorRuntime {
         init: bool,
         response_tx: Sender<StartActorResult>,
         config: &ManifestConfig,
+        engine: wasmtime::Engine,
     ) {
         // Create a local shutdown controller for this runtime
         let mut shutdown_controller = ShutdownController::new();
@@ -530,6 +546,7 @@ impl ActorRuntime {
                 shutdown_controller,
                 handler_tasks,
                 config,
+                engine,
             )
             .await;
         });
@@ -584,6 +601,7 @@ impl ActorRuntime {
         shutdown_controller: crate::shutdown::ShutdownController,
         handler_tasks: Vec<JoinHandle<()>>,
         config: ManifestConfig,
+        engine: wasmtime::Engine,
     ) {
         info!("Actor runtime starting operation processing loop");
         let mut shutdown_initiated = false;
@@ -679,7 +697,7 @@ impl ActorRuntime {
                         ActorOperation::UpdateComponent { component_address, response_tx } => {
                             debug!("Processing UpdateComponent operation for component: {}", component_address);
 
-                            match Self::update_component(&mut actor_instance, &component_address, &config).await {
+                            match Self::update_component(&mut actor_instance, &component_address, &config, engine.clone()).await {
                                 Ok(_) => {
                                     debug!("Component update successful");
                                     if let Err(e) = response_tx.send(Ok(())) {
@@ -803,7 +821,7 @@ impl ActorRuntime {
                         ActorOperation::UpdateComponent { component_address, response_tx } => {
                             debug!("Processing UpdateComponent operation for component: {}", component_address);
 
-                            match Self::update_component(&mut actor_instance, &component_address, &config).await {
+                            match Self::update_component(&mut actor_instance, &component_address, &config, engine.clone()).await {
                                 Ok(_) => {
                                     debug!("Component update successful");
                                     if let Err(e) = response_tx.send(Ok(())) {
@@ -989,6 +1007,7 @@ impl ActorRuntime {
         actor_instance: &mut ActorInstance,
         component_address: &str,
         config: &ManifestConfig,
+        engine: wasmtime::Engine,
     ) -> Result<(), ActorError> {
         let actor_id = actor_instance.id();
         info!(
@@ -1042,6 +1061,7 @@ impl ActorRuntime {
             actor_store,
             actor_id.clone(),
             &response_tx,
+            engine,
         )
         .await
         {

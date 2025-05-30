@@ -96,6 +96,8 @@ pub struct TheaterRuntime {
     channels: HashMap<ChannelId, HashSet<ChannelParticipant>>,
     /// Optional channel to send channel events back to the server
     channel_events_tx: Option<Sender<crate::messages::ChannelEvent>>,
+    /// wasm engine
+    wasm_engine: wasmtime::Engine,
 }
 
 /// # ActorProcess
@@ -170,6 +172,7 @@ impl TheaterRuntime {
         channel_events_tx: Option<Sender<crate::messages::ChannelEvent>>,
     ) -> Result<Self> {
         info!("Theater runtime initializing");
+        let engine = wasmtime::Engine::new(wasmtime::Config::new().async_support(true))?;
 
         Ok(Self {
             theater_tx,
@@ -178,6 +181,7 @@ impl TheaterRuntime {
             subscriptions: HashMap::new(),
             channels: HashMap::new(),
             channel_events_tx,
+            wasm_engine: engine,
         })
     }
 
@@ -707,10 +711,9 @@ impl TheaterRuntime {
                             ChannelParticipant::External => {
                                 // Send the message to the server
                                 if let Some(tx) = &self.channel_events_tx {
-                                    let channel_event =
-                                        crate::messages::ChannelEvent::Close {
-                                            channel_id: channel_id.clone(),
-                                        };
+                                    let channel_event = crate::messages::ChannelEvent::Close {
+                                        channel_id: channel_id.clone(),
+                                    };
 
                                     if let Err(e) = tx.send(channel_event).await {
                                         error!("Failed to send close event to server: {}", e);
@@ -860,6 +863,7 @@ impl TheaterRuntime {
         let actor_id_for_task = actor_id.clone();
         let actor_name = manifest.name.clone();
         let manifest_clone = manifest.clone();
+        let engine = self.wasm_engine.clone();
         let actor_runtime_process = tokio::spawn(async move {
             ActorRuntime::start(
                 actor_id_for_task.clone(),
@@ -873,6 +877,7 @@ impl TheaterRuntime {
                 init,
                 shutdown_receiver_clone,
                 response_tx,
+                engine,
             )
             .await;
 

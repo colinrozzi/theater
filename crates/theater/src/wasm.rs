@@ -261,9 +261,10 @@ impl ActorComponent {
         name: String,
         component_path: String,
         actor_store: ActorStore,
+        engine: Engine,
     ) -> Result<Self> {
         // Load WASM component
-        let engine = Engine::new(wasmtime::Config::new().async_support(true))?;
+        //        let engine = Engine::new(wasmtime::Config::new().async_support(true))?;
         info!("Loading WASM component from: {}", component_path);
         let _wasm_bytes = resolve_reference(&component_path).await?;
         let wasm_bytes = Self::get_wasm_component_bytes(component_path)
