@@ -1,0 +1,141 @@
+package ntwk:theater;
+
+/// # Timing Interface
+///
+/// Provides time-related functions for actors to get the current time and control execution timing.
+///
+/// ## Purpose
+///
+/// The timing interface gives actors access to time information and timing control
+/// within the Theater runtime. It allows actors to:
+/// - Get the current time
+/// - Pause execution for specific durations
+/// - Delay execution until specific points in time
+///
+/// ## Example
+///
+/// ```rust
+/// use ntwk::theater::timing;
+///
+/// async fn example() -> Result<(), String> {
+///     // Get the current time
+///     let now = timing::now();
+///     println!("Current time: {}", now);
+///     
+///     // Sleep for 500 milliseconds
+///     timing::sleep(500)?;
+///     
+///     // Wait until a specific future time
+///     let five_seconds_later = now + 5000;
+///     timing::deadline(five_seconds_later)?;
+///     
+///     Ok(())
+/// }
+/// ```
+///
+/// ## Security
+///
+/// The timing operations are managed by the Theater runtime, which may enforce:
+/// - Rate limits on sleep operations to prevent resource exhaustion
+/// - Maximum duration limits to prevent indefinite blocking
+/// - Tracking and reporting of sleep patterns in the event chain
+///
+/// ## Implementation Notes
+///
+/// When actors call timing functions, the WebAssembly execution is suspended without
+/// blocking the entire runtime. This allows the runtime to continue processing other
+/// actors while an actor is waiting.
+interface timing {
+    /// # Get current time
+    ///
+    /// Returns the current time in milliseconds since the UNIX epoch (January 1, 1970 UTC).
+    ///
+    /// ## Returns
+    ///
+    /// The current timestamp in milliseconds
+    ///
+    /// ## Example
+    ///
+    /// ```rust
+    /// use ntwk::theater::timing;
+    ///
+    /// // Get current timestamp
+    /// let now = timing::now();
+    ///
+    /// // Convert to seconds
+    /// let seconds_since_epoch = now / 1000;
+    /// ```
+    ///
+    /// ## Implementation Notes
+    ///
+    /// The time value is consistent across the entire Theater runtime, ensuring that
+    /// all actors have a synchronized view of time.
+    now: func() -> u64;
+    
+    /// # Pause execution
+    ///
+    /// Pauses the execution of the actor for the specified number of milliseconds.
+    ///
+    /// ## Parameters
+    ///
+    /// * `duration` - Number of milliseconds to sleep
+    ///
+    /// ## Returns
+    ///
+    /// * `Ok(_)` - Sleep completed successfully
+    /// * `Err(string)` - Error message if sleep was interrupted or not allowed
+    ///
+    /// ## Example
+    ///
+    /// ```rust
+    /// use ntwk::theater::timing;
+    ///
+    /// // Sleep for 1 second
+    /// timing::sleep(1000)?;
+    ///
+    /// // Sleep for 100ms
+    /// timing::sleep(100)?;
+    /// ```
+    ///
+    /// ## Security
+    ///
+    /// The runtime may enforce limits on how long an actor can sleep to prevent
+    /// resource exhaustion or denial of service. Sleep operations are recorded
+    /// in the actor's event chain.
+    sleep: func(duration: u64) -> result<_, string>;
+    
+    /// # Wait until specific time
+    ///
+    /// Pauses execution until the specified timestamp is reached.
+    ///
+    /// ## Parameters
+    ///
+    /// * `timestamp` - Target time in milliseconds since UNIX epoch
+    ///
+    /// ## Returns
+    ///
+    /// * `Ok(_)` - Deadline was reached successfully
+    /// * `Err(string)` - Error message if the wait was interrupted or not allowed
+    ///
+    /// ## Example
+    ///
+    /// ```rust
+    /// use ntwk::theater::timing;
+    ///
+    /// // Wait until a specific time
+    /// let target_time = 1672531200000; // Jan 1, 2023 00:00:00 UTC
+    /// timing::deadline(target_time)?;
+    ///
+    /// // Wait until 10 seconds from now
+    /// let now = timing::now();
+    /// let ten_seconds_later = now + 10000;
+    /// timing::deadline(ten_seconds_later)?;
+    /// ```
+    ///
+    /// ## Implementation Notes
+    ///
+    /// - If the specified timestamp is in the past, the function returns immediately
+    /// - The runtime may reject excessive deadline values that are too far in the future
+    /// - Deadline operations are recorded in the actor's event chain
+    deadline: func(timestamp: u64) -> result<_, string>;
+}

@@ -1,0 +1,16 @@
+/target
+/notes
+/chain
+/logs
+.aider*
+.env
+!.gitignore
+dir-rep.xml
+debug.log
+/store
+/tmp
+note.md
+.DS_Store
+book/book/
+/chains
+/events

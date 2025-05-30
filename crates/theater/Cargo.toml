@@ -1,0 +1,49 @@
+[package]
+name = "theater"
+description = "A WebAssembly actor system for AI agents"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+# Core dependencies
+anyhow.workspace = true
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+uuid.workspace = true
+
+# WebAssembly runtime
+wasmtime = { version = "31.0", features = ["component-model", "async"] }
+wit-bindgen = "0.36.0"
+
+# Additional core deps
+chrono = { version = "0.4", features = ["serde"] }
+thiserror = "1.0"
+toml = "0.8"
+lazy_static = "1.4"
+futures = "0.3"
+pin-utils = "0.1"
+rand = "0.8.5"
+rand_chacha = "0.3"
+tokio-util = { version = "0.7.13", features = ["codec"] }
+bytes = "1.0"
+sha1 = "0.10"
+hex = "0.4.3"
+md5 = "0.7.0"
+
+# Dependencies that are currently used by core but should be moved
+axum = { version = "0.8.1", features = ["ws"] }
+reqwest = { version = "0.11", features = ["json"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+console = "0.15.7"
+libc = "0.2.172"
+
+[dev-dependencies]
+test-log = "0.2"
+pretty_assertions = "1.4"
+tempfile = "3.8.1"
+mockall = "0.11.4"

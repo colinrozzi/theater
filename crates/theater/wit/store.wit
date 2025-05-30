@@ -1,0 +1,506 @@
+package ntwk:theater;
+
+/// # Content Store
+///
+/// Provides a content-addressable storage system for actors to store and retrieve data.
+///
+/// ## Purpose
+///
+/// The store interface allows actors to save and retrieve content using content-addressed
+/// storage, where each piece of content is referenced by a hash of its data. This provides
+/// immutability, deduplication, and integrity verification for all stored content.
+///
+/// Additionally, the store supports a labeling system that allows human-readable names
+/// to be attached to content references, making it easier to locate and manage content.
+///
+/// ## Example
+///
+/// ```rust
+/// use ntwk::theater::store;
+///
+/// // Create a new store
+/// let store_id = store::new()?;
+///
+/// // Store some content
+/// let content = "Hello, Theater!".as_bytes().to_vec();
+/// let content_ref = store::store(store_id, content)?;
+///
+/// // Retrieve it by its content reference
+/// let retrieved = store::get(store_id, content_ref.clone())?;
+/// assert_eq!(retrieved, "Hello, Theater!".as_bytes());
+///
+/// // Label the content for easier access
+/// store::label(store_id, "greeting", content_ref.clone())?;
+///
+/// // Later, retrieve by label
+/// let label_ref = store::get_by_label(store_id, "greeting")?.unwrap();
+/// let greeting = store::get(store_id, label_ref)?;
+/// ```
+///
+/// ## Security
+///
+/// The content store is isolated per actor, preventing direct access to other actors' data.
+/// All store operations are tracked in the actor's event chain, providing a complete
+/// audit trail of data operations.
+///
+/// ## Implementation Notes
+///
+/// The store uses content-based addressing where the reference to content is derived from
+/// a cryptographic hash of the content itself. This ensures:
+///
+/// - Content cannot be modified without changing its reference
+/// - Identical content is stored only once (automatic deduplication)
+/// - Content integrity can be verified
+interface store {
+    /// # Content Reference
+    ///
+    /// A reference to content stored in the content-addressable store.
+    ///
+    /// ## Purpose
+    ///
+    /// ContentRef provides a stable, immutable reference to content based on its hash,
+    /// enabling content-addressable storage where data is referenced by its cryptographic hash
+    /// rather than by location or name.
+    ///
+    /// ## Example
+    ///
+    /// ```rust
+    /// use ntwk::theater::store::{content_ref, store};
+    ///
+    /// // Store content and get its reference
+    /// let store_id = store::new()?;
+    /// let data = b"Some important data".to_vec();
+    /// let ref = store::store(store_id, data)?;
+    ///
+    /// // The hash in the content ref is a SHA-256 digest
+    /// println!("Stored content with hash: {}", ref.hash);
+    /// ```
+    ///
+    /// ## Security
+    ///
+    /// Content references use cryptographic hashes that are collision-resistant,
+    /// ensuring that distinct content will have distinct references. This provides
+    /// integrity verification for all stored content.
+    record content-ref {
+        /// Cryptographic hash of the content (SHA-256 in hexadecimal format)
+        hash: string,
+    }
+
+    /// # Create a new store
+    ///
+    /// Creates a new content-addressable store instance.
+    ///
+    /// ## Returns
+    ///
+    /// * `Ok(string)` - The ID of the newly created store
+    /// * `Err(string)` - Error message if store creation fails
+    ///
+    /// ## Example
+    ///
+    /// ```rust
+    /// use ntwk::theater::store;
+    ///
+    /// // Create a new store
+    /// let store_id = store::new()?;
+    /// ```
+    ///
+    /// ## Implementation Notes
+    ///
+    /// Each actor has access to its own isolated store instances. Store IDs are only
+    /// valid within the context of the actor that created them.
+    new: func() -> result<string, string>;
+
+    /// # Store content
+    ///
+    /// Stores content in the content-addressable store and returns a reference to it.
+    ///
+    /// ## Parameters
+    ///
+    /// * `store-id` - ID of the store to use
+    /// * `content` - The content bytes to store
+    ///
+    /// ## Returns
+    ///
+    /// * `Ok(content-ref)` - Reference to the stored content
+    /// * `Err(string)` - Error message if storage fails
+    ///
+    /// ## Example
+    ///
+    /// ```rust
+    /// use ntwk::theater::store;
+    ///
+    /// // Store some content
+    /// let data = serde_json::to_vec(&my_data)?;
+    /// let content_ref = store::store(store_id, data)?;
+    /// ```
+    ///
+    /// ## Implementation Notes
+    ///
+    /// If identical content already exists in the store, the existing content reference
+    /// will be returned without storing a duplicate copy.
+    store: func(store-id: string, content: list<u8>) -> result<content-ref, string>;
+    
+    /// # Retrieve content
+    ///
+    /// Retrieves content from the store using its content reference.
+    ///
+    /// ## Parameters
+    ///
+    /// * `store-id` - ID of the store to use
+    /// * `content-ref` - Reference to the content to retrieve
+    ///
+    /// ## Returns
+    ///
+    /// * `Ok(list<u8>)` - The retrieved content bytes
+    /// * `Err(string)` - Error message if retrieval fails
+    ///
+    /// ## Example
+    ///
+    /// ```rust
+    /// use ntwk::theater::store;
+    ///
+    /// // Retrieve content
+    /// let content = store::get(store_id, content_ref)?;
+    /// let my_data: MyData = serde_json::from_slice(&content)?;
+    /// ```
+    get: func(store-id: string, content-ref: content-ref) -> result<list<u8>, string>;
+    
+    /// # Check if content exists
+    ///
+    /// Checks if a particular content reference exists in the store.
+    ///
+    /// ## Parameters
+    ///
+    /// * `store-id` - ID of the store to check
+    /// * `content-ref` - Reference to check for
+    ///
+    /// ## Returns
+    ///
+    /// * `Ok(bool)` - True if the content exists, false otherwise
+    /// * `Err(string)` - Error message if the check fails
+    ///
+    /// ## Example
+    ///
+    /// ```rust
+    /// use ntwk::theater::store;
+    ///
+    /// // Check if content exists before attempting to retrieve it
+    /// if store::exists(store_id, content_ref)? {
+    ///     let content = store::get(store_id, content_ref)?;
+    ///     // Process content...
+    /// } else {
+    ///     // Handle missing content case
+    /// }
+    /// ```
+    exists: func(store-id: string, content-ref: content-ref) -> result<bool, string>;
+    
+    /// # Attach a label to content
+    ///
+    /// Associates a human-readable label with a content reference.
+    ///
+    /// ## Parameters
+    ///
+    /// * `store-id` - ID of the store to use
+    /// * `label` - The human-readable label to attach
+    /// * `content-ref` - Reference to the content to label
+    ///
+    /// ## Returns
+    ///
+    /// * `Ok(_)` - Label was successfully attached
+    /// * `Err(string)` - Error message if labeling fails
+    ///
+    /// ## Example
+    ///
+    /// ```rust
+    /// use ntwk::theater::store;
+    ///
+    /// // Store and label config data
+    /// let config_data = serde_json::to_vec(&my_config)?;
+    /// let ref = store::store(store_id, config_data)?;
+    /// store::label(store_id, "current-config", ref)?;
+    /// ```
+    ///
+    /// ## Implementation Notes
+    ///
+    /// A label can point to multiple content references, effectively acting as a collection.
+    /// Each call to this function adds the content reference to the label without removing
+    /// previous references.
+    label: func(store-id: string, label: string, content-ref: content-ref) -> result<_, string>;
+    
+    /// # Get content reference by label
+    ///
+    /// Retrieves a content reference associated with a label.
+    ///
+    /// ## Parameters
+    ///
+    /// * `store-id` - ID of the store to use
+    /// * `label` - The label to look up
+    ///
+    /// ## Returns
+    ///
+    /// * `Ok(option<content-ref>)` - The content reference if found, None if the label doesn't exist
+    /// * `Err(string)` - Error message if the lookup fails
+    ///
+    /// ## Example
+    ///
+    /// ```rust
+    /// use ntwk::theater::store;
+    ///
+    /// // Retrieve the current configuration
+    /// if let Some(ref) = store::get_by_label(store_id, "current-config")? {
+    ///     let config_data = store::get(store_id, ref)?;
+    ///     let config: MyConfig = serde_json::from_slice(&config_data)?;
+    ///     // Use configuration...
+    /// } else {
+    ///     // No configuration found
+    /// }
+    /// ```
+    ///
+    /// ## Implementation Notes
+    ///
+    /// If a label points to multiple content references, this function returns the most
+    /// recently added reference.
+    get-by-label: func(store-id: string, label: string) -> result<option<content-ref>, string>;
+    
+    /// # Remove a label
+    ///
+    /// Deletes a label and its associations with content references.
+    ///
+    /// ## Parameters
+    ///
+    /// * `store-id` - ID of the store to use
+    /// * `label` - The label to remove
+    ///
+    /// ## Returns
+    ///
+    /// * `Ok(_)` - Label was successfully removed
+    /// * `Err(string)` - Error message if removal fails
+    ///
+    /// ## Example
+    ///
+    /// ```rust
+    /// use ntwk::theater::store;
+    ///
+    /// // Remove an obsolete label
+    /// store::remove_label(store_id, "old-config")?;
+    /// ```
+    ///
+    /// ## Implementation Notes
+    ///
+    /// Removing a label does not delete the content it points to, only the association
+    /// between the label and the content references.
+    remove-label: func(store-id: string, label: string) -> result<_, string>;
+    
+    /// # Remove a specific content reference from a label
+    ///
+    /// Removes the association between a label and a specific content reference.
+    ///
+    /// ## Parameters
+    ///
+    /// * `store-id` - ID of the store to use
+    /// * `label` - The label to modify
+    /// * `content-ref` - The content reference to remove from the label
+    ///
+    /// ## Returns
+    ///
+    /// * `Ok(_)` - Reference was successfully removed from the label
+    /// * `Err(string)` - Error message if removal fails
+    ///
+    /// ## Example
+    ///
+    /// ```rust
+    /// use ntwk::theater::store;
+    ///
+    /// // Remove a specific version from the "historical-configs" label
+    /// store::remove_from_label(store_id, "historical-configs", outdated_ref)?;
+    /// ```
+    ///
+    /// ## Implementation Notes
+    ///
+    /// This operation only removes the association between the label and the content reference.
+    /// It does not delete the content itself.
+    remove-from-label: func(store-id: string, label: string, content-ref: content-ref) -> result<_, string>;
+    
+    /// # Store content and immediately label it
+    ///
+    /// Stores content and associates it with a label in a single operation.
+    ///
+    /// ## Parameters
+    ///
+    /// * `store-id` - ID of the store to use
+    /// * `label` - The label to attach to the content
+    /// * `content` - The content bytes to store
+    ///
+    /// ## Returns
+    ///
+    /// * `Ok(content-ref)` - Reference to the stored content
+    /// * `Err(string)` - Error message if the operation fails
+    ///
+    /// ## Example
+    ///
+    /// ```rust
+    /// use ntwk::theater::store;
+    ///
+    /// // Store and label user data in one operation
+    /// let user_data = serde_json::to_vec(&user)?;
+    /// let ref = store::store_at_label(store_id, "user-profile", user_data)?;
+    /// ```
+    ///
+    /// ## Implementation Notes
+    ///
+    /// This is a convenience function that combines `store` and `label` operations.
+    /// The label will point to the new content reference in addition to any existing
+    /// content references it may already point to.
+    store-at-label: func(store-id: string, label: string, content: list<u8>) -> result<content-ref, string>;
+    
+    /// # Replace content at a label
+    ///
+    /// Stores new content and makes the label point exclusively to it, removing any
+    /// previous associations.
+    ///
+    /// ## Parameters
+    ///
+    /// * `store-id` - ID of the store to use
+    /// * `label` - The label to update
+    /// * `content` - The new content bytes to store
+    ///
+    /// ## Returns
+    ///
+    /// * `Ok(content-ref)` - Reference to the stored content
+    /// * `Err(string)` - Error message if the operation fails
+    ///
+    /// ## Example
+    ///
+    /// ```rust
+    /// use ntwk::theater::store;
+    ///
+    /// // Update configuration with new values
+    /// let new_config = serde_json::to_vec(&updated_config)?;
+    /// let ref = store::replace_content_at_label(store_id, "current-config", new_config)?;
+    /// ```
+    ///
+    /// ## Implementation Notes
+    ///
+    /// This operation is atomic - the label will either point to the new content reference
+    /// or remain unchanged if the operation fails.
+    replace-content-at-label: func(store-id: string, label: string, content: list<u8>) -> result<content-ref, string>;
+    
+    /// # Replace label with specific content reference
+    ///
+    /// Updates a label to point exclusively to an existing content reference.
+    ///
+    /// ## Parameters
+    ///
+    /// * `store-id` - ID of the store to use
+    /// * `label` - The label to update
+    /// * `content-ref` - The content reference the label should point to
+    ///
+    /// ## Returns
+    ///
+    /// * `Ok(_)` - Label was successfully updated
+    /// * `Err(string)` - Error message if the update fails
+    ///
+    /// ## Example
+    ///
+    /// ```rust
+    /// use ntwk::theater::store;
+    ///
+    /// // Revert to a previous version
+    /// store::replace_at_label(store_id, "current-config", previous_version_ref)?;
+    /// ```
+    ///
+    /// ## Implementation Notes
+    ///
+    /// This operation removes any existing associations between the label and other
+    /// content references. After this operation, the label will point only to the
+    /// specified content reference.
+    replace-at-label: func(store-id: string, label: string, content-ref: content-ref) -> result<_, string>;
+    
+    /// # List all labels
+    ///
+    /// Retrieves a list of all labels in the store.
+    ///
+    /// ## Parameters
+    ///
+    /// * `store-id` - ID of the store to query
+    ///
+    /// ## Returns
+    ///
+    /// * `Ok(list<string>)` - List of all labels in the store
+    /// * `Err(string)` - Error message if the operation fails
+    ///
+    /// ## Example
+    ///
+    /// ```rust
+    /// use ntwk::theater::store;
+    ///
+    /// // Get all available labels
+    /// let labels = store::list_labels(store_id)?;
+    /// for label in labels {
+    ///     println!("Found label: {}", label);
+    /// }
+    /// ```
+    list-labels: func(store-id: string) -> result<list<string>, string>;
+    
+    /// # List all content references
+    ///
+    /// Retrieves a list of all content references in the store.
+    ///
+    /// ## Parameters
+    ///
+    /// * `store-id` - ID of the store to query
+    ///
+    /// ## Returns
+    ///
+    /// * `Ok(list<content-ref>)` - List of all content references in the store
+    /// * `Err(string)` - Error message if the operation fails
+    ///
+    /// ## Example
+    ///
+    /// ```rust
+    /// use ntwk::theater::store;
+    ///
+    /// // Get all content references
+    /// let refs = store::list_all_content(store_id)?;
+    /// println!("Store contains {} content items", refs.len());
+    /// ```
+    ///
+    /// ## Implementation Notes
+    ///
+    /// This operation may be expensive for stores with a large amount of content.
+    /// Consider using labels to organize and access content more efficiently.
+    list-all-content: func(store-id: string) -> result<list<content-ref>, string>;
+    
+    /// # Calculate total size
+    ///
+    /// Calculates the total size of all content in the store.
+    ///
+    /// ## Parameters
+    ///
+    /// * `store-id` - ID of the store to query
+    ///
+    /// ## Returns
+    ///
+    /// * `Ok(u64)` - Total size in bytes
+    /// * `Err(string)` - Error message if the calculation fails
+    ///
+    /// ## Example
+    ///
+    /// ```rust
+    /// use ntwk::theater::store;
+    ///
+    /// // Check store size
+    /// let total_bytes = store::calculate_total_size(store_id)?;
+    /// println!("Store contains {} bytes of data", total_bytes);
+    ///
+    /// // Format as human-readable size
+    /// let size_mb = total_bytes as f64 / (1024.0 * 1024.0);
+    /// println!("Store size: {:.2} MB", size_mb);
+    /// ```
+    ///
+    /// ## Implementation Notes
+    ///
+    /// This operation calculates the actual storage space used, accounting for
+    /// deduplication of identical content.
+    calculate-total-size: func(store-id: string) -> result<u64, string>;
+}

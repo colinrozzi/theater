@@ -1,0 +1,155 @@
+package ntwk:theater;
+
+interface http-framework {
+    use http-types.{http-request, http-response};
+    use http-types.{server-config, server-info, tls-config};
+    use websocket-types.{websocket-message};
+    
+    // Core types
+    /// Unique identifier for an HTTP server instance
+    type server-id = u64;
+    
+    /// Unique identifier for a registered handler function
+    type handler-id = u64;
+    
+    /// Unique identifier for a registered route
+    type route-id = u64;
+    
+    /// Unique identifier for registered middleware
+    type middleware-id = u64;
+    
+    create-server: func(config: server-config) -> result<server-id, string>;
+    get-server-info: func(server-id: server-id) -> result<server-info, string>;
+    start-server: func(server-id: server-id) -> result<u16, string>;
+    stop-server: func(server-id: server-id) -> result<_, string>;
+    destroy-server: func(server-id: server-id) -> result<_, string>;
+    register-handler: func(handler-name: string) -> result<handler-id, string>;
+    add-route: func(server-id: server-id, path: string, method: string, handler-id: handler-id) -> result<route-id, string>;
+    remove-route: func(route-id: route-id) -> result<_, string>;
+    add-middleware: func(server-id: server-id, path: string, handler-id: handler-id) -> result<middleware-id, string>;
+    remove-middleware: func(middleware-id: middleware-id) -> result<_, string>;
+    enable-websocket: func(
+        server-id: server-id, 
+        path: string, 
+        connect-handler-id: option<handler-id>,
+        message-handler-id: handler-id,
+        disconnect-handler-id: option<handler-id>
+    ) -> result<_, string>;
+    send-websocket-message: func(server-id: server-id, connection-id: u64, message: websocket-message) -> result<_, string>;
+    close-websocket: func(server-id: server-id, connection-id: u64) -> result<_, string>;
+}
+
+interface http-handlers {
+    use http-types.{http-request, http-response};
+    use websocket-types.{websocket-message};
+    use http-types.{middleware-result};
+    use http-framework.{handler-id};
+
+    handle-request: func(state: option<list<u8>>, params: tuple<handler-id, http-request>) -> result<tuple<option<list<u8>>, tuple<http-response>>, string>;
+    handle-middleware: func(state: option<list<u8>>, params: tuple<handler-id, http-request>) -> result<tuple<option<list<u8>>, tuple<middleware-result>>, string>;
+    handle-websocket-connect: func(state: option<list<u8>>, params: tuple<handler-id, u64, string, option<string>>) -> result<tuple<option<list<u8>>>, string>;
+    handle-websocket-message: func(state: option<list<u8>>, params: tuple<handler-id, u64, websocket-message>) -> result<tuple<option<list<u8>>, tuple<list<websocket-message>>>, string>;
+    handle-websocket-disconnect: func(state: option<list<u8>>, params: tuple<handler-id, u64>) -> result<tuple<option<list<u8>>>, string>;
+}
+
+interface http-client {
+    use http-types.{http-request, http-response};
+
+    send-http: func(req: http-request) -> result<http-response, string>;
+}
+
+interface http-types {
+    /// Raw binary data type
+    type bytes = list<u8>;
+
+    record http-request {
+        /// HTTP method (GET, POST, PUT, DELETE, etc.)
+        method: string,
+        /// Full request URI including query parameters
+        uri: string,
+        /// List of request headers as key-value pairs
+        headers: list<tuple<string, string>>,
+        /// Optional request body as binary data
+        body: option<bytes>
+    }
+
+    record http-response {
+        /// HTTP status code (e.g., 200, 404, 500)
+        status: u16,
+        /// List of response headers as key-value pairs
+        headers: list<tuple<string, string>>,
+        /// Optional response body as binary data
+        body: option<bytes>
+    }
+    
+    record server-config {
+        /// Port to listen on, 0 means system-assigned
+        port: option<u16>,
+        /// Host address to bind to
+        host: option<string>,
+        /// TLS configuration for HTTPS
+        tls-config: option<tls-config>,
+    }
+    
+    record tls-config {
+        /// Path to the certificate file
+        cert-path: string,
+        /// Path to the key file
+        key-path: string,
+    }
+    
+    record server-info {
+        /// Server ID
+        id: u64,
+        /// Current listening port
+        port: u16,
+        /// Host address
+        host: string,
+        /// Whether the server is running
+        running: bool,
+        /// Number of active routes
+        routes-count: u32,
+        /// Number of active middleware
+        middleware-count: u32,
+        /// Whether WebSocket is enabled
+        websocket-enabled: bool,
+    }
+    
+    record middleware-result {
+        /// Whether to continue processing the request
+        proceed: bool,
+        /// The potentially modified request
+        request: http-request,
+    }
+}
+
+interface websocket-types {
+    variant message-type {
+        /// A text message (UTF-8 encoded)
+        text,
+        /// A binary message
+        binary,
+        /// A new connection was established
+        connect,
+        /// The connection was closed
+        close,
+        /// A ping message (for keep-alive)
+        ping,
+        /// A pong message (response to ping)
+        pong,
+        /// Any other message type with string identifier
+        other(string),
+    }
+
+    /// # WebSocket Message
+    ///
+    /// Represents a message sent or received over a WebSocket connection.
+    record websocket-message {
+        /// The type of the message
+        ty: message-type,
+        /// Binary data payload (used for binary messages)
+        data: option<list<u8>>,
+        /// Text payload (used for text messages)
+        text: option<string>,
+    }
+}

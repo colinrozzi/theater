@@ -1,0 +1,98 @@
+package ntwk:theater;
+
+/// # Runtime Interface
+///
+/// The `runtime` interface provides core runtime capabilities to actors in the Theater system.
+/// It allows actors to access their environment, log messages, and retrieve their event chain.
+///
+/// ## Purpose
+///
+/// This interface serves as a bridge between the actor and its execution environment,
+/// providing essential services for operation, debugging, and state management. It enables
+/// actors to log information to the system and access their immutable event history.
+///
+/// ## Example
+///
+/// ```wit
+/// // Using the runtime interface in a WIT definition
+/// use ntwk:theater/runtime;
+///
+/// // Using the runtime interface in a Rust implementation
+/// runtime::log("Actor initialized successfully");
+/// let my_chain = runtime::get_chain();
+/// ```
+///
+/// ## Security
+///
+/// The runtime interface is designed to be safe to expose to all actors, as it provides
+/// only read access to state and controlled logging functionality. It doesn't allow actors
+/// to modify runtime state or access system resources outside their sandbox.
+///
+/// ## Implementation Notes
+///
+/// This interface is typically implemented by the Theater runtime and automatically
+/// provided to all actors. No special configuration is required to use it, though
+/// logging behavior can be controlled through manifest settings.
+
+interface runtime {
+    use types.{chain, actor-id};
+
+    /// Logs a message to the actor's log stream.
+    ///
+    /// ## Purpose
+    ///
+    /// This function allows actors to send log messages to the Theater logging system.
+    /// Messages are tagged with the actor's ID and can be viewed through the Theater CLI
+    /// or event subscription system.
+    ///
+    /// ## Parameters
+    ///
+    /// * `msg` - The message to log
+    ///
+    /// ## Example
+    ///
+    /// ```rust
+    /// // In Rust actor code
+    /// runtime::log("Processing request with ID: 12345");
+    /// ```
+    ///
+    /// ## Implementation Notes
+    ///
+    /// Log messages are subject to the logging level configuration specified in the actor's
+    /// manifest. The Theater runtime may filter or redirect logs based on this configuration.
+    log: func(msg: string);
+
+    /// Retrieves the actor's event chain.
+    ///
+    /// ## Purpose
+    ///
+    /// This function provides access to the actor's complete event history as a chain of
+    /// cryptographically linked events. This allows actors to inspect their state evolution
+    /// and verify the integrity of their history.
+    ///
+    /// ## Returns
+    ///
+    /// * `chain` - The actor's event chain containing all recorded events
+    ///
+    /// ## Example
+    ///
+    /// ```rust
+    /// // In Rust actor code
+    /// let chain = runtime::get_chain();
+    /// 
+    /// // Count events by type
+    /// let mut event_counts = std::collections::HashMap::new();
+    /// for event in chain.events {
+    ///     *event_counts.entry(event.event_type.clone()).or_insert(0) += 1;
+    /// }
+    /// ```
+    ///
+    /// ## Security
+    ///
+    /// The event chain is immutable and cryptographically verifiable, ensuring that actors
+    /// cannot tamper with their event history. This provides a secure audit trail of all
+    /// actor actions.
+    get-chain: func() -> chain;
+
+    shutdown: func(data: option<list<u8>>) -> result<_, string>;
+}
