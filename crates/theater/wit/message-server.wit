@@ -1,0 +1,572 @@
+package ntwk:theater;
+
+/// # Message Server Client Interface
+///
+/// Defines the callback handlers that actors must implement to receive messages through
+/// the message server system.
+///
+/// ## Purpose
+///
+/// This interface enables actors to receive and process various types of messages:
+/// - One-way messages (send)
+/// - Request-response interactions (request)
+/// - Bidirectional channel-based communication (channel operations)
+///
+/// By implementing these handler functions, an actor can participate in different
+/// communication patterns with other actors and external systems.
+///
+/// ## Example
+///
+/// ```rust
+/// use ntwk::theater::message_server_client::Guest;
+/// use ntwk::theater::types::{channel_accept, channel_id};
+/// use serde_json::{json, Value};
+///
+/// struct MyMessageHandler;
+///
+/// impl Guest for MyMessageHandler {
+///     fn handle_send(state: Option<Value>, params: (Value,)) 
+///             -> Result<(Option<Value>,), String> {
+///         let (message,) = params;
+///         println!("Received message: {}", message);
+///         
+///         // Update state if needed
+///         let new_state = if let Some(mut state) = state {
+///             state["message_count"] = json!(state["message_count"].as_u64().unwrap_or(0) + 1);
+///             Some(state)
+///         } else {
+///             Some(json!({"message_count": 1}))
+///         };
+///         
+///         Ok((new_state,))
+///     }
+///     
+///     // Implement other handlers...
+/// }
+/// ```
+///
+/// ## Security
+///
+/// The message handlers receive input from potentially untrusted sources, so they should:
+/// - Validate all incoming message data
+/// - Handle malformed messages gracefully
+/// - Protect against common attack vectors like JSON injection
+///
+/// ## Implementation Notes
+///
+/// - All handlers receive and can update the actor's state
+/// - Errors returned from handlers are logged and may trigger supervision
+/// - Handler execution is tracked in the actor's event chain
+interface message-server-client {
+    use types.{event, channel-id, channel-accept};
+
+    /// # Handle one-way message
+    ///
+    /// Processes a one-way message that doesn't require a response.
+    ///
+    /// ## Parameters
+    ///
+    /// * `state` - The current actor state or None if not initialized
+    /// * `params` - Tuple containing:
+    ///   * `json` - The message payload
+    ///
+    /// ## Returns
+    ///
+    /// * `Ok((option<list<u8>>,))` - Updated actor state (or None to retain current state)
+    /// * `Err(string)` - Error message if message handling fails
+    ///
+    /// ## Example
+    ///
+    /// ```rust
+    /// fn handle_send(state: Option<Value>, params: (Value,)) -> Result<(Option<Value>,), String> {
+    ///     let (message,) = params;
+    ///     
+    ///     // Process the message...
+    ///     
+    ///     // Return updated state (or None to keep current state)
+    ///     Ok((Some(updated_state),))
+    /// }
+    /// ```
+    handle-send: func(state: option<list<u8>>, params: tuple<list<u8>>) -> result<tuple<option<list<u8>>>, string>;
+    
+    /// # Handle request-response message
+    ///
+    /// Processes a request that requires a response.
+    ///
+    /// ## Parameters
+    ///
+    /// * `state` - The current actor state or None if not initialized
+    /// * `params` - Tuple containing:
+    ///   * `string` - The request ID
+    ///   * `json` - The request payload
+    ///
+    /// ## Returns
+    ///
+    /// * `Ok((option<list<u8>>, (option<list<u8>>,)))` - Tuple containing:
+    ///   * Updated actor state (or None)
+    ///   * Response message to send back (or None to send a response yet)
+    /// * `Err(string)` - Error message if request handling fails
+    ///
+    /// ## Example
+    ///
+    /// ```rust
+    /// fn handle_request(state: Option<Vec<u8>>, params: (String, Vec<u8>)) 
+    ///         -> Result<(Option<Vec<u8>>, (Option<Vec<u8>>,)), String> {
+    ///     let (request_id, request) = params;
+    ///     
+    ///     // Process the request...
+    ///     let response = json!({"status": "success", "data": "result"});
+    ///     
+    ///     // Return updated state and response
+    ///     Ok((Some(updated_state), (Some(response),)))
+    /// }
+    /// ```
+    handle-request: func(state: option<list<u8>>, params: tuple<string, list<u8>>) -> result<tuple<option<list<u8>>, tuple<option<list<u8>>>>, string>;
+    
+    /// # Handle channel open request
+    ///
+    /// Called when another actor requests to open a communication channel.
+    ///
+    /// ## Parameters
+    ///
+    /// * `state` - The current actor state or None if not initialized
+    /// * `params` - Tuple containing:
+    ///   * `json` - The initial message payload
+    ///
+    /// ## Returns
+    ///
+    /// * `Ok((option<list<u8>>, (channel-accept,)))` - Tuple containing:
+    ///   * Updated actor state (or None to retain current state)
+    ///   * Channel acceptance decision
+    /// * `Err(string)` - Error message if open handling fails
+    ///
+    /// ## Example
+    ///
+    /// ```rust
+    /// fn handle_channel_open(state: Option<Value>, params: (Value,)) 
+    ///         -> Result<(Option<Value>, (channel_accept,)), String> {
+    ///     let (initial_message,) = params;
+    ///     
+    ///     // Decide whether to accept the channel
+    ///     let accept = channel_accept {
+    ///         accept: true,
+    ///         error_message: None,
+    ///     };
+    ///     
+    ///     // Return updated state and acceptance decision
+    ///     Ok((Some(updated_state), (accept,)))
+    /// }
+    /// ```
+    ///
+    /// ## Security
+    ///
+    /// The actor should validate the channel request and only accept channels from
+    /// trusted sources. The acceptance mechanism provides a security checkpoint.
+    handle-channel-open: func(state: option<list<u8>>, params: tuple<string, list<u8>>) -> result<tuple<option<list<u8>>, tuple<channel-accept>>, string>;
+    
+    /// # Handle channel message
+    ///
+    /// Processes a message received on an established channel.
+    ///
+    /// ## Parameters
+    ///
+    /// * `state` - The current actor state or None if not initialized
+    /// * `params` - Tuple containing:
+    ///   * `channel-id` - ID of the channel the message was received on
+    ///   * `json` - The message payload
+    ///
+    /// ## Returns
+    ///
+    /// * `Ok((option<list<u8>>,))` - Updated actor state (or None to retain current state)
+    /// * `Err(string)` - Error message if message handling fails
+    ///
+    /// ## Example
+    ///
+    /// ```rust
+    /// fn handle_channel_message(state: Option<Value>, params: (channel_id, Value)) 
+    ///         -> Result<(Option<Value>,), String> {
+    ///     let (channel_id, message) = params;
+    ///     
+    ///     // Process the channel message...
+    ///     println!("Received message on channel {}: {}", channel_id, message);
+    ///     
+    ///     // Return updated state (or None to keep current state)
+    ///     Ok((Some(updated_state),))
+    /// }
+    /// ```
+    handle-channel-message: func(state: option<list<u8>>, params: tuple<channel-id, list<u8>>) -> result<tuple<option<list<u8>>>, string>;
+    
+    /// # Handle channel close
+    ///
+    /// Called when a communication channel is closed.
+    ///
+    /// ## Parameters
+    ///
+    /// * `state` - The current actor state or None if not initialized
+    /// * `params` - Tuple containing:
+    ///   * `channel-id` - ID of the channel that was closed
+    ///
+    /// ## Returns
+    ///
+    /// * `Ok((option<list<u8>>,))` - Updated actor state (or None to retain current state)
+    /// * `Err(string)` - Error message if close handling fails
+    ///
+    /// ## Example
+    ///
+    /// ```rust
+    /// fn handle_channel_close(state: Option<Value>, params: (channel_id,)) 
+    ///         -> Result<(Option<Value>,), String> {
+    ///     let (channel_id,) = params;
+    ///     
+    ///     // Clean up any resources associated with the channel
+    ///     println!("Channel {} closed", channel_id);
+    ///     
+    ///     // Return updated state (or None to keep current state)
+    ///     Ok((Some(updated_state),))
+    /// }
+    /// ```
+    ///
+    /// ## Implementation Notes
+    ///
+    /// This function should perform any necessary cleanup for the closed channel,
+    /// such as releasing resources or updating internal state to reflect the channel closure.
+    handle-channel-close: func(state: option<list<u8>>, params: tuple<channel-id>) -> result<tuple<option<list<u8>>>, string>;
+}
+
+/// # Message Server Host Interface
+///
+/// Provides functions for actors to send messages to other actors and manage communication channels.
+///
+/// ## Purpose
+///
+/// This interface enables actors to initiate various types of communication:
+/// - Send one-way messages to other actors
+/// - Make request-response interactions with other actors
+/// - Establish and use bidirectional communication channels
+///
+/// These functions allow actors to collaborate, share data, and coordinate their activities
+/// within the Theater system.
+///
+/// ## Example
+///
+/// ```rust
+/// use ntwk::theater::message_server_host;
+/// use ntwk::theater::types::actor_id;
+/// use serde_json::json;
+///
+/// async fn example() -> Result<(), String> {
+///     // Get the target actor ID (in a real scenario)
+///     let target_actor = actor_id { id: "actor-123".to_string() };
+///     
+///     // Send a one-way message
+///     let message = json!({"action": "update", "value": 42});
+///     message_server_host::send(target_actor.clone(), message)?;
+///     
+///     // Make a request and get a response
+///     let request = json!({"action": "query", "key": "user-profile"});
+///     let response = message_server_host::request(target_actor.clone(), request)?;
+///     println!("Received response: {}", response);
+///     
+///     // Open a channel for ongoing communication
+///     let initial_msg = json!({"action": "subscribe", "topic": "updates"});
+///     let channel_id = message_server_host::open_channel(target_actor, initial_msg)?;
+///     
+///     // Send messages on the channel
+///     message_server_host::send_on_channel(channel_id.clone(), json!({"update": 1}))?;
+///     message_server_host::send_on_channel(channel_id.clone(), json!({"update": 2}))?;
+///     
+///     // Close the channel when done
+///     message_server_host::close_channel(channel_id)?;
+///     
+///     Ok(())
+/// }
+/// ```
+///
+/// ## Security
+///
+/// The message server enforces security boundaries to ensure that:
+/// - Actors can only communicate with actors they have permission to access
+/// - Messages are delivered reliably and in order
+/// - Channel operations are authenticated
+///
+/// All message operations are tracked in the actor's event chain for complete auditability.
+///
+/// ## Implementation Notes
+///
+/// The message server operations are asynchronous but appear synchronous to the WebAssembly
+/// component. The runtime suspends the actor's execution as needed without blocking the
+/// entire system.
+interface message-server-host {
+    use types.{actor-id, channel-id};
+
+    /// # Send one-way message
+    ///
+    /// Sends a message to another actor without waiting for a response.
+    ///
+    /// ## Parameters
+    ///
+    /// * `actor-id` - ID of the target actor
+    /// * `msg` - JSON message payload to send
+    ///
+    /// ## Returns
+    ///
+    /// * `Ok(_)` - Message was successfully sent
+    /// * `Err(string)` - Error message if send fails
+    ///
+    /// ## Example
+    ///
+    /// ```rust
+    /// use ntwk::theater::message_server_host;
+    /// use ntwk::theater::types::actor_id;
+    /// use serde_json::json;
+    ///
+    /// // Send a notification
+    /// let target = actor_id { id: "logging-service".to_string() };
+    /// let log_msg = json!({
+    ///     "level": "info",
+    ///     "message": "User logged in",
+    ///     "timestamp": 1625097600000
+    /// });
+    /// message_server_host::send(target, log_msg)?;
+    /// ```
+    ///
+    /// ## Security
+    ///
+    /// The runtime verifies that the sender has permission to send messages to the
+    /// target actor before delivery.
+    send: func(actor-id: actor-id, msg: list<u8>) -> result<_, string>;
+
+    /// # Send request and await response
+    ///
+    /// Sends a message to another actor and waits for a response.
+    ///
+    /// ## Parameters
+    ///
+    /// * `actor-id` - ID of the target actor
+    /// * `msg` - JSON request payload to send
+    ///
+    /// ## Returns
+    ///
+    /// * `Ok(json)` - The response from the target actor
+    /// * `Err(string)` - Error message if the request fails
+    ///
+    /// ## Example
+    ///
+    /// ```rust
+    /// use ntwk::theater::message_server_host;
+    /// use ntwk::theater::types::actor_id;
+    /// use serde_json::json;
+    ///
+    /// // Query a data service
+    /// let data_service = actor_id { id: "data-service".to_string() };
+    /// let query = json!({
+    ///     "query": "SELECT * FROM users WHERE id = ?",
+    ///     "parameters": [42]
+    /// });
+    /// let result = message_server_host::request(data_service, query)?;
+    /// ```
+    ///
+    /// ## Implementation Notes
+    ///
+    /// This function suspends the calling actor's execution until a response is received
+    /// or a timeout occurs. The runtime handles the suspension efficiently without
+    /// blocking other actors.
+    request: func(actor-id: actor-id, msg: list<u8>) -> result<list<u8>, string>;
+    
+    /// # Open communication channel
+    ///
+    /// Establishes a bidirectional communication channel with another actor.
+    ///
+    /// ## Parameters
+    ///
+    /// * `actor-id` - ID of the target actor
+    /// * `initial-msg` - JSON message sent as part of channel establishment
+    ///
+    /// ## Returns
+    ///
+    /// * `Ok(channel-id)` - ID of the established channel
+    /// * `Err(string)` - Error message if channel establishment fails
+    ///
+    /// ## Example
+    ///
+    /// ```rust
+    /// use ntwk::theater::message_server_host;
+    /// use ntwk::theater::types::actor_id;
+    /// use serde_json::json;
+    ///
+    /// // Open a channel to a streaming service
+    /// let streaming_service = actor_id { id: "data-stream".to_string() };
+    /// let subscription = json!({
+    ///     "action": "subscribe",
+    ///     "topics": ["market-data", "news-feed"],
+    ///     "options": {"buffer_size": 100}
+    /// });
+    /// let channel = message_server_host::open_channel(streaming_service, subscription)?;
+    /// ```
+    ///
+    /// ## Security
+    ///
+    /// Channel establishment requires mutual consent:
+    /// 1. The initiator requests the channel by calling this function
+    /// 2. The target actor explicitly accepts or rejects the channel
+    ///
+    /// This provides a security checkpoint to prevent unwanted channels.
+    open-channel: func(actor-id: actor-id, initial-msg: list<u8>) -> result<channel-id, string>;
+    
+    /// # Send message on channel
+    ///
+    /// Sends a message through an established channel.
+    ///
+    /// ## Parameters
+    ///
+    /// * `channel-id` - ID of the channel to send on
+    /// * `msg` - JSON message payload to send
+    ///
+    /// ## Returns
+    ///
+    /// * `Ok(_)` - Message was successfully sent
+    /// * `Err(string)` - Error message if send fails
+    ///
+    /// ## Example
+    ///
+    /// ```rust
+    /// use ntwk::theater::message_server_host;
+    /// use serde_json::json;
+    ///
+    /// // Send a message on an established channel
+    /// let update = json!({
+    ///     "type": "position-update",
+    ///     "x": 10.5,
+    ///     "y": 20.3,
+    ///     "timestamp": 1625097600000
+    /// });
+    /// message_server_host::send_on_channel(channel_id, update)?;
+    /// ```
+    ///
+    /// ## Implementation Notes
+    ///
+    /// Messages sent on a channel are delivered in order. If the channel is closed
+    /// or invalid, this function will return an error.
+    send-on-channel: func(channel-id: channel-id, msg: list<u8>) -> result<_, string>;
+    
+    /// # Close channel
+    ///
+    /// Closes an open communication channel.
+    ///
+    /// ## Parameters
+    ///
+    /// * `channel-id` - ID of the channel to close
+    ///
+    /// ## Returns
+    ///
+    /// * `Ok(_)` - Channel was successfully closed
+    /// * `Err(string)` - Error message if close fails
+    ///
+    /// ## Example
+    ///
+    /// ```rust
+    /// use ntwk::theater::message_server_host;
+    ///
+    /// // Close a channel when done with it
+    /// message_server_host::close_channel(channel_id)?;
+    /// ```
+    ///
+    /// ## Implementation Notes
+    ///
+    /// Closing a channel is a final operation - once closed, a channel cannot be reopened.
+    /// Both participants receive a notification when a channel is closed.
+    close-channel: func(channel-id: channel-id) -> result<_, string>;
+    
+    /// # List outstanding requests
+    ///
+    /// Retrieves a list of all pending request IDs that haven't been responded to yet.
+    ///
+    /// ## Returns
+    ///
+    /// * `list<string>` - List of outstanding request IDs
+    ///
+    /// ## Example
+    ///
+    /// ```rust
+    /// use ntwk::theater::message_server_host;
+    ///
+    /// // Get all pending requests
+    /// let pending_requests = message_server_host::list_outstanding_requests();
+    /// for request_id in pending_requests {
+    ///     println!("Pending request: {}", request_id);
+    /// }
+    /// ```
+    ///
+    /// ## Implementation Notes
+    ///
+    /// This function is useful for actors that need to track and manage asynchronous
+    /// request processing. It allows actors to check for pending requests and decide
+    /// which ones to process next.
+    list-outstanding-requests: func() -> list<string>;
+    
+    /// # Respond to a specific request
+    ///
+    /// Sends a response to a previously received request identified by its ID.
+    ///
+    /// ## Parameters
+    ///
+    /// * `request-id` - ID of the request to respond to
+    /// * `response` - JSON response payload to send
+    ///
+    /// ## Returns
+    ///
+    /// * `Ok(_)` - Response was successfully sent
+    /// * `Err(string)` - Error message if response fails
+    ///
+    /// ## Example
+    ///
+    /// ```rust
+    /// use ntwk::theater::message_server_host;
+    /// use serde_json::json;
+    ///
+    /// // Respond to a specific request
+    /// let response = json!({
+    ///     "status": "success",
+    ///     "data": {
+    ///         "result": 42
+    ///     }
+    /// });
+    /// message_server_host::respond_to_request("req-123", response)?;
+    /// ```
+    ///
+    /// ## Implementation Notes
+    ///
+    /// This function allows actors to implement asynchronous request handling patterns,
+    /// where requests are received, processed in the background, and responded to later.
+    /// If the request ID is not found, an error is returned.
+    respond-to-request: func(request-id: string, response: list<u8>) -> result<_, string>;
+    
+    /// # Cancel a pending request
+    ///
+    /// Explicitly cancels a pending request without sending a response.
+    ///
+    /// ## Parameters
+    ///
+    /// * `request-id` - ID of the request to cancel
+    ///
+    /// ## Returns
+    ///
+    /// * `Ok(_)` - Request was successfully canceled
+    /// * `Err(string)` - Error message if cancellation fails
+    ///
+    /// ## Example
+    ///
+    /// ```rust
+    /// use ntwk::theater::message_server_host;
+    ///
+    /// // Cancel a request that can't be fulfilled
+    /// message_server_host::cancel_request("req-123")?;
+    /// ```
+    ///
+    /// ## Implementation Notes
+    ///
+    /// Canceling a request causes the requester to receive an error indicating that
+    /// the request was canceled. This is useful for cleanup operations and handling
+    /// error cases where a proper response cannot be generated.
+    cancel-request: func(request-id: string) -> result<_, string>;
+}

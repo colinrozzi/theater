@@ -1,0 +1,134 @@
+package ntwk:theater;
+
+// # Common Type Definitions
+//
+// Defines shared types used across multiple interfaces in the Theater system.
+// This interface serves as a central location for type definitions to ensure
+// consistency and avoid duplication.
+//
+// ## Purpose
+//
+// The types interface provides common data structures and type aliases used 
+// throughout the Theater system. These types represent core concepts such as:
+//
+// - Message formats
+// - Event chain structures
+// - Identifiers
+//
+// By centralizing these definitions, the system maintains type consistency
+// across different interfaces and components.
+//
+// ## Example
+//
+// These types are typically imported and used in actor implementations:
+//
+// ```rust
+// use ntwk::theater::types::actor_id;
+//
+// // Using actor-id for referring to actors
+// fn get_actor_info(id: actor_id) -> String {
+//     format!("Info for actor {}", id)
+// }
+// ```
+//
+// ## Implementation Notes
+//
+// - Most types are designed to be serialization-format agnostic
+// - The `list<u8>` (byte array) representation allows for flexible serialization
+// - Actors typically use serde-compatible formats for serialization/deserialization
+
+// Define a shared type for messages
+interface types {
+    /// Unique identifier for an actor
+    ///
+    /// Actors are identified by string identifiers throughout the system. These
+    /// identifiers are typically UUIDs or other unique strings.
+    type actor-id = string;
+    
+    /// Unique identifier for a channel
+    ///
+    /// Channels are communication pathways between actors or between actors and
+    /// external systems. They are identified by string identifiers.
+    type channel-id = string;
+    
+    /// Response to a channel connection request
+    ///
+    /// When an actor is asked to accept a channel connection, it responds with
+    /// this structure to indicate acceptance and provide an optional initial message.
+    record channel-accept {
+        /// Whether the channel connection was accepted
+        accepted: bool,
+        /// Optional initial message to send on the channel
+        message: option<list<u8>>,
+    }
+
+    /// Complete event chain for an actor
+    ///
+    /// Represents the full history of events that have occurred in an actor,
+    /// providing traceability and auditability.
+    record chain {
+        /// List of events in the chain, each with metadata
+        events: list<meta-event>
+    }
+
+    /// Event with associated metadata
+    ///
+    /// Represents a single event in the chain with its metadata (hash),
+    /// allowing for verification and referencing.
+    record meta-event {
+        /// Hash of the event, used for verification and referencing
+        hash: u64,
+        /// The actual event data
+        event: event,
+    }
+
+    /// Core event structure
+    ///
+    /// Represents a single event in an actor's history, including its type,
+    /// parent reference, and associated data.
+    record event {
+        /// Type of event (e.g., "http", "message", "wasm")
+        event-type: string,
+        /// Optional reference to parent event (previous in chain)
+        parent: option<u64>,
+        /// Serialized event data
+        data: list<u8>,
+    }
+
+    // # Event in a chain
+    //
+    // Represents a single event in an actor's chain (audit log).
+    //
+    // ## Fields
+    //
+    // * `hash` - Unique identifier/hash for this event
+    // * `parent-hash` - Hash of the previous event in the chain (None for first event)
+    // * `event-type` - Type of event (e.g., "wasm", "http", "message")
+    // * `data` - Serialized event data
+    // * `timestamp` - Timestamp when the event occurred (milliseconds since epoch)
+    record chain-event {
+        hash: list<u8>,
+        parent-hash: option<list<u8>>,
+        event-type: string,
+        data: list<u8>,
+        timestamp: u64
+    }
+
+    record wit-actor-error {
+        error-type: wit-error-type,
+        data: option<list<u8>>,
+    }
+
+    /// Actor error
+    enum wit-error-type {
+        operation-timeout,
+        channel-closed,
+        shutting-down,
+        function-not-found,
+        type-mismatch,
+        internal,
+        serialization-error,
+        update-component-error,
+        paused
+    }
+}
