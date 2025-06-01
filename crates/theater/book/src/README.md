@@ -27,8 +27,7 @@ Understanding these pillars provides the foundation for building effective AI ag
 ## Quick Links
 
 - [Why Theater?](introduction/why-theater.md) - Understand the challenges of AI agent systems that Theater solves
-- [Core Concepts Overview](core-concepts/README.md) - Learn the fundamental ideas behind Theater
-- [Building AI Agent Systems](use-cases/ai-agents.md) - Explore how to build robust agent architectures
+- [Core Concepts Overview](core-concepts/index.html) - Learn the fundamental ideas behind Theater
 - [CLI Reference](user-guide/cli.md) - Command-line interface documentation
 - [Building Your First Agent](development/building-actors.md) - Start creating with Theater
 
