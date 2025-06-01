@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["execute","update_actor_component"],"struct":["UpdateArgs"]};

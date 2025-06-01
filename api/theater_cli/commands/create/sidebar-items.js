@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["execute","is_valid_project_name"],"struct":["CreateArgs"]};

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["available_templates","basic_template_files","copy_file","copy_wit_files","create_project","get_theater_wit_dir","http_template_files"],"struct":["Template"]};
