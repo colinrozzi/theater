@@ -21,14 +21,10 @@ jobs:
           mdbook-version: 'latest'
           
       - name: Setup Rust
-        uses: actions-rs/toolchain@v1
-        with:
-          profile: minimal
-          toolchain: stable
-          override: true
+        uses: dtolnay/rust-toolchain@stable
       
       - name: Build Book
-        working-directory: ./book
+        working-directory: ./crates/theater/book
         run: mdbook build
       
       - name: Build API docs
@@ -40,7 +36,7 @@ jobs:
           mkdir -p combined-docs
           # Copy mdBook output directly to the root of combined-docs
           mkdir -p combined-docs/guide
-          cp -r book/book/* combined-docs/guide
+          cp -r crates/theater/book/book/* combined-docs/guide
           # Create api directory and copy API docs there
           mkdir -p combined-docs/api
           cp -r target/doc/* combined-docs/api/

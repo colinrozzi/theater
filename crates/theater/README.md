@@ -54,7 +54,7 @@ theater events <agent-id>
 theater start manifest.toml --id-only | theater subscribe -
 ```
 
-[See complete CLI documentation →](book/src/cli.md)
+[See complete CLI documentation →](https://colinrozzi.github.io/theater/guide/user-guide/cli.html)
 
 ## Agent System Architecture
 
