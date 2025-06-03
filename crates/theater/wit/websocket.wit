@@ -17,7 +17,7 @@ package theater:simple;
 ///
 /// ```wit
 /// // Using the websocket-server interface in a WIT definition
-/// use ntwk:theater/websocket-server;
+/// use theater:simple/websocket-server;
 ///
 /// // Implementing the interface in Rust
 /// impl websocket_server::Guest for MyActor {

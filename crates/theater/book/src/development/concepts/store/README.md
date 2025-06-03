@@ -178,7 +178,7 @@ store.label(format!("actor:{}", actor_id), &content_ref).await?;
 
 ## Store Host Functions
 
-The store system exposes a set of host functions to WebAssembly actors through the `ntwk:theater/store` interface:
+The store system exposes a set of host functions to WebAssembly actors through the `theater:simple/store` interface:
 
 ```rust
 // Create a new store

@@ -245,7 +245,7 @@ pub struct ActorHandle {
 ///
 /// ```wit
 /// // In a .wit file
-/// use ntwk:theater/actor;
+/// use theater:simple/actor;
 ///
 /// // Implementing the interface in Rust
 /// struct MyActor;

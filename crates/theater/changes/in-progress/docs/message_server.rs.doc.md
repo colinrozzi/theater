@@ -265,7 +265,7 @@ impl MessageServerHost {
     ///
     /// ## Implementation Notes
     ///
-    /// This method sets up several host functions in the ntwk:theater/message-server-host namespace:
+    /// This method sets up several host functions in the theater:simple/message-server-host namespace:
     /// - send: Send a one-way message to another actor
     /// - request: Send a request to another actor and wait for a response
     /// - open-channel: Establish a bi-directional communication channel with another actor
@@ -298,7 +298,7 @@ impl MessageServerHost {
     ///
     /// ## Implementation Notes
     ///
-    /// This method registers several export functions in the ntwk:theater/message-server-client namespace:
+    /// This method registers several export functions in the theater:simple/message-server-client namespace:
     /// - handle-send: Called when the actor receives a one-way message
     /// - handle-request: Called when the actor receives a request that requires a response
     /// - handle-channel-open: Called when another actor requests to open a channel

@@ -638,7 +638,7 @@ impl ActorInstance {
     /// # use theater::wasm::ActorInstance;
     ///
     /// fn check_function(instance: &ActorInstance) {
-    ///     if instance.has_function("ntwk:theater/actor.init") {
+    ///     if instance.has_function("theater:simple/actor.init") {
     ///         println!("The init function is available");
     ///     } else {
     ///         println!("The init function is not registered");
@@ -706,7 +706,7 @@ impl ActorInstance {
     ///     
     ///     // Call the function with no initial state
     ///     let (new_state, result) = instance.call_function(
-    ///         "ntwk:theater/actor.init",
+    ///         "theater:simple/actor.init",
     ///         None,
     ///         params
     ///     ).await?;

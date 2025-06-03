@@ -75,8 +75,8 @@ impl MessageServerHost {
 
         let mut interface = actor_component
             .linker
-            .instance("ntwk:theater/message-server-host")
-            .expect("Could not instantiate ntwk:theater/message-server-host");
+            .instance("theater:simple/message-server-host")
+            .expect("Could not instantiate theater:simple/message-server-host");
 
         let theater_tx = self.theater_tx.clone();
 
@@ -88,7 +88,7 @@ impl MessageServerHost {
                       -> Box<dyn Future<Output = Result<(Result<(), String>,)>> + Send> {
                     // Record the message send call event
                     ctx.data_mut().record_event(ChainEventData {
-                        event_type: "ntwk:theater/message-server-host/send".to_string(),
+                        event_type: "theater:simple/message-server-host/send".to_string(),
                         data: EventData::Message(MessageEventData::SendMessageCall {
                             recipient: address.clone(),
                             message_type: "binary".to_string(), // Could be enhanced to detect type
@@ -105,7 +105,7 @@ impl MessageServerHost {
                             Err(e) => {
                                 let err_msg = format!("Failed to parse actor ID: {}", e);
                                 ctx.data_mut().record_event(ChainEventData {
-                                    event_type: "ntwk:theater/message-server-host/send".to_string(),
+                                    event_type: "theater:simple/message-server-host/send".to_string(),
                                     data: EventData::Message(MessageEventData::Error {
                                         operation: "send".to_string(),
                                         recipient: Some(address.clone()),
@@ -131,7 +131,7 @@ impl MessageServerHost {
                             Ok(_) => {
                                 // Record successful message send result
                                 ctx.data_mut().record_event(ChainEventData {
-                                    event_type: "ntwk:theater/message-server-host/send".to_string(),
+                                    event_type: "theater:simple/message-server-host/send".to_string(),
                                     data: EventData::Message(MessageEventData::SendMessageResult {
                                         recipient: address_clone.clone(),
                                         success: true,
@@ -145,7 +145,7 @@ impl MessageServerHost {
                                 let err = e.to_string();
                                 // Record failed message send result
                                 ctx.data_mut().record_event(ChainEventData {
-                                    event_type: "ntwk:theater/message-server-host/send".to_string(),
+                                    event_type: "theater:simple/message-server-host/send".to_string(),
                                     data: EventData::Message(MessageEventData::Error {
                                         operation: "send".to_string(),
                                         recipient: Some(address_clone.clone()),
@@ -172,7 +172,7 @@ impl MessageServerHost {
                       -> Box<dyn Future<Output = Result<(Result<Vec<u8>, String>,)>> + Send> {
                     // Record the message request call event
                     ctx.data_mut().record_event(ChainEventData {
-                        event_type: "ntwk:theater/message-server-host/request".to_string(),
+                        event_type: "theater:simple/message-server-host/request".to_string(),
                         data: EventData::Message(MessageEventData::RequestMessageCall {
                             recipient: address.clone(),
                             message_type: "binary".to_string(), // Could be enhanced to detect type
@@ -193,7 +193,7 @@ impl MessageServerHost {
                                 Err(e) => {
                                     let err_msg = format!("Failed to parse actor ID: {}", e);
                                     ctx.data_mut().record_event(ChainEventData {
-                                        event_type: "ntwk:theater/message-server-host/request".to_string(),
+                                        event_type: "theater:simple/message-server-host/request".to_string(),
                                         data: EventData::Message(MessageEventData::Error {
                                             operation: "request".to_string(),
                                             recipient: Some(address_clone.clone()),
@@ -217,7 +217,7 @@ impl MessageServerHost {
                                     Ok(response) => {
                                         // Record successful message request result
                                         ctx.data_mut().record_event(ChainEventData {
-                                            event_type: "ntwk:theater/message-server-host/request".to_string(),
+                                            event_type: "theater:simple/message-server-host/request".to_string(),
                                             data: EventData::Message(MessageEventData::RequestMessageResult {
                                                 recipient: address_clone.clone(),
                                                 data: response.clone(),
@@ -232,7 +232,7 @@ impl MessageServerHost {
                                         let err = e.to_string();
                                         // Record failed message request result
                                         ctx.data_mut().record_event(ChainEventData {
-                                            event_type: "ntwk:theater/message-server-host/request".to_string(),
+                                            event_type: "theater:simple/message-server-host/request".to_string(),
                                             data: EventData::Message(MessageEventData::Error {
                                                 operation: "request".to_string(),
                                                 recipient: Some(address_clone.clone()),
@@ -249,7 +249,7 @@ impl MessageServerHost {
                                 let err = e.to_string();
                                 // Record failed message request result
                                 ctx.data_mut().record_event(ChainEventData {
-                                    event_type: "ntwk:theater/message-server-host/request".to_string(),
+                                    event_type: "theater:simple/message-server-host/request".to_string(),
                                     data: EventData::Message(MessageEventData::Error {
                                         operation: "request".to_string(),
                                         recipient: Some(address_clone.clone()),
@@ -277,7 +277,7 @@ impl MessageServerHost {
                       -> Box<dyn Future<Output = Result<(Vec<String>,)>> + Send> {
                     // Record the list-outstanding-requests event
                     ctx.data_mut().record_event(ChainEventData {
-                        event_type: "ntwk:theater/message-server-host/list-outstanding-requests"
+                        event_type: "theater:simple/message-server-host/list-outstanding-requests"
                             .to_string(),
                         data: EventData::Message(MessageEventData::ListOutstandingRequestsCall {}),
                         timestamp: chrono::Utc::now().timestamp_millis() as u64,
@@ -293,7 +293,7 @@ impl MessageServerHost {
                         // Record the list-outstanding-requests result
                         ctx.data_mut().record_event(ChainEventData {
                             event_type:
-                                "ntwk:theater/message-server-host/list-outstanding-requests"
+                                "theater:simple/message-server-host/list-outstanding-requests"
                                     .to_string(),
                             data: EventData::Message(
                                 MessageEventData::ListOutstandingRequestsResult {
@@ -325,7 +325,7 @@ impl MessageServerHost {
                     
                     // Record the respond-to-request event
                     ctx.data_mut().record_event(ChainEventData {
-                        event_type: "ntwk:theater/message-server-host/respond-to-request".to_string(),
+                        event_type: "theater:simple/message-server-host/respond-to-request".to_string(),
                         data: EventData::Message(MessageEventData::RespondToRequestCall {
                             request_id: request_id.clone(),
                             response_size: response_data.len(),
@@ -343,7 +343,7 @@ impl MessageServerHost {
                                 Ok(_) => {
                                     // Record successful response
                                     ctx.data_mut().record_event(ChainEventData {
-                                        event_type: "ntwk:theater/message-server-host/respond-to-request".to_string(),
+                                        event_type: "theater:simple/message-server-host/respond-to-request".to_string(),
                                         data: EventData::Message(MessageEventData::RespondToRequestResult {
                                             request_id: request_id_clone.clone(),
                                             success: true,
@@ -356,7 +356,7 @@ impl MessageServerHost {
                                 Err(e) => {
                                     let err_msg = format!("Failed to send response: {:?}", e);
                                     ctx.data_mut().record_event(ChainEventData {
-                                        event_type: "ntwk:theater/message-server-host/respond-to-request".to_string(),
+                                        event_type: "theater:simple/message-server-host/respond-to-request".to_string(),
                                         data: EventData::Message(MessageEventData::Error {
                                             operation: "respond-to-request".to_string(),
                                             recipient: None,
@@ -371,7 +371,7 @@ impl MessageServerHost {
                         } else {
                             let err_msg = format!("Request ID not found: {}", request_id);
                             ctx.data_mut().record_event(ChainEventData {
-                                event_type: "ntwk:theater/message-server-host/respond-to-request".to_string(),
+                                event_type: "theater:simple/message-server-host/respond-to-request".to_string(),
                                 data: EventData::Message(MessageEventData::Error {
                                     operation: "respond-to-request".to_string(),
                                     recipient: None,
@@ -401,7 +401,7 @@ impl MessageServerHost {
                     
                     // Record the cancel-request event
                     ctx.data_mut().record_event(ChainEventData {
-                        event_type: "ntwk:theater/message-server-host/cancel-request".to_string(),
+                        event_type: "theater:simple/message-server-host/cancel-request".to_string(),
                         data: EventData::Message(MessageEventData::CancelRequestCall {
                             request_id: request_id.clone(),
                         }),
@@ -420,7 +420,7 @@ impl MessageServerHost {
                             
                             // Record successful cancellation
                             ctx.data_mut().record_event(ChainEventData {
-                                event_type: "ntwk:theater/message-server-host/cancel-request".to_string(),
+                                event_type: "theater:simple/message-server-host/cancel-request".to_string(),
                                 data: EventData::Message(MessageEventData::CancelRequestResult {
                                     request_id: request_id_clone.clone(),
                                     success: true,
@@ -432,7 +432,7 @@ impl MessageServerHost {
                         } else {
                             let err_msg = format!("Request ID not found: {}", request_id);
                             ctx.data_mut().record_event(ChainEventData {
-                                event_type: "ntwk:theater/message-server-host/cancel-request".to_string(),
+                                event_type: "theater:simple/message-server-host/cancel-request".to_string(),
                                 data: EventData::Message(MessageEventData::Error {
                                     operation: "cancel-request".to_string(),
                                     recipient: None,
@@ -464,7 +464,7 @@ impl MessageServerHost {
                     
                     // Record the channel open call event
                     ctx.data_mut().record_event(ChainEventData {
-                        event_type: "ntwk:theater/message-server-host/open-channel".to_string(),
+                        event_type: "theater:simple/message-server-host/open-channel".to_string(),
                         data: EventData::Message(MessageEventData::OpenChannelCall {
                             recipient: address.clone(),
                             message_type: "binary".to_string(),
@@ -479,7 +479,7 @@ impl MessageServerHost {
                         Err(e) => {
                             let err_msg = format!("Failed to parse actor ID: {}", e);
                             ctx.data_mut().record_event(ChainEventData {
-                                event_type: "ntwk:theater/message-server-host/open-channel".to_string(),
+                                event_type: "theater:simple/message-server-host/open-channel".to_string(),
                                 data: EventData::Message(MessageEventData::Error {
                                     operation: "open-channel".to_string(),
                                     recipient: Some(address_clone.clone()),
@@ -522,7 +522,7 @@ impl MessageServerHost {
                                             Ok(accepted) => {
                                                 // Record successful channel open result
                                                 ctx.data_mut().record_event(ChainEventData {
-                                                    event_type: "ntwk:theater/message-server-host/open-channel".to_string(),
+                                                    event_type: "theater:simple/message-server-host/open-channel".to_string(),
                                                     data: EventData::Message(MessageEventData::OpenChannelResult {
                                                         recipient: address_clone.clone(),
                                                         channel_id: channel_id_clone.clone(),
@@ -553,7 +553,7 @@ impl MessageServerHost {
                                             Err(e) => {
                                                 let err_msg = format!("Error opening channel: {}", e);
                                                 ctx.data_mut().record_event(ChainEventData {
-                                                    event_type: "ntwk:theater/message-server-host/open-channel".to_string(),
+                                                    event_type: "theater:simple/message-server-host/open-channel".to_string(),
                                                     data: EventData::Message(MessageEventData::Error {
                                                         operation: "open-channel".to_string(),
                                                         recipient: Some(address_clone.clone()),
@@ -569,7 +569,7 @@ impl MessageServerHost {
                                     Err(e) => {
                                         let err_msg = format!("Failed to receive channel open response: {}", e);
                                         ctx.data_mut().record_event(ChainEventData {
-                                            event_type: "ntwk:theater/message-server-host/open-channel".to_string(),
+                                            event_type: "theater:simple/message-server-host/open-channel".to_string(),
                                             data: EventData::Message(MessageEventData::Error {
                                                 operation: "open-channel".to_string(),
                                                 recipient: Some(address_clone.clone()),
@@ -585,7 +585,7 @@ impl MessageServerHost {
                             Err(e) => {
                                 let err_msg = format!("Failed to send channel open command: {}", e);
                                 ctx.data_mut().record_event(ChainEventData {
-                                    event_type: "ntwk:theater/message-server-host/open-channel".to_string(),
+                                    event_type: "theater:simple/message-server-host/open-channel".to_string(),
                                     data: EventData::Message(MessageEventData::Error {
                                         operation: "open-channel".to_string(),
                                         recipient: Some(address_clone.clone()),
@@ -622,7 +622,7 @@ impl MessageServerHost {
                     
                     // Record the channel message call event
                     ctx.data_mut().record_event(ChainEventData {
-                        event_type: "ntwk:theater/message-server-host/send-on-channel".to_string(),
+                        event_type: "theater:simple/message-server-host/send-on-channel".to_string(),
                         data: EventData::Message(MessageEventData::ChannelMessageCall {
                             channel_id: channel_id.clone(),
                             msg: msg.clone(),
@@ -648,7 +648,7 @@ impl MessageServerHost {
                             Ok(_) => {
                                 // Record successful message send on channel
                                 ctx.data_mut().record_event(ChainEventData {
-                                    event_type: "ntwk:theater/message-server-host/send-on-channel".to_string(),
+                                    event_type: "theater:simple/message-server-host/send-on-channel".to_string(),
                                     data: EventData::Message(MessageEventData::ChannelMessageResult {
                                         channel_id: channel_id_clone.clone(),
                                         success: true,
@@ -661,7 +661,7 @@ impl MessageServerHost {
                             Err(e) => {
                                 let err_msg = format!("Failed to send message on channel: {}", e);
                                 ctx.data_mut().record_event(ChainEventData {
-                                    event_type: "ntwk:theater/message-server-host/send-on-channel".to_string(),
+                                    event_type: "theater:simple/message-server-host/send-on-channel".to_string(),
                                     data: EventData::Message(MessageEventData::Error {
                                         operation: "send-on-channel".to_string(),
                                         recipient: None,
@@ -691,7 +691,7 @@ impl MessageServerHost {
                     
                     // Record the channel close call event
                     ctx.data_mut().record_event(ChainEventData {
-                        event_type: "ntwk:theater/message-server-host/close-channel".to_string(),
+                        event_type: "theater:simple/message-server-host/close-channel".to_string(),
                         data: EventData::Message(MessageEventData::CloseChannelCall {
                             channel_id: channel_id.clone(),
                         }),
@@ -714,7 +714,7 @@ impl MessageServerHost {
                             Ok(_) => {
                                 // Record successful channel close
                                 ctx.data_mut().record_event(ChainEventData {
-                                    event_type: "ntwk:theater/message-server-host/close-channel".to_string(),
+                                    event_type: "theater:simple/message-server-host/close-channel".to_string(),
                                     data: EventData::Message(MessageEventData::CloseChannelResult {
                                         channel_id: channel_id_clone.clone(),
                                         success: true,
@@ -727,7 +727,7 @@ impl MessageServerHost {
                             Err(e) => {
                                 let err_msg = format!("Failed to close channel: {}", e);
                                 ctx.data_mut().record_event(ChainEventData {
-                                    event_type: "ntwk:theater/message-server-host/close-channel".to_string(),
+                                    event_type: "theater:simple/message-server-host/close-channel".to_string(),
                                     data: EventData::Message(MessageEventData::Error {
                                         operation: "close-channel".to_string(),
                                         recipient: None,
@@ -750,13 +750,13 @@ impl MessageServerHost {
     pub async fn add_export_functions(&self, actor_instance: &mut ActorInstance) -> Result<()> {
         actor_instance
             .register_function_no_result::<(Vec<u8>,)>(
-                "ntwk:theater/message-server-client",
+                "theater:simple/message-server-client",
                 "handle-send",
             )
             .expect("Failed to register handle-send function");
         actor_instance
             .register_function::<(String, Vec<u8>), (Option<Vec<u8>>,)>(
-                "ntwk:theater/message-server-client",
+                "theater:simple/message-server-client",
                 "handle-request",
             )
             .expect("Failed to register handle-request function");
@@ -764,19 +764,19 @@ impl MessageServerHost {
         // Register channel functions
         actor_instance
             .register_function::<(String, Vec<u8>), (ChannelAccept,)>(
-                "ntwk:theater/message-server-client",
+                "theater:simple/message-server-client",
                 "handle-channel-open",
             )
             .expect("Failed to register handle-channel-open function");
         actor_instance
             .register_function_no_result::<(String, Vec<u8>)>(
-                "ntwk:theater/message-server-client",
+                "theater:simple/message-server-client",
                 "handle-channel-message",
             )
             .expect("Failed to register handle-channel-message function");
         actor_instance
             .register_function_no_result::<(String,)>(
-                "ntwk:theater/message-server-client",
+                "theater:simple/message-server-client",
                 "handle-channel-close",
             )
             .expect("Failed to register handle-channel-close function");
@@ -824,7 +824,7 @@ impl MessageServerHost {
             ActorMessage::Send(ActorSend { data }) => {
                 actor_handle
                     .call_function::<(Vec<u8>,), ()>(
-                        "ntwk:theater/message-server-client.handle-send".to_string(),
+                        "theater:simple/message-server-client.handle-send".to_string(),
                         (data,),
                     )
                     .await?;
@@ -834,7 +834,7 @@ impl MessageServerHost {
                 info!("Got request: id={}, data size={}", request_id, data.len());
                 let response = actor_handle
                     .call_function::<(String, Vec<u8>), (Option<Vec<u8>>,)>(
-                        "ntwk:theater/message-server-client.handle-request".to_string(),
+                        "theater:simple/message-server-client.handle-request".to_string(),
                         (request_id.clone(), data),
                     )
                     .await?;
@@ -865,7 +865,7 @@ impl MessageServerHost {
 
                 let result = actor_handle
                     .call_function::<(String, Vec<u8>,), (ChannelAccept,)>(
-                        "ntwk:theater/message-server-client.handle-channel-open".to_string(),
+                        "theater:simple/message-server-client.handle-channel-open".to_string(),
                         (channel_id.to_string(), data),
                     )
                     .await?;
@@ -892,7 +892,7 @@ impl MessageServerHost {
 
                         actor_handle
                             .call_function::<(String, Vec<u8>), ()>(
-                                "ntwk:theater/message-server-client.handle-channel-message"
+                                "theater:simple/message-server-client.handle-channel-message"
                                     .to_string(),
                                 (channel_id.to_string(), data),
                             )
@@ -913,7 +913,7 @@ impl MessageServerHost {
 
                     actor_handle
                         .call_function::<(String,), ()>(
-                            "ntwk:theater/message-server-client.handle-channel-close".to_string(),
+                            "theater:simple/message-server-client.handle-channel-close".to_string(),
                             (channel_id.to_string(),),
                         )
                         .await?;

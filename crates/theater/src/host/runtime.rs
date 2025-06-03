@@ -75,8 +75,8 @@ impl RuntimeHost {
         let name = actor_component.name.clone();
         let mut interface = actor_component
             .linker
-            .instance("ntwk:theater/runtime")
-            .expect("Could not instantiate ntwk:theater/runtime");
+            .instance("theater:simple/runtime")
+            .expect("Could not instantiate theater:simple/runtime");
 
         interface
             .func_wrap(
@@ -86,7 +86,7 @@ impl RuntimeHost {
 
                     // Record log call event
                     ctx.data_mut().record_event(ChainEventData {
-                        event_type: "ntwk:theater/runtime/log".to_string(),
+                        event_type: "theater:simple/runtime/log".to_string(),
                         data: EventData::Runtime(RuntimeEventData::Log {
                             level: "info".to_string(),
                             message: msg.clone(),
@@ -107,7 +107,7 @@ impl RuntimeHost {
                 move |mut ctx: StoreContextMut<'_, ActorStore>, ()| -> Result<(Vec<u8>,)> {
                     // Record state request call event
                     ctx.data_mut().record_event(ChainEventData {
-                        event_type: "ntwk:theater/runtime/get-state".to_string(),
+                        event_type: "theater:simple/runtime/get-state".to_string(),
                         data: EventData::Runtime(RuntimeEventData::StateChangeCall {
                             old_state: "unknown".to_string(),
                             new_state: "requested".to_string(),
@@ -125,7 +125,7 @@ impl RuntimeHost {
 
                     // Record state request result event
                     ctx.data_mut().record_event(ChainEventData {
-                        event_type: "ntwk:theater/runtime/get-state".to_string(),
+                        event_type: "theater:simple/runtime/get-state".to_string(),
                         data: EventData::Runtime(RuntimeEventData::StateChangeResult {
                             success: true,
                         }),
@@ -148,7 +148,7 @@ impl RuntimeHost {
                       -> Box<dyn Future<Output = Result<(Result<(), String>,)>> + Send> {
                     // Record shutdown call event
                     ctx.data_mut().record_event(ChainEventData {
-                        event_type: "ntwk:theater/runtime/shutdown".to_string(),
+                        event_type: "theater:simple/runtime/shutdown".to_string(),
                         data: EventData::Runtime(RuntimeEventData::ShutdownCall {
                             data: data.clone(),
                         }),
@@ -174,7 +174,7 @@ impl RuntimeHost {
                         {
                             Ok(_) => {
                                 ctx.data_mut().record_event(ChainEventData {
-                                    event_type: "ntwk:theater/runtime/shutdown".to_string(),
+                                    event_type: "theater:simple/runtime/shutdown".to_string(),
                                     data: EventData::Runtime(RuntimeEventData::ShutdownRequested {
                                         success: true,
                                     }),
@@ -187,7 +187,7 @@ impl RuntimeHost {
                                 let err = e.to_string();
                                 // Record failed shutdown result event
                                 ctx.data_mut().record_event(ChainEventData {
-                                    event_type: "ntwk:theater/runtime/shutdown".to_string(),
+                                    event_type: "theater:simple/runtime/shutdown".to_string(),
                                     data: EventData::Runtime(RuntimeEventData::ShutdownRequested {
                                         success: false,
                                     }),
@@ -209,7 +209,7 @@ impl RuntimeHost {
     }
 
     pub async fn add_export_functions(&self, actor_instance: &mut ActorInstance) -> Result<()> {
-        actor_instance.register_function_no_result::<(String,)>("ntwk:theater/actor", "init")
+        actor_instance.register_function_no_result::<(String,)>("theater:simple/actor", "init")
     }
 
     pub async fn start(

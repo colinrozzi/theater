@@ -15,7 +15,7 @@ package theater:simple;
 ///
 /// ```wit
 /// // Using the runtime interface in a WIT definition
-/// use ntwk:theater/runtime;
+/// use theater:simple/runtime;
 ///
 /// // Using the runtime interface in a Rust implementation
 /// runtime::log("Actor initialized successfully");

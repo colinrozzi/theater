@@ -4,7 +4,7 @@ The Store Handler provides actors with access to Theater's content-addressable s
 
 ## Overview
 
-The Store Handler implements the `ntwk:theater/store` interface, enabling actors to:
+The Store Handler implements the `theater:simple/store` interface, enabling actors to:
 
 1. Create and manage store instances
 2. Store and retrieve data using content-addressable storage

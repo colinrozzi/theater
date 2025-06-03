@@ -113,7 +113,7 @@ impl HttpFramework {
 
         let mut interface = actor_component
             .linker
-            .instance("ntwk:theater/http-framework")
+            .instance("theater:simple/http-framework")
             .expect("could not instantiate http-framework");
 
         // Create server implementation
@@ -1068,35 +1068,35 @@ impl HttpFramework {
 
         actor_instance
             .register_function::<(u64, HttpRequest), (HttpResponse,)>(
-                "ntwk:theater/http-handlers",
+                "theater:simple/http-handlers",
                 "handle-request",
             )
             .expect("Failed to register handle-request function");
 
         actor_instance
             .register_function::<(u64, HttpRequest), (MiddlewareResult,)>(
-                "ntwk:theater/http-handlers",
+                "theater:simple/http-handlers",
                 "handle-middleware",
             )
             .expect("Failed to register handle-middleware function");
 
         actor_instance
             .register_function_no_result::<(u64, u64, String, Option<String>)>(
-                "ntwk:theater/http-handlers",
+                "theater:simple/http-handlers",
                 "handle-websocket-connect",
             )
             .expect("Failed to register handle-websocket-connect function");
 
         actor_instance
             .register_function::<(u64, u64, WebSocketMessage), (Vec<WebSocketMessage>,)>(
-                "ntwk:theater/http-handlers",
+                "theater:simple/http-handlers",
                 "handle-websocket-message",
             )
             .expect("Failed to register handle-websocket-message function");
 
         actor_instance
             .register_function_no_result::<(u64, u64)>(
-                "ntwk:theater/http-handlers",
+                "theater:simple/http-handlers",
                 "handle-websocket-disconnect",
             )
             .expect("Failed to register handle-websocket-disconnect function");

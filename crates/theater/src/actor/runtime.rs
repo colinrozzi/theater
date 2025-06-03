@@ -557,7 +557,7 @@ impl ActorRuntime {
                 info!("Calling init function for actor: {:?}", id);
                 match actor_handle
                     .call_function::<(String,), ()>(
-                        "ntwk:theater/actor.init".to_string(),
+                        "theater:simple/actor.init".to_string(),
                         (id.to_string(),),
                     )
                     .await

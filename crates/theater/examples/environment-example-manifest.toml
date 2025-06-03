@@ -5,7 +5,7 @@ component_path = "not_yet_built.wasm"
 save_chain = true
 
 [interface]
-implements = "ntwk:theater/actor"
+implements = "theater:simple/actor"
 requires = []
 
 [[handlers]]

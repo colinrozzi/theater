@@ -204,7 +204,7 @@ impl TimingHost {
     ///
     /// ## Implementation Notes
     ///
-    /// This method sets up several host functions in the ntwk:theater/timing namespace:
+    /// This method sets up several host functions in the theater:simple/timing namespace:
     /// - now: Get the current timestamp in milliseconds
     /// - sleep: Pause execution for a specified duration
     /// - deadline: Pause execution until a specific timestamp

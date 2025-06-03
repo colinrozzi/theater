@@ -54,8 +54,8 @@ impl SupervisorHost {
 
         let mut interface = actor_component
             .linker
-            .instance("ntwk:theater/supervisor")
-            .expect("Could not instantiate ntwk:theater/supervisor");
+            .instance("theater:simple/supervisor")
+            .expect("Could not instantiate theater:simple/supervisor");
 
         let supervisor_tx = self.channel_tx.clone();
         // spawn-child implementation
@@ -67,7 +67,7 @@ impl SupervisorHost {
                       -> Box<dyn Future<Output = Result<(Result<String, String>,)>> + Send> {
                     // Record spawn child call event
                     ctx.data_mut().record_event(ChainEventData {
-                        event_type: "ntwk:theater/supervisor/spawn".to_string(),
+                        event_type: "theater:simple/supervisor/spawn".to_string(),
                         data: EventData::Supervisor(SupervisorEventData::SpawnChildCall {
                             manifest_path: manifest.clone(),
                         }),
@@ -100,7 +100,7 @@ impl SupervisorHost {
                                         
                                         // Record spawn child result event
                                         ctx.data_mut().record_event(ChainEventData {
-                                            event_type: "ntwk:theater/supervisor/spawn".to_string(),
+                                            event_type: "theater:simple/supervisor/spawn".to_string(),
                                             data: EventData::Supervisor(SupervisorEventData::SpawnChildResult {
                                                 child_id: actor_id_str.clone(),
                                                 success: true,
@@ -114,7 +114,7 @@ impl SupervisorHost {
                                     Ok(Err(e)) => {
                                         // Record spawn child error event
                                         ctx.data_mut().record_event(ChainEventData {
-                                            event_type: "ntwk:theater/supervisor/spawn".to_string(),
+                                            event_type: "theater:simple/supervisor/spawn".to_string(),
                                             data: EventData::Supervisor(SupervisorEventData::Error {
                                                 operation: "spawn".to_string(),
                                                 child_id: None,
@@ -129,7 +129,7 @@ impl SupervisorHost {
                                     Err(e) => {
                                         // Record spawn child error event
                                         ctx.data_mut().record_event(ChainEventData {
-                                            event_type: "ntwk:theater/supervisor/spawn".to_string(),
+                                            event_type: "theater:simple/supervisor/spawn".to_string(),
                                             data: EventData::Supervisor(SupervisorEventData::Error {
                                                 operation: "spawn".to_string(),
                                                 child_id: None,
@@ -146,7 +146,7 @@ impl SupervisorHost {
                             Err(e) => {
                                 // Record spawn child error event
                                 ctx.data_mut().record_event(ChainEventData {
-                                    event_type: "ntwk:theater/supervisor/spawn".to_string(),
+                                    event_type: "theater:simple/supervisor/spawn".to_string(),
                                     data: EventData::Supervisor(SupervisorEventData::Error {
                                         operation: "spawn".to_string(),
                                         child_id: None,
@@ -174,7 +174,7 @@ impl SupervisorHost {
                       -> Box<dyn Future<Output = Result<(Result<String, String>,)>> + Send> {
                     // Record spawn child call event
                     ctx.data_mut().record_event(ChainEventData {
-                        event_type: "ntwk:theater/supervisor/spawn".to_string(),
+                        event_type: "theater:simple/supervisor/spawn".to_string(),
                         data: EventData::Supervisor(SupervisorEventData::ResumeChildCall {
                             manifest_path: manifest.clone(),
                             initial_state: state_bytes.clone(),
@@ -208,7 +208,7 @@ impl SupervisorHost {
                                         
                                         // Record spawn child result event
                                         ctx.data_mut().record_event(ChainEventData {
-                                            event_type: "ntwk:theater/supervisor/resume".to_string(),
+                                            event_type: "theater:simple/supervisor/resume".to_string(),
                                             data: EventData::Supervisor(SupervisorEventData::ResumeChildResult {
                                                 child_id: actor_id_str.clone(),
                                                 success: true,
@@ -222,7 +222,7 @@ impl SupervisorHost {
                                     Ok(Err(e)) => {
                                         // Record spawn child error event
                                         ctx.data_mut().record_event(ChainEventData {
-                                            event_type: "ntwk:theater/supervisor/spawn".to_string(),
+                                            event_type: "theater:simple/supervisor/spawn".to_string(),
                                             data: EventData::Supervisor(SupervisorEventData::Error {
                                                 operation: "resume".to_string(),
                                                 child_id: None,
@@ -237,7 +237,7 @@ impl SupervisorHost {
                                     Err(e) => {
                                         // Record spawn child error event
                                         ctx.data_mut().record_event(ChainEventData {
-                                            event_type: "ntwk:theater/supervisor/resume".to_string(),
+                                            event_type: "theater:simple/supervisor/resume".to_string(),
                                             data: EventData::Supervisor(SupervisorEventData::Error {
                                                 operation: "resume".to_string(),
                                                 child_id: None,
@@ -254,7 +254,7 @@ impl SupervisorHost {
                             Err(e) => {
                                 // Record spawn child error event
                                 ctx.data_mut().record_event(ChainEventData {
-                                    event_type: "ntwk:theater/supervisor/resume".to_string(),
+                                    event_type: "theater:simple/supervisor/resume".to_string(),
                                     data: EventData::Supervisor(SupervisorEventData::Error {
                                         operation: "resume".to_string(),
                                         child_id: None,
@@ -281,7 +281,7 @@ impl SupervisorHost {
                       -> Box<dyn Future<Output = Result<(Vec<String>,)>> + Send> {
                     // Record list children call event
                     ctx.data_mut().record_event(ChainEventData {
-                        event_type: "ntwk:theater/supervisor/list-children".to_string(),
+                        event_type: "theater:simple/supervisor/list-children".to_string(),
                         data: EventData::Supervisor(SupervisorEventData::ListChildrenCall {}),
                         timestamp: chrono::Utc::now().timestamp_millis() as u64,
                         description: Some("Listing children".to_string()),
@@ -307,7 +307,7 @@ impl SupervisorHost {
 
                                     // Record list children result event
                                     ctx.data_mut().record_event(ChainEventData {
-                                        event_type: "ntwk:theater/supervisor/list-children"
+                                        event_type: "theater:simple/supervisor/list-children"
                                             .to_string(),
                                         data: EventData::Supervisor(
                                             SupervisorEventData::ListChildrenResult {
@@ -327,7 +327,7 @@ impl SupervisorHost {
                                 Err(e) => {
                                     // Record list children error event
                                     ctx.data_mut().record_event(ChainEventData {
-                                        event_type: "ntwk:theater/supervisor/list-children"
+                                        event_type: "theater:simple/supervisor/list-children"
                                             .to_string(),
                                         data: EventData::Supervisor(SupervisorEventData::Error {
                                             operation: "list-children".to_string(),
@@ -347,7 +347,7 @@ impl SupervisorHost {
                             Err(e) => {
                                 // Record list children error event
                                 ctx.data_mut().record_event(ChainEventData {
-                                    event_type: "ntwk:theater/supervisor/list-children".to_string(),
+                                    event_type: "theater:simple/supervisor/list-children".to_string(),
                                     data: EventData::Supervisor(SupervisorEventData::Error {
                                         operation: "list-children".to_string(),
                                         child_id: None,
@@ -380,7 +380,7 @@ impl SupervisorHost {
                       -> Box<dyn Future<Output = Result<(Result<(), String>,)>> + Send> {
                     // Record restart child call event
                     ctx.data_mut().record_event(ChainEventData {
-                        event_type: "ntwk:theater/supervisor/restart-child".to_string(),
+                        event_type: "theater:simple/supervisor/restart-child".to_string(),
                         data: EventData::Supervisor(SupervisorEventData::RestartChildCall {
                             child_id: child_id.clone(),
                         }),
@@ -401,7 +401,7 @@ impl SupervisorHost {
                                     Err(e) => {
                                         // Record error event
                                         ctx.data_mut().record_event(ChainEventData {
-                                            event_type: "ntwk:theater/supervisor/restart-child".to_string(),
+                                            event_type: "theater:simple/supervisor/restart-child".to_string(),
                                             data: EventData::Supervisor(SupervisorEventData::Error {
                                                 operation: "restart-child".to_string(),
                                                 child_id: Some(child_id_clone.clone()),
@@ -422,7 +422,7 @@ impl SupervisorHost {
                                 Ok(Ok(())) => {
                                     // Record restart child result event
                                     ctx.data_mut().record_event(ChainEventData {
-                                        event_type: "ntwk:theater/supervisor/restart-child".to_string(),
+                                        event_type: "theater:simple/supervisor/restart-child".to_string(),
                                         data: EventData::Supervisor(SupervisorEventData::RestartChildResult {
                                             child_id: child_id_clone.clone(),
                                             success: true,
@@ -436,7 +436,7 @@ impl SupervisorHost {
                                 Ok(Err(e)) => {
                                     // Record restart child error event
                                     ctx.data_mut().record_event(ChainEventData {
-                                        event_type: "ntwk:theater/supervisor/restart-child".to_string(),
+                                        event_type: "theater:simple/supervisor/restart-child".to_string(),
                                         data: EventData::Supervisor(SupervisorEventData::Error {
                                             operation: "restart-child".to_string(),
                                             child_id: Some(child_id_clone.clone()),
@@ -451,7 +451,7 @@ impl SupervisorHost {
                                 Err(e) => {
                                     // Record restart child error event
                                     ctx.data_mut().record_event(ChainEventData {
-                                        event_type: "ntwk:theater/supervisor/restart-child".to_string(),
+                                        event_type: "theater:simple/supervisor/restart-child".to_string(),
                                         data: EventData::Supervisor(SupervisorEventData::Error {
                                             operation: "restart-child".to_string(),
                                             child_id: Some(child_id_clone.clone()),
@@ -467,7 +467,7 @@ impl SupervisorHost {
                             Err(e) => {
                                 // Record restart child error event
                                 ctx.data_mut().record_event(ChainEventData {
-                                    event_type: "ntwk:theater/supervisor/restart-child".to_string(),
+                                    event_type: "theater:simple/supervisor/restart-child".to_string(),
                                     data: EventData::Supervisor(SupervisorEventData::Error {
                                         operation: "restart-child".to_string(),
                                         child_id: Some(child_id_clone.clone()),
@@ -494,7 +494,7 @@ impl SupervisorHost {
                       -> Box<dyn Future<Output = Result<(Result<(), String>,)>> + Send> {
                     // Record stop child call event
                     ctx.data_mut().record_event(ChainEventData {
-                        event_type: "ntwk:theater/supervisor/stop-child".to_string(),
+                        event_type: "theater:simple/supervisor/stop-child".to_string(),
                         data: EventData::Supervisor(SupervisorEventData::StopChildCall {
                             child_id: child_id.clone(),
                         }),
@@ -515,7 +515,7 @@ impl SupervisorHost {
                                     Err(e) => {
                                         // Record error event
                                         ctx.data_mut().record_event(ChainEventData {
-                                            event_type: "ntwk:theater/supervisor/stop-child".to_string(),
+                                            event_type: "theater:simple/supervisor/stop-child".to_string(),
                                             data: EventData::Supervisor(SupervisorEventData::Error {
                                                 operation: "stop-child".to_string(),
                                                 child_id: Some(child_id_clone.clone()),
@@ -536,7 +536,7 @@ impl SupervisorHost {
                                 Ok(Ok(())) => {
                                     // Record stop child result event
                                     ctx.data_mut().record_event(ChainEventData {
-                                        event_type: "ntwk:theater/supervisor/stop-child".to_string(),
+                                        event_type: "theater:simple/supervisor/stop-child".to_string(),
                                         data: EventData::Supervisor(SupervisorEventData::StopChildResult {
                                             child_id: child_id_clone.clone(),
                                             success: true,
@@ -550,7 +550,7 @@ impl SupervisorHost {
                                 Ok(Err(e)) => {
                                     // Record stop child error event
                                     ctx.data_mut().record_event(ChainEventData {
-                                        event_type: "ntwk:theater/supervisor/stop-child".to_string(),
+                                        event_type: "theater:simple/supervisor/stop-child".to_string(),
                                         data: EventData::Supervisor(SupervisorEventData::Error {
                                             operation: "stop-child".to_string(),
                                             child_id: Some(child_id_clone.clone()),
@@ -565,7 +565,7 @@ impl SupervisorHost {
                                 Err(e) => {
                                     // Record stop child error event
                                     ctx.data_mut().record_event(ChainEventData {
-                                        event_type: "ntwk:theater/supervisor/stop-child".to_string(),
+                                        event_type: "theater:simple/supervisor/stop-child".to_string(),
                                         data: EventData::Supervisor(SupervisorEventData::Error {
                                             operation: "stop-child".to_string(),
                                             child_id: Some(child_id_clone.clone()),
@@ -581,7 +581,7 @@ impl SupervisorHost {
                             Err(e) => {
                                 // Record stop child error event
                                 ctx.data_mut().record_event(ChainEventData {
-                                    event_type: "ntwk:theater/supervisor/stop-child".to_string(),
+                                    event_type: "theater:simple/supervisor/stop-child".to_string(),
                                     data: EventData::Supervisor(SupervisorEventData::Error {
                                         operation: "stop-child".to_string(),
                                         child_id: Some(child_id_clone.clone()),
@@ -610,7 +610,7 @@ impl SupervisorHost {
                 > {
                     // Record get child state call event
                     ctx.data_mut().record_event(ChainEventData {
-                        event_type: "ntwk:theater/supervisor/get-child-state".to_string(),
+                        event_type: "theater:simple/supervisor/get-child-state".to_string(),
                         data: EventData::Supervisor(SupervisorEventData::GetChildStateCall {
                             child_id: child_id.clone(),
                         }),
@@ -631,7 +631,7 @@ impl SupervisorHost {
                                     Err(e) => {
                                         // Record error event
                                         ctx.data_mut().record_event(ChainEventData {
-                                            event_type: "ntwk:theater/supervisor/get-child-state"
+                                            event_type: "theater:simple/supervisor/get-child-state"
                                                 .to_string(),
                                             data: EventData::Supervisor(
                                                 SupervisorEventData::Error {
@@ -659,7 +659,7 @@ impl SupervisorHost {
                                     // Record get child state result event
                                     let state_size = state.as_ref().map_or(0, |s| s.len());
                                     ctx.data_mut().record_event(ChainEventData {
-                                        event_type: "ntwk:theater/supervisor/get-child-state"
+                                        event_type: "theater:simple/supervisor/get-child-state"
                                             .to_string(),
                                         data: EventData::Supervisor(
                                             SupervisorEventData::GetChildStateResult {
@@ -680,7 +680,7 @@ impl SupervisorHost {
                                 Ok(Err(e)) => {
                                     // Record get child state error event
                                     ctx.data_mut().record_event(ChainEventData {
-                                        event_type: "ntwk:theater/supervisor/get-child-state"
+                                        event_type: "theater:simple/supervisor/get-child-state"
                                             .to_string(),
                                         data: EventData::Supervisor(SupervisorEventData::Error {
                                             operation: "get-child-state".to_string(),
@@ -699,7 +699,7 @@ impl SupervisorHost {
                                 Err(e) => {
                                     // Record get child state error event
                                     ctx.data_mut().record_event(ChainEventData {
-                                        event_type: "ntwk:theater/supervisor/get-child-state"
+                                        event_type: "theater:simple/supervisor/get-child-state"
                                             .to_string(),
                                         data: EventData::Supervisor(SupervisorEventData::Error {
                                             operation: "get-child-state".to_string(),
@@ -719,7 +719,7 @@ impl SupervisorHost {
                             Err(e) => {
                                 // Record get child state error event
                                 ctx.data_mut().record_event(ChainEventData {
-                                    event_type: "ntwk:theater/supervisor/get-child-state"
+                                    event_type: "theater:simple/supervisor/get-child-state"
                                         .to_string(),
                                     data: EventData::Supervisor(SupervisorEventData::Error {
                                         operation: "get-child-state".to_string(),
@@ -752,7 +752,7 @@ impl SupervisorHost {
                 > {
                     // Record get child events call event
                     ctx.data_mut().record_event(ChainEventData {
-                        event_type: "ntwk:theater/supervisor/get-child-events".to_string(),
+                        event_type: "theater:simple/supervisor/get-child-events".to_string(),
                         data: EventData::Supervisor(SupervisorEventData::GetChildEventsCall {
                             child_id: child_id.clone(),
                         }),
@@ -773,7 +773,7 @@ impl SupervisorHost {
                                     Err(e) => {
                                         // Record error event
                                         ctx.data_mut().record_event(ChainEventData {
-                                            event_type: "ntwk:theater/supervisor/get-child-events"
+                                            event_type: "theater:simple/supervisor/get-child-events"
                                                 .to_string(),
                                             data: EventData::Supervisor(
                                                 SupervisorEventData::Error {
@@ -800,7 +800,7 @@ impl SupervisorHost {
                                 Ok(Ok(events)) => {
                                     // Record get child events result event
                                     ctx.data_mut().record_event(ChainEventData {
-                                        event_type: "ntwk:theater/supervisor/get-child-events"
+                                        event_type: "theater:simple/supervisor/get-child-events"
                                             .to_string(),
                                         data: EventData::Supervisor(
                                             SupervisorEventData::GetChildEventsResult {
@@ -822,7 +822,7 @@ impl SupervisorHost {
                                 Ok(Err(e)) => {
                                     // Record get child events error event
                                     ctx.data_mut().record_event(ChainEventData {
-                                        event_type: "ntwk:theater/supervisor/get-child-events"
+                                        event_type: "theater:simple/supervisor/get-child-events"
                                             .to_string(),
                                         data: EventData::Supervisor(SupervisorEventData::Error {
                                             operation: "get-child-events".to_string(),
@@ -841,7 +841,7 @@ impl SupervisorHost {
                                 Err(e) => {
                                     // Record get child events error event
                                     ctx.data_mut().record_event(ChainEventData {
-                                        event_type: "ntwk:theater/supervisor/get-child-events"
+                                        event_type: "theater:simple/supervisor/get-child-events"
                                             .to_string(),
                                         data: EventData::Supervisor(SupervisorEventData::Error {
                                             operation: "get-child-events".to_string(),
@@ -861,7 +861,7 @@ impl SupervisorHost {
                             Err(e) => {
                                 // Record get child events error event
                                 ctx.data_mut().record_event(ChainEventData {
-                                    event_type: "ntwk:theater/supervisor/get-child-events"
+                                    event_type: "theater:simple/supervisor/get-child-events"
                                         .to_string(),
                                     data: EventData::Supervisor(SupervisorEventData::Error {
                                         operation: "get-child-events".to_string(),
@@ -893,14 +893,14 @@ impl SupervisorHost {
 
         actor_instance
             .register_function_no_result::<(String, WitActorError)>(
-                "ntwk:theater/supervisor-handlers",
+                "theater:simple/supervisor-handlers",
                 "handle-child-error",
             )
             .expect("Failed to register handle-child-error function");
 
         actor_instance
             .register_function_no_result::<(String, Option<Vec<u8>>)>(
-                "ntwk:theater/supervisor-handlers",
+                "theater:simple/supervisor-handlers",
                 "handle-child-exit",
             )
             .expect("Failed to register handle-child-exit function");
@@ -942,7 +942,7 @@ impl SupervisorHost {
             ActorResult::Error(child_error) => {
                 actor_handle
                     .call_function::<(String, WitActorError), ()>(
-                        "ntwk:theater/supervisor-handlers.handle-child-error".to_string(),
+                        "theater:simple/supervisor-handlers.handle-child-error".to_string(),
                         (child_error.actor_id.to_string(), child_error.error.into()),
                     )
                     .await?;
@@ -950,7 +950,7 @@ impl SupervisorHost {
             ActorResult::Success(child_result) => {
                 info!("Child result: {:?}", child_result);
                 actor_handle.call_function::<(String, Option<Vec<u8>>), ()>(
-                    "ntwk:theater/supervisor-handlers.handle-child-exit".to_string(),
+                    "theater:simple/supervisor-handlers.handle-child-exit".to_string(),
                     (child_result.actor_id.to_string(), child_result.result.into()),
                 ).await?;
             }

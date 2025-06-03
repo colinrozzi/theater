@@ -160,7 +160,7 @@ Break long-running operations into discrete steps:
   // Standard Rust syntax for calling the functions
   actor_handle
     .call_function::<(String, Vec<u8>), ()>(
-      "ntwk:theater/message-server-client.handle-channel-message",
+      "theater:simple/message-server-client.handle-channel-message",
       (channel_id.to_string(), data),
     )
     .await?;
@@ -171,7 +171,7 @@ Break long-running operations into discrete steps:
   // Register with types matching the WIT interface
   actor_instance
     .register_function_no_result::<(String, Vec<u8>)>(
-      "ntwk:theater/message-server-client",
+      "theater:simple/message-server-client",
       "handle-channel-message",
     )
   ```

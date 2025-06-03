@@ -60,8 +60,8 @@ impl RandomHost {
 
         let mut interface = actor_component
             .linker
-            .instance("ntwk:theater/random")
-            .expect("Could not instantiate ntwk:theater/random");
+            .instance("theater:simple/random")
+            .expect("Could not instantiate theater:simple/random");
 
         let rng = Arc::clone(&self.rng);
         let config = self.config.clone();
@@ -79,7 +79,7 @@ impl RandomHost {
                     
                     // Record the random bytes call event
                     ctx.data_mut().record_event(ChainEventData {
-                        event_type: "ntwk:theater/random-host/random-bytes".to_string(),
+                        event_type: "theater:simple/random-host/random-bytes".to_string(),
                         data: EventData::Random(RandomEventData::RandomBytesCall {
                             requested_size: size,
                         }),
@@ -91,7 +91,7 @@ impl RandomHost {
                         let error_msg = format!("Requested {} bytes exceeds maximum {}", size, config.max_bytes);
                         
                         ctx.data_mut().record_event(ChainEventData {
-                            event_type: "ntwk:theater/random-host/random-bytes".to_string(),
+                            event_type: "theater:simple/random-host/random-bytes".to_string(),
                             data: EventData::Random(RandomEventData::Error {
                                 operation: "random-bytes".to_string(),
                                 message: error_msg.clone(),
@@ -110,7 +110,7 @@ impl RandomHost {
                             
                             // Record successful result
                             ctx.data_mut().record_event(ChainEventData {
-                                event_type: "ntwk:theater/random-host/random-bytes".to_string(),
+                                event_type: "theater:simple/random-host/random-bytes".to_string(),
                                 data: EventData::Random(RandomEventData::RandomBytesResult {
                                     generated_size: size,
                                     success: true,
@@ -125,7 +125,7 @@ impl RandomHost {
                             let error_msg = format!("Failed to acquire RNG lock: {}", e);
                             
                             ctx.data_mut().record_event(ChainEventData {
-                                event_type: "ntwk:theater/random-host/random-bytes".to_string(),
+                                event_type: "theater:simple/random-host/random-bytes".to_string(),
                                 data: EventData::Random(RandomEventData::Error {
                                     operation: "random-bytes".to_string(),
                                     message: error_msg.clone(),
@@ -155,7 +155,7 @@ impl RandomHost {
                 Box::new(async move {
                     // Record the random range call event
                     ctx.data_mut().record_event(ChainEventData {
-                        event_type: "ntwk:theater/random-host/random-range".to_string(),
+                        event_type: "theater:simple/random-host/random-range".to_string(),
                         data: EventData::Random(RandomEventData::RandomRangeCall {
                             min,
                             max
@@ -168,7 +168,7 @@ impl RandomHost {
                         let error_msg = format!("Invalid range: min ({}) >= max ({})", min, max);
                         
                         ctx.data_mut().record_event(ChainEventData {
-                            event_type: "ntwk:theater/random-host/random-range".to_string(),
+                            event_type: "theater:simple/random-host/random-range".to_string(),
                             data: EventData::Random(RandomEventData::Error {
                                 operation: "random-range".to_string(),
                                 message: error_msg.clone(),
@@ -184,7 +184,7 @@ impl RandomHost {
                         let error_msg = format!("Requested max value ({}) exceeds configured maximum ({})", max, config.max_int);
                         
                         ctx.data_mut().record_event(ChainEventData {
-                            event_type: "ntwk:theater/random-host/random-range".to_string(),
+                            event_type: "theater:simple/random-host/random-range".to_string(),
                             data: EventData::Random(RandomEventData::Error {
                                 operation: "random-range".to_string(),
                                 message: error_msg.clone(),
@@ -202,7 +202,7 @@ impl RandomHost {
                             
                             // Record successful result
                             ctx.data_mut().record_event(ChainEventData {
-                                event_type: "ntwk:theater/random-host/random-range".to_string(),
+                                event_type: "theater:simple/random-host/random-range".to_string(),
                                 data: EventData::Random(RandomEventData::RandomRangeResult {
                                     min,
                                     max,
@@ -219,7 +219,7 @@ impl RandomHost {
                             let error_msg = format!("Failed to acquire RNG lock: {}", e);
                             
                             ctx.data_mut().record_event(ChainEventData {
-                                event_type: "ntwk:theater/random-host/random-range".to_string(),
+                                event_type: "theater:simple/random-host/random-range".to_string(),
                                 data: EventData::Random(RandomEventData::Error {
                                     operation: "random-range".to_string(),
                                     message: error_msg.clone(),
@@ -247,7 +247,7 @@ impl RandomHost {
                 Box::new(async move {
                     // Record the random float call event
                     ctx.data_mut().record_event(ChainEventData {
-                        event_type: "ntwk:theater/random-host/random-float".to_string(),
+                        event_type: "theater:simple/random-host/random-float".to_string(),
                         data: EventData::Random(RandomEventData::RandomFloatCall),
                         timestamp: chrono::Utc::now().timestamp_millis() as u64,
                         description: Some("Generating random float between 0.0 and 1.0".to_string()),
@@ -259,7 +259,7 @@ impl RandomHost {
                             
                             // Record successful result
                             ctx.data_mut().record_event(ChainEventData {
-                                event_type: "ntwk:theater/random-host/random-float".to_string(),
+                                event_type: "theater:simple/random-host/random-float".to_string(),
                                 data: EventData::Random(RandomEventData::RandomFloatResult {
                                     value,
                                     success: true,
@@ -274,7 +274,7 @@ impl RandomHost {
                             let error_msg = format!("Failed to acquire RNG lock: {}", e);
                             
                             ctx.data_mut().record_event(ChainEventData {
-                                event_type: "ntwk:theater/random-host/random-float".to_string(),
+                                event_type: "theater:simple/random-host/random-float".to_string(),
                                 data: EventData::Random(RandomEventData::Error {
                                     operation: "random-float".to_string(),
                                     message: error_msg.clone(),
@@ -301,7 +301,7 @@ impl RandomHost {
                     Box::new(async move {
                         // Record the UUID generation call event
                         ctx.data_mut().record_event(ChainEventData {
-                            event_type: "ntwk:theater/random-host/generate-uuid".to_string(),
+                            event_type: "theater:simple/random-host/generate-uuid".to_string(),
                             data: EventData::Random(RandomEventData::GenerateUuidCall),
                             timestamp: chrono::Utc::now().timestamp_millis() as u64,
                             description: Some("Generating random UUID".to_string()),
@@ -314,7 +314,7 @@ impl RandomHost {
                                 
                                 // Record successful result
                                 ctx.data_mut().record_event(ChainEventData {
-                                    event_type: "ntwk:theater/random-host/generate-uuid".to_string(),
+                                    event_type: "theater:simple/random-host/generate-uuid".to_string(),
                                     data: EventData::Random(RandomEventData::GenerateUuidResult {
                                         uuid: uuid_str.clone(),
                                         success: true,
@@ -329,7 +329,7 @@ impl RandomHost {
                                 let error_msg = format!("Failed to acquire RNG lock: {}", e);
                                 
                                 ctx.data_mut().record_event(ChainEventData {
-                                    event_type: "ntwk:theater/random-host/generate-uuid".to_string(),
+                                    event_type: "theater:simple/random-host/generate-uuid".to_string(),
                                     data: EventData::Random(RandomEventData::Error {
                                         operation: "generate-uuid".to_string(),
                                         message: error_msg.clone(),

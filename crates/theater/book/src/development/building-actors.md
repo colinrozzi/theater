@@ -117,7 +117,7 @@ name = "counter-actor"
 component_path = "target/wasm32-wasi/release/counter_actor.wasm"
 
 [interface]
-implements = "ntwk:theater/actor"
+implements = "theater:simple/actor"
 requires = []
 
 [[handlers]]

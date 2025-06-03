@@ -4,7 +4,7 @@ The Filesystem Handler provides actors with controlled access to the local files
 
 ## Overview
 
-The Filesystem Handler implements the `ntwk:theater/filesystem` interface, providing actors with the ability to:
+The Filesystem Handler implements the `theater:simple/filesystem` interface, providing actors with the ability to:
 
 1. Read and write files securely
 2. Create and manage directories

@@ -180,21 +180,21 @@ impl ProcessHost {
         // Register the process handler export functions
         actor_instance
             .register_function_no_result::<(u64, Vec<u8>)>(
-                "ntwk:theater/process-handlers",
+                "theater:simple/process-handlers",
                 "handle-stdout",
             )
             .expect("Failed to register handle-stdout function");
 
         actor_instance
             .register_function_no_result::<(u64, Vec<u8>)>(
-                "ntwk:theater/process-handlers",
+                "theater:simple/process-handlers",
                 "handle-stderr",
             )
             .expect("Failed to register handle-stderr function");
 
         actor_instance
             .register_function_no_result::<(u64, i32)>(
-                "ntwk:theater/process-handlers",
+                "theater:simple/process-handlers",
                 "handle-exit",
             )
             .expect("Failed to register handle-exit function");
@@ -430,8 +430,8 @@ impl ProcessHost {
 
         let mut interface = actor_component
             .linker
-            .instance("ntwk:theater/process")
-            .expect("Could not instantiate ntwk:theater/process");
+            .instance("theater:simple/process")
+            .expect("Could not instantiate theater:simple/process");
 
         // Implementation for os-spawn
         let processes = self.processes.clone();
@@ -589,7 +589,7 @@ impl ProcessHost {
                                         actor_id_clone,
                                         theater_tx_clone,
                                         actor_handle.clone(),
-                                        "ntwk:theater/process-handlers.handle-stdout".to_string(),
+                                        "theater:simple/process-handlers.handle-stdout".to_string(),
                                     ).await;
                                 }))
                             } else {
@@ -614,7 +614,7 @@ impl ProcessHost {
                                         actor_id_clone,
                                         theater_tx_clone,
                                         actor_handle.clone(),
-                                        "ntwk:theater/process-handlers.handle-stderr".to_string(),
+                                        "theater:simple/process-handlers.handle-stderr".to_string(),
                                     ).await;
                                 }))
                             } else {
@@ -660,7 +660,7 @@ impl ProcessHost {
                                             // Now also explicitly call the actor's handle_exit function directly
                                             // This provides redundancy in case the event system fails
                                             match actor_handle_clone.call_function::<(u64, i32), ()>(
-                                                "ntwk:theater/process-handlers.handle-exit".to_string(),
+                                                "theater:simple/process-handlers.handle-exit".to_string(),
                                                 (process_id_clone, exit_code)
                                             ).await {
                                                 Ok(_) => info!("Successfully called handle_exit directly for process {}", process_id_clone),

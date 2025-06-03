@@ -38,8 +38,8 @@ impl StoreHost {
 
         let mut interface = actor_component
             .linker
-            .instance("ntwk:theater/store")
-            .expect("could not instantiate ntwk:theater/store");
+            .instance("theater:simple/store")
+            .expect("could not instantiate theater:simple/store");
 
         interface.func_wrap(
             "new",
@@ -48,7 +48,7 @@ impl StoreHost {
                   -> Result<(Result<String, String>,)> {
                 // Record store call event
                 ctx.data_mut().record_event(ChainEventData {
-                    event_type: "ntwk:theater/store/store".to_string(),
+                    event_type: "theater:simple/store/store".to_string(),
                     data: EventData::Store(StoreEventData::NewStoreCall {}),
                     timestamp: chrono::Utc::now().timestamp_millis() as u64,
                     description: Some("Creating new content store".to_string()),
@@ -58,7 +58,7 @@ impl StoreHost {
 
                 // Record store result event
                 ctx.data_mut().record_event(ChainEventData {
-                    event_type: "ntwk:theater/store/store".to_string(),
+                    event_type: "theater:simple/store/store".to_string(),
                     data: EventData::Store(StoreEventData::NewStoreResult {
                         store_id: store.id().to_string(),
                         success: true,
@@ -77,7 +77,7 @@ impl StoreHost {
                 -> Box<dyn Future<Output = Result<(Result<ContentRef, String>,)>> + Send> {
                 // Record store call event
                 ctx.data_mut().record_event(ChainEventData {
-                    event_type: "ntwk:theater/store/store".to_string(),
+                    event_type: "theater:simple/store/store".to_string(),
                     data: EventData::Store(StoreEventData::StoreCall {
                         store_id: store_id.clone(),
                         content: content.clone(),
@@ -96,7 +96,7 @@ impl StoreHost {
                             
                             // Record store result event
                             ctx.data_mut().record_event(ChainEventData {
-                                event_type: "ntwk:theater/store/store".to_string(),
+                                event_type: "theater:simple/store/store".to_string(),
                                 data: EventData::Store(StoreEventData::StoreResult {
                                     store_id: store_id.clone(),
                                     content_ref: content_ref.clone(),
@@ -113,7 +113,7 @@ impl StoreHost {
                             
                             // Record store error event
                             ctx.data_mut().record_event(ChainEventData {
-                                event_type: "ntwk:theater/store/store".to_string(),
+                                event_type: "theater:simple/store/store".to_string(),
                                 data: EventData::Store(StoreEventData::Error {
                                     operation: "store".to_string(),
                                     message: e.to_string(),
@@ -135,7 +135,7 @@ impl StoreHost {
                 -> Box<dyn Future<Output = Result<(Result<Vec<u8>, String>,)>> + Send> {
                 // Record get call event
                 ctx.data_mut().record_event(ChainEventData {
-                    event_type: "ntwk:theater/store/get".to_string(),
+                    event_type: "theater:simple/store/get".to_string(),
                     data: EventData::Store(StoreEventData::GetCall {
                         store_id: store_id.clone(),
                         content_ref: content_ref.clone(),
@@ -154,7 +154,7 @@ impl StoreHost {
                             
                             // Record get result event
                             ctx.data_mut().record_event(ChainEventData {
-                                event_type: "ntwk:theater/store/get".to_string(),
+                                event_type: "theater:simple/store/get".to_string(),
                                 data: EventData::Store(StoreEventData::GetResult {
                                     store_id: store_id.clone(),
                                     content_ref: content_ref.clone(),
@@ -172,7 +172,7 @@ impl StoreHost {
                             
                             // Record get error event
                             ctx.data_mut().record_event(ChainEventData {
-                                event_type: "ntwk:theater/store/get".to_string(),
+                                event_type: "theater:simple/store/get".to_string(),
                                 data: EventData::Store(StoreEventData::Error {
                                     operation: "get".to_string(),
                                     message: e.to_string(),
@@ -195,7 +195,7 @@ impl StoreHost {
                   -> Box<dyn Future<Output = Result<(Result<bool, String>,)>> + Send> {
                 // Record exists call event
                 ctx.data_mut().record_event(ChainEventData {
-                    event_type: "ntwk:theater/store/exists".to_string(),
+                    event_type: "theater:simple/store/exists".to_string(),
                     data: EventData::Store(StoreEventData::ExistsCall {
                         store_id: store_id.clone(),
                         content_ref: content_ref.clone(),
@@ -217,7 +217,7 @@ impl StoreHost {
 
                             // Record exists result event
                             ctx.data_mut().record_event(ChainEventData {
-                                event_type: "ntwk:theater/store/exists".to_string(),
+                                event_type: "theater:simple/store/exists".to_string(),
                                 data: EventData::Store(StoreEventData::ExistsResult {
                                     store_id: store_id.clone(),
                                     content_ref: content_ref.clone(),
@@ -246,7 +246,7 @@ impl StoreHost {
                   -> Box<dyn Future<Output = Result<(Result<(), String>,)>> + Send> {
                 // Record label call event
                 ctx.data_mut().record_event(ChainEventData {
-                    event_type: "ntwk:theater/store/label".to_string(),
+                    event_type: "theater:simple/store/label".to_string(),
                     data: EventData::Store(StoreEventData::LabelCall {
                         store_id: store_id.clone(),
                         label: label_string.clone(),
@@ -272,7 +272,7 @@ impl StoreHost {
 
                             // Record label result event
                             ctx.data_mut().record_event(ChainEventData {
-                                event_type: "ntwk:theater/store/label".to_string(),
+                                event_type: "theater:simple/store/label".to_string(),
                                 data: EventData::Store(StoreEventData::LabelResult {
                                     store_id: store_id.clone(),
                                     label: label_string.clone(),
@@ -294,7 +294,7 @@ impl StoreHost {
 
                             // Record label error event
                             ctx.data_mut().record_event(ChainEventData {
-                                event_type: "ntwk:theater/store/label".to_string(),
+                                event_type: "theater:simple/store/label".to_string(),
                                 data: EventData::Store(StoreEventData::Error {
                                     operation: "label".to_string(),
                                     message: e.to_string(),
@@ -324,7 +324,7 @@ impl StoreHost {
             > {
                 // Record get-by-label call event
                 ctx.data_mut().record_event(ChainEventData {
-                    event_type: "ntwk:theater/store/get-by-label".to_string(),
+                    event_type: "theater:simple/store/get-by-label".to_string(),
                     data: EventData::Store(StoreEventData::GetByLabelCall {
                         store_id: store_id.clone(),
                         label: label_string.clone(),
@@ -345,7 +345,7 @@ impl StoreHost {
 
                             // Record get-by-label result event
                             ctx.data_mut().record_event(ChainEventData {
-                                event_type: "ntwk:theater/store/get-by-label".to_string(),
+                                event_type: "theater:simple/store/get-by-label".to_string(),
                                 data: EventData::Store(StoreEventData::GetByLabelResult {
                                     store_id: store_id.clone(),
                                     label: label_clone.name().to_string(),
@@ -366,7 +366,7 @@ impl StoreHost {
 
                             // Record get-by-label error event
                             ctx.data_mut().record_event(ChainEventData {
-                                event_type: "ntwk:theater/store/get-by-label".to_string(),
+                                event_type: "theater:simple/store/get-by-label".to_string(),
                                 data: EventData::Store(StoreEventData::Error {
                                     operation: "get-by-label".to_string(),
                                     message: e.to_string(),
@@ -392,7 +392,7 @@ impl StoreHost {
                   -> Box<dyn Future<Output = Result<(Result<(), String>,)>> + Send> {
                 // Record remove-label call event
                 ctx.data_mut().record_event(ChainEventData {
-                    event_type: "ntwk:theater/store/remove-label".to_string(),
+                    event_type: "theater:simple/store/remove-label".to_string(),
                     data: EventData::Store(StoreEventData::RemoveLabelCall {
                         store_id: store_id.clone(),
                         label: label_string.clone(),
@@ -413,7 +413,7 @@ impl StoreHost {
 
                             // Record remove-label result event
                             ctx.data_mut().record_event(ChainEventData {
-                                event_type: "ntwk:theater/store/remove-label".to_string(),
+                                event_type: "theater:simple/store/remove-label".to_string(),
                                 data: EventData::Store(StoreEventData::RemoveLabelResult {
                                     store_id: store_id.clone(),
                                     label: label_string.clone(),
@@ -433,7 +433,7 @@ impl StoreHost {
 
                             // Record remove-label error event
                             ctx.data_mut().record_event(ChainEventData {
-                                event_type: "ntwk:theater/store/remove-label".to_string(),
+                                event_type: "theater:simple/store/remove-label".to_string(),
                                 data: EventData::Store(StoreEventData::Error {
                                     operation: "remove-label".to_string(),
                                     message: e.to_string(),
@@ -458,7 +458,7 @@ impl StoreHost {
                 -> Box<dyn Future<Output = Result<(Result<ContentRef, String>,)>> + Send> {
                 // Record put-at-label call event
                 ctx.data_mut().record_event(ChainEventData {
-                    event_type: "ntwk:theater/store/store-at-label".to_string(),
+                    event_type: "theater:simple/store/store-at-label".to_string(),
                     data: EventData::Store(StoreEventData::StoreAtLabelCall {
                         store_id: store_id.clone(),
                         label: label_string.clone(),
@@ -481,7 +481,7 @@ impl StoreHost {
                             
                             // Record put-at-label result event
                             ctx.data_mut().record_event(ChainEventData {
-                                event_type: "ntwk:theater/store/store-at-label".to_string(),
+                                event_type: "theater:simple/store/store-at-label".to_string(),
                                 data: EventData::Store(StoreEventData::StoreAtLabelResult {
                                     store_id: store_id.clone(),
                                     label: label_string.clone(),
@@ -499,7 +499,7 @@ impl StoreHost {
                             
                             // Record put-at-label error event
                             ctx.data_mut().record_event(ChainEventData {
-                                event_type: "ntwk:theater/store/put-at-label".to_string(),
+                                event_type: "theater:simple/store/put-at-label".to_string(),
                                 data: EventData::Store(StoreEventData::Error {
                                     operation: "put-at-label".to_string(),
                                     message: e.to_string(),
@@ -521,7 +521,7 @@ impl StoreHost {
                 -> Box<dyn Future<Output = Result<(Result<ContentRef, String>,)>> + Send> {
                 // Record replace-content-at-label call event
                 ctx.data_mut().record_event(ChainEventData {
-                    event_type: "ntwk:theater/store/replace-content-at-label".to_string(),
+                    event_type: "theater:simple/store/replace-content-at-label".to_string(),
                     data: EventData::Store(StoreEventData::ReplaceContentAtLabelCall {
                         store_id: store_id.clone(),
                         label: label_string.clone(),
@@ -544,7 +544,7 @@ impl StoreHost {
                             
                             // Record replace-content-at-label result event
                             ctx.data_mut().record_event(ChainEventData {
-                                event_type: "ntwk:theater/store/replace-content-at-label".to_string(),
+                                event_type: "theater:simple/store/replace-content-at-label".to_string(),
                                 data: EventData::Store(StoreEventData::ReplaceContentAtLabelResult {
                                     store_id: store_id.clone(),
                                     label: label_string.clone(),
@@ -562,7 +562,7 @@ impl StoreHost {
                             
                             // Record replace-content-at-label error event
                             ctx.data_mut().record_event(ChainEventData {
-                                event_type: "ntwk:theater/store/replace-content-at-label".to_string(),
+                                event_type: "theater:simple/store/replace-content-at-label".to_string(),
                                 data: EventData::Store(StoreEventData::Error {
                                     operation: "replace-content-at-label".to_string(),
                                     message: e.to_string(),
@@ -584,7 +584,7 @@ impl StoreHost {
                 -> Box<dyn Future<Output = Result<(Result<(), String>,)>> + Send> {
                 // Record replace-at-label call event
                 ctx.data_mut().record_event(ChainEventData {
-                    event_type: "ntwk:theater/store/replace-at-label".to_string(),
+                    event_type: "theater:simple/store/replace-at-label".to_string(),
                     data: EventData::Store(StoreEventData::ReplaceAtLabelCall {
                         store_id: store_id.clone(),
                         label: label_string.clone(),
@@ -606,7 +606,7 @@ impl StoreHost {
                             
                             // Record replace-at-label result event
                             ctx.data_mut().record_event(ChainEventData {
-                                event_type: "ntwk:theater/store/replace-at-label".to_string(),
+                                event_type: "theater:simple/store/replace-at-label".to_string(),
                                 data: EventData::Store(StoreEventData::ReplaceAtLabelResult {
                                     store_id: store_id.clone(),
                                     label: label_string.clone(),
@@ -624,7 +624,7 @@ impl StoreHost {
                             
                             // Record replace-at-label error event
                             ctx.data_mut().record_event(ChainEventData {
-                                event_type: "ntwk:theater/store/replace-at-label".to_string(),
+                                event_type: "theater:simple/store/replace-at-label".to_string(),
                                 data: EventData::Store(StoreEventData::Error {
                                     operation: "replace-at-label".to_string(),
                                     message: e.to_string(),
@@ -649,7 +649,7 @@ impl StoreHost {
             > {
                 // Record list-all-content call event
                 ctx.data_mut().record_event(ChainEventData {
-                    event_type: "ntwk:theater/store/list-all-content".to_string(),
+                    event_type: "theater:simple/store/list-all-content".to_string(),
                     data: EventData::Store(StoreEventData::ListAllContentCall {
                         store_id: store_id.clone(),
                     }),
@@ -667,7 +667,7 @@ impl StoreHost {
 
                             // Record list-all-content result event
                             ctx.data_mut().record_event(ChainEventData {
-                                event_type: "ntwk:theater/store/list-all-content".to_string(),
+                                event_type: "theater:simple/store/list-all-content".to_string(),
                                 data: EventData::Store(StoreEventData::ListAllContentResult {
                                     store_id: store_id.clone(),
                                     content_refs: content_refs.clone(),
@@ -687,7 +687,7 @@ impl StoreHost {
 
                             // Record list-all-content error event
                             ctx.data_mut().record_event(ChainEventData {
-                                event_type: "ntwk:theater/store/list-all-content".to_string(),
+                                event_type: "theater:simple/store/list-all-content".to_string(),
                                 data: EventData::Store(StoreEventData::Error {
                                     operation: "list-all-content".to_string(),
                                     message: e.to_string(),
@@ -713,7 +713,7 @@ impl StoreHost {
                   -> Box<dyn Future<Output = Result<(Result<u64, String>,)>> + Send> {
                 // Record calculate-total-size call event
                 ctx.data_mut().record_event(ChainEventData {
-                    event_type: "ntwk:theater/store/calculate-total-size".to_string(),
+                    event_type: "theater:simple/store/calculate-total-size".to_string(),
                     data: EventData::Store(StoreEventData::CalculateTotalSizeCall {
                         store_id: store_id.clone(),
                     }),
@@ -731,7 +731,7 @@ impl StoreHost {
 
                             // Record calculate-total-size result event
                             ctx.data_mut().record_event(ChainEventData {
-                                event_type: "ntwk:theater/store/calculate-total-size".to_string(),
+                                event_type: "theater:simple/store/calculate-total-size".to_string(),
                                 data: EventData::Store(StoreEventData::CalculateTotalSizeResult {
                                     store_id: store_id.clone(),
                                     size: total_size,
@@ -751,7 +751,7 @@ impl StoreHost {
 
                             // Record calculate-total-size error event
                             ctx.data_mut().record_event(ChainEventData {
-                                event_type: "ntwk:theater/store/calculate-total-size".to_string(),
+                                event_type: "theater:simple/store/calculate-total-size".to_string(),
                                 data: EventData::Store(StoreEventData::Error {
                                     operation: "calculate-total-size".to_string(),
                                     message: e.to_string(),
@@ -776,7 +776,7 @@ impl StoreHost {
                 -> Box<dyn Future<Output = Result<(Result<Vec<String>, String>,)>> + Send> {
                 // Record list labels call event
                 ctx.data_mut().record_event(ChainEventData {
-                    event_type: "ntwk:theater/store/list-labels".to_string(),
+                    event_type: "theater:simple/store/list-labels".to_string(),
                     data: EventData::Store(StoreEventData::ListLabelsCall { store_id: store_id.clone() }),
                     timestamp: chrono::Utc::now().timestamp_millis() as u64,
                     description: Some("Listing all labels".to_string()),
@@ -792,7 +792,7 @@ impl StoreHost {
                             
                             // Record list labels result event
                             ctx.data_mut().record_event(ChainEventData {
-                                event_type: "ntwk:theater/store/list-labels".to_string(),
+                                event_type: "theater:simple/store/list-labels".to_string(),
                                 data: EventData::Store(StoreEventData::ListLabelsResult {
                                     store_id: store_id.clone(),
                                     labels: labels.clone(),
@@ -809,7 +809,7 @@ impl StoreHost {
                             
                             // Record list labels error event
                             ctx.data_mut().record_event(ChainEventData {
-                                event_type: "ntwk:theater/store/list-labels".to_string(),
+                                event_type: "theater:simple/store/list-labels".to_string(),
                                 data: EventData::Store(StoreEventData::Error {
                                     operation: "list-labels".to_string(),
                                     message: e.to_string(),

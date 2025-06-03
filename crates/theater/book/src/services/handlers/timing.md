@@ -4,7 +4,7 @@ The Timing Handler provides actors with time-related capabilities, including del
 
 ## Overview
 
-The Timing Handler implements the `ntwk:theater/timing` interface, enabling actors to:
+The Timing Handler implements the `theater:simple/timing` interface, enabling actors to:
 
 1. Introduce controlled delays in their execution
 2. Implement timeout patterns for operations

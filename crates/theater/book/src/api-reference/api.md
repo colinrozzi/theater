@@ -25,8 +25,8 @@ Here are some key components in the API:
 Every Theater actor must implement the core actor interface:
 
 ```wit
-// ntwk:theater/actor interface
-package ntwk:theater
+// theater:simple/actor interface
+package theater:simple
 
 interface types {
     /// JSON-encoded data
@@ -103,7 +103,7 @@ Theater provides several host functions that actors can use. For complete detail
 ### Runtime Interface
 
 ```wit
-// ntwk:theater/runtime interface
+// theater:simple/runtime interface
 interface runtime {
     /// Log a message to the host system
     log: func(msg: string)
@@ -119,7 +119,7 @@ interface runtime {
 ### HTTP Server Interface
 
 ```wit
-// ntwk:theater/http-server interface
+// theater:simple/http-server interface
 interface http-server {
     record http-request {
         method: string,
@@ -143,7 +143,7 @@ The [HttpFramework](/theater/api/theater/host/framework/struct.HttpFramework.htm
 ### WebSocket Server Interface
 
 ```wit
-// ntwk:theater/websocket-server interface
+// theater:simple/websocket-server interface
 interface websocket-server {
     use types.{json}
 
@@ -259,7 +259,7 @@ name = "example-actor"
 component_path = "target/wasm32-wasi/release/example_actor.wasm"
 
 [interface]
-implements = "ntwk:theater/websocket-server"
+implements = "theater:simple/websocket-server"
 requires = []
 
 [[handlers]]

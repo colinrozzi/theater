@@ -4,7 +4,7 @@ The HTTP Framework Handler enables actors to serve HTTP requests, turning them i
 
 ## Overview
 
-The HTTP Framework Handler implements the `ntwk:theater/http-framework` interface, providing:
+The HTTP Framework Handler implements the `theater:simple/http-framework` interface, providing:
 
 1. A way for actors to receive and respond to HTTP requests
 2. Conversion between HTTP requests and actor-friendly formats

@@ -109,7 +109,7 @@ component_path = "my_actor.wasm"
 [[handlers]]
 type = "message-server"
 config = { port = 8080 }
-interface = "ntwk:theater/message-server-client"
+interface = "theater:simple/message-server-client"
 
 # HTTP server handler
 [[handlers]]
@@ -238,14 +238,14 @@ component_path = "counter.wasm"
 # Interfaces implemented by this actor
 [interface]
 implements = [
-    "ntwk:theater/actor",
-    "ntwk:theater/message-server-client",
-    "ntwk:theater/http-server"
+    "theater:simple/actor",
+    "theater:simple/message-server-client",
+    "theater:simple/http-server"
 ]
 
 # Interfaces required by this actor
 requires = [
-    "ntwk:theater/message-server-host"
+    "theater:simple/message-server-host"
 ]
 
 # Message server handler

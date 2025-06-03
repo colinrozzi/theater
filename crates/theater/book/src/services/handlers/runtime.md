@@ -4,7 +4,7 @@ The Runtime Handler provides actors with information about and control over thei
 
 ## Overview
 
-The Runtime Handler implements the `ntwk:theater/runtime` interface, providing actors with the ability to:
+The Runtime Handler implements the `theater:simple/runtime` interface, providing actors with the ability to:
 
 1. Access information about themselves and the runtime
 2. Control their lifecycle

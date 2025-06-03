@@ -53,8 +53,8 @@ impl EnvironmentHost {
 
         let mut interface = actor_component
             .linker
-            .instance("ntwk:theater/environment")
-            .expect("Could not instantiate ntwk:theater/environment");
+            .instance("theater:simple/environment")
+            .expect("Could not instantiate theater:simple/environment");
 
         let config = self.config.clone();
         
@@ -68,7 +68,7 @@ impl EnvironmentHost {
                 if !is_allowed {
                     // Record access denial
                     ctx.data_mut().record_event(ChainEventData {
-                        event_type: "ntwk:theater/environment/get-var".to_string(),
+                        event_type: "theater:simple/environment/get-var".to_string(),
                         data: EventData::Environment(EnvironmentEventData {
                             operation: "get-var".to_string(),
                             variable_name: var_name.clone(),
@@ -87,7 +87,7 @@ impl EnvironmentHost {
 
                 // Record the access attempt
                 ctx.data_mut().record_event(ChainEventData {
-                    event_type: "ntwk:theater/environment/get-var".to_string(),
+                    event_type: "theater:simple/environment/get-var".to_string(),
                     data: EventData::Environment(EnvironmentEventData {
                         operation: "get-var".to_string(),
                         variable_name: var_name.clone(),
@@ -115,7 +115,7 @@ impl EnvironmentHost {
                 if !is_allowed {
                     // Record access denial
                     ctx.data_mut().record_event(ChainEventData {
-                        event_type: "ntwk:theater/environment/exists".to_string(),
+                        event_type: "theater:simple/environment/exists".to_string(),
                         data: EventData::Environment(EnvironmentEventData {
                             operation: "exists".to_string(),
                             variable_name: var_name.clone(),
@@ -133,7 +133,7 @@ impl EnvironmentHost {
 
                 // Record the check
                 ctx.data_mut().record_event(ChainEventData {
-                    event_type: "ntwk:theater/environment/exists".to_string(),
+                    event_type: "theater:simple/environment/exists".to_string(),
                     data: EventData::Environment(EnvironmentEventData {
                         operation: "exists".to_string(),
                         variable_name: var_name.clone(),
@@ -160,7 +160,7 @@ impl EnvironmentHost {
                 if !config_clone2.allow_list_all {
                     // Record denied list attempt
                     ctx.data_mut().record_event(ChainEventData {
-                        event_type: "ntwk:theater/environment/list-vars".to_string(),
+                        event_type: "theater:simple/environment/list-vars".to_string(),
                         data: EventData::Environment(EnvironmentEventData {
                             operation: "list-vars".to_string(),
                             variable_name: "(list-all disabled)".to_string(),
@@ -185,7 +185,7 @@ impl EnvironmentHost {
                 // Record the list operation
                 let count = accessible_vars.len();
                 ctx.data_mut().record_event(ChainEventData {
-                    event_type: "ntwk:theater/environment/list-vars".to_string(),
+                    event_type: "theater:simple/environment/list-vars".to_string(),
                     data: EventData::Environment(EnvironmentEventData {
                         operation: "list-vars".to_string(),
                         variable_name: format!("(returned {} variables)", count),

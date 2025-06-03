@@ -4,7 +4,7 @@ The HTTP Client Handler enables actors to make HTTP requests to external service
 
 ## Overview
 
-The HTTP Client Handler implements the `ntwk:theater/http-client` interface, providing a way for actors to:
+The HTTP Client Handler implements the `theater:simple/http-client` interface, providing a way for actors to:
 
 1. Send HTTP requests to external services
 2. Process HTTP responses

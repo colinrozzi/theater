@@ -813,7 +813,7 @@ impl ServerState {
         let result = self
             .actor_handle
             .call_function::<(u64, HttpRequest), (HttpResponse,)>(
-                "ntwk:theater/http-handlers.handle-request".to_string(),
+                "theater:simple/http-handlers.handle-request".to_string(),
                 (handler_id, request),
             )
             .await?;
@@ -830,7 +830,7 @@ impl ServerState {
         let result = self
             .actor_handle
             .call_function::<(u64, HttpRequest), (MiddlewareResult,)>(
-                "ntwk:theater/http-handlers.handle-middleware".to_string(),
+                "theater:simple/http-handlers.handle-middleware".to_string(),
                 (handler_id, request),
             )
             .await?;
@@ -848,7 +848,7 @@ impl ServerState {
         // Call connect handler
         self.actor_handle
             .call_function::<(u64, u64, String, Option<String>), ()>(
-                "ntwk:theater/http-handlers.handle-websocket-connect".to_string(),
+                "theater:simple/http-handlers.handle-websocket-connect".to_string(),
                 (handler_id, connection_id, path, query),
             )
             .await?;
@@ -866,7 +866,7 @@ impl ServerState {
         let result = self
             .actor_handle
             .call_function::<(u64, u64, WebSocketMessage), (Vec<WebSocketMessage>,)>(
-                "ntwk:theater/http-handlers.handle-websocket-message".to_string(),
+                "theater:simple/http-handlers.handle-websocket-message".to_string(),
                 (handler_id, connection_id, message),
             )
             .await?;
@@ -882,7 +882,7 @@ impl ServerState {
         // Call disconnect handler
         self.actor_handle
             .call_function::<(u64, u64), ()>(
-                "ntwk:theater/http-handlers.handle-websocket-disconnect".to_string(),
+                "theater:simple/http-handlers.handle-websocket-disconnect".to_string(),
                 (handler_id, connection_id),
             )
             .await?;

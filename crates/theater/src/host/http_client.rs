@@ -62,8 +62,8 @@ impl HttpClientHost {
 
         let mut interface = actor_component
             .linker
-            .instance("ntwk:theater/http-client")
-            .expect("could not instantiate ntwk:theater/http-client");
+            .instance("theater:simple/http-client")
+            .expect("could not instantiate theater:simple/http-client");
 
         interface.func_wrap_async(
             "send-http",
@@ -73,7 +73,7 @@ impl HttpClientHost {
                 
                 // Record HTTP client request call event
                 ctx.data_mut().record_event(ChainEventData {
-                    event_type: "ntwk:theater/http-client/send-http".to_string(),
+                    event_type: "theater:simple/http-client/send-http".to_string(),
                     data: EventData::Http(HttpEventData::HttpClientRequestCall {
                         method: req.method.clone(),
                         url: req.uri.clone(),
@@ -97,7 +97,7 @@ impl HttpClientHost {
                             
                             // Record error event
                             ctx.data_mut().record_event(ChainEventData {
-                                event_type: "ntwk:theater/http-client/send-http".to_string(),
+                                event_type: "theater:simple/http-client/send-http".to_string(),
                                 data: EventData::Http(HttpEventData::Error {
                                     operation: "send-http".to_string(),
                                     path: req_clone.uri.clone(),
@@ -141,7 +141,7 @@ impl HttpClientHost {
                                 Err(e) => {
                                     // Record error reading response body
                                     ctx.data_mut().record_event(ChainEventData {
-                                        event_type: "ntwk:theater/http-client/send-http".to_string(),
+                                        event_type: "theater:simple/http-client/send-http".to_string(),
                                         data: EventData::Http(HttpEventData::Error {
                                             operation: "read-response-body".to_string(),
                                             path: req_clone.uri.clone(),
@@ -163,7 +163,7 @@ impl HttpClientHost {
                             
                             // Record HTTP client request result event
                             ctx.data_mut().record_event(ChainEventData {
-                                event_type: "ntwk:theater/http-client/send-http".to_string(),
+                                event_type: "theater:simple/http-client/send-http".to_string(),
                                 data: EventData::Http(HttpEventData::HttpClientRequestResult {
                                     status,
                                     headers_count: resp.headers.len(),
@@ -181,7 +181,7 @@ impl HttpClientHost {
                             
                             // Record HTTP client request error event
                             ctx.data_mut().record_event(ChainEventData {
-                                event_type: "ntwk:theater/http-client/send-http".to_string(),
+                                event_type: "theater:simple/http-client/send-http".to_string(),
                                 data: EventData::Http(HttpEventData::Error {
                                     operation: "send-http".to_string(),
                                     path: req_clone.uri.clone(),

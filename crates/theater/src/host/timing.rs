@@ -47,8 +47,8 @@ impl TimingHost {
 
         let mut interface = actor_component
             .linker
-            .instance("ntwk:theater/timing")
-            .expect("Could not instantiate ntwk:theater/timing");
+            .instance("theater:simple/timing")
+            .expect("Could not instantiate theater:simple/timing");
 
         let max_sleep_duration = self.config.max_sleep_duration;
         let min_sleep_duration = self.config.min_sleep_duration;
@@ -62,7 +62,7 @@ impl TimingHost {
 
                     // Record now call event
                     ctx.data_mut().record_event(ChainEventData {
-                        event_type: "ntwk:theater/timing/now".to_string(),
+                        event_type: "theater:simple/timing/now".to_string(),
                         data: EventData::Timing(TimingEventData::NowCall {}),
                         timestamp: now,
                         description: Some("Getting current timestamp".to_string()),
@@ -70,7 +70,7 @@ impl TimingHost {
 
                     // Record now result event
                     ctx.data_mut().record_event(ChainEventData {
-                        event_type: "ntwk:theater/timing/now".to_string(),
+                        event_type: "theater:simple/timing/now".to_string(),
                         data: EventData::Timing(TimingEventData::NowResult { timestamp: now }),
                         timestamp: now,
                         description: Some(format!("Current timestamp: {}", now)),
@@ -92,7 +92,7 @@ impl TimingHost {
                     
                     // Record sleep call event
                     ctx.data_mut().record_event(ChainEventData {
-                        event_type: "ntwk:theater/timing/sleep".to_string(),
+                        event_type: "theater:simple/timing/sleep".to_string(),
                         data: EventData::Timing(TimingEventData::SleepCall { duration }),
                         timestamp: now,
                         description: Some(format!("Sleeping for {} ms", duration)),
@@ -107,7 +107,7 @@ impl TimingHost {
                         
                         // Record error event
                         ctx.data_mut().record_event(ChainEventData {
-                            event_type: "ntwk:theater/timing/sleep".to_string(),
+                            event_type: "theater:simple/timing/sleep".to_string(),
                             data: EventData::Timing(TimingEventData::Error {
                                 operation: "sleep".to_string(),
                                 message: error_msg.clone(),
@@ -124,7 +124,7 @@ impl TimingHost {
                         
                         // Record error event
                         ctx.data_mut().record_event(ChainEventData {
-                            event_type: "ntwk:theater/timing/sleep".to_string(),
+                            event_type: "theater:simple/timing/sleep".to_string(),
                             data: EventData::Timing(TimingEventData::Error {
                                 operation: "sleep".to_string(),
                                 message: error_msg.clone(),
@@ -148,7 +148,7 @@ impl TimingHost {
                         
                         // Record sleep result event
                         ctx.data_mut().record_event(ChainEventData {
-                            event_type: "ntwk:theater/timing/sleep".to_string(),
+                            event_type: "theater:simple/timing/sleep".to_string(),
                             data: EventData::Timing(TimingEventData::SleepResult {
                                 duration: duration_clone,
                                 success: true,
@@ -174,7 +174,7 @@ impl TimingHost {
                     
                     // Record deadline call event
                     ctx.data_mut().record_event(ChainEventData {
-                        event_type: "ntwk:theater/timing/deadline".to_string(),
+                        event_type: "theater:simple/timing/deadline".to_string(),
                         data: EventData::Timing(TimingEventData::DeadlineCall { timestamp }),
                         timestamp: now,
                         description: Some(format!("Waiting until timestamp: {}", timestamp)),
@@ -186,7 +186,7 @@ impl TimingHost {
                         
                         // Record deadline result event (immediate success)
                         ctx.data_mut().record_event(ChainEventData {
-                            event_type: "ntwk:theater/timing/deadline".to_string(),
+                            event_type: "theater:simple/timing/deadline".to_string(),
                             data: EventData::Timing(TimingEventData::DeadlineResult {
                                 timestamp,
                                 success: true,
@@ -211,7 +211,7 @@ impl TimingHost {
                         
                         // Record error event
                         ctx.data_mut().record_event(ChainEventData {
-                            event_type: "ntwk:theater/timing/deadline".to_string(),
+                            event_type: "theater:simple/timing/deadline".to_string(),
                             data: EventData::Timing(TimingEventData::Error {
                                 operation: "deadline".to_string(),
                                 message: error_msg.clone(),
@@ -235,7 +235,7 @@ impl TimingHost {
                         
                         // Record deadline result event
                         ctx.data_mut().record_event(ChainEventData {
-                            event_type: "ntwk:theater/timing/deadline".to_string(),
+                            event_type: "theater:simple/timing/deadline".to_string(),
                             data: EventData::Timing(TimingEventData::DeadlineResult {
                                 timestamp: timestamp_clone,
                                 success: reached_deadline,

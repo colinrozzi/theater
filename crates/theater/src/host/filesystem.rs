@@ -98,8 +98,8 @@ impl FileSystemHost {
 
         let mut interface = actor_component
             .linker
-            .instance("ntwk:theater/filesystem")
-            .expect("could not instantiate ntwk:theater/filesystem");
+            .instance("theater:simple/filesystem")
+            .expect("could not instantiate theater:simple/filesystem");
 
         let allowed_path = self.path.clone();
 
@@ -110,7 +110,7 @@ impl FileSystemHost {
                   -> Result<(Result<Vec<u8>, String>,)> {
                 // Record file read call event
                 ctx.data_mut().record_event(ChainEventData {
-                    event_type: "ntwk:theater/filesystem/read-file".to_string(),
+                    event_type: "theater:simple/filesystem/read-file".to_string(),
                     data: EventData::Filesystem(FilesystemEventData::FileReadCall {
                         path: file_path.clone(),
                     }),
@@ -126,7 +126,7 @@ impl FileSystemHost {
                     Err(e) => {
                         // Record error event
                         ctx.data_mut().record_event(ChainEventData {
-                            event_type: "ntwk:theater/filesystem/read-file".to_string(),
+                            event_type: "theater:simple/filesystem/read-file".to_string(),
                             data: EventData::Filesystem(FilesystemEventData::Error {
                                 operation: "open".to_string(),
                                 path: file_path.to_string_lossy().to_string(),
@@ -144,7 +144,7 @@ impl FileSystemHost {
                 if let Err(e) = reader.read_to_end(&mut contents) {
                     // Record error event
                     ctx.data_mut().record_event(ChainEventData {
-                        event_type: "ntwk:theater/filesystem/read-file".to_string(),
+                        event_type: "theater:simple/filesystem/read-file".to_string(),
                         data: EventData::Filesystem(FilesystemEventData::Error {
                             operation: "read".to_string(),
                             path: file_path.to_string_lossy().to_string(),
@@ -158,7 +158,7 @@ impl FileSystemHost {
 
                 // Record file read result event
                 ctx.data_mut().record_event(ChainEventData {
-                    event_type: "ntwk:theater/filesystem/read-file".to_string(),
+                    event_type: "theater:simple/filesystem/read-file".to_string(),
                     data: EventData::Filesystem(FilesystemEventData::FileReadResult {
                         contents: contents.clone(),
                         success: true,
@@ -185,7 +185,7 @@ impl FileSystemHost {
                   -> Result<(Result<(), String>,)> {
                 // Record file write call event
                 ctx.data_mut().record_event(ChainEventData {
-                    event_type: "ntwk:theater/filesystem/write-file".to_string(),
+                    event_type: "theater:simple/filesystem/write-file".to_string(),
                     data: EventData::Filesystem(FilesystemEventData::FileWriteCall {
                         path: file_path.clone(),
                         contents: contents.clone().into(),
@@ -207,7 +207,7 @@ impl FileSystemHost {
                         Ok(_) => {
                             // Record file write result event
                             ctx.data_mut().record_event(ChainEventData {
-                                event_type: "ntwk:theater/filesystem/write-file".to_string(),
+                                event_type: "theater:simple/filesystem/write-file".to_string(),
                                 data: EventData::Filesystem(FilesystemEventData::FileWriteResult {
                                     path: file_path.to_string_lossy().to_string(),
                                     success: true,
@@ -226,7 +226,7 @@ impl FileSystemHost {
                         Err(e) => {
                             // Record error event
                             ctx.data_mut().record_event(ChainEventData {
-                                event_type: "ntwk:theater/filesystem/write-file".to_string(),
+                                event_type: "theater:simple/filesystem/write-file".to_string(),
                                 data: EventData::Filesystem(FilesystemEventData::Error {
                                     operation: "write".to_string(),
                                     path: file_path.to_string_lossy().to_string(),
@@ -245,7 +245,7 @@ impl FileSystemHost {
                     Err(e) => {
                         // Record error event
                         ctx.data_mut().record_event(ChainEventData {
-                            event_type: "ntwk:theater/filesystem/write-file".to_string(),
+                            event_type: "theater:simple/filesystem/write-file".to_string(),
                             data: EventData::Filesystem(FilesystemEventData::Error {
                                 operation: "create".to_string(),
                                 path: file_path.to_string_lossy().to_string(),
@@ -273,7 +273,7 @@ impl FileSystemHost {
                   -> Result<(Result<Vec<String>, String>,)> {
                 // Record directory listed call event
                 ctx.data_mut().record_event(ChainEventData {
-                    event_type: "ntwk:theater/filesystem/list-files".to_string(),
+                    event_type: "theater:simple/filesystem/list-files".to_string(),
                     data: EventData::Filesystem(FilesystemEventData::DirectoryListedCall {
                         path: dir_path.clone(),
                     }),
@@ -297,7 +297,7 @@ impl FileSystemHost {
 
                         // Record directory list result event
                         ctx.data_mut().record_event(ChainEventData {
-                            event_type: "ntwk:theater/filesystem/list-files".to_string(),
+                            event_type: "theater:simple/filesystem/list-files".to_string(),
                             data: EventData::Filesystem(FilesystemEventData::DirectoryListResult {
                                 entries: files.clone(),
                                 path: dir_path.to_string_lossy().to_string(),
@@ -317,7 +317,7 @@ impl FileSystemHost {
                     Err(e) => {
                         // Record error event
                         ctx.data_mut().record_event(ChainEventData {
-                            event_type: "ntwk:theater/filesystem/list-files".to_string(),
+                            event_type: "theater:simple/filesystem/list-files".to_string(),
                             data: EventData::Filesystem(FilesystemEventData::Error {
                                 operation: "list".to_string(),
                                 path: dir_path.to_string_lossy().to_string(),
@@ -345,7 +345,7 @@ impl FileSystemHost {
                   -> Result<(Result<(), String>,)> {
                 // Record file delete call event
                 ctx.data_mut().record_event(ChainEventData {
-                    event_type: "ntwk:theater/filesystem/delete-file".to_string(),
+                    event_type: "theater:simple/filesystem/delete-file".to_string(),
                     data: EventData::Filesystem(FilesystemEventData::FileDeleteCall {
                         path: file_path.clone(),
                     }),
@@ -360,7 +360,7 @@ impl FileSystemHost {
                     Ok(_) => {
                         // Record file delete result event
                         ctx.data_mut().record_event(ChainEventData {
-                            event_type: "ntwk:theater/filesystem/delete-file".to_string(),
+                            event_type: "theater:simple/filesystem/delete-file".to_string(),
                             data: EventData::Filesystem(FilesystemEventData::FileDeleteResult {
                                 path: file_path.to_string_lossy().to_string(),
                                 success: true,
@@ -375,7 +375,7 @@ impl FileSystemHost {
                     Err(e) => {
                         // Record error event
                         ctx.data_mut().record_event(ChainEventData {
-                            event_type: "ntwk:theater/filesystem/delete-file".to_string(),
+                            event_type: "theater:simple/filesystem/delete-file".to_string(),
                             data: EventData::Filesystem(FilesystemEventData::Error {
                                 operation: "delete".to_string(),
                                 path: file_path.to_string_lossy().to_string(),
@@ -403,7 +403,7 @@ impl FileSystemHost {
                   -> Result<(Result<(), String>,)> {
                 // Record directory created call event
                 ctx.data_mut().record_event(ChainEventData {
-                    event_type: "ntwk:theater/filesystem/create-dir".to_string(),
+                    event_type: "theater:simple/filesystem/create-dir".to_string(),
                     data: EventData::Filesystem(FilesystemEventData::DirectoryCreatedCall {
                         path: dir_path.clone(),
                     }),
@@ -419,7 +419,7 @@ impl FileSystemHost {
                     Ok(_) => {
                         // Record directory created result event
                         ctx.data_mut().record_event(ChainEventData {
-                            event_type: "ntwk:theater/filesystem/create-dir".to_string(),
+                            event_type: "theater:simple/filesystem/create-dir".to_string(),
                             data: EventData::Filesystem(
                                 FilesystemEventData::DirectoryCreatedResult {
                                     success: true,
@@ -439,7 +439,7 @@ impl FileSystemHost {
                     Err(e) => {
                         // Record error event
                         ctx.data_mut().record_event(ChainEventData {
-                            event_type: "ntwk:theater/filesystem/create-dir".to_string(),
+                            event_type: "theater:simple/filesystem/create-dir".to_string(),
                             data: EventData::Filesystem(FilesystemEventData::Error {
                                 operation: "create_dir".to_string(),
                                 path: dir_path.to_string_lossy().to_string(),
@@ -467,7 +467,7 @@ impl FileSystemHost {
                   -> Result<(Result<(), String>,)> {
                 // Record directory deleted call event
                 ctx.data_mut().record_event(ChainEventData {
-                    event_type: "ntwk:theater/filesystem/delete-dir".to_string(),
+                    event_type: "theater:simple/filesystem/delete-dir".to_string(),
                     data: EventData::Filesystem(FilesystemEventData::DirectoryDeletedCall {
                         path: dir_path.clone(),
                     }),
@@ -482,7 +482,7 @@ impl FileSystemHost {
                     Ok(_) => {
                         // Record directory deleted result event
                         ctx.data_mut().record_event(ChainEventData {
-                            event_type: "ntwk:theater/filesystem/delete-dir".to_string(),
+                            event_type: "theater:simple/filesystem/delete-dir".to_string(),
                             data: EventData::Filesystem(
                                 FilesystemEventData::DirectoryDeletedResult {
                                     success: true,
@@ -502,7 +502,7 @@ impl FileSystemHost {
                     Err(e) => {
                         // Record error event
                         ctx.data_mut().record_event(ChainEventData {
-                            event_type: "ntwk:theater/filesystem/delete-dir".to_string(),
+                            event_type: "theater:simple/filesystem/delete-dir".to_string(),
                             data: EventData::Filesystem(FilesystemEventData::Error {
                                 operation: "delete_dir".to_string(),
                                 path: dir_path.to_string_lossy().to_string(),
@@ -530,7 +530,7 @@ impl FileSystemHost {
                   -> Result<(Result<bool, String>,)> {
                 // Record path exists call event
                 ctx.data_mut().record_event(ChainEventData {
-                    event_type: "ntwk:theater/filesystem/path-exists".to_string(),
+                    event_type: "theater:simple/filesystem/path-exists".to_string(),
                     data: EventData::Filesystem(FilesystemEventData::PathExistsCall {
                         path: path.clone(),
                     }),
@@ -545,7 +545,7 @@ impl FileSystemHost {
 
                 // Record path exists result event
                 ctx.data_mut().record_event(ChainEventData {
-                    event_type: "ntwk:theater/filesystem/path-exists".to_string(),
+                    event_type: "theater:simple/filesystem/path-exists".to_string(),
                     data: EventData::Filesystem(FilesystemEventData::PathExistsResult {
                         path: path.to_string_lossy().to_string(),
                         exists,
@@ -580,7 +580,7 @@ impl FileSystemHost {
 
                     // Record command execution event
                     ctx.data_mut().record_event(ChainEventData {
-                        event_type: "ntwk:theater/filesystem/execute-command".to_string(),
+                        event_type: "theater:simple/filesystem/execute-command".to_string(),
                         data: EventData::Filesystem(FilesystemEventData::CommandExecuted {
                             directory: dir.clone(),
                             command: command.clone(),
@@ -610,7 +610,7 @@ impl FileSystemHost {
                             Ok(result) => {
                                 // Record successful
                                 ctx.data_mut().record_event(ChainEventData {
-                                    event_type: "ntwk:theater/filesystem/command-result"
+                                    event_type: "theater:simple/filesystem/command-result"
                                         .to_string(),
                                     data: EventData::Filesystem(
                                         FilesystemEventData::CommandCompleted {
@@ -640,7 +640,7 @@ impl FileSystemHost {
                 > {
                     // Record nix command execution event
                     ctx.data_mut().record_event(ChainEventData {
-                        event_type: "ntwk:theater/filesystem/execute-nix-command".to_string(),
+                        event_type: "theater:simple/filesystem/execute-nix-command".to_string(),
                         data: EventData::Filesystem(FilesystemEventData::NixCommandExecuted {
                             directory: dir.clone(),
                             command: command.clone(),
@@ -661,7 +661,7 @@ impl FileSystemHost {
                             Ok(result) => {
                                 // Record successful execution
                                 ctx.data_mut().record_event(ChainEventData {
-                                    event_type: "ntwk:theater/filesystem/nix-command-result"
+                                    event_type: "theater:simple/filesystem/nix-command-result"
                                         .to_string(),
                                     data: EventData::Filesystem(
                                         FilesystemEventData::CommandCompleted {

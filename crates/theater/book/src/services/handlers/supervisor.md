@@ -4,7 +4,7 @@ The Supervisor Handler enables parent-child relationships between actors in Thea
 
 ## Overview
 
-The Supervisor Handler implements the `ntwk:theater/supervisor` interface, enabling actors to:
+The Supervisor Handler implements the `theater:simple/supervisor` interface, enabling actors to:
 
 1. Spawn new child actors
 2. Monitor child actor lifecycle events

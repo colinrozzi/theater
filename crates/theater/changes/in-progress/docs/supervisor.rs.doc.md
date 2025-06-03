@@ -182,7 +182,7 @@ impl SupervisorHost {
     ///
     /// ## Implementation Notes
     ///
-    /// This method sets up several host functions in the ntwk:theater/supervisor namespace:
+    /// This method sets up several host functions in the theater:simple/supervisor namespace:
     /// - spawn: Create a new child actor from a manifest
     /// - resume: Resume a previously stopped actor with its state
     /// - list-children: Get a list of all child actor IDs

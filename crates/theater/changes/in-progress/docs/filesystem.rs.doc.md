@@ -182,7 +182,7 @@ impl FileSystemHost {
     ///
     /// ## Implementation Notes
     ///
-    /// This method sets up several host functions in the ntwk:theater/filesystem namespace:
+    /// This method sets up several host functions in the theater:simple/filesystem namespace:
     /// - read-file: Read file contents from the filesystem
     /// - write-file: Write content to a file
     /// - list-files: List directory contents
