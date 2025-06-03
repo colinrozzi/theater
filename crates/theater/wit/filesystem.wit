@@ -1,4 +1,4 @@
-package ntwk:theater;
+package theater:simple;
 
 interface filesystem {
     read-file: func(path: string) -> result<list<u8>, string>;

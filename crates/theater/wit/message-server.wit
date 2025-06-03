@@ -1,4 +1,4 @@
-package ntwk:theater;
+package theater:simple;
 
 /// # Message Server Client Interface
 ///

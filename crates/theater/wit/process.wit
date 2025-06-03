@@ -1,3 +1,4 @@
+package theater:simple;
 
 /// OS Process handler interface for managing operating system processes
 interface process {

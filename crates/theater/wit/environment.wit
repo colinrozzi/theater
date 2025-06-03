@@ -1,4 +1,4 @@
-package ntwk:theater;
+package theater:simple;
 
 interface environment {
     // Get a specific environment variable

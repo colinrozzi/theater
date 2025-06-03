@@ -1,4 +1,4 @@
-package ntwk:theater;
+package theater:simple;
 
 interface random {
     random-bytes: func(length: u32) -> result<list<u8>, string>;

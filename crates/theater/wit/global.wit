@@ -1,0 +1,6 @@
+package theater:simple;
+
+world minimal {
+    export actor;
+    import runtime;
+}
