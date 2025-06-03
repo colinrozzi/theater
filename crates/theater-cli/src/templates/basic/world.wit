@@ -1,4 +1,4 @@
-package ntwk:theater;
+package theater:simple;
 
 world hello-world {
     import runtime;

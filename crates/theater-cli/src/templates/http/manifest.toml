@@ -4,7 +4,7 @@ description = "An HTTP server Theater actor"
 component_path = "target/wasm32-unknown-unknown/release/{{project_name_snake}}.wasm"
 
 [interface]
-implements = "ntwk:theater/actor"
+implements = "theater:simple/actor"
 requires = []
 
 [[handlers]]
