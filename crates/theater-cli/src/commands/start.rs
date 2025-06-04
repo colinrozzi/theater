@@ -205,8 +205,9 @@ async fn run_with_tui(
     let (response_tx, response_rx) = mpsc::unbounded_channel();
     
     // We'll need to get the actor ID from the first ActorStarted response
-    let mut actor_id: Option<String> = None;
+    let mut _actor_id: Option<String> = None;
     let mut tui_started = false;
+    let mut tui_completed = false;
     
     // Add a timeout for actor startup
     let timeout_duration = tokio::time::Duration::from_secs(30);
@@ -228,7 +229,7 @@ async fn run_with_tui(
                 if let Ok(Some(response)) = data {
                     match &response {
                         ManagementResponse::ActorStarted { id } => {
-                            actor_id = Some(id.to_string());
+                            _actor_id = Some(id.to_string());
                             debug!("Actor started with ID: {}", id);
                             tui_started = true;
                         }
@@ -257,18 +258,21 @@ async fn run_with_tui(
                 debug!("Received Ctrl-C, stopping TUI mode");
                 break;
             }
-            result = &mut tui_handle => {
+            result = &mut tui_handle, if !tui_completed => {
                 match result {
                     Ok(_) => debug!("TUI task completed"),
                     Err(e) => debug!("TUI task error: {}", e),
                 }
+                tui_completed = true;
                 break;
             }
         }
     }
     
-    // Clean up - wait for TUI to finish
-    tokio::time::timeout(tokio::time::Duration::from_millis(500), tui_handle).await.ok();
+    // Clean up - wait for TUI to finish if it hasn't already
+    if !tui_completed {
+        let _ = tokio::time::timeout(tokio::time::Duration::from_millis(500), tui_handle).await;
+    }
     
     Ok(())
 }
