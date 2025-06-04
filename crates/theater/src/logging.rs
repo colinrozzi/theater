@@ -5,7 +5,7 @@ use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 
 pub fn setup_global_logging(
     log_path: impl AsRef<Path>,
-    filter_string: &str,
+    log_level: &tracing::Level,
     with_stdout: bool,
 ) -> Result<()> {
     let log_path = log_path.as_ref();
@@ -17,13 +17,16 @@ pub fn setup_global_logging(
 
     // Create a more sophisticated filter string
     // Format: theater=debug,wasmtime=info
-    let enhanced_filter = if filter_string.to_lowercase() == "debug" {
-        // If debug is requested, set debug for theater components but keep wasmtime at info
-        "theater=debug,wasmtime=info,wasmtime_wasi=info".to_string()
-    } else {
-        // Otherwise use the original filter string for all crates
-        filter_string.to_string()
-    };
+    if !log_path.exists() {
+        File::create(log_path)?; // Create the log file if it doesn't exist
+    }
+
+    let enhanced_filter = format!(
+        "{},theater={},wasmtime={}",
+        log_level.as_str(),
+        log_level.as_str(),
+        "info"
+    );
 
     let file = File::create(log_path)?;
     let file_writer = std::sync::Mutex::new(file).with_max_level(tracing::Level::TRACE);

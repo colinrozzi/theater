@@ -2929,6 +2929,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "theater-server-cli"
+version = "0.2.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "shellexpand",
+ "tempfile",
+ "theater",
+ "theater-server",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "thiserror"
 version = "1.0.69"
 source = "registry+https://github.com/rust-lang/crates.io-index"

@@ -3,6 +3,7 @@ members = [
     "crates/theater",
     "crates/theater-cli", 
     "crates/theater-server",
+    "crates/theater-server-cli",
     "crates/theater-client"
 ]
 resolver = "2"

@@ -1,0 +1,29 @@
+[package]
+name = "theater-server-cli"
+description = "Standalone CLI for Theater server management"
+version.workspace = true  
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "theater-server"
+path = "src/main.rs"
+
+[dependencies]
+# Internal dependencies
+theater.workspace = true
+theater-server.workspace = true
+
+# Core dependencies
+anyhow.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+
+# CLI-specific dependencies
+clap = { version = "4.4", features = ["derive"] }
+shellexpand = "3.1.1"
+
+[dev-dependencies]
+tempfile = "3.7"
