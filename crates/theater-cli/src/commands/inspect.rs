@@ -46,7 +46,7 @@ pub fn execute(args: &InspectArgs, _verbose: bool, json: bool) -> Result<()> {
         debug!("Getting actor state");
         let state_result = client.get_actor_state(&args.actor_id.to_string()).await;
         let state = match state_result {
-            Ok(state_value) => {
+            Ok(ref state_value) => {
                 if state_value.is_null() {
                     None
                 } else {

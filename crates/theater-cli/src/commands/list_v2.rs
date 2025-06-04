@@ -1,5 +1,5 @@
 use std::net::SocketAddr;
-use clap::Parser;
+
 use tracing::debug;
 
 use crate::error::{CliError, CliResult};

@@ -114,7 +114,7 @@ pub fn run() -> anyhow::Result<()> {
 /// Run the Theater CLI asynchronously
 pub async fn run_async(
     config: config::Config, 
-    mut shutdown_rx: tokio::sync::oneshot::Receiver<()>
+    _shutdown_rx: tokio::sync::oneshot::Receiver<()>
 ) -> anyhow::Result<()> {
     let cli = Cli::parse();
     

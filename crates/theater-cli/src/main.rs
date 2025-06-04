@@ -1,2 +1,38 @@
-use anyhow::Result;\nuse tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};\n\nuse theater_cli::{config::Config, run_async};\n\n#[tokio::main]\nasync fn main() -> Result<()> {\n    // Load configuration\n    let config = Config::load().unwrap_or_else(|e| {\n        eprintln!(\"Warning: Failed to load config, using defaults: {}\", e);\n        Config::default()\n    });\n\n    // Initialize logging\n    let log_level = config.logging.level.parse().unwrap_or(tracing::Level::INFO);\n    \n    let registry = tracing_subscriber::registry()\n        .with(tracing_subscriber::EnvFilter::from_default_env().add_directive(log_level.into()));\n    \n    if config.logging.structured {\n        registry\n            .with(tracing_subscriber::fmt::layer().json())\n            .init();\n    } else {\n        registry\n            .with(tracing_subscriber::fmt::layer().pretty())\n            .init();\n    }\n\n    // Setup graceful shutdown handling\n    let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();\n    \n    tokio::spawn(async move {\n        tokio::signal::ctrl_c().await.ok();\n        let _ = shutdown_tx.send(());\n    });\n\n    // Run the CLI\n    run_async(config, shutdown_rx).await\n}\n"
-<parameter name="mode">overwrite
+use anyhow::Result;
+use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+
+use theater_cli::{config::Config, run_async};
+
+#[tokio::main]
+async fn main() -> Result<()> {
+    // Load configuration
+    let config = Config::load().unwrap_or_else(|e| {
+        eprintln!("Warning: Failed to load config, using defaults: {}", e);
+        Config::default()
+    });
+
+    // Initialize logging
+    let log_level = config.logging.level.parse().unwrap_or(tracing::Level::INFO);
+    
+    let registry = tracing_subscriber::registry()
+        .with(tracing_subscriber::EnvFilter::from_default_env().add_directive(log_level.into()));
+    
+    // For now, use simple formatting regardless of structured setting
+    registry
+        .with(
+            tracing_subscriber::fmt::layer()
+                .with_target(false)
+        )
+        .init();
+
+    // Setup graceful shutdown handling
+    let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
+    
+    tokio::spawn(async move {
+        tokio::signal::ctrl_c().await.ok();
+        let _ = shutdown_tx.send(());
+    });
+
+    // Run the CLI
+    run_async(config, shutdown_rx).await
+}

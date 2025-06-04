@@ -127,7 +127,8 @@ pub fn execute(args: &SubscribeArgs, _verbose: bool, json: bool) -> Result<()> {
         }
 
         // Subscribe to the actor's events
-        let _event_stream = client.subscribe_to_events(&actor_id.to_string()).await?;
+        let event_stream = client.subscribe_to_events(&actor_id.to_string()).await?;
+        let subscription_id = event_stream.subscription_id();
 
         info!(
             "Subscribed to actor events with subscription ID: {}",
@@ -184,7 +185,7 @@ pub fn execute(args: &SubscribeArgs, _verbose: bool, json: bool) -> Result<()> {
 
             // Process the event
             match response {
-                ManagementResponse::ActorEvent { event } => {
+                Some(ManagementResponse::ActorEvent { event }) => {
                     // Skip if doesn't match filter
                     if let Some(filter) = &args.event_type {
                         if !event.event_type.contains(filter) {
@@ -215,7 +216,7 @@ pub fn execute(args: &SubscribeArgs, _verbose: bool, json: bool) -> Result<()> {
                         break;
                     }
                 }
-                ManagementResponse::ActorError { error } => {
+                Some(ManagementResponse::ActorError { error }) => {
                     // Handle actor error
                     if json {
                         let output = serde_json::json!({
@@ -227,8 +228,8 @@ pub fn execute(args: &SubscribeArgs, _verbose: bool, json: bool) -> Result<()> {
                         println!("{} Actor error: {}", style("ERROR").bold().red(), error);
                     }
                 }
-                ManagementResponse::Error { error } => {
-                    return Err(anyhow!("Error from server: {:?}", error));
+                Some(ManagementResponse::Error { error }) => {
+                    return Err(crate::error::CliError::ServerError { message: format!("{:?}", error) }.into());
                 }
                 _ => {
                     debug!("Received unexpected response: {:?}", response);
@@ -244,7 +245,7 @@ pub fn execute(args: &SubscribeArgs, _verbose: bool, json: bool) -> Result<()> {
             debug!("Failed to unsubscribe: {}", e);
         }
 
-        Ok::<(), anyhow::Error>(())
+        Ok(())
     })?;
 
     Ok(())

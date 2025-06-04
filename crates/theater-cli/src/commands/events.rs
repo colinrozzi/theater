@@ -83,7 +83,7 @@ pub fn execute(args: &EventsArgs, _verbose: bool, json: bool) -> Result<()> {
 
     runtime.block_on(async {
         let config = crate::config::Config::default();
-        let mut client = TheaterClient::new(args.address, config);
+        let client = TheaterClient::new(args.address, config);
 
         // Try to connect to the server, but continue even if it fails
         // (we'll automatically fall back to filesystem if needed)

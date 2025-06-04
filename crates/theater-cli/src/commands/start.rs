@@ -151,7 +151,7 @@ pub fn execute(args: &StartArgs, _verbose: bool, json: bool) -> Result<()> {
                             }
                         }
                         _ => {
-                            println!("Error receiving data: {:?}", e);
+                            println!("Unknown response received");
                             break;
                         }
                         _ => {

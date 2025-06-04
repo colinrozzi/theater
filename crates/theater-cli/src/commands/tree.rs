@@ -6,10 +6,10 @@ use std::net::SocketAddr;
 use tracing::debug;
 
 use theater::id::TheaterId;
-use theater::messages::ActorStatus;
 
 use crate::client::TheaterClient;
 use crate::utils::formatting;
+use console::style;
 
 #[derive(Debug, Parser)]
 pub struct TreeArgs {
@@ -44,7 +44,7 @@ pub fn execute(args: &TreeArgs, _verbose: bool, json: bool) -> Result<()> {
 
     runtime.block_on(async {
         let config = crate::config::Config::load().unwrap_or_default();
-        let mut client = TheaterClient::new(args.address, config);
+        let client = TheaterClient::new(args.address, config);
 
         // Connect to the server
         client.connect().await?;
@@ -134,12 +134,13 @@ pub fn execute(args: &TreeArgs, _verbose: bool, json: bool) -> Result<()> {
         }
 
         // For human-readable output, we need to identify root nodes
-        let mut root_nodes = Vec::new();
+        let mut root_nodes: Vec<String> = Vec::new();
 
         // If a specific root is provided, use it as the only root
         if let Some(root_id) = &args.root {
-            if nodes.contains_key(root_id) {
-                root_nodes.push(root_id.clone());
+            let root_str = root_id.to_string();
+            if nodes.contains_key(&root_str) {
+                root_nodes.push(root_str);
             } else {
                 return Err(anyhow!("Root actor not found: {}", root_id));
             }
@@ -172,6 +173,22 @@ pub fn execute(args: &TreeArgs, _verbose: bool, json: bool) -> Result<()> {
     Ok(())
 }
 
+/// Format a short version of an actor ID string (first 8 chars)
+fn format_short_id_string(id: &str) -> String {
+    let short_id = &id[..std::cmp::min(8, id.len())];
+    style(short_id).cyan().to_string()
+}
+
+/// Format an actor status string with appropriate color
+fn format_status_string(status: &str) -> String {
+    match status.to_uppercase().as_str() {
+        "RUNNING" => style("RUNNING").green().bold().to_string(),
+        "STOPPED" => style("STOPPED").red().bold().to_string(),
+        "FAILED" => style("FAILED").red().bold().to_string(),
+        _ => style(status).yellow().to_string(),
+    }
+}
+
 /// Recursively print the tree structure
 fn print_tree(
     nodes: &HashMap<String, ActorNode>,
@@ -196,8 +213,8 @@ fn print_tree(
             "{}{}{} ({})",
             prefix,
             branch,
-            formatting::format_short_id(&node.id),
-            formatting::format_status(&node.status)
+            format_short_id_string(&node.id),
+            format_status_string(&node.status)
         );
 
         // Determine the prefix for children

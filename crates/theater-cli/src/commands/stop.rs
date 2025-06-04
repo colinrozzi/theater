@@ -32,7 +32,7 @@ pub fn execute(args: &StopArgs, _verbose: bool, json: bool) -> Result<()> {
 
     runtime.block_on(async {
         let config = crate::config::Config::load().unwrap_or_default();
-        let mut client = TheaterClient::new(args.address, config);
+        let client = TheaterClient::new(args.address, config);
 
         // Connect to the server
         client.connect().await?;
