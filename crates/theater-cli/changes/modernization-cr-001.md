@@ -59,6 +59,7 @@ Complete architectural overhaul implementing modern CLI patterns:
 - [x] **✅ COMPLETE**: Rich output formatters with multiple display modes
 - [x] **✅ COMPLETE**: Comprehensive error handling with user-friendly messages
 - [x] **✅ COMPLETE**: Unit testing framework for modernized commands
+- [x] **✅ COMPLETE**: CommandContext pattern conversion (all commands using `ctx.create_client()`, `ctx.server_address()`, etc.)
 
 #### ✅ **Modernized Commands (18/13)** 🎉 **PHASE 2 COMPLETE!**
 - [x] `list` (ActorList formatter, async execution)
@@ -86,7 +87,7 @@ Complete architectural overhaul implementing modern CLI patterns:
 
 All 13 primary commands have been fully modernized with async execution, rich formatters, and enhanced error handling!
 - [x] **✅ COMPLETE**: Fixed pattern matching and error propagation
-- [ ] Convert commands to use CommandContext pattern (46 commands remaining)
+- [x] **✅ COMPLETE**: Convert commands to use CommandContext pattern (all commands modernized)
 - [ ] Add progress indicators to long operations
 - [ ] Implement interactive prompts where helpful
 - [ ] Add input validation and helpful suggestions
