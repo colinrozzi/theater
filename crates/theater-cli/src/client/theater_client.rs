@@ -4,7 +4,7 @@ use tokio::sync::Mutex;
 use tracing::{debug, info};
 use uuid::Uuid;
 
-use theater::{ChainEvent, messages::ChannelParticipant};
+use theater::{messages::ChannelParticipant, ChainEvent};
 use theater_server::{ManagementCommand, ManagementResponse};
 
 use crate::client::connection::Connection;
@@ -70,9 +70,9 @@ impl TheaterClient {
                     .collect();
                 Ok(string_actors)
             }
-            ManagementResponse::Error { error } => {
-                Err(CliError::ServerError { message: format!("{:?}", error) })
-            }
+            ManagementResponse::Error { error } => Err(CliError::ServerError {
+                message: format!("{:?}", error),
+            }),
             _ => Err(CliError::UnexpectedResponse {
                 response: format!("{:?}", response),
             }),
@@ -86,42 +86,25 @@ impl TheaterClient {
         initial_state: Option<Vec<u8>>,
         parent: bool,
         subscribe: bool,
-    ) -> CliResult<String> {
+    ) -> CliResult<()> {
         let mut conn = self.connection.lock().await;
-        let response = conn
-            .send_command(ManagementCommand::StartActor {
-                manifest: manifest_content,
-                initial_state,
-                parent,
-                subscribe,
-            })
-            .await?;
-
-        match response {
-            ManagementResponse::ActorStarted { id } => {
-                info!("Actor started with ID: {}", id);
-                Ok(id.to_string())
-            }
-            ManagementResponse::Error { error } => {
-                Err(CliError::ActorStartFailed {
-                    actor_id: "unknown".to_string(),
-                    reason: format!("{:?}", error),
-                })
-            }
-            _ => Err(CliError::UnexpectedResponse {
-                response: format!("{:?}", response),
-            }),
-        }
+        conn.send_command_no_response(ManagementCommand::StartActor {
+            manifest: manifest_content,
+            initial_state,
+            parent,
+            subscribe,
+        })
+        .await
     }
 
     /// Stop a running actor
     pub async fn stop_actor(&self, actor_id: &str) -> CliResult<()> {
         let mut conn = self.connection.lock().await;
-        let theater_id = actor_id.parse().map_err(|_| CliError::invalid_actor_id(actor_id))?;
+        let theater_id = actor_id
+            .parse()
+            .map_err(|_| CliError::invalid_actor_id(actor_id))?;
         let response = conn
-            .send_command(ManagementCommand::StopActor {
-                id: theater_id,
-            })
+            .send_command(ManagementCommand::StopActor { id: theater_id })
             .await?;
 
         match response {
@@ -146,11 +129,11 @@ impl TheaterClient {
     /// Get actor state
     pub async fn get_actor_state(&self, actor_id: &str) -> CliResult<serde_json::Value> {
         let mut conn = self.connection.lock().await;
-        let theater_id = actor_id.parse().map_err(|_| CliError::invalid_actor_id(actor_id))?;
+        let theater_id = actor_id
+            .parse()
+            .map_err(|_| CliError::invalid_actor_id(actor_id))?;
         let response = conn
-            .send_command(ManagementCommand::GetActorState {
-                id: theater_id,
-            })
+            .send_command(ManagementCommand::GetActorState { id: theater_id })
             .await?;
 
         match response {
@@ -182,11 +165,11 @@ impl TheaterClient {
     /// Get actor events
     pub async fn get_actor_events(&self, actor_id: &str) -> CliResult<Vec<ChainEvent>> {
         let mut conn = self.connection.lock().await;
-        let theater_id = actor_id.parse().map_err(|_| CliError::invalid_actor_id(actor_id))?;
+        let theater_id = actor_id
+            .parse()
+            .map_err(|_| CliError::invalid_actor_id(actor_id))?;
         let response = conn
-            .send_command(ManagementCommand::GetActorEvents {
-                id: theater_id,
-            })
+            .send_command(ManagementCommand::GetActorEvents { id: theater_id })
             .await?;
 
         match response {
@@ -211,7 +194,9 @@ impl TheaterClient {
     /// Send a message to an actor (fire and forget)
     pub async fn send_message(&self, actor_id: &str, message: Vec<u8>) -> CliResult<()> {
         let mut conn = self.connection.lock().await;
-        let theater_id = actor_id.parse().map_err(|_| CliError::invalid_actor_id(actor_id))?;
+        let theater_id = actor_id
+            .parse()
+            .map_err(|_| CliError::invalid_actor_id(actor_id))?;
         let response = conn
             .send_command(ManagementCommand::SendActorMessage {
                 id: theater_id,
@@ -238,7 +223,9 @@ impl TheaterClient {
     /// Send a request to an actor and wait for response
     pub async fn request_message(&self, actor_id: &str, message: Vec<u8>) -> CliResult<Vec<u8>> {
         let mut conn = self.connection.lock().await;
-        let theater_id = actor_id.parse().map_err(|_| CliError::invalid_actor_id(actor_id))?;
+        let theater_id = actor_id
+            .parse()
+            .map_err(|_| CliError::invalid_actor_id(actor_id))?;
         let response = conn
             .send_command(ManagementCommand::RequestActorMessage {
                 id: theater_id,
@@ -265,20 +252,22 @@ impl TheaterClient {
     /// Subscribe to events from an actor (returns a stream-like interface)
     pub async fn subscribe_to_events(&self, actor_id: &str) -> CliResult<EventStream> {
         let mut conn = self.connection.lock().await;
-        let theater_id = actor_id.parse().map_err(|_| CliError::invalid_actor_id(actor_id))?;
-        let response = conn.send_command(ManagementCommand::SubscribeToActor {
-            id: theater_id,
-        })
-        .await?;
+        let theater_id = actor_id
+            .parse()
+            .map_err(|_| CliError::invalid_actor_id(actor_id))?;
+        let response = conn
+            .send_command(ManagementCommand::SubscribeToActor { id: theater_id })
+            .await?;
 
         match response {
-            ManagementResponse::Subscribed { id: _, subscription_id } => {
-                Ok(EventStream {
-                    client: self.clone(),
-                    actor_id: actor_id.to_string(),
-                    subscription_id,
-                })
-            }
+            ManagementResponse::Subscribed {
+                id: _,
+                subscription_id,
+            } => Ok(EventStream {
+                client: self.clone(),
+                actor_id: actor_id.to_string(),
+                subscription_id,
+            }),
             ManagementResponse::Error { error } => {
                 let error_str = format!("{:?}", error);
                 if error_str.contains("not found") {
@@ -302,11 +291,11 @@ impl TheaterClient {
     /// Get actor status
     pub async fn get_actor_status(&self, actor_id: &str) -> CliResult<String> {
         let mut conn = self.connection.lock().await;
-        let theater_id = actor_id.parse().map_err(|_| CliError::invalid_actor_id(actor_id))?;
+        let theater_id = actor_id
+            .parse()
+            .map_err(|_| CliError::invalid_actor_id(actor_id))?;
         let response = conn
-            .send_command(ManagementCommand::GetActorStatus {
-                id: theater_id,
-            })
+            .send_command(ManagementCommand::GetActorStatus { id: theater_id })
             .await?;
 
         match response {
@@ -328,11 +317,11 @@ impl TheaterClient {
     /// Restart an actor
     pub async fn restart_actor(&self, actor_id: &str) -> CliResult<()> {
         let mut conn = self.connection.lock().await;
-        let theater_id = actor_id.parse().map_err(|_| CliError::invalid_actor_id(actor_id))?;
+        let theater_id = actor_id
+            .parse()
+            .map_err(|_| CliError::invalid_actor_id(actor_id))?;
         let response = conn
-            .send_command(ManagementCommand::RestartActor {
-                id: theater_id,
-            })
+            .send_command(ManagementCommand::RestartActor { id: theater_id })
             .await?;
 
         match response {
@@ -354,7 +343,9 @@ impl TheaterClient {
     /// Update actor component
     pub async fn update_actor_component(&self, actor_id: &str, component: String) -> CliResult<()> {
         let mut conn = self.connection.lock().await;
-        let theater_id = actor_id.parse().map_err(|_| CliError::invalid_actor_id(actor_id))?;
+        let theater_id = actor_id
+            .parse()
+            .map_err(|_| CliError::invalid_actor_id(actor_id))?;
         let response = conn
             .send_command(ManagementCommand::UpdateActorComponent {
                 id: theater_id,
@@ -379,9 +370,15 @@ impl TheaterClient {
     }
 
     /// Unsubscribe from actor events
-    pub async fn unsubscribe_from_actor(&self, actor_id: &str, subscription_id: Uuid) -> CliResult<()> {
+    pub async fn unsubscribe_from_actor(
+        &self,
+        actor_id: &str,
+        subscription_id: Uuid,
+    ) -> CliResult<()> {
         let mut conn = self.connection.lock().await;
-        let theater_id = actor_id.parse().map_err(|_| CliError::invalid_actor_id(actor_id))?;
+        let theater_id = actor_id
+            .parse()
+            .map_err(|_| CliError::invalid_actor_id(actor_id))?;
         let response = conn
             .send_command(ManagementCommand::UnsubscribeFromActor {
                 id: theater_id,
@@ -391,9 +388,9 @@ impl TheaterClient {
 
         match response {
             ManagementResponse::Unsubscribed { id: _ } => Ok(()),
-            ManagementResponse::Error { error } => {
-                Err(CliError::ServerError { message: format!("{:?}", error) })
-            }
+            ManagementResponse::Error { error } => Err(CliError::ServerError {
+                message: format!("{:?}", error),
+            }),
             _ => Err(CliError::UnexpectedResponse {
                 response: format!("{:?}", response),
             }),
@@ -401,9 +398,15 @@ impl TheaterClient {
     }
 
     /// Open a channel with an actor
-    pub async fn open_channel(&self, actor_id: &str, initial_message: Vec<u8>) -> CliResult<String> {
+    pub async fn open_channel(
+        &self,
+        actor_id: &str,
+        initial_message: Vec<u8>,
+    ) -> CliResult<String> {
         let mut conn = self.connection.lock().await;
-        let theater_id = actor_id.parse().map_err(|_| CliError::invalid_actor_id(actor_id))?;
+        let theater_id = actor_id
+            .parse()
+            .map_err(|_| CliError::invalid_actor_id(actor_id))?;
         let response = conn
             .send_command(ManagementCommand::OpenChannel {
                 actor_id: ChannelParticipant::Actor(theater_id),
@@ -413,9 +416,9 @@ impl TheaterClient {
 
         match response {
             ManagementResponse::ChannelOpened { channel_id, .. } => Ok(channel_id),
-            ManagementResponse::Error { error } => {
-                Err(CliError::ServerError { message: format!("{:?}", error) })
-            }
+            ManagementResponse::Error { error } => Err(CliError::ServerError {
+                message: format!("{:?}", error),
+            }),
             _ => Err(CliError::UnexpectedResponse {
                 response: format!("{:?}", response),
             }),
@@ -434,9 +437,9 @@ impl TheaterClient {
 
         match response {
             ManagementResponse::ChannelMessage { .. } => Ok(()),
-            ManagementResponse::Error { error } => {
-                Err(CliError::ServerError { message: format!("{:?}", error) })
-            }
+            ManagementResponse::Error { error } => Err(CliError::ServerError {
+                message: format!("{:?}", error),
+            }),
             _ => Err(CliError::UnexpectedResponse {
                 response: format!("{:?}", response),
             }),
@@ -454,9 +457,9 @@ impl TheaterClient {
 
         match response {
             ManagementResponse::ChannelClosed { .. } => Ok(()),
-            ManagementResponse::Error { error } => {
-                Err(CliError::ServerError { message: format!("{:?}", error) })
-            }
+            ManagementResponse::Error { error } => Err(CliError::ServerError {
+                message: format!("{:?}", error),
+            }),
             _ => Err(CliError::UnexpectedResponse {
                 response: format!("{:?}", response),
             }),
@@ -466,13 +469,15 @@ impl TheaterClient {
     /// Receive channel message (for channel communication)
     pub async fn receive_channel_message(&self) -> CliResult<Option<(String, Vec<u8>)>> {
         match self.next_response().await? {
-            Some(ManagementResponse::ChannelMessage { channel_id, message, .. }) => {
-                Ok(Some((channel_id, message)))
-            }
+            Some(ManagementResponse::ChannelMessage {
+                channel_id,
+                message,
+                ..
+            }) => Ok(Some((channel_id, message))),
             Some(ManagementResponse::ChannelClosed { .. }) => Ok(None),
-            Some(ManagementResponse::Error { error }) => {
-                Err(CliError::ServerError { message: format!("{:?}", error) })
-            }
+            Some(ManagementResponse::Error { error }) => Err(CliError::ServerError {
+                message: format!("{:?}", error),
+            }),
             Some(_) => {
                 // Ignore other message types and try again
                 Box::pin(self.receive_channel_message()).await
@@ -495,9 +500,9 @@ impl EventStream {
         match self.client.next_response().await? {
             Some(ManagementResponse::ActorEvent { event }) => Ok(Some(event)),
             Some(ManagementResponse::ActorStopped { .. }) => Ok(None),
-            Some(ManagementResponse::Error { error }) => {
-                Err(CliError::EventStreamError { reason: format!("{:?}", error) })
-            }
+            Some(ManagementResponse::Error { error }) => Err(CliError::EventStreamError {
+                reason: format!("{:?}", error),
+            }),
             Some(_) => {
                 // Ignore other response types in event stream
                 Box::pin(self.next_event()).await
@@ -518,7 +523,9 @@ impl EventStream {
 
     /// Unsubscribe from this event stream
     pub async fn unsubscribe(self) -> CliResult<()> {
-        self.client.unsubscribe_from_actor(&self.actor_id, self.subscription_id).await
+        self.client
+            .unsubscribe_from_actor(&self.actor_id, self.subscription_id)
+            .await
     }
 }
 
@@ -530,7 +537,7 @@ mod tests {
     async fn test_client_creation() {
         let addr = "127.0.0.1:9000".parse().unwrap();
         let client = TheaterClient::with_default_config(addr);
-        
+
         assert_eq!(client.address().await, addr);
         assert!(!client.is_connected().await);
     }
@@ -540,7 +547,7 @@ mod tests {
         let addr = "127.0.0.1:9000".parse().unwrap();
         let client = TheaterClient::with_default_config(addr);
         let client2 = client.clone();
-        
+
         assert_eq!(client.address().await, client2.address().await);
     }
 }

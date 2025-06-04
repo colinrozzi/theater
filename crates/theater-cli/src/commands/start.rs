@@ -86,33 +86,38 @@ pub async fn execute_async(args: &StartArgs, ctx: &CommandContext) -> Result<(),
         .map_err(|e| CliError::connection_failed(address, e))?;
 
     // Start the actor with initial state
+    debug!("Calling start actor on client");
     client
         .start_actor(manifest_content, initial_state, args.parent, args.subscribe)
         .await
         .map_err(|e| CliError::actor_not_found(format!("Failed to start actor: {}", e)))?;
+    debug!("Actor start request sent successfully");
 
     if args.subscribe && !ctx.json {
         println!("");
         display_events_header(&args.format);
     }
 
-    let mut is_running = true;
     let mut actor_started = false;
 
     // Add a timeout for actor startup
     let timeout_duration = tokio::time::Duration::from_secs(30);
 
-    while is_running {
+    debug!("Entering response loop, waiting for actor start confirmation or events");
+    loop {
         tokio::select! {
             data = client.next_response() => {
+                debug!("Received response from client");
+                debug!("Response data: {:?}", data);
                 if let Ok(Some(data)) = data {
                     match data {
                         ManagementResponse::ActorStarted { id } => {
+                            debug!("Management response received: Actor started with ID: {}", id);
                             actor_started = true;
 
                             if args.id_only {
                                 println!("{}", id);
-                                is_running = false;
+                                break;
                             } else {
                                 let result = ActorStarted {
                                     actor_id: id.to_string(),
@@ -121,11 +126,12 @@ pub async fn execute_async(args: &StartArgs, ctx: &CommandContext) -> Result<(),
                                     subscribing: args.subscribe,
                                     acting_as_parent: args.parent,
                                 };
+                                debug!("Outputting result: {:?}", result);
                                 ctx.output.output(&result, None)?;
 
                                 // if we are not subscribing or acting as a parent, break the loop
                                 if !args.subscribe && !args.parent {
-                                    is_running = false;
+                                    break;
                                 }
                             }
                         }
@@ -146,7 +152,7 @@ pub async fn execute_async(args: &StartArgs, ctx: &CommandContext) -> Result<(),
                             println!("-----[actor stopped]-----------------");
                             println!("{}", id);
                             println!("-------------------------------------");
-                            is_running = false;
+                            break;
                         }
                         ManagementResponse::ActorResult(actor_result) => {
                             if args.parent {
@@ -157,7 +163,7 @@ pub async fn execute_async(args: &StartArgs, ctx: &CommandContext) -> Result<(),
                         }
                         _ => {
                             println!("Unknown response received");
-                            is_running = false;
+                            break;
                         }
                     }
                 }
@@ -172,7 +178,7 @@ pub async fn execute_async(args: &StartArgs, ctx: &CommandContext) -> Result<(),
                 if !ctx.json {
                     println!("\n{}\n", "Interrupted by user");
                 }
-                is_running = false;
+                break;
             }
         }
     }
