@@ -4,6 +4,7 @@ pub mod config;
 pub mod error;
 pub mod output;
 pub mod templates;
+pub mod tui;
 pub mod utils;
 
 use clap::{Parser, Subcommand};
