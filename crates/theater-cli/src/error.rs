@@ -105,6 +105,26 @@ pub enum CliError {
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
 
+    /// Network and protocol specific errors
+    #[error("Network error during {operation}: {source}")]
+    NetworkError {
+        operation: String,
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
+
+    #[error("Invalid response: {message}")]
+    InvalidResponse {
+        message: String,
+        source: Option<Box<dyn std::error::Error + Send + Sync>>,
+    },
+
+    #[error("I/O operation failed: {operation}")]
+    IoError {
+        operation: String,
+        #[source]
+        source: std::io::Error,
+    },
+
     #[error("Parse error: {message}")]
     ParseError { message: String },
 }
@@ -289,6 +309,9 @@ impl CliError {
             Self::Internal(_) | Self::Serialization(_) | Self::Io(_) | Self::ParseError { .. } => {
                 "internal"
             }
+            Self::NetworkError { .. } => "network",
+            Self::InvalidResponse { .. } => "response",
+            Self::IoError { .. } => "io",
         }
     }
 }

@@ -75,6 +75,14 @@ pub enum Commands {
     /// Channel operations
     #[command(name = "channel")]
     Channel(commands::channel::ChannelArgs),
+
+    /// Generate shell completion scripts
+    #[command(name = "completion")]
+    Completion(commands::completion::CompletionArgs),
+
+    /// Generate dynamic completions (internal use)
+    #[command(name = "dynamic-completion", hide = true)]
+    DynamicCompletion(commands::dynamic_completion::DynamicCompletionArgs),
 }
 
 /// Run the Theater CLI asynchronously
@@ -134,6 +142,12 @@ pub async fn run(
             }
         },
         Commands::ListStored(args) => commands::list_stored::execute_async(args, &ctx)
+            .await
+            .map_err(|e| anyhow::Error::from(e)),
+        Commands::Completion(args) => commands::completion::execute_async(args, &ctx)
+            .await
+            .map_err(|e| anyhow::Error::from(e)),
+        Commands::DynamicCompletion(args) => commands::dynamic_completion::execute_async(args, &ctx)
             .await
             .map_err(|e| anyhow::Error::from(e)),
     };
