@@ -87,7 +87,6 @@ pub async fn run(
     config: config::Config,
     _shutdown_rx: tokio::sync::oneshot::Receiver<()>,
 ) -> anyhow::Result<()> {
-
     // Create output manager
     let output = output::OutputManager::new(config.output.clone());
 
@@ -113,12 +112,9 @@ pub async fn run(
         Commands::Build(args) => commands::build::execute_async(args, &ctx)
             .await
             .map_err(|e| anyhow::Error::from(e)),
-        Commands::List(args) => {
-            // Use our modernized list command as an example
-            commands::list::execute_async(args, &ctx)
-                .await
-                .map_err(|e| anyhow::Error::from(e))
-        }
+        Commands::List(args) => commands::list::execute_async(args, &ctx)
+            .await
+            .map_err(|e| anyhow::Error::from(e)),
         Commands::State(args) => commands::state::execute_async(args, &ctx)
             .await
             .map_err(|e| anyhow::Error::from(e)),

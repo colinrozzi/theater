@@ -60,7 +60,7 @@ impl Default for Config {
                 max_width: None,
             },
             logging: LoggingConfig {
-                level: "info".to_string(),
+                level: "warn".to_string(),
                 file: None,
                 structured: false,
             },
@@ -90,8 +90,9 @@ impl Config {
             let config_file = config_dir.join("theater").join("config.toml");
             if config_file.exists() {
                 debug!("Loading config from {}", config_file.display());
-                config = Self::load_from_file(&config_file)
-                    .with_context(|| format!("Failed to load config from {}", config_file.display()))?;
+                config = Self::load_from_file(&config_file).with_context(|| {
+                    format!("Failed to load config from {}", config_file.display())
+                })?;
             }
         }
 
@@ -105,10 +106,10 @@ impl Config {
     pub fn load_from_file(path: &PathBuf) -> Result<Self> {
         let content = std::fs::read_to_string(path)
             .with_context(|| format!("Failed to read config file: {}", path.display()))?;
-        
+
         let config: Self = toml::from_str(&content)
             .with_context(|| format!("Failed to parse config file: {}", path.display()))?;
-        
+
         Ok(config)
     }
 
@@ -168,12 +169,15 @@ impl Config {
     /// Save configuration to the default location
     pub fn save(&self) -> Result<()> {
         let config_dir = Self::config_dir()?;
-        std::fs::create_dir_all(&config_dir)
-            .with_context(|| format!("Failed to create config directory: {}", config_dir.display()))?;
+        std::fs::create_dir_all(&config_dir).with_context(|| {
+            format!(
+                "Failed to create config directory: {}",
+                config_dir.display()
+            )
+        })?;
 
         let config_file = config_dir.join("config.toml");
-        let content = toml::to_string_pretty(self)
-            .context("Failed to serialize configuration")?;
+        let content = toml::to_string_pretty(self).context("Failed to serialize configuration")?;
 
         std::fs::write(&config_file, content)
             .with_context(|| format!("Failed to write config file: {}", config_file.display()))?;
@@ -191,7 +195,10 @@ mod tests {
     #[test]
     fn test_default_config() {
         let config = Config::default();
-        assert_eq!(config.server.default_address, "127.0.0.1:9000".parse().unwrap());
+        assert_eq!(
+            config.server.default_address,
+            "127.0.0.1:9000".parse().unwrap()
+        );
         assert_eq!(config.output.default_format, "compact");
         assert!(config.output.colors);
     }
@@ -201,16 +208,22 @@ mod tests {
         let config = Config::default();
         let serialized = toml::to_string_pretty(&config).unwrap();
         let deserialized: Config = toml::from_str(&serialized).unwrap();
-        
-        assert_eq!(config.server.default_address, deserialized.server.default_address);
-        assert_eq!(config.output.default_format, deserialized.output.default_format);
+
+        assert_eq!(
+            config.server.default_address,
+            deserialized.server.default_address
+        );
+        assert_eq!(
+            config.output.default_format,
+            deserialized.output.default_format
+        );
     }
 
     #[test]
     fn test_config_load_from_file() {
         let temp_dir = TempDir::new().unwrap();
         let config_file = temp_dir.path().join("config.toml");
-        
+
         let config_content = r#"
 [server]
 default_address = "192.168.1.100:8080"
@@ -227,11 +240,14 @@ timestamps = false
 level = "debug"
 structured = true
 "#;
-        
+
         std::fs::write(&config_file, config_content).unwrap();
         let config = Config::load_from_file(&config_file).unwrap();
-        
-        assert_eq!(config.server.default_address, "192.168.1.100:8080".parse().unwrap());
+
+        assert_eq!(
+            config.server.default_address,
+            "192.168.1.100:8080".parse().unwrap()
+        );
         assert_eq!(config.output.default_format, "json");
         assert!(!config.output.colors);
         assert_eq!(config.logging.level, "debug");
