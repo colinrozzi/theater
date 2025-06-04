@@ -97,14 +97,19 @@ pub async fn execute_async(args: &StartArgs, ctx: &CommandContext) -> Result<(),
     }
 
     let mut is_running = true;
+    let mut actor_started = false;
 
+    // Add a timeout for actor startup
+    let timeout_duration = tokio::time::Duration::from_secs(30);
+    
     while is_running {
         tokio::select! {
             data = client.next_response() => {
                 if let Ok(Some(data)) = data {
                     match data {
                         ManagementResponse::ActorStarted { id } => {
-
+                            actor_started = true;
+                            
                             if args.id_only {
                                 println!("{}", id);
                                 is_running = false;
@@ -157,8 +162,16 @@ pub async fn execute_async(args: &StartArgs, ctx: &CommandContext) -> Result<(),
                     }
                 }
             }
+            _ = tokio::time::sleep(timeout_duration) => {
+                if !actor_started {
+                    return Err(CliError::operation_timeout("Actor startup", timeout_duration.as_secs()));
+                }
+            }
             _ = tokio::signal::ctrl_c() => {
                 debug!("Received Ctrl-C, stopping");
+                if !ctx.json {
+                    println!("\n{}\n", "Interrupted by user");
+                }
                 is_running = false;
             }
         }

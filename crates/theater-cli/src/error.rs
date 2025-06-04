@@ -50,10 +50,7 @@ pub enum CliError {
 
     /// Template errors
     #[error("Template '{template}' not found. Available templates: {available}")]
-    TemplateNotFound {
-        template: String,
-        available: String,
-    },
+    TemplateNotFound { template: String, available: String },
 
     #[error("Template error: {reason}")]
     TemplateError { reason: String },
@@ -182,8 +179,14 @@ impl CliError {
         Self::InvalidInput {
             field: "actor_id".to_string(),
             value: actor_id,
-            suggestion: "Actor ID must be a valid UUID (e.g., 123e4567-e89b-12d3-a456-426614174000)".to_string(),
+            suggestion:
+                "Actor ID must be a valid UUID (e.g., 123e4567-e89b-12d3-a456-426614174000)"
+                    .to_string(),
         }
+    }
+
+    pub fn operation_timeout(operation: impl Into<String>, timeout: u64) -> Self {
+        Self::ConnectionTimeout { timeout }
     }
 
     /// Get a user-friendly error message with potential solutions
@@ -220,14 +223,20 @@ impl CliError {
                     output
                 )
             }
-            Self::MissingTool { tool, install_command } => {
+            Self::MissingTool {
+                tool,
+                install_command,
+            } => {
                 format!(
                     "Required tool '{}' is not installed.\n\n\
                     Install it with:\n  {}",
                     tool, install_command
                 )
             }
-            Self::TemplateNotFound { template, available } => {
+            Self::TemplateNotFound {
+                template,
+                available,
+            } => {
                 format!(
                     "Template '{}' was not found.\n\n\
                     Available templates: {}\n\n\
@@ -235,11 +244,12 @@ impl CliError {
                     template, available
                 )
             }
-            Self::InvalidInput { field, value, suggestion } => {
-                format!(
-                    "Invalid {}: '{}'\n\n{}",
-                    field, value, suggestion
-                )
+            Self::InvalidInput {
+                field,
+                value,
+                suggestion,
+            } => {
+                format!("Invalid {}: '{}'\n\n{}", field, value, suggestion)
             }
             _ => self.to_string(),
         }
@@ -276,7 +286,9 @@ impl CliError {
             | Self::ProtocolError { .. }
             | Self::UnexpectedResponse { .. } => "server",
             Self::EventStreamError { .. } | Self::EventFilterError { .. } => "events",
-            Self::Internal(_) | Self::Serialization(_) | Self::Io(_) | Self::ParseError { .. } => "internal",
+            Self::Internal(_) | Self::Serialization(_) | Self::Io(_) | Self::ParseError { .. } => {
+                "internal"
+            }
         }
     }
 }
@@ -309,14 +321,8 @@ mod tests {
 
     #[test]
     fn test_error_categories() {
-        assert_eq!(
-            CliError::actor_not_found("test").category(),
-            "actor"
-        );
-        assert_eq!(
-            CliError::build_failed("failed").category(),
-            "build"
-        );
+        assert_eq!(CliError::actor_not_found("test").category(), "actor");
+        assert_eq!(CliError::build_failed("failed").category(), "build");
         assert_eq!(
             CliError::template_not_found("basic", vec!["http".to_string()]).category(),
             "template"

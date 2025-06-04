@@ -83,10 +83,10 @@ pub enum Commands {
 
 /// Run the Theater CLI asynchronously
 pub async fn run(
+    cli: Cli,
     config: config::Config,
     _shutdown_rx: tokio::sync::oneshot::Receiver<()>,
 ) -> anyhow::Result<()> {
-    let cli = Cli::parse();
 
     // Create output manager
     let output = output::OutputManager::new(config.output.clone());
