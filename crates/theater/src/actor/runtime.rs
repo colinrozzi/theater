@@ -930,7 +930,7 @@ impl ActorRuntime {
             .data_mut()
             .record_event(ChainEventData {
                 event_type: "wasm".to_string(),
-                timestamp: start.elapsed().as_secs(),
+                timestamp: chrono::Utc::now().timestamp_millis() as u64,
                 description: Some(format!("Wasm call to function '{}'", name)),
                 data: EventData::Wasm(WasmEventData::WasmCall {
                     function_name: name.clone(),
@@ -946,7 +946,7 @@ impl ActorRuntime {
                     .data_mut()
                     .record_event(ChainEventData {
                         event_type: "wasm".to_string(),
-                        timestamp: start.elapsed().as_secs(),
+                        timestamp: chrono::Utc::now().timestamp_millis() as u64,
                         description: Some(format!("Wasm call to function '{}' completed", name)),
                         data: EventData::Wasm(WasmEventData::WasmResult {
                             function_name: name.clone(),
@@ -961,7 +961,7 @@ impl ActorRuntime {
                     .data_mut()
                     .record_event(ChainEventData {
                         event_type: "wasm".to_string(),
-                        timestamp: start.elapsed().as_secs(),
+                        timestamp: chrono::Utc::now().timestamp_millis() as u64,
                         description: Some(format!("Wasm call to function '{}' failed", name)),
                         data: EventData::Wasm(WasmEventData::WasmError {
                             function_name: name.clone(),
