@@ -56,7 +56,8 @@ pub fn execute(args: &MessageArgs, _verbose: bool, json: bool) -> Result<()> {
     let runtime = tokio::runtime::Runtime::new()?;
 
     runtime.block_on(async {
-        let mut client = TheaterClient::new(args.address);
+        let config = crate::config::Config::default();
+        let mut client = TheaterClient::new(args.address, config);
 
         // Connect to the server
         client.connect().await?;
@@ -67,7 +68,7 @@ pub fn execute(args: &MessageArgs, _verbose: bool, json: bool) -> Result<()> {
         if args.request {
             // Send as a request and wait for response
             let response: Vec<u8> = client
-                .request_actor_message(actor_id.clone(), message_bytes)
+                .request_message(&actor_id.to_string(), message_bytes)
                 .await?;
 
             // Output the response
@@ -90,7 +91,7 @@ pub fn execute(args: &MessageArgs, _verbose: bool, json: bool) -> Result<()> {
         } else {
             // Send as a one-way message
             client
-                .send_actor_message(actor_id.clone(), message_bytes)
+                .send_message(&actor_id.to_string(), message_bytes)
                 .await?;
 
             // Output the result

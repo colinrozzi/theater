@@ -81,7 +81,8 @@ pub fn execute(args: &StartArgs, _verbose: bool, json: bool) -> Result<()> {
 
     // Connect to the server and start the actor
     runtime.block_on(async {
-        let mut client = TheaterClient::new(args.address);
+        let config = crate::config::Config::default();
+        let mut client = TheaterClient::new(args.address, config);
 
         // Connect to the server
         client.connect().await?;
@@ -99,7 +100,7 @@ pub fn execute(args: &StartArgs, _verbose: bool, json: bool) -> Result<()> {
         loop {
             tokio::select! {
                 data = client.next_response() => {
-                    if let Some(data) = data {
+                    if let Ok(Some(data)) = data {
                     match data {
                         Ok(ManagementResponse::ActorStarted { id }) => {
                             if args.id_only {

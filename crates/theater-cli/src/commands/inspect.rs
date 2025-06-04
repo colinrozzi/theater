@@ -33,41 +33,39 @@ pub fn execute(args: &InspectArgs, _verbose: bool, json: bool) -> Result<()> {
     let runtime = tokio::runtime::Runtime::new()?;
 
     runtime.block_on(async {
-        let mut client = TheaterClient::new(args.address);
+        let config = crate::config::Config::default();
+        let mut client = TheaterClient::new(args.address, config);
 
         // Connect to the server
         client.connect().await?;
 
         // Collect all actor information
         debug!("Getting actor status");
-        let status = client.get_actor_status(args.actor_id.clone()).await?;
+        let status = client.get_actor_status(&args.actor_id.to_string()).await?;
 
         debug!("Getting actor state");
-        let state_result = client.get_actor_state(args.actor_id.clone()).await;
+        let state_result = client.get_actor_state(&args.actor_id.to_string()).await;
         let state = match state_result {
-            Ok(Some(ref state)) => {
-                // Try to parse as JSON for display
-                match serde_json::from_slice::<serde_json::Value>(&state) {
-                    Ok(parsed) => Some(parsed),
-                    Err(_) => {
-                        // If it's not valid JSON, just note the size
-                        debug!("State is not valid JSON, showing size only");
-                        None
-                    }
+            Ok(state_value) => {
+                if state_value.is_null() {
+                    None
+                } else {
+                    Some(state_value)
                 }
             }
             _ => None,
         };
 
         debug!("Getting actor events");
-        let events_result = client.get_actor_events(args.actor_id.clone()).await;
+        let events_result = client.get_actor_events(&args.actor_id.to_string()).await;
         let events = match events_result {
             Ok(events) => events,
             Err(_) => vec![],
         };
 
-        debug!("Getting actor metrics");
-        let metrics_result = client.get_actor_metrics(args.actor_id.clone()).await;
+        // TODO: Implement metrics when available
+        // debug!("Getting actor metrics");
+        // let metrics_result = client.get_actor_metrics(&args.actor_id.to_string()).await;
         let metrics = match metrics_result {
             Ok(metrics) => Some(metrics),
             Err(_) => None,
@@ -103,7 +101,7 @@ pub fn execute(args: &InspectArgs, _verbose: bool, json: bool) -> Result<()> {
             );
             println!(
                 "{}",
-                formatting::format_key_value("Status", &formatting::format_status(&status))
+                formatting::format_key_value("Status", &status)
             );
 
             // Calculate uptime if we have events
@@ -130,10 +128,9 @@ pub fn execute(args: &InspectArgs, _verbose: bool, json: bool) -> Result<()> {
                     }
                 }
                 None => {
-                    if let Ok(Some(raw_state)) = state_result {
-                        println!("{} bytes of binary data", raw_state.len());
-                    } else {
-                        println!("No state available");
+                    match state_result {
+                        Ok(_) => println!("State is null"),
+                        Err(_) => println!("No state available"),
                     }
                 }
             }

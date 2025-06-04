@@ -21,7 +21,8 @@ pub fn execute(args: &ListArgs, _verbose: bool, json: bool) -> Result<()> {
     let runtime = tokio::runtime::Runtime::new()?;
 
     runtime.block_on(async {
-        let mut client = TheaterClient::new(args.address);
+        let config = crate::config::Config::default();
+        let mut client = TheaterClient::new(args.address, config);
 
         // Connect to the server
         client.connect().await?;

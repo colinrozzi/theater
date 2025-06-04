@@ -131,31 +131,31 @@ pub async fn run_async(
 
     // Execute the command - using legacy functions for now, can be modernized incrementally
     let result = match &cli.command {
-        Commands::Subscribe(args) => commands::subscribe::execute(args, ctx.verbose, ctx.json).map_err(Into::into),
-        Commands::Server(args) => commands::server::start::execute(args, ctx.verbose).map_err(Into::into),
-        Commands::Create(args) => commands::create::execute(args, ctx.verbose, ctx.json).map_err(Into::into),
-        Commands::Build(args) => commands::build::execute(args, ctx.verbose, ctx.json).map_err(Into::into),
+        Commands::Subscribe(args) => commands::subscribe::execute(args, ctx.verbose, ctx.json).map_err(|e| anyhow::Error::from(e)),
+        Commands::Server(args) => commands::server::start::execute(args, ctx.verbose).map_err(|e| anyhow::Error::from(e)),
+        Commands::Create(args) => commands::create::execute(args, ctx.verbose, ctx.json).map_err(|e| anyhow::Error::from(e)),
+        Commands::Build(args) => commands::build::execute(args, ctx.verbose, ctx.json).map_err(|e| anyhow::Error::from(e)),
         Commands::List(args) => {
             // Use our modernized list command as an example
-            commands::list_v2::execute_async(args, &ctx).await.map_err(Into::into)
+            commands::list_v2::execute_async(args, &ctx).await.map_err(|e| anyhow::Error::from(e))
         },
-        Commands::Logs(args) => commands::logs::execute(args, ctx.verbose, ctx.json).map_err(Into::into),
-        Commands::State(args) => commands::state::execute(args, ctx.verbose, ctx.json).map_err(Into::into),
-        Commands::Events(args) => commands::events::execute(args, ctx.verbose, ctx.json).map_err(Into::into),
-        Commands::Inspect(args) => commands::inspect::execute(args, ctx.verbose, ctx.json).map_err(Into::into),
-        Commands::Tree(args) => commands::tree::execute(args, ctx.verbose, ctx.json).map_err(Into::into),
-        Commands::Validate(args) => commands::validate::execute(args, ctx.verbose, ctx.json).map_err(Into::into),
-        Commands::Start(args) => commands::start::execute(args, ctx.verbose, ctx.json).map_err(Into::into),
-        Commands::Stop(args) => commands::stop::execute(args, ctx.verbose, ctx.json).map_err(Into::into),
-        Commands::Restart(args) => commands::restart::execute(args, ctx.verbose, ctx.json).map_err(Into::into),
-        Commands::Update(args) => commands::update::execute(args, ctx.verbose, ctx.json).map_err(Into::into),
-        Commands::Message(args) => commands::message::execute(args, ctx.verbose, ctx.json).map_err(Into::into),
+        Commands::Logs(args) => commands::logs::execute(args, ctx.verbose, ctx.json).map_err(|e| anyhow::Error::from(e)),
+        Commands::State(args) => commands::state::execute(args, ctx.verbose, ctx.json).map_err(|e| anyhow::Error::from(e)),
+        Commands::Events(args) => commands::events::execute(args, ctx.verbose, ctx.json).map_err(|e| anyhow::Error::from(e)),
+        Commands::Inspect(args) => commands::inspect::execute(args, ctx.verbose, ctx.json).map_err(|e| anyhow::Error::from(e)),
+        Commands::Tree(args) => commands::tree::execute(args, ctx.verbose, ctx.json).map_err(|e| anyhow::Error::from(e)),
+        Commands::Validate(args) => commands::validate::execute(args, ctx.verbose, ctx.json).map_err(|e| anyhow::Error::from(e)),
+        Commands::Start(args) => commands::start::execute(args, ctx.verbose, ctx.json).map_err(|e| anyhow::Error::from(e)),
+        Commands::Stop(args) => commands::stop::execute(args, ctx.verbose, ctx.json).map_err(|e| anyhow::Error::from(e)),
+        Commands::Restart(args) => commands::restart::execute(args, ctx.verbose, ctx.json).map_err(|e| anyhow::Error::from(e)),
+        Commands::Update(args) => commands::update::execute(args, ctx.verbose, ctx.json).map_err(|e| anyhow::Error::from(e)),
+        Commands::Message(args) => commands::message::execute(args, ctx.verbose, ctx.json).map_err(|e| anyhow::Error::from(e)),
         Commands::Channel(args) => match &args.command {
             commands::channel::ChannelCommands::Open(open_args) => {
-                commands::channel::open::execute(open_args, ctx.verbose, ctx.json).map_err(Into::into)
+                commands::channel::open::execute(open_args, ctx.verbose, ctx.json).map_err(|e| anyhow::Error::from(e))
             }
         },
-        Commands::ListStored(args) => commands::list_stored::execute(args, ctx.verbose, ctx.json).map_err(Into::into),
+        Commands::ListStored(args) => commands::list_stored::execute(args, ctx.verbose, ctx.json).map_err(|e| anyhow::Error::from(e)),
     };
     
     // Handle the result

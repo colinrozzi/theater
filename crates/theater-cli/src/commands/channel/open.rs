@@ -77,7 +77,8 @@ async fn run_channel_session(
     json_output: bool,
     verbose: bool,
 ) -> Result<()> {
-    let mut client = TheaterClient::new(server_addr);
+    let config = crate::config::Config::default();
+    let mut client = TheaterClient::new(server_addr, config);
 
     // Connect to the server
     client.connect().await?;

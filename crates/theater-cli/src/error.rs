@@ -107,6 +107,9 @@ pub enum CliError {
 
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
+
+    #[error("Parse error: {message}")]
+    ParseError { message: String },
 }
 
 impl CliError {
@@ -170,6 +173,16 @@ impl CliError {
             field: field.into(),
             value: value.into(),
             suggestion: suggestion.into(),
+        }
+    }
+
+    /// Create an invalid actor ID error
+    pub fn invalid_actor_id(actor_id: impl Into<String>) -> Self {
+        let actor_id = actor_id.into();
+        Self::InvalidInput {
+            field: "actor_id".to_string(),
+            value: actor_id,
+            suggestion: "Actor ID must be a valid UUID (e.g., 123e4567-e89b-12d3-a456-426614174000)".to_string(),
         }
     }
 
@@ -263,7 +276,7 @@ impl CliError {
             | Self::ProtocolError { .. }
             | Self::UnexpectedResponse { .. } => "server",
             Self::EventStreamError { .. } | Self::EventFilterError { .. } => "events",
-            Self::Internal(_) | Self::Serialization(_) | Self::Io(_) => "internal",
+            Self::Internal(_) | Self::Serialization(_) | Self::Io(_) | Self::ParseError { .. } => "internal",
         }
     }
 }

@@ -40,13 +40,14 @@ pub fn execute(args: &LogsArgs, _verbose: bool, json: bool) -> Result<()> {
     let runtime = tokio::runtime::Runtime::new()?;
 
     runtime.block_on(async {
-        let mut client = TheaterClient::new(args.address);
+        let config = crate::config::Config::default();
+        let mut client = TheaterClient::new(args.address, config);
 
         // Connect to the server
         client.connect().await?;
 
         // Get the actor events (we'll filter for log events)
-        let events = client.get_actor_events(actor_id.clone()).await?;
+        let events = client.get_actor_events(&actor_id.to_string()).await?;
 
         // Filter for log events and extract log messages
         let log_events: Vec<_> = events.iter().filter(|e| e.event_type == "Log").collect();
@@ -98,7 +99,7 @@ pub fn execute(args: &LogsArgs, _verbose: bool, json: bool) -> Result<()> {
             }
 
             // Subscribe to actor events
-            let sub_id = client.subscribe_to_actor(actor_id.clone()).await?;
+            let event_stream = client.subscribe_to_events(&actor_id.to_string()).await?;
 
             // TODO: Implement subscription handling for real-time logs
             // This would require a more complex setup with a channel to receive events
@@ -109,7 +110,7 @@ pub fn execute(args: &LogsArgs, _verbose: bool, json: bool) -> Result<()> {
             tokio::time::sleep(Duration::from_secs(60)).await;
 
             // Unsubscribe when done
-            client.unsubscribe_from_actor(actor_id, sub_id).await?;
+            event_stream.unsubscribe().await?;
         }
 
         Ok::<(), anyhow::Error>(())

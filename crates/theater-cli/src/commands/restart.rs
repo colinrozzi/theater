@@ -31,13 +31,14 @@ pub fn execute(args: &RestartArgs, _verbose: bool, json: bool) -> Result<()> {
     let runtime = tokio::runtime::Runtime::new()?;
 
     runtime.block_on(async {
-        let mut client = TheaterClient::new(args.address);
+        let config = crate::config::Config::default();
+        let mut client = TheaterClient::new(args.address, config);
 
         // Connect to the server
         client.connect().await?;
 
         // Restart the actor
-        client.restart_actor(actor_id.clone()).await?;
+        client.restart_actor(&actor_id.to_string()).await?;
 
         // Output the result
         if !json {
