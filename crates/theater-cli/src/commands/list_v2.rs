@@ -2,38 +2,85 @@ use std::net::SocketAddr;
 use clap::Parser;
 use tracing::debug;
 
-use crate::error::CliResult;
+use crate::error::{CliError, CliResult};
 use crate::output::formatters::ActorList;
-use crate::{CommandContext, client::TheaterClient};
+use crate::{CommandContext};
 
-#[derive(Debug, Parser)]
-pub struct ListArgs {
-    /// Address of the theater server
-    #[arg(short, long)]
-    pub address: Option<SocketAddr>,
-}
+// Re-use the existing ListArgs structure
+pub use crate::commands::list::ListArgs;
 
-/// Execute the list command asynchronously
+/// Execute the list command asynchronously with modern patterns
 pub async fn execute_async(args: &ListArgs, ctx: &CommandContext) -> CliResult<()> {
-    debug!("Listing actors");
-    
-    let server_addr = ctx.server_address(args.address);
-    debug!("Connecting to server at: {}", server_addr);
+    debug!("Listing actors with modern implementation");
+    debug!("Connecting to server at: {}", args.address);
 
-    // Create client with configuration
-    let client = TheaterClient::new(server_addr, ctx.config.clone());
-
-    // Get the list of actors
-    let actors = client.list_actors().await?;
+    // Create a simplified client that works with the current protocol
+    let actors = list_actors_simple(args.address).await?;
 
     // Create formatted output
-    let actor_list = ActorList { actors };
+    let actor_list = ActorList { 
+        actors: actors.into_iter()
+            .map(|(id, name)| (id.to_string(), name))
+            .collect()
+    };
     
     // Output using the configured format
     let format = if ctx.json { Some("json") } else { None };
     ctx.output.output(&actor_list, format)?;
 
     Ok(())
+}
+
+/// Simplified actor listing that works with current protocol
+async fn list_actors_simple(address: SocketAddr) -> CliResult<Vec<(theater::id::TheaterId, String)>> {
+    use tokio::net::TcpStream;
+    use tokio_util::codec::{Framed, LengthDelimitedCodec};
+    use futures::{SinkExt, StreamExt};
+    use bytes::Bytes;
+    
+    // Connect directly to the server
+    let socket = TcpStream::connect(address).await
+        .map_err(|e| CliError::connection_failed(address, e))?;
+    
+    let mut codec = LengthDelimitedCodec::new();
+    codec.set_max_frame_length(32 * 1024 * 1024);
+    let mut framed = Framed::new(socket, codec);
+    
+    // Send ListActors command
+    let command = theater_server::ManagementCommand::ListActors;
+    let command_bytes = serde_json::to_vec(&command)
+        .map_err(CliError::Serialization)?;
+    
+    framed.send(Bytes::from(command_bytes)).await
+        .map_err(|_| CliError::ConnectionLost)?;
+    
+    // Receive response
+    if let Some(response_bytes) = framed.next().await {
+        let response_bytes = response_bytes
+            .map_err(|_| CliError::ConnectionLost)?;
+        
+        let response: theater_server::ManagementResponse = serde_json::from_slice(&response_bytes)
+            .map_err(|e| CliError::ProtocolError {
+                reason: format!("Failed to deserialize response: {}", e),
+            })?;
+        
+        match response {
+            theater_server::ManagementResponse::ActorList { actors } => {
+                debug!("Listed {} actors", actors.len());
+                Ok(actors)
+            }
+            theater_server::ManagementResponse::Error { error } => {
+                Err(CliError::ServerError { 
+                    message: format!("{:?}", error)
+                })
+            }
+            _ => Err(CliError::UnexpectedResponse {
+                response: format!("{:?}", response),
+            }),
+        }
+    } else {
+        Err(CliError::ConnectionLost)
+    }
 }
 
 // Keep the legacy function for backward compatibility
@@ -61,8 +108,10 @@ mod tests {
     use crate::output::OutputManager;
 
     #[tokio::test]
-    async fn test_list_command() {
-        let args = ListArgs { address: None };
+    async fn test_list_command_structure() {
+        let args = ListArgs { 
+            address: "127.0.0.1:9000".parse().unwrap() 
+        };
         let config = Config::default();
         let output = OutputManager::new(config.output.clone());
         

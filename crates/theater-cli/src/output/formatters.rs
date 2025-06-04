@@ -80,10 +80,11 @@ impl OutputFormat for ActorEvents {
 
         for event in &self.events {
             let timestamp = format_timestamp(event.timestamp);
+            let description = event.description.as_deref().unwrap_or("No description");
             println!("{} {} {}", 
                 output.theme().muted().apply_to(&timestamp),
                 output.theme().accent().apply_to(&event.event_type),
-                truncate_string(&event.description, 60)
+                truncate_string(description, 60)
             );
         }
         Ok(())
@@ -105,13 +106,11 @@ impl OutputFormat for ActorEvents {
                 output.theme().muted().apply_to(&timestamp),
                 output.theme().accent().apply_to(&event.event_type)
             );
-            println!("   {}", event.description);
+            let description = event.description.as_deref().unwrap_or("No description");
+            println!("   {}", description);
             
-            if !event.data.is_empty() {
-                println!("   Data: {}", 
-                    output.theme().muted().apply_to(&truncate_string(&event.data, 100))
-                );
-            }
+            // Note: event.data structure is complex EventData enum, not displaying raw data
+            // Could be enhanced to show specific event data based on type
             println!();
         }
 
@@ -131,7 +130,7 @@ impl OutputFormat for ActorEvents {
             .map(|event| vec![
                 format_timestamp(event.timestamp),
                 event.event_type.clone(),
-                truncate_string(&event.description, 50),
+                truncate_string(event.description.as_deref().unwrap_or("No description"), 50),
             ])
             .collect();
 
@@ -275,8 +274,8 @@ impl OutputFormat for ServerInfo {
 
 // Helper functions
 
-fn format_timestamp(timestamp: i64) -> String {
-    match DateTime::from_timestamp(timestamp, 0) {
+fn format_timestamp(timestamp: u64) -> String {
+    match DateTime::from_timestamp(timestamp as i64, 0) {
         Some(dt) => dt.format("%Y-%m-%d %H:%M:%S UTC").to_string(),
         None => timestamp.to_string(),
     }

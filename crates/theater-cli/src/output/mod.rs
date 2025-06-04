@@ -1,4 +1,4 @@
-mod formatters;
+pub mod formatters;
 mod progress;
 mod theme;
 
