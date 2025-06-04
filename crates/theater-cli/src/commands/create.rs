@@ -3,7 +3,7 @@ use clap::Parser;
 use std::path::PathBuf;
 use tracing::debug;
 
-use crate::{CommandContext, error::CliError, output::formatters::ProjectCreated, templates};
+use crate::{error::CliError, output::formatters::ProjectCreated, templates, CommandContext};
 
 #[derive(Debug, Parser)]
 pub struct CreateArgs {
@@ -30,7 +30,7 @@ pub async fn execute_async(args: &CreateArgs, ctx: &CommandContext) -> Result<()
         return Err(CliError::invalid_input(
             "project_name",
             &args.name,
-            "Project names must only contain alphanumeric characters, hyphens, and underscores"
+            "Project names must only contain alphanumeric characters, hyphens, and underscores",
         ));
     }
 
@@ -49,14 +49,21 @@ pub async fn execute_async(args: &CreateArgs, ctx: &CommandContext) -> Result<()
     // Check if the template exists
     if !templates_list.contains_key(&args.template) {
         let available_templates: Vec<String> = templates_list.keys().cloned().collect();
-        return Err(CliError::template_not_found(&args.template, available_templates));
+        return Err(CliError::template_not_found(
+            &args.template,
+            available_templates,
+        ));
     }
 
     // Create the project
     let project_path = output_dir.join(&args.name);
-    templates::create_project(&args.template, &args.name, &output_dir)
-        .map_err(|e| CliError::file_operation_failed("create project", project_path.display().to_string(), 
-            std::io::Error::new(std::io::ErrorKind::Other, e)))?;
+    templates::create_project(&args.template, &args.name, &output_dir).map_err(|e| {
+        CliError::file_operation_failed(
+            "create project",
+            project_path.display().to_string(),
+            std::io::Error::new(std::io::ErrorKind::Other, e),
+        )
+    })?;
 
     // Create success result and output
     let result = ProjectCreated {
@@ -74,24 +81,10 @@ pub async fn execute_async(args: &CreateArgs, ctx: &CommandContext) -> Result<()
     Ok(())
 }
 
-/// Legacy wrapper for backward compatibility
-pub fn execute(args: &CreateArgs, verbose: bool, json: bool) -> Result<()> {
-    let runtime = tokio::runtime::Runtime::new()?;
-    runtime.block_on(async {
-        let config = crate::config::Config::load().unwrap_or_default();
-        let output = crate::output::OutputManager::new(config.output.clone());
-        let ctx = crate::CommandContext {
-            config,
-            output,
-            verbose,
-            json,
-        };
-        execute_async(args, &ctx).await.map_err(|e| anyhow::Error::from(e))
-    })
-}
-
 fn is_valid_project_name(name: &str) -> bool {
     // Check that the name only contains alphanumeric characters, hyphens, and underscores
-    !name.is_empty() && name.chars()
-        .all(|c| c.is_alphanumeric() || c == '-' || c == '_')
+    !name.is_empty()
+        && name
+            .chars()
+            .all(|c| c.is_alphanumeric() || c == '-' || c == '_')
 }

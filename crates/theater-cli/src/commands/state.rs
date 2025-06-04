@@ -1,12 +1,12 @@
 use clap::Parser;
 use std::net::SocketAddr;
-use tracing::debug;
 use std::str::FromStr;
+use tracing::debug;
 
-use theater::id::TheaterId;
 use crate::error::{CliError, CliResult};
 use crate::output::formatters::ActorState;
 use crate::CommandContext;
+use theater::id::TheaterId;
 
 #[derive(Debug, Parser)]
 pub struct StateArgs {
@@ -29,20 +29,23 @@ pub async fn execute_async(args: &StateArgs, ctx: &CommandContext) -> CliResult<
     debug!("Connecting to server at: {}", args.address);
 
     // Parse the actor ID
-    let actor_id = TheaterId::from_str(&args.actor_id)
-        .map_err(|_| CliError::InvalidInput {
-            field: "actor_id".to_string(),
-            value: args.actor_id.clone(),
-            suggestion: "Provide a valid actor ID in the correct format".to_string(),
-        })?;
+    let actor_id = TheaterId::from_str(&args.actor_id).map_err(|_| CliError::InvalidInput {
+        field: "actor_id".to_string(),
+        value: args.actor_id.clone(),
+        suggestion: "Provide a valid actor ID in the correct format".to_string(),
+    })?;
 
     // Create client and connect
     let client = ctx.create_client();
-    client.connect().await
+    client
+        .connect()
+        .await
         .map_err(|e| CliError::connection_failed(args.address, e))?;
 
     // Get the actor state
-    let state = client.get_actor_state(&actor_id.to_string()).await
+    let state = client
+        .get_actor_state(&actor_id.to_string())
+        .await
         .map_err(|e| CliError::ServerError {
             message: format!("Failed to get actor state: {}", e),
         })?;
@@ -52,30 +55,16 @@ pub async fn execute_async(args: &StateArgs, ctx: &CommandContext) -> CliResult<
         actor_id: actor_id.to_string(),
         state,
     };
-    
+
     // Output using the configured format
-    let format = if ctx.json { Some("json") } else { Some(args.format.as_str()) };
+    let format = if ctx.json {
+        Some("json")
+    } else {
+        Some(args.format.as_str())
+    };
     ctx.output.output(&actor_state, format)?;
 
     Ok(())
-}
-
-// Keep the legacy function for backward compatibility
-pub fn execute(args: &StateArgs, verbose: bool, json: bool) -> anyhow::Result<()> {
-    let runtime = tokio::runtime::Runtime::new()?;
-    runtime.block_on(async {
-        let config = crate::config::Config::load().unwrap_or_default();
-        let output = crate::output::OutputManager::new(config.output.clone());
-        
-        let ctx = CommandContext {
-            config,
-            output,
-            verbose,
-            json,
-        };
-        
-        execute_async(args, &ctx).await.map_err(Into::into)
-    })
 }
 
 #[cfg(test)]
@@ -93,14 +82,14 @@ mod tests {
         };
         let config = Config::default();
         let output = OutputManager::new(config.output.clone());
-        
+
         let ctx = CommandContext {
             config,
             output,
             verbose: false,
             json: false,
         };
-        
+
         let result = execute_async(&args, &ctx).await;
         assert!(result.is_err());
         if let Err(CliError::InvalidInput { field, .. }) = result {

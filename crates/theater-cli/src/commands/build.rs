@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use tracing::{debug, error, info};
 
-use crate::{CommandContext, error::CliError, output::formatters::BuildResult};
+use crate::{error::CliError, output::formatters::BuildResult, CommandContext};
 use theater::config::ManifestConfig;
 
 #[derive(Debug, Parser)]
@@ -74,7 +74,10 @@ pub async fn execute_async(args: &BuildArgs, ctx: &CommandContext) -> Result<(),
     }
 
     // Build the WebAssembly component using cargo-component
-    debug!("Building WebAssembly component for actor in {}...", project_dir.display());
+    debug!(
+        "Building WebAssembly component for actor in {}...",
+        project_dir.display()
+    );
 
     // Execute cargo component build
     let mut build_cmd = Command::new("cargo");
@@ -87,13 +90,18 @@ pub async fn execute_async(args: &BuildArgs, ctx: &CommandContext) -> Result<(),
     build_cmd.current_dir(&project_dir);
 
     // Run the build command and capture output
-    let (status, stdout, stderr) = run_command_with_output(&mut build_cmd, ctx.verbose)
-        .map_err(|e| CliError::build_failed(format!("Failed to execute cargo component build: {}", e)))?;
+    let (status, stdout, stderr) =
+        run_command_with_output(&mut build_cmd, ctx.verbose).map_err(|e| {
+            CliError::build_failed(format!("Failed to execute cargo component build: {}", e))
+        })?;
 
     // Handle build failures
     if !status.success() {
         let error_details = if stderr.is_empty() { stdout } else { stderr };
-        return Err(CliError::build_failed(format!("Cargo component build failed:\\n{}", error_details)));
+        return Err(CliError::build_failed(format!(
+            "Cargo component build failed:\\n{}",
+            error_details
+        )));
     }
 
     // Construct the path to the built wasm file
@@ -114,23 +122,38 @@ pub async fn execute_async(args: &BuildArgs, ctx: &CommandContext) -> Result<(),
 
     // Update the manifest.toml with the new component path if it exists
     if manifest_exists {
-        let manifest_content = fs::read_to_string(&manifest_path)
-            .map_err(|e| CliError::file_operation_failed("read manifest.toml", manifest_path.display().to_string(), e))?;
+        let manifest_content = fs::read_to_string(&manifest_path).map_err(|e| {
+            CliError::file_operation_failed(
+                "read manifest.toml",
+                manifest_path.display().to_string(),
+                e,
+            )
+        })?;
 
-        let mut manifest: ManifestConfig = toml::from_str(&manifest_content)
-            .map_err(|e| CliError::invalid_manifest(format!("Failed to parse manifest.toml: {}", e)))?;
+        let mut manifest: ManifestConfig = toml::from_str(&manifest_content).map_err(|e| {
+            CliError::invalid_manifest(format!("Failed to parse manifest.toml: {}", e))
+        })?;
 
         // Update the component path - use absolute path to the wasm file
         manifest.component = wasm_path.to_string_lossy().to_string();
 
         // Write the updated manifest
-        let updated_manifest = toml::to_string(&manifest)
-            .map_err(|e| CliError::invalid_manifest(format!("Failed to serialize manifest.toml: {}", e)))?;
+        let updated_manifest = toml::to_string(&manifest).map_err(|e| {
+            CliError::invalid_manifest(format!("Failed to serialize manifest.toml: {}", e))
+        })?;
 
-        fs::write(&manifest_path, updated_manifest)
-            .map_err(|e| CliError::file_operation_failed("write manifest.toml", manifest_path.display().to_string(), e))?;
+        fs::write(&manifest_path, updated_manifest).map_err(|e| {
+            CliError::file_operation_failed(
+                "write manifest.toml",
+                manifest_path.display().to_string(),
+                e,
+            )
+        })?;
 
-        info!("Updated manifest with component path: {}", wasm_path.display());
+        info!(
+            "Updated manifest with component path: {}",
+            wasm_path.display()
+        );
     }
 
     // Create build result and output
@@ -148,22 +171,6 @@ pub async fn execute_async(args: &BuildArgs, ctx: &CommandContext) -> Result<(),
 
     ctx.output.output(&result, None)?;
     Ok(())
-}
-
-/// Legacy wrapper for backward compatibility
-pub fn execute(args: &BuildArgs, verbose: bool, json: bool) -> Result<()> {
-    let runtime = tokio::runtime::Runtime::new()?;
-    runtime.block_on(async {
-        let config = crate::config::Config::load().unwrap_or_default();
-        let output = crate::output::OutputManager::new(config.output.clone());
-        let ctx = crate::CommandContext {
-            config,
-            output,
-            verbose,
-            json,
-        };
-        execute_async(args, &ctx).await.map_err(|e| anyhow::Error::from(e))
-    })
 }
 
 /// Run a command and return the status, stdout, and stderr

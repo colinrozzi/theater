@@ -3,9 +3,9 @@ use clap::Parser;
 use std::net::SocketAddr;
 use tracing::debug;
 
-use crate::{CommandContext, error::CliError, output::formatters::ActorStarted};
 use crate::client::ManagementResponse;
 use crate::utils::event_display::{display_events_header, display_single_event};
+use crate::{error::CliError, output::formatters::ActorStarted, CommandContext};
 use theater::utils::resolve_reference;
 
 #[derive(Debug, Parser)]
@@ -42,21 +42,23 @@ pub struct StartArgs {
 /// Execute the start command asynchronously (modernized)
 pub async fn execute_async(args: &StartArgs, ctx: &CommandContext) -> Result<(), CliError> {
     debug!("Starting actor from manifest: {}", args.manifest);
-    
+
     // Get server address from args or config
     let address = ctx.server_address(args.address);
     debug!("Connecting to server at: {}", address);
 
     // Resolve the manifest reference (could be file path, URL, or store path)
-    let manifest_bytes = resolve_reference(&args.manifest).await
-        .map_err(|e| CliError::invalid_manifest(format!(
+    let manifest_bytes = resolve_reference(&args.manifest).await.map_err(|e| {
+        CliError::invalid_manifest(format!(
             "Failed to resolve manifest reference '{}': {}",
             args.manifest, e
-        )))?;
+        ))
+    })?;
 
     // Convert bytes to string
-    let manifest_content = String::from_utf8(manifest_bytes)
-        .map_err(|e| CliError::invalid_manifest(format!("Manifest content is not valid UTF-8: {}", e)))?;
+    let manifest_content = String::from_utf8(manifest_bytes).map_err(|e| {
+        CliError::invalid_manifest(format!("Manifest content is not valid UTF-8: {}", e))
+    })?;
 
     // Handle the initial state parameter
     let initial_state = if let Some(state_str) = &args.initial_state {
@@ -78,11 +80,15 @@ pub async fn execute_async(args: &StartArgs, ctx: &CommandContext) -> Result<(),
 
     // Create client and connect
     let client = ctx.create_client();
-    client.connect().await
+    client
+        .connect()
+        .await
         .map_err(|e| CliError::connection_failed(address, e))?;
 
     // Start the actor with initial state
-    client.start_actor(manifest_content, initial_state, args.parent, args.subscribe).await
+    client
+        .start_actor(manifest_content, initial_state, args.parent, args.subscribe)
+        .await
         .map_err(|e| CliError::actor_not_found(format!("Failed to start actor: {}", e)))?;
 
     if args.subscribe && !ctx.json {
@@ -98,7 +104,7 @@ pub async fn execute_async(args: &StartArgs, ctx: &CommandContext) -> Result<(),
                 if let Ok(Some(data)) = data {
                     match data {
                         ManagementResponse::ActorStarted { id } => {
-                            
+
                             if args.id_only {
                                 println!("{}", id);
                                 is_running = false;
@@ -111,7 +117,7 @@ pub async fn execute_async(args: &StartArgs, ctx: &CommandContext) -> Result<(),
                                     acting_as_parent: args.parent,
                                 };
                                 ctx.output.output(&result, None)?;
-                                
+
                                 // if we are not subscribing or acting as a parent, break the loop
                                 if !(args.subscribe || args.parent) {
                                     is_running = false;
@@ -159,20 +165,4 @@ pub async fn execute_async(args: &StartArgs, ctx: &CommandContext) -> Result<(),
     }
 
     Ok(())
-}
-
-/// Legacy wrapper for backward compatibility
-pub fn execute(args: &StartArgs, verbose: bool, json: bool) -> Result<()> {
-    let runtime = tokio::runtime::Runtime::new()?;
-    runtime.block_on(async {
-        let config = crate::config::Config::load().unwrap_or_default();
-        let output = crate::output::OutputManager::new(config.output.clone());
-        let ctx = crate::CommandContext {
-            config,
-            output,
-            verbose,
-            json,
-        };
-        execute_async(args, &ctx).await.map_err(|e| anyhow::Error::from(e))
-    })
 }

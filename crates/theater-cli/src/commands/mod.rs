@@ -4,16 +4,10 @@ pub mod create;
 pub mod events;
 pub mod inspect;
 pub mod list;
-pub mod list_v2;
 pub mod list_stored;
-pub mod logs;
 pub mod message;
-pub mod restart;
 pub mod server;
 pub mod start;
 pub mod state;
 pub mod stop;
 pub mod subscribe;
-pub mod tree;
-pub mod update;
-

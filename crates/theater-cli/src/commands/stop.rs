@@ -1,12 +1,12 @@
 use clap::Parser;
 use std::net::SocketAddr;
-use tracing::debug;
 use std::str::FromStr;
+use tracing::debug;
 
-use theater::id::TheaterId;
 use crate::error::{CliError, CliResult};
 use crate::output::formatters::ActorAction;
 use crate::CommandContext;
+use theater::id::TheaterId;
 
 #[derive(Debug, Parser)]
 pub struct StopArgs {
@@ -25,20 +25,23 @@ pub async fn execute_async(args: &StopArgs, ctx: &CommandContext) -> CliResult<(
     debug!("Connecting to server at: {}", args.address);
 
     // Parse the actor ID
-    let actor_id = TheaterId::from_str(&args.actor_id)
-        .map_err(|_| CliError::InvalidInput {
-            field: "actor_id".to_string(),
-            value: args.actor_id.clone(),
-            suggestion: "Provide a valid actor ID in the correct format".to_string(),
-        })?;
+    let actor_id = TheaterId::from_str(&args.actor_id).map_err(|_| CliError::InvalidInput {
+        field: "actor_id".to_string(),
+        value: args.actor_id.clone(),
+        suggestion: "Provide a valid actor ID in the correct format".to_string(),
+    })?;
 
     // Create client and connect
     let client = ctx.create_client();
-    client.connect().await
+    client
+        .connect()
+        .await
         .map_err(|e| CliError::connection_failed(args.address, e))?;
 
     // Stop the actor
-    client.stop_actor(&actor_id.to_string()).await
+    client
+        .stop_actor(&actor_id.to_string())
+        .await
         .map_err(|e| CliError::ServerError {
             message: format!("Failed to stop actor: {}", e),
         })?;
@@ -50,30 +53,12 @@ pub async fn execute_async(args: &StopArgs, ctx: &CommandContext) -> CliResult<(
         success: true,
         message: None,
     };
-    
+
     // Output using the configured format
     let format = if ctx.json { Some("json") } else { None };
     ctx.output.output(&action_result, format)?;
 
     Ok(())
-}
-
-// Keep the legacy function for backward compatibility
-pub fn execute(args: &StopArgs, verbose: bool, json: bool) -> anyhow::Result<()> {
-    let runtime = tokio::runtime::Runtime::new()?;
-    runtime.block_on(async {
-        let config = crate::config::Config::load().unwrap_or_default();
-        let output = crate::output::OutputManager::new(config.output.clone());
-        
-        let ctx = CommandContext {
-            config,
-            output,
-            verbose,
-            json,
-        };
-        
-        execute_async(args, &ctx).await.map_err(Into::into)
-    })
 }
 
 #[cfg(test)]
@@ -90,14 +75,14 @@ mod tests {
         };
         let config = Config::default();
         let output = OutputManager::new(config.output.clone());
-        
+
         let ctx = CommandContext {
             config,
             output,
             verbose: false,
             json: false,
         };
-        
+
         let result = execute_async(&args, &ctx).await;
         assert!(result.is_err());
         if let Err(CliError::InvalidInput { field, .. }) = result {

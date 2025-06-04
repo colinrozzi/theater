@@ -3,11 +3,11 @@ use std::net::SocketAddr;
 use std::str::FromStr;
 use tracing::debug;
 
-use theater::id::TheaterId;
-use theater::chain::ChainEvent;
 use crate::error::{CliError, CliResult};
 use crate::output::formatters::ActorEvents;
 use crate::CommandContext;
+use theater::chain::ChainEvent;
+use theater::id::TheaterId;
 
 /// Get events for an actor (falls back to filesystem if actor is not running)
 #[derive(Debug, Parser)]
@@ -59,20 +59,23 @@ pub async fn execute_async(args: &EventsArgs, ctx: &CommandContext) -> CliResult
     debug!("Connecting to server at: {}", args.address);
 
     // Parse the actor ID
-    let actor_id = TheaterId::from_str(&args.actor_id)
-        .map_err(|_| CliError::InvalidInput {
-            field: "actor_id".to_string(),
-            value: args.actor_id.clone(),
-            suggestion: "Provide a valid actor ID in the correct format".to_string(),
-        })?;
+    let actor_id = TheaterId::from_str(&args.actor_id).map_err(|_| CliError::InvalidInput {
+        field: "actor_id".to_string(),
+        value: args.actor_id.clone(),
+        suggestion: "Provide a valid actor ID in the correct format".to_string(),
+    })?;
 
     // Create client and connect
     let client = ctx.create_client();
-    client.connect().await
+    client
+        .connect()
+        .await
         .map_err(|e| CliError::connection_failed(args.address, e))?;
 
     // Get the actor events
-    let mut events = client.get_actor_events(&actor_id.to_string()).await
+    let mut events = client
+        .get_actor_events(&actor_id.to_string())
+        .await
         .map_err(|e| CliError::ServerError {
             message: format!("Failed to get actor events: {}", e),
         })?;
@@ -218,7 +221,8 @@ fn parse_time_spec(spec: &str) -> CliResult<u64> {
         _ => Err(CliError::InvalidInput {
             field: "time_unit".to_string(),
             value: unit,
-            suggestion: "Use time units: s (seconds), m (minutes), h (hours), d (days), w (weeks)".to_string(),
+            suggestion: "Use time units: s (seconds), m (minutes), h (hours), d (days), w (weeks)"
+                .to_string(),
         }),
     }
 }
@@ -279,24 +283,6 @@ fn order_events_by_chain(events: &[ChainEvent], reverse: bool) -> Vec<ChainEvent
     ordered_events
 }
 
-// Keep the legacy function for backward compatibility
-pub fn execute(args: &EventsArgs, verbose: bool, json: bool) -> anyhow::Result<()> {
-    let runtime = tokio::runtime::Runtime::new()?;
-    runtime.block_on(async {
-        let config = crate::config::Config::load().unwrap_or_default();
-        let output = crate::output::OutputManager::new(config.output.clone());
-        
-        let ctx = CommandContext {
-            config,
-            output,
-            verbose,
-            json,
-        };
-        
-        execute_async(args, &ctx).await.map_err(Into::into)
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -319,14 +305,14 @@ mod tests {
         };
         let config = Config::default();
         let output = OutputManager::new(config.output.clone());
-        
+
         let ctx = CommandContext {
             config,
             output,
             verbose: false,
             json: false,
         };
-        
+
         let result = execute_async(&args, &ctx).await;
         assert!(result.is_err());
         if let Err(CliError::InvalidInput { field, .. }) = result {
@@ -340,12 +326,12 @@ mod tests {
     fn test_parse_time_spec() {
         // Test unix timestamp
         assert_eq!(parse_time_spec("1000").unwrap(), 1000);
-        
+
         // Test relative times (will be based on current time, so just check they don't error)
         assert!(parse_time_spec("1h").is_ok());
         assert!(parse_time_spec("2d").is_ok());
         assert!(parse_time_spec("30m").is_ok());
-        
+
         // Test invalid formats
         assert!(parse_time_spec("invalid").is_err());
         assert!(parse_time_spec("1x").is_err());

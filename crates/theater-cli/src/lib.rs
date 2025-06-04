@@ -52,10 +52,6 @@ pub enum Commands {
     #[command(name = "list")]
     List(commands::list::ListArgs),
 
-    /// View actor logs
-    #[command(name = "logs")]
-    Logs(commands::logs::LogsArgs),
-
     /// Get actor state
     #[command(name = "state")]
     State(commands::state::StateArgs),
@@ -68,23 +64,9 @@ pub enum Commands {
     #[command(name = "inspect")]
     Inspect(commands::inspect::InspectArgs),
 
-    /// Show actor hierarchy as a tree
-    #[command(name = "tree")]
-    Tree(commands::tree::TreeArgs),
-
-
-
     /// Stop a running actor
     #[command(name = "stop")]
     Stop(commands::stop::StopArgs),
-
-    /// Restart a running actor
-    #[command(name = "restart")]
-    Restart(commands::restart::RestartArgs),
-
-    /// Update an actor's component
-    #[command(name = "update")]
-    Update(commands::update::UpdateArgs),
 
     /// Send a message to an actor
     #[command(name = "message")]
@@ -99,26 +81,16 @@ pub enum Commands {
     Channel(commands::channel::ChannelArgs),
 }
 
-/// Run the Theater CLI (legacy sync version)
-pub fn run() -> anyhow::Result<()> {
-    let runtime = tokio::runtime::Runtime::new()?;
-    runtime.block_on(async {
-        let config = config::Config::load().unwrap_or_default();
-        let (_, shutdown_rx) = tokio::sync::oneshot::channel();
-        run_async(config, shutdown_rx).await
-    })
-}
-
 /// Run the Theater CLI asynchronously
-pub async fn run_async(
-    config: config::Config, 
-    _shutdown_rx: tokio::sync::oneshot::Receiver<()>
+pub async fn run(
+    config: config::Config,
+    _shutdown_rx: tokio::sync::oneshot::Receiver<()>,
 ) -> anyhow::Result<()> {
     let cli = Cli::parse();
-    
+
     // Create output manager
     let output = output::OutputManager::new(config.output.clone());
-    
+
     // Create a context that contains shared resources
     let ctx = CommandContext {
         config,
@@ -129,33 +101,54 @@ pub async fn run_async(
 
     // Execute the command - using legacy functions for now, can be modernized incrementally
     let result = match &cli.command {
-        Commands::Subscribe(args) => commands::subscribe::execute_async(args, &ctx).await.map_err(|e| anyhow::Error::from(e)),
-        Commands::Server(args) => commands::server::start::execute_async(args, &ctx).await.map_err(|e| anyhow::Error::from(e)),
-        Commands::Create(args) => commands::create::execute_async(args, &ctx).await.map_err(|e| anyhow::Error::from(e)),
-        Commands::Build(args) => commands::build::execute_async(args, &ctx).await.map_err(|e| anyhow::Error::from(e)),
+        Commands::Subscribe(args) => commands::subscribe::execute_async(args, &ctx)
+            .await
+            .map_err(|e| anyhow::Error::from(e)),
+        Commands::Server(args) => commands::server::start::execute_async(args, &ctx)
+            .await
+            .map_err(|e| anyhow::Error::from(e)),
+        Commands::Create(args) => commands::create::execute_async(args, &ctx)
+            .await
+            .map_err(|e| anyhow::Error::from(e)),
+        Commands::Build(args) => commands::build::execute_async(args, &ctx)
+            .await
+            .map_err(|e| anyhow::Error::from(e)),
         Commands::List(args) => {
             // Use our modernized list command as an example
-            commands::list_v2::execute_async(args, &ctx).await.map_err(|e| anyhow::Error::from(e))
-        },
-        Commands::Logs(args) => commands::logs::execute_async(args, &ctx).await.map_err(|e| anyhow::Error::from(e)),
-        Commands::State(args) => commands::state::execute_async(args, &ctx).await.map_err(|e| anyhow::Error::from(e)),
-        Commands::Events(args) => commands::events::execute_async(args, &ctx).await.map_err(|e| anyhow::Error::from(e)),
-        Commands::Inspect(args) => commands::inspect::execute_async(args, &ctx).await.map_err(|e| anyhow::Error::from(e)),
-        Commands::Tree(args) => commands::tree::execute_async(args, &ctx).await.map_err(|e| anyhow::Error::from(e)),
-
-        Commands::Start(args) => commands::start::execute_async(args, &ctx).await.map_err(|e| anyhow::Error::from(e)),
-        Commands::Stop(args) => commands::stop::execute_async(args, &ctx).await.map_err(|e| anyhow::Error::from(e)),
-        Commands::Restart(args) => commands::restart::execute_async(args, &ctx).await.map_err(|e| anyhow::Error::from(e)),
-        Commands::Update(args) => commands::update::execute_async(args, &ctx).await.map_err(|e| anyhow::Error::from(e)),
-        Commands::Message(args) => commands::message::execute_async(args, &ctx).await.map_err(|e| anyhow::Error::from(e)),
+            commands::list::execute_async(args, &ctx)
+                .await
+                .map_err(|e| anyhow::Error::from(e))
+        }
+        Commands::State(args) => commands::state::execute_async(args, &ctx)
+            .await
+            .map_err(|e| anyhow::Error::from(e)),
+        Commands::Events(args) => commands::events::execute_async(args, &ctx)
+            .await
+            .map_err(|e| anyhow::Error::from(e)),
+        Commands::Inspect(args) => commands::inspect::execute_async(args, &ctx)
+            .await
+            .map_err(|e| anyhow::Error::from(e)),
+        Commands::Start(args) => commands::start::execute_async(args, &ctx)
+            .await
+            .map_err(|e| anyhow::Error::from(e)),
+        Commands::Stop(args) => commands::stop::execute_async(args, &ctx)
+            .await
+            .map_err(|e| anyhow::Error::from(e)),
+        Commands::Message(args) => commands::message::execute_async(args, &ctx)
+            .await
+            .map_err(|e| anyhow::Error::from(e)),
         Commands::Channel(args) => match &args.command {
             commands::channel::ChannelCommands::Open(open_args) => {
-                commands::channel::open::execute_async(open_args, &ctx).await.map_err(|e| anyhow::Error::from(e))
+                commands::channel::open::execute_async(open_args, &ctx)
+                    .await
+                    .map_err(|e| anyhow::Error::from(e))
             }
         },
-        Commands::ListStored(args) => commands::list_stored::execute_async(args, &ctx).await.map_err(|e| anyhow::Error::from(e)),
+        Commands::ListStored(args) => commands::list_stored::execute_async(args, &ctx)
+            .await
+            .map_err(|e| anyhow::Error::from(e)),
     };
-    
+
     // Handle the result
     match result {
         Ok(()) => Ok(()),
@@ -190,9 +183,12 @@ impl CommandContext {
     pub fn create_client(&self) -> client::TheaterClient {
         client::TheaterClient::new(self.config.server.default_address, self.config.clone())
     }
-    
+
     /// Get the server address from config or override
-    pub fn server_address(&self, override_addr: Option<std::net::SocketAddr>) -> std::net::SocketAddr {
+    pub fn server_address(
+        &self,
+        override_addr: Option<std::net::SocketAddr>,
+    ) -> std::net::SocketAddr {
         override_addr.unwrap_or(self.config.server.default_address)
     }
 }

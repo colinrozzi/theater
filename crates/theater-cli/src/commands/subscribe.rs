@@ -7,9 +7,9 @@ use std::time::Duration;
 use tokio::time;
 use tracing::{debug, info};
 
-use crate::{CommandContext, error::CliError, output::formatters::EventSubscription};
 use crate::client::ManagementResponse;
 use crate::utils::event_display::{display_events, display_single_event, EventDisplayOptions};
+use crate::{error::CliError, output::formatters::EventSubscription, CommandContext};
 use theater::id::TheaterId;
 
 #[derive(Debug, Parser)]
@@ -56,8 +56,9 @@ pub async fn execute_async(args: &SubscribeArgs, ctx: &CommandContext) -> Result
     // Read actor ID from stdin if "-" is specified
     let actor_id_str = if args.actor_id == "-" {
         let mut input = String::new();
-        std::io::stdin().read_line(&mut input)
-            .map_err(|e| CliError::invalid_input("actor_id", "-", format!("Failed to read from stdin: {}", e)))?;
+        std::io::stdin().read_line(&mut input).map_err(|e| {
+            CliError::invalid_input("actor_id", "-", format!("Failed to read from stdin: {}", e))
+        })?;
         input.trim().to_string()
     } else {
         args.actor_id.clone()
@@ -75,7 +76,9 @@ pub async fn execute_async(args: &SubscribeArgs, ctx: &CommandContext) -> Result
 
     // Create client and connect
     let client = ctx.create_client();
-    client.connect().await
+    client
+        .connect()
+        .await
         .map_err(|e| CliError::connection_failed(address, e))?;
 
     // Set up display options
@@ -109,8 +112,15 @@ pub async fn execute_async(args: &SubscribeArgs, ctx: &CommandContext) -> Result
 
     // If history flag is set, get and display historical events
     if args.history {
-        let mut events = client.get_actor_events(&actor_id.to_string()).await
-            .map_err(|e| CliError::actor_not_found(format!("Failed to get events for actor {}: {}", actor_id, e)))?;
+        let mut events = client
+            .get_actor_events(&actor_id.to_string())
+            .await
+            .map_err(|e| {
+                CliError::actor_not_found(format!(
+                    "Failed to get events for actor {}: {}",
+                    actor_id, e
+                ))
+            })?;
 
         // Apply event type filter if specified
         if let Some(filter) = &args.event_type {
@@ -131,19 +141,29 @@ pub async fn execute_async(args: &SubscribeArgs, ctx: &CommandContext) -> Result
     }
 
     // Subscribe to the actor's events
-    let event_stream = client.subscribe_to_events(&actor_id.to_string()).await
-        .map_err(|e| CliError::actor_not_found(format!("Failed to subscribe to actor {}: {}", actor_id, e)))?;
-    
+    let event_stream = client
+        .subscribe_to_events(&actor_id.to_string())
+        .await
+        .map_err(|e| {
+            CliError::actor_not_found(format!("Failed to subscribe to actor {}: {}", actor_id, e))
+        })?;
+
     let subscription_id = event_stream.subscription_id();
     subscription_info.subscription_id = Some(subscription_id.to_string());
     subscription_info.is_active = true;
 
-    info!("Subscribed to actor events with subscription ID: {}", subscription_id);
+    info!(
+        "Subscribed to actor events with subscription ID: {}",
+        subscription_id
+    );
 
     // If history was not requested or no events were found, print headers
     if !args.history || events_count == 0 {
         if display_options.format == "compact" && !display_options.json {
-            println!("{:<12} {:<12} {:<25} {}", "HASH", "PARENT", "EVENT TYPE", "DESCRIPTION");
+            println!(
+                "{:<12} {:<12} {:<25} {}",
+                "HASH", "PARENT", "EVENT TYPE", "DESCRIPTION"
+            );
             println!("{}", style("─".repeat(100)).dim());
         }
 
@@ -161,8 +181,11 @@ pub async fn execute_async(args: &SubscribeArgs, ctx: &CommandContext) -> Result
             let timeout_duration = Duration::from_secs(args.timeout);
             if last_event_time.elapsed() > timeout_duration {
                 if !ctx.json {
-                    println!("\n{} No events received for {} seconds, exiting.",
-                        style("⏱").yellow().bold(), args.timeout);
+                    println!(
+                        "\n{} No events received for {} seconds, exiting.",
+                        style("⏱").yellow().bold(),
+                        args.timeout
+                    );
                 }
                 break;
             }
@@ -199,15 +222,23 @@ pub async fn execute_async(args: &SubscribeArgs, ctx: &CommandContext) -> Result
                 // Display the event
                 display_single_event(
                     &event,
-                    if display_options.json { "json" } else { &display_options.format },
+                    if display_options.json {
+                        "json"
+                    } else {
+                        &display_options.format
+                    },
                     display_options.detailed,
-                ).map_err(|e| CliError::invalid_input("event_display", "event", e.to_string()))?;
+                )
+                .map_err(|e| CliError::invalid_input("event_display", "event", e.to_string()))?;
 
                 // Check if we've hit the limit
                 if args.limit > 0 && events_count >= args.limit {
                     if !ctx.json {
-                        println!("\n{} Reached event limit ({}), exiting.",
-                            style("ℹ").blue().bold(), args.limit);
+                        println!(
+                            "\n{} Reached event limit ({}), exiting.",
+                            style("ℹ").blue().bold(),
+                            args.limit
+                        );
                     }
                     break;
                 }
@@ -218,14 +249,21 @@ pub async fn execute_async(args: &SubscribeArgs, ctx: &CommandContext) -> Result
                         "actor_id": actor_id.to_string(),
                         "error": error,
                     });
-                    println!("{}", serde_json::to_string_pretty(&output)
-                        .map_err(|e| CliError::invalid_input("json_output", "error", e.to_string()))?);
+                    println!(
+                        "{}",
+                        serde_json::to_string_pretty(&output).map_err(|e| {
+                            CliError::invalid_input("json_output", "error", e.to_string())
+                        })?
+                    );
                 } else {
                     println!("{} Actor error: {}", style("ERROR").bold().red(), error);
                 }
             }
             Some(ManagementResponse::Error { error }) => {
-                return Err(CliError::actor_not_found(format!("Server error: {:?}", error)));
+                return Err(CliError::actor_not_found(format!(
+                    "Server error: {:?}",
+                    error
+                )));
             }
             _ => {
                 debug!("Received unexpected response: {:?}", response);
@@ -234,12 +272,15 @@ pub async fn execute_async(args: &SubscribeArgs, ctx: &CommandContext) -> Result
     }
 
     // Unsubscribe before exiting
-    if let Err(e) = client.unsubscribe_from_actor(&actor_id.to_string(), subscription_id).await {
+    if let Err(e) = client
+        .unsubscribe_from_actor(&actor_id.to_string(), subscription_id)
+        .await
+    {
         debug!("Failed to unsubscribe: {}", e);
     }
 
     subscription_info.is_active = false;
-    
+
     // Final status output if not JSON
     if !ctx.json && !args.history {
         subscription_info.events_received = events_count;
@@ -247,20 +288,4 @@ pub async fn execute_async(args: &SubscribeArgs, ctx: &CommandContext) -> Result
     }
 
     Ok(())
-}
-
-/// Legacy wrapper for backward compatibility
-pub fn execute(args: &SubscribeArgs, verbose: bool, json: bool) -> Result<()> {
-    let runtime = tokio::runtime::Runtime::new()?;
-    runtime.block_on(async {
-        let config = crate::config::Config::load().unwrap_or_default();
-        let output = crate::output::OutputManager::new(config.output.clone());
-        let ctx = crate::CommandContext {
-            config,
-            output,
-            verbose,
-            json,
-        };
-        execute_async(args, &ctx).await.map_err(|e| anyhow::Error::from(e))
-    })
 }
