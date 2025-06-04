@@ -1,12 +1,11 @@
-use anyhow::{anyhow, Context, Result};
+use anyhow::{anyhow, Result};
 use clap::Parser;
-use console::style;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use tracing::{debug, error, info};
 
-// Import Theater types for working with manifests
+use crate::{CommandContext, error::CliError, output::formatters::BuildResult};
 use theater::config::ManifestConfig;
 
 #[derive(Debug, Parser)]
@@ -24,11 +23,14 @@ pub struct BuildArgs {
     pub clean: bool,
 }
 
-pub fn execute(args: &BuildArgs, verbose: bool, json: bool) -> Result<()> {
+/// Execute the build command asynchronously (modernized)
+pub async fn execute_async(args: &BuildArgs, ctx: &CommandContext) -> Result<(), CliError> {
     let project_dir = if args.project_dir.is_absolute() {
         args.project_dir.clone()
     } else {
-        std::env::current_dir()?.join(&args.project_dir)
+        std::env::current_dir()
+            .map_err(|e| CliError::file_operation_failed("get current directory", ".", e))?
+            .join(&args.project_dir)
     };
 
     debug!("Building actor in directory: {}", project_dir.display());
@@ -38,55 +40,41 @@ pub fn execute(args: &BuildArgs, verbose: bool, json: bool) -> Result<()> {
     // Check if the directory contains a Cargo.toml file
     let cargo_toml_path = project_dir.join("Cargo.toml");
     if !cargo_toml_path.exists() {
-        return Err(anyhow!(
+        return Err(CliError::invalid_manifest(format!(
             "Not a Rust project directory (Cargo.toml not found): {}",
             project_dir.display()
-        ));
+        )));
     }
 
     // Get the package name from Cargo.toml
-    let package_name = get_package_name(&cargo_toml_path)?;
+    let package_name = get_package_name(&cargo_toml_path)
+        .map_err(|e| CliError::invalid_manifest(format!("Failed to parse Cargo.toml: {}", e)))?;
 
     // Check for manifest.toml
     let manifest_path = project_dir.join("manifest.toml");
     let manifest_exists = manifest_path.exists();
-    if !manifest_exists && !json {
-        println!(
-            "{} No manifest.toml found in project directory. Will build the WebAssembly component, but you'll need to create a manifest to deploy it.",
-            style("ℹ").blue().bold()
-        );
-    }
 
     // Check if cargo-component is installed
     if !is_cargo_component_installed() {
-        return Err(anyhow!(
+        return Err(CliError::build_failed(
             "cargo-component is not installed. Please install it with 'cargo install cargo-component'."
         ));
     }
 
     // Perform cleaning if requested
     if args.clean {
-        if !json {
-            println!("Cleaning build artifacts...");
-        }
-
-        // Clean Cargo artifacts
+        debug!("Cleaning build artifacts...");
         let mut clean_cmd = Command::new("cargo");
         clean_cmd.arg("clean").current_dir(&project_dir);
 
-        if let Err(e) = run_command_with_output(&mut clean_cmd, verbose) {
+        if let Err(e) = run_command_with_output(&mut clean_cmd, ctx.verbose) {
             error!("Failed to clean cargo artifacts: {}", e);
             // Continue anyway, as this is not fatal
         }
     }
 
     // Build the WebAssembly component using cargo-component
-    if !json {
-        println!(
-            "Building WebAssembly component for actor in {}...",
-            project_dir.display()
-        );
-    }
+    debug!("Building WebAssembly component for actor in {}...", project_dir.display());
 
     // Execute cargo component build
     let mut build_cmd = Command::new("cargo");
@@ -99,50 +87,13 @@ pub fn execute(args: &BuildArgs, verbose: bool, json: bool) -> Result<()> {
     build_cmd.current_dir(&project_dir);
 
     // Run the build command and capture output
-    let (status, stdout, stderr) = match run_command_with_output(&mut build_cmd, verbose) {
-        Ok(result) => result,
-        Err(e) => {
-            error!("Failed to execute cargo component build: {}", e);
-            if !json {
-                println!("{} Build failed: {}", style("✗").red().bold(), e);
-            } else {
-                let output = serde_json::json!({
-                    "success": false,
-                    "project_dir": project_dir.display().to_string(),
-                    "error": format!("Failed to execute cargo component build: {}", e)
-                });
-                println!("{}", serde_json::to_string_pretty(&output)?);
-            }
-            return Err(anyhow!("Failed to execute cargo component build: {}", e));
-        }
-    };
+    let (status, stdout, stderr) = run_command_with_output(&mut build_cmd, ctx.verbose)
+        .map_err(|e| CliError::build_failed(format!("Failed to execute cargo component build: {}", e)))?;
 
     // Handle build failures
     if !status.success() {
-        error!("Cargo component build failed with status: {}", status);
-
-        if !json {
-            // Use console's Term to ensure ANSI color codes are preserved
-            println!("{} Build failed with errors:\n", style("✗").red().bold());
-
-            // Use console's Term to write directly to stderr with colors preserved
-            let term = console::Term::stderr();
-            let _ = term.write_str(&stdout);
-            let _ = term.write_str(&stderr);
-            // Make sure we end with a newline
-            if !stderr.ends_with('\n') {
-                let _ = term.write_str("\n");
-            }
-        } else {
-            let output = serde_json::json!({
-                "success": false,
-                "project_dir": project_dir.display().to_string(),
-                "error": "Build failed"
-            });
-            println!("{}", serde_json::to_string_pretty(&output)?);
-        }
-
-        return Err(anyhow!("Cargo component build failed"));
+        let error_details = if stderr.is_empty() { stdout } else { stderr };
+        return Err(CliError::build_failed(format!("Cargo component build failed:\\n{}", error_details)));
     }
 
     // Construct the path to the built wasm file
@@ -155,71 +106,64 @@ pub fn execute(args: &BuildArgs, verbose: bool, json: bool) -> Result<()> {
 
     // Validate the wasm file exists
     if !wasm_path.exists() {
-        error!(
+        return Err(CliError::build_failed(format!(
             "Built WASM file not found at expected path: {}",
             wasm_path.display()
-        );
-        return Err(anyhow!(
-            "Built WASM file not found at expected path: {}",
-            wasm_path.display()
-        ));
+        )));
     }
 
     // Update the manifest.toml with the new component path if it exists
     if manifest_exists {
-        let manifest_content =
-            fs::read_to_string(&manifest_path).context("Failed to read manifest.toml")?;
+        let manifest_content = fs::read_to_string(&manifest_path)
+            .map_err(|e| CliError::file_operation_failed("read manifest.toml", manifest_path.display().to_string(), e))?;
 
-        let mut manifest: ManifestConfig =
-            toml::from_str(&manifest_content).context("Failed to parse manifest.toml")?;
+        let mut manifest: ManifestConfig = toml::from_str(&manifest_content)
+            .map_err(|e| CliError::invalid_manifest(format!("Failed to parse manifest.toml: {}", e)))?;
 
         // Update the component path - use absolute path to the wasm file
         manifest.component = wasm_path.to_string_lossy().to_string();
 
         // Write the updated manifest
-        let updated_manifest =
-            toml::to_string(&manifest).context("Failed to serialize manifest.toml")?;
+        let updated_manifest = toml::to_string(&manifest)
+            .map_err(|e| CliError::invalid_manifest(format!("Failed to serialize manifest.toml: {}", e)))?;
 
         fs::write(&manifest_path, updated_manifest)
-            .context("Failed to write updated manifest.toml")?;
+            .map_err(|e| CliError::file_operation_failed("write manifest.toml", manifest_path.display().to_string(), e))?;
 
-        info!(
-            "Updated manifest with component path: {}",
-            wasm_path.display()
-        );
+        info!("Updated manifest with component path: {}", wasm_path.display());
     }
 
-    if !json {
-        println!(
-            "{} Successfully built WebAssembly component: {}",
-            style("✓").green().bold(),
-            style(wasm_path.display()).cyan()
-        );
+    // Create build result and output
+    let result = BuildResult {
+        success: true,
+        project_dir,
+        wasm_path: Some(wasm_path),
+        manifest_exists,
+        manifest_path: Some(manifest_path),
+        build_type: build_type.to_string(),
+        package_name,
+        stdout,
+        stderr,
+    };
 
-        // Instructions for deployment if manifest exists
-        if manifest_exists {
-            println!("\nTo deploy your actor:");
-            println!("  theater start {}", manifest_path.display());
-        } else {
-            println!("\nTo create a manifest for your actor:");
-            println!(
-                "  theater create-manifest {} --component-path {}",
-                project_dir.display(),
-                wasm_path.display()
-            );
-        }
-    } else {
-        let output = serde_json::json!({
-            "success": true,
-            "project_dir": project_dir.display().to_string(),
-            "wasm_path": wasm_path.to_string_lossy().to_string(),
-            "manifest_exists": manifest_exists,
-            "manifest_path": manifest_path.display().to_string()
-        });
-        println!("{}", serde_json::to_string_pretty(&output)?);
-    }
-
+    ctx.output.output(&result, None)?;
     Ok(())
+}
+
+/// Legacy wrapper for backward compatibility
+pub fn execute(args: &BuildArgs, verbose: bool, json: bool) -> Result<()> {
+    let runtime = tokio::runtime::Runtime::new()?;
+    runtime.block_on(async {
+        let config = crate::config::Config::load().unwrap_or_default();
+        let output = crate::output::OutputManager::new(config.output.clone());
+        let ctx = crate::CommandContext {
+            config,
+            output,
+            verbose,
+            json,
+        };
+        execute_async(args, &ctx).await.map_err(|e| anyhow::Error::from(e))
+    })
 }
 
 /// Run a command and return the status, stdout, and stderr

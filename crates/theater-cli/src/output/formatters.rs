@@ -172,21 +172,27 @@ impl OutputFormat for ActorState {
 #[derive(Debug, serde::Serialize)]
 pub struct BuildResult {
     pub success: bool,
-    pub output: String,
-    pub component_path: Option<String>,
+    pub project_dir: std::path::PathBuf,
+    pub wasm_path: Option<std::path::PathBuf>,
+    pub manifest_exists: bool,
+    pub manifest_path: Option<std::path::PathBuf>,
+    pub build_type: String,
+    pub package_name: String,
+    pub stdout: String,
+    pub stderr: String,
 }
 
 impl OutputFormat for BuildResult {
     fn format_compact(&self, output: &OutputManager) -> CliResult<()> {
         if self.success {
             output.success("Build completed successfully")?;
-            if let Some(path) = &self.component_path {
-                println!("  Component: {}", output.theme().accent().apply_to(path));
+            if let Some(wasm_path) = &self.wasm_path {
+                println!("  Component: {}", output.theme().accent().apply_to(wasm_path.display()));
             }
         } else {
             output.error("Build failed")?;
-            if !self.output.is_empty() {
-                println!("{}", output.theme().muted().apply_to(&self.output));
+            if !self.stderr.is_empty() {
+                println!("{}", output.theme().muted().apply_to(&self.stderr));
             }
         }
         Ok(())
@@ -198,14 +204,30 @@ impl OutputFormat for BuildResult {
                 output.theme().success_icon(),
                 output.theme().highlight().apply_to("Build Successful")
             );
+            println!();
+            println!("Package: {}", output.theme().accent().apply_to(&self.package_name));
+            println!("Build Type: {}", output.theme().muted().apply_to(&self.build_type));
             
-            if let Some(path) = &self.component_path {
-                println!("Component: {}", output.theme().accent().apply_to(path));
+            if let Some(wasm_path) = &self.wasm_path {
+                println!("Component: {}", output.theme().accent().apply_to(wasm_path.display()));
             }
             
-            if !self.output.is_empty() {
+            if self.manifest_exists {
+                if let Some(manifest_path) = &self.manifest_path {
+                    println!("\nTo deploy your actor:");
+                    println!("  theater start {}", output.theme().muted().apply_to(manifest_path.display()));
+                }
+            } else {
+                println!("\n{} No manifest.toml found.", output.theme().warning_icon());
+                if let Some(wasm_path) = &self.wasm_path {
+                    println!("Create one to deploy: theater create-manifest --component-path {}", 
+                        output.theme().muted().apply_to(wasm_path.display()));
+                }
+            }
+            
+            if !self.stdout.is_empty() {
                 println!("\nBuild Output:");
-                println!("{}", output.theme().muted().apply_to(&self.output));
+                println!("{}", output.theme().muted().apply_to(&self.stdout));
             }
         } else {
             println!("{} {}", 
@@ -213,9 +235,13 @@ impl OutputFormat for BuildResult {
                 output.theme().error().apply_to("Build Failed")
             );
             
-            if !self.output.is_empty() {
+            if !self.stderr.is_empty() {
                 println!("\nError Output:");
-                println!("{}", self.output);
+                println!("{}", self.stderr);
+            }
+            if !self.stdout.is_empty() {
+                println!("\nBuild Output:");
+                println!("{}", self.stdout);
             }
         }
         Ok(())
@@ -227,12 +253,18 @@ impl OutputFormat for BuildResult {
             vec!["Status".to_string(), if self.success { "Success".to_string() } else { "Failed".to_string() }],
         ];
         
-        if let Some(path) = &self.component_path {
-            rows.push(vec!["Component".to_string(), path.clone()]);
+        rows.push(vec!["Package".to_string(), self.package_name.clone()]);
+        rows.push(vec!["Build Type".to_string(), self.build_type.clone()]);
+        rows.push(vec!["Project Dir".to_string(), self.project_dir.display().to_string()]);
+        
+        if let Some(wasm_path) = &self.wasm_path {
+            rows.push(vec!["Component".to_string(), wasm_path.display().to_string()]);
         }
         
-        if !self.output.is_empty() {
-            rows.push(vec!["Output".to_string(), truncate_string(&self.output, 100)]);
+        rows.push(vec!["Manifest Exists".to_string(), self.manifest_exists.to_string()]);
+        
+        if let Some(manifest_path) = &self.manifest_path {
+            rows.push(vec!["Manifest Path".to_string(), manifest_path.display().to_string()]);
         }
         
         output.table(&headers, &rows)?;
@@ -809,6 +841,422 @@ impl OutputFormat for ActorInspection {
             rows.push(vec!["Metrics".to_string(), truncate_string(&metrics_str, 100)]);
         }
         
+        output.table(&headers, &rows)?;
+        Ok(())
+    }
+}
+
+/// Actor tree formatter
+#[derive(Debug, serde::Serialize)]
+pub struct ActorTree {
+    pub actors: Vec<String>,
+    pub nodes: std::collections::HashMap<String, crate::commands::tree::ActorNode>,
+    pub root_nodes: Vec<String>,
+    pub max_depth: usize,
+    pub specified_root: Option<theater::id::TheaterId>,
+}
+
+impl OutputFormat for ActorTree {
+    fn format_compact(&self, output: &OutputManager) -> CliResult<()> {
+        if self.actors.is_empty() {
+            output.info("No actors are currently running")?;
+            return Ok(());
+        }
+        
+        println!("Actor tree ({} actors)", self.actors.len());
+        for root_id in &self.root_nodes {
+            if let Some(node) = self.nodes.get(root_id) {
+                println!("  {} ({})", 
+                    output.theme().accent().apply_to(&crate::commands::tree::format_short_id_string(&node.id)),
+                    output.theme().muted().apply_to(&node.status)
+                );
+            }
+        }
+        Ok(())
+    }
+
+    fn format_pretty(&self, output: &OutputManager) -> CliResult<()> {
+        if self.actors.is_empty() {
+            output.info("No actors are currently running")?;
+            return Ok(());
+        }
+        
+        println!("{}", output.theme().highlight().apply_to("ACTOR HIERARCHY"));
+        println!("{}", "─".repeat(50));
+        println!("Total actors: {}\n", self.actors.len());
+        
+        // Print each tree starting from root nodes
+        for root_id in &self.root_nodes {
+            crate::commands::tree::print_tree(&self.nodes, root_id, "", true, self.max_depth, 0);
+        }
+        Ok(())
+    }
+
+    fn format_table(&self, output: &OutputManager) -> CliResult<()> {
+        if self.actors.is_empty() {
+            output.info("No actors are currently running")?;
+            return Ok(());
+        }
+        
+        let headers = vec!["ID", "Status", "Parent", "Children"];
+        let rows: Vec<Vec<String>> = self.nodes
+            .values()
+            .map(|node| vec![
+                truncate_string(&node.id, 16),
+                node.status.clone(),
+                node.parent.as_deref().unwrap_or("None").to_string(),
+                node.children.len().to_string(),
+            ])
+            .collect();
+        
+        output.table(&headers, &rows)?;
+        Ok(())
+    }
+}
+
+/// Project creation formatter
+#[derive(Debug, serde::Serialize)]
+pub struct ProjectCreated {
+    pub name: String,
+    pub template: String,
+    pub path: std::path::PathBuf,
+    pub build_instructions: Vec<String>,
+}
+
+impl OutputFormat for ProjectCreated {
+    fn format_compact(&self, output: &OutputManager) -> CliResult<()> {
+        println!("{} Created project: {}", 
+            output.theme().success().apply_to("✓"),
+            output.theme().accent().apply_to(&self.name)
+        );
+        println!("Path: {}", output.theme().muted().apply_to(self.path.display()));
+        Ok(())
+    }
+
+    fn format_pretty(&self, output: &OutputManager) -> CliResult<()> {
+        println!("{} {}", 
+            output.theme().success().apply_to("✓"),
+            output.theme().highlight().apply_to(&format!("Created new actor project: {}", self.name))
+        );
+        println!();
+        println!("Template: {}", output.theme().accent().apply_to(&self.template));
+        println!("Location: {}", output.theme().muted().apply_to(self.path.display()));
+        println!();
+        println!("{}", output.theme().highlight().apply_to("Next steps:"));
+        for (i, instruction) in self.build_instructions.iter().enumerate() {
+            println!("  {}. {}", i + 1, output.theme().muted().apply_to(instruction));
+        }
+        Ok(())
+    }
+
+    fn format_table(&self, output: &OutputManager) -> CliResult<()> {
+        let headers = vec!["Property", "Value"];
+        let rows = vec![
+            vec!["Name".to_string(), self.name.clone()],
+            vec!["Template".to_string(), self.template.clone()],
+            vec!["Path".to_string(), self.path.display().to_string()],
+        ];
+        output.table(&headers, &rows)?;
+        
+        println!();
+        println!("{}", output.theme().highlight().apply_to("Build Instructions:"));
+        for (i, instruction) in self.build_instructions.iter().enumerate() {
+            println!("  {}. {}", i + 1, instruction);
+        }
+        Ok(())
+    }
+}
+
+/// Actor started formatter
+#[derive(Debug, serde::Serialize)]
+pub struct ActorStarted {
+    pub actor_id: String,
+    pub manifest_path: String,
+    pub address: String,
+    pub subscribing: bool,
+    pub acting_as_parent: bool,
+}
+
+impl OutputFormat for ActorStarted {
+    fn format_compact(&self, output: &OutputManager) -> CliResult<()> {
+        println!("{} Actor started: {}", 
+            output.theme().success_icon(),
+            output.theme().accent().apply_to(&self.actor_id)
+        );
+        Ok(())
+    }
+
+    fn format_pretty(&self, output: &OutputManager) -> CliResult<()> {
+        println!("{}", "─".repeat(45));
+        println!("{} {}", 
+            output.theme().success_icon(),
+            output.theme().highlight().apply_to("ACTOR STARTED")
+        );
+        println!("{}", "─".repeat(45));
+        println!("Actor ID: {}", output.theme().accent().apply_to(&self.actor_id));
+        println!("Manifest: {}", output.theme().muted().apply_to(&self.manifest_path));
+        println!("Server: {}", output.theme().muted().apply_to(&self.address));
+        
+        if self.subscribing {
+            println!("Status: {}", output.theme().info().apply_to("Subscribing to events"));
+        }
+        if self.acting_as_parent {
+            println!("Role: {}", output.theme().info().apply_to("Acting as parent"));
+        }
+        println!("{}", "─".repeat(45));
+        Ok(())
+    }
+
+    fn format_table(&self, output: &OutputManager) -> CliResult<()> {
+        let headers = vec!["Property", "Value"];
+        let rows = vec![
+            vec!["Actor ID".to_string(), self.actor_id.clone()],
+            vec!["Manifest".to_string(), self.manifest_path.clone()],
+            vec!["Server".to_string(), self.address.clone()],
+            vec!["Subscribing".to_string(), self.subscribing.to_string()],
+            vec!["Acting as Parent".to_string(), self.acting_as_parent.to_string()],
+        ];
+        output.table(&headers, &rows)?;
+        Ok(())
+    }
+}
+
+/// Event subscription formatter
+#[derive(Debug, serde::Serialize)]
+pub struct EventSubscription {
+    pub actor_id: theater::id::TheaterId,
+    pub address: String,
+    pub event_type_filter: Option<String>,
+    pub limit: usize,
+    pub timeout: u64,
+    pub format: String,
+    pub show_history: bool,
+    pub history_limit: usize,
+    pub detailed: bool,
+    pub events_received: usize,
+    pub subscription_id: Option<String>,
+    pub is_active: bool,
+}
+
+impl OutputFormat for EventSubscription {
+    fn format_compact(&self, output: &OutputManager) -> CliResult<()> {
+        if self.is_active {
+            println!("{} Subscribed to: {}", 
+                output.theme().success_icon(),
+                output.theme().accent().apply_to(&self.actor_id.to_string())
+            );
+            if let Some(filter) = &self.event_type_filter {
+                println!("  Filter: {}", output.theme().muted().apply_to(filter));
+            }
+        } else {
+            println!("{} Subscription ended: {} events received", 
+                output.theme().info_icon(),
+                output.theme().accent().apply_to(&self.events_received)
+            );
+        }
+        Ok(())
+    }
+
+    fn format_pretty(&self, output: &OutputManager) -> CliResult<()> {
+        if self.is_active {
+            println!("{} {}", 
+                output.theme().info_icon(),
+                output.theme().highlight().apply_to(&format!("Subscribing to events for actor: {}", self.actor_id))
+            );
+            
+            if let Some(filter) = &self.event_type_filter {
+                println!("{} {}", 
+                    output.theme().info_icon(),
+                    output.theme().highlight().apply_to(&format!("Filtering events by type: {}", filter))
+                );
+            }
+            
+            println!();
+            println!("Server: {}", output.theme().muted().apply_to(&self.address));
+            println!("Format: {}", output.theme().muted().apply_to(&self.format));
+            
+            if self.limit > 0 {
+                println!("Limit: {} events", output.theme().muted().apply_to(&self.limit));
+            }
+            
+            if self.timeout > 0 {
+                println!("Timeout: {} seconds", output.theme().muted().apply_to(&self.timeout));
+            }
+            
+            if self.show_history {
+                let history_desc = if self.history_limit > 0 {
+                    format!("Last {} events", self.history_limit)
+                } else {
+                    "All historical events".to_string()
+                };
+                println!("History: {}", output.theme().muted().apply_to(&history_desc));
+            }
+            
+            if let Some(subscription_id) = &self.subscription_id {
+                println!("Subscription ID: {}", output.theme().muted().apply_to(subscription_id));
+            }
+            
+            println!();
+        } else {
+            println!("{} Subscription ended", output.theme().success_icon());
+            println!("Events received: {}", output.theme().accent().apply_to(&self.events_received));
+        }
+        Ok(())
+    }
+
+    fn format_table(&self, output: &OutputManager) -> CliResult<()> {
+        let headers = vec!["Property", "Value"];
+        let mut rows = vec![
+            vec!["Actor ID".to_string(), self.actor_id.to_string()],
+            vec!["Server".to_string(), self.address.clone()],
+            vec!["Format".to_string(), self.format.clone()],
+            vec!["Status".to_string(), if self.is_active { "Active".to_string() } else { "Ended".to_string() }],
+            vec!["Events Received".to_string(), self.events_received.to_string()],
+        ];
+        
+        if let Some(filter) = &self.event_type_filter {
+            rows.push(vec!["Event Filter".to_string(), filter.clone()]);
+        }
+        
+        if self.limit > 0 {
+            rows.push(vec!["Limit".to_string(), self.limit.to_string()]);
+        }
+        
+        if self.timeout > 0 {
+            rows.push(vec!["Timeout".to_string(), format!("{} seconds", self.timeout)]);
+        }
+        
+        if let Some(subscription_id) = &self.subscription_id {
+            rows.push(vec!["Subscription ID".to_string(), subscription_id.clone()]);
+        }
+        
+        output.table(&headers, &rows)?;
+        Ok(())
+    }
+}
+
+/// Server started formatter
+#[derive(Debug, serde::Serialize)]
+pub struct ServerStarted {
+    pub address: std::net::SocketAddr,
+    pub log_level: String,
+    pub log_filter: Option<String>,
+    pub log_dir: String,
+    pub log_path: std::path::PathBuf,
+    pub log_stdout: bool,
+    pub filter_string: String,
+}
+
+impl OutputFormat for ServerStarted {
+    fn format_compact(&self, output: &OutputManager) -> CliResult<()> {
+        println!("{} Theater server starting on {}", 
+            output.theme().success_icon(),
+            output.theme().accent().apply_to(&self.address)
+        );
+        println!("  Logs: {}", output.theme().muted().apply_to(self.log_path.display()));
+        Ok(())
+    }
+
+    fn format_pretty(&self, output: &OutputManager) -> CliResult<()> {
+        println!("{}", output.theme().highlight().apply_to("─".repeat(50)));
+        println!("{} {}", 
+            output.theme().success_icon(),
+            output.theme().highlight().apply_to("THEATER SERVER STARTING")
+        );
+        println!("{}", output.theme().highlight().apply_to("─".repeat(50)));
+        println!();
+        println!("Address: {}", output.theme().accent().apply_to(&self.address));
+        println!("Log Level: {}", output.theme().muted().apply_to(&self.log_level));
+        
+        if let Some(filter) = &self.log_filter {
+            println!("Log Filter: {}", output.theme().muted().apply_to(filter));
+        }
+        
+        println!("Log Directory: {}", output.theme().muted().apply_to(&self.log_dir));
+        println!("Log File: {}", output.theme().muted().apply_to(self.log_path.display()));
+        
+        if self.log_stdout {
+            println!("Console Logging: {}", output.theme().success().apply_to("Enabled"));
+        }
+        
+        println!();
+        println!("{}", output.theme().highlight().apply_to("─".repeat(50)));
+        println!();
+        println!("{} Server is running. Press Ctrl+C to stop.", 
+            output.theme().info_icon());
+        println!();
+        Ok(())
+    }
+
+    fn format_table(&self, output: &OutputManager) -> CliResult<()> {
+        let headers = vec!["Property", "Value"];
+        let mut rows = vec![
+            vec!["Address".to_string(), self.address.to_string()],
+            vec!["Log Level".to_string(), self.log_level.clone()],
+            vec!["Log Directory".to_string(), self.log_dir.clone()],
+            vec!["Log File".to_string(), self.log_path.display().to_string()],
+            vec!["Console Logging".to_string(), self.log_stdout.to_string()],
+            vec!["Filter String".to_string(), self.filter_string.clone()],
+        ];
+        
+        if let Some(filter) = &self.log_filter {
+            rows.push(vec!["Custom Filter".to_string(), filter.clone()]);
+        }
+        
+        output.table(&headers, &rows)?;
+        Ok(())
+    }
+}
+
+/// Channel opened formatter
+#[derive(Debug, serde::Serialize)]
+pub struct ChannelOpened {
+    pub actor_id: theater::id::TheaterId,
+    pub channel_id: String,
+    pub address: String,
+    pub initial_message_size: usize,
+    pub is_interactive: bool,
+}
+
+impl OutputFormat for ChannelOpened {
+    fn format_compact(&self, output: &OutputManager) -> CliResult<()> {
+        println!("{} Channel opened to: {}", 
+            output.theme().success_icon(),
+            output.theme().accent().apply_to(&self.actor_id.to_string())
+        );
+        println!("  Channel ID: {}", output.theme().muted().apply_to(&self.channel_id));
+        Ok(())
+    }
+
+    fn format_pretty(&self, output: &OutputManager) -> CliResult<()> {
+        println!("{} {}", 
+            output.theme().success_icon(),
+            output.theme().highlight().apply_to(&format!("Opening channel to actor: {}", self.actor_id))
+        );
+        println!();
+        println!("Channel ID: {}", output.theme().accent().apply_to(&self.channel_id));
+        println!("Server: {}", output.theme().muted().apply_to(&self.address));
+        println!("Initial Message: {} bytes", output.theme().muted().apply_to(&self.initial_message_size));
+        
+        if self.is_interactive {
+            println!();
+            println!("{} {}", 
+                output.theme().success_icon(),
+                output.theme().highlight().apply_to("Channel opened successfully")
+            );
+        }
+        Ok(())
+    }
+
+    fn format_table(&self, output: &OutputManager) -> CliResult<()> {
+        let headers = vec!["Property", "Value"];
+        let rows = vec![
+            vec!["Actor ID".to_string(), self.actor_id.to_string()],
+            vec!["Channel ID".to_string(), self.channel_id.clone()],
+            vec!["Server".to_string(), self.address.clone()],
+            vec!["Initial Message Size".to_string(), format!("{} bytes", self.initial_message_size)],
+            vec!["Interactive Mode".to_string(), self.is_interactive.to_string()],
+        ];
         output.table(&headers, &rows)?;
         Ok(())
     }

@@ -1,14 +1,11 @@
 use anyhow::Result;
 use clap::Parser;
-use serde_json::json;
 use std::net::SocketAddr;
-use std::time::Duration;
 use tracing::debug;
 
 use theater::id::TheaterId;
 
 use crate::{CommandContext, error::CliError, output::formatters::ActorInspection};
-use crate::utils::formatting;
 
 #[derive(Debug, Parser)]
 pub struct InspectArgs {
@@ -34,14 +31,14 @@ pub async fn execute_async(args: &InspectArgs, ctx: &CommandContext) -> Result<(
     debug!("Connecting to server at: {}", address);
 
     // Create client and connect
-    let mut client = ctx.create_client();
+    let client = ctx.create_client();
     client.connect().await
         .map_err(|e| CliError::connection_failed(address, e))?;
 
     // Collect all actor information
     debug!("Getting actor status");
     let status = client.get_actor_status(&args.actor_id.to_string()).await
-        .map_err(|e| CliError::actor_operation_failed("status", &args.actor_id.to_string(), e))?;
+        .map_err(|_e| CliError::actor_not_found(&args.actor_id.to_string()))?;
 
     debug!("Getting actor state");
     let state_result = client.get_actor_state(&args.actor_id.to_string()).await;

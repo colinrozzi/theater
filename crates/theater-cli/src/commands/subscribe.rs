@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 use clap::Parser;
 use console::style;
 use std::net::SocketAddr;
@@ -7,8 +7,8 @@ use std::time::Duration;
 use tokio::time;
 use tracing::{debug, info};
 
+use crate::{CommandContext, error::CliError, output::formatters::EventSubscription};
 use crate::client::ManagementResponse;
-use crate::client::TheaterClient;
 use crate::utils::event_display::{display_events, display_single_event, EventDisplayOptions};
 use theater::id::TheaterId;
 
@@ -19,8 +19,8 @@ pub struct SubscribeArgs {
     pub actor_id: String,
 
     /// Address of the theater server
-    #[arg(short, long, default_value = "127.0.0.1:9000")]
-    pub address: SocketAddr,
+    #[arg(short, long)]
+    pub address: Option<SocketAddr>,
 
     /// Filter events by type (e.g., http.request, filesystem.read)
     #[arg(short, long)]
@@ -51,202 +51,216 @@ pub struct SubscribeArgs {
     pub history_limit: usize,
 }
 
-pub fn execute(args: &SubscribeArgs, _verbose: bool, json: bool) -> Result<()> {
+/// Execute the subscribe command asynchronously (modernized)
+pub async fn execute_async(args: &SubscribeArgs, ctx: &CommandContext) -> Result<(), CliError> {
     // Read actor ID from stdin if "-" is specified
     let actor_id_str = if args.actor_id == "-" {
         let mut input = String::new();
-        std::io::stdin().read_line(&mut input)?;
+        std::io::stdin().read_line(&mut input)
+            .map_err(|e| CliError::invalid_input("actor_id", "-", format!("Failed to read from stdin: {}", e)))?;
         input.trim().to_string()
     } else {
         args.actor_id.clone()
     };
 
     debug!("Subscribing to events for actor: {}", actor_id_str);
-    debug!("Connecting to server at: {}", args.address);
 
     // Parse the actor ID
     let actor_id = TheaterId::from_str(&actor_id_str)
-        .map_err(|_| anyhow!("Invalid actor ID: {}", actor_id_str))?;
+        .map_err(|_| CliError::invalid_actor_id(&actor_id_str))?;
 
-    // Create runtime and connect to the server
-    let runtime = tokio::runtime::Runtime::new()?;
+    // Get server address from args or config
+    let address = ctx.server_address(args.address);
+    debug!("Connecting to server at: {}", address);
 
-    runtime.block_on(async {
-        println!(
-            "{} Subscribing to events for actor: {}",
-            style("ℹ").blue().bold(),
-            style(actor_id.to_string()).cyan()
-        );
+    // Create client and connect
+    let client = ctx.create_client();
+    client.connect().await
+        .map_err(|e| CliError::connection_failed(address, e))?;
 
-        if let Some(event_type) = &args.event_type {
-            println!(
-                "{} Filtering events by type: {}",
-                style("ℹ").blue().bold(),
-                style(event_type).green()
-            );
+    // Set up display options
+    let display_options = EventDisplayOptions {
+        format: args.format.clone(),
+        detailed: args.detailed,
+        json: ctx.json,
+    };
+
+    // Initialize event counter and subscription info
+    let mut events_count = 0;
+    let mut subscription_info = EventSubscription {
+        actor_id: actor_id.clone(),
+        address: address.to_string(),
+        event_type_filter: args.event_type.clone(),
+        limit: args.limit,
+        timeout: args.timeout,
+        format: args.format.clone(),
+        show_history: args.history,
+        history_limit: args.history_limit,
+        detailed: args.detailed,
+        events_received: 0,
+        subscription_id: None,
+        is_active: false,
+    };
+
+    // Display subscription start info
+    if !ctx.json {
+        ctx.output.output(&subscription_info, None)?;
+    }
+
+    // If history flag is set, get and display historical events
+    if args.history {
+        let mut events = client.get_actor_events(&actor_id.to_string()).await
+            .map_err(|e| CliError::actor_not_found(format!("Failed to get events for actor {}: {}", actor_id, e)))?;
+
+        // Apply event type filter if specified
+        if let Some(filter) = &args.event_type {
+            events.retain(|e| e.event_type.contains(filter));
         }
 
-        let config = crate::config::Config::load().unwrap_or_default();
-        let mut client = TheaterClient::new(args.address, config);
+        // Limit the number of historical events if requested
+        if args.history_limit > 0 && events.len() > args.history_limit {
+            let skip_count = events.len() - args.history_limit;
+            events = events.into_iter().skip(skip_count).collect();
+        }
 
-        // Connect to the server
-        client.connect().await?;
+        // Display historical events
+        if !events.is_empty() {
+            events_count = display_events(&events, Some(&actor_id), &display_options, 0)
+                .map_err(|e| CliError::invalid_input("event_display", "events", e.to_string()))?;
+        }
+    }
 
-        // Set up display options
-        let display_options = EventDisplayOptions {
-            format: args.format.clone(),
-            detailed: args.detailed,
-            json,
+    // Subscribe to the actor's events
+    let event_stream = client.subscribe_to_events(&actor_id.to_string()).await
+        .map_err(|e| CliError::actor_not_found(format!("Failed to subscribe to actor {}: {}", actor_id, e)))?;
+    
+    let subscription_id = event_stream.subscription_id();
+    subscription_info.subscription_id = Some(subscription_id.to_string());
+    subscription_info.is_active = true;
+
+    info!("Subscribed to actor events with subscription ID: {}", subscription_id);
+
+    // If history was not requested or no events were found, print headers
+    if !args.history || events_count == 0 {
+        if display_options.format == "compact" && !display_options.json {
+            println!("{:<12} {:<12} {:<25} {}", "HASH", "PARENT", "EVENT TYPE", "DESCRIPTION");
+            println!("{}", style("─".repeat(100)).dim());
+        }
+
+        if !args.history && !ctx.json {
+            println!("{} Waiting for events...\n", style("⏳").yellow().bold());
+        }
+    }
+
+    let mut last_event_time = std::time::Instant::now();
+
+    // Listen for events
+    loop {
+        // Check for timeout if enabled
+        if args.timeout > 0 {
+            let timeout_duration = Duration::from_secs(args.timeout);
+            if last_event_time.elapsed() > timeout_duration {
+                if !ctx.json {
+                    println!("\n{} No events received for {} seconds, exiting.",
+                        style("⏱").yellow().bold(), args.timeout);
+                }
+                break;
+            }
+        }
+
+        // Try to receive an event with a timeout
+        let response = match time::timeout(Duration::from_secs(1), client.next_response()).await {
+            Ok(result) => match result {
+                Ok(response) => response,
+                Err(e) => {
+                    if !e.to_string().contains("Connection closed") {
+                        return Err(CliError::connection_failed(address, e));
+                    }
+                    continue;
+                }
+            },
+            Err(_) => continue, // Timeout, continue to check global timeout
         };
 
-        // Initialize event counter
-        let mut events_count = 0;
+        // Process the event
+        match response {
+            Some(ManagementResponse::ActorEvent { event }) => {
+                // Skip if doesn't match filter
+                if let Some(filter) = &args.event_type {
+                    if !event.event_type.contains(filter) {
+                        continue;
+                    }
+                }
 
-        // If history flag is set, get and display historical events
-        if args.history {
-            // Get historical events
-            let mut events = client.get_actor_events(&actor_id.to_string()).await?;
+                last_event_time = std::time::Instant::now();
+                events_count += 1;
+                subscription_info.events_received = events_count;
 
-            // Apply event type filter if specified
-            if let Some(filter) = &args.event_type {
-                events.retain(|e| e.event_type.contains(filter));
-            }
+                // Display the event
+                display_single_event(
+                    &event,
+                    if display_options.json { "json" } else { &display_options.format },
+                    display_options.detailed,
+                ).map_err(|e| CliError::invalid_input("event_display", "event", e.to_string()))?;
 
-            // Limit the number of historical events if requested
-            if args.history_limit > 0 && events.len() > args.history_limit {
-                // If we have more events than the limit, take the most recent ones
-                let skip_count = events.len() - args.history_limit;
-                events = events.into_iter().skip(skip_count).collect();
-            }
-
-            // If there are historical events, display them
-            if !events.is_empty() {
-                // Display events using the shared display function
-                events_count = display_events(&events, Some(&actor_id), &display_options, 0)?;
-            }
-        }
-
-        // Subscribe to the actor's events
-        let event_stream = client.subscribe_to_events(&actor_id.to_string()).await?;
-        let subscription_id = event_stream.subscription_id();
-
-        info!(
-            "Subscribed to actor events with subscription ID: {}",
-            subscription_id
-        );
-
-        // If history was not requested or no events were found, we need to print the headers now
-        if !args.history || events_count == 0 {
-            if display_options.format == "compact" && !display_options.json {
-                println!(
-                    "{:<12} {:<12} {:<25} {}",
-                    "HASH", "PARENT", "EVENT TYPE", "DESCRIPTION"
-                );
-                println!("{}", style("─".repeat(100)).dim());
-            }
-
-            if !args.history {
-                println!("{} Waiting for events...\n", style("⏳").yellow().bold());
-            }
-        }
-
-        let mut last_event_time = std::time::Instant::now();
-
-        // Listen for events
-        loop {
-            // Check for timeout if enabled
-            if args.timeout > 0 {
-                let timeout_duration = Duration::from_secs(args.timeout);
-                if last_event_time.elapsed() > timeout_duration {
-                    println!(
-                        "\n{} No events received for {} seconds, exiting.",
-                        style("⏱").yellow().bold(),
-                        args.timeout
-                    );
+                // Check if we've hit the limit
+                if args.limit > 0 && events_count >= args.limit {
+                    if !ctx.json {
+                        println!("\n{} Reached event limit ({}), exiting.",
+                            style("ℹ").blue().bold(), args.limit);
+                    }
                     break;
                 }
             }
-
-            // Try to receive an event with a timeout to allow checking for the global timeout
-            let response =
-                match time::timeout(Duration::from_secs(1), client.next_response()).await {
-                    Ok(result) => match result {
-                        Ok(response) => response,
-                        Err(e) => {
-                            // Only return error if not a timeout
-                            if !e.to_string().contains("Connection closed") {
-                                return Err(e);
-                            }
-                            continue;
-                        }
-                    },
-                    Err(_) => continue, // Timeout, continue to check global timeout
-                };
-
-            // Process the event
-            match response {
-                Some(ManagementResponse::ActorEvent { event }) => {
-                    // Skip if doesn't match filter
-                    if let Some(filter) = &args.event_type {
-                        if !event.event_type.contains(filter) {
-                            continue;
-                        }
-                    }
-
-                    last_event_time = std::time::Instant::now();
-
-                    // Display the event using the shared display function
-                    display_single_event(
-                        &event,
-                        if display_options.json {
-                            "json"
-                        } else {
-                            &display_options.format
-                        },
-                        display_options.detailed,
-                    )?;
-
-                    // Check if we've hit the limit
-                    if args.limit > 0 && events_count >= args.limit {
-                        println!(
-                            "\n{} Reached event limit ({}), exiting.",
-                            style("ℹ").blue().bold(),
-                            args.limit
-                        );
-                        break;
-                    }
-                }
-                Some(ManagementResponse::ActorError { error }) => {
-                    // Handle actor error
-                    if json {
-                        let output = serde_json::json!({
-                            "actor_id": actor_id.to_string(),
-                            "error": error,
-                        });
-                        println!("{}", serde_json::to_string_pretty(&output)?);
-                    } else {
-                        println!("{} Actor error: {}", style("ERROR").bold().red(), error);
-                    }
-                }
-                Some(ManagementResponse::Error { error }) => {
-                    return Err(crate::error::CliError::ServerError { message: format!("{:?}", error) }.into());
-                }
-                _ => {
-                    debug!("Received unexpected response: {:?}", response);
+            Some(ManagementResponse::ActorError { error }) => {
+                if ctx.json {
+                    let output = serde_json::json!({
+                        "actor_id": actor_id.to_string(),
+                        "error": error,
+                    });
+                    println!("{}", serde_json::to_string_pretty(&output)
+                        .map_err(|e| CliError::invalid_input("json_output", "error", e.to_string()))?);
+                } else {
+                    println!("{} Actor error: {}", style("ERROR").bold().red(), error);
                 }
             }
+            Some(ManagementResponse::Error { error }) => {
+                return Err(CliError::actor_not_found(format!("Server error: {:?}", error)));
+            }
+            _ => {
+                debug!("Received unexpected response: {:?}", response);
+            }
         }
+    }
 
-        // Unsubscribe before exiting
-        if let Err(e) = client
-            .unsubscribe_from_actor(&actor_id.to_string(), subscription_id)
-            .await
-        {
-            debug!("Failed to unsubscribe: {}", e);
-        }
+    // Unsubscribe before exiting
+    if let Err(e) = client.unsubscribe_from_actor(&actor_id.to_string(), subscription_id).await {
+        debug!("Failed to unsubscribe: {}", e);
+    }
 
-        Ok(())
-    })?;
+    subscription_info.is_active = false;
+    
+    // Final status output if not JSON
+    if !ctx.json && !args.history {
+        subscription_info.events_received = events_count;
+        // Could output final status here if desired
+    }
 
     Ok(())
+}
+
+/// Legacy wrapper for backward compatibility
+pub fn execute(args: &SubscribeArgs, verbose: bool, json: bool) -> Result<()> {
+    let runtime = tokio::runtime::Runtime::new()?;
+    runtime.block_on(async {
+        let config = crate::config::Config::load().unwrap_or_default();
+        let output = crate::output::OutputManager::new(config.output.clone());
+        let ctx = crate::CommandContext {
+            config,
+            output,
+            verbose,
+            json,
+        };
+        execute_async(args, &ctx).await.map_err(|e| anyhow::Error::from(e))
+    })
 }

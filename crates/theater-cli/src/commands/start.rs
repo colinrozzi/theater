@@ -1,10 +1,10 @@
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 use clap::Parser;
 use std::net::SocketAddr;
-
 use tracing::debug;
 
-use crate::client::{ManagementResponse, TheaterClient};
+use crate::{CommandContext, error::CliError, output::formatters::ActorStarted};
+use crate::client::ManagementResponse;
 use crate::utils::event_display::{display_events_header, display_single_event};
 use theater::utils::resolve_reference;
 
@@ -15,8 +15,8 @@ pub struct StartArgs {
     pub manifest: String,
 
     /// Address of the theater server
-    #[arg(short, long, default_value = "127.0.0.1:9000")]
-    pub address: SocketAddr,
+    #[arg(short, long)]
+    pub address: Option<SocketAddr>,
 
     /// Initial state as JSON string or path to JSON file
     #[arg(short, long)]
@@ -39,32 +39,29 @@ pub struct StartArgs {
     pub format: String,
 }
 
-pub fn execute(args: &StartArgs, _verbose: bool, json: bool) -> Result<()> {
+/// Execute the start command asynchronously (modernized)
+pub async fn execute_async(args: &StartArgs, ctx: &CommandContext) -> Result<(), CliError> {
     debug!("Starting actor from manifest: {}", args.manifest);
-    debug!("Connecting to server at: {}", args.address);
-
-    // Create runtime first to handle both sync and async operations
-    let runtime = tokio::runtime::Runtime::new()?;
+    
+    // Get server address from args or config
+    let address = ctx.server_address(args.address);
+    debug!("Connecting to server at: {}", address);
 
     // Resolve the manifest reference (could be file path, URL, or store path)
-    let manifest_bytes = runtime.block_on(async {
-        resolve_reference(&args.manifest).await.map_err(|e| {
-            anyhow!(
-                "Failed to resolve manifest reference '{}': {}",
-                args.manifest,
-                e
-            )
-        })
-    })?;
+    let manifest_bytes = resolve_reference(&args.manifest).await
+        .map_err(|e| CliError::invalid_manifest(format!(
+            "Failed to resolve manifest reference '{}': {}",
+            args.manifest, e
+        )))?;
 
     // Convert bytes to string
     let manifest_content = String::from_utf8(manifest_bytes)
-        .map_err(|e| anyhow!("Manifest content is not valid UTF-8: {}", e))?;
+        .map_err(|e| CliError::invalid_manifest(format!("Manifest content is not valid UTF-8: {}", e)))?;
 
     // Handle the initial state parameter
     let initial_state = if let Some(state_str) = &args.initial_state {
         // Try to resolve as reference first (file path, URL, or store path)
-        match runtime.block_on(resolve_reference(state_str)) {
+        match resolve_reference(state_str).await {
             Ok(bytes) => {
                 debug!("Resolved initial state from reference: {}", state_str);
                 Some(bytes)
@@ -79,58 +76,58 @@ pub fn execute(args: &StartArgs, _verbose: bool, json: bool) -> Result<()> {
         None
     };
 
-    // Connect to the server and start the actor
-    runtime.block_on(async {
-        let config = crate::config::Config::default();
-        let mut client = TheaterClient::new(args.address, config);
+    // Create client and connect
+    let client = ctx.create_client();
+    client.connect().await
+        .map_err(|e| CliError::connection_failed(address, e))?;
 
-        // Connect to the server
-        client.connect().await?;
+    // Start the actor with initial state
+    client.start_actor(manifest_content, initial_state, args.parent, args.subscribe).await
+        .map_err(|e| CliError::actor_not_found(format!("Failed to start actor: {}", e)))?;
 
-        // Start the actor with initial state
-        client
-            .start_actor(manifest_content, initial_state, args.parent, args.subscribe)
-            .await?;
+    if args.subscribe && !ctx.json {
+        println!("");
+        display_events_header(&args.format);
+    }
 
-        if args.subscribe && !json {
-            println!("");
-            display_events_header(&args.format);
-        }
+    let mut is_running = true;
 
-        loop {
-            tokio::select! {
-                data = client.next_response() => {
-                    if let Ok(Some(data)) = data {
+    while is_running {
+        tokio::select! {
+            data = client.next_response() => {
+                if let Ok(Some(data)) = data {
                     match data {
                         ManagementResponse::ActorStarted { id } => {
+                            
                             if args.id_only {
                                 println!("{}", id);
-                                break;
+                                is_running = false;
                             } else {
-                                println!("-----[actor started]-----------------");
-                                println!(
-                                    "     {}",
-                                    id
-                                );
-                                println!("-------------------------------------");
+                                let result = ActorStarted {
+                                    actor_id: id.to_string(),
+                                    manifest_path: args.manifest.clone(),
+                                    address: address.to_string(),
+                                    subscribing: args.subscribe,
+                                    acting_as_parent: args.parent,
+                                };
+                                ctx.output.output(&result, None)?;
+                                
                                 // if we are not subscribing or acting as a parent, break the loop
                                 if !(args.subscribe || args.parent) {
-                                    break;
+                                    is_running = false;
                                 }
                             }
                         }
                         ManagementResponse::ActorEvent { event } => {
                             if args.subscribe {
-                                display_single_event(&event, &args.format, json).expect("Failed to display event");
+                                display_single_event(&event, &args.format, ctx.json)
+                                    .map_err(|e| CliError::invalid_input("event_display", "event", e.to_string()))?;
                             }
                         }
                         ManagementResponse::ActorError { error } => {
                             if args.subscribe {
                                 println!("-----[actor error]-----------------");
-                                println!(
-                                    "     {}",
-                                    error
-                                );
+                                println!("     {}", error);
                                 println!("-----------------------------------");
                             }
                         }
@@ -138,36 +135,44 @@ pub fn execute(args: &StartArgs, _verbose: bool, json: bool) -> Result<()> {
                             println!("-----[actor stopped]-----------------");
                             println!("{}", id);
                             println!("-------------------------------------");
-                            break;
+                            is_running = false;
                         }
                         ManagementResponse::ActorResult(actor_result) => {
                             if args.parent {
                                 println!("-----[actor result]-----------------");
-                                println!(
-                                    "     {}",
-                                    actor_result
-                                );
+                                println!("     {}", actor_result);
                                 println!("------------------------------------");
                             }
                         }
                         _ => {
                             println!("Unknown response received");
-                            break;
-                        }
-                        _ => {
-                            println!("Received unknown data: {:?}", data);
+                            is_running = false;
                         }
                     }
                 }
-                }
-                _ = tokio::signal::ctrl_c() => {
-                    break;
-                },
+            }
+            _ = tokio::signal::ctrl_c() => {
+                debug!("Received Ctrl-C, stopping");
+                is_running = false;
             }
         }
-
-        Ok::<(), anyhow::Error>(())
-    })?;
+    }
 
     Ok(())
+}
+
+/// Legacy wrapper for backward compatibility
+pub fn execute(args: &StartArgs, verbose: bool, json: bool) -> Result<()> {
+    let runtime = tokio::runtime::Runtime::new()?;
+    runtime.block_on(async {
+        let config = crate::config::Config::load().unwrap_or_default();
+        let output = crate::output::OutputManager::new(config.output.clone());
+        let ctx = crate::CommandContext {
+            config,
+            output,
+            verbose,
+            json,
+        };
+        execute_async(args, &ctx).await.map_err(|e| anyhow::Error::from(e))
+    })
 }

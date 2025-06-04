@@ -1,21 +1,19 @@
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 use clap::Parser;
-use serde_json::json;
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use tracing::debug;
 
 use theater::id::TheaterId;
 
-use crate::client::TheaterClient;
-use crate::utils::formatting;
+use crate::{CommandContext, error::CliError, output::formatters::ActorTree};
 use console::style;
 
 #[derive(Debug, Parser)]
 pub struct TreeArgs {
     /// Address of the theater server
-    #[arg(short, long, default_value = "127.0.0.1:9000")]
-    pub address: SocketAddr,
+    #[arg(short, long)]
+    pub address: Option<SocketAddr>,
 
     /// Maximum depth to display (0 for unlimited)
     #[arg(short, long, default_value = "0")]
@@ -27,160 +25,133 @@ pub struct TreeArgs {
 }
 
 /// Node in the actor tree
-struct ActorNode {
-    id: String,
-    status: String,
-    children: Vec<String>,
-    parent: Option<String>,
-    name: String, // Actor name (from manifest if available)
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ActorNode {
+    pub id: String,
+    pub status: String,
+    pub children: Vec<String>,
+    pub parent: Option<String>,
+    pub name: String,
 }
 
-pub fn execute(args: &TreeArgs, _verbose: bool, json: bool) -> Result<()> {
+/// Execute the tree command asynchronously (modernized)
+pub async fn execute_async(args: &TreeArgs, ctx: &CommandContext) -> Result<(), CliError> {
     debug!("Generating actor tree");
-    debug!("Connecting to server at: {}", args.address);
+    
+    // Get server address from args or config
+    let address = ctx.server_address(args.address);
+    debug!("Connecting to server at: {}", address);
 
-    // Create runtime and connect to the server
-    let runtime = tokio::runtime::Runtime::new()?;
+    // Create client and connect
+    let client = ctx.create_client();
+    client.connect().await
+        .map_err(|e| CliError::connection_failed(address, e))?;
 
-    runtime.block_on(async {
-        let config = crate::config::Config::load().unwrap_or_default();
-        let client = TheaterClient::new(args.address, config);
+    // Get the list of all actors
+    let actors = client.list_actors().await
+        .map_err(|e| CliError::connection_failed(address, e))?;
 
-        // Connect to the server
-        client.connect().await?;
+    if actors.is_empty() {
+        let tree = ActorTree {
+            actors: Vec::new(),
+            nodes: HashMap::new(),
+            root_nodes: Vec::new(),
+            max_depth: args.depth,
+            specified_root: args.root.clone(),
+        };
+        ctx.output.output(&tree, None)?;
+        return Ok(());
+    }
 
-        // Get the list of all actors
-        let actors = client.list_actors().await?;
+    // Collect information about each actor
+    let mut nodes: HashMap<String, ActorNode> = HashMap::new();
 
-        if actors.is_empty() {
-            if json {
-                println!(
-                    "{}",
-                    serde_json::to_string_pretty(&json!({
-                        "actors": [],
-                        "tree": {}
-                    }))?
-                );
-            } else {
-                println!(
-                    "{}",
-                    formatting::format_info("No actors are currently running.")
-                );
-            }
-            return Ok(());
-        }
+    // First pass: collect basic information
+    for (actor_id, _name) in &actors {
+        debug!("Getting information for actor: {}", actor_id);
 
-        // Collect information about each actor
-        let mut nodes: HashMap<String, ActorNode> = HashMap::new();
+        // Get actor status
+        let status_str = match client.get_actor_status(actor_id).await {
+            Ok(status) => status,
+            Err(_) => "Stopped".to_string(), // Use Stopped as fallback
+        };
 
-        // First pass: collect basic information
-        for (actor_id, _name) in &actors {
-            debug!("Getting information for actor: {}", actor_id);
+        // In a real implementation, we would query parent/child relationships from the server
+        // For now, we'll use a simplified approach assuming no relationships
+        nodes.insert(
+            actor_id.clone(),
+            ActorNode {
+                id: actor_id.clone(),
+                status: status_str,
+                children: Vec::new(),
+                parent: None,
+                name: format!("Actor {}", actor_id),
+            },
+        );
+    }
 
-            // Get actor status
-            let status_str = match client.get_actor_status(actor_id).await {
-                Ok(status) => status,
-                Err(_) => "Stopped".to_string(), // Use Stopped as fallback
-            };
+    // Build the tree structure
+    let mut root_nodes: Vec<String> = Vec::new();
 
-            // We'd need to get actual parent/child relationships from the server
-            // For now, we'll use a simplified approach assuming no relationships
-            // In a real implementation, we would query this information from the server
-
-            nodes.insert(
-                actor_id.clone(),
-                ActorNode {
-                    id: actor_id.clone(),
-                    status: status_str,
-                    children: Vec::new(),
-                    parent: None,
-                    name: format!("Actor {}", actor_id),
-                },
-            );
-        }
-
-        // Build the tree structure
-        // Note: In a real implementation, we would query the actual parent-child
-        // relationships from the server. This is a placeholder for demonstration.
-
-        // Let's assume for this example that we have this information
-        // In reality, you would need to extend your server/client API to get this data
-
-        // For JSON output
-        if json {
-            let mut tree_json = json!({});
-
-            // Build a JSON representation of the tree
-            for (id, node) in &nodes {
-                tree_json[id.to_string()] = json!({
-                    "id": node.id.to_string(),
-                    "status": format!("{:?}", node.status),
-                    "name": node.name,
-                    "children": node.children.iter().map(|c| c.to_string()).collect::<Vec<_>>(),
-                    "parent": node.parent.as_ref().map(|p| p.to_string())
-                });
-            }
-
-            // Output the result
-            println!(
-                "{}",
-                serde_json::to_string_pretty(&json!({
-                    "actors": actors.iter().map(|a| a.0.to_string()).collect::<Vec<_>>(),
-                    "tree": tree_json
-                }))?
-            );
-
-            return Ok(());
-        }
-
-        // For human-readable output, we need to identify root nodes
-        let mut root_nodes: Vec<String> = Vec::new();
-
-        // If a specific root is provided, use it as the only root
-        if let Some(root_id) = &args.root {
-            let root_str = root_id.to_string();
-            if nodes.contains_key(&root_str) {
-                root_nodes.push(root_str);
-            } else {
-                return Err(anyhow!("Root actor not found: {}", root_id));
-            }
+    // If a specific root is provided, use it as the only root
+    if let Some(root_id) = &args.root {
+        let root_str = root_id.to_string();
+        if nodes.contains_key(&root_str) {
+            root_nodes.push(root_str);
         } else {
-            // Otherwise, find all nodes that have no parent
-            for (id, node) in &nodes {
-                if node.parent.is_none() {
-                    root_nodes.push(id.clone());
-                }
+            return Err(CliError::actor_not_found(root_id.to_string()));
+        }
+    } else {
+        // Find all nodes that have no parent (for now, all actors are roots)
+        for (id, node) in &nodes {
+            if node.parent.is_none() {
+                root_nodes.push(id.clone());
             }
         }
+    }
 
-        // Print the tree header
-        println!("{}", formatting::format_section("ACTOR HIERARCHY"));
-        println!("Total actors: {}\n", actors.len());
+    // If we have no root nodes but have actors, assume all are independent
+    if root_nodes.is_empty() && !actors.is_empty() {
+        root_nodes = actors.iter().map(|a| a.0.clone()).collect();
+    }
 
-        // If we have no root nodes but have actors, assume all are independent
-        if root_nodes.is_empty() && !actors.is_empty() {
-            root_nodes = actors.into_iter().map(|a| a.0).collect();
-        }
+    // Create tree structure and output
+    let tree = ActorTree {
+        actors: actors.into_iter().map(|a| a.0).collect(),
+        nodes,
+        root_nodes,
+        max_depth: args.depth,
+        specified_root: args.root.clone(),
+    };
 
-        // Print each tree starting from root nodes
-        for root_id in root_nodes {
-            print_tree(&nodes, &root_id, "", true, args.depth, 0);
-        }
-
-        Ok::<(), anyhow::Error>(())
-    })?;
-
+    ctx.output.output(&tree, None)?;
     Ok(())
 }
 
+/// Legacy wrapper for backward compatibility
+pub fn execute(args: &TreeArgs, verbose: bool, json: bool) -> Result<()> {
+    let runtime = tokio::runtime::Runtime::new()?;
+    runtime.block_on(async {
+        let config = crate::config::Config::load().unwrap_or_default();
+        let output = crate::output::OutputManager::new(config.output.clone());
+        let ctx = crate::CommandContext {
+            config,
+            output,
+            verbose,
+            json,
+        };
+        execute_async(args, &ctx).await.map_err(|e| anyhow::Error::from(e))
+    })
+}
+
 /// Format a short version of an actor ID string (first 8 chars)
-fn format_short_id_string(id: &str) -> String {
+pub fn format_short_id_string(id: &str) -> String {
     let short_id = &id[..std::cmp::min(8, id.len())];
     style(short_id).cyan().to_string()
 }
 
 /// Format an actor status string with appropriate color
-fn format_status_string(status: &str) -> String {
+pub fn format_status_string(status: &str) -> String {
     match status.to_uppercase().as_str() {
         "RUNNING" => style("RUNNING").green().bold().to_string(),
         "STOPPED" => style("STOPPED").red().bold().to_string(),
@@ -190,7 +161,7 @@ fn format_status_string(status: &str) -> String {
 }
 
 /// Recursively print the tree structure
-fn print_tree(
+pub fn print_tree(
     nodes: &HashMap<String, ActorNode>,
     current_id: &String,
     prefix: &str,
