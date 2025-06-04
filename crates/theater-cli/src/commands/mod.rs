@@ -6,7 +6,6 @@ pub mod inspect;
 pub mod list;
 pub mod list_stored;
 pub mod message;
-pub mod server;
 pub mod start;
 pub mod state;
 pub mod stop;

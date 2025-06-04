@@ -101,7 +101,7 @@ pub async fn execute_async(args: &StartArgs, ctx: &CommandContext) -> Result<(),
 
     // Add a timeout for actor startup
     let timeout_duration = tokio::time::Duration::from_secs(30);
-    
+
     while is_running {
         tokio::select! {
             data = client.next_response() => {
@@ -109,7 +109,7 @@ pub async fn execute_async(args: &StartArgs, ctx: &CommandContext) -> Result<(),
                     match data {
                         ManagementResponse::ActorStarted { id } => {
                             actor_started = true;
-                            
+
                             if args.id_only {
                                 println!("{}", id);
                                 is_running = false;
@@ -124,7 +124,7 @@ pub async fn execute_async(args: &StartArgs, ctx: &CommandContext) -> Result<(),
                                 ctx.output.output(&result, None)?;
 
                                 // if we are not subscribing or acting as a parent, break the loop
-                                if !(args.subscribe || args.parent) {
+                                if !args.subscribe && !args.parent {
                                     is_running = false;
                                 }
                             }

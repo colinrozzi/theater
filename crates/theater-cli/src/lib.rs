@@ -28,10 +28,6 @@ pub struct Cli {
 
 #[derive(Debug, Subcommand)]
 pub enum Commands {
-    /// Start a Theater server
-    #[command(name = "server")]
-    Server(commands::server::start::StartArgs),
-
     /// Create a new Theater actor project
     #[command(name = "create")]
     Create(commands::create::CreateArgs),
@@ -101,9 +97,6 @@ pub async fn run(
     // Execute the command - using legacy functions for now, can be modernized incrementally
     let result = match &cli.command {
         Commands::Subscribe(args) => commands::subscribe::execute_async(args, &ctx)
-            .await
-            .map_err(|e| anyhow::Error::from(e)),
-        Commands::Server(args) => commands::server::start::execute_async(args, &ctx)
             .await
             .map_err(|e| anyhow::Error::from(e)),
         Commands::Create(args) => commands::create::execute_async(args, &ctx)

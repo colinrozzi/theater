@@ -1370,7 +1370,6 @@ pub struct ServerStarted {
     pub log_dir: String,
     pub log_path: std::path::PathBuf,
     pub log_stdout: bool,
-    pub filter_string: String,
 }
 
 impl OutputFormat for ServerStarted {
@@ -1447,7 +1446,6 @@ impl OutputFormat for ServerStarted {
             vec!["Log Directory".to_string(), self.log_dir.clone()],
             vec!["Log File".to_string(), self.log_path.display().to_string()],
             vec!["Console Logging".to_string(), self.log_stdout.to_string()],
-            vec!["Filter String".to_string(), self.filter_string.clone()],
         ];
 
         if let Some(filter) = &self.log_filter {

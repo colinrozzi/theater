@@ -2877,6 +2877,7 @@ dependencies = [
  "serde_json",
  "serde_yaml",
  "shellexpand",
+ "tempfile",
  "term_size",
  "theater",
  "theater-client",
