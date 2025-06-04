@@ -28,10 +28,10 @@ pub struct TreeArgs {
 
 /// Node in the actor tree
 struct ActorNode {
-    id: TheaterId,
-    status: ActorStatus,
-    children: Vec<TheaterId>,
-    parent: Option<TheaterId>,
+    id: String,
+    status: String,
+    children: Vec<String>,
+    parent: Option<String>,
     name: String, // Actor name (from manifest if available)
 }
 
@@ -43,7 +43,8 @@ pub fn execute(args: &TreeArgs, _verbose: bool, json: bool) -> Result<()> {
     let runtime = tokio::runtime::Runtime::new()?;
 
     runtime.block_on(async {
-        let mut client = TheaterClient::new(args.address);
+        let config = crate::config::Config::load().unwrap_or_default();
+        let mut client = TheaterClient::new(args.address, config);
 
         // Connect to the server
         client.connect().await?;
@@ -70,16 +71,16 @@ pub fn execute(args: &TreeArgs, _verbose: bool, json: bool) -> Result<()> {
         }
 
         // Collect information about each actor
-        let mut nodes: HashMap<TheaterId, ActorNode> = HashMap::new();
+        let mut nodes: HashMap<String, ActorNode> = HashMap::new();
 
         // First pass: collect basic information
         for (actor_id, _name) in &actors {
             debug!("Getting information for actor: {}", actor_id);
 
             // Get actor status
-            let status = match client.get_actor_status(actor_id.clone()).await {
+            let status_str = match client.get_actor_status(actor_id).await {
                 Ok(status) => status,
-                Err(_) => ActorStatus::Stopped, // Use Stopped as fallback
+                Err(_) => "Stopped".to_string(), // Use Stopped as fallback
             };
 
             // We'd need to get actual parent/child relationships from the server
@@ -90,7 +91,7 @@ pub fn execute(args: &TreeArgs, _verbose: bool, json: bool) -> Result<()> {
                 actor_id.clone(),
                 ActorNode {
                     id: actor_id.clone(),
-                    status,
+                    status: status_str,
                     children: Vec::new(),
                     parent: None,
                     name: format!("Actor {}", actor_id),
@@ -157,7 +158,7 @@ pub fn execute(args: &TreeArgs, _verbose: bool, json: bool) -> Result<()> {
 
         // If we have no root nodes but have actors, assume all are independent
         if root_nodes.is_empty() && !actors.is_empty() {
-            root_nodes = actors.into_iter().map(|a| a.0.clone()).collect();
+            root_nodes = actors.into_iter().map(|a| a.0).collect();
         }
 
         // Print each tree starting from root nodes
@@ -173,8 +174,8 @@ pub fn execute(args: &TreeArgs, _verbose: bool, json: bool) -> Result<()> {
 
 /// Recursively print the tree structure
 fn print_tree(
-    nodes: &HashMap<TheaterId, ActorNode>,
-    current_id: &TheaterId,
+    nodes: &HashMap<String, ActorNode>,
+    current_id: &String,
     prefix: &str,
     is_last: bool,
     max_depth: usize,

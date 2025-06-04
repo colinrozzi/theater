@@ -93,7 +93,7 @@ pub fn execute(args: &EventsArgs, _verbose: bool, json: bool) -> Result<()> {
         }
 
         // Get the actor events
-        let mut events = client.get_actor_events(actor_id.clone()).await?;
+        let mut events = client.get_actor_events(&actor_id.to_string()).await?;
 
         // Apply filters
         if let Some(event_type) = &args.event_type {

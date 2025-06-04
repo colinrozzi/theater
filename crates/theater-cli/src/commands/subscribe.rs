@@ -86,7 +86,8 @@ pub fn execute(args: &SubscribeArgs, _verbose: bool, json: bool) -> Result<()> {
             );
         }
 
-        let mut client = TheaterClient::new(args.address);
+        let config = crate::config::Config::load().unwrap_or_default();
+        let mut client = TheaterClient::new(args.address, config);
 
         // Connect to the server
         client.connect().await?;
@@ -104,7 +105,7 @@ pub fn execute(args: &SubscribeArgs, _verbose: bool, json: bool) -> Result<()> {
         // If history flag is set, get and display historical events
         if args.history {
             // Get historical events
-            let mut events = client.get_actor_events(actor_id.clone()).await?;
+            let mut events = client.get_actor_events(&actor_id.to_string()).await?;
 
             // Apply event type filter if specified
             if let Some(filter) = &args.event_type {
@@ -126,7 +127,7 @@ pub fn execute(args: &SubscribeArgs, _verbose: bool, json: bool) -> Result<()> {
         }
 
         // Subscribe to the actor's events
-        let subscription_id = client.subscribe_to_actor(actor_id.clone()).await?;
+        let _event_stream = client.subscribe_to_events(&actor_id.to_string()).await?;
 
         info!(
             "Subscribed to actor events with subscription ID: {}",
@@ -167,7 +168,7 @@ pub fn execute(args: &SubscribeArgs, _verbose: bool, json: bool) -> Result<()> {
 
             // Try to receive an event with a timeout to allow checking for the global timeout
             let response =
-                match time::timeout(Duration::from_secs(1), client.receive_response()).await {
+                match time::timeout(Duration::from_secs(1), client.next_response()).await {
                     Ok(result) => match result {
                         Ok(response) => response,
                         Err(e) => {
@@ -237,7 +238,7 @@ pub fn execute(args: &SubscribeArgs, _verbose: bool, json: bool) -> Result<()> {
 
         // Unsubscribe before exiting
         if let Err(e) = client
-            .unsubscribe_from_actor(actor_id, subscription_id)
+            .unsubscribe_from_actor(&actor_id.to_string(), subscription_id)
             .await
         {
             debug!("Failed to unsubscribe: {}", e);

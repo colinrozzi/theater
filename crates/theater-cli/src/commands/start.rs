@@ -102,7 +102,7 @@ pub fn execute(args: &StartArgs, _verbose: bool, json: bool) -> Result<()> {
                 data = client.next_response() => {
                     if let Ok(Some(data)) = data {
                     match data {
-                        Ok(ManagementResponse::ActorStarted { id }) => {
+                        ManagementResponse::ActorStarted { id } => {
                             if args.id_only {
                                 println!("{}", id);
                                 break;
@@ -119,12 +119,12 @@ pub fn execute(args: &StartArgs, _verbose: bool, json: bool) -> Result<()> {
                                 }
                             }
                         }
-                        Ok(ManagementResponse::ActorEvent { event }) => {
+                        ManagementResponse::ActorEvent { event } => {
                             if args.subscribe {
                                 display_single_event(&event, &args.format, json).expect("Failed to display event");
                             }
                         }
-                        Ok(ManagementResponse::ActorError { error }) => {
+                        ManagementResponse::ActorError { error } => {
                             if args.subscribe {
                                 println!("-----[actor error]-----------------");
                                 println!(
@@ -134,13 +134,13 @@ pub fn execute(args: &StartArgs, _verbose: bool, json: bool) -> Result<()> {
                                 println!("-----------------------------------");
                             }
                         }
-                        Ok(ManagementResponse::ActorStopped { id }) => {
+                        ManagementResponse::ActorStopped { id } => {
                             println!("-----[actor stopped]-----------------");
                             println!("{}", id);
                             println!("-------------------------------------");
                             break;
                         }
-                        Ok(ManagementResponse::ActorResult(actor_result)) => {
+                        ManagementResponse::ActorResult(actor_result) => {
                             if args.parent {
                                 println!("-----[actor result]-----------------");
                                 println!(
@@ -150,7 +150,7 @@ pub fn execute(args: &StartArgs, _verbose: bool, json: bool) -> Result<()> {
                                 println!("------------------------------------");
                             }
                         }
-                        Err(e) => {
+                        _ => {
                             println!("Error receiving data: {:?}", e);
                             break;
                         }

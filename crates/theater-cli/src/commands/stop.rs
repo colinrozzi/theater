@@ -31,13 +31,14 @@ pub fn execute(args: &StopArgs, _verbose: bool, json: bool) -> Result<()> {
     let runtime = tokio::runtime::Runtime::new()?;
 
     runtime.block_on(async {
-        let mut client = TheaterClient::new(args.address);
+        let config = crate::config::Config::load().unwrap_or_default();
+        let mut client = TheaterClient::new(args.address, config);
 
         // Connect to the server
         client.connect().await?;
 
         // Stop the actor
-        client.stop_actor(actor_id.clone()).await?;
+        client.stop_actor(&actor_id.to_string()).await?;
 
         // Output the result
         if !json {

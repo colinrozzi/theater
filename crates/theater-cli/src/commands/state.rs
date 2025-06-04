@@ -35,76 +35,35 @@ pub fn execute(args: &StateArgs, _verbose: bool, json: bool) -> Result<()> {
     let runtime = tokio::runtime::Runtime::new()?;
 
     runtime.block_on(async {
-        let mut client = TheaterClient::new(args.address);
+        let config = crate::config::Config::load().unwrap_or_default();
+        let client = TheaterClient::new(args.address, config);
 
         // Connect to the server
         client.connect().await?;
 
         // Get the actor state
-        let state = client.get_actor_state(actor_id.clone()).await?;
+        let state = client.get_actor_state(&actor_id.to_string()).await?;
 
         // Output the result based on format
-        match state {
-            Some(state_bytes) => {
-                if json {
-                    let output = serde_json::json!({
-                        "actor_id": actor_id.to_string(),
-                        "state": hex::encode(&state_bytes),
-                        "size": state_bytes.len()
-                    });
-                    println!("{}", serde_json::to_string_pretty(&output)?);
-                } else {
-                    match args.format.as_str() {
-                        "raw" => {
-                            // Output the raw bytes
-                            print!("{}", String::from_utf8_lossy(&state_bytes));
-                        }
-                        "json" => {
-                            // Try to parse as JSON and output pretty-printed
-                            match serde_json::from_slice::<serde_json::Value>(&state_bytes) {
-                                Ok(json_value) => {
-                                    println!("{}", serde_json::to_string_pretty(&json_value)?);
-                                }
-                                Err(_) => {
-                                    println!(
-                                        "{} (non-JSON data, displaying as hex)",
-                                        style("⚠ Failed to parse state as JSON").yellow()
-                                    );
-                                    println!("{}", hex::encode(&state_bytes));
-                                }
-                            }
-                        }
-                        "pretty" | _ => {
-                            // Try to parse as JSON, fallback to safe display
-                            println!("{} Actor State:", style("ℹ").blue().bold());
-                            match serde_json::from_slice::<serde_json::Value>(&state_bytes) {
-                                Ok(json_value) => {
-                                    println!("{}", serde_json::to_string_pretty(&json_value)?);
-                                }
-                                Err(_) => {
-                                    // Try to display as UTF-8 string
-                                    if let Ok(string_value) = String::from_utf8(state_bytes.clone())
-                                    {
-                                        println!("{}", string_value);
-                                    } else {
-                                        println!("Binary data ({} bytes):", state_bytes.len());
-                                        println!("{}", hex::encode(&state_bytes));
-                                    }
-                                }
-                            }
-                        }
-                    }
+        if json {
+            let output = serde_json::json!({
+                "actor_id": actor_id.to_string(),
+                "state": state
+            });
+            println!("{}", serde_json::to_string_pretty(&output)?);
+        } else {
+            match args.format.as_str() {
+                "json" => {
+                    println!("{}", serde_json::to_string_pretty(&state)?);
                 }
-            }
-            None => {
-                if json {
-                    let output = serde_json::json!({
-                        "actor_id": actor_id.to_string(),
-                        "state": null
-                    });
-                    println!("{}", serde_json::to_string_pretty(&output)?);
-                } else {
-                    println!("{} Actor has no state", style("ℹ").blue().bold());
+                "pretty" => {
+                    println!("{} Actor State:", style("ℹ").blue().bold());
+                    println!("Actor: {}", actor_id);
+                    println!("State:");
+                    println!("{}", serde_json::to_string_pretty(&state)?);
+                }
+                _ => {
+                    println!("{}", state);
                 }
             }
         }

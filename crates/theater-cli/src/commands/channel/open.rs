@@ -91,7 +91,7 @@ async fn run_channel_session(
 
     // Open a channel to the actor
     let channel_id = client
-        .open_channel(actor_id.clone(), initial_message)
+        .open_channel(&actor_id.to_string(), initial_message)
         .await?;
 
     println!(

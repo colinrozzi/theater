@@ -34,7 +34,7 @@ pub async fn update_actor_component(
     );
 
     // Use the built-in client method
-    client.update_actor_component(actor_id, component).await
+    client.update_actor_component(&actor_id.to_string(), component).await.map_err(Into::into)
 }
 
 pub fn execute(args: &UpdateArgs, _verbose: bool, json: bool) -> Result<()> {
@@ -50,7 +50,8 @@ pub fn execute(args: &UpdateArgs, _verbose: bool, json: bool) -> Result<()> {
     let runtime = tokio::runtime::Runtime::new()?;
 
     runtime.block_on(async {
-        let mut client = TheaterClient::new(args.address);
+        let config = crate::config::Config::load().unwrap_or_default();
+        let mut client = TheaterClient::new(args.address, config);
 
         // Connect to the server
         client.connect().await?;

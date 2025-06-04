@@ -66,6 +66,7 @@ pub fn execute(args: &InspectArgs, _verbose: bool, json: bool) -> Result<()> {
         // TODO: Implement metrics when available
         // debug!("Getting actor metrics");
         // let metrics_result = client.get_actor_metrics(&args.actor_id.to_string()).await;
+        let metrics_result: Result<serde_json::Value, anyhow::Error> = Err(anyhow::anyhow!("Metrics not implemented"));
         let metrics = match metrics_result {
             Ok(metrics) => Some(metrics),
             Err(_) => None,
