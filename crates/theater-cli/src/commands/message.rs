@@ -1,14 +1,15 @@
-use anyhow::{anyhow, Result};
 use clap::Parser;
-use console::style;
 use std::fs;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use tracing::debug;
-
-use crate::client::TheaterClient;
 use std::str::FromStr;
+
+
 use theater::id::TheaterId;
+use crate::error::{CliError, CliResult};
+use crate::output::formatters::{MessageSent, MessageResponse};
+use crate::CommandContext;
 
 #[derive(Debug, Parser)]
 pub struct MessageArgs {
@@ -33,16 +34,26 @@ pub struct MessageArgs {
     pub request: bool,
 }
 
-pub fn execute(args: &MessageArgs, _verbose: bool, json: bool) -> Result<()> {
+/// Execute the message command asynchronously with modern patterns
+pub async fn execute_async(args: &MessageArgs, ctx: &CommandContext) -> CliResult<()> {
     debug!("Sending message to actor: {}", args.actor_id);
+    
     // Get message content either from direct argument or file
     let message_content = if let Some(message) = &args.message {
         message.clone()
     } else if let Some(file_path) = &args.file {
         debug!("Reading message from file: {:?}", file_path);
-        fs::read_to_string(file_path).map_err(|e| anyhow!("Failed to read message file: {}", e))?
+        fs::read_to_string(file_path).map_err(|e| CliError::FileOperationFailed {
+            path: file_path.display().to_string(),
+            operation: "read".to_string(),
+            source: e,
+        })?
     } else {
-        return Err(anyhow!("Either message or file must be provided"));
+        return Err(CliError::InvalidInput {
+            field: "message".to_string(),
+            value: "none".to_string(),
+            suggestion: "Either provide a message directly or specify a file with --file".to_string(),
+        });
     };
 
     debug!("Message: {}", message_content);
@@ -50,69 +61,140 @@ pub fn execute(args: &MessageArgs, _verbose: bool, json: bool) -> Result<()> {
 
     // Parse the actor ID
     let actor_id = TheaterId::from_str(&args.actor_id)
-        .map_err(|_| anyhow!("Invalid actor ID: {}", args.actor_id))?;
+        .map_err(|_| CliError::InvalidInput {
+            field: "actor_id".to_string(),
+            value: args.actor_id.clone(),
+            suggestion: "Provide a valid actor ID in the correct format".to_string(),
+        })?;
 
-    // Create runtime and connect to the server
-    let runtime = tokio::runtime::Runtime::new()?;
+    // Create client and connect
+    let client = ctx.create_client();
+    client.connect().await
+        .map_err(|e| CliError::connection_failed(args.address, e))?;
 
-    runtime.block_on(async {
-        let config = crate::config::Config::default();
-        let mut client = TheaterClient::new(args.address, config);
+    // Convert message to bytes
+    let message_bytes = message_content.as_bytes().to_vec();
 
-        // Connect to the server
-        client.connect().await?;
+    if args.request {
+        // Send as a request and wait for response
+        let response: Vec<u8> = client
+            .request_message(&actor_id.to_string(), message_bytes)
+            .await
+            .map_err(|e| CliError::ServerError {
+                message: format!("Failed to send request to actor: {}", e),
+            })?;
 
-        // Convert message to bytes
-        let message_bytes = message_content.as_bytes().to_vec();
+        // Create formatted output for response
+        let message_response = MessageResponse {
+            actor_id: actor_id.to_string(),
+            request: message_content,
+            response: String::from_utf8_lossy(&response).to_string(),
+        };
+        
+        // Output using the configured format
+        let format = if ctx.json { Some("json") } else { None };
+        ctx.output.output(&message_response, format)?;
+    } else {
+        // Send as a one-way message
+        client
+            .send_message(&actor_id.to_string(), message_bytes)
+            .await
+            .map_err(|e| CliError::ServerError {
+                message: format!("Failed to send message to actor: {}", e),
+            })?;
 
-        if args.request {
-            // Send as a request and wait for response
-            let response: Vec<u8> = client
-                .request_message(&actor_id.to_string(), message_bytes)
-                .await?;
-
-            // Output the response
-            if json {
-                let output = serde_json::json!({
-                    "actor_id": actor_id.to_string(),
-                    "request": message_content,
-                    "response": String::from_utf8_lossy(&response).to_string()
-                });
-                println!("{}", serde_json::to_string_pretty(&output)?);
-            } else {
-                println!(
-                    "{} Response from actor: {}",
-                    style("✓").green().bold(),
-                    style(actor_id.to_string()).cyan()
-                );
-
-                println!("{}", String::from_utf8_lossy(&response));
-            }
-        } else {
-            // Send as a one-way message
-            client
-                .send_message(&actor_id.to_string(), message_bytes)
-                .await?;
-
-            // Output the result
-            if json {
-                let output = serde_json::json!({
-                    "success": true,
-                    "actor_id": actor_id.to_string(),
-                    "message": message_content
-                });
-                println!("{}", serde_json::to_string_pretty(&output)?);
-            } else {
-                println!(
-                    "{} Message sent to actor: {}",
-                    style("✓").green().bold(),
-                    style(actor_id.to_string()).cyan()
-                );
-            }
-        }
-
-        Ok::<(), anyhow::Error>(())
-    })?;
+        // Create formatted output for message sent
+        let message_sent = MessageSent {
+            actor_id: actor_id.to_string(),
+            message: message_content,
+            success: true,
+        };
+        
+        // Output using the configured format
+        let format = if ctx.json { Some("json") } else { None };
+        ctx.output.output(&message_sent, format)?;
+    }
 
     Ok(())
+}
+
+// Keep the legacy function for backward compatibility
+pub fn execute(args: &MessageArgs, verbose: bool, json: bool) -> anyhow::Result<()> {
+    let runtime = tokio::runtime::Runtime::new()?;
+    runtime.block_on(async {
+        let config = crate::config::Config::load().unwrap_or_default();
+        let output = crate::output::OutputManager::new(config.output.clone());
+        
+        let ctx = CommandContext {
+            config,
+            output,
+            verbose,
+            json,
+        };
+        
+        execute_async(args, &ctx).await.map_err(Into::into)
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::Config;
+    use crate::output::OutputManager;
+
+    #[tokio::test]
+    async fn test_message_command_invalid_actor_id() {
+        let args = MessageArgs {
+            actor_id: "invalid-id".to_string(),
+            message: Some("test message".to_string()),
+            file: None,
+            address: "127.0.0.1:9000".parse().unwrap(),
+            request: false,
+        };
+        let config = Config::default();
+        let output = OutputManager::new(config.output.clone());
+        
+        let ctx = CommandContext {
+            config,
+            output,
+            verbose: false,
+            json: false,
+        };
+        
+        let result = execute_async(&args, &ctx).await;
+        assert!(result.is_err());
+        if let Err(CliError::InvalidInput { field, .. }) = result {
+            assert_eq!(field, "actor_id");
+        } else {
+            panic!("Expected InvalidInput error");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_message_command_no_message_or_file() {
+        let args = MessageArgs {
+            actor_id: "test-id".to_string(),
+            message: None,
+            file: None,
+            address: "127.0.0.1:9000".parse().unwrap(),
+            request: false,
+        };
+        let config = Config::default();
+        let output = OutputManager::new(config.output.clone());
+        
+        let ctx = CommandContext {
+            config,
+            output,
+            verbose: false,
+            json: false,
+        };
+        
+        let result = execute_async(&args, &ctx).await;
+        assert!(result.is_err());
+        if let Err(CliError::InvalidInput { field, .. }) = result {
+            assert_eq!(field, "message");
+        } else {
+            panic!("Expected InvalidInput error");
+        }
+    }
 }

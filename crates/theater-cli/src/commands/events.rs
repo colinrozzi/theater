@@ -1,18 +1,13 @@
-use anyhow::{anyhow, Result};
 use clap::Parser;
-use console::style;
 use std::net::SocketAddr;
 use std::str::FromStr;
-
 use tracing::debug;
 
-use crate::client::TheaterClient;
-use crate::utils::event_display::{
-    display_csv_header, display_events, display_events_timeline, pretty_stringify_event,
-    EventDisplayOptions,
-};
-use theater::chain::ChainEvent;
 use theater::id::TheaterId;
+use theater::chain::ChainEvent;
+use crate::error::{CliError, CliResult};
+use crate::output::formatters::ActorEvents;
+use crate::CommandContext;
 
 /// Get events for an actor (falls back to filesystem if actor is not running)
 #[derive(Debug, Parser)]
@@ -45,18 +40,6 @@ pub struct EventsArgs {
     #[arg(long)]
     pub search: Option<String>,
 
-    /// Output format (pretty, compact, json, csv)
-    #[arg(short, long, default_value = "compact")]
-    pub format: String,
-
-    /// Export events to file
-    #[arg(short, long)]
-    pub export: Option<String>,
-
-    /// Show detailed event information
-    #[arg(short = 'd', long)]
-    pub detailed: bool,
-
     /// Sort events (chain, time, type, size)
     #[arg(short, long, default_value = "chain")]
     pub sort: String,
@@ -65,164 +48,147 @@ pub struct EventsArgs {
     #[arg(short = 'r', long)]
     pub reverse: bool,
 
-    /// Show events in a timeline view
-    #[arg(long)]
-    pub timeline: bool,
+    /// Show detailed event information
+    #[arg(short = 'd', long)]
+    pub detailed: bool,
 }
 
-pub fn execute(args: &EventsArgs, _verbose: bool, json: bool) -> Result<()> {
+/// Execute the events command asynchronously with modern patterns
+pub async fn execute_async(args: &EventsArgs, ctx: &CommandContext) -> CliResult<()> {
     debug!("Getting events for actor: {}", args.actor_id);
     debug!("Connecting to server at: {}", args.address);
 
     // Parse the actor ID
     let actor_id = TheaterId::from_str(&args.actor_id)
-        .map_err(|_| anyhow!("Invalid actor ID: {}", args.actor_id))?;
+        .map_err(|_| CliError::InvalidInput {
+            field: "actor_id".to_string(),
+            value: args.actor_id.clone(),
+            suggestion: "Provide a valid actor ID in the correct format".to_string(),
+        })?;
 
-    // Create runtime and connect to the server
-    let runtime = tokio::runtime::Runtime::new()?;
+    // Create client and connect
+    let client = ctx.create_client();
+    client.connect().await
+        .map_err(|e| CliError::connection_failed(args.address, e))?;
 
-    runtime.block_on(async {
-        let config = crate::config::Config::default();
-        let client = TheaterClient::new(args.address, config);
+    // Get the actor events
+    let mut events = client.get_actor_events(&actor_id.to_string()).await
+        .map_err(|e| CliError::ServerError {
+            message: format!("Failed to get actor events: {}", e),
+        })?;
 
-        // Try to connect to the server, but continue even if it fails
-        // (we'll automatically fall back to filesystem if needed)
-        let connected = client.connect().await.is_ok();
-        if !connected {
-            debug!("Failed to connect to server, will attempt to read events from filesystem");
-        }
+    // Apply filters
+    apply_filters(&mut events, args)?;
 
-        // Get the actor events
-        let mut events = client.get_actor_events(&actor_id.to_string()).await?;
+    // Apply sorting
+    apply_sorting(&mut events, &args.sort, args.reverse)?;
 
-        // Apply filters
-        if let Some(event_type) = &args.event_type {
-            events.retain(|e| e.event_type.contains(event_type));
-        }
+    // Limit the number of events if requested
+    if args.limit > 0 && events.len() > args.limit {
+        events = events.into_iter().take(args.limit).collect();
+    }
 
-        // Parse and apply timestamp filters
-        if let Some(from_str) = &args.from {
-            let from_time = parse_time_spec(from_str)?;
-            events.retain(|e| e.timestamp >= from_time);
-        }
+    // Create formatted output
+    let actor_events = ActorEvents {
+        actor_id: actor_id.to_string(),
+        events,
+    };
 
-        if let Some(to_str) = &args.to {
-            let to_time = parse_time_spec(to_str)?;
-            events.retain(|e| e.timestamp <= to_time);
-        }
-
-        // Apply text search
-        if let Some(search_text) = &args.search {
-            events.retain(|e| {
-                // Search in event type
-                if e.event_type.contains(search_text) {
-                    return true;
-                }
-
-                // Search in description
-                if let Some(desc) = &e.description {
-                    if desc.contains(search_text) {
-                        return true;
-                    }
-                }
-
-                // Search in data if it's UTF-8 text
-                if let Ok(data_str) = std::str::from_utf8(&e.data) {
-                    if data_str.contains(search_text) {
-                        return true;
-                    }
-                }
-
-                false
-            });
-        }
-
-        // Organize events by chain structure if "chain" sort is requested, otherwise use standard sorts
-        match args.sort.as_str() {
-            "chain" => {
-                // Sort events by their chain structure (parent-child relationships)
-                let ordered_events = order_events_by_chain(&events, args.reverse);
-                events = ordered_events;
-            }
-            "time" => {
-                if args.reverse {
-                    events.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
-                } else {
-                    events.sort_by(|a, b| a.timestamp.cmp(&b.timestamp));
-                }
-            }
-            "type" => {
-                if args.reverse {
-                    events.sort_by(|a, b| b.event_type.cmp(&a.event_type));
-                } else {
-                    events.sort_by(|a, b| a.event_type.cmp(&b.event_type));
-                }
-            }
-            "size" => {
-                if args.reverse {
-                    events.sort_by(|a, b| a.data.len().cmp(&b.data.len()));
-                } else {
-                    events.sort_by(|a, b| b.data.len().cmp(&a.data.len()));
-                }
-            }
-            _ => {
-                // Default to chain
-                let ordered_events = order_events_by_chain(&events, args.reverse);
-                events = ordered_events;
-            }
-        }
-
-        // Limit the number of events if requested
-        if args.limit > 0 && events.len() > args.limit {
-            events = events.into_iter().take(args.limit).collect();
-        }
-
-        // Handle export if requested
-        if let Some(export_path) = &args.export {
-            export_events(&events, export_path, &args.format)?;
-            println!(
-                "{} Exported {} events to {}",
-                style("✓").green().bold(),
-                events.len(),
-                export_path
-            );
-        }
-
-        // Create display options
-        let display_options = EventDisplayOptions {
-            format: args.format.clone(),
-            detailed: args.detailed,
-            json,
-        };
-
-        // Display events according to format or timeline view
-        if args.timeline {
-            display_events_timeline(&events, &actor_id)?
-        } else {
-            // If JSON flag is set, it overrides the format option
-            let format = if json {
-                "json".to_string()
-            } else {
-                args.format.clone()
-            };
-
-            // Special handling for CSV format
-            if format == "csv" {
-                display_csv_header();
-                display_events(&events, Some(&actor_id), &display_options, 0)?;
-            } else {
-                display_events(&events, Some(&actor_id), &display_options, 0)?;
-            }
-        }
-
-        Ok::<(), anyhow::Error>(())
-    })?;
+    // Output using the configured format
+    let format = if ctx.json { Some("json") } else { None };
+    ctx.output.output(&actor_events, format)?;
 
     Ok(())
 }
 
+/// Apply various filters to the events
+fn apply_filters(events: &mut Vec<ChainEvent>, args: &EventsArgs) -> CliResult<()> {
+    // Filter by event type
+    if let Some(event_type) = &args.event_type {
+        events.retain(|e| e.event_type.contains(event_type));
+    }
+
+    // Parse and apply timestamp filters
+    if let Some(from_str) = &args.from {
+        let from_time = parse_time_spec(from_str)?;
+        events.retain(|e| e.timestamp >= from_time);
+    }
+
+    if let Some(to_str) = &args.to {
+        let to_time = parse_time_spec(to_str)?;
+        events.retain(|e| e.timestamp <= to_time);
+    }
+
+    // Apply text search
+    if let Some(search_text) = &args.search {
+        events.retain(|e| {
+            // Search in event type
+            if e.event_type.contains(search_text) {
+                return true;
+            }
+
+            // Search in description
+            if let Some(desc) = &e.description {
+                if desc.contains(search_text) {
+                    return true;
+                }
+            }
+
+            // Search in data if it's UTF-8 text
+            if let Ok(data_str) = std::str::from_utf8(&e.data) {
+                if data_str.contains(search_text) {
+                    return true;
+                }
+            }
+
+            false
+        });
+    }
+
+    Ok(())
+}
+
+/// Apply sorting to the events
+fn apply_sorting(events: &mut Vec<ChainEvent>, sort_type: &str, reverse: bool) -> CliResult<()> {
+    match sort_type {
+        "chain" => {
+            let ordered_events = order_events_by_chain(events, reverse);
+            *events = ordered_events;
+        }
+        "time" => {
+            if reverse {
+                events.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
+            } else {
+                events.sort_by(|a, b| a.timestamp.cmp(&b.timestamp));
+            }
+        }
+        "type" => {
+            if reverse {
+                events.sort_by(|a, b| b.event_type.cmp(&a.event_type));
+            } else {
+                events.sort_by(|a, b| a.event_type.cmp(&b.event_type));
+            }
+        }
+        "size" => {
+            if reverse {
+                events.sort_by(|a, b| a.data.len().cmp(&b.data.len()));
+            } else {
+                events.sort_by(|a, b| b.data.len().cmp(&a.data.len()));
+            }
+        }
+        _ => {
+            return Err(CliError::InvalidInput {
+                field: "sort".to_string(),
+                value: sort_type.to_string(),
+                suggestion: "Use one of: chain, time, type, size".to_string(),
+            });
+        }
+    }
+    Ok(())
+}
+
 // Helper function to parse time specifications like "1h", "2d", or unix timestamps
-fn parse_time_spec(spec: &str) -> Result<u64> {
+fn parse_time_spec(spec: &str) -> CliResult<u64> {
     // Try parsing as a simple timestamp first
     if let Ok(timestamp) = spec.parse::<u64>() {
         return Ok(timestamp);
@@ -237,7 +203,11 @@ fn parse_time_spec(spec: &str) -> Result<u64> {
     let (amount_str, unit) = spec.chars().partition::<String, _>(|c| c.is_ascii_digit());
     let amount = amount_str
         .parse::<u64>()
-        .map_err(|_| anyhow!("Invalid time specification: {}", spec))?;
+        .map_err(|_| CliError::InvalidInput {
+            field: "time".to_string(),
+            value: spec.to_string(),
+            suggestion: "Use format like '1h', '2d', '30m', or a unix timestamp".to_string(),
+        })?;
 
     match unit.as_str() {
         "s" => Ok(now - amount),
@@ -245,70 +215,15 @@ fn parse_time_spec(spec: &str) -> Result<u64> {
         "h" => Ok(now - amount * 3600),
         "d" => Ok(now - amount * 86400),
         "w" => Ok(now - amount * 604800),
-        _ => Err(anyhow!("Unknown time unit: {}", unit)),
+        _ => Err(CliError::InvalidInput {
+            field: "time_unit".to_string(),
+            value: unit,
+            suggestion: "Use time units: s (seconds), m (minutes), h (hours), d (days), w (weeks)".to_string(),
+        }),
     }
 }
 
-// Export events to a file
-fn export_events(events: &[ChainEvent], path: &str, format: &str) -> Result<()> {
-    let content = match format {
-        "json" => serde_json::to_string_pretty(events)?,
-        "csv" => {
-            let mut wtr = csv::Writer::from_writer(vec![]);
-
-            // Write header
-            wtr.write_record(&[
-                "timestamp",
-                "event_type",
-                "hash",
-                "parent_hash",
-                "description",
-                "data_size",
-            ])?;
-
-            // Write data
-            for event in events {
-                let hash_hex = hex::encode(&event.hash);
-                let parent_hash_hex = event
-                    .parent_hash
-                    .as_ref()
-                    .map(|h| hex::encode(h))
-                    .unwrap_or_else(|| String::from(""));
-
-                wtr.write_record(&[
-                    &event.timestamp.to_string(),
-                    &event.event_type,
-                    &hash_hex,
-                    &parent_hash_hex,
-                    &event
-                        .description
-                        .clone()
-                        .unwrap_or_else(|| String::from("")),
-                    &event.data.len().to_string(),
-                ])?;
-            }
-
-            String::from_utf8(wtr.into_inner()?)?
-        }
-        "pretty" => {
-            let mut output = String::new();
-            for event in events {
-                output.push_str(&pretty_stringify_event(event, true));
-                output.push_str("\n");
-            }
-            output
-        }
-        _ => serde_json::to_string_pretty(events)?, // Default to JSON
-    };
-
-    std::fs::write(path, content)?;
-    Ok(())
-}
-
 // Order events by their chain structure (parent-child relationships)
-// We are guaranteed that we are given all events in a chain, and that there are no cycles, and
-// that there is always exactly one root event. All events have only one parent, except the root.
-// Only one child event can have a given parent.
 fn order_events_by_chain(events: &[ChainEvent], reverse: bool) -> Vec<ChainEvent> {
     if events.is_empty() {
         return Vec::new();
@@ -319,7 +234,7 @@ fn order_events_by_chain(events: &[ChainEvent], reverse: bool) -> Vec<ChainEvent
     // Find the root event (the one without a parent)
     let root = events.iter().find(|e| e.parent_hash.is_none());
 
-    // If no root is found (should not happen with given guarantees), return events as-is
+    // If no root is found, return events as-is
     let root = match root {
         Some(r) => r,
         None => return events.to_vec(),
@@ -364,3 +279,75 @@ fn order_events_by_chain(events: &[ChainEvent], reverse: bool) -> Vec<ChainEvent
     ordered_events
 }
 
+// Keep the legacy function for backward compatibility
+pub fn execute(args: &EventsArgs, verbose: bool, json: bool) -> anyhow::Result<()> {
+    let runtime = tokio::runtime::Runtime::new()?;
+    runtime.block_on(async {
+        let config = crate::config::Config::load().unwrap_or_default();
+        let output = crate::output::OutputManager::new(config.output.clone());
+        
+        let ctx = CommandContext {
+            config,
+            output,
+            verbose,
+            json,
+        };
+        
+        execute_async(args, &ctx).await.map_err(Into::into)
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::Config;
+    use crate::output::OutputManager;
+
+    #[tokio::test]
+    async fn test_events_command_invalid_actor_id() {
+        let args = EventsArgs {
+            actor_id: "invalid-id".to_string(),
+            address: "127.0.0.1:9000".parse().unwrap(),
+            limit: 0,
+            event_type: None,
+            from: None,
+            to: None,
+            search: None,
+            sort: "chain".to_string(),
+            reverse: false,
+            detailed: false,
+        };
+        let config = Config::default();
+        let output = OutputManager::new(config.output.clone());
+        
+        let ctx = CommandContext {
+            config,
+            output,
+            verbose: false,
+            json: false,
+        };
+        
+        let result = execute_async(&args, &ctx).await;
+        assert!(result.is_err());
+        if let Err(CliError::InvalidInput { field, .. }) = result {
+            assert_eq!(field, "actor_id");
+        } else {
+            panic!("Expected InvalidInput error");
+        }
+    }
+
+    #[test]
+    fn test_parse_time_spec() {
+        // Test unix timestamp
+        assert_eq!(parse_time_spec("1000").unwrap(), 1000);
+        
+        // Test relative times (will be based on current time, so just check they don't error)
+        assert!(parse_time_spec("1h").is_ok());
+        assert!(parse_time_spec("2d").is_ok());
+        assert!(parse_time_spec("30m").is_ok());
+        
+        // Test invalid formats
+        assert!(parse_time_spec("invalid").is_err());
+        assert!(parse_time_spec("1x").is_err());
+    }
+}

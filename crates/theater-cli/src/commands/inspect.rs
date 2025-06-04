@@ -7,7 +7,7 @@ use tracing::debug;
 
 use theater::id::TheaterId;
 
-use crate::client::TheaterClient;
+use crate::{CommandContext, error::CliError, output::formatters::ActorInspection};
 use crate::utils::formatting;
 
 #[derive(Debug, Parser)]
@@ -17,163 +17,81 @@ pub struct InspectArgs {
     pub actor_id: TheaterId,
 
     /// Address of the theater server
-    #[arg(short, long, default_value = "127.0.0.1:9000")]
-    pub address: SocketAddr,
+    #[arg(short, long)]
+    pub address: Option<SocketAddr>,
 
     /// Show detailed information
     #[arg(short, long)]
     pub detailed: bool,
 }
 
-pub fn execute(args: &InspectArgs, _verbose: bool, json: bool) -> Result<()> {
+/// Execute the inspect command asynchronously (modernized)
+pub async fn execute_async(args: &InspectArgs, ctx: &CommandContext) -> Result<(), CliError> {
     debug!("Inspecting actor: {}", args.actor_id);
-    debug!("Connecting to server at: {}", args.address);
+    
+    // Get server address from args or config
+    let address = ctx.server_address(args.address);
+    debug!("Connecting to server at: {}", address);
 
-    // Create runtime and connect to the server
-    let runtime = tokio::runtime::Runtime::new()?;
+    // Create client and connect
+    let mut client = ctx.create_client();
+    client.connect().await
+        .map_err(|e| CliError::connection_failed(address, e))?;
 
-    runtime.block_on(async {
-        let config = crate::config::Config::default();
-        let mut client = TheaterClient::new(args.address, config);
+    // Collect all actor information
+    debug!("Getting actor status");
+    let status = client.get_actor_status(&args.actor_id.to_string()).await
+        .map_err(|e| CliError::actor_operation_failed("status", &args.actor_id.to_string(), e))?;
 
-        // Connect to the server
-        client.connect().await?;
-
-        // Collect all actor information
-        debug!("Getting actor status");
-        let status = client.get_actor_status(&args.actor_id.to_string()).await?;
-
-        debug!("Getting actor state");
-        let state_result = client.get_actor_state(&args.actor_id.to_string()).await;
-        let state = match state_result {
-            Ok(ref state_value) => {
-                if state_value.is_null() {
-                    None
-                } else {
-                    Some(state_value)
-                }
-            }
-            _ => None,
-        };
-
-        debug!("Getting actor events");
-        let events_result = client.get_actor_events(&args.actor_id.to_string()).await;
-        let events = match events_result {
-            Ok(events) => events,
-            Err(_) => vec![],
-        };
-
-        // TODO: Implement metrics when available
-        // debug!("Getting actor metrics");
-        // let metrics_result = client.get_actor_metrics(&args.actor_id.to_string()).await;
-        let metrics_result: Result<serde_json::Value, anyhow::Error> = Err(anyhow::anyhow!("Metrics not implemented"));
-        let metrics = match metrics_result {
-            Ok(metrics) => Some(metrics),
-            Err(_) => None,
-        };
-
-        // Output the result
-        if json {
-            // JSON output format
-            let output = json!({
-                "id": args.actor_id.to_string(),
-                "status": format!("{:?}", status),
-                "state": state,
-                "events": {
-                    "count": events.len(),
-                    "latest": events.last().map(|e| {
-                        json!({
-                            "type": e.event_type,
-                            "timestamp": e.timestamp,
-                            "hash": hex::encode(&e.hash)
-                        })
-                    })
-                },
-                "metrics": metrics
-            });
-
-            println!("{}", serde_json::to_string_pretty(&output)?);
-        } else {
-            // Human-readable output
-            println!("{}", formatting::format_section("ACTOR INFORMATION"));
-            println!(
-                "{}",
-                formatting::format_key_value("ID", &formatting::format_id(&args.actor_id))
-            );
-            println!(
-                "{}",
-                formatting::format_key_value("Status", &status)
-            );
-
-            // Calculate uptime if we have events
-            if let Some(first_event) = events.first() {
-                let now = chrono::Utc::now().timestamp() as u64;
-                let uptime = Duration::from_secs(now.saturating_sub(first_event.timestamp));
-                println!(
-                    "{}",
-                    formatting::format_key_value("Uptime", &formatting::format_duration(uptime))
-                );
-            }
-
-            // State information
-            println!("{}", formatting::format_section("STATE"));
-            match &state {
-                Some(state_json) => {
-                    // Pretty print state if it's not too large
-                    let state_str = serde_json::to_string_pretty(&state_json)?;
-                    if state_str.len() < 1000 || args.detailed {
-                        println!("{}", state_str);
-                    } else {
-                        println!("{} bytes of JSON data", state_str.len());
-                        println!("(Use --detailed to see full state)");
-                    }
-                }
-                None => {
-                    match state_result {
-                        Ok(_) => println!("State is null"),
-                        Err(_) => println!("No state available"),
-                    }
-                }
-            }
-
-            // Events information
-            println!("{}", formatting::format_section("EVENTS"));
-            println!("Total events: {}", events.len());
-
-            if !events.is_empty() {
-                println!("\nLatest events:");
-                // Show the last 5 events (or all if there are fewer than 5)
-                let start_idx = if events.len() > 5 && !args.detailed {
-                    events.len() - 5
-                } else {
-                    0
-                };
-
-                for (i, event) in events.iter().enumerate().skip(start_idx) {
-                    println!("{}. {}", i + 1, formatting::format_event_summary(event));
-                }
-
-                if events.len() > 5 && !args.detailed {
-                    println!("\n(Showing only the last 5 events. Use --detailed to see all.)");
-                }
-            }
-
-            // Metrics information if available
-            if let Some(metrics) = metrics {
-                println!("{}", formatting::format_section("METRICS"));
-                // Try to pretty-print the metrics
-                println!("{}", serde_json::to_string_pretty(&metrics)?);
-            }
-
-            // Additional information if detailed mode is enabled
-            if args.detailed {
-                // Here you would add any additional detailed information
-                // such as handler configurations, runtime details, etc.
+    debug!("Getting actor state");
+    let state_result = client.get_actor_state(&args.actor_id.to_string()).await;
+    let state = match state_result {
+        Ok(ref state_value) => {
+            if state_value.is_null() {
+                None
+            } else {
+                Some(state_value)
             }
         }
+        _ => None,
+    };
 
-        Ok::<(), anyhow::Error>(())
-    })?;
+    debug!("Getting actor events");
+    let events_result = client.get_actor_events(&args.actor_id.to_string()).await;
+    let events = match events_result {
+        Ok(events) => events,
+        Err(_) => vec![],
+    };
 
+    // TODO: Implement metrics when available
+    let metrics: Option<serde_json::Value> = None;
+
+    // Create inspection result and output
+    let inspection = ActorInspection {
+        id: args.actor_id.clone(),
+        status: format!("{:?}", status),
+        state: state.cloned(),
+        events: events.clone(),
+        metrics,
+        detailed: args.detailed,
+    };
+
+    ctx.output.output(&inspection, None)?;
     Ok(())
+}
+
+/// Legacy wrapper for backward compatibility
+pub fn execute(args: &InspectArgs, verbose: bool, json: bool) -> Result<()> {
+    let runtime = tokio::runtime::Runtime::new()?;
+    runtime.block_on(async {
+        let config = crate::config::Config::load().unwrap_or_default();
+        let output = crate::output::OutputManager::new(config.output.clone());
+        let ctx = crate::CommandContext {
+            config,
+            output,
+            verbose,
+            json,
+        };
+        execute_async(args, &ctx).await.map_err(|e| anyhow::Error::from(e))
+    })
 }

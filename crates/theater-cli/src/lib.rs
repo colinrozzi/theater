@@ -72,9 +72,7 @@ pub enum Commands {
     #[command(name = "tree")]
     Tree(commands::tree::TreeArgs),
 
-    /// Validate an actor manifest
-    #[command(name = "validate")]
-    Validate(commands::validate::ValidateArgs),
+
 
     /// Stop a running actor
     #[command(name = "stop")]
@@ -139,23 +137,23 @@ pub async fn run_async(
             // Use our modernized list command as an example
             commands::list_v2::execute_async(args, &ctx).await.map_err(|e| anyhow::Error::from(e))
         },
-        Commands::Logs(args) => commands::logs::execute(args, ctx.verbose, ctx.json).map_err(|e| anyhow::Error::from(e)),
-        Commands::State(args) => commands::state::execute(args, ctx.verbose, ctx.json).map_err(|e| anyhow::Error::from(e)),
-        Commands::Events(args) => commands::events::execute(args, ctx.verbose, ctx.json).map_err(|e| anyhow::Error::from(e)),
-        Commands::Inspect(args) => commands::inspect::execute(args, ctx.verbose, ctx.json).map_err(|e| anyhow::Error::from(e)),
+        Commands::Logs(args) => commands::logs::execute_async(args, &ctx).await.map_err(|e| anyhow::Error::from(e)),
+        Commands::State(args) => commands::state::execute_async(args, &ctx).await.map_err(|e| anyhow::Error::from(e)),
+        Commands::Events(args) => commands::events::execute_async(args, &ctx).await.map_err(|e| anyhow::Error::from(e)),
+        Commands::Inspect(args) => commands::inspect::execute_async(args, &ctx).await.map_err(|e| anyhow::Error::from(e)),
         Commands::Tree(args) => commands::tree::execute(args, ctx.verbose, ctx.json).map_err(|e| anyhow::Error::from(e)),
-        Commands::Validate(args) => commands::validate::execute(args, ctx.verbose, ctx.json).map_err(|e| anyhow::Error::from(e)),
+
         Commands::Start(args) => commands::start::execute(args, ctx.verbose, ctx.json).map_err(|e| anyhow::Error::from(e)),
-        Commands::Stop(args) => commands::stop::execute(args, ctx.verbose, ctx.json).map_err(|e| anyhow::Error::from(e)),
-        Commands::Restart(args) => commands::restart::execute(args, ctx.verbose, ctx.json).map_err(|e| anyhow::Error::from(e)),
-        Commands::Update(args) => commands::update::execute(args, ctx.verbose, ctx.json).map_err(|e| anyhow::Error::from(e)),
-        Commands::Message(args) => commands::message::execute(args, ctx.verbose, ctx.json).map_err(|e| anyhow::Error::from(e)),
+        Commands::Stop(args) => commands::stop::execute_async(args, &ctx).await.map_err(|e| anyhow::Error::from(e)),
+        Commands::Restart(args) => commands::restart::execute_async(args, &ctx).await.map_err(|e| anyhow::Error::from(e)),
+        Commands::Update(args) => commands::update::execute_async(args, &ctx).await.map_err(|e| anyhow::Error::from(e)),
+        Commands::Message(args) => commands::message::execute_async(args, &ctx).await.map_err(|e| anyhow::Error::from(e)),
         Commands::Channel(args) => match &args.command {
             commands::channel::ChannelCommands::Open(open_args) => {
                 commands::channel::open::execute(open_args, ctx.verbose, ctx.json).map_err(|e| anyhow::Error::from(e))
             }
         },
-        Commands::ListStored(args) => commands::list_stored::execute(args, ctx.verbose, ctx.json).map_err(|e| anyhow::Error::from(e)),
+        Commands::ListStored(args) => commands::list_stored::execute_async(args, &ctx).await.map_err(|e| anyhow::Error::from(e)),
     };
     
     // Handle the result

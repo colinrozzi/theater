@@ -1,12 +1,12 @@
-use anyhow::{anyhow, Result};
 use clap::Parser;
-use console::style;
 use std::net::SocketAddr;
 use tracing::debug;
-
-use crate::client::TheaterClient;
 use std::str::FromStr;
+
 use theater::id::TheaterId;
+use crate::error::{CliError, CliResult};
+use crate::output::formatters::ActorState;
+use crate::CommandContext;
 
 #[derive(Debug, Parser)]
 pub struct StateArgs {
@@ -23,53 +23,90 @@ pub struct StateArgs {
     pub format: String,
 }
 
-pub fn execute(args: &StateArgs, _verbose: bool, json: bool) -> Result<()> {
+/// Execute the state command asynchronously with modern patterns
+pub async fn execute_async(args: &StateArgs, ctx: &CommandContext) -> CliResult<()> {
     debug!("Getting state for actor: {}", args.actor_id);
     debug!("Connecting to server at: {}", args.address);
 
     // Parse the actor ID
     let actor_id = TheaterId::from_str(&args.actor_id)
-        .map_err(|_| anyhow!("Invalid actor ID: {}", args.actor_id))?;
+        .map_err(|_| CliError::InvalidInput {
+            field: "actor_id".to_string(),
+            value: args.actor_id.clone(),
+            suggestion: "Provide a valid actor ID in the correct format".to_string(),
+        })?;
 
-    // Create runtime and connect to the server
-    let runtime = tokio::runtime::Runtime::new()?;
+    // Create client and connect
+    let client = ctx.create_client();
+    client.connect().await
+        .map_err(|e| CliError::connection_failed(args.address, e))?;
 
-    runtime.block_on(async {
-        let config = crate::config::Config::load().unwrap_or_default();
-        let client = TheaterClient::new(args.address, config);
+    // Get the actor state
+    let state = client.get_actor_state(&actor_id.to_string()).await
+        .map_err(|e| CliError::ServerError {
+            message: format!("Failed to get actor state: {}", e),
+        })?;
 
-        // Connect to the server
-        client.connect().await?;
-
-        // Get the actor state
-        let state = client.get_actor_state(&actor_id.to_string()).await?;
-
-        // Output the result based on format
-        if json {
-            let output = serde_json::json!({
-                "actor_id": actor_id.to_string(),
-                "state": state
-            });
-            println!("{}", serde_json::to_string_pretty(&output)?);
-        } else {
-            match args.format.as_str() {
-                "json" => {
-                    println!("{}", serde_json::to_string_pretty(&state)?);
-                }
-                "pretty" => {
-                    println!("{} Actor State:", style("ℹ").blue().bold());
-                    println!("Actor: {}", actor_id);
-                    println!("State:");
-                    println!("{}", serde_json::to_string_pretty(&state)?);
-                }
-                _ => {
-                    println!("{}", state);
-                }
-            }
-        }
-
-        Ok::<(), anyhow::Error>(())
-    })?;
+    // Create formatted output
+    let actor_state = ActorState {
+        actor_id: actor_id.to_string(),
+        state,
+    };
+    
+    // Output using the configured format
+    let format = if ctx.json { Some("json") } else { Some(args.format.as_str()) };
+    ctx.output.output(&actor_state, format)?;
 
     Ok(())
+}
+
+// Keep the legacy function for backward compatibility
+pub fn execute(args: &StateArgs, verbose: bool, json: bool) -> anyhow::Result<()> {
+    let runtime = tokio::runtime::Runtime::new()?;
+    runtime.block_on(async {
+        let config = crate::config::Config::load().unwrap_or_default();
+        let output = crate::output::OutputManager::new(config.output.clone());
+        
+        let ctx = CommandContext {
+            config,
+            output,
+            verbose,
+            json,
+        };
+        
+        execute_async(args, &ctx).await.map_err(Into::into)
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::Config;
+    use crate::output::OutputManager;
+
+    #[tokio::test]
+    async fn test_state_command_invalid_actor_id() {
+        let args = StateArgs {
+            actor_id: "invalid-id".to_string(),
+            address: "127.0.0.1:9000".parse().unwrap(),
+            format: "pretty".to_string(),
+        };
+        let config = Config::default();
+        let output = OutputManager::new(config.output.clone());
+        
+        let ctx = CommandContext {
+            config,
+            output,
+            verbose: false,
+            json: false,
+        };
+        
+        let result = execute_async(&args, &ctx).await;
+        assert!(result.is_err());
+        if let Err(CliError::InvalidInput { field, .. }) = result {
+            assert_eq!(field, "actor_id");
+        } else {
+            panic!("Expected InvalidInput error");
+        }
+    }
 }
