@@ -57,6 +57,10 @@ pub enum Commands {
     #[command(name = "events")]
     Events(commands::events::EventsArgs),
 
+    /// Interactively explore actor events with TUI
+    #[command(name = "events-explore")]
+    EventsExplore(commands::events_explore::ExploreArgs),
+
     /// Inspect a running actor (detailed view)
     #[command(name = "inspect")]
     Inspect(commands::inspect::InspectArgs),
@@ -121,6 +125,9 @@ pub async fn run(
             .await
             .map_err(|e| anyhow::Error::from(e)),
         Commands::Events(args) => commands::events::execute_async(args, &ctx)
+            .await
+            .map_err(|e| anyhow::Error::from(e)),
+        Commands::EventsExplore(args) => commands::events_explore::execute_async(args, &ctx)
             .await
             .map_err(|e| anyhow::Error::from(e)),
         Commands::Inspect(args) => commands::inspect::execute_async(args, &ctx)

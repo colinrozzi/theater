@@ -1,6 +1,7 @@
 pub mod app;
 pub mod components;
 pub mod events;
+pub mod event_explorer;
 pub mod ui;
 
 use crossterm::{

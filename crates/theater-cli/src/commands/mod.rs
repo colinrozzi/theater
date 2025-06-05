@@ -4,6 +4,7 @@ pub mod completion;
 pub mod dynamic_completion;
 pub mod create;
 pub mod events;
+pub mod events_explore;
 pub mod inspect;
 pub mod list;
 pub mod list_stored;
