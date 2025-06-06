@@ -37,7 +37,7 @@ pub mod chain;
 pub mod config;
 pub mod errors;
 pub mod events;
-pub mod fragmenting_codec;
+
 pub mod host;
 pub mod id;
 pub mod logging;
@@ -50,7 +50,7 @@ pub mod utils;
 mod wasm;
 
 pub use actor::ActorError;
-pub use fragmenting_codec::FragmentingCodec;
+
 pub use actor::ActorHandle;
 pub use actor::ActorOperation;
 pub use actor::ActorRuntime;

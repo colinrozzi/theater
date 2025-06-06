@@ -12,8 +12,7 @@ use tokio::net::TcpStream;
 use tokio_util::codec::Framed;
 use tracing::{debug, error, info};
 
-use theater::FragmentingCodec;
-use theater_server::{ManagementCommand, ManagementResponse};
+use theater_server::{FragmentingCodec, ManagementCommand, ManagementResponse};
 
 /// A client connection to a Theater server
 ///

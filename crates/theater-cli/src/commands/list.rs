@@ -2,7 +2,8 @@ use clap::Parser;
 use std::net::SocketAddr;
 use tracing::debug;
 
-use crate::error::{CliError, CliResult};
+use crate::client::cli_wrapper;
+use crate::error::CliResult;
 use crate::output::formatters::ActorList;
 use crate::CommandContext;
 
@@ -13,13 +14,13 @@ pub struct ListArgs {
     pub address: SocketAddr,
 }
 
-/// Execute the list command asynchronously with modern patterns
+/// Execute the list command asynchronously using theater-client
 pub async fn execute_async(args: &ListArgs, ctx: &CommandContext) -> CliResult<()> {
-    debug!("Listing actors with modern implementation");
+    debug!("Listing actors using theater-client");
     debug!("Connecting to server at: {}", args.address);
 
-    // Create a simplified client that works with the current protocol
-    let actors = list_actors_simple(args.address).await?;
+    // Use the CLI wrapper - all the timeout/retry logic is handled internally
+    let actors = cli_wrapper::list_actors(args.address, &ctx.config).await?;
 
     // Create formatted output
     let actor_list = ActorList {
@@ -34,59 +35,6 @@ pub async fn execute_async(args: &ListArgs, ctx: &CommandContext) -> CliResult<(
     ctx.output.output(&actor_list, format)?;
 
     Ok(())
-}
-
-/// Simplified actor listing that works with current protocol
-async fn list_actors_simple(
-    address: SocketAddr,
-) -> CliResult<Vec<(theater::id::TheaterId, String)>> {
-    use bytes::Bytes;
-    use futures::{SinkExt, StreamExt};
-    use tokio::net::TcpStream;
-    use tokio_util::codec::{Framed, LengthDelimitedCodec};
-
-    // Connect directly to the server
-    let socket = TcpStream::connect(address)
-        .await
-        .map_err(|e| CliError::connection_failed(address, e))?;
-
-    let mut codec = LengthDelimitedCodec::new();
-    codec.set_max_frame_length(32 * 1024 * 1024);
-    let mut framed = Framed::new(socket, codec);
-
-    // Send ListActors command
-    let command = theater_server::ManagementCommand::ListActors;
-    let command_bytes = serde_json::to_vec(&command).map_err(CliError::Serialization)?;
-
-    framed
-        .send(Bytes::from(command_bytes))
-        .await
-        .map_err(|_| CliError::ConnectionLost)?;
-
-    // Receive response
-    if let Some(response_bytes) = framed.next().await {
-        let response_bytes = response_bytes.map_err(|_| CliError::ConnectionLost)?;
-
-        let response: theater_server::ManagementResponse = serde_json::from_slice(&response_bytes)
-            .map_err(|e| CliError::ProtocolError {
-                reason: format!("Failed to deserialize response: {}", e),
-            })?;
-
-        match response {
-            theater_server::ManagementResponse::ActorList { actors } => {
-                debug!("Listed {} actors", actors.len());
-                Ok(actors)
-            }
-            theater_server::ManagementResponse::Error { error } => Err(CliError::ServerError {
-                message: format!("{:?}", error),
-            }),
-            _ => Err(CliError::UnexpectedResponse {
-                response: format!("{:?}", response),
-            }),
-        }
-    } else {
-        Err(CliError::ConnectionLost)
-    }
 }
 
 // Keep the legacy function for backward compatibility

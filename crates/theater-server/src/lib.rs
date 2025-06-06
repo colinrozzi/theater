@@ -5,4 +5,5 @@
 mod fragmenting_codec;
 mod server;
 
+pub use fragmenting_codec::FragmentingCodec;
 pub use server::{ManagementCommand, ManagementError, ManagementResponse, TheaterServer};

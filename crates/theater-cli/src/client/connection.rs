@@ -8,7 +8,7 @@ use tokio::time::timeout;
 use tokio_util::codec::Framed;
 use tracing::{debug, error, info, warn};
 
-use theater::FragmentingCodec;
+use theater_server::FragmentingCodec;
 
 use crate::config::Config;
 use crate::error::{CliError, CliResult};
