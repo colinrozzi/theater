@@ -97,7 +97,7 @@ pub async fn execute_async(args: &StartArgs, ctx: &CommandContext) -> Result<(),
 
     // Check if we should use TUI mode
     let use_tui = args.subscribe && args.parent && !ctx.json && !args.id_only;
-    
+
     if use_tui {
         // Use TUI mode
         return run_with_tui(args, client).await;
@@ -117,7 +117,7 @@ pub async fn execute_async(args: &StartArgs, ctx: &CommandContext) -> Result<(),
             data = client.next_response() => {
                 debug!("Received response from client");
                 debug!("Response data: {:?}", data);
-                if let Ok(Some(data)) = data {
+                if let Ok(data) = data {
                     match data {
                         ManagementResponse::ActorStarted { id } => {
                             debug!("Management response received: Actor started with ID: {}", id);
@@ -200,33 +200,35 @@ async fn run_with_tui(
     client: crate::client::TheaterClient,
 ) -> Result<(), CliError> {
     debug!("Starting TUI mode for actor monitoring");
-    
+
     // Create channel for communication with TUI
     let (response_tx, response_rx) = mpsc::unbounded_channel();
-    
+
     // We'll need to get the actor ID from the first ActorStarted response
     let mut _actor_id: Option<String> = None;
     let mut tui_started = false;
     let mut tui_completed = false;
-    
+
     // Add a timeout for actor startup
     let timeout_duration = tokio::time::Duration::from_secs(30);
-    
+
     // Start TUI task early and wait for first actor started event
     let mut tui_handle = {
         let manifest_path = args.manifest.clone();
         tokio::spawn(async move {
             // Use a placeholder actor ID initially
-            if let Err(e) = tui::run_tui("Starting...".to_string(), manifest_path, response_rx).await {
+            if let Err(e) =
+                tui::run_tui("Starting...".to_string(), manifest_path, response_rx).await
+            {
                 eprintln!("TUI error: {}", e);
             }
         })
     };
-    
+
     loop {
         tokio::select! {
             data = client.next_response() => {
-                if let Ok(Some(response)) = data {
+                if let Ok(response) = data {
                     match &response {
                         ManagementResponse::ActorStarted { id } => {
                             _actor_id = Some(id.to_string());
@@ -240,7 +242,7 @@ async fn run_with_tui(
                         }
                         _ => {}
                     }
-                    
+
                     // Send all responses to TUI
                     if let Err(_) = response_tx.send(response) {
                         // TUI channel closed, probably user quit
@@ -268,11 +270,11 @@ async fn run_with_tui(
             }
         }
     }
-    
+
     // Clean up - wait for TUI to finish if it hasn't already
     if !tui_completed {
         let _ = tokio::time::timeout(tokio::time::Duration::from_millis(500), tui_handle).await;
     }
-    
+
     Ok(())
 }

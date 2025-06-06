@@ -18,9 +18,10 @@ use theater_server::{FragmentingCodec, ManagementCommand, ManagementResponse};
 ///
 /// This provides a thin wrapper around the TCP connection with simple
 /// send and receive methods that can be used with tokio::select!
+#[derive(Debug)]
 pub struct TheaterConnection {
     /// Server address
-    address: SocketAddr,
+    pub address: SocketAddr,
     /// The TCP connection
     connection: Option<Framed<TcpStream, FragmentingCodec>>,
 }
@@ -136,6 +137,17 @@ impl TheaterConnection {
                 Err(anyhow!("Connection closed by server"))
             }
         }
+    }
+
+    pub async fn send_and_receive(
+        &mut self,
+        command: ManagementCommand,
+    ) -> Result<ManagementResponse> {
+        // Send the command
+        self.send(command).await?;
+
+        // Receive the response
+        self.receive().await
     }
 
     /// Check if the connection is active

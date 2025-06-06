@@ -7,34 +7,29 @@ use uuid::Uuid;
 use theater::{messages::ChannelParticipant, ChainEvent};
 use theater_server::{ManagementCommand, ManagementResponse};
 
-use crate::client::connection::Connection;
 use crate::config::Config;
 use crate::error::{CliError, CliResult};
+use theater_client::TheaterConnection;
 
 /// High-level client for Theater server operations
 #[derive(Debug, Clone)]
 pub struct TheaterClient {
-    connection: Arc<Mutex<Connection>>,
+    connection: Arc<Mutex<TheaterConnection>>,
 }
 
 impl TheaterClient {
     /// Create a new TheaterClient
-    pub fn new(address: SocketAddr, config: Config) -> Self {
-        let connection = Connection::new(address, config);
+    pub fn new(address: SocketAddr) -> Self {
+        let connection = TheaterConnection::new(address);
         Self {
             connection: Arc::new(Mutex::new(connection)),
         }
     }
 
-    /// Create a new TheaterClient with default configuration
-    pub fn with_default_config(address: SocketAddr) -> Self {
-        Self::new(address, Config::default())
-    }
-
     /// Get the server address
     pub async fn address(&self) -> SocketAddr {
         let conn = self.connection.lock().await;
-        conn.address()
+        conn.address
     }
 
     /// Check if connected to the server
@@ -46,7 +41,12 @@ impl TheaterClient {
     /// Explicitly connect to the server (usually not needed as commands auto-connect)
     pub async fn connect(&self) -> CliResult<()> {
         let mut conn = self.connection.lock().await;
-        conn.ensure_connected().await
+        conn.connect()
+            .await
+            .map_err(|e| CliError::ConnectionFailed {
+                address: conn.address,
+                source: e,
+            })
     }
 
     /// Close the connection
@@ -58,7 +58,7 @@ impl TheaterClient {
     /// List all running actors
     pub async fn list_actors(&self) -> CliResult<Vec<(String, String)>> {
         let mut conn = self.connection.lock().await;
-        let response = conn.send_command(ManagementCommand::ListActors).await?;
+        let response = conn.send_and_receive(ManagementCommand::ListActors).await?;
 
         match response {
             ManagementResponse::ActorList { actors } => {
@@ -88,13 +88,17 @@ impl TheaterClient {
         subscribe: bool,
     ) -> CliResult<()> {
         let mut conn = self.connection.lock().await;
-        conn.send_command_no_response(ManagementCommand::StartActor {
+        conn.send(ManagementCommand::StartActor {
             manifest: manifest_content,
             initial_state,
             parent,
             subscribe,
         })
         .await
+        .map_err(|e| CliError::ConnectionFailed {
+            address: conn.address,
+            source: e,
+        })
     }
 
     /// Stop a running actor
@@ -104,7 +108,7 @@ impl TheaterClient {
             .parse()
             .map_err(|_| CliError::invalid_actor_id(actor_id))?;
         let response = conn
-            .send_command(ManagementCommand::StopActor { id: theater_id })
+            .send_and_receive(ManagementCommand::StopActor { id: theater_id })
             .await?;
 
         match response {
@@ -133,7 +137,7 @@ impl TheaterClient {
             .parse()
             .map_err(|_| CliError::invalid_actor_id(actor_id))?;
         let response = conn
-            .send_command(ManagementCommand::GetActorState { id: theater_id })
+            .send_and_receive(ManagementCommand::GetActorState { id: theater_id })
             .await?;
 
         match response {
@@ -169,7 +173,7 @@ impl TheaterClient {
             .parse()
             .map_err(|_| CliError::invalid_actor_id(actor_id))?;
         let response = conn
-            .send_command(ManagementCommand::GetActorEvents { id: theater_id })
+            .send_and_receive(ManagementCommand::GetActorEvents { id: theater_id })
             .await?;
 
         match response {
@@ -198,7 +202,7 @@ impl TheaterClient {
             .parse()
             .map_err(|_| CliError::invalid_actor_id(actor_id))?;
         let response = conn
-            .send_command(ManagementCommand::SendActorMessage {
+            .send_and_receive(ManagementCommand::SendActorMessage {
                 id: theater_id,
                 data: message,
             })
@@ -227,7 +231,7 @@ impl TheaterClient {
             .parse()
             .map_err(|_| CliError::invalid_actor_id(actor_id))?;
         let response = conn
-            .send_command(ManagementCommand::RequestActorMessage {
+            .send_and_receive(ManagementCommand::RequestActorMessage {
                 id: theater_id,
                 data: message,
             })
@@ -256,7 +260,7 @@ impl TheaterClient {
             .parse()
             .map_err(|_| CliError::invalid_actor_id(actor_id))?;
         let response = conn
-            .send_command(ManagementCommand::SubscribeToActor { id: theater_id })
+            .send_and_receive(ManagementCommand::SubscribeToActor { id: theater_id })
             .await?;
 
         match response {
@@ -283,9 +287,14 @@ impl TheaterClient {
     }
 
     /// Get the next response from the connection (for streaming operations)
-    pub async fn next_response(&self) -> CliResult<Option<ManagementResponse>> {
+    pub async fn next_response(&self) -> CliResult<ManagementResponse> {
         let mut conn = self.connection.lock().await;
-        conn.next_response().await
+        conn.receive()
+            .await
+            .map_err(|e| CliError::ConnectionFailed {
+                address: conn.address.clone(),
+                source: e,
+            })
     }
 
     /// Get actor status
@@ -295,7 +304,7 @@ impl TheaterClient {
             .parse()
             .map_err(|_| CliError::invalid_actor_id(actor_id))?;
         let response = conn
-            .send_command(ManagementCommand::GetActorStatus { id: theater_id })
+            .send_and_receive(ManagementCommand::GetActorStatus { id: theater_id })
             .await?;
 
         match response {
@@ -321,7 +330,7 @@ impl TheaterClient {
             .parse()
             .map_err(|_| CliError::invalid_actor_id(actor_id))?;
         let response = conn
-            .send_command(ManagementCommand::RestartActor { id: theater_id })
+            .send_and_receive(ManagementCommand::RestartActor { id: theater_id })
             .await?;
 
         match response {
@@ -347,7 +356,7 @@ impl TheaterClient {
             .parse()
             .map_err(|_| CliError::invalid_actor_id(actor_id))?;
         let response = conn
-            .send_command(ManagementCommand::UpdateActorComponent {
+            .send_and_receive(ManagementCommand::UpdateActorComponent {
                 id: theater_id,
                 component,
             })
@@ -380,7 +389,7 @@ impl TheaterClient {
             .parse()
             .map_err(|_| CliError::invalid_actor_id(actor_id))?;
         let response = conn
-            .send_command(ManagementCommand::UnsubscribeFromActor {
+            .send_and_receive(ManagementCommand::UnsubscribeFromActor {
                 id: theater_id,
                 subscription_id,
             })
@@ -408,7 +417,7 @@ impl TheaterClient {
             .parse()
             .map_err(|_| CliError::invalid_actor_id(actor_id))?;
         let response = conn
-            .send_command(ManagementCommand::OpenChannel {
+            .send_and_receive(ManagementCommand::OpenChannel {
                 actor_id: ChannelParticipant::Actor(theater_id),
                 initial_message,
             })
@@ -429,7 +438,7 @@ impl TheaterClient {
     pub async fn send_on_channel(&self, channel_id: &str, message: Vec<u8>) -> CliResult<()> {
         let mut conn = self.connection.lock().await;
         let response = conn
-            .send_command(ManagementCommand::SendOnChannel {
+            .send_and_receive(ManagementCommand::SendOnChannel {
                 channel_id: channel_id.to_string(),
                 message,
             })
@@ -450,7 +459,7 @@ impl TheaterClient {
     pub async fn close_channel(&self, channel_id: &str) -> CliResult<()> {
         let mut conn = self.connection.lock().await;
         let response = conn
-            .send_command(ManagementCommand::CloseChannel {
+            .send_and_receive(ManagementCommand::CloseChannel {
                 channel_id: channel_id.to_string(),
             })
             .await?;
@@ -468,21 +477,21 @@ impl TheaterClient {
 
     /// Receive channel message (for channel communication)
     pub async fn receive_channel_message(&self) -> CliResult<Option<(String, Vec<u8>)>> {
-        match self.next_response().await? {
-            Some(ManagementResponse::ChannelMessage {
+        let mut conn = self.connection.lock().await;
+        match conn.receive().await? {
+            ManagementResponse::ChannelMessage {
                 channel_id,
                 message,
                 ..
-            }) => Ok(Some((channel_id, message))),
-            Some(ManagementResponse::ChannelClosed { .. }) => Ok(None),
-            Some(ManagementResponse::Error { error }) => Err(CliError::ServerError {
+            } => Ok(Some((channel_id, message))),
+            ManagementResponse::ChannelClosed { .. } => Ok(None),
+            ManagementResponse::Error { error } => Err(CliError::ServerError {
                 message: format!("{:?}", error),
             }),
-            Some(_) => {
+            _ => {
                 // Ignore other message types and try again
                 Box::pin(self.receive_channel_message()).await
             }
-            None => Ok(None),
         }
     }
 }
@@ -497,17 +506,17 @@ pub struct EventStream {
 impl EventStream {
     /// Get the next event from the stream
     pub async fn next_event(&self) -> CliResult<Option<ChainEvent>> {
-        match self.client.next_response().await? {
-            Some(ManagementResponse::ActorEvent { event }) => Ok(Some(event)),
-            Some(ManagementResponse::ActorStopped { .. }) => Ok(None),
-            Some(ManagementResponse::Error { error }) => Err(CliError::EventStreamError {
+        let mut conn = self.client.connection.lock().await;
+        match conn.receive().await? {
+            ManagementResponse::ActorEvent { event } => Ok(Some(event)),
+            ManagementResponse::ActorStopped { .. } => Ok(None),
+            ManagementResponse::Error { error } => Err(CliError::EventStreamError {
                 reason: format!("{:?}", error),
             }),
-            Some(_) => {
+            _ => {
                 // Ignore other response types in event stream
                 Box::pin(self.next_event()).await
             }
-            None => Ok(None),
         }
     }
 
@@ -536,7 +545,7 @@ mod tests {
     #[tokio::test]
     async fn test_client_creation() {
         let addr = "127.0.0.1:9000".parse().unwrap();
-        let client = TheaterClient::with_default_config(addr);
+        let client = TheaterClient::new(addr);
 
         assert_eq!(client.address().await, addr);
         assert!(!client.is_connected().await);
@@ -545,7 +554,7 @@ mod tests {
     #[tokio::test]
     async fn test_client_clone() {
         let addr = "127.0.0.1:9000".parse().unwrap();
-        let client = TheaterClient::with_default_config(addr);
+        let client = TheaterClient::new(addr);
         let client2 = client.clone();
 
         assert_eq!(client.address().await, client2.address().await);

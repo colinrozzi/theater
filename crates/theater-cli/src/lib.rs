@@ -155,9 +155,11 @@ pub async fn run(
         Commands::Completion(args) => commands::completion::execute_async(args, &ctx)
             .await
             .map_err(|e| anyhow::Error::from(e)),
-        Commands::DynamicCompletion(args) => commands::dynamic_completion::execute_async(args, &ctx)
-            .await
-            .map_err(|e| anyhow::Error::from(e)),
+        Commands::DynamicCompletion(args) => {
+            commands::dynamic_completion::execute_async(args, &ctx)
+                .await
+                .map_err(|e| anyhow::Error::from(e))
+        }
     };
 
     // Handle the result
@@ -192,7 +194,7 @@ pub struct CommandContext {
 impl CommandContext {
     /// Create a theater client using the configured server address
     pub fn create_client(&self) -> client::TheaterClient {
-        client::TheaterClient::new(self.config.server.default_address, self.config.clone())
+        client::TheaterClient::new(self.config.server.default_address)
     }
 
     /// Get the server address from config or override

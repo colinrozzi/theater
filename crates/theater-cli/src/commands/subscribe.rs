@@ -207,7 +207,7 @@ pub async fn execute_async(args: &SubscribeArgs, ctx: &CommandContext) -> Result
 
         // Process the event
         match response {
-            Some(ManagementResponse::ActorEvent { event }) => {
+            ManagementResponse::ActorEvent { event } => {
                 // Skip if doesn't match filter
                 if let Some(filter) = &args.event_type {
                     if !event.event_type.contains(filter) {
@@ -243,7 +243,7 @@ pub async fn execute_async(args: &SubscribeArgs, ctx: &CommandContext) -> Result
                     break;
                 }
             }
-            Some(ManagementResponse::ActorError { error }) => {
+            ManagementResponse::ActorError { error } => {
                 if ctx.json {
                     let output = serde_json::json!({
                         "actor_id": actor_id.to_string(),
@@ -259,7 +259,7 @@ pub async fn execute_async(args: &SubscribeArgs, ctx: &CommandContext) -> Result
                     println!("{} Actor error: {}", style("ERROR").bold().red(), error);
                 }
             }
-            Some(ManagementResponse::Error { error }) => {
+            ManagementResponse::Error { error } => {
                 return Err(CliError::actor_not_found(format!(
                     "Server error: {:?}",
                     error
