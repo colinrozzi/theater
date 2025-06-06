@@ -89,6 +89,18 @@ async fn run_explorer_loop(
             ExplorerAction::PageDown => {
                 app.page_down();
             }
+            ExplorerAction::ScrollDetailUp => {
+                app.scroll_detail_up();
+            }
+            ExplorerAction::ScrollDetailDown => {
+                app.scroll_detail_down();
+            }
+            ExplorerAction::ScrollDetailPageUp => {
+                app.scroll_detail_page_up(10);
+            }
+            ExplorerAction::ScrollDetailPageDown => {
+                app.scroll_detail_page_down(10);
+            }
             ExplorerAction::ToggleDetailMode => {
                 app.cycle_detail_mode();
             }

@@ -107,8 +107,16 @@ fn render_status_bar(f: &mut Frame, app: &EventExplorerApp, area: Rect) {
         ));
     }
 
+    // Show scroll position if scrolled
+    if app.detail_scroll_offset > 0 {
+        status_parts.push(Span::styled(
+            format!("| Scroll: {} ", app.detail_scroll_offset),
+            Style::default().fg(Color::Magenta),
+        ));
+    }
+
     // Add spacer to push controls to the right
-    let controls = " [q]uit [h]elp [Tab] cycle views ";
+    let controls = " [q]uit [h]elp [Tab] cycle [←→] scroll ";
     let spacer_width = area
         .width
         .saturating_sub(controls.len() as u16)

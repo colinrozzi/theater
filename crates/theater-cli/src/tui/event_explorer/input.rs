@@ -8,6 +8,10 @@ pub enum ExplorerAction {
     NavigateDown,
     PageUp,
     PageDown,
+    ScrollDetailUp,
+    ScrollDetailDown,
+    ScrollDetailPageUp,
+    ScrollDetailPageDown,
     ToggleDetailMode,
     ShowHelp,
     TogglePause,
@@ -35,6 +39,14 @@ pub fn handle_input() -> CliResult<ExplorerAction> {
                 KeyCode::Down | KeyCode::Char('j') => ExplorerAction::NavigateDown,
                 KeyCode::PageUp => ExplorerAction::PageUp,
                 KeyCode::PageDown => ExplorerAction::PageDown,
+                KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    ExplorerAction::ScrollDetailPageUp
+                }
+                KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    ExplorerAction::ScrollDetailPageDown
+                }
+                KeyCode::Left => ExplorerAction::ScrollDetailUp,
+                KeyCode::Right => ExplorerAction::ScrollDetailDown,
                 KeyCode::Tab => ExplorerAction::ToggleDetailMode,
                 KeyCode::Char('h') | KeyCode::F(1) => ExplorerAction::ShowHelp,
                 KeyCode::Char('p') => ExplorerAction::TogglePause,
@@ -63,9 +75,17 @@ Navigation:
   ↓/j          Move down in event list  
   Page Up/Down Page through events
   
+Detail Panel Scrolling:
+  ←/→          Scroll detail content up/down
+  Ctrl+U/D     Page up/down in detail content
+  
 Detail Views:
   Tab          Cycle through detail modes:
-               Overview → JSON → Raw → Chain
+               Overview → Data → Raw → Chain
+               • Overview: Metadata + data preview
+               • Data: Full stringified/JSON content  
+               • Raw: Hex dump with ASCII
+               • Chain: Parent/child relationships
   
 Filtering & Search:
   f            Open filter dialog (future)

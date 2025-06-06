@@ -18,6 +18,9 @@ pub struct EventExplorerApp {
     // Display modes
     pub detail_mode: DetailMode,
     pub show_help: bool,
+    
+    // Detail panel scrolling
+    pub detail_scroll_offset: usize,
 
     // Filtering
     pub active_filters: EventFilters,
@@ -97,6 +100,7 @@ impl EventExplorerApp {
             should_quit: false,
             detail_mode: DetailMode::Overview,
             show_help: false,
+            detail_scroll_offset: 0,
             active_filters: EventFilters::default(),
             search_query: String::new(),
             filter_input_mode: false,
@@ -182,6 +186,8 @@ impl EventExplorerApp {
 
         self.selected_event_index = Some(next_idx);
         self.list_state.select(Some(next_idx));
+        // Reset detail scroll when selecting different event
+        self.detail_scroll_offset = 0;
     }
 
     pub fn select_previous(&mut self) {
@@ -196,6 +202,8 @@ impl EventExplorerApp {
 
         self.selected_event_index = Some(prev_idx);
         self.list_state.select(Some(prev_idx));
+        // Reset detail scroll when selecting different event
+        self.detail_scroll_offset = 0;
     }
 
     pub fn page_up(&mut self) {
@@ -237,6 +245,30 @@ impl EventExplorerApp {
             DetailMode::RawData => DetailMode::ChainView,
             DetailMode::ChainView => DetailMode::Overview,
         };
+        // Reset scroll when changing modes
+        self.detail_scroll_offset = 0;
+    }
+    
+    pub fn scroll_detail_up(&mut self) {
+        self.detail_scroll_offset = self.detail_scroll_offset.saturating_sub(1);
+    }
+    
+    pub fn scroll_detail_down(&mut self) {
+        self.detail_scroll_offset += 1;
+        // Note: We'll clamp this in the UI based on available content
+    }
+    
+    pub fn scroll_detail_page_up(&mut self, page_size: usize) {
+        self.detail_scroll_offset = self.detail_scroll_offset.saturating_sub(page_size);
+    }
+    
+    pub fn scroll_detail_page_down(&mut self, page_size: usize) {
+        self.detail_scroll_offset += page_size;
+        // Note: We'll clamp this in the UI based on available content
+    }
+    
+    pub fn reset_detail_scroll(&mut self) {
+        self.detail_scroll_offset = 0;
     }
 
     pub fn toggle_help(&mut self) {
@@ -315,7 +347,7 @@ impl DetailMode {
     pub fn display_name(&self) -> &'static str {
         match self {
             DetailMode::Overview => "Overview",
-            DetailMode::JsonData => "JSON",
+            DetailMode::JsonData => "Data",
             DetailMode::RawData => "Raw",
             DetailMode::ChainView => "Chain",
         }
@@ -323,7 +355,7 @@ impl DetailMode {
 
     pub fn next_mode_name(&self) -> &'static str {
         match self {
-            DetailMode::Overview => "JSON",
+            DetailMode::Overview => "Data",
             DetailMode::JsonData => "Raw",
             DetailMode::RawData => "Chain",
             DetailMode::ChainView => "Overview",
