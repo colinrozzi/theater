@@ -11,7 +11,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{mpsc, Mutex};
-use tokio_util::codec::{Framed, LengthDelimitedCodec};
+use tokio_util::codec::Framed;
 use tracing::{debug, error, info};
 use uuid::Uuid;
 
@@ -19,6 +19,7 @@ use theater::id::TheaterId;
 use theater::messages::{ChannelId, TheaterCommand};
 use theater::theater_runtime::TheaterRuntime;
 use theater::TheaterRuntimeError;
+use theater::FragmentingCodec;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ManagementCommand {
@@ -396,8 +397,7 @@ impl TheaterServer {
         // Create a channel for sending responses to this client
         let (client_tx, mut client_rx) = mpsc::channel::<ManagementResponse>(32);
 
-        let mut codec = LengthDelimitedCodec::new();
-        codec.set_max_frame_length(32 * 1024 * 1024); // Increase to 32MB
+        let codec = FragmentingCodec::new();
         let framed = Framed::new(socket, codec);
 
         // Split the framed connection into read and write parts

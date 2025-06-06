@@ -31,6 +31,7 @@ rand = "0.8.5"
 rand_chacha = "0.3"
 tokio-util = { version = "0.7.13", features = ["codec"] }
 bytes = "1.0"
+base64 = "0.21"
 sha1 = "0.10"
 hex = "0.4.3"
 md5 = "0.7.0"

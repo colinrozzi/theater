@@ -9,9 +9,10 @@ use futures::sink::SinkExt;
 use futures::stream::StreamExt;
 use std::net::SocketAddr;
 use tokio::net::TcpStream;
-use tokio_util::codec::{Framed, LengthDelimitedCodec};
+use tokio_util::codec::Framed;
 use tracing::{debug, error, info};
 
+use theater::FragmentingCodec;
 use theater_server::{ManagementCommand, ManagementResponse};
 
 /// A client connection to a Theater server
@@ -22,7 +23,7 @@ pub struct TheaterConnection {
     /// Server address
     address: SocketAddr,
     /// The TCP connection
-    connection: Option<Framed<TcpStream, LengthDelimitedCodec>>,
+    connection: Option<Framed<TcpStream, FragmentingCodec>>,
 }
 
 impl TheaterConnection {
@@ -56,8 +57,7 @@ impl TheaterConnection {
         info!("Connecting to Theater server at {}", self.address);
         let socket = TcpStream::connect(self.address).await?;
 
-        let mut codec = LengthDelimitedCodec::new();
-        codec.set_max_frame_length(32 * 1024 * 1024); // 32MB max frame size
+        let codec = FragmentingCodec::new();
         let framed = Framed::new(socket, codec);
 
         self.connection = Some(framed);
@@ -178,7 +178,7 @@ mod tests {
         tokio::select! {
             _ = async {
                 while let Ok((socket, _)) = listener.accept().await {
-                    let mut framed = Framed::new(socket, LengthDelimitedCodec::new());
+                    let mut framed = Framed::new(socket, FragmentingCodec::new());
 
                     // Echo back whatever we receive
                     while let Some(Ok(bytes)) = framed.next().await {
