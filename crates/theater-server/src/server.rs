@@ -1,7 +1,3 @@
-use theater::messages::{
-    ActorMessage, ActorRequest, ActorResult, ActorSend, ActorStatus, ChannelEvent, ChannelParticipant,
-};
-use theater::{ActorError, ChainEvent, ManifestConfig};
 use anyhow::Result;
 use bytes::Bytes;
 use futures::sink::SinkExt;
@@ -9,6 +5,11 @@ use futures::stream::StreamExt;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
+use theater::messages::{
+    ActorMessage, ActorRequest, ActorResult, ActorSend, ActorStatus, ChannelEvent,
+    ChannelParticipant,
+};
+use theater::{ActorError, ChainEvent, ManifestConfig};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{mpsc, Mutex};
 use tokio_util::codec::Framed;
@@ -19,7 +20,8 @@ use theater::id::TheaterId;
 use theater::messages::{ChannelId, TheaterCommand};
 use theater::theater_runtime::TheaterRuntime;
 use theater::TheaterRuntimeError;
-use theater::FragmentingCodec;
+
+use crate::fragmenting_codec::FragmentingCodec;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ManagementCommand {

@@ -28,3 +28,5 @@ warp = { version = "0.3", features = ["tls"] }
 futures = "0.3"
 tokio-util = { version = "0.7.13", features = ["codec"] }
 bytes = "1.0"
+
+base64 = "0.21"

@@ -1,14 +1,14 @@
 use std::net::SocketAddr;
-use std::time::Duration;
-
-use anyhow::{Context, Result};
+use anyhow::Result;
 use bytes::Bytes;
 use futures::sink::SinkExt;
 use futures::stream::StreamExt;
 use tokio::net::TcpStream;
 use tokio::time::timeout;
-use tokio_util::codec::{Framed, LengthDelimitedCodec};
+use tokio_util::codec::Framed;
 use tracing::{debug, error, info, warn};
+
+use theater::FragmentingCodec;
 
 use crate::config::Config;
 use crate::error::{CliError, CliResult};
@@ -20,7 +20,7 @@ pub use theater_server::{ManagementCommand, ManagementResponse};
 pub struct Connection {
     address: SocketAddr,
     config: Config,
-    framed: Option<Framed<TcpStream, LengthDelimitedCodec>>,
+    framed: Option<Framed<TcpStream, FragmentingCodec>>,
     last_error: Option<String>,
 }
 
@@ -63,14 +63,12 @@ impl Connection {
             })?
             .map_err(|e| CliError::connection_failed(self.address, e))?;
 
-        // Configure the codec with a reasonable max frame size
-        let mut codec = LengthDelimitedCodec::new();
-        codec.set_max_frame_length(32 * 1024 * 1024); // 32MB max frame
-
+        // Use the FragmentingCodec for transparent message chunking
+        let codec = FragmentingCodec::new();
         self.framed = Some(Framed::new(socket, codec));
         self.last_error = None;
 
-        info!("Successfully connected to Theater server");
+        info!("Successfully connected to Theater server with fragmentation support");
         Ok(())
     }
 
@@ -99,7 +97,7 @@ impl Connection {
         let command_bytes = serde_json::to_vec(&command)
             .map_err(CliError::Serialization)?;
 
-        // Send with timeout
+        // Send with timeout - FragmentingCodec will handle chunking if needed - FragmentingCodec will handle chunking if needed
         let send_future = framed.send(Bytes::from(command_bytes));
         timeout(self.config.server.timeout, send_future)
             .await
@@ -113,7 +111,7 @@ impl Connection {
 
         debug!("Command sent, waiting for response");
 
-        // Receive response with timeout
+        // Receive response with timeout - FragmentingCodec will handle reassembly if needed
         let receive_future = framed.next();
         let response_bytes = timeout(self.config.server.timeout, receive_future)
             .await

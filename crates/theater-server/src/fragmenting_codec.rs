@@ -3,6 +3,7 @@
 //! A codec that transparently handles fragmentation of large messages.
 //! Built on top of LengthDelimitedCodec to maintain compatibility with existing Theater infrastructure.
 
+use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use bytes::{Bytes, BytesMut};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -11,7 +12,6 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 use tokio_util::codec::{Decoder, Encoder, LengthDelimitedCodec};
 use tracing::{debug, warn};
-use base64::{Engine, engine::general_purpose::STANDARD as BASE64};
 
 /// Maximum size for a single fragment data (12MB)
 /// This leaves room for JSON serialization overhead while staying well under the 32MB frame limit
@@ -83,7 +83,7 @@ impl PartialMessage {
         }
 
         let mut result = Vec::new();
-        
+
         // Reassemble fragments in order
         for i in 0..self.total_fragments {
             if let Some(fragment_data) = self.fragments.get(&i) {
@@ -118,7 +118,7 @@ impl FragmentingCodec {
     pub fn new() -> Self {
         let mut inner = LengthDelimitedCodec::new();
         inner.set_max_frame_length(32 * 1024 * 1024); // 32MB max frame
-        
+
         Self {
             inner,
             next_message_id: AtomicU64::new(1),
@@ -161,20 +161,20 @@ impl FragmentingCodec {
     fn fragment_message(&self, data: &[u8]) -> Vec<Fragment> {
         let message_id = self.next_message_id();
         let total_size = data.len();
-        
+
         // Use the defined chunk size constant
         let chunk_size = MAX_FRAGMENT_DATA_SIZE;
-        
+
         // Calculate how many fragments we need
         let total_fragments = (total_size + chunk_size - 1) / chunk_size;
-        
+
         debug!(
             "Fragmenting message {} into {} fragments (total size: {} bytes, chunk size: {} bytes)",
             message_id, total_fragments, total_size, chunk_size
         );
 
         let mut fragments = Vec::new();
-        
+
         for (i, chunk) in data.chunks(chunk_size).enumerate() {
             let fragment = Fragment {
                 message_id,
@@ -182,15 +182,16 @@ impl FragmentingCodec {
                 total_fragments: total_fragments as u32,
                 data: BASE64.encode(chunk),
             };
-            
+
             // Debug: check serialized size to ensure it's under the frame limit
             if let Ok(serialized) = serde_json::to_vec(&FrameType::Fragment(fragment.clone())) {
                 debug!("Fragment {} serialized size: {} bytes", i, serialized.len());
-                if serialized.len() > 31 * 1024 * 1024 { // Close to 32MB limit
+                if serialized.len() > 31 * 1024 * 1024 {
+                    // Close to 32MB limit
                     warn!("Fragment {} serialized size ({} bytes) is dangerously close to frame limit", i, serialized.len());
                 }
             }
-            
+
             fragments.push(fragment);
         }
 
@@ -209,35 +210,42 @@ impl Encoder<Bytes> for FragmentingCodec {
 
     fn encode(&mut self, item: Bytes, dst: &mut BytesMut) -> Result<(), Self::Error> {
         let data = item.to_vec();
-        
+
         // Check if we need to fragment this message
         if data.len() <= MAX_FRAGMENT_DATA_SIZE {
             // Small message - send as complete
             let frame = FrameType::Complete(data);
             let serialized = serde_json::to_vec(&frame).map_err(|e| {
-                io::Error::new(io::ErrorKind::InvalidData, format!("Failed to serialize frame: {}", e))
+                io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!("Failed to serialize frame: {}", e),
+                )
             })?;
-            
+
             self.inner.encode(Bytes::from(serialized), dst)
         } else {
             // Large message - fragment it
             let fragments = self.fragment_message(&data);
-            
+
             // Encode each fragment into the destination buffer
             for fragment in fragments {
                 let frame = FrameType::Fragment(fragment);
                 let serialized = serde_json::to_vec(&frame).map_err(|e| {
-                    io::Error::new(io::ErrorKind::InvalidData, format!("Failed to serialize fragment: {}", e))
+                    io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        format!("Failed to serialize fragment: {}", e),
+                    )
                 })?;
-                
+
                 // Create a temporary buffer for this fragment
                 let mut fragment_buf = BytesMut::new();
-                self.inner.encode(Bytes::from(serialized), &mut fragment_buf)?;
-                
+                self.inner
+                    .encode(Bytes::from(serialized), &mut fragment_buf)?;
+
                 // Append to the main destination buffer
                 dst.extend_from_slice(&fragment_buf);
             }
-            
+
             Ok(())
         }
     }
@@ -255,7 +263,10 @@ impl Decoder for FragmentingCodec {
         if let Some(frame_bytes) = self.inner.decode(src)? {
             // Deserialize the frame
             let frame: FrameType = serde_json::from_slice(&frame_bytes).map_err(|e| {
-                io::Error::new(io::ErrorKind::InvalidData, format!("Failed to deserialize frame: {}", e))
+                io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!("Failed to deserialize frame: {}", e),
+                )
             })?;
 
             match frame {
@@ -268,19 +279,25 @@ impl Decoder for FragmentingCodec {
                     let message_id = fragment.message_id;
                     let fragment_index = fragment.fragment_index;
                     let total_fragments = fragment.total_fragments;
-                    
+
                     debug!(
                         "Received fragment {}/{} for message {}",
-                        fragment_index + 1, total_fragments, message_id
+                        fragment_index + 1,
+                        total_fragments,
+                        message_id
                     );
 
                     // Decode the base64 data
                     let fragment_data = BASE64.decode(&fragment.data).map_err(|e| {
-                        io::Error::new(io::ErrorKind::InvalidData, format!("Failed to decode fragment data: {}", e))
+                        io::Error::new(
+                            io::ErrorKind::InvalidData,
+                            format!("Failed to decode fragment data: {}", e),
+                        )
                     })?;
 
                     // Get or create partial message
-                    let partial = self.partial_messages
+                    let partial = self
+                        .partial_messages
                         .entry(message_id)
                         .or_insert_with(|| PartialMessage::new(total_fragments));
 
@@ -290,11 +307,11 @@ impl Decoder for FragmentingCodec {
                     // Check if message is complete
                     if partial.is_complete() {
                         debug!("Message {} is complete, reassembling", message_id);
-                        
+
                         // Remove from partial messages and reassemble
                         let partial = self.partial_messages.remove(&message_id).unwrap();
                         let complete_data = partial.reassemble()?;
-                        
+
                         Ok(Some(Bytes::from(complete_data)))
                     } else {
                         // Still waiting for more fragments
@@ -318,26 +335,26 @@ impl Decoder for FragmentingCodec {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tokio_util::codec::{FramedRead, FramedWrite};
-    use tokio::io::duplex;
     use futures::{SinkExt, StreamExt};
+    use tokio::io::duplex;
+    use tokio_util::codec::{FramedRead, FramedWrite};
 
     #[tokio::test]
     async fn test_small_message_no_fragmentation() {
         let (client, server) = duplex(1024);
-        
+
         let codec_write = FragmentingCodec::new();
         let codec_read = FragmentingCodec::new();
-        
+
         let mut writer = FramedWrite::new(client, codec_write);
         let mut reader = FramedRead::new(server, codec_read);
-        
+
         let test_data = b"Hello, World!";
-        
+
         // Send small message
         writer.send(Bytes::from(&test_data[..])).await.unwrap();
         drop(writer); // Close writer
-        
+
         // Receive should get the same data
         let received = reader.next().await.unwrap().unwrap();
         assert_eq!(received.as_ref(), test_data);
@@ -346,16 +363,16 @@ mod tests {
     #[tokio::test]
     async fn test_large_message_fragmentation() {
         let (client, server) = duplex(64 * 1024 * 1024); // Large buffer
-        
+
         let codec_write = FragmentingCodec::new();
         let codec_read = FragmentingCodec::new();
-        
+
         let mut writer = FramedWrite::new(client, codec_write);
         let mut reader = FramedRead::new(server, codec_read);
-        
+
         // Create a message larger than MAX_FRAGMENT_DATA_SIZE
         let test_data = vec![0xAB; MAX_FRAGMENT_DATA_SIZE + 1000];
-        
+
         // Send large message
         match writer.send(Bytes::from(test_data.clone())).await {
             Ok(_) => println!("Successfully sent large message"),
@@ -365,7 +382,7 @@ mod tests {
             }
         }
         drop(writer); // Close writer
-        
+
         // Receive should get the same data
         let received = reader.next().await.unwrap().unwrap();
         assert_eq!(received.as_ref(), &test_data[..]);
@@ -375,16 +392,16 @@ mod tests {
     fn test_fragment_message() {
         let codec = FragmentingCodec::new();
         let data = vec![0x42; MAX_FRAGMENT_DATA_SIZE + 500];
-        
+
         let fragments = codec.fragment_message(&data);
-        
+
         assert_eq!(fragments.len(), 2);
         assert_eq!(fragments[0].fragment_index, 0);
         assert_eq!(fragments[1].fragment_index, 1);
         assert_eq!(fragments[0].total_fragments, 2);
         assert_eq!(fragments[1].total_fragments, 2);
         assert_eq!(fragments[0].message_id, fragments[1].message_id);
-        
+
         // Check data integrity
         let mut reassembled = Vec::new();
         let decoded_0 = BASE64.decode(&fragments[0].data).unwrap();
@@ -397,16 +414,16 @@ mod tests {
     #[test]
     fn test_partial_message_assembly() {
         let mut partial = PartialMessage::new(3);
-        
+
         assert!(!partial.is_complete());
-        
+
         partial.add_fragment(0, vec![1, 2, 3]);
         partial.add_fragment(2, vec![7, 8, 9]);
         assert!(!partial.is_complete());
-        
+
         partial.add_fragment(1, vec![4, 5, 6]);
         assert!(partial.is_complete());
-        
+
         let reassembled = partial.reassemble().unwrap();
         assert_eq!(reassembled, vec![1, 2, 3, 4, 5, 6, 7, 8, 9]);
     }
