@@ -1,7 +1,7 @@
 use chrono::{DateTime, Utc};
 use ratatui::widgets::ListState;
-use theater::chain::ChainEvent;
 use std::collections::HashMap;
+use theater::chain::ChainEvent;
 
 #[derive(Debug)]
 pub struct EventExplorerApp {
@@ -18,7 +18,7 @@ pub struct EventExplorerApp {
     // Display modes
     pub detail_mode: DetailMode,
     pub show_help: bool,
-    
+
     // Detail panel scrolling
     pub detail_scroll_offset: usize,
 
@@ -248,25 +248,25 @@ impl EventExplorerApp {
         // Reset scroll when changing modes
         self.detail_scroll_offset = 0;
     }
-    
+
     pub fn scroll_detail_up(&mut self) {
         self.detail_scroll_offset = self.detail_scroll_offset.saturating_sub(1);
     }
-    
+
     pub fn scroll_detail_down(&mut self) {
         self.detail_scroll_offset += 1;
         // Note: We'll clamp this in the UI based on available content
     }
-    
+
     pub fn scroll_detail_page_up(&mut self, page_size: usize) {
         self.detail_scroll_offset = self.detail_scroll_offset.saturating_sub(page_size);
     }
-    
+
     pub fn scroll_detail_page_down(&mut self, page_size: usize) {
         self.detail_scroll_offset += page_size;
         // Note: We'll clamp this in the UI based on available content
     }
-    
+
     pub fn reset_detail_scroll(&mut self) {
         self.detail_scroll_offset = 0;
     }

@@ -1,5 +1,5 @@
-use crate::id::TheaterId;
 use crate::actor::ActorError;
+use crate::id::TheaterId;
 use std::fmt;
 
 /// # Theater Runtime Error
@@ -11,31 +11,31 @@ use std::fmt;
 pub enum TheaterRuntimeError {
     /// Actor not found in the runtime
     ActorNotFound(TheaterId),
-    
+
     /// Actor already exists with the given ID
     ActorAlreadyExists(TheaterId),
-    
+
     /// Actor exists but is not in running state
     ActorNotRunning(TheaterId),
-    
+
     /// Actor operation failed
     ActorOperationFailed(String),
-    
+
     /// Error from within an actor
     ActorError(ActorError),
-    
+
     /// Error with communication channels
     ChannelError(String),
-    
+
     /// Channel not found
     ChannelNotFound(String),
-    
+
     /// Channel rejected by target
     ChannelRejected,
-    
+
     /// Error with serialization/deserialization
     SerializationError(String),
-    
+
     /// Internal runtime error
     InternalError(String),
 }

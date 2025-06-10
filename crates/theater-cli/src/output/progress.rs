@@ -13,13 +13,15 @@ pub struct ProgressBar {
 impl ProgressBar {
     pub fn new(len: u64, theme: Theme) -> Self {
         let bar = IndicatifBar::new(len);
-        
+
         // Set a nice style
         let style = ProgressStyle::default_bar()
-            .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos:>7}/{len:7} {msg}")
+            .template(
+                "{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos:>7}/{len:7} {msg}",
+            )
             .unwrap()
             .progress_chars("██░");
-            
+
         bar.set_style(style);
         bar.enable_steady_tick(Duration::from_millis(100));
 
@@ -29,12 +31,12 @@ impl ProgressBar {
     /// Create an indeterminate progress bar (spinner)
     pub fn new_spinner(theme: Theme) -> Self {
         let bar = IndicatifBar::new_spinner();
-        
+
         let style = ProgressStyle::default_spinner()
             .template("{spinner:.green} {elapsed_precise} {msg}")
             .unwrap()
             .tick_strings(&["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]);
-            
+
         bar.set_style(style);
         bar.enable_steady_tick(Duration::from_millis(100));
 

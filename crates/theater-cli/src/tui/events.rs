@@ -43,6 +43,6 @@ pub fn handle_input(app: &mut TuiApp) -> Result<InputEvent, Box<dyn std::error::
             }
         }
     }
-    
+
     Ok(InputEvent::None)
 }

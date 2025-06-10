@@ -1,5 +1,5 @@
-use crossterm::event::{self, Event, KeyCode, KeyModifiers};
 use crate::error::CliResult;
+use crossterm::event::{self, Event, KeyCode, KeyModifiers};
 
 #[derive(Debug)]
 pub enum ExplorerAction {
@@ -26,13 +26,11 @@ pub enum ExplorerAction {
 
 pub fn handle_input() -> CliResult<ExplorerAction> {
     if event::poll(std::time::Duration::from_millis(100)).map_err(|e| {
-        crate::error::CliError::Internal(
-            anyhow::anyhow!("Failed to poll for input: {}", e),
-        )
+        crate::error::CliError::Internal(anyhow::anyhow!("Failed to poll for input: {}", e))
     })? {
-        if let Event::Key(key) = event::read().map_err(|e| crate::error::CliError::Internal(
-            anyhow::anyhow!("Failed to read input: {}", e),
-        ))? {
+        if let Event::Key(key) = event::read().map_err(|e| {
+            crate::error::CliError::Internal(anyhow::anyhow!("Failed to read input: {}", e))
+        })? {
             return Ok(match key.code {
                 KeyCode::Char('q') | KeyCode::Esc => ExplorerAction::Quit,
                 KeyCode::Up | KeyCode::Char('k') => ExplorerAction::NavigateUp,

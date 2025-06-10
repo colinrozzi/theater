@@ -16,10 +16,10 @@ use wasmtime::StoreContextMut;
 pub enum EnvironmentError {
     #[error("Access denied for environment variable: {0}")]
     AccessDenied(String),
-    
+
     #[error("Environment variable not found: {0}")]
     VariableNotFound(String),
-    
+
     #[error("Invalid variable name: {0}")]
     InvalidVariableName(String),
 }
@@ -30,9 +30,7 @@ pub struct EnvironmentHost {
 
 impl EnvironmentHost {
     pub fn new(config: EnvironmentHandlerConfig) -> Self {
-        Self {
-            config,
-        }
+        Self { config }
     }
 
     pub async fn start(
@@ -57,14 +55,16 @@ impl EnvironmentHost {
             .expect("Could not instantiate theater:simple/environment");
 
         let config = self.config.clone();
-        
+
         // get-var implementation
         interface.func_wrap(
             "get-var",
-            move |mut ctx: StoreContextMut<'_, ActorStore>, (var_name,): (String,)| -> Result<(Option<String>,)> {
+            move |mut ctx: StoreContextMut<'_, ActorStore>,
+                  (var_name,): (String,)|
+                  -> Result<(Option<String>,)> {
                 let now = Utc::now().timestamp_millis() as u64;
                 let is_allowed = config.is_variable_allowed(&var_name);
-                
+
                 if !is_allowed {
                     // Record access denial
                     ctx.data_mut().record_event(ChainEventData {
@@ -77,7 +77,10 @@ impl EnvironmentHost {
                             timestamp: chrono::Utc::now(),
                         }),
                         timestamp: now,
-                        description: Some(format!("Access denied for environment variable: {}", var_name)),
+                        description: Some(format!(
+                            "Access denied for environment variable: {}",
+                            var_name
+                        )),
                     });
                     return Ok((None,));
                 }
@@ -96,7 +99,10 @@ impl EnvironmentHost {
                         timestamp: chrono::Utc::now(),
                     }),
                     timestamp: now,
-                    description: Some(format!("Environment variable access: {} (found: {})", var_name, value_found)),
+                    description: Some(format!(
+                        "Environment variable access: {} (found: {})",
+                        var_name, value_found
+                    )),
                 });
 
                 Ok((value,))
@@ -108,10 +114,12 @@ impl EnvironmentHost {
         // exists implementation
         interface.func_wrap(
             "exists",
-            move |mut ctx: StoreContextMut<'_, ActorStore>, (var_name,): (String,)| -> Result<(bool,)> {
+            move |mut ctx: StoreContextMut<'_, ActorStore>,
+                  (var_name,): (String,)|
+                  -> Result<(bool,)> {
                 let now = Utc::now().timestamp_millis() as u64;
                 let is_allowed = config_clone.is_variable_allowed(&var_name);
-                
+
                 if !is_allowed {
                     // Record access denial
                     ctx.data_mut().record_event(ChainEventData {
@@ -124,7 +132,10 @@ impl EnvironmentHost {
                             timestamp: chrono::Utc::now(),
                         }),
                         timestamp: now,
-                        description: Some(format!("Access denied for environment variable exists check: {}", var_name)),
+                        description: Some(format!(
+                            "Access denied for environment variable exists check: {}",
+                            var_name
+                        )),
                     });
                     return Ok((false,));
                 }
@@ -142,7 +153,10 @@ impl EnvironmentHost {
                         timestamp: chrono::Utc::now(),
                     }),
                     timestamp: now,
-                    description: Some(format!("Environment variable exists check: {} (exists: {})", var_name, exists)),
+                    description: Some(format!(
+                        "Environment variable exists check: {} (exists: {})",
+                        var_name, exists
+                    )),
                 });
 
                 Ok((exists,))
@@ -154,9 +168,11 @@ impl EnvironmentHost {
         // list-vars implementation
         interface.func_wrap(
             "list-vars",
-            move |mut ctx: StoreContextMut<'_, ActorStore>, (): ()| -> Result<(Vec<(String, String)>,)> {
+            move |mut ctx: StoreContextMut<'_, ActorStore>,
+                  (): ()|
+                  -> Result<(Vec<(String, String)>,)> {
                 let now = Utc::now().timestamp_millis() as u64;
-                
+
                 if !config_clone2.allow_list_all {
                     // Record denied list attempt
                     ctx.data_mut().record_event(ChainEventData {
@@ -169,13 +185,16 @@ impl EnvironmentHost {
                             timestamp: chrono::Utc::now(),
                         }),
                         timestamp: now,
-                        description: Some("Environment variable listing denied - allow_list_all is false".to_string()),
+                        description: Some(
+                            "Environment variable listing denied - allow_list_all is false"
+                                .to_string(),
+                        ),
                     });
                     return Ok((Vec::new(),));
                 }
 
                 let mut accessible_vars = Vec::new();
-                
+
                 for (key, value) in env::vars() {
                     if config_clone2.is_variable_allowed(&key) {
                         accessible_vars.push((key, value));
@@ -194,7 +213,10 @@ impl EnvironmentHost {
                         timestamp: chrono::Utc::now(),
                     }),
                     timestamp: now,
-                    description: Some(format!("Environment variable listing returned {} accessible variables", count)),
+                    description: Some(format!(
+                        "Environment variable listing returned {} accessible variables",
+                        count
+                    )),
                 });
 
                 Ok((accessible_vars,))

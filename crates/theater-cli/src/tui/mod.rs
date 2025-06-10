@@ -1,17 +1,14 @@
 pub mod app;
 pub mod components;
-pub mod events;
 pub mod event_explorer;
+pub mod events;
 pub mod ui;
 
 use crossterm::{
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
-use ratatui::{
-    backend::CrosstermBackend,
-    Terminal,
-};
+use ratatui::{backend::CrosstermBackend, Terminal};
 use std::io;
 use tokio::sync::mpsc;
 use tracing::debug;

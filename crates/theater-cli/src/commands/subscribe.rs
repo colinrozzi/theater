@@ -227,7 +227,6 @@ pub async fn execute_async(args: &SubscribeArgs, ctx: &CommandContext) -> Result
                     } else {
                         &display_options.format
                     },
-                    display_options.detailed,
                 )
                 .map_err(|e| CliError::invalid_input("event_display", "event", e.to_string()))?;
 

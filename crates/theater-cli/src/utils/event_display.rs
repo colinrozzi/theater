@@ -63,14 +63,14 @@ pub fn display_events(
     // Display all events according to format
     for event in events {
         count += 1;
-        display_single_event(event, effective_format, options.detailed)?;
+        display_single_event(event, effective_format)?;
     }
 
     Ok(count)
 }
 
 /// Display a single event with formatting options
-pub fn display_single_event(event: &ChainEvent, format: &str, detailed: bool) -> Result<()> {
+pub fn display_single_event(event: &ChainEvent, format: &str) -> Result<()> {
     match format {
         "json" => {
             let output = serde_json::json!({
@@ -158,6 +158,54 @@ pub fn display_single_event(event: &ChainEvent, format: &str, detailed: bool) ->
                 timestamp, event_type, hash, parent_hash, description, data_size
             );
         }
+        "detailed" => {
+            let timestamp = chrono::DateTime::from_timestamp(event.timestamp as i64, 0)
+                .unwrap_or_else(|| chrono::DateTime::UNIX_EPOCH)
+                .format("%Y-%m-%d %H:%M:%S%.3f")
+                .to_string();
+
+            let hash_str = hex::encode(&event.hash);
+            let parent_hash = match &event.parent_hash {
+                Some(hash) => hex::encode(hash),
+                None => "-".to_string(),
+            };
+
+            let colored_type = match event.event_type.split('.').next().unwrap_or("") {
+                "http" => style(&event.event_type).cyan(),
+                "filesystem" => style(&event.event_type).green(),
+                "message" => style(&event.event_type).magenta(),
+                "runtime" => style(&event.event_type).blue(),
+                "error" => style(&event.event_type).red(),
+                _ => style(&event.event_type).yellow(),
+            };
+
+            // Print detailed event info
+            println!(
+                "{} [{}] {}",
+                style("EVENT").bold().blue(),
+                hash_str,
+                colored_type
+            );
+
+            println!("   Timestamp: {}", timestamp);
+            println!("   Parent Hash: {}", parent_hash);
+            if let Some(desc) = &event.description {
+                println!("   Description: {}", desc);
+            } else {
+                println!("   Description: None");
+            }
+
+            println!("   Data Size: {} bytes", event.data.len());
+            if let Ok(text) = std::str::from_utf8(&event.data) {
+                println!("   Data: {}", text);
+            } else {
+                // Print hex dump if binary data
+                println!("\nHex Dump:");
+                print_hex_dump(&event.data, 16);
+            }
+
+            println!("");
+        }
         _ => {
             // pretty format (default)
             // Format timestamp
@@ -187,26 +235,6 @@ pub fn display_single_event(event: &ChainEvent, format: &str, detailed: bool) ->
             // Show event description if available
             if let Some(desc) = &event.description {
                 println!("   {}", desc);
-            }
-
-            // Show additional details if requested
-            if detailed {
-                println!("   Hash: {}", hex::encode(&event.hash));
-
-                if let Some(parent) = &event.parent_hash {
-                    println!("   Parent: {}", hex::encode(parent));
-                }
-
-                // Try to pretty-print the event data as JSON
-                if let Ok(text) = std::str::from_utf8(&event.data) {
-                    if let Ok(json) = serde_json::from_str::<serde_json::Value>(text) {
-                        println!("   Data: {}", serde_json::to_string_pretty(&json)?);
-                    } else {
-                        println!("   Data: {}", text);
-                    }
-                } else {
-                    println!("   Data: {} bytes of binary data", event.data.len());
-                }
             }
 
             println!("");

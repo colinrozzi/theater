@@ -51,12 +51,13 @@ fn render_title_bar(f: &mut Frame, app: &TuiApp, area: Rect) {
     };
 
     let title = format!(" Theater Actor Monitor - Actor ID: {} ", actor_id_short);
-    
-    let title_paragraph = Paragraph::new(title)
-        .style(Style::default()
+
+    let title_paragraph = Paragraph::new(title).style(
+        Style::default()
             .fg(Color::White)
             .bg(Color::Blue)
-            .add_modifier(Modifier::BOLD));
+            .add_modifier(Modifier::BOLD),
+    );
 
     f.render_widget(title_paragraph, area);
 }
@@ -68,10 +69,8 @@ fn render_controls_bar(f: &mut Frame, app: &TuiApp, area: Rect) {
         " Controls: [q]uit [p]ause [s]croll [c]lear "
     };
 
-    let controls_paragraph = Paragraph::new(controls)
-        .style(Style::default()
-            .fg(Color::Black)
-            .bg(Color::Gray));
+    let controls_paragraph =
+        Paragraph::new(controls).style(Style::default().fg(Color::Black).bg(Color::Gray));
 
     f.render_widget(controls_paragraph, area);
 }

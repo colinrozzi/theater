@@ -330,7 +330,10 @@ impl StoreHost {
                         label: label_string.clone(),
                     }),
                     timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                    description: Some(format!("Getting content reference by label: {}", label_string)),
+                    description: Some(format!(
+                        "Getting content reference by label: {}",
+                        label_string
+                    )),
                 });
 
                 let store = ContentStore::from_id(&store_id);

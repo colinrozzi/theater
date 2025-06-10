@@ -2,12 +2,12 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Paragraph},
+    widgets::Paragraph,
     Frame,
 };
 
 use super::app::EventExplorerApp;
-use super::components::{render_event_list, render_event_detail, render_help_modal};
+use super::components::{render_event_detail, render_event_list, render_help_modal};
 
 pub fn render_explorer_ui(f: &mut Frame, app: &EventExplorerApp) {
     let size = f.size();
@@ -55,7 +55,10 @@ fn render_title_bar(f: &mut Frame, app: &EventExplorerApp, area: Rect) {
     };
 
     let mut title_parts = vec![
-        Span::styled(" Theater Event Explorer - Actor: ", Style::default().fg(Color::White)),
+        Span::styled(
+            " Theater Event Explorer - Actor: ",
+            Style::default().fg(Color::White),
+        ),
         Span::styled(actor_id_short, Style::default().fg(Color::Yellow)),
     ];
 
@@ -71,12 +74,11 @@ fn render_title_bar(f: &mut Frame, app: &EventExplorerApp, area: Rect) {
         title_parts.push(Span::styled("] ", Style::default().fg(Color::Green)));
     }
 
-    let title_paragraph = Paragraph::new(Line::from(title_parts))
-        .style(
-            Style::default()
-                .bg(Color::Blue)
-                .add_modifier(Modifier::BOLD),
-        );
+    let title_paragraph = Paragraph::new(Line::from(title_parts)).style(
+        Style::default()
+            .bg(Color::Blue)
+            .add_modifier(Modifier::BOLD),
+    );
 
     f.render_widget(title_paragraph, area);
 }
@@ -136,8 +138,8 @@ fn render_status_bar(f: &mut Frame, app: &EventExplorerApp, area: Rect) {
 
     status_parts.push(Span::styled(controls, Style::default().fg(Color::Gray)));
 
-    let status_paragraph = Paragraph::new(Line::from(status_parts))
-        .style(Style::default().bg(Color::DarkGray));
+    let status_paragraph =
+        Paragraph::new(Line::from(status_parts)).style(Style::default().bg(Color::DarkGray));
 
     f.render_widget(status_paragraph, area);
 }

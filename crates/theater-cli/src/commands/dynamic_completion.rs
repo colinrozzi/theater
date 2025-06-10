@@ -41,39 +41,41 @@ async fn generate_dynamic_completions(
     _ctx: &CommandContext,
 ) -> CliResult<Vec<String>> {
     let words: Vec<&str> = args.line.split_whitespace().collect();
-    
+
     // Determine what we're completing based on the command structure
     match words.as_slice() {
         // theater <command>
         ["theater"] => Ok(get_command_completions(&args.current)),
-        
+
         // theater start <manifest_or_actor_id>
         ["theater", "start"] => get_manifest_completions(&args.current).await,
-        
+
         // theater stop <actor_id>
         ["theater", "stop"] => get_actor_id_completions(&args.current, args.address).await,
-        
+
         // theater state <actor_id>
         ["theater", "state"] => get_actor_id_completions(&args.current, args.address).await,
-        
+
         // theater inspect <actor_id>
         ["theater", "inspect"] => get_actor_id_completions(&args.current, args.address).await,
-        
+
         // theater message <actor_id>
         ["theater", "message"] => get_actor_id_completions(&args.current, args.address).await,
-        
+
         // theater events <actor_id>
         ["theater", "events"] => get_actor_id_completions(&args.current, args.address).await,
-        
+
         // theater channel open <actor_id>
-        ["theater", "channel", "open"] => get_actor_id_completions(&args.current, args.address).await,
-        
+        ["theater", "channel", "open"] => {
+            get_actor_id_completions(&args.current, args.address).await
+        }
+
         // theater create <template>
         ["theater", "create"] => Ok(get_template_completions(&args.current)),
-        
+
         // theater completion <shell>
         ["theater", "completion"] => Ok(get_shell_completions(&args.current)),
-        
+
         _ => Ok(vec![]),
     }
 }
@@ -81,11 +83,21 @@ async fn generate_dynamic_completions(
 /// Get available command completions
 fn get_command_completions(current: &str) -> Vec<String> {
     let commands = vec![
-        "build", "channel", "completion", "create", "events", 
-        "inspect", "list", "list-stored", "message", "start", 
-        "state", "stop", "subscribe"
+        "build",
+        "channel",
+        "completion",
+        "create",
+        "events",
+        "inspect",
+        "list",
+        "list-stored",
+        "message",
+        "start",
+        "state",
+        "stop",
+        "subscribe",
     ];
-    
+
     commands
         .into_iter()
         .filter(|cmd| cmd.starts_with(current))
@@ -96,7 +108,7 @@ fn get_command_completions(current: &str) -> Vec<String> {
 /// Get template completions
 fn get_template_completions(current: &str) -> Vec<String> {
     let templates = vec!["basic", "http"];
-    
+
     templates
         .into_iter()
         .filter(|tmpl| tmpl.starts_with(current))
@@ -107,7 +119,7 @@ fn get_template_completions(current: &str) -> Vec<String> {
 /// Get shell completions
 fn get_shell_completions(current: &str) -> Vec<String> {
     let shells = vec!["bash", "zsh", "fish", "powershell", "elvish"];
-    
+
     shells
         .into_iter()
         .filter(|shell| shell.starts_with(current))
@@ -119,7 +131,7 @@ fn get_shell_completions(current: &str) -> Vec<String> {
 async fn get_manifest_completions(current: &str) -> CliResult<Vec<String>> {
     // Look for manifest.toml files in current directory and subdirectories
     let mut completions = Vec::new();
-    
+
     // Add manifest files
     if let Ok(entries) = std::fs::read_dir(".") {
         for entry in entries.flatten() {
@@ -132,7 +144,7 @@ async fn get_manifest_completions(current: &str) -> CliResult<Vec<String>> {
             }
         }
     }
-    
+
     // Also add any stored actor IDs
     if let Ok(stored_actors) = get_stored_actor_ids().await {
         for actor_id in stored_actors {
@@ -141,14 +153,14 @@ async fn get_manifest_completions(current: &str) -> CliResult<Vec<String>> {
             }
         }
     }
-    
+
     Ok(completions)
 }
 
 /// Get running actor ID completions
 async fn get_actor_id_completions(current: &str, address: SocketAddr) -> CliResult<Vec<String>> {
     debug!("Getting actor completions from server at: {}", address);
-    
+
     match get_running_actor_ids(address).await {
         Ok(actor_ids) => {
             let completions = actor_ids
@@ -186,14 +198,15 @@ async fn get_running_actor_ids(address: SocketAddr) -> CliResult<Vec<String>> {
     let request = serde_json::json!({
         "type": "list_actors"
     });
-    
+
     let request_bytes = Bytes::from(serde_json::to_vec(&request).unwrap());
-    framed.send(request_bytes).await.map_err(|e| {
-        CliError::NetworkError {
+    framed
+        .send(request_bytes)
+        .await
+        .map_err(|e| CliError::NetworkError {
             operation: "send list request".to_string(),
             source: Box::new(e),
-        }
-    })?;
+        })?;
 
     // Read response
     if let Some(response_frame) = framed.next().await {
@@ -202,8 +215,8 @@ async fn get_running_actor_ids(address: SocketAddr) -> CliResult<Vec<String>> {
             source: Box::new(e),
         })?;
 
-        let response: serde_json::Value = serde_json::from_slice(&response_bytes)
-            .map_err(|e| CliError::InvalidResponse {
+        let response: serde_json::Value =
+            serde_json::from_slice(&response_bytes).map_err(|e| CliError::InvalidResponse {
                 message: "Failed to parse actor list response".to_string(),
                 source: Some(Box::new(e)),
             })?;
@@ -212,10 +225,12 @@ async fn get_running_actor_ids(address: SocketAddr) -> CliResult<Vec<String>> {
             let actor_ids = actors
                 .iter()
                 .filter_map(|actor| {
-                    actor.get("id").and_then(|id| id.as_str().map(|s| s.to_string()))
+                    actor
+                        .get("id")
+                        .and_then(|id| id.as_str().map(|s| s.to_string()))
                 })
                 .collect();
-            
+
             return Ok(actor_ids);
         }
     }

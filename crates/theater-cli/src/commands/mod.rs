@@ -1,8 +1,8 @@
 pub mod build;
 pub mod channel;
 pub mod completion;
-pub mod dynamic_completion;
 pub mod create;
+pub mod dynamic_completion;
 pub mod events;
 pub mod events_explore;
 pub mod inspect;

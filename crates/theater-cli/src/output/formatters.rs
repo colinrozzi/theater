@@ -4,6 +4,7 @@ use theater::ChainEvent;
 
 use crate::error::CliResult;
 use crate::output::{OutputFormat, OutputManager};
+use crate::utils::event_display::display_single_event;
 
 /// Actor list formatter
 #[derive(Debug, serde::Serialize)]
@@ -65,6 +66,29 @@ impl OutputFormat for ActorList {
         output.table(&headers, &rows)?;
         Ok(())
     }
+
+    fn format_detailed(&self, output: &OutputManager) -> CliResult<()> {
+        if self.actors.is_empty() {
+            output.info("No actors are currently running")?;
+            return Ok(());
+        }
+
+        println!(
+            "{}",
+            output.theme().highlight().apply_to("Detailed Actor List")
+        );
+        println!("{}", "─".repeat(40));
+
+        for (i, (id, name)) in self.actors.iter().enumerate() {
+            println!(
+                "{}. {} - {}",
+                i + 1,
+                output.theme().accent().apply_to(id),
+                output.theme().muted().apply_to(name)
+            );
+        }
+        Ok(())
+    }
 }
 
 /// Actor events formatter
@@ -81,15 +105,14 @@ impl OutputFormat for ActorEvents {
             return Ok(());
         }
 
+        println!(
+            "{:<12} {:<12} {:<25} {}",
+            "HASH", "PARENT", "EVENT TYPE", "DESCRIPTION"
+        );
+        println!("{}", "─".repeat(100));
+
         for event in &self.events {
-            let timestamp = format_timestamp(event.timestamp);
-            let description = event.description.as_deref().unwrap_or("No description");
-            println!(
-                "{} {} {}",
-                output.theme().muted().apply_to(&timestamp),
-                output.theme().accent().apply_to(&event.event_type),
-                truncate_string(description, 60)
-            );
+            display_single_event(event, "compact")?;
         }
         Ok(())
     }
@@ -109,23 +132,10 @@ impl OutputFormat for ActorEvents {
         );
         println!("{}", "─".repeat(80));
 
-        for (i, event) in self.events.iter().enumerate() {
-            let timestamp = format_timestamp(event.timestamp);
-            println!(
-                "{}. {} {}",
-                i + 1,
-                output.theme().muted().apply_to(&timestamp),
-                output.theme().accent().apply_to(&event.event_type)
-            );
-            let description = event.description.as_deref().unwrap_or("No description");
-            println!("   {}", description);
-
-            // Note: event.data structure is complex EventData enum, not displaying raw data
-            // Could be enhanced to show specific event data based on type
-            println!();
+        for event in self.events.iter() {
+            display_single_event(event, "pretty")?;
         }
 
-        output.info(&format!("Total: {} events", self.events.len()))?;
         Ok(())
     }
 
@@ -149,6 +159,24 @@ impl OutputFormat for ActorEvents {
             .collect();
 
         output.table(&headers, &rows)?;
+        Ok(())
+    }
+
+    fn format_detailed(&self, output: &OutputManager) -> CliResult<()> {
+        if self.events.is_empty() {
+            output.info(&format!("No events found for actor {}", self.actor_id))?;
+            return Ok(());
+        }
+
+        println!(
+            "{}",
+            output.theme().highlight().apply_to("Detailed Actor Events")
+        );
+        println!("{}", "─".repeat(80));
+
+        for event in self.events.iter() {
+            display_single_event(event, "detailed")?;
+        }
         Ok(())
     }
 }
@@ -190,6 +218,20 @@ impl OutputFormat for ActorState {
     fn format_table(&self, output: &OutputManager) -> CliResult<()> {
         // For state, table format doesn't make much sense, so fall back to pretty
         self.format_pretty(output)
+    }
+
+    fn format_detailed(&self, output: &OutputManager) -> CliResult<()> {
+        println!(
+            "{}",
+            output.theme().highlight().apply_to("Detailed Actor State")
+        );
+        println!("{}", "─".repeat(40));
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&self.state)
+                .unwrap_or_else(|_| "Invalid JSON".to_string())
+        );
+        Ok(())
     }
 }
 
@@ -334,6 +376,10 @@ impl OutputFormat for BuildResult {
         output.table(&headers, &rows)?;
         Ok(())
     }
+
+    fn format_detailed(&self, output: &OutputManager) -> CliResult<()> {
+        todo!()
+    }
 }
 
 /// Actor action result formatter (for start, stop, restart actions)
@@ -436,6 +482,10 @@ impl OutputFormat for ActorAction {
         output.table(&headers, &rows)?;
         Ok(())
     }
+
+    fn format_detailed(&self, output: &OutputManager) -> CliResult<()> {
+        todo!()
+    }
 }
 
 /// Component update result formatter
@@ -533,6 +583,9 @@ impl OutputFormat for ComponentUpdate {
         output.table(&headers, &rows)?;
         Ok(())
     }
+    fn format_detailed(&self, output: &OutputManager) -> CliResult<()> {
+        todo!()
+    }
 }
 
 /// Message sent result formatter
@@ -614,6 +667,9 @@ impl OutputFormat for MessageSent {
         output.table(&headers, &rows)?;
         Ok(())
     }
+    fn format_detailed(&self, output: &OutputManager) -> CliResult<()> {
+        todo!()
+    }
 }
 
 /// Message response formatter (for request/response)
@@ -667,6 +723,9 @@ impl OutputFormat for MessageResponse {
 
         output.table(&headers, &rows)?;
         Ok(())
+    }
+    fn format_detailed(&self, output: &OutputManager) -> CliResult<()> {
+        todo!()
     }
 }
 
@@ -752,6 +811,9 @@ impl OutputFormat for StoredActorList {
 
         output.table(&headers, &rows)?;
         Ok(())
+    }
+    fn format_detailed(&self, output: &OutputManager) -> CliResult<()> {
+        todo!()
     }
 }
 
@@ -857,6 +919,9 @@ impl OutputFormat for ActorLogs {
         output.table(&headers, &rows)?;
         Ok(())
     }
+    fn format_detailed(&self, output: &OutputManager) -> CliResult<()> {
+        todo!()
+    }
 }
 
 /// Server information formatter
@@ -913,6 +978,9 @@ impl OutputFormat for ServerInfo {
             self.format_pretty(output)?;
         }
         Ok(())
+    }
+    fn format_detailed(&self, output: &OutputManager) -> CliResult<()> {
+        todo!()
     }
 }
 
@@ -1062,6 +1130,9 @@ impl OutputFormat for ActorInspection {
         output.table(&headers, &rows)?;
         Ok(())
     }
+    fn format_detailed(&self, output: &OutputManager) -> CliResult<()> {
+        todo!()
+    }
 }
 
 /// Project creation formatter
@@ -1136,6 +1207,9 @@ impl OutputFormat for ProjectCreated {
         }
         Ok(())
     }
+    fn format_detailed(&self, output: &OutputManager) -> CliResult<()> {
+        todo!()
+    }
 }
 
 /// Actor started formatter
@@ -1206,6 +1280,9 @@ impl OutputFormat for ActorStarted {
         ];
         output.table(&headers, &rows)?;
         Ok(())
+    }
+    fn format_detailed(&self, output: &OutputManager) -> CliResult<()> {
+        todo!()
     }
 }
 
@@ -1359,6 +1436,9 @@ impl OutputFormat for EventSubscription {
         output.table(&headers, &rows)?;
         Ok(())
     }
+    fn format_detailed(&self, output: &OutputManager) -> CliResult<()> {
+        todo!()
+    }
 }
 
 /// Server started formatter
@@ -1455,6 +1535,9 @@ impl OutputFormat for ServerStarted {
         output.table(&headers, &rows)?;
         Ok(())
     }
+    fn format_detailed(&self, output: &OutputManager) -> CliResult<()> {
+        todo!()
+    }
 }
 
 /// Channel opened formatter
@@ -1532,6 +1615,9 @@ impl OutputFormat for ChannelOpened {
         ];
         output.table(&headers, &rows)?;
         Ok(())
+    }
+    fn format_detailed(&self, output: &OutputManager) -> CliResult<()> {
+        todo!()
     }
 }
 

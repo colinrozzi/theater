@@ -47,6 +47,9 @@ pub struct ExploreArgs {
     /// Search events for this text (in description and data)
     #[arg(long)]
     pub search: Option<String>,
+
+    #[arg(long, default_value = None)]
+    pub format: Option<String>,
 }
 
 /// Execute the events explore command asynchronously
@@ -66,17 +69,14 @@ pub async fn execute_async(args: &ExploreArgs, ctx: &CommandContext) -> CliResul
     let events = load_events(args, ctx, &actor_id).await?;
 
     // Create and configure the explorer app
-    let mut app = event_explorer::EventExplorerApp::new(
-        args.actor_id.clone(),
-        args.live,
-        args.follow,
-    );
-    
+    let mut app =
+        event_explorer::EventExplorerApp::new(args.actor_id.clone(), args.live, args.follow);
+
     // Apply initial filters if specified
     if let Some(event_type) = &args.event_type {
         app.set_event_type_filter(event_type.clone());
     }
-    
+
     if let Some(search) = &args.search {
         app.set_search_query(search.clone());
     }
@@ -100,7 +100,7 @@ async fn load_events(
 
     // Create client and connect
     let client = ctx.create_client();
-    
+
     if args.live {
         // Try to connect to live actor first
         match client.connect().await {
@@ -115,7 +115,10 @@ async fn load_events(
                     })
             }
             Err(e) => {
-                debug!("Failed to connect to live actor: {}, falling back to stored events", e);
+                debug!(
+                    "Failed to connect to live actor: {}, falling back to stored events",
+                    e
+                );
                 // Fall back to stored events
                 load_stored_events(args, ctx, actor_id).await
             }
@@ -146,6 +149,7 @@ async fn load_stored_events(
         sort: "chain".to_string(),
         reverse: false,
         detailed: false,
+        format: args.format.clone(),
     };
 
     // Use existing events command logic to load and filter events
@@ -169,7 +173,10 @@ async fn load_stored_events(
 }
 
 /// Apply filters to events (reused from events command)
-fn apply_filters(events: &mut Vec<ChainEvent>, args: &crate::commands::events::EventsArgs) -> CliResult<()> {
+fn apply_filters(
+    events: &mut Vec<ChainEvent>,
+    args: &crate::commands::events::EventsArgs,
+) -> CliResult<()> {
     // Filter by event type
     if let Some(event_type) = &args.event_type {
         events.retain(|e| e.event_type.contains(event_type));
@@ -225,6 +232,7 @@ mod tests {
             from: None,
             to: None,
             search: None,
+            format: None,
         };
 
         let config = Config::default();

@@ -9,18 +9,18 @@ pub struct TuiApp {
     pub actor_id: String,
     pub manifest_path: String,
     pub start_time: DateTime<Utc>,
-    
+
     // Event tracking
     pub events: VecDeque<DisplayEvent>,
     pub max_events: usize,
     pub auto_scroll: bool,
-    
+
     // Lifecycle tracking
     pub lifecycle_events: Vec<LifecycleEvent>,
     pub current_status: ActorStatus,
     pub error_count: usize,
     pub event_count: usize,
-    
+
     // UI state
     pub should_quit: bool,
     pub paused: bool,
@@ -88,13 +88,13 @@ impl TuiApp {
     pub fn add_event(&mut self, event: DisplayEvent) {
         if !self.paused {
             self.event_count += 1;
-            
+
             if event.level == EventLevel::Error {
                 self.error_count += 1;
             }
-            
+
             self.events.push_back(event);
-            
+
             // Keep only the last max_events
             while self.events.len() > self.max_events {
                 self.events.pop_front();
@@ -116,9 +116,9 @@ impl TuiApp {
             }
             _ => {}
         }
-        
+
         self.lifecycle_events.push(event);
-        
+
         // Keep only the last 50 lifecycle events
         if self.lifecycle_events.len() > 50 {
             self.lifecycle_events.remove(0);
@@ -127,7 +127,7 @@ impl TuiApp {
 
     pub fn handle_management_response(&mut self, response: ManagementResponse) {
         let timestamp = Utc::now();
-        
+
         match response {
             ManagementResponse::ActorStarted { id } => {
                 let lifecycle_event = LifecycleEvent {
@@ -171,7 +171,11 @@ impl TuiApp {
         }
     }
 
-    fn chain_event_to_display_event(&self, event: ChainEvent, timestamp: DateTime<Utc>) -> DisplayEvent {
+    fn chain_event_to_display_event(
+        &self,
+        event: ChainEvent,
+        timestamp: DateTime<Utc>,
+    ) -> DisplayEvent {
         let description = event.description.as_deref().unwrap_or("Unknown event");
         let level = if description.contains("error") {
             EventLevel::Error

@@ -1,11 +1,11 @@
 pub mod app;
-pub mod ui;
 pub mod components;
 pub mod input;
+pub mod ui;
 
 pub use app::EventExplorerApp;
 
-use crate::{CommandContext, error::CliResult};
+use crate::{error::CliResult, CommandContext};
 use crossterm::{
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
@@ -23,24 +23,24 @@ pub async fn run_explorer(
     debug!("Starting event explorer TUI");
 
     // Setup terminal
-    enable_raw_mode().map_err(|e| crate::error::CliError::Internal(
-        anyhow::anyhow!("Failed to enable raw mode: {}", e),
-    ))?;
+    enable_raw_mode().map_err(|e| {
+        crate::error::CliError::Internal(anyhow::anyhow!("Failed to enable raw mode: {}", e))
+    })?;
 
     let mut stdout = io::stdout();
-    execute!(stdout, EnterAlternateScreen).map_err(|e| crate::error::CliError::Internal(
-        anyhow::anyhow!("Failed to enter alternate screen: {}", e),
-    ))?;
+    execute!(stdout, EnterAlternateScreen).map_err(|e| {
+        crate::error::CliError::Internal(anyhow::anyhow!("Failed to enter alternate screen: {}", e))
+    })?;
 
     let backend = CrosstermBackend::new(stdout);
-    let mut terminal = Terminal::new(backend).map_err(|e| crate::error::CliError::Internal(
-        anyhow::anyhow!("Failed to create terminal: {}", e),
-    ))?;
+    let mut terminal = Terminal::new(backend).map_err(|e| {
+        crate::error::CliError::Internal(anyhow::anyhow!("Failed to create terminal: {}", e))
+    })?;
 
     // Hide cursor
-    terminal.hide_cursor().map_err(|e| crate::error::CliError::Internal(
-        anyhow::anyhow!("Failed to hide cursor: {}", e),
-    ))?;
+    terminal.hide_cursor().map_err(|e| {
+        crate::error::CliError::Internal(anyhow::anyhow!("Failed to hide cursor: {}", e))
+    })?;
 
     // Main event loop
     let result = run_explorer_loop(&mut terminal, &mut app, ctx, server_address).await;
@@ -67,9 +67,9 @@ async fn run_explorer_loop(
         // Render UI
         terminal
             .draw(|f| ui::render_explorer_ui(f, app))
-            .map_err(|e| crate::error::CliError::Internal(
-                anyhow::anyhow!("Failed to draw terminal: {}", e),
-            ))?;
+            .map_err(|e| {
+                crate::error::CliError::Internal(anyhow::anyhow!("Failed to draw terminal: {}", e))
+            })?;
 
         // Handle input
         match handle_input()? {

@@ -25,31 +25,28 @@ impl CliTheaterClient {
     }
 
     /// Send a command and receive a response with CLI timeout and error handling
-    pub async fn send_command(&mut self, command: ManagementCommand) -> CliResult<ManagementResponse> {
+    pub async fn send_command(
+        &mut self,
+        command: ManagementCommand,
+    ) -> CliResult<ManagementResponse> {
         // Connect with timeout
         self.ensure_connected().await?;
 
         // Send command with timeout
-        tokio::time::timeout(
-            self.config.server.timeout,
-            self.connection.send(command)
-        )
-        .await
-        .map_err(|_| CliError::ConnectionTimeout {
-            timeout: self.config.server.timeout.as_secs(),
-        })?
-        .map_err(|e| CliError::connection_failed(self.address, e))?;
+        tokio::time::timeout(self.config.server.timeout, self.connection.send(command))
+            .await
+            .map_err(|_| CliError::ConnectionTimeout {
+                timeout: self.config.server.timeout.as_secs(),
+            })?
+            .map_err(|e| CliError::connection_failed(self.address, e))?;
 
         // Receive response with timeout
-        let response = tokio::time::timeout(
-            self.config.server.timeout,
-            self.connection.receive()
-        )
-        .await
-        .map_err(|_| CliError::ConnectionTimeout {
-            timeout: self.config.server.timeout.as_secs(),
-        })?
-        .map_err(|e| CliError::connection_failed(self.address, e))?;
+        let response = tokio::time::timeout(self.config.server.timeout, self.connection.receive())
+            .await
+            .map_err(|_| CliError::ConnectionTimeout {
+                timeout: self.config.server.timeout.as_secs(),
+            })?
+            .map_err(|e| CliError::connection_failed(self.address, e))?;
 
         Ok(response)
     }
@@ -60,30 +57,24 @@ impl CliTheaterClient {
         self.ensure_connected().await?;
 
         // Send command with timeout
-        tokio::time::timeout(
-            self.config.server.timeout,
-            self.connection.send(command)
-        )
-        .await
-        .map_err(|_| CliError::ConnectionTimeout {
-            timeout: self.config.server.timeout.as_secs(),
-        })?
-        .map_err(|e| CliError::connection_failed(self.address, e))?;
+        tokio::time::timeout(self.config.server.timeout, self.connection.send(command))
+            .await
+            .map_err(|_| CliError::ConnectionTimeout {
+                timeout: self.config.server.timeout.as_secs(),
+            })?
+            .map_err(|e| CliError::connection_failed(self.address, e))?;
 
         Ok(())
     }
 
     /// Receive the next response (for streaming operations)
     pub async fn receive(&mut self) -> CliResult<ManagementResponse> {
-        let response = tokio::time::timeout(
-            self.config.server.timeout,
-            self.connection.receive()
-        )
-        .await
-        .map_err(|_| CliError::ConnectionTimeout {
-            timeout: self.config.server.timeout.as_secs(),
-        })?
-        .map_err(|e| CliError::connection_failed(self.address, e))?;
+        let response = tokio::time::timeout(self.config.server.timeout, self.connection.receive())
+            .await
+            .map_err(|_| CliError::ConnectionTimeout {
+                timeout: self.config.server.timeout.as_secs(),
+            })?
+            .map_err(|e| CliError::connection_failed(self.address, e))?;
 
         Ok(response)
     }
@@ -98,10 +89,8 @@ impl CliTheaterClient {
         let max_attempts = self.config.server.retry_attempts;
 
         while attempts < max_attempts {
-            match tokio::time::timeout(
-                self.config.server.timeout,
-                self.connection.connect()
-            ).await {
+            match tokio::time::timeout(self.config.server.timeout, self.connection.connect()).await
+            {
                 Ok(Ok(())) => return Ok(()),
                 Ok(Err(e)) => {
                     attempts += 1;
@@ -142,7 +131,10 @@ impl CliTheaterClient {
 // Helper functions for common operations
 
 /// List all actors with CLI error handling
-pub async fn list_actors(address: SocketAddr, config: &Config) -> CliResult<Vec<(theater::id::TheaterId, String)>> {
+pub async fn list_actors(
+    address: SocketAddr,
+    config: &Config,
+) -> CliResult<Vec<(theater::id::TheaterId, String)>> {
     let mut client = CliTheaterClient::new(address, config.clone());
     let response = client.send_command(ManagementCommand::ListActors).await?;
 
@@ -163,8 +155,10 @@ pub async fn stop_actor(address: SocketAddr, config: &Config, actor_id: &str) ->
     let theater_id = actor_id
         .parse()
         .map_err(|_| CliError::invalid_actor_id(actor_id))?;
-    
-    let response = client.send_command(ManagementCommand::StopActor { id: theater_id }).await?;
+
+    let response = client
+        .send_command(ManagementCommand::StopActor { id: theater_id })
+        .await?;
 
     match response {
         ManagementResponse::ActorStopped { .. } => Ok(()),
@@ -183,13 +177,19 @@ pub async fn stop_actor(address: SocketAddr, config: &Config, actor_id: &str) ->
 }
 
 /// Get actor state with CLI error handling
-pub async fn get_actor_state(address: SocketAddr, config: &Config, actor_id: &str) -> CliResult<Option<Vec<u8>>> {
+pub async fn get_actor_state(
+    address: SocketAddr,
+    config: &Config,
+    actor_id: &str,
+) -> CliResult<Option<Vec<u8>>> {
     let mut client = CliTheaterClient::new(address, config.clone());
     let theater_id = actor_id
         .parse()
         .map_err(|_| CliError::invalid_actor_id(actor_id))?;
-    
-    let response = client.send_command(ManagementCommand::GetActorState { id: theater_id }).await?;
+
+    let response = client
+        .send_command(ManagementCommand::GetActorState { id: theater_id })
+        .await?;
 
     match response {
         ManagementResponse::ActorState { state, .. } => Ok(state),

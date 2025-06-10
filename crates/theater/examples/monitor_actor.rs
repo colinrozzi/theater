@@ -8,7 +8,7 @@ use theater::client::TheaterConnection;
 use theater::messages::{ActorResult, ActorStatus};
 use theater::theater_server::{ManagementCommand, ManagementResponse};
 use tokio::select;
-use tokio::time::{sleep, Duration, interval};
+use tokio::time::{interval, sleep, Duration};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -18,29 +18,31 @@ async fn main() -> Result<()> {
         eprintln!("Usage: {} <manifest_path> [server_address]", args[0]);
         std::process::exit(1);
     }
-    
+
     let manifest_path = &args[1];
-    let server_address = args.get(2)
+    let server_address = args
+        .get(2)
         .map(|s| s.as_str())
         .unwrap_or("127.0.0.1:4000")
         .parse()?;
-    
+
     println!("Connecting to server at {}", server_address);
-    
+
     // Set up connection
     let mut conn = TheaterConnection::new(server_address);
     conn.connect().await?;
-    
+
     println!("Starting actor from manifest: {}", manifest_path);
-    
+
     // Start actor as parent (to receive completion notifications)
     conn.send(ManagementCommand::StartActor {
         manifest: manifest_path.to_string(),
         initial_state: None,
         parent: true,
         subscribe: true, // Subscribe to events
-    }).await?;
-    
+    })
+    .await?;
+
     // Get the actor ID from the response
     let actor_id = loop {
         let response = conn.receive().await?;
@@ -48,13 +50,13 @@ async fn main() -> Result<()> {
             break id;
         }
     };
-    
+
     println!("Actor started with ID: {}", actor_id);
     println!("Monitoring actor lifecycle...");
-    
+
     // Set up a periodic status check (every 5 seconds)
     let mut heartbeat_interval = interval(Duration::from_secs(5));
-    
+
     // Monitor the actor
     loop {
         select! {
@@ -85,7 +87,7 @@ async fn main() -> Result<()> {
                     },
                     Ok(ManagementResponse::ActorStatus { status, .. }) => {
                         println!("Actor status: {:?}", status);
-                        
+
                         // If the actor is no longer running, exit
                         if !matches!(status, ActorStatus::Running) {
                             println!("Actor is no longer running: {:?}", status);
@@ -101,13 +103,13 @@ async fn main() -> Result<()> {
                     }
                 }
             },
-            
+
             // Periodic heartbeat to check status
             _ = heartbeat_interval.tick() => {
                 println!("Sending status check...");
                 conn.send(ManagementCommand::GetActorStatus { id: actor_id.clone() }).await?;
             },
-            
+
             // Optional timeout (1 hour)
             _ = sleep(Duration::from_secs(3600)) => {
                 println!("Monitoring timeout reached (1 hour)");
@@ -115,9 +117,9 @@ async fn main() -> Result<()> {
             }
         }
     }
-    
+
     println!("Actor monitoring complete");
     conn.close().await?;
-    
+
     Ok(())
 }

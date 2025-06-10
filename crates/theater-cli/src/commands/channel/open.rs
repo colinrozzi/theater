@@ -9,7 +9,7 @@ use std::path::PathBuf;
 use tokio::sync::mpsc;
 use tracing::{debug, error};
 
-use crate::{CommandContext, error::CliError, output::formatters::ChannelOpened};
+use crate::{error::CliError, output::formatters::ChannelOpened, CommandContext};
 use theater::id::TheaterId;
 
 #[derive(Debug, Parser)]
@@ -40,8 +40,9 @@ pub async fn execute_async(args: &OpenArgs, ctx: &CommandContext) -> Result<(), 
         message.clone().into_bytes()
     } else if let Some(file_path) = &args.file {
         debug!("Reading initial message from file: {:?}", file_path);
-        fs::read(file_path)
-            .map_err(|e| CliError::file_operation_failed("read message file", file_path.display().to_string(), e))?
+        fs::read(file_path).map_err(|e| {
+            CliError::file_operation_failed("read message file", file_path.display().to_string(), e)
+        })?
     } else {
         // Default initial message
         serde_json::to_vec(&serde_json::json!({
@@ -50,7 +51,13 @@ pub async fn execute_async(args: &OpenArgs, ctx: &CommandContext) -> Result<(), 
                 "timestamp": chrono::Utc::now().timestamp_millis(),
             }
         }))
-        .map_err(|e| CliError::invalid_input("initial_message", "json", format!("Failed to create default initial message: {}", e)))?
+        .map_err(|e| {
+            CliError::invalid_input(
+                "initial_message",
+                "json",
+                format!("Failed to create default initial message: {}", e),
+            )
+        })?
     };
 
     debug!("Initial message size: {} bytes", initial_message.len());
@@ -75,15 +82,24 @@ async fn run_channel_session(
 ) -> Result<(), CliError> {
     // Create client and connect
     let client = ctx.create_client();
-    client.connect().await
+    client
+        .connect()
+        .await
         .map_err(|e| CliError::connection_failed(server_addr, e))?;
 
     // Capture initial message size before move
     let initial_message_size = initial_message.len();
-    
+
     // Open a channel to the actor
-    let channel_id = client.open_channel(&actor_id.to_string(), initial_message).await
-        .map_err(|e| CliError::actor_not_found(format!("Failed to open channel to actor {}: {}", actor_id, e)))?;
+    let channel_id = client
+        .open_channel(&actor_id.to_string(), initial_message)
+        .await
+        .map_err(|e| {
+            CliError::actor_not_found(format!(
+                "Failed to open channel to actor {}: {}",
+                actor_id, e
+            ))
+        })?;
     // Create channel info for output
     let channel_info = ChannelOpened {
         actor_id: actor_id.clone(),
@@ -102,11 +118,18 @@ async fn run_channel_session(
     }
 
     // Set up the REPL for interactive mode
-    let mut rl = DefaultEditor::new()
-        .map_err(|e| CliError::invalid_input("readline", "setup", format!("Failed to setup readline: {}", e)))?;
-    
-    println!("{} Enter commands ('help' for available commands, 'exit' to quit)",
-        style("i").blue().bold());
+    let mut rl = DefaultEditor::new().map_err(|e| {
+        CliError::invalid_input(
+            "readline",
+            "setup",
+            format!("Failed to setup readline: {}", e),
+        )
+    })?;
+
+    println!(
+        "{} Enter commands ('help' for available commands, 'exit' to quit)",
+        style("i").blue().bold()
+    );
 
     // Create a task to listen for input
     let (input_tx, mut input_rx) = mpsc::channel::<String>(32);
@@ -267,7 +290,9 @@ async fn run_channel_session(
     input_task.abort();
 
     // Close the channel
-    client.close_channel(&channel_id).await
+    client
+        .close_channel(&channel_id)
+        .await
         .map_err(|e| CliError::actor_not_found(format!("Failed to close channel: {}", e)))?;
 
     println!("{} Channel closed", style("✓").green().bold());
@@ -287,6 +312,8 @@ pub fn execute(args: &OpenArgs, verbose: bool, json: bool) -> Result<()> {
             verbose,
             json,
         };
-        execute_async(args, &ctx).await.map_err(|e| anyhow::Error::from(e))
+        execute_async(args, &ctx)
+            .await
+            .map_err(|e| anyhow::Error::from(e))
     })
 }

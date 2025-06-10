@@ -145,7 +145,7 @@ pub async fn execute_async(args: &StartArgs, ctx: &CommandContext) -> Result<(),
                         }
                         ManagementResponse::ActorEvent { event } => {
                             if args.subscribe {
-                                display_single_event(&event, &args.format, ctx.json)
+                                display_single_event(&event, &args.format)
                                     .map_err(|e| CliError::invalid_input("event_display", "event", e.to_string()))?;
                             }
                         }

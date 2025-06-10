@@ -88,6 +88,9 @@ impl OutputManager {
             "table" => {
                 data.format_table(self)?;
             }
+            "detailed" => {
+                data.format_detailed(self)?;
+            }
             _ => {
                 return Err(crate::error::CliError::invalid_input(
                     "format",
@@ -128,7 +131,7 @@ impl OutputManager {
 
         // Calculate column widths
         let mut widths: Vec<usize> = headers.iter().map(|h| h.len()).collect();
-        
+
         for row in rows {
             for (i, cell) in row.iter().enumerate() {
                 if i < widths.len() {
@@ -141,7 +144,7 @@ impl OutputManager {
         if let Some(max_width) = self.config.max_width {
             let available_width = max_width.saturating_sub(widths.len() * 3); // Account for separators
             let total_width: usize = widths.iter().sum();
-            
+
             if total_width > available_width {
                 // Proportionally reduce column widths
                 let scale = available_width as f64 / total_width as f64;
@@ -154,8 +157,9 @@ impl OutputManager {
         // Print header
         print!("│");
         for (i, header) in headers.iter().enumerate() {
-            print!(" {:width$} │", 
-                self.theme.table_header().apply_to(header), 
+            print!(
+                " {:width$} │",
+                self.theme.table_header().apply_to(header),
                 width = widths[i]
             );
         }
@@ -178,7 +182,7 @@ impl OutputManager {
                 } else {
                     cell.clone()
                 };
-                
+
                 print!(" {:width$} │", truncated, width = widths[i]);
             }
             println!();
@@ -193,6 +197,7 @@ pub trait OutputFormat {
     fn format_compact(&self, output: &OutputManager) -> CliResult<()>;
     fn format_pretty(&self, output: &OutputManager) -> CliResult<()>;
     fn format_table(&self, output: &OutputManager) -> CliResult<()>;
+    fn format_detailed(&self, output: &OutputManager) -> CliResult<()>;
 }
 
 #[cfg(test)]
@@ -208,7 +213,7 @@ mod tests {
             timestamps: true,
             max_width: Some(100),
         };
-        
+
         let output = OutputManager::new(config);
         assert_eq!(output.config().default_format, "json");
     }

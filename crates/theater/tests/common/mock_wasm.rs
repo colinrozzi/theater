@@ -135,7 +135,10 @@ impl MockActorComponentFactory {
         let component = MockActorComponent::new(&config, store).await?;
 
         // Set up standard functions
-        component.set_function_result("theater:simple/actor.init", mock_function_result(()).unwrap());
+        component.set_function_result(
+            "theater:simple/actor.init",
+            mock_function_result(()).unwrap(),
+        );
 
         component.set_function_result(
             "theater:simple/actor.handle_message",

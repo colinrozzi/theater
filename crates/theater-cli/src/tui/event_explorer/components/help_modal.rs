@@ -1,5 +1,5 @@
 use ratatui::{
-    layout::{Rect},
+    layout::Rect,
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Clear, Paragraph, Wrap},
@@ -13,10 +13,10 @@ pub fn render_help_modal(f: &mut Frame, _app: &EventExplorerApp, area: Rect) {
     // Calculate modal size (80% of screen, centered)
     let modal_width = (area.width as f32 * 0.8) as u16;
     let modal_height = (area.height as f32 * 0.8) as u16;
-    
+
     let modal_x = (area.width.saturating_sub(modal_width)) / 2;
     let modal_y = (area.height.saturating_sub(modal_height)) / 2;
-    
+
     let modal_area = Rect {
         x: modal_x,
         y: modal_y,
@@ -37,13 +37,17 @@ pub fn render_help_modal(f: &mut Frame, _app: &EventExplorerApp, area: Rect) {
                 // Title lines
                 Line::from(Span::styled(
                     line,
-                    Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD),
                 ))
             } else if line.ends_with(":") {
                 // Section headers
                 Line::from(Span::styled(
                     line,
-                    Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
                 ))
             } else if line.starts_with("  ") {
                 // Key descriptions - parse key and description
@@ -54,7 +58,9 @@ pub fn render_help_modal(f: &mut Frame, _app: &EventExplorerApp, area: Rect) {
                         Span::styled("  ", Style::default()),
                         Span::styled(
                             key_part,
-                            Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
+                            Style::default()
+                                .fg(Color::Green)
+                                .add_modifier(Modifier::BOLD),
                         ),
                         Span::styled(desc_part, Style::default().fg(Color::White)),
                     ])

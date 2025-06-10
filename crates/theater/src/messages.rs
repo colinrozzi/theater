@@ -707,9 +707,7 @@ pub enum ChannelEvent {
         message: Vec<u8>,
     },
     /// A channel was closed
-    Close {
-        channel_id: ChannelId,
-    },
+    Close { channel_id: ChannelId },
 }
 
 #[derive(Debug, Clone)]

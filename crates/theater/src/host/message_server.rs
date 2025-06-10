@@ -864,7 +864,7 @@ impl MessageServerHost {
                 );
 
                 let result = actor_handle
-                    .call_function::<(String, Vec<u8>,), (ChannelAccept,)>(
+                    .call_function::<(String, Vec<u8>), (ChannelAccept,)>(
                         "theater:simple/message-server-client.handle-channel-open".to_string(),
                         (channel_id.to_string(), data),
                     )

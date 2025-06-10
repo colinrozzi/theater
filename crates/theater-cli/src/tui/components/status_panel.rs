@@ -18,10 +18,10 @@ pub fn render_status_panel(f: &mut Frame, app: &TuiApp, area: Rect) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(6),  // Actor info
-            Constraint::Length(4),  // Status
-            Constraint::Length(3),  // Stats
-            Constraint::Min(3),     // Recent lifecycle events
+            Constraint::Length(6), // Actor info
+            Constraint::Length(4), // Status
+            Constraint::Length(3), // Stats
+            Constraint::Min(3),    // Recent lifecycle events
         ])
         .split(Rect {
             x: area.x + 1,
@@ -35,13 +35,13 @@ pub fn render_status_panel(f: &mut Frame, app: &TuiApp, area: Rect) {
 
     // Actor Info Section
     render_actor_info(f, app, chunks[0]);
-    
+
     // Status Section
     render_status_info(f, app, chunks[1]);
-    
+
     // Stats Section
     render_stats(f, app, chunks[2]);
-    
+
     // Recent Events Section
     render_recent_lifecycle_events(f, app, chunks[3]);
 }
@@ -61,7 +61,12 @@ fn render_actor_info(f: &mut Frame, app: &TuiApp, area: Rect) {
     let lines = vec![
         Line::from(vec![
             Span::styled(status_symbol, Style::default()),
-            Span::styled(format!(" Actor {}", status_text), Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                format!(" Actor {}", status_text),
+                Style::default()
+                    .fg(Color::White)
+                    .add_modifier(Modifier::BOLD),
+            ),
         ]),
         Line::from(vec![
             Span::styled("   ID: ", Style::default().fg(Color::Gray)),
@@ -83,14 +88,19 @@ fn render_actor_info(f: &mut Frame, app: &TuiApp, area: Rect) {
 }
 
 fn render_status_info(f: &mut Frame, app: &TuiApp, area: Rect) {
-    let last_event_time = app.events.back()
+    let last_event_time = app
+        .events
+        .back()
         .map(|e| e.timestamp.format("%H:%M:%S").to_string())
         .unwrap_or_else(|| "Never".to_string());
 
     let lines = vec![
-        Line::from(vec![
-            Span::styled("🟡 Recent Activity", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
-        ]),
+        Line::from(vec![Span::styled(
+            "🟡 Recent Activity",
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        )]),
         Line::from(vec![
             Span::styled("   Last Event: ", Style::default().fg(Color::Gray)),
             Span::styled(last_event_time, Style::default().fg(Color::White)),
@@ -103,19 +113,34 @@ fn render_status_info(f: &mut Frame, app: &TuiApp, area: Rect) {
 }
 
 fn render_stats(f: &mut Frame, app: &TuiApp, area: Rect) {
-    let error_color = if app.error_count > 0 { Color::Red } else { Color::Green };
+    let error_color = if app.error_count > 0 {
+        Color::Red
+    } else {
+        Color::Green
+    };
     let pause_status = if app.paused { " (PAUSED)" } else { "" };
 
     let lines = vec![
         Line::from(vec![
-            Span::styled("📊 Statistics", Style::default().fg(Color::Blue).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                "📊 Statistics",
+                Style::default()
+                    .fg(Color::Blue)
+                    .add_modifier(Modifier::BOLD),
+            ),
             Span::styled(pause_status, Style::default().fg(Color::Yellow)),
         ]),
         Line::from(vec![
             Span::styled("   Events: ", Style::default().fg(Color::Gray)),
-            Span::styled(app.event_count.to_string(), Style::default().fg(Color::White)),
+            Span::styled(
+                app.event_count.to_string(),
+                Style::default().fg(Color::White),
+            ),
             Span::styled("   Errors: ", Style::default().fg(Color::Gray)),
-            Span::styled(app.error_count.to_string(), Style::default().fg(error_color)),
+            Span::styled(
+                app.error_count.to_string(),
+                Style::default().fg(error_color),
+            ),
         ]),
     ];
 
@@ -128,9 +153,12 @@ fn render_recent_lifecycle_events(f: &mut Frame, app: &TuiApp, area: Rect) {
         return;
     }
 
-    let title_line = Line::from(vec![
-        Span::styled("⚡ Lifecycle Events", Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD)),
-    ]);
+    let title_line = Line::from(vec![Span::styled(
+        "⚡ Lifecycle Events",
+        Style::default()
+            .fg(Color::Magenta)
+            .add_modifier(Modifier::BOLD),
+    )]);
 
     let mut lines = vec![title_line];
 
@@ -153,17 +181,24 @@ fn render_recent_lifecycle_events(f: &mut Frame, app: &TuiApp, area: Rect) {
         };
 
         lines.push(Line::from(vec![
-            Span::styled(format!("   [{}] ", timestamp), Style::default().fg(Color::Gray)),
+            Span::styled(
+                format!("   [{}] ", timestamp),
+                Style::default().fg(Color::Gray),
+            ),
             Span::styled(symbol, Style::default()),
-            Span::styled(format!(" {}", event.message), Style::default().fg(Color::White)),
+            Span::styled(
+                format!(" {}", event.message),
+                Style::default().fg(Color::White),
+            ),
         ]));
     }
 
     // Fill remaining space if no events
     if app.lifecycle_events.is_empty() {
-        lines.push(Line::from(vec![
-            Span::styled("   No lifecycle events yet", Style::default().fg(Color::Gray)),
-        ]));
+        lines.push(Line::from(vec![Span::styled(
+            "   No lifecycle events yet",
+            Style::default().fg(Color::Gray),
+        )]));
     }
 
     let paragraph = Paragraph::new(lines);
@@ -173,7 +208,7 @@ fn render_recent_lifecycle_events(f: &mut Frame, app: &TuiApp, area: Rect) {
 fn format_duration(start_time: chrono::DateTime<chrono::Utc>) -> String {
     let duration = chrono::Utc::now().signed_duration_since(start_time);
     let total_seconds = duration.num_seconds();
-    
+
     if total_seconds < 60 {
         format!("{}s", total_seconds)
     } else if total_seconds < 3600 {

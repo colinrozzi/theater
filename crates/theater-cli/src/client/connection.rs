@@ -1,8 +1,8 @@
-use std::net::SocketAddr;
 use anyhow::Result;
 use bytes::Bytes;
 use futures::sink::SinkExt;
 use futures::stream::StreamExt;
+use std::net::SocketAddr;
 use tokio::net::TcpStream;
 use tokio::time::timeout;
 use tokio_util::codec::Framed;
@@ -87,15 +87,17 @@ impl Connection {
     }
 
     /// Send a command and wait for a response
-    pub async fn send_command(&mut self, command: ManagementCommand) -> CliResult<ManagementResponse> {
+    pub async fn send_command(
+        &mut self,
+        command: ManagementCommand,
+    ) -> CliResult<ManagementResponse> {
         self.ensure_connected().await?;
 
         let framed = self.framed.as_mut().unwrap();
 
         // Serialize and send the command
         debug!("Sending command: {:?}", command);
-        let command_bytes = serde_json::to_vec(&command)
-            .map_err(CliError::Serialization)?;
+        let command_bytes = serde_json::to_vec(&command).map_err(CliError::Serialization)?;
 
         // Send with timeout - FragmentingCodec will handle chunking if needed - FragmentingCodec will handle chunking if needed
         let send_future = framed.send(Bytes::from(command_bytes));
@@ -121,8 +123,8 @@ impl Connection {
 
         match response_bytes {
             Some(Ok(bytes)) => {
-                let response: ManagementResponse = serde_json::from_slice(&bytes)
-                    .map_err(|e| CliError::ProtocolError {
+                let response: ManagementResponse =
+                    serde_json::from_slice(&bytes).map_err(|e| CliError::ProtocolError {
                         reason: format!("Failed to deserialize response: {}", e),
                     })?;
                 debug!("Received response: {:?}", response);
@@ -149,8 +151,7 @@ impl Connection {
 
         // Serialize and send the command
         debug!("Sending command (no response expected): {:?}", command);
-        let command_bytes = serde_json::to_vec(&command)
-            .map_err(CliError::Serialization)?;
+        let command_bytes = serde_json::to_vec(&command).map_err(CliError::Serialization)?;
 
         // Send with timeout
         let send_future = framed.send(Bytes::from(command_bytes));
@@ -180,8 +181,8 @@ impl Connection {
 
             match response_bytes {
                 Some(Ok(bytes)) => {
-                    let response: ManagementResponse = serde_json::from_slice(&bytes)
-                        .map_err(|e| CliError::ProtocolError {
+                    let response: ManagementResponse =
+                        serde_json::from_slice(&bytes).map_err(|e| CliError::ProtocolError {
                             reason: format!("Failed to deserialize response: {}", e),
                         })?;
                     debug!("Received streaming response: {:?}", response);
@@ -243,7 +244,7 @@ mod tests {
         let config = Config::default();
         let addr = "127.0.0.1:9000".parse().unwrap();
         let conn = Connection::new(addr, config);
-        
+
         assert_eq!(conn.address(), addr);
         assert!(!conn.is_connected());
         assert!(conn.last_error().is_none());

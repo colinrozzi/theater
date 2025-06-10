@@ -27,15 +27,14 @@ pub async fn execute_async(args: &CompletionArgs, ctx: &CommandContext) -> CliRe
     match &args.output {
         Some(output_path) => {
             debug!("Writing completion to file: {:?}", output_path);
-            
-            let mut file = std::fs::File::create(output_path)
-                .map_err(|e| CliError::IoError {
-                    operation: format!("create completion file: {}", output_path.display()),
-                    source: e,
-                })?;
-            
+
+            let mut file = std::fs::File::create(output_path).map_err(|e| CliError::IoError {
+                operation: format!("create completion file: {}", output_path.display()),
+                source: e,
+            })?;
+
             generate(args.shell, &mut app, &app_name, &mut file);
-            
+
             ctx.output.success(&format!(
                 "Shell completion for {} written to: {}",
                 args.shell,
@@ -121,9 +120,7 @@ To install Elvish completions:
    eval (theater completion elvish | slurp)
 "#
         }
-        _ => {
-            "Please refer to your shell's documentation for completion installation."
-        }
+        _ => "Please refer to your shell's documentation for completion installation.",
     };
 
     ctx.output.info(instructions)?;

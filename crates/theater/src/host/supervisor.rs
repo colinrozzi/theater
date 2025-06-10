@@ -347,7 +347,8 @@ impl SupervisorHost {
                             Err(e) => {
                                 // Record list children error event
                                 ctx.data_mut().record_event(ChainEventData {
-                                    event_type: "theater:simple/supervisor/list-children".to_string(),
+                                    event_type: "theater:simple/supervisor/list-children"
+                                        .to_string(),
                                     data: EventData::Supervisor(SupervisorEventData::Error {
                                         operation: "list-children".to_string(),
                                         child_id: None,
@@ -773,8 +774,9 @@ impl SupervisorHost {
                                     Err(e) => {
                                         // Record error event
                                         ctx.data_mut().record_event(ChainEventData {
-                                            event_type: "theater:simple/supervisor/get-child-events"
-                                                .to_string(),
+                                            event_type:
+                                                "theater:simple/supervisor/get-child-events"
+                                                    .to_string(),
                                             data: EventData::Supervisor(
                                                 SupervisorEventData::Error {
                                                     operation: "get-child-events".to_string(),
@@ -949,13 +951,17 @@ impl SupervisorHost {
             }
             ActorResult::Success(child_result) => {
                 info!("Child result: {:?}", child_result);
-                actor_handle.call_function::<(String, Option<Vec<u8>>), ()>(
-                    "theater:simple/supervisor-handlers.handle-child-exit".to_string(),
-                    (child_result.actor_id.to_string(), child_result.result.into()),
-                ).await?;
+                actor_handle
+                    .call_function::<(String, Option<Vec<u8>>), ()>(
+                        "theater:simple/supervisor-handlers.handle-child-exit".to_string(),
+                        (
+                            child_result.actor_id.to_string(),
+                            child_result.result.into(),
+                        ),
+                    )
+                    .await?;
             }
         }
-
 
         Ok(())
     }

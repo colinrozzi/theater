@@ -636,7 +636,7 @@ impl ProcessHost {
                             tokio::spawn(async move { // actor_handle_clone is available in this scope
                                 // Move ownership of the child into this task
                                 if let Ok(status) = child.wait().await {
-                                    let exit_code = status.code().unwrap_or(-1);
+                                    let exit_code = status.code().unwrap_or(-10);
                                     
                                     // Create the event data
                                     let event_data = ChainEventData {

@@ -51,6 +51,9 @@ pub struct EventsArgs {
     /// Show detailed event information
     #[arg(short = 'd', long)]
     pub detailed: bool,
+
+    #[arg(long, short = 'f', default_value = "pretty")]
+    pub format: Option<String>,
 }
 
 /// Execute the events command asynchronously with modern patterns
@@ -98,8 +101,14 @@ pub async fn execute_async(args: &EventsArgs, ctx: &CommandContext) -> CliResult
     };
 
     // Output using the configured format
-    let format = if ctx.json { Some("json") } else { None };
-    ctx.output.output(&actor_events, format)?;
+    let format = if let Some(fmt) = &args.format {
+        fmt.clone()
+    } else if ctx.json {
+        "json".to_string()
+    } else {
+        "pretty".to_string()
+    };
+    ctx.output.output(&actor_events, Some(&format))?;
 
     Ok(())
 }
@@ -302,6 +311,7 @@ mod tests {
             sort: "chain".to_string(),
             reverse: false,
             detailed: false,
+            format: None,
         };
         let config = Config::default();
         let output = OutputManager::new(config.output.clone());
