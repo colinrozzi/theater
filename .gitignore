@@ -14,3 +14,6 @@ note.md
 book/book/
 /chains
 /events
+git.json
+inline-chat.log
+theater-client.log
