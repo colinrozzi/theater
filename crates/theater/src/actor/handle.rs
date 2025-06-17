@@ -14,6 +14,8 @@ use crate::actor::types::{ActorError, ActorOperation, DEFAULT_OPERATION_TIMEOUT}
 use crate::chain::ChainEvent;
 use crate::metrics::ActorMetrics;
 
+use super::types::{ActorControl, ActorInfo};
+
 /// # ActorHandle
 ///
 /// A handle to an actor in the Theater system, providing methods to interact with the actor.
@@ -26,6 +28,8 @@ use crate::metrics::ActorMetrics;
 #[derive(Clone)]
 pub struct ActorHandle {
     operation_tx: mpsc::Sender<ActorOperation>,
+    info_tx: mpsc::Sender<ActorInfo>,
+    control_tx: mpsc::Sender<ActorControl>,
 }
 
 impl ActorHandle {
@@ -38,8 +42,16 @@ impl ActorHandle {
     /// ## Returns
     ///
     /// A new ActorHandle instance.
-    pub fn new(operation_tx: mpsc::Sender<ActorOperation>) -> Self {
-        Self { operation_tx }
+    pub fn new(
+        operation_tx: mpsc::Sender<ActorOperation>,
+        info_tx: mpsc::Sender<ActorInfo>,
+        control_tx: mpsc::Sender<ActorControl>,
+    ) -> Self {
+        Self {
+            operation_tx,
+            info_tx,
+            control_tx,
+        }
     }
 
     /// Calls a function on the actor with the given name and parameters.
@@ -127,8 +139,8 @@ impl ActorHandle {
     pub async fn get_state(&self) -> Result<Option<Vec<u8>>, ActorError> {
         let (tx, rx) = oneshot::channel();
 
-        self.operation_tx
-            .send(ActorOperation::GetState { response_tx: tx })
+        self.info_tx
+            .send(ActorInfo::GetState { response_tx: tx })
             .await
             .map_err(|e| {
                 error!("Failed to send GetState operation: {}", e);
@@ -169,8 +181,8 @@ impl ActorHandle {
     pub async fn get_chain(&self) -> Result<Vec<ChainEvent>, ActorError> {
         let (tx, rx) = oneshot::channel();
 
-        self.operation_tx
-            .send(ActorOperation::GetChain { response_tx: tx })
+        self.info_tx
+            .send(ActorInfo::GetChain { response_tx: tx })
             .await
             .map_err(|e| {
                 error!("Failed to send GetChain operation: {}", e);
@@ -211,8 +223,8 @@ impl ActorHandle {
     pub async fn get_metrics(&self) -> Result<ActorMetrics, ActorError> {
         let (tx, rx) = oneshot::channel();
 
-        self.operation_tx
-            .send(ActorOperation::GetMetrics { response_tx: tx })
+        self.info_tx
+            .send(ActorInfo::GetMetrics { response_tx: tx })
             .await
             .map_err(|e| {
                 error!("Failed to send GetMetrics operation: {}", e);
@@ -253,8 +265,8 @@ impl ActorHandle {
     pub async fn shutdown(&self) -> Result<(), ActorError> {
         let (tx, rx) = oneshot::channel();
 
-        self.operation_tx
-            .send(ActorOperation::Shutdown { response_tx: tx })
+        self.control_tx
+            .send(ActorControl::Shutdown { response_tx: tx })
             .await
             .map_err(|e| {
                 error!("Failed to send Shutdown operation: {}", e);

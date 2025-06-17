@@ -77,6 +77,11 @@ pub enum ActorError {
     #[error("Actor is paused")]
     #[component(name = "actor-paused")]
     Paused,
+
+    /// Actor is not paused
+    #[error("Actor is not paused")]
+    #[component(name = "actor-not-paused")]
+    NotPaused,
 }
 
 #[derive(Debug, Clone, ComponentType, Lift, Lower, Serialize, Deserialize)]
@@ -133,6 +138,7 @@ impl From<ActorError> for WitActorError {
                 (WitErrorType::UpdateComponentError, Some(data.into_bytes()))
             }
             ActorError::Paused => (WitErrorType::Paused, None),
+            ActorError::NotPaused => (WitErrorType::Paused, None),
             ActorError::UnexpectedError(data) => (WitErrorType::Internal, Some(data.into_bytes())),
         };
         Self { error_type, data }
@@ -146,6 +152,7 @@ impl From<ActorError> for WitActorError {
 /// This enum defines the message types that can be sent to an `ActorRuntime` via
 /// its operation channel. Each variant includes the necessary data for the operation
 /// and a oneshot channel sender for returning the result.
+#[derive(Debug)]
 pub enum ActorOperation {
     /// Call a WebAssembly function in the actor
     CallFunction {
@@ -156,29 +163,6 @@ pub enum ActorOperation {
         /// Channel to send the result back to the caller
         response_tx: oneshot::Sender<Result<Vec<u8>, ActorError>>,
     },
-    /// Retrieve current metrics for the actor
-    GetMetrics {
-        /// Channel to send metrics back to the caller
-        response_tx: oneshot::Sender<Result<ActorMetrics, ActorError>>,
-    },
-    /// Initiate actor shutdown
-    Shutdown {
-        /// Channel to confirm shutdown completion
-        response_tx: oneshot::Sender<Result<(), ActorError>>,
-    },
-    /// Retrieve the actor's event chain (audit log)
-    GetChain {
-        /// Channel to send chain events back to the caller
-        response_tx: oneshot::Sender<Result<Vec<crate::ChainEvent>, ActorError>>,
-    },
-    SaveChain {
-        response_tx: oneshot::Sender<Result<(), ActorError>>,
-    },
-    /// Retrieve the actor's current state
-    GetState {
-        /// Channel to send state back to the caller
-        response_tx: oneshot::Sender<Result<Option<Vec<u8>>, ActorError>>,
-    },
     /// Update a WebAssembly component in the actor
     UpdateComponent {
         /// Address of the component to update
@@ -186,6 +170,10 @@ pub enum ActorOperation {
         /// Channel to send the result back to the caller
         response_tx: oneshot::Sender<Result<(), ActorError>>,
     },
+}
+
+#[derive(Debug)]
+pub enum ActorControl {
     /// Pause the actor
     Pause {
         /// Channel to confirm pause completion
@@ -195,5 +183,32 @@ pub enum ActorOperation {
     Resume {
         /// Channel to confirm resume completion
         response_tx: oneshot::Sender<Result<(), ActorError>>,
+    },
+    /// Initiate actor shutdown
+    Shutdown {
+        /// Channel to confirm shutdown completion
+        response_tx: oneshot::Sender<Result<(), ActorError>>,
+    },
+}
+
+#[derive(Debug)]
+pub enum ActorInfo {
+    /// Retrieve the actor's current state
+    GetState {
+        /// Channel to send state back to the caller
+        response_tx: oneshot::Sender<Result<Option<Vec<u8>>, ActorError>>,
+    },
+    /// Retrieve the actor's event chain (audit log)
+    GetChain {
+        /// Channel to send chain events back to the caller
+        response_tx: oneshot::Sender<Result<Vec<ChainEvent>, ActorError>>,
+    },
+    SaveChain {
+        response_tx: oneshot::Sender<Result<(), ActorError>>,
+    },
+    /// Retrieve performance metrics for the actor
+    GetMetrics {
+        /// Channel to send metrics back to the caller
+        response_tx: oneshot::Sender<Result<ActorMetrics, ActorError>>,
     },
 }

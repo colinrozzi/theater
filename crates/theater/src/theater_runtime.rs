@@ -5,7 +5,7 @@
 //! the entire system.
 
 use crate::actor::runtime::{ActorRuntime, StartActorResult};
-use crate::actor::types::{ActorError, ActorOperation};
+use crate::actor::types::{ActorControl, ActorError, ActorInfo, ActorOperation};
 use crate::chain::ChainEvent;
 use crate::id::TheaterId;
 use crate::messages::{
@@ -125,6 +125,10 @@ pub struct ActorProcess {
     pub mailbox_tx: mpsc::Sender<ActorMessage>,
     /// Channel for sending operations to the actor
     pub operation_tx: mpsc::Sender<ActorOperation>,
+    /// Channel for sending actor information commands
+    pub info_tx: mpsc::Sender<ActorInfo>,
+    /// Channel for sending control commands to the actor
+    pub control_tx: mpsc::Sender<ActorControl>,
     /// Set of child actor IDs
     pub children: HashSet<TheaterId>,
     /// Current status of the actor
@@ -843,10 +847,14 @@ impl TheaterRuntime {
         let mut shutdown_controller = ShutdownController::new();
         let (mailbox_tx, mailbox_rx) = mpsc::channel(100);
         let (operation_tx, operation_rx) = mpsc::channel(100);
+        let (info_tx, info_rx) = mpsc::channel(100);
+        let (control_tx, control_rx) = mpsc::channel(100);
         let theater_tx = self.theater_tx.clone();
 
         let shutdown_receiver = shutdown_controller.subscribe();
         let actor_operation_tx = operation_tx.clone();
+        let actor_info_tx = info_tx.clone();
+        let actor_control_tx = control_tx.clone();
         let shutdown_receiver_clone = shutdown_receiver;
         let actor_sender = mailbox_tx.clone();
 
@@ -874,6 +882,10 @@ impl TheaterRuntime {
                 mailbox_rx,
                 operation_rx,
                 actor_operation_tx,
+                info_rx,
+                actor_info_tx,
+                control_rx,
+                actor_control_tx,
                 init,
                 shutdown_receiver_clone,
                 response_tx,
@@ -901,6 +913,8 @@ impl TheaterRuntime {
                     process: actor_runtime_process,
                     mailbox_tx,
                     operation_tx,
+                    info_tx,
+                    control_tx,
                     children: HashSet::new(),
                     status: ActorStatus::Running,
                     manifest_path: manifest_path.clone(),
@@ -1025,14 +1039,11 @@ impl TheaterRuntime {
             for child_id in &proc.children.clone() {
                 if let Some(child_proc) = self.actors.get_mut(&child_id.clone()) {
                     let child_id = child_proc.actor_id.clone();
-                    let operation_tx = child_proc.operation_tx.clone();
+                    let control_tx = child_proc.control_tx.clone();
                     tokio::spawn(async move {
                         debug!("Pausing child actor: {:?}", child_id);
                         let (response_tx, response_rx) = oneshot::channel();
-                        if let Err(e) = operation_tx
-                            .send(ActorOperation::Pause { response_tx })
-                            .await
-                        {
+                        if let Err(e) = control_tx.send(ActorControl::Pause { response_tx }).await {
                             error!("Failed to send error message to child actor: {}", e);
                         }
                         if let Ok(result) = response_rx.await {
@@ -1090,8 +1101,8 @@ impl TheaterRuntime {
                     oneshot::Sender<Result<(), ActorError>>,
                     oneshot::Receiver<Result<(), ActorError>>,
                 ) = oneshot::channel();
-                proc.operation_tx
-                    .send(ActorOperation::SaveChain { response_tx: tx })
+                proc.info_tx
+                    .send(ActorInfo::SaveChain { response_tx: tx })
                     .await?;
 
                 match rx.await {
@@ -1232,8 +1243,8 @@ impl TheaterRuntime {
                 oneshot::Sender<Result<Option<Vec<u8>>, ActorError>>,
                 oneshot::Receiver<Result<Option<Vec<u8>>, ActorError>>,
             ) = oneshot::channel();
-            proc.operation_tx
-                .send(ActorOperation::GetState { response_tx: tx })
+            proc.info_tx
+                .send(ActorInfo::GetState { response_tx: tx })
                 .await?;
 
             match rx.await {
@@ -1260,8 +1271,8 @@ impl TheaterRuntime {
             ) = oneshot::channel();
 
             if let Err(e) = proc
-                .operation_tx
-                .send(ActorOperation::GetChain { response_tx: tx })
+                .info_tx
+                .send(ActorInfo::GetChain { response_tx: tx })
                 .await
             {
                 return Err(TheaterRuntimeError::ChannelError(format!(
@@ -1295,8 +1306,8 @@ impl TheaterRuntime {
                 oneshot::Sender<Result<ActorMetrics, ActorError>>,
                 oneshot::Receiver<Result<ActorMetrics, ActorError>>,
             ) = oneshot::channel();
-            proc.operation_tx
-                .send(ActorOperation::GetMetrics { response_tx: tx })
+            proc.info_tx
+                .send(ActorInfo::GetMetrics { response_tx: tx })
                 .await?;
 
             match rx.await {

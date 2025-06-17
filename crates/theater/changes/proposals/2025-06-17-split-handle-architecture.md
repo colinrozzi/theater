@@ -94,13 +94,24 @@ Implement separate processing loops:
 - `controller.metrics()` sees live updates, not just final results
 - Consistency model remains the same as current implementation
 
-### 5. Resource Management
+### 5. Resource Management and Responsibility Separation
 
-**Internal Channel Management**: `ActorRuntime` manages both execution and control channels internally:
-- `TheaterRuntime` returns user-facing `(ActorExecutor, ActorController)` handles
-- `ActorRuntime` internally manages both `execution_tx` and `control_tx` channels
-- Single shutdown signal in `ActorRuntime` closes both channels simultaneously
-- When actor shuts down, both user handles become inert and return `ActorError::ChannelClosed`
+**Clear Separation of Concerns**:
+
+**TheaterRuntime Responsibilities**:
+- Creates `ActorRuntime` instance during spawn
+- Obtains execution and control channel senders from `ActorRuntime`
+- Creates user-facing `ActorExecutor` and `ActorController` handles
+- Returns `(ActorExecutor, ActorController)` tuple to user
+- Does NOT manage or track the dual channels directly
+
+**ActorRuntime Responsibilities**:
+- Creates and owns both `execution_tx` and `control_tx` channels internally
+- Provides channel senders to `TheaterRuntime` during initialization
+- Manages both execution and control processing loops
+- Handles unified shutdown when receiving shutdown signal
+- Closes both channels simultaneously during shutdown
+- Ensures both user handles become inert after shutdown
 
 ### 6. Error Handling
 
@@ -123,7 +134,21 @@ let metrics = actor.get_metrics().await?; // Blocked by slow_operation
 ```rust
 let (executor, controller) = theater.spawn_actor(manifest).await?;
 let result = executor.call_function("slow_operation", params).await?; // Can be slow
-let metrics = controller.metrics(); // Always instant (no await!)
+let metrics = controller.metrics().await; // Always instant from shared state
+```
+
+**Internal Architecture**:
+```rust
+// TheaterRuntime creates ActorRuntime and gets channels
+let actor_runtime = ActorRuntime::new(config, ...)?;
+let (execution_tx, control_tx) = actor_runtime.get_channels();
+
+// TheaterRuntime creates user handles
+let executor = ActorExecutor::new(actor_id, execution_tx);
+let controller = ActorController::new(actor_id, control_tx, shared_state);
+
+// Returns to user
+Ok((executor, controller))
 ```
 
 ## Implementation Plan
@@ -136,12 +161,13 @@ let metrics = controller.metrics(); // Always instant (no await!)
 - [ ] Add real-time state broadcasting with `watch::channel`
 
 ### Phase 2: Runtime Integration (Week 2)
-- [ ] Modify `TheaterRuntime::spawn_actor()` to return split handles
+- [ ] Update `ActorRuntime` to create and own both execution and control channels
 - [ ] Implement dual processing loops in `ActorRuntime`
 - [ ] Add execution handler for sequential operation processing
 - [ ] Add control handler with interrupt capabilities
-- [ ] Update `ActorRuntime` to manage both channels internally
-- [ ] Implement unified shutdown for both channels
+- [ ] Modify `TheaterRuntime::spawn_actor()` to obtain channels from `ActorRuntime`
+- [ ] Update `TheaterRuntime::spawn_actor()` to create and return split handles
+- [ ] Implement unified shutdown in `ActorRuntime` for both channels
 
 ### Phase 3: Safety and Control (Week 3)
 - [ ] Implement pause/resume functionality
@@ -189,8 +215,8 @@ All existing code using `ActorHandle` must be updated to use the new split handl
 - `src/actor/shared_state.rs` - Shared state management
 
 ### Modified Files
-- `src/theater_runtime.rs` - Update spawn_actor API
-- `src/actor/runtime.rs` - Implement dual processing loops and unified shutdown
+- `src/actor/runtime.rs` - Create/own channels, implement dual processing loops, unified shutdown
+- `src/theater_runtime.rs` - Update spawn_actor to get channels from ActorRuntime and return split handles
 - `src/actor/types.rs` - Add ActorError::Interrupted and update operation types
 - `src/actor/handle.rs` - Remove old ActorHandle
 - `src/messages.rs` - Update command types
