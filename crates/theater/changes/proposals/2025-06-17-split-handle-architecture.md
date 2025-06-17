@@ -84,9 +84,33 @@ Implement separate processing loops:
 
 1. **Execution Handler**: Processes `ExecutionOperation`s sequentially (like current implementation)
 2. **Control Handler**: Processes `ControlOperation`s with ability to interrupt execution
-3. **Shared State Management**: Real-time updates to shared state accessible instantly by controller
+3. **Shared State Management**: Real-time progressive updates to shared state accessible instantly by controller
 
-### 4. API Changes
+### 4. State Consistency Model
+
+**Progressive Updates**: Maintains the current chain event model where state is updated during operations:
+- Chain events continue to be added as operations progress (current behavior)
+- Shared state (`Arc<RwLock<T>>`) is updated in real-time during long-running operations
+- `controller.metrics()` sees live updates, not just final results
+- Consistency model remains the same as current implementation
+
+### 5. Resource Management
+
+**Internal Channel Management**: `ActorRuntime` manages both execution and control channels internally:
+- `TheaterRuntime` returns user-facing `(ActorExecutor, ActorController)` handles
+- `ActorRuntime` internally manages both `execution_tx` and `control_tx` channels
+- Single shutdown signal in `ActorRuntime` closes both channels simultaneously
+- When actor shuts down, both user handles become inert and return `ActorError::ChannelClosed`
+
+### 6. Error Handling
+
+**Interrupt Operations**: New error type for interrupted execution:
+- Add `ActorError::Interrupted` for operations stopped by control commands
+- Execution operations return `ActorError::Interrupted` when interrupted by `ForceStop`
+- Control operations return their specific error types (e.g., `ActorError::ChannelClosed`)
+- Failed execution operations with pending control operations return the execution error
+
+### 7. API Changes
 
 **Before (current)**:
 ```rust
@@ -105,6 +129,7 @@ let metrics = controller.metrics(); // Always instant (no await!)
 ## Implementation Plan
 
 ### Phase 1: Core Infrastructure (Week 1)
+- [ ] Add `ActorError::Interrupted` to error types
 - [ ] Create `ActorExecutor` and `ActorController` types
 - [ ] Add `ExecutionOperation` and `ControlOperation` enums
 - [ ] Implement shared state management with `Arc<RwLock<T>>`
@@ -115,7 +140,8 @@ let metrics = controller.metrics(); // Always instant (no await!)
 - [ ] Implement dual processing loops in `ActorRuntime`
 - [ ] Add execution handler for sequential operation processing
 - [ ] Add control handler with interrupt capabilities
-- [ ] Update `ActorProcess` to track both handlers
+- [ ] Update `ActorRuntime` to manage both channels internally
+- [ ] Implement unified shutdown for both channels
 
 ### Phase 3: Safety and Control (Week 3)
 - [ ] Implement pause/resume functionality
@@ -164,8 +190,8 @@ All existing code using `ActorHandle` must be updated to use the new split handl
 
 ### Modified Files
 - `src/theater_runtime.rs` - Update spawn_actor API
-- `src/actor/runtime.rs` - Implement dual processing loops
-- `src/actor/types.rs` - Update operation types
+- `src/actor/runtime.rs` - Implement dual processing loops and unified shutdown
+- `src/actor/types.rs` - Add ActorError::Interrupted and update operation types
 - `src/actor/handle.rs` - Remove old ActorHandle
 - `src/messages.rs` - Update command types
 - `examples/` - Update all examples
