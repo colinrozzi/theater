@@ -28,6 +28,7 @@ use crate::host::timing::TimingHost;
 use crate::id::TheaterId;
 use crate::messages::{ActorMessage, TheaterCommand};
 use crate::metrics::MetricsCollector;
+use crate::shutdown::ShutdownType;
 use crate::shutdown::{ShutdownController, ShutdownReceiver};
 use crate::store::ContentStore;
 use crate::wasm::{ActorComponent, ActorInstance};
@@ -838,12 +839,53 @@ impl ActorRuntime {
                             break; // Exit the loop to start shutdown
                         }
                     }
-
                 }
+
                 // Shutdown signal received
-                _ = &mut shutdown_receiver.receiver => {
-                    info!("Shutdown signal received, breaking from loop");
-                    break;
+                shutdown_signal = &mut shutdown_receiver.receiver => {
+                    info!("Received shutdown signal from parent");
+                    match shutdown_signal {
+                        Ok(shutdown_signal) => {
+                            info!("Shutdown signal received: {:?}", shutdown_signal);
+                            match shutdown_signal.shutdown_type {
+                                ShutdownType::Graceful => {
+                                    info!("Graceful shutdown requested");
+                                    if current_operation.is_some() {
+                                        // Operation is running - mark for shutdown after completion
+                                        info!("Operation running - will shutdown after completion");
+                                        shutdown_requested = true;
+                                    } else {
+                                        // No operation running - shutdown immediately
+                                        info!("No operation running - shutting down immediately");
+                                        break;
+                                    }
+                                }
+                                ShutdownType::Force => {
+                                    info!("Forceful shutdown requested");
+                                    // Abort any ongoing operations
+                                    if let Some(task) = current_operation.take() {
+                                        task.abort();
+                                    }
+                                    break; // Exit the loop to start shutdown
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            error!("Failed to receive shutdown signal: {:?}", e);
+                            // If the shutdown signal fails, there has been an error with the
+                            // runtime communication, we should exit the loop gracefully
+                            info!("Exiting runtime communication loop due to shutdown signal error");
+                            if current_operation.is_some() {
+                                // Operation is running - mark for shutdown after completion
+                                info!("Operation running - will shutdown after completion");
+                                shutdown_requested = true;
+                            } else {
+                                // No operation running - shutdown immediately
+                                info!("No operation running - shutting down immediately");
+                                break;
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -1149,7 +1191,9 @@ impl ActorRuntime {
 
         // Signal shutdown to all handler components
         info!("Signaling shutdown to all handler components");
-        shutdown_controller.signal_shutdown().await;
+        shutdown_controller
+            .signal_shutdown(ShutdownType::Graceful)
+            .await;
 
         // If any handlers are still running, abort them
         for task in handler_tasks {
@@ -1181,10 +1225,9 @@ impl ActorRuntime {
 
         // Signal shutdown to all components
         info!("Signaling shutdown to all components");
-        self.shutdown_controller.signal_shutdown().await;
-
-        // Wait a bit for graceful shutdown
-        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        self.shutdown_controller
+            .signal_shutdown(ShutdownType::Graceful)
+            .await;
 
         // If any handlers are still running, abort them
         for task in self.handler_tasks.drain(..) {

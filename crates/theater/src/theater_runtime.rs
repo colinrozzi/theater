@@ -14,7 +14,7 @@ use crate::messages::{
 };
 use crate::messages::{ActorMessage, ActorStatus, TheaterCommand};
 use crate::metrics::ActorMetrics;
-use crate::shutdown::ShutdownController;
+use crate::shutdown::{ShutdownController, ShutdownType};
 use crate::utils::{self, resolve_reference};
 use crate::ManifestConfig;
 use crate::Result;
@@ -352,13 +352,29 @@ impl TheaterRuntime {
                     response_tx,
                 } => {
                     debug!("Stopping actor: {:?}", actor_id);
-                    match self.stop_actor(actor_id).await {
+                    match self.stop_actor(actor_id, ShutdownType::Graceful).await {
                         Ok(_) => {
                             info!("Actor stopped successfully");
                             let _ = response_tx.send(Ok(()));
                         }
                         Err(e) => {
                             error!("Failed to stop actor: {}", e);
+                            let _ = response_tx.send(Err(e));
+                        }
+                    }
+                }
+                TheaterCommand::TerminateActor {
+                    actor_id,
+                    response_tx,
+                } => {
+                    debug!("Terminating actor: {:?}", actor_id);
+                    match self.stop_actor(actor_id, ShutdownType::Force).await {
+                        Ok(_) => {
+                            info!("Actor terminated successfully");
+                            let _ = response_tx.send(Ok(()));
+                        }
+                        Err(e) => {
+                            error!("Failed to terminate actor: {}", e);
                             let _ = response_tx.send(Err(e));
                         }
                     }
@@ -1086,12 +1102,10 @@ impl TheaterRuntime {
     ///
     /// This method stops an actor and all its children recursively. It follows these steps:
     /// 1. Stop all children of the actor
-    /// 2. Signal the actor to shut down gracefully
-    /// 3. Wait for a grace period to allow cleanup
-    /// 4. Force abort the actor's task if still running
+    /// 2. Signal the actor to shut down
     /// 5. Remove the actor from the runtime's registries
     /// 6. Clean up any channel registrations
-    async fn stop_actor(&mut self, actor_id: TheaterId) -> Result<()> {
+    async fn stop_actor(&mut self, actor_id: TheaterId, shutdown_type: ShutdownType) -> Result<()> {
         debug!("Stopping actor: {:?}", actor_id);
 
         // If the actor's manifest says we should save the chain, save it
@@ -1134,7 +1148,7 @@ impl TheaterRuntime {
                 child_id,
                 actor_id
             );
-            Box::pin(self.stop_actor(child_id.clone())).await?;
+            Box::pin(self.stop_actor(child_id.clone(), shutdown_type)).await?;
             debug!("Successfully stopped child {:?}", child_id);
         }
 
@@ -1145,7 +1159,9 @@ impl TheaterRuntime {
         match proc {
             Some(proc) => {
                 debug!("Signaling actor {:?} to shutdown", actor_id);
-                proc.shutdown_controller.signal_shutdown().await;
+                proc.shutdown_controller
+                    .signal_shutdown(shutdown_type)
+                    .await;
             }
             None => {
                 debug!("Actor {:?} not found during shutdown", actor_id);
@@ -1194,7 +1210,7 @@ impl TheaterRuntime {
             }
         }
 
-        self.stop_actor(actor_id).await?;
+        self.stop_actor(actor_id, ShutdownType::Graceful).await?;
 
         Ok(())
     }
@@ -1366,7 +1382,7 @@ impl TheaterRuntime {
         // Stop all actors
         for actor_id in self.actors.keys().cloned().collect::<Vec<_>>() {
             debug!("Stopping actor {} as part of theater shutdown", actor_id);
-            if let Err(e) = self.stop_actor(actor_id).await {
+            if let Err(e) = self.stop_actor(actor_id, ShutdownType::Graceful).await {
                 error!("Error stopping actor during shutdown: {}", e);
                 // Continue with other actors even if one fails
             }

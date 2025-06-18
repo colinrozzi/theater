@@ -163,6 +163,20 @@ pub enum TheaterCommand {
         response_tx: oneshot::Sender<Result<()>>,
     },
 
+    /// # Terminate an actor
+    ///
+    /// Forcefully terminates an actor and cleans up its resources.
+    /// This will abort any ongoing operations and remove the actor from the system.
+    ///
+    /// ## Parameters
+    ///
+    /// * `actor_id` - ID of the actor to terminate
+    /// * `response_tx` - Channel to receive the result (success or error)
+    TerminateActor {
+        actor_id: TheaterId,
+        response_tx: oneshot::Sender<Result<()>>,
+    },
+
     ShuttingDown {
         actor_id: TheaterId,
         data: Option<Vec<u8>>,
@@ -479,6 +493,9 @@ impl TheaterCommand {
             }
             TheaterCommand::StopActor { actor_id, .. } => {
                 format!("StopActor: {:?}", actor_id)
+            }
+            TheaterCommand::TerminateActor { actor_id, .. } => {
+                format!("TerminateActor: {:?}", actor_id)
             }
             TheaterCommand::ShuttingDown { actor_id, data } => {
                 format!(

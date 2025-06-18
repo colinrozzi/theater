@@ -8,7 +8,16 @@ pub const DEFAULT_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);
 /// A signal indicating that a component should shutdown
 #[derive(Debug)]
 pub struct ShutdownSignal {
+    /// Type of shutdown to perform
+    pub shutdown_type: ShutdownType,
     pub sender: Option<Sender<()>>,
+}
+
+/// Type of shutdown to perform
+#[derive(Debug, Clone, Copy)]
+pub enum ShutdownType {
+    Graceful,
+    Force,
 }
 
 /// Controller that can broadcast shutdown signals to multiple receivers
@@ -32,13 +41,14 @@ impl ShutdownController {
     }
 
     /// Signal all receivers to shutdown
-    pub async fn signal_shutdown(self) {
+    pub async fn signal_shutdown(self, shutdown_type: ShutdownType) {
         debug!("Signaling shutdown to all subscribers");
         let mut receivers = Vec::new();
         for sender in self.subscribers {
             let (responder, receiver) = tokio::sync::oneshot::channel();
             receivers.push(receiver);
             match sender.send(ShutdownSignal {
+                shutdown_type,
                 sender: Some(responder),
             }) {
                 Ok(_) => {
@@ -75,7 +85,10 @@ impl ShutdownReceiver {
             }
             Err(e) => {
                 debug!("Shutdown channel error: {}, using default signal", e);
-                ShutdownSignal { sender: None }
+                ShutdownSignal {
+                    sender: None,
+                    shutdown_type: ShutdownType::Graceful,
+                }
             }
         }
     }
