@@ -13,6 +13,11 @@
 use serde::{Deserialize, Serialize};
 use std::{cmp::Ordering, collections::HashSet, hash::Hash};
 
+/// Trait for applying restrictions to permission types
+pub trait RestrictWith<T> {
+    fn restrict_with(&self, restriction: &T) -> Self;
+}
+
 /* ─────────────────────────────────────────────────────────────────────────── */
 /*  Helper functions                                                          */
 /* ─────────────────────────────────────────────────────────────────────────── */
@@ -53,6 +58,27 @@ fn vec_superset<T: Eq + Hash>(parent: &Vec<T>, child: &Vec<T>) -> bool {
 /// Convenience: numeric ≤ (child ≤ parent).
 fn le_num<T: PartialOrd>(parent: &T, child: &T) -> bool {
     child <= parent
+}
+
+/// Helper: intersection of two optional vectors
+fn intersect_options<T: Clone + Eq + std::hash::Hash>(
+    first: &Option<Vec<T>>,
+    second: &Option<Vec<T>>,
+) -> Option<Vec<T>> {
+    match (first, second) {
+        (Some(first_list), Some(second_list)) => {
+            let first_set: HashSet<_> = first_list.iter().collect();
+            let intersection: Vec<T> = second_list
+                .iter()
+                .filter(|item| first_set.contains(item))
+                .cloned()
+                .collect();
+            Some(intersection)
+        }
+        (Some(first_list), None) => Some(first_list.clone()),
+        (None, Some(_)) => None, // First denies capability
+        (None, None) => None,
+    }
 }
 
 /* ─────────────────────────────────────────────────────────────────────────── */
@@ -348,6 +374,113 @@ pub struct HandlerPermission {
     pub random: Option<RandomPermissions>,
 }
 
+impl HandlerPermission {
+    /// Create a root permission set that allows all capabilities
+    pub fn root() -> Self {
+        HandlerPermission {
+            message_server: Some(MessageServerPermissions),
+            file_system: Some(FileSystemPermissions {
+                read: true,
+                write: true,
+                execute: true,
+                allowed_commands: None, // None means all commands allowed
+                new_dir: Some(true),
+                allowed_paths: None, // None means all paths allowed
+            }),
+            http_client: Some(HttpClientPermissions {
+                allowed_methods: None, // None means all methods allowed
+                allowed_hosts: None, // None means all hosts allowed
+                max_redirects: None, // None means unlimited
+                timeout: None, // None means no timeout restriction
+            }),
+            http_framework: Some(HttpFrameworkPermissions {
+                allowed_routes: None,
+                allowed_methods: None,
+                max_request_size: None,
+            }),
+            runtime: Some(RuntimePermissions),
+            supervisor: Some(SupervisorPermissions),
+            store: Some(StorePermissions),
+            timing: Some(TimingPermissions {
+                max_sleep_duration: u64::MAX,
+                min_sleep_duration: 0,
+            }),
+            process: Some(ProcessPermissions {
+                max_processes: usize::MAX,
+                max_output_buffer: usize::MAX,
+                allowed_programs: None,
+                allowed_paths: None,
+            }),
+            environment: Some(EnvironmentPermissions {
+                allowed_vars: None,
+                denied_vars: None,
+                allow_list_all: true,
+                allowed_prefixes: None,
+            }),
+            random: Some(RandomPermissions {
+                max_bytes: usize::MAX,
+                max_int: u64::MAX,
+                allow_crypto_secure: true,
+            }),
+        }
+    }
+
+    /// Calculate effective permissions from parent permissions and inheritance policy
+    pub fn calculate_effective(
+        parent_permissions: &HandlerPermission,
+        policy: &crate::config::inheritance::HandlerPermissionPolicy,
+    ) -> HandlerPermission {
+        use crate::config::inheritance::apply_inheritance_policy;
+        
+        HandlerPermission {
+            message_server: apply_inheritance_policy(
+                &parent_permissions.message_server,
+                &policy.message_server,
+            ),
+            file_system: apply_inheritance_policy(
+                &parent_permissions.file_system,
+                &policy.file_system,
+            ),
+            http_client: apply_inheritance_policy(
+                &parent_permissions.http_client,
+                &policy.http_client,
+            ),
+            http_framework: apply_inheritance_policy(
+                &parent_permissions.http_framework,
+                &policy.http_framework,
+            ),
+            runtime: apply_inheritance_policy(
+                &parent_permissions.runtime,
+                &policy.runtime,
+            ),
+            supervisor: apply_inheritance_policy(
+                &parent_permissions.supervisor,
+                &policy.supervisor,
+            ),
+            store: apply_inheritance_policy(
+                &parent_permissions.store,
+                &policy.store,
+            ),
+            timing: apply_inheritance_policy(
+                &parent_permissions.timing,
+                &policy.timing,
+            ),
+            process: apply_inheritance_policy(
+                &parent_permissions.process,
+                &policy.process,
+            ),
+            environment: apply_inheritance_policy(
+                &parent_permissions.environment,
+                &policy.environment,
+            ),
+            random: apply_inheritance_policy(
+                &parent_permissions.random,
+                &policy.random,
+            ),
+        }
+    }
+}
+
 impl PartialOrd for HandlerPermission {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         use Ordering::*;
@@ -384,5 +517,131 @@ impl PartialOrd for HandlerPermission {
         .iter()
         .any(|&d| d);
         Some(if strictly { Greater } else { Equal })
+    }
+}
+
+/* ─────────────────────────────────────────────────────────────────────────── */
+/*  RestrictWith implementations                                               */
+/* ─────────────────────────────────────────────────────────────────────────── */
+
+impl RestrictWith<FileSystemPermissions> for FileSystemPermissions {
+    fn restrict_with(&self, restriction: &FileSystemPermissions) -> Self {
+        FileSystemPermissions {
+            read: self.read && restriction.read,
+            write: self.write && restriction.write,
+            execute: self.execute && restriction.execute,
+            allowed_commands: intersect_options(&self.allowed_commands, &restriction.allowed_commands),
+            new_dir: self.new_dir.and_then(|p| restriction.new_dir.map(|r| p && r)),
+            allowed_paths: intersect_options(&self.allowed_paths, &restriction.allowed_paths),
+        }
+    }
+}
+
+impl RestrictWith<HttpClientPermissions> for HttpClientPermissions {
+    fn restrict_with(&self, restriction: &HttpClientPermissions) -> Self {
+        HttpClientPermissions {
+            allowed_methods: intersect_options(&self.allowed_methods, &restriction.allowed_methods),
+            allowed_hosts: intersect_options(&self.allowed_hosts, &restriction.allowed_hosts),
+            max_redirects: match (self.max_redirects, restriction.max_redirects) {
+                (Some(parent), Some(restrict)) => Some(parent.min(restrict)),
+                (Some(parent), None) => Some(parent),
+                (None, _) => None,
+            },
+            timeout: match (self.timeout, restriction.timeout) {
+                (Some(parent), Some(restrict)) => Some(parent.min(restrict)),
+                (Some(parent), None) => Some(parent),
+                (None, _) => None,
+            },
+        }
+    }
+}
+
+impl RestrictWith<HttpFrameworkPermissions> for HttpFrameworkPermissions {
+    fn restrict_with(&self, restriction: &HttpFrameworkPermissions) -> Self {
+        HttpFrameworkPermissions {
+            allowed_routes: intersect_options(&self.allowed_routes, &restriction.allowed_routes),
+            allowed_methods: intersect_options(&self.allowed_methods, &restriction.allowed_methods),
+            max_request_size: match (self.max_request_size, restriction.max_request_size) {
+                (Some(parent), Some(restrict)) => Some(parent.min(restrict)),
+                (Some(parent), None) => Some(parent),
+                (None, _) => None,
+            },
+        }
+    }
+}
+
+impl RestrictWith<ProcessPermissions> for ProcessPermissions {
+    fn restrict_with(&self, restriction: &ProcessPermissions) -> Self {
+        ProcessPermissions {
+            max_processes: self.max_processes.min(restriction.max_processes),
+            max_output_buffer: self.max_output_buffer.min(restriction.max_output_buffer),
+            allowed_programs: intersect_options(&self.allowed_programs, &restriction.allowed_programs),
+            allowed_paths: intersect_options(&self.allowed_paths, &restriction.allowed_paths),
+        }
+    }
+}
+
+impl RestrictWith<EnvironmentPermissions> for EnvironmentPermissions {
+    fn restrict_with(&self, restriction: &EnvironmentPermissions) -> Self {
+        EnvironmentPermissions {
+            allowed_vars: intersect_options(&self.allowed_vars, &restriction.allowed_vars),
+            denied_vars: match (&self.denied_vars, &restriction.denied_vars) {
+                (Some(parent), Some(restrict)) => {
+                    let mut combined = parent.clone();
+                    combined.extend_from_slice(restrict);
+                    combined.dedup();
+                    Some(combined)
+                },
+                (Some(parent), None) => Some(parent.clone()),
+                (None, Some(restrict)) => Some(restrict.clone()),
+                (None, None) => None,
+            },
+            allow_list_all: self.allow_list_all && restriction.allow_list_all,
+            allowed_prefixes: intersect_options(&self.allowed_prefixes, &restriction.allowed_prefixes),
+        }
+    }
+}
+
+impl RestrictWith<RandomPermissions> for RandomPermissions {
+    fn restrict_with(&self, restriction: &RandomPermissions) -> Self {
+        RandomPermissions {
+            max_bytes: self.max_bytes.min(restriction.max_bytes),
+            max_int: self.max_int.min(restriction.max_int),
+            allow_crypto_secure: self.allow_crypto_secure && restriction.allow_crypto_secure,
+        }
+    }
+}
+
+impl RestrictWith<TimingPermissions> for TimingPermissions {
+    fn restrict_with(&self, restriction: &TimingPermissions) -> Self {
+        TimingPermissions {
+            max_sleep_duration: self.max_sleep_duration.min(restriction.max_sleep_duration),
+            min_sleep_duration: self.min_sleep_duration.max(restriction.min_sleep_duration),
+        }
+    }
+}
+
+// Simple permissions that don't restrict
+impl RestrictWith<MessageServerPermissions> for MessageServerPermissions {
+    fn restrict_with(&self, _restriction: &MessageServerPermissions) -> Self {
+        self.clone()
+    }
+}
+
+impl RestrictWith<RuntimePermissions> for RuntimePermissions {
+    fn restrict_with(&self, _restriction: &RuntimePermissions) -> Self {
+        self.clone()
+    }
+}
+
+impl RestrictWith<SupervisorPermissions> for SupervisorPermissions {
+    fn restrict_with(&self, _restriction: &SupervisorPermissions) -> Self {
+        self.clone()
+    }
+}
+
+impl RestrictWith<StorePermissions> for StorePermissions {
+    fn restrict_with(&self, _restriction: &StorePermissions) -> Self {
+        self.clone()
     }
 }

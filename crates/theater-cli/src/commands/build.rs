@@ -6,7 +6,7 @@ use std::process::Command;
 use tracing::{debug, error, info};
 
 use crate::{error::CliError, output::formatters::BuildResult, CommandContext};
-use theater::config::ManifestConfig;
+use theater::config::actor_manifest::ManifestConfig;
 
 #[derive(Debug, Parser)]
 pub struct BuildArgs {

@@ -5,6 +5,7 @@ use tracing::debug;
 use crate::utils::resolve_reference;
 
 use super::permissions::HandlerPermission;
+use super::inheritance::HandlerPermissionPolicy;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ComponentConfig {
@@ -21,6 +22,8 @@ pub struct ManifestConfig {
     pub long_description: Option<String>,
     pub save_chain: Option<bool>,
     pub permissions: Option<HandlerPermission>,
+    #[serde(default)]
+    pub permission_policy: HandlerPermissionPolicy,
     #[serde(default)]
     pub init_state: Option<String>,
     #[serde(default)]
@@ -444,5 +447,13 @@ impl ManifestConfig {
 
     pub fn save_chain(&self) -> bool {
         self.save_chain.unwrap_or(false)
+    }
+
+    /// Calculate effective permissions based on parent permissions and this manifest's policy
+    pub fn calculate_effective_permissions(
+        &self,
+        parent_permissions: &HandlerPermission,
+    ) -> HandlerPermission {
+        HandlerPermission::calculate_effective(parent_permissions, &self.permission_policy)
     }
 }

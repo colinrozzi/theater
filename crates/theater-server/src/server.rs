@@ -326,6 +326,7 @@ impl TheaterServer {
             theater_tx.clone(),
             theater_rx,
             Some(channel_events_tx.clone()),
+            theater::config::permissions::HandlerPermission::root(), // Root permissions for server
         )
         .await?;
         let management_socket = TcpListener::bind(address).await?;
