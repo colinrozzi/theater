@@ -17,6 +17,14 @@ use std::{cmp::Ordering, collections::HashSet, hash::Hash};
 /*  Helper functions                                                          */
 /* ─────────────────────────────────────────────────────────────────────────── */
 
+/// Returns `true` when `candidate` is *totally* covered by `parent`.
+pub fn permits(parent: &HandlerPermission, candidate: &HandlerPermission) -> bool {
+    matches!(
+        parent.partial_cmp(candidate),
+        Some(std::cmp::Ordering::Greater | std::cmp::Ordering::Equal)
+    )
+}
+
 /// Generic helper: returns `true` when the **child** request is allowed under
 /// the **parent** capability, according to the comparator `cmp` on concrete
 /// values.

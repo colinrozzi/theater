@@ -7,6 +7,7 @@
 use crate::actor::runtime::{ActorRuntime, StartActorResult};
 use crate::actor::types::{ActorControl, ActorError, ActorInfo, ActorOperation};
 use crate::chain::ChainEvent;
+use crate::config::permissions::HandlerPermission;
 use crate::id::TheaterId;
 use crate::messages::{
     ActorChannelClose, ActorChannelMessage, ActorChannelOpen, ActorResult, ChannelId,
@@ -98,6 +99,8 @@ pub struct TheaterRuntime {
     channel_events_tx: Option<Sender<crate::messages::ChannelEvent>>,
     /// wasm engine
     wasm_engine: wasmtime::Engine,
+    /// Runtime permissions
+    permissions: HandlerPermission,
 }
 
 /// # ActorProcess
@@ -174,6 +177,7 @@ impl TheaterRuntime {
         theater_tx: Sender<TheaterCommand>,
         theater_rx: Receiver<TheaterCommand>,
         channel_events_tx: Option<Sender<crate::messages::ChannelEvent>>,
+        permissions: HandlerPermission,
     ) -> Result<Self> {
         info!("Theater runtime initializing");
         let engine = wasmtime::Engine::new(wasmtime::Config::new().async_support(true))?;
@@ -186,6 +190,7 @@ impl TheaterRuntime {
             channels: HashMap::new(),
             channel_events_tx,
             wasm_engine: engine,
+            permissions,
         })
     }
 
