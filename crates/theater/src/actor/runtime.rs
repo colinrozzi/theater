@@ -33,9 +33,9 @@ use crate::store::ContentStore;
 use crate::wasm::{ActorComponent, ActorInstance};
 use crate::MessageServerConfig;
 use crate::Result;
-use futures::lock::Mutex;
 use std::sync::Arc;
 use tokio::sync::mpsc::{self, Receiver, Sender};
+use tokio::sync::oneshot;
 use tokio::sync::RwLock;
 use tokio::task::JoinHandle;
 use tokio::time::Instant;
@@ -611,9 +611,13 @@ impl ActorRuntime {
         let paused = Arc::new(RwLock::new(false));
         let mut current_operation: Option<JoinHandle<()>> = None;
 
+        // Add shutdown state tracking
+        let mut shutdown_requested = false;
+        let mut shutdown_response_tx: Option<oneshot::Sender<Result<(), ActorError>>> = None;
+
         loop {
             tokio::select! {
-               // Clean up completed operations
+                // Clean up completed operations
                 _ = async {
                     match current_operation.as_mut() {
                         Some(task) => task.await,
@@ -622,15 +626,31 @@ impl ActorRuntime {
                 } => {
                     info!("Operation completed");
                     current_operation = None;
+
+                    // Check if shutdown was requested and no more operations are running
+                    if shutdown_requested {
+                        info!("Shutdown requested and operation completed - shutting down gracefully");
+
+                        // Send success response if we have one
+                        if let Some(response_tx) = shutdown_response_tx.take() {
+                            let _ = response_tx.send(Ok(()));
+                        }
+
+                        break; // Exit the loop
+                    }
                 }
 
 
                 // Process operations
-                Some(op) = operation_rx.recv(), if current_operation.is_none() => {
+                Some(op) = operation_rx.recv(), if current_operation.is_none() && !*paused.read().await => {
                     info!("Received operation: {:?}", op);
                     match op {
                         ActorOperation::CallFunction { name, params, response_tx } => {
                             // Check if the actor is paused
+                            // Think about this, if the actor is paused, do we want to add the
+                            // check to the conditional above and hang, but keep the operation in the
+                            // queue? or do we want to take in and reject the operation?
+                            /*
                             if *paused.read().await {
                                 error!("Actor is paused, rejecting function call: {}", name);
                                 if let Err(e) = response_tx.send(Err(ActorError::Paused)) {
@@ -638,6 +658,7 @@ impl ActorRuntime {
                                 }
                                 continue;
                             }
+                            */
                             info!("Processing function call: {}", name);
                             let theater_tx = theater_tx.clone();
                             let metrics = metrics.clone();
@@ -730,15 +751,20 @@ impl ActorRuntime {
                            }
                         }
                         ActorInfo::GetStatus { response_tx } => {
-                            let processing_state = if *paused.read().await {
-                                "Paused".to_string()
-                            } else {
-                                match current_operation {
-                                    Some(_) => "Processing".to_string(),
-                                    None => "Idle".to_string(),
+                            let processing_state = if shutdown_requested {
+                                if current_operation.is_some() {
+                                    "Shutting down (waiting for operation)"
+                                } else {
+                                    "Shutting down"
                                 }
+                            } else if *paused.read().await {
+                                "Paused"
+                            } else if current_operation.is_some() {
+                                "Processing"
+                            } else {
+                                "Idle"
                             };
-                            if let Err(e) = response_tx.send(Ok(processing_state)) {
+                            if let Err(e) = response_tx.send(Ok(processing_state.to_string())) {
                                 error!("Failed to send processing state response: {:?}", e);
                             }
                         }
@@ -765,33 +791,40 @@ impl ActorRuntime {
                     match control {
                         ActorControl::Pause { response_tx } => {
                             info!("Pausing actor");
-                            *paused.write().await = true;
-                            if let Err(e) = response_tx.send(Ok(())) {
-                                error!("Failed to send pause response: {:?}", e);
+                            if shutdown_requested {
+                                let _ = response_tx.send(Err(ActorError::ShuttingDown));
+                            } else {
+                                *paused.write().await = true;
+                                let _ = response_tx.send(Ok(()));
                             }
                         }
                         ActorControl::Resume { response_tx } => {
                             info!("Resuming actor");
-                            let response;
-                            if *paused.read().await {
-                                *paused.write().await = false;
-                                info!("Actor resumed successfully");
-                                response = Ok(());
+                            if shutdown_requested {
+                                let _ = response_tx.send(Err(ActorError::ShuttingDown));
                             } else {
-                                warn!("Actor was not paused, ignoring resume command");
-                                response = Err(ActorError::NotPaused);
-                            }
-                            if let Err(e) = response_tx.send(response) {
-                                error!("Failed to send resume response: {:?}", e);
+                                let response = if *paused.read().await {
+                                    *paused.write().await = false;
+                                    Ok(())
+                                } else {
+                                    Err(ActorError::NotPaused)
+                                };
+                                let _ = response_tx.send(response);
                             }
                         }
                         ActorControl::Shutdown { response_tx } => {
                             info!("Received shutdown command");
-                            // Shutdown logic here
-                            if let Err(e) = response_tx.send(Ok(())) {
-                                error!("Failed to send shutdown confirmation: {:?}", e);
+                            if current_operation.is_some() {
+                                // Operation is running - mark for shutdown after completion
+                                info!("Operation running - will shutdown after completion");
+                                shutdown_requested = true;
+                                shutdown_response_tx = Some(response_tx);
+                            } else {
+                                // No operation running - shutdown immediately
+                                info!("No operation running - shutting down immediately");
+                                let _ = response_tx.send(Ok(()));
+                                break;
                             }
-                            break; // Exit the loop to start shutdown
                         }
                         ActorControl::Terminate { response_tx } => {
                             info!("Received force shutdown command");
@@ -938,6 +971,7 @@ impl ActorRuntime {
     ///
     /// * `Ok(())` - If the component was successfully updated
     /// * `Err(ActorError)` - If the update failed
+    #[allow(dead_code)]
     async fn update_component(
         actor_instance: &mut ActorInstance,
         component_address: &str,
@@ -1077,6 +1111,7 @@ impl ActorRuntime {
     }
 
     /// Helper method to record update errors in the actor's chain
+    #[allow(dead_code)]
     fn record_update_error(
         actor_instance: &mut ActorInstance,
         component_address: &str,
