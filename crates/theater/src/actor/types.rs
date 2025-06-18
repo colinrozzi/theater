@@ -189,6 +189,11 @@ pub enum ActorControl {
         /// Channel to confirm shutdown completion
         response_tx: oneshot::Sender<Result<(), ActorError>>,
     },
+    /// Forcefully terminate the actor, aborting any ongoing operations
+    Terminate {
+        /// Channel to confirm termination completion
+        response_tx: oneshot::Sender<Result<(), ActorError>>,
+    },
 }
 
 #[derive(Debug)]
@@ -210,5 +215,10 @@ pub enum ActorInfo {
     GetMetrics {
         /// Channel to send metrics back to the caller
         response_tx: oneshot::Sender<Result<ActorMetrics, ActorError>>,
+    },
+    /// Retrieve the actor's current processing state
+    GetStatus {
+        /// Channel to send processing state back to the caller
+        response_tx: oneshot::Sender<Result<String, ActorError>>,
     },
 }

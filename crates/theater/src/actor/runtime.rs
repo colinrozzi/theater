@@ -33,7 +33,10 @@ use crate::store::ContentStore;
 use crate::wasm::{ActorComponent, ActorInstance};
 use crate::MessageServerConfig;
 use crate::Result;
+use futures::lock::Mutex;
+use std::sync::Arc;
 use tokio::sync::mpsc::{self, Receiver, Sender};
+use tokio::sync::RwLock;
 use tokio::task::JoinHandle;
 use tokio::time::Instant;
 use tracing::{debug, error, info, warn};
@@ -550,11 +553,11 @@ impl ActorRuntime {
         // Spawn the main runtime task that runs and processes operations
         tokio::spawn(async move {
             Self::run_communication_loops(
-                actor_instance,
+                Arc::new(RwLock::new(actor_instance)),
                 operation_rx,
                 info_rx,
                 control_rx,
-                metrics,
+                Arc::new(RwLock::new(metrics)),
                 parent_shutdown_receiver,
                 theater_tx,
                 shutdown_controller,
@@ -592,30 +595,43 @@ impl ActorRuntime {
     }
 
     async fn run_communication_loops(
-        mut actor_instance: ActorInstance,
+        actor_instance: Arc<RwLock<ActorInstance>>,
         mut operation_rx: Receiver<ActorOperation>,
         mut info_rx: Receiver<ActorInfo>,
         mut control_rx: Receiver<ActorControl>,
-        metrics: MetricsCollector,
+        metrics: Arc<RwLock<MetricsCollector>>,
         mut shutdown_receiver: ShutdownReceiver,
         theater_tx: Sender<TheaterCommand>,
         shutdown_controller: ShutdownController,
         handler_tasks: Vec<JoinHandle<()>>,
-        config: ManifestConfig,
-        engine: wasmtime::Engine,
+        _config: ManifestConfig,
+        _engine: wasmtime::Engine,
     ) {
         info!("Actor runtime starting communication loops");
-        let mut paused = false;
+        let paused = Arc::new(RwLock::new(false));
+        let mut current_operation: Option<JoinHandle<()>> = None;
 
         loop {
             tokio::select! {
+               // Clean up completed operations
+                _ = async {
+                    match current_operation.as_mut() {
+                        Some(task) => task.await,
+                        None => std::future::pending().await,
+                    }
+                } => {
+                    info!("Operation completed");
+                    current_operation = None;
+                }
+
+
                 // Process operations
-                Some(op) = operation_rx.recv() => {
+                Some(op) = operation_rx.recv(), if current_operation.is_none() => {
                     info!("Received operation: {:?}", op);
                     match op {
                         ActorOperation::CallFunction { name, params, response_tx } => {
                             // Check if the actor is paused
-                            if paused {
+                            if *paused.read().await {
                                 error!("Actor is paused, rejecting function call: {}", name);
                                 if let Err(e) = response_tx.send(Err(ActorError::Paused)) {
                                     error!("Failed to send paused error response for operation '{}': {:?}", name, e);
@@ -623,32 +639,48 @@ impl ActorRuntime {
                                 continue;
                             }
                             info!("Processing function call: {}", name);
-                            match Self::execute_call(&mut actor_instance, &name, params, &theater_tx, &metrics).await {
-                                Ok(result) => {
-                                    if let Err(e) = response_tx.send(Ok(result)) {
-                                        error!("Failed to send function call response for operation '{}': {:?}", name, e);
+                            let theater_tx = theater_tx.clone();
+                            let metrics = metrics.clone();
+                            let actor_instance = actor_instance.clone();
+                            let paused = paused.clone();
+                            current_operation = Some(tokio::spawn(async move {
+                                // Execute the function call
+                                let mut actor_instance = actor_instance.write().await;
+                                let metrics = metrics.write().await;
+                                match Self::execute_call(
+                                    &mut actor_instance,
+                                    &name,
+                                    params,
+                                    &theater_tx,
+                                    &metrics,
+                                ).await {
+                                    Ok(result) => {
+                                        if let Err(e) = response_tx.send(Ok(result)) {
+                                            error!("Failed to send function call response for operation '{}': {:?}", name, e);
+                                        }
+                                    }
+                                    Err(actor_error) => {
+                                        // Notify the theater runtime about the error
+                                        let _ = theater_tx
+                                            .send(TheaterCommand::ActorError {
+                                                actor_id: actor_instance.id().clone(),
+                                                error: actor_error.clone(),
+                                            })
+                                            .await;
+
+                                        error!("Operation '{}' failed with error: {:?}", name, actor_error);
+                                        if let Err(send_err) = response_tx.send(Err(actor_error)) {
+                                            error!("Failed to send function call error response for operation '{}': {:?}", name, send_err);
+                                        }
+
+                                        *paused.write().await = true; // Pause the actor on error
                                     }
                                 }
-                                Err(actor_error) => {
-                                    // Notify the theater runtime about the error
-                                    let _ = theater_tx
-                                        .send(TheaterCommand::ActorError {
-                                            actor_id: actor_instance.id().clone(),
-                                            error: actor_error.clone(),
-                                        })
-                                        .await;
 
-                                    error!("Operation '{}' failed with error: {:?}", name, actor_error);
-                                    if let Err(send_err) = response_tx.send(Err(actor_error)) {
-                                        error!("Failed to send function call error response for operation '{}': {:?}", name, send_err);
-                                    }
-
-                                    // Pause the actor
-                                    paused = true;
-                                }
-                            }
+                            }));
                         }
-                    ActorOperation::UpdateComponent { component_address, response_tx } => {
+                        ActorOperation::UpdateComponent { component_address: _, response_tx } => {
+                            /*
                             info!("Processing UpdateComponent operation for component: {}", component_address);
                             match Self::update_component(&mut actor_instance, &component_address, &config, engine.clone()).await {
                                 Ok(_) => {
@@ -663,32 +695,55 @@ impl ActorRuntime {
                                     }
                                 }
                             }
+                            */
+                            error!("UpdateComponent operation is not implemented yet");
+                            if let Err(e) = response_tx.send(Err(ActorError::UpdateComponentError("Not implemented".to_string()))) {
+                                error!("Failed to send update component response: {:?}", e);
+                            }
                         }
                     }
                 }
+
                 // Process info requests
                 Some(info) = info_rx.recv() => {
                     info!("Received info request: {:?}", info);
                     match info {
                         ActorInfo::GetState { response_tx } => {
+                            let actor_instance = actor_instance.read().await;
                             let state = actor_instance.store.data().get_state();
                             if let Err(e) = response_tx.send(Ok(state)) {
                                 error!("Failed to send state response: {:?}", e);
                             }
                         }
                         ActorInfo::GetChain { response_tx } => {
+                            let actor_instance = actor_instance.read().await;
                             let chain = actor_instance.store.data().get_chain();
                             if let Err(e) = response_tx.send(Ok(chain)) {
                                 error!("Failed to send chain response: {:?}", e);
                             }
                         }
                         ActorInfo::GetMetrics { response_tx } => {
+                            let metrics = metrics.read().await;
                             let metrics_data = metrics.get_metrics().await;
                             if let Err(e) = response_tx.send(Ok(metrics_data)) {
                                 error!("Failed to send metrics response: {:?}", e);
+                           }
+                        }
+                        ActorInfo::GetStatus { response_tx } => {
+                            let processing_state = if *paused.read().await {
+                                "Paused".to_string()
+                            } else {
+                                match current_operation {
+                                    Some(_) => "Processing".to_string(),
+                                    None => "Idle".to_string(),
+                                }
+                            };
+                            if let Err(e) = response_tx.send(Ok(processing_state)) {
+                                error!("Failed to send processing state response: {:?}", e);
                             }
                         }
                         ActorInfo::SaveChain { response_tx } => {
+                            let actor_instance = actor_instance.read().await;
                             match actor_instance.save_chain() {
                                 Ok(_) => {
                                     if let Err(e) = response_tx.send(Ok(())) {
@@ -710,7 +765,7 @@ impl ActorRuntime {
                     match control {
                         ActorControl::Pause { response_tx } => {
                             info!("Pausing actor");
-                            paused = true;
+                            *paused.write().await = true;
                             if let Err(e) = response_tx.send(Ok(())) {
                                 error!("Failed to send pause response: {:?}", e);
                             }
@@ -718,8 +773,8 @@ impl ActorRuntime {
                         ActorControl::Resume { response_tx } => {
                             info!("Resuming actor");
                             let response;
-                            if paused {
-                                paused = false;
+                            if *paused.read().await {
+                                *paused.write().await = false;
                                 info!("Actor resumed successfully");
                                 response = Ok(());
                             } else {
@@ -738,6 +793,17 @@ impl ActorRuntime {
                             }
                             break; // Exit the loop to start shutdown
                         }
+                        ActorControl::Terminate { response_tx } => {
+                            info!("Received force shutdown command");
+                            // Abort any ongoing operations
+                            if let Some(task) = current_operation.take() {
+                                task.abort();
+                            }
+                            if let Err(e) = response_tx.send(Ok(())) {
+                                error!("Failed to send force shutdown confirmation: {:?}", e);
+                            }
+                            break; // Exit the loop to start shutdown
+                        }
                     }
 
                 }
@@ -749,6 +815,8 @@ impl ActorRuntime {
             }
         }
 
+        info!("Actor runtime communication loop exiting, performing cleanup");
+        let metrics = metrics.read().await;
         Self::perform_cleanup(shutdown_controller, handler_tasks, &metrics).await;
     }
 

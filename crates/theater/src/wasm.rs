@@ -613,7 +613,7 @@ pub struct ActorInstance {
 }
 
 impl ActorInstance {
-    pub fn save_chain(&mut self) -> Result<()> {
+    pub fn save_chain(&self) -> Result<()> {
         self.actor_component.actor_store.save_chain()
     }
 
