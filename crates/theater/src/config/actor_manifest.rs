@@ -1,10 +1,10 @@
 use serde::{Deserialize, Serialize};
-use std::cmp::Ordering;
-use std::collections::HashSet;
 use std::path::PathBuf;
 use tracing::debug;
 
 use crate::utils::resolve_reference;
+
+use super::permissions::HandlerPermission;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ComponentConfig {
@@ -69,57 +69,6 @@ pub struct InterfacesConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct HandlerPermission {
-    message_server: Option<MessageServerPermissions>,
-    file_system: Option<FileSystemPermissions>,
-    http_client: Option<HttpClientPermissions>,
-    http_framework: Option<HttpFrameworkPermissions>,
-    runtime: Option<RuntimePermissions>,
-    supervisor: Option<SupervisorPermissions>,
-    store: Option<StorePermissions>,
-    timing: Option<TimingPermissions>,
-    process: Option<ProcessPermissions>,
-    environment: Option<EnvironmentPermissions>,
-    random: Option<RandomPermissions>,
-}
-
-impl PartialOrd for HandlerPermission {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        use std::cmp::Ordering;
-
-        let comparisons = [
-            self.message_server.partial_cmp(&other.message_server),
-            self.file_system.partial_cmp(&other.file_system),
-            self.http_client.partial_cmp(&other.http_client),
-            self.http_framework.partial_cmp(&other.http_framework),
-            self.runtime.partial_cmp(&other.runtime),
-            self.supervisor.partial_cmp(&other.supervisor),
-            self.store.partial_cmp(&other.store),
-            self.timing.partial_cmp(&other.timing),
-            self.process.partial_cmp(&other.process),
-            self.environment.partial_cmp(&other.environment),
-            self.random.partial_cmp(&other.random),
-        ];
-
-        let mut any_strict = false;
-
-        for cmp in comparisons {
-            match cmp {
-                Some(Ordering::Greater) => any_strict = true,
-                Some(Ordering::Equal) => continue,
-                _ => return None, // Less or incomparable
-            }
-        }
-
-        Some(if any_strict {
-            Ordering::Greater
-        } else {
-            Ordering::Equal
-        })
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", content = "config")]
 pub enum HandlerConfig {
     #[serde(rename = "message-server")]
@@ -149,22 +98,8 @@ pub enum HandlerConfig {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct SupervisorHostConfig {}
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, PartialOrd)]
-pub struct SupervisorPermissions {
-    pub max_children: usize,
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct RuntimeHostConfig {}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct RuntimePermissions {}
-
-impl PartialOrd for RuntimePermissions {
-    fn partial_cmp(&self, _other: &Self) -> Option<std::cmp::Ordering> {
-        Some(std::cmp::Ordering::Equal)
-    }
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct TimingHostConfig {
@@ -184,24 +119,9 @@ fn default_min_sleep_duration() -> u64 {
     1
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, PartialOrd)]
-pub struct TimingPermissions {
-    pub max_sleep_duration: u64,
-    pub min_sleep_duration: u64,
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HttpServerHandlerConfig {
     pub port: u16,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct HttpServerPermissions {}
-
-impl PartialOrd for HttpServerPermissions {
-    fn partial_cmp(&self, _other: &Self) -> Option<std::cmp::Ordering> {
-        Some(std::cmp::Ordering::Equal)
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -210,25 +130,7 @@ pub struct WebSocketServerHandlerConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct WebSocketServerPermissions {}
-
-impl PartialOrd for WebSocketServerPermissions {
-    fn partial_cmp(&self, _other: &Self) -> Option<std::cmp::Ordering> {
-        Some(std::cmp::Ordering::Equal)
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct MessageServerConfig {}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct MessageServerPermissions {}
-
-impl PartialOrd for MessageServerPermissions {
-    fn partial_cmp(&self, _other: &Self) -> Option<std::cmp::Ordering> {
-        Some(std::cmp::Ordering::Equal)
-    }
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct FileSystemHandlerConfig {
@@ -238,195 +140,13 @@ pub struct FileSystemHandlerConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct FileSystemPermissions {
-    pub read: bool,
-    pub write: bool,
-    pub execute: bool,
-    pub allowed_commands: Option<Vec<String>>,
-    pub new_dir: Option<bool>,
-    pub allowed_paths: Option<Vec<String>>,
-}
-
-impl PartialOrd for FileSystemPermissions {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        // The parent must have >= permissions than the child.
-
-        // Booleans: parent must be >= child
-        if self.read < other.read || self.write < other.write || self.execute < other.execute {
-            return None;
-        }
-
-        // new_dir: treat None as false
-        if self.new_dir.unwrap_or(false) < other.new_dir.unwrap_or(false) {
-            return None;
-        }
-
-        // allowed_commands: parent must be a superset
-        if let Some(child_cmds) = &other.allowed_commands {
-            if let Some(parent_cmds) = &self.allowed_commands {
-                let parent_set: HashSet<_> = parent_cmds.iter().collect();
-                let child_set: HashSet<_> = child_cmds.iter().collect();
-                if !parent_set.is_superset(&child_set) {
-                    return None;
-                }
-            } else {
-                return None;
-            }
-        }
-
-        // allowed_paths: same logic
-        if let Some(child_paths) = &other.allowed_paths {
-            if let Some(parent_paths) = &self.allowed_paths {
-                let parent_set: HashSet<_> = parent_paths.iter().collect();
-                let child_set: HashSet<_> = child_paths.iter().collect();
-                if !parent_set.is_superset(&child_set) {
-                    return None;
-                }
-            } else {
-                return None;
-            }
-        }
-
-        // If all checks passed, child is ≤ parent
-        if self == other {
-            Some(Ordering::Equal)
-        } else {
-            Some(Ordering::Greater) // "Parent > Child"
-        }
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct HttpClientHandlerConfig {}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct HttpClientPermissions {
-    pub allowed_methods: Option<Vec<String>>,
-    pub allowed_hosts: Option<Vec<String>>,
-    pub max_redirects: Option<usize>,
-    pub timeout: Option<u64>, // in milliseconds
-}
-
-impl PartialOrd for HttpClientPermissions {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        // allowed_methods: child must be subset of parent
-        if let Some(child_methods) = &other.allowed_methods {
-            if let Some(parent_methods) = &self.allowed_methods {
-                let parent_set: HashSet<_> = parent_methods.iter().collect();
-                let child_set: HashSet<_> = child_methods.iter().collect();
-                if !parent_set.is_superset(&child_set) {
-                    return None;
-                }
-            } else {
-                return None;
-            }
-        }
-
-        // allowed_hosts: child must be subset of parent
-        if let Some(child_hosts) = &other.allowed_hosts {
-            if let Some(parent_hosts) = &self.allowed_hosts {
-                let parent_set: HashSet<_> = parent_hosts.iter().collect();
-                let child_set: HashSet<_> = child_hosts.iter().collect();
-                if !parent_set.is_superset(&child_set) {
-                    return None;
-                }
-            } else {
-                return None;
-            }
-        }
-
-        // max_redirects: child must be <= parent
-        if let Some(child_max) = other.max_redirects {
-            if let Some(parent_max) = self.max_redirects {
-                if child_max > parent_max {
-                    return None;
-                }
-            } else {
-                return None;
-            }
-        }
-
-        // timeout: child must be <= parent
-        if let Some(child_timeout) = other.timeout {
-            if let Some(parent_timeout) = self.timeout {
-                if child_timeout > parent_timeout {
-                    return None;
-                }
-            } else {
-                return None;
-            }
-        }
-
-        if self == other {
-            Some(Ordering::Equal)
-        } else {
-            Some(Ordering::Greater)
-        }
-    }
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct StoreHandlerConfig {}
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, PartialOrd)]
-pub struct StorePermissions {}
-
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct HttpFrameworkHandlerConfig {}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct HttpFrameworkPermissions {
-    pub allowed_routes: Option<Vec<String>>,
-    pub allowed_methods: Option<Vec<String>>,
-    pub max_request_size: Option<usize>, // in bytes
-}
-
-impl PartialOrd for HttpFrameworkPermissions {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        // allowed_routes: child must be subset of parent
-        if let Some(child_routes) = &other.allowed_routes {
-            if let Some(parent_routes) = &self.allowed_routes {
-                let parent_set: HashSet<_> = parent_routes.iter().collect();
-                let child_set: HashSet<_> = child_routes.iter().collect();
-                if !parent_set.is_superset(&child_set) {
-                    return None;
-                }
-            } else {
-                return None;
-            }
-        }
-
-        // allowed_methods: child must be subset of parent
-        if let Some(child_methods) = &other.allowed_methods {
-            if let Some(parent_methods) = &self.allowed_methods {
-                let parent_set: HashSet<_> = parent_methods.iter().collect();
-                let child_set: HashSet<_> = child_methods.iter().collect();
-                if !parent_set.is_superset(&child_set) {
-                    return None;
-                }
-            } else {
-                return None;
-            }
-        }
-
-        // max_request_size: child must be <= parent
-        if let Some(child_max) = other.max_request_size {
-            if let Some(parent_max) = self.max_request_size {
-                if child_max > parent_max {
-                    return None;
-                }
-            } else {
-                return None;
-            }
-        }
-
-        if self == other {
-            Some(Ordering::Equal)
-        } else {
-            Some(Ordering::Greater)
-        }
-    }
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ProcessHostConfig {
@@ -436,60 +156,6 @@ pub struct ProcessHostConfig {
     pub max_output_buffer: usize,
     pub allowed_programs: Option<Vec<String>>,
     pub allowed_paths: Option<Vec<String>>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct ProcessPermissions {
-    pub max_processes: usize,
-    pub max_output_buffer: usize,
-    pub allowed_programs: Option<Vec<String>>,
-    pub allowed_paths: Option<Vec<String>>,
-}
-
-impl PartialOrd for ProcessPermissions {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        // max_processes: child must be <= parent
-        if self.max_processes < other.max_processes {
-            return None;
-        }
-
-        // max_output_buffer: child must be <= parent
-        if self.max_output_buffer < other.max_output_buffer {
-            return None;
-        }
-
-        // allowed_programs: parent must be superset of child
-        if let Some(child_programs) = &other.allowed_programs {
-            if let Some(parent_programs) = &self.allowed_programs {
-                let parent_set: HashSet<_> = parent_programs.iter().collect();
-                let child_set: HashSet<_> = child_programs.iter().collect();
-                if !parent_set.is_superset(&child_set) {
-                    return None;
-                }
-            } else {
-                return None;
-            }
-        }
-
-        // allowed_paths: same logic
-        if let Some(child_paths) = &other.allowed_paths {
-            if let Some(parent_paths) = &self.allowed_paths {
-                let parent_set: HashSet<_> = parent_paths.iter().collect();
-                let child_set: HashSet<_> = child_paths.iter().collect();
-                if !parent_set.is_superset(&child_set) {
-                    return None;
-                }
-            } else {
-                return None;
-            }
-        }
-
-        if self == other {
-            Some(Ordering::Equal)
-        } else {
-            Some(Ordering::Greater)
-        }
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -503,72 +169,6 @@ pub struct EnvironmentHandlerConfig {
     pub allow_list_all: bool,
     /// Optional prefix filter - only allow vars starting with these prefixes
     pub allowed_prefixes: Option<Vec<String>>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct EnvironmentPermissions {
-    /// Optional allowlist of environment variable names that can be accessed
-    pub allowed_vars: Option<Vec<String>>,
-    /// Optional denylist of environment variable names that cannot be accessed
-    pub denied_vars: Option<Vec<String>>,
-    /// Whether to allow listing all environment variables (default: false for security)
-    pub allow_list_all: bool,
-    /// Optional prefix filter - only allow vars starting with these prefixes
-    pub allowed_prefixes: Option<Vec<String>>,
-}
-
-impl PartialOrd for EnvironmentPermissions {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        // allowed_vars: child must be subset of parent
-        if let Some(child_vars) = &other.allowed_vars {
-            if let Some(parent_vars) = &self.allowed_vars {
-                let parent_set: HashSet<_> = parent_vars.iter().collect();
-                let child_set: HashSet<_> = child_vars.iter().collect();
-                if !parent_set.is_superset(&child_set) {
-                    return None;
-                }
-            } else {
-                return None;
-            }
-        }
-
-        // denied_vars: parent must be superset of child
-        if let Some(child_denied) = &other.denied_vars {
-            if let Some(parent_denied) = &self.denied_vars {
-                let parent_set: HashSet<_> = parent_denied.iter().collect();
-                let child_set: HashSet<_> = child_denied.iter().collect();
-                if !parent_set.is_superset(&child_set) {
-                    return None;
-                }
-            } else {
-                return None;
-            }
-        }
-
-        // allow_list_all: parent must be >= child
-        if self.allow_list_all < other.allow_list_all {
-            return None;
-        }
-
-        // allowed_prefixes: child must be subset of parent
-        if let Some(child_prefixes) = &other.allowed_prefixes {
-            if let Some(parent_prefixes) = &self.allowed_prefixes {
-                let parent_set: HashSet<_> = parent_prefixes.iter().collect();
-                let child_set: HashSet<_> = child_prefixes.iter().collect();
-                if !parent_set.is_superset(&child_set) {
-                    return None;
-                }
-            } else {
-                return None;
-            }
-        }
-
-        if self == other {
-            Some(Ordering::Equal)
-        } else {
-            Some(Ordering::Greater)
-        }
-    }
 }
 
 impl EnvironmentHandlerConfig {
@@ -610,52 +210,6 @@ fn default_max_output_buffer() -> usize {
     1024 * 1024
 }
 
-impl PartialOrd for ProcessHostConfig {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        // max_processes: child must be <= parent
-        if self.max_processes < other.max_processes {
-            return None;
-        }
-
-        // max_output_buffer: child must be <= parent
-        if self.max_output_buffer < other.max_output_buffer {
-            return None;
-        }
-
-        // allowed_programs: parent must be superset of child
-        if let Some(child_programs) = &other.allowed_programs {
-            if let Some(parent_programs) = &self.allowed_programs {
-                let parent_set: HashSet<_> = parent_programs.iter().collect();
-                let child_set: HashSet<_> = child_programs.iter().collect();
-                if !parent_set.is_superset(&child_set) {
-                    return None;
-                }
-            } else {
-                return None;
-            }
-        }
-
-        // allowed_paths: same logic
-        if let Some(child_paths) = &other.allowed_paths {
-            if let Some(parent_paths) = &self.allowed_paths {
-                let parent_set: HashSet<_> = parent_paths.iter().collect();
-                let child_set: HashSet<_> = child_paths.iter().collect();
-                if !parent_set.is_superset(&child_set) {
-                    return None;
-                }
-            } else {
-                return None;
-            }
-        }
-
-        if self == other {
-            Some(Ordering::Equal)
-        } else {
-            Some(Ordering::Greater)
-        }
-    }
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct RandomHandlerConfig {
     /// Optional fixed seed for reproducible random numbers (useful for testing)
@@ -669,41 +223,6 @@ pub struct RandomHandlerConfig {
     /// Whether to allow cryptographically secure random numbers (default: false)
     #[serde(default)]
     pub allow_crypto_secure: bool,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct RandomPermissions {
-    /// Maximum number of bytes that can be generated in a single call
-    pub max_bytes: usize,
-    /// Maximum number for random integer generation
-    pub max_int: u64,
-    /// Whether to allow cryptographically secure random numbers
-    pub allow_crypto_secure: bool,
-}
-
-impl PartialOrd for RandomPermissions {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        // max_bytes: child must be <= parent
-        if self.max_bytes < other.max_bytes {
-            return None;
-        }
-
-        // max_int: child must be <= parent
-        if self.max_int < other.max_int {
-            return None;
-        }
-
-        // allow_crypto_secure: parent must be >= child
-        if self.allow_crypto_secure < other.allow_crypto_secure {
-            return None;
-        }
-
-        if self == other {
-            Some(Ordering::Equal)
-        } else {
-            Some(Ordering::Greater)
-        }
-    }
 }
 
 fn default_max_random_bytes() -> usize {

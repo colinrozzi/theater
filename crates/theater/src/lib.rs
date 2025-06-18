@@ -57,7 +57,7 @@ pub use actor::ActorRuntime;
 pub use actor::ActorStore;
 pub use actor::StartActorResult;
 pub use chain::{ChainEvent, StateChain};
-pub use config::{
+pub use config::actor_manifest::{
     HandlerConfig, HttpServerHandlerConfig, ManifestConfig, MessageServerConfig,
     RandomHandlerConfig,
 };

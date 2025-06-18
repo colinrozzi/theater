@@ -1,7 +1,7 @@
 use crate::actor::handle::ActorHandle;
 use crate::actor::store::ActorStore;
 use crate::actor::types::ActorError;
-use crate::config::FileSystemHandlerConfig;
+use crate::config::actor_manifest::FileSystemHandlerConfig;
 use crate::events::filesystem::{CommandError, CommandResult, CommandSuccess, FilesystemEventData};
 use crate::events::{ChainEventData, EventData};
 use crate::shutdown::ShutdownReceiver;

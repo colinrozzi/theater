@@ -6,7 +6,7 @@
 
 use crate::actor::handle::ActorHandle;
 use crate::actor::store::ActorStore;
-use crate::config::RandomHandlerConfig;
+use crate::config::actor_manifest::RandomHandlerConfig;
 use crate::events::{random::RandomEventData, ChainEventData, EventData};
 use crate::shutdown::ShutdownReceiver;
 use crate::wasm::{ActorComponent, ActorInstance};
@@ -397,7 +397,7 @@ impl RandomHost {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::RandomHandlerConfig;
+    use crate::config::actor_manifest::RandomHandlerConfig;
 
     #[test]
     fn test_random_handler_config_defaults() {

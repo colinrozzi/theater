@@ -1,7 +1,7 @@
 use crate::actor::handle::ActorHandle;
 use crate::actor::store::ActorStore;
 use crate::actor::types::ActorError;
-use crate::config::RuntimeHostConfig;
+use crate::config::actor_manifest::RuntimeHostConfig;
 use crate::events::runtime::RuntimeEventData;
 use crate::events::{ChainEventData, EventData};
 use crate::messages::TheaterCommand;

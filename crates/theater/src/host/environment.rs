@@ -1,6 +1,6 @@
 use crate::actor::handle::ActorHandle;
 use crate::actor::store::ActorStore;
-use crate::config::EnvironmentHandlerConfig;
+use crate::config::actor_manifest::EnvironmentHandlerConfig;
 use crate::events::environment::EnvironmentEventData;
 use crate::events::{ChainEventData, EventData};
 use crate::shutdown::ShutdownReceiver;

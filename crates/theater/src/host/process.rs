@@ -1,6 +1,6 @@
 use crate::actor::handle::ActorHandle;
 use crate::actor::store::ActorStore;
-use crate::config::ProcessHostConfig;
+use crate::config::actor_manifest::ProcessHostConfig;
 use crate::events::process::ProcessEventData;
 use crate::events::{ChainEventData, EventData};
 use crate::shutdown::ShutdownReceiver;

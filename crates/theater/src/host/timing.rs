@@ -1,7 +1,7 @@
 use crate::actor::handle::ActorHandle;
 use crate::actor::store::ActorStore;
 use crate::actor::types::ActorError;
-use crate::config::TimingHostConfig;
+use crate::config::actor_manifest::TimingHostConfig;
 use crate::events::timing::TimingEventData;
 use crate::events::{ChainEventData, EventData};
 use crate::shutdown::ShutdownReceiver;

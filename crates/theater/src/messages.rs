@@ -65,10 +65,10 @@ use crate::actor::ActorError;
 /// (`oneshot::Sender`) are used extensively to allow commands to return results
 /// to their callers.
 use crate::chain::ChainEvent;
-use crate::config::ManifestConfig;
 use crate::id::TheaterId;
 use crate::metrics::ActorMetrics;
 use crate::store::ContentStore;
+use crate::ManifestConfig;
 use crate::Result;
 use crate::TheaterRuntimeError;
 use serde::{Deserialize, Serialize};
