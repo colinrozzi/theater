@@ -19,6 +19,53 @@ impl<T> Default for HandlerInheritance<T> {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::permissions::*;
+
+    #[test]
+    fn test_inheritance_policy_comprehensive() {
+        let parent_perms = HandlerPermission {
+            file_system: Some(FileSystemPermissions {
+                read: true,
+                write: true,
+                execute: true,
+                allowed_commands: Some(vec!["ls".to_string(), "cat".to_string()]),
+                new_dir: Some(true),
+                allowed_paths: Some(vec!["/home".to_string()]),
+            }),
+            ..Default::default()
+        };
+
+        let policy = HandlerPermissionPolicy {
+            file_system: HandlerInheritance::Restrict(FileSystemPermissions {
+                read: true,
+                write: false,
+                execute: true,
+                allowed_commands: Some(vec!["ls".to_string()]),
+                new_dir: Some(false),
+                allowed_paths: None,
+            }),
+            ..Default::default()
+        };
+
+        let result = HandlerPermission::calculate_effective(&parent_perms, &policy);
+        let fs = result.file_system.unwrap();
+        assert!(fs.read);
+        assert!(!fs.write);
+        assert_eq!(fs.allowed_commands, Some(vec!["ls".to_string()]));
+    }
+
+    #[test]
+    fn test_default_inheritance_is_inherit() {
+        let policy = HandlerPermissionPolicy::default();
+        assert!(matches!(policy.file_system, HandlerInheritance::Inherit));
+        assert!(matches!(policy.http_client, HandlerInheritance::Inherit));
+        assert!(matches!(policy.process, HandlerInheritance::Inherit));
+    }
+}
+
 /// Per-handler permission inheritance policies
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct HandlerPermissionPolicy {

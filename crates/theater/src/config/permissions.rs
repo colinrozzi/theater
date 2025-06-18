@@ -645,3 +645,84 @@ impl RestrictWith<StorePermissions> for StorePermissions {
         self.clone()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::inheritance::{HandlerInheritance, HandlerPermissionPolicy};
+
+    // Helper function to create a full-capability filesystem permission
+    fn full_filesystem_permissions() -> FileSystemPermissions {
+        FileSystemPermissions {
+            read: true,
+            write: true,
+            execute: true,
+            allowed_commands: Some(vec!["ls".to_string(), "cat".to_string(), "echo".to_string()]),
+            new_dir: Some(true),
+            allowed_paths: Some(vec!["/home".to_string(), "/tmp".to_string(), "/data".to_string()]),
+        }
+    }
+
+    #[test]
+    fn test_filesystem_restrict_with_boolean_flags() {
+        let parent = full_filesystem_permissions();
+        let restriction = FileSystemPermissions {
+            read: false,
+            write: true,
+            execute: false,
+            allowed_commands: None,
+            new_dir: None,
+            allowed_paths: None,
+        };
+
+        let result = parent.restrict_with(&restriction);
+
+        assert!(!result.read);
+        assert!(result.write);
+        assert!(!result.execute);
+    }
+
+    #[test]
+    fn test_security_property_child_cannot_exceed_parent() {
+        let parent = FileSystemPermissions {
+            read: true,
+            write: false,
+            execute: true,
+            allowed_commands: Some(vec!["ls".to_string()]),
+            new_dir: Some(false),
+            allowed_paths: Some(vec!["/home".to_string()]),
+        };
+
+        let greedy_restriction = FileSystemPermissions {
+            read: true,
+            write: true, // Child wants write but parent doesn't have it
+            execute: true,
+            allowed_commands: Some(vec!["ls".to_string(), "rm".to_string()]),
+            new_dir: Some(true),
+            allowed_paths: Some(vec!["/home".to_string(), "/root".to_string()]),
+        };
+
+        let result = parent.restrict_with(&greedy_restriction);
+
+        assert!(result.read);
+        assert!(!result.write); // Parent doesn't have it
+        assert!(result.execute);
+        assert_eq!(result.allowed_commands, Some(vec!["ls".to_string()]));
+        assert_eq!(result.new_dir, Some(false));
+        assert_eq!(result.allowed_paths, Some(vec!["/home".to_string()]));
+    }
+
+    #[test]
+    fn test_root_permissions_comprehensive() {
+        let root = HandlerPermission::root();
+
+        assert!(root.file_system.is_some());
+        assert!(root.http_client.is_some());
+        assert!(root.process.is_some());
+
+        let fs = root.file_system.unwrap();
+        assert!(fs.read && fs.write && fs.execute);
+        assert_eq!(fs.allowed_commands, None);
+        assert_eq!(fs.allowed_paths, None);
+    }
+}
