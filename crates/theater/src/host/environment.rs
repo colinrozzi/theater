@@ -1,6 +1,7 @@
 use crate::actor::handle::ActorHandle;
 use crate::actor::store::ActorStore;
 use crate::config::actor_manifest::EnvironmentHandlerConfig;
+use crate::config::enforcement::PermissionChecker;
 use crate::events::environment::EnvironmentEventData;
 use crate::events::{ChainEventData, EventData};
 use crate::shutdown::ShutdownReceiver;
@@ -26,11 +27,12 @@ pub enum EnvironmentError {
 
 pub struct EnvironmentHost {
     config: EnvironmentHandlerConfig,
+    permissions: Option<crate::config::permissions::EnvironmentPermissions>,
 }
 
 impl EnvironmentHost {
-    pub fn new(config: EnvironmentHandlerConfig) -> Self {
-        Self { config }
+    pub fn new(config: EnvironmentHandlerConfig, permissions: Option<crate::config::permissions::EnvironmentPermissions>) -> Self {
+        Self { config, permissions }
     }
 
     pub async fn start(
@@ -54,7 +56,8 @@ impl EnvironmentHost {
             .instance("theater:simple/environment")
             .expect("Could not instantiate theater:simple/environment");
 
-        let config = self.config.clone();
+        let _config = self.config.clone();
+        let permissions = self.permissions.clone();
 
         // get-var implementation
         interface.func_wrap(
@@ -63,12 +66,15 @@ impl EnvironmentHost {
                   (var_name,): (String,)|
                   -> Result<(Option<String>,)> {
                 let now = Utc::now().timestamp_millis() as u64;
-                let is_allowed = config.is_variable_allowed(&var_name);
-
-                if !is_allowed {
-                    // Record access denial
+                
+                // PERMISSION CHECK BEFORE OPERATION
+                if let Err(e) = PermissionChecker::check_env_var_access(
+                    &permissions,
+                    &var_name,
+                ) {
+                    // Record permission denied event
                     ctx.data_mut().record_event(ChainEventData {
-                        event_type: "theater:simple/environment/get-var".to_string(),
+                        event_type: "theater:simple/environment/permission-denied".to_string(),
                         data: EventData::Environment(EnvironmentEventData {
                             operation: "get-var".to_string(),
                             variable_name: var_name.clone(),
@@ -78,8 +84,8 @@ impl EnvironmentHost {
                         }),
                         timestamp: now,
                         description: Some(format!(
-                            "Access denied for environment variable: {}",
-                            var_name
+                            "Permission denied for environment variable access: {}",
+                            e
                         )),
                     });
                     return Ok((None,));
@@ -109,7 +115,7 @@ impl EnvironmentHost {
             },
         )?;
 
-        let config_clone = self.config.clone();
+        let permissions_clone = self.permissions.clone();
 
         // exists implementation
         interface.func_wrap(
@@ -118,12 +124,15 @@ impl EnvironmentHost {
                   (var_name,): (String,)|
                   -> Result<(bool,)> {
                 let now = Utc::now().timestamp_millis() as u64;
-                let is_allowed = config_clone.is_variable_allowed(&var_name);
-
-                if !is_allowed {
-                    // Record access denial
+                
+                // PERMISSION CHECK BEFORE OPERATION
+                if let Err(e) = PermissionChecker::check_env_var_access(
+                    &permissions_clone,
+                    &var_name,
+                ) {
+                    // Record permission denied event
                     ctx.data_mut().record_event(ChainEventData {
-                        event_type: "theater:simple/environment/exists".to_string(),
+                        event_type: "theater:simple/environment/permission-denied".to_string(),
                         data: EventData::Environment(EnvironmentEventData {
                             operation: "exists".to_string(),
                             variable_name: var_name.clone(),
@@ -133,8 +142,8 @@ impl EnvironmentHost {
                         }),
                         timestamp: now,
                         description: Some(format!(
-                            "Access denied for environment variable exists check: {}",
-                            var_name
+                            "Permission denied for environment variable exists check: {}",
+                            e
                         )),
                     });
                     return Ok((false,));

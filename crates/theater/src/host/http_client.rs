@@ -2,6 +2,7 @@ use crate::actor::handle::ActorHandle;
 use crate::actor::store::ActorStore;
 use crate::actor::types::ActorError;
 use crate::config::actor_manifest::HttpClientHandlerConfig;
+use crate::config::enforcement::PermissionChecker;
 use crate::events::http::HttpEventData;
 use crate::events::{ChainEventData, EventData};
 use crate::shutdown::ShutdownReceiver;
@@ -15,7 +16,9 @@ use tracing::{error, info};
 use wasmtime::component::{ComponentType, Lift, Lower};
 
 #[derive(Clone)]
-pub struct HttpClientHost {}
+pub struct HttpClientHost {
+    permissions: Option<crate::config::permissions::HttpClientPermissions>,
+}
 
 #[derive(Debug, Clone, Deserialize, Serialize, ComponentType, Lift, Lower)]
 #[component(record)]
@@ -53,8 +56,8 @@ pub enum HttpClientError {
 }
 
 impl HttpClientHost {
-    pub fn new(_config: HttpClientHandlerConfig) -> Self {
-        Self {}
+    pub fn new(_config: HttpClientHandlerConfig, permissions: Option<crate::config::permissions::HttpClientPermissions>) -> Self {
+        Self { permissions }
     }
 
     pub async fn setup_host_functions(&self, actor_component: &mut ActorComponent) -> Result<()> {
@@ -65,6 +68,7 @@ impl HttpClientHost {
             .instance("theater:simple/http-client")
             .expect("could not instantiate theater:simple/http-client");
 
+        let permissions = self.permissions.clone();
         interface.func_wrap_async(
             "send-http",
             move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore>,
@@ -83,6 +87,36 @@ impl HttpClientHost {
                     timestamp: chrono::Utc::now().timestamp_millis() as u64,
                     description: Some(format!("Sending {} request to {}", req.method, req.uri)),
                 });
+                
+                // PERMISSION CHECK BEFORE OPERATION
+                // Extract host from URL for permission checking
+                let host = if let Ok(parsed_url) = reqwest::Url::parse(&req.uri) {
+                    parsed_url.host_str().unwrap_or(&req.uri).to_string()
+                } else {
+                    req.uri.clone()
+                };
+                
+                if let Err(e) = PermissionChecker::check_http_operation(
+                    &permissions,
+                    &req.method,
+                    &host,
+                ) {
+                    error!("HTTP client permission denied: {}", e);
+                    ctx.data_mut().record_event(ChainEventData {
+                        event_type: "theater:simple/http-client/permission-denied".to_string(),
+                        data: EventData::Http(HttpEventData::PermissionDenied {
+                            operation: "send-http".to_string(),
+                            method: req.method.clone(),
+                            url: req.uri.clone(),
+                            reason: e.to_string(),
+                        }),
+                        timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                        description: Some(format!("Permission denied for {} request to {}", req.method, req.uri)),
+                    });
+                    return Box::new(async move {
+                        Ok((Err(format!("Permission denied: {}", e)),))
+                    });
+                }
                 
                 let req_clone = req.clone();
                 

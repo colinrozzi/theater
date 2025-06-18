@@ -7,6 +7,7 @@
 use crate::actor::handle::ActorHandle;
 use crate::actor::store::ActorStore;
 use crate::config::actor_manifest::RandomHandlerConfig;
+use crate::config::enforcement::PermissionChecker;
 use crate::events::{random::RandomEventData, ChainEventData, EventData};
 use crate::shutdown::ShutdownReceiver;
 use crate::wasm::{ActorComponent, ActorInstance};
@@ -21,6 +22,7 @@ use tracing::info;
 pub struct RandomHost {
     config: RandomHandlerConfig,
     rng: Arc<Mutex<ChaCha20Rng>>,
+    permissions: Option<crate::config::permissions::RandomPermissions>,
 }
 
 /// Error types for random operations
@@ -40,7 +42,7 @@ pub enum RandomError {
 }
 
 impl RandomHost {
-    pub fn new(config: RandomHandlerConfig) -> Self {
+    pub fn new(config: RandomHandlerConfig, permissions: Option<crate::config::permissions::RandomPermissions>) -> Self {
         let rng = if let Some(seed) = config.seed {
             info!("Initializing random host with seed: {}", seed);
             Arc::new(Mutex::new(ChaCha20Rng::seed_from_u64(seed)))
@@ -49,7 +51,7 @@ impl RandomHost {
             Arc::new(Mutex::new(ChaCha20Rng::from_entropy()))
         };
 
-        Self { config, rng }
+        Self { config, rng, permissions }
     }
 
     pub async fn setup_host_functions(
@@ -65,6 +67,7 @@ impl RandomHost {
 
         let rng = Arc::clone(&self.rng);
         let config = self.config.clone();
+        let permissions = self.permissions.clone();
 
         // Generate random bytes
         interface.func_wrap_async(
@@ -72,7 +75,8 @@ impl RandomHost {
             move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore>,
                   (size,): (u32,)| -> Box<dyn Future<Output = Result<(Result<Vec<u8>, String>,)>> + Send> {
                 let rng = Arc::clone(&rng);
-                let config = config.clone();
+                let _config = config.clone();
+                let permissions = permissions.clone();
                 
                 Box::new(async move {
                     let size = size as usize;
@@ -87,20 +91,25 @@ impl RandomHost {
                         description: Some(format!("Generating {} random bytes", size)),
                     });
 
-                    if size > config.max_bytes {
-                        let error_msg = format!("Requested {} bytes exceeds maximum {}", size, config.max_bytes);
-                        
+                    // PERMISSION CHECK BEFORE OPERATION
+                    if let Err(e) = PermissionChecker::check_random_operation(
+                        &permissions,
+                        "random-bytes",
+                        Some(size),
+                        None,
+                    ) {
+                        // Record permission denied event
                         ctx.data_mut().record_event(ChainEventData {
-                            event_type: "theater:simple/random-host/random-bytes".to_string(),
-                            data: EventData::Random(RandomEventData::Error {
+                            event_type: "theater:simple/random-host/permission-denied".to_string(),
+                            data: EventData::Random(RandomEventData::PermissionDenied {
                                 operation: "random-bytes".to_string(),
-                                message: error_msg.clone(),
+                                reason: e.to_string(),
                             }),
                             timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                            description: Some(format!("Error generating random bytes: {}", error_msg)),
+                            description: Some(format!("Permission denied for random bytes generation: {}", e)),
                         });
                         
-                        return Ok((Err(error_msg),));
+                        return Ok((Err(format!("Permission denied: {}", e)),));
                     }
 
                     let mut bytes = vec![0u8; size];
@@ -408,7 +417,7 @@ mod tests {
             allow_crypto_secure: false,
         };
 
-        let handler = RandomHost::new(config.clone());
+        let handler = RandomHost::new(config.clone(), None);
         assert_eq!(handler.config.max_bytes, 1024);
         assert_eq!(handler.config.max_int, 1000);
         assert_eq!(handler.config.allow_crypto_secure, false);
@@ -424,7 +433,7 @@ mod tests {
             allow_crypto_secure: false,
         };
 
-        let handler = RandomHost::new(config);
+        let handler = RandomHost::new(config, None);
         assert_eq!(handler.config.seed, Some(12345));
     }
 }

@@ -82,4 +82,13 @@ pub enum RandomEventData {
         /// Error message describing what went wrong
         message: String,
     },
+
+    /// Permission was denied for random operation
+    #[serde(rename = "permission_denied")]
+    PermissionDenied {
+        /// The operation that was denied
+        operation: String,
+        /// Reason for denial
+        reason: String,
+    },
 }

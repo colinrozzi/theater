@@ -9,4 +9,5 @@ pub enum TimingEventData {
     DeadlineCall { timestamp: u64 },
     DeadlineResult { timestamp: u64, success: bool },
     Error { operation: String, message: String },
+    PermissionDenied { operation: String, reason: String },
 }

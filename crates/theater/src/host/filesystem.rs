@@ -2,6 +2,7 @@ use crate::actor::handle::ActorHandle;
 use crate::actor::store::ActorStore;
 use crate::actor::types::ActorError;
 use crate::config::actor_manifest::FileSystemHandlerConfig;
+use crate::config::enforcement::PermissionChecker;
 use crate::events::filesystem::{CommandError, CommandResult, CommandSuccess, FilesystemEventData};
 use crate::events::{ChainEventData, EventData};
 use crate::shutdown::ShutdownReceiver;
@@ -60,10 +61,11 @@ pub enum FileSystemError {
 pub struct FileSystemHost {
     path: PathBuf,
     allowed_commands: Option<Vec<String>>,
+    permissions: Option<crate::config::permissions::FileSystemPermissions>,
 }
 
 impl FileSystemHost {
-    pub fn new(config: FileSystemHandlerConfig) -> Self {
+    pub fn new(config: FileSystemHandlerConfig, permissions: Option<crate::config::permissions::FileSystemPermissions>) -> Self {
         let path: PathBuf;
         match config.new_dir {
             Some(true) => {
@@ -77,6 +79,7 @@ impl FileSystemHost {
         Self {
             path,
             allowed_commands: config.allowed_commands,
+            permissions,
         }
     }
 
@@ -102,12 +105,34 @@ impl FileSystemHost {
             .expect("could not instantiate theater:simple/filesystem");
 
         let allowed_path = self.path.clone();
+        let permissions = self.permissions.clone();
 
         let _ = interface.func_wrap(
             "read-file",
             move |mut ctx: StoreContextMut<'_, ActorStore>,
                   (file_path,): (String,)|
                   -> Result<(Result<Vec<u8>, String>,)> {
+                // PERMISSION CHECK BEFORE OPERATION
+                if let Err(e) = PermissionChecker::check_filesystem_operation(
+                    &permissions,
+                    "read",
+                    Some(&file_path),
+                    None,
+                ) {
+                    error!("Filesystem read permission denied: {}", e);
+                    ctx.data_mut().record_event(ChainEventData {
+                        event_type: "theater:simple/filesystem/permission-denied".to_string(),
+                        data: EventData::Filesystem(FilesystemEventData::PermissionDenied {
+                            operation: "read".to_string(),
+                            path: file_path.clone(),
+                            reason: e.to_string(),
+                        }),
+                        timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                        description: Some(format!("Permission denied for read operation on {}", file_path)),
+                    });
+                    return Ok((Err(format!("Permission denied: {}", e)),));
+                }
+
                 // Record file read call event
                 ctx.data_mut().record_event(ChainEventData {
                     event_type: "theater:simple/filesystem/read-file".to_string(),
@@ -177,12 +202,34 @@ impl FileSystemHost {
         );
 
         let allowed_path = self.path.clone();
+        let permissions = self.permissions.clone();
 
         let _ = interface.func_wrap(
             "write-file",
             move |mut ctx: StoreContextMut<'_, ActorStore>,
                   (file_path, contents): (String, String)|
                   -> Result<(Result<(), String>,)> {
+                // PERMISSION CHECK BEFORE OPERATION
+                if let Err(e) = PermissionChecker::check_filesystem_operation(
+                    &permissions,
+                    "write",
+                    Some(&file_path),
+                    None,
+                ) {
+                    error!("Filesystem write permission denied: {}", e);
+                    ctx.data_mut().record_event(ChainEventData {
+                        event_type: "theater:simple/filesystem/permission-denied".to_string(),
+                        data: EventData::Filesystem(FilesystemEventData::PermissionDenied {
+                            operation: "write".to_string(),
+                            path: file_path.clone(),
+                            reason: e.to_string(),
+                        }),
+                        timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                        description: Some(format!("Permission denied for write operation on {}", file_path)),
+                    });
+                    return Ok((Err(format!("Permission denied: {}", e)),));
+                }
+
                 // Record file write call event
                 ctx.data_mut().record_event(ChainEventData {
                     event_type: "theater:simple/filesystem/write-file".to_string(),

@@ -70,4 +70,14 @@ pub enum ProcessEventData {
         /// Error message
         message: String,
     },
+    
+    /// Permission denied
+    PermissionDenied {
+        /// Operation that was denied
+        operation: String,
+        /// Program that was denied
+        program: String,
+        /// Reason for denial
+        reason: String,
+    },
 }

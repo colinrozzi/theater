@@ -8,6 +8,7 @@ use crate::actor::runtime::{ActorRuntime, StartActorResult};
 use crate::actor::types::{ActorControl, ActorError, ActorInfo, ActorOperation};
 use crate::chain::ChainEvent;
 use crate::config::permissions::HandlerPermission;
+use crate::config::enforcement::{validate_manifest_permissions, PermissionError};
 use crate::id::TheaterId;
 use crate::messages::{
     ActorChannelClose, ActorChannelMessage, ActorChannelOpen, ActorResult, ChannelId,
@@ -969,6 +970,16 @@ impl TheaterRuntime {
                 Err(anyhow::anyhow!(
                     "Actor startup failed: [{}] {}",
                     actor_id,
+                    e
+                ))
+            }
+            Some(StartActorResult::Error(e)) => {
+                error!("Failed to start actor due to permission/validation error: {}", e);
+                // Abort the runtime process since it failed
+                actor_runtime_process.abort();
+                // Return the specific error message to the spawner
+                Err(anyhow::anyhow!(
+                    "Actor startup failed: {}",
                     e
                 ))
             }

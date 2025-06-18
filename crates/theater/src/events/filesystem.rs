@@ -75,6 +75,13 @@ pub enum FilesystemEventData {
         message: String,
     },
 
+    // Permission events
+    PermissionDenied {
+        operation: String,
+        path: String,
+        reason: String,
+    },
+
     // Command events
     CommandExecuted {
         directory: String,

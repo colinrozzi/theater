@@ -26,6 +26,7 @@ pub struct MessageServerHost {
     theater_tx: Sender<TheaterCommand>,
     active_channels: HashMap<ChannelId, ChannelState>,
     outstanding_requests: Arc<Mutex<HashMap<String, tokio::sync::oneshot::Sender<Vec<u8>>>>>,
+    permissions: Option<crate::config::permissions::MessageServerPermissions>,
 }
 
 #[derive(Clone)]
@@ -57,6 +58,7 @@ impl MessageServerHost {
         mailbox_tx: Sender<ActorMessage>,
         mailbox_rx: Receiver<ActorMessage>,
         theater_tx: Sender<TheaterCommand>,
+        permissions: Option<crate::config::permissions::MessageServerPermissions>,
     ) -> Self {
         Self {
             mailbox_tx,
@@ -64,6 +66,7 @@ impl MessageServerHost {
             theater_tx,
             active_channels: HashMap::new(),
             outstanding_requests: Arc::new(Mutex::new(HashMap::new())),
+            permissions,
         }
     }
 

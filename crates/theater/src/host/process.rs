@@ -1,6 +1,7 @@
 use crate::actor::handle::ActorHandle;
 use crate::actor::store::ActorStore;
 use crate::config::actor_manifest::ProcessHostConfig;
+use crate::config::enforcement::PermissionChecker;
 use crate::events::process::ProcessEventData;
 use crate::events::{ChainEventData, EventData};
 use crate::shutdown::ShutdownReceiver;
@@ -150,16 +151,19 @@ pub struct ProcessHost {
     next_process_id: Arc<Mutex<u64>>,
     /// Actor handle for sending events
     actor_handle: ActorHandle,
+    /// Permission configuration
+    permissions: Option<crate::config::permissions::ProcessPermissions>,
 }
 
 impl ProcessHost {
     /// Create a new ProcessHost with the given configuration
-    pub fn new(config: ProcessHostConfig, actor_handle: ActorHandle) -> Self {
+    pub fn new(config: ProcessHostConfig, actor_handle: ActorHandle, permissions: Option<crate::config::permissions::ProcessPermissions>) -> Self {
         Self {
             config,
             processes: Arc::new(Mutex::new(HashMap::new())),
             next_process_id: Arc::new(Mutex::new(1)),
             actor_handle,
+            permissions,
         }
     }
 
@@ -438,6 +442,7 @@ impl ProcessHost {
         let next_process_id = self.next_process_id.clone();
         let config = self.config.clone();
         let actor_handle = self.actor_handle.clone();
+        let permissions = self.permissions.clone();
         interface.func_wrap_async(
             "os-spawn",
             move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore>,
@@ -445,8 +450,9 @@ impl ProcessHost {
                   -> Box<dyn Future<Output = Result<(Result<u64, String>,)>> + Send> {
                 let processes = processes.clone();
                 let next_process_id = next_process_id.clone();
-                let config = config.clone();
+                let _config = config.clone();
                 let actor_handle = actor_handle.clone();
+                let permissions = permissions.clone();
                 
                 Box::new(async move {
                     // Convert u8 modes to OutputMode enum
@@ -457,65 +463,32 @@ impl ProcessHost {
                     let args = process_config.args.clone();
                     let cwd = process_config.cwd.clone();
                     
-                    // Validate program path
-                    if let Some(allowed_programs) = &config.allowed_programs {
-                        if !allowed_programs.contains(&program) {
-                            // Record error event
-                            ctx.data_mut().record_event(ChainEventData {
-                                event_type: "process/spawn".to_string(),
-                                data: EventData::Process(ProcessEventData::Error {
-                                    process_id: None,
-                                    operation: "spawn".to_string(),
-                                    message: format!("Program not allowed: {}", program),
-                                }),
-                                timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                                description: Some(format!("Failed to spawn process: Program not allowed: {}", program)),
-                            });
-                            
-                            return Ok((Err(format!("Program not allowed: {}", program)),));
-                        }
-                    }
-                    
-                    // Validate working directory
-                    if let Some(cwd_path) = &cwd {
-                        if let Some(allowed_paths) = &config.allowed_paths {
-                            if !allowed_paths.iter().any(|path| cwd_path.starts_with(path)) {
-                                // Record error event
-                                ctx.data_mut().record_event(ChainEventData {
-                                    event_type: "process/spawn".to_string(),
-                                    data: EventData::Process(ProcessEventData::Error {
-                                        process_id: None,
-                                        operation: "spawn".to_string(),
-                                        message: format!("Working directory not allowed: {}", cwd_path),
-                                    }),
-                                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                                    description: Some(format!("Failed to spawn process: Working directory not allowed: {}", cwd_path)),
-                                });
-                                
-                                return Ok((Err(format!("Working directory not allowed: {}", cwd_path)),));
-                            }
-                        }
-                    }
-                    
-                    // Check if we've reached the max number of processes
-                    {
+                    // PERMISSION CHECK BEFORE OPERATION
+                    let current_process_count = {
                         let processes_lock = processes.lock().unwrap();
-                        if processes_lock.len() >= config.max_processes {
-                            // Record error event
-                            ctx.data_mut().record_event(ChainEventData {
-                                event_type: "process/spawn".to_string(),
-                                data: EventData::Process(ProcessEventData::Error {
-                                    process_id: None,
-                                    operation: "spawn".to_string(),
-                                    message: "Too many processes".to_string(),
-                                }),
-                                timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                                description: Some("Failed to spawn process: Too many processes running".to_string()),
-                            });
-                            
-                            return Ok((Err("Too many processes running".to_string()),));
-                        }
+                        processes_lock.len()
+                    };
+                    
+                    if let Err(e) = PermissionChecker::check_process_operation(
+                        &permissions,
+                        &program,
+                        current_process_count,
+                    ) {
+                        // Record permission denied event
+                        ctx.data_mut().record_event(ChainEventData {
+                            event_type: "process/permission-denied".to_string(),
+                            data: EventData::Process(ProcessEventData::PermissionDenied {
+                                operation: "spawn".to_string(),
+                                program: program.clone(),
+                                reason: e.to_string(),
+                            }),
+                            timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                            description: Some(format!("Permission denied for process spawn: {}", e)),
+                        });
+                        
+                        return Ok((Err(format!("Permission denied: {}", e)),));
                     }
+
                     
                     // Get a new process ID
                     let process_id = {

@@ -2,6 +2,7 @@ use crate::actor::handle::ActorHandle;
 use crate::actor::store::ActorStore;
 use crate::actor::types::ActorError;
 use crate::config::actor_manifest::TimingHostConfig;
+use crate::config::enforcement::PermissionChecker;
 use crate::events::timing::TimingEventData;
 use crate::events::{ChainEventData, EventData};
 use crate::shutdown::ShutdownReceiver;
@@ -17,6 +18,7 @@ use wasmtime::StoreContextMut;
 #[derive(Clone)]
 pub struct TimingHost {
     config: TimingHostConfig,
+    permissions: Option<crate::config::permissions::TimingPermissions>,
 }
 
 #[derive(Error, Debug)]
@@ -38,8 +40,8 @@ pub enum TimingError {
 }
 
 impl TimingHost {
-    pub fn new(config: TimingHostConfig) -> Self {
-        Self { config }
+    pub fn new(config: TimingHostConfig, permissions: Option<crate::config::permissions::TimingPermissions>) -> Self {
+        Self { config, permissions }
     }
 
     pub async fn setup_host_functions(&self, actor_component: &mut ActorComponent) -> Result<()> {
@@ -50,8 +52,7 @@ impl TimingHost {
             .instance("theater:simple/timing")
             .expect("Could not instantiate theater:simple/timing");
 
-        let max_sleep_duration = self.config.max_sleep_duration;
-        let min_sleep_duration = self.config.min_sleep_duration;
+        let permissions = self.permissions.clone();
 
         // Implementation of the now() function
         let _ = interface
@@ -82,6 +83,7 @@ impl TimingHost {
             .expect("Failed to wrap now function");
 
         // Implementation of the sleep() function
+        let permissions_clone = permissions.clone();
         let _ = interface
             .func_wrap_async(
                 "sleep",
@@ -98,42 +100,24 @@ impl TimingHost {
                         description: Some(format!("Sleeping for {} ms", duration)),
                     });
                     
-                    let max_duration = max_sleep_duration;
-                    let min_duration = min_sleep_duration;
-                    
-                    // Check duration constraints
-                    if duration > max_duration {
-                        let error_msg = format!("Duration too long: {} ms exceeds maximum of {} ms", duration, max_duration);
-                        
-                        // Record error event
+                    // PERMISSION CHECK BEFORE OPERATION
+                    if let Err(e) = PermissionChecker::check_timing_operation(
+                        &permissions_clone,
+                        "sleep",
+                        duration,
+                    ) {
+                        // Record permission denied event
                         ctx.data_mut().record_event(ChainEventData {
-                            event_type: "theater:simple/timing/sleep".to_string(),
-                            data: EventData::Timing(TimingEventData::Error {
+                            event_type: "theater:simple/timing/permission-denied".to_string(),
+                            data: EventData::Timing(TimingEventData::PermissionDenied {
                                 operation: "sleep".to_string(),
-                                message: error_msg.clone(),
+                                reason: e.to_string(),
                             }),
                             timestamp: now,
-                            description: Some(error_msg.clone()),
+                            description: Some(format!("Permission denied for sleep operation: {}", e)),
                         });
                         
-                        return Box::new(futures::future::ready(Ok((Err(error_msg),))));
-                    }
-                    
-                    if duration < min_duration && duration > 0 {
-                        let error_msg = format!("Duration too short: {} ms is below minimum of {} ms", duration, min_duration);
-                        
-                        // Record error event
-                        ctx.data_mut().record_event(ChainEventData {
-                            event_type: "theater:simple/timing/sleep".to_string(),
-                            data: EventData::Timing(TimingEventData::Error {
-                                operation: "sleep".to_string(),
-                                message: error_msg.clone(),
-                            }),
-                            timestamp: now,
-                            description: Some(error_msg.clone()),
-                        });
-                        
-                        return Box::new(futures::future::ready(Ok((Err(error_msg),))));
+                        return Box::new(futures::future::ready(Ok((Err(format!("Permission denied: {}", e)),))));
                     }
                     
                     // Clone duration for the closure
@@ -164,6 +148,7 @@ impl TimingHost {
             .expect("Failed to wrap sleep function");
 
         // Implementation of the deadline() function
+        let permissions_clone2 = permissions.clone();
         let _ = interface
             .func_wrap_async(
                 "deadline",
@@ -200,27 +185,25 @@ impl TimingHost {
                     
                     // Calculate the duration to sleep
                     let duration = timestamp - now;
-                    let max_duration = max_sleep_duration;
                     
-                    // Check if the duration exceeds the maximum
-                    if duration > max_duration {
-                        let error_msg = format!(
-                            "Deadline too far in the future: {} ms from now exceeds maximum of {} ms",
-                            duration, max_duration
-                        );
-                        
-                        // Record error event
+                    // PERMISSION CHECK BEFORE OPERATION
+                    if let Err(e) = PermissionChecker::check_timing_operation(
+                        &permissions_clone2,
+                        "deadline",
+                        duration,
+                    ) {
+                        // Record permission denied event
                         ctx.data_mut().record_event(ChainEventData {
-                            event_type: "theater:simple/timing/deadline".to_string(),
-                            data: EventData::Timing(TimingEventData::Error {
+                            event_type: "theater:simple/timing/permission-denied".to_string(),
+                            data: EventData::Timing(TimingEventData::PermissionDenied {
                                 operation: "deadline".to_string(),
-                                message: error_msg.clone(),
+                                reason: e.to_string(),
                             }),
                             timestamp: now,
-                            description: Some(error_msg.clone()),
+                            description: Some(format!("Permission denied for deadline operation: {}", e)),
                         });
                         
-                        return Box::new(futures::future::ready(Ok((Err(error_msg),))));
+                        return Box::new(futures::future::ready(Ok((Err(format!("Permission denied: {}", e)),))));
                     }
                     
                     // Clone timestamp for the closure

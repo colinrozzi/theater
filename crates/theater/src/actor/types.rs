@@ -82,6 +82,11 @@ pub enum ActorError {
     #[error("Actor is not paused")]
     #[component(name = "actor-not-paused")]
     NotPaused,
+
+    /// Failed to update actor due to permission or validation error
+    #[error("Actor update failed: {0}")]
+    #[component(name = "update-error")]
+    UpdateError(String),
 }
 
 #[derive(Debug, Clone, ComponentType, Lift, Lower, Serialize, Deserialize)]
@@ -114,6 +119,8 @@ pub enum WitErrorType {
     UpdateComponentError,
     #[component(name = "paused")]
     Paused,
+    #[component(name = "update-error")]
+    UpdateError,
 }
 
 impl From<ActorError> for WitActorError {
@@ -140,6 +147,7 @@ impl From<ActorError> for WitActorError {
             ActorError::Paused => (WitErrorType::Paused, None),
             ActorError::NotPaused => (WitErrorType::Paused, None),
             ActorError::UnexpectedError(data) => (WitErrorType::Internal, Some(data.into_bytes())),
+            ActorError::UpdateError(data) => (WitErrorType::UpdateError, Some(data.into_bytes())),
         };
         Self { error_type, data }
     }
