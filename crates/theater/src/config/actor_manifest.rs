@@ -4,8 +4,8 @@ use tracing::debug;
 
 use crate::utils::resolve_reference;
 
-use super::permissions::HandlerPermission;
 use super::inheritance::HandlerPermissionPolicy;
+use super::permissions::HandlerPermission;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ComponentConfig {
@@ -21,7 +21,6 @@ pub struct ManifestConfig {
     pub description: Option<String>,
     pub long_description: Option<String>,
     pub save_chain: Option<bool>,
-    pub permissions: Option<HandlerPermission>,
     #[serde(default)]
     pub permission_policy: HandlerPermissionPolicy,
     #[serde(default)]
