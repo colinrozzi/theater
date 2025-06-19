@@ -375,7 +375,7 @@ impl ActorRuntime {
                         return Err("HttpFramework handler requested but not permitted by effective permissions".to_string());
                     }
                     Some(Handler::HttpFramework(
-                        HttpFramework::new(),
+                        HttpFramework::new(effective_permissions.http_framework.clone()),
                         effective_permissions.http_framework.clone(),
                     ))
                 }
@@ -388,6 +388,7 @@ impl ActorRuntime {
                         RuntimeHost::new(
                             config.clone(),
                             theater_tx.clone(),
+                            effective_permissions.runtime.clone(),
                         ),
                         effective_permissions.runtime.clone(),
                     ))
@@ -398,7 +399,7 @@ impl ActorRuntime {
                         return Err("Supervisor handler requested but not permitted by effective permissions".to_string());
                     }
                     Some(Handler::Supervisor(
-                        SupervisorHost::new(config.clone()),
+                        SupervisorHost::new(config.clone(), effective_permissions.supervisor.clone()),
                         effective_permissions.supervisor.clone(),
                     ))
                 }
@@ -422,7 +423,7 @@ impl ActorRuntime {
                         return Err("Store handler requested but not permitted by effective permissions".to_string());
                     }
                     Some(Handler::Store(
-                        StoreHost::new(config.clone()),
+                        StoreHost::new(config.clone(), effective_permissions.store.clone()),
                         effective_permissions.store.clone(),
                     ))
                 }

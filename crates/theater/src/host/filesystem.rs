@@ -312,12 +312,34 @@ impl FileSystemHost {
         );
 
         let allowed_path = self.path.clone();
+        let permissions = self.permissions.clone();
 
         let _ = interface.func_wrap(
             "list-files",
             move |mut ctx: StoreContextMut<'_, ActorStore>,
                   (dir_path,): (String,)|
                   -> Result<(Result<Vec<String>, String>,)> {
+                // PERMISSION CHECK BEFORE OPERATION
+                if let Err(e) = PermissionChecker::check_filesystem_operation(
+                    &permissions,
+                    "list",
+                    Some(&dir_path),
+                    None,
+                ) {
+                    error!("Filesystem list permission denied: {}", e);
+                    ctx.data_mut().record_event(ChainEventData {
+                        event_type: "theater:simple/filesystem/permission-denied".to_string(),
+                        data: EventData::Filesystem(FilesystemEventData::PermissionDenied {
+                            operation: "list".to_string(),
+                            path: dir_path.clone(),
+                            reason: e.to_string(),
+                        }),
+                        timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                        description: Some(format!("Permission denied for list operation on {}", dir_path)),
+                    });
+                    return Ok((Err(format!("Permission denied: {}", e)),));
+                }
+
                 // Record directory listed call event
                 ctx.data_mut().record_event(ChainEventData {
                     event_type: "theater:simple/filesystem/list-files".to_string(),
@@ -384,12 +406,34 @@ impl FileSystemHost {
         );
 
         let allowed_path = self.path.clone();
+        let permissions = self.permissions.clone();
 
         let _ = interface.func_wrap(
             "delete-file",
             move |mut ctx: StoreContextMut<'_, ActorStore>,
                   (file_path,): (String,)|
                   -> Result<(Result<(), String>,)> {
+                // PERMISSION CHECK BEFORE OPERATION
+                if let Err(e) = PermissionChecker::check_filesystem_operation(
+                    &permissions,
+                    "delete",
+                    Some(&file_path),
+                    None,
+                ) {
+                    error!("Filesystem delete permission denied: {}", e);
+                    ctx.data_mut().record_event(ChainEventData {
+                        event_type: "theater:simple/filesystem/permission-denied".to_string(),
+                        data: EventData::Filesystem(FilesystemEventData::PermissionDenied {
+                            operation: "delete".to_string(),
+                            path: file_path.clone(),
+                            reason: e.to_string(),
+                        }),
+                        timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                        description: Some(format!("Permission denied for delete operation on {}", file_path)),
+                    });
+                    return Ok((Err(format!("Permission denied: {}", e)),));
+                }
+
                 // Record file delete call event
                 ctx.data_mut().record_event(ChainEventData {
                     event_type: "theater:simple/filesystem/delete-file".to_string(),
@@ -442,12 +486,34 @@ impl FileSystemHost {
         );
 
         let allowed_path = self.path.clone();
+        let permissions = self.permissions.clone();
 
         let _ = interface.func_wrap(
             "create-dir",
             move |mut ctx: StoreContextMut<'_, ActorStore>,
                   (dir_path,): (String,)|
                   -> Result<(Result<(), String>,)> {
+                // PERMISSION CHECK BEFORE OPERATION
+                if let Err(e) = PermissionChecker::check_filesystem_operation(
+                    &permissions,
+                    "write",
+                    Some(&dir_path),
+                    None,
+                ) {
+                    error!("Filesystem create directory permission denied: {}", e);
+                    ctx.data_mut().record_event(ChainEventData {
+                        event_type: "theater:simple/filesystem/permission-denied".to_string(),
+                        data: EventData::Filesystem(FilesystemEventData::PermissionDenied {
+                            operation: "create-dir".to_string(),
+                            path: dir_path.clone(),
+                            reason: e.to_string(),
+                        }),
+                        timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                        description: Some(format!("Permission denied for create-dir operation on {}", dir_path)),
+                    });
+                    return Ok((Err(format!("Permission denied: {}", e)),));
+                }
+
                 // Record directory created call event
                 ctx.data_mut().record_event(ChainEventData {
                     event_type: "theater:simple/filesystem/create-dir".to_string(),
@@ -506,12 +572,34 @@ impl FileSystemHost {
         );
 
         let allowed_path = self.path.clone();
+        let permissions = self.permissions.clone();
 
         let _ = interface.func_wrap(
             "delete-dir",
             move |mut ctx: StoreContextMut<'_, ActorStore>,
                   (dir_path,): (String,)|
                   -> Result<(Result<(), String>,)> {
+                // PERMISSION CHECK BEFORE OPERATION
+                if let Err(e) = PermissionChecker::check_filesystem_operation(
+                    &permissions,
+                    "delete",
+                    Some(&dir_path),
+                    None,
+                ) {
+                    error!("Filesystem delete directory permission denied: {}", e);
+                    ctx.data_mut().record_event(ChainEventData {
+                        event_type: "theater:simple/filesystem/permission-denied".to_string(),
+                        data: EventData::Filesystem(FilesystemEventData::PermissionDenied {
+                            operation: "delete-dir".to_string(),
+                            path: dir_path.clone(),
+                            reason: e.to_string(),
+                        }),
+                        timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                        description: Some(format!("Permission denied for delete-dir operation on {}", dir_path)),
+                    });
+                    return Ok((Err(format!("Permission denied: {}", e)),));
+                }
+
                 // Record directory deleted call event
                 ctx.data_mut().record_event(ChainEventData {
                     event_type: "theater:simple/filesystem/delete-dir".to_string(),
@@ -569,12 +657,34 @@ impl FileSystemHost {
         );
 
         let allowed_path = self.path.clone();
+        let permissions = self.permissions.clone();
 
         let _ = interface.func_wrap(
             "path-exists",
             move |mut ctx: StoreContextMut<'_, ActorStore>,
                   (path,): (String,)|
                   -> Result<(Result<bool, String>,)> {
+                // PERMISSION CHECK BEFORE OPERATION
+                if let Err(e) = PermissionChecker::check_filesystem_operation(
+                    &permissions,
+                    "read",
+                    Some(&path),
+                    None,
+                ) {
+                    error!("Filesystem path-exists permission denied: {}", e);
+                    ctx.data_mut().record_event(ChainEventData {
+                        event_type: "theater:simple/filesystem/permission-denied".to_string(),
+                        data: EventData::Filesystem(FilesystemEventData::PermissionDenied {
+                            operation: "path-exists".to_string(),
+                            path: path.clone(),
+                            reason: e.to_string(),
+                        }),
+                        timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                        description: Some(format!("Permission denied for path-exists operation on {}", path)),
+                    });
+                    return Ok((Err(format!("Permission denied: {}", e)),));
+                }
+
                 // Record path exists call event
                 ctx.data_mut().record_event(ChainEventData {
                     event_type: "theater:simple/filesystem/path-exists".to_string(),

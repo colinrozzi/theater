@@ -26,11 +26,13 @@ pub enum StoreError {
 }
 
 #[derive(Clone)]
-pub struct StoreHost {}
+pub struct StoreHost {
+    permissions: Option<crate::config::permissions::StorePermissions>,
+}
 
 impl StoreHost {
-    pub fn new(_config: StoreHandlerConfig) -> Self {
-        Self {}
+    pub fn new(_config: StoreHandlerConfig, permissions: Option<crate::config::permissions::StorePermissions>) -> Self {
+        Self { permissions }
     }
 
     pub async fn setup_host_functions(&self, actor_component: &mut ActorComponent) -> Result<()> {

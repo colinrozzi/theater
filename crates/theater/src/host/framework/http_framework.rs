@@ -85,10 +85,11 @@ pub struct HttpFramework {
     next_route_id: Arc<AtomicU64>,
     next_middleware_id: Arc<AtomicU64>,
     server_handles: Arc<RwLock<HashMap<u64, ServerHandle>>>,
+    permissions: Option<crate::config::permissions::HttpFrameworkPermissions>,
 }
 
 impl HttpFramework {
-    pub fn new() -> Self {
+    pub fn new(permissions: Option<crate::config::permissions::HttpFrameworkPermissions>) -> Self {
         Self {
             servers: Arc::new(RwLock::new(HashMap::new())),
             handlers: Arc::new(RwLock::new(HandlerRegistry::new())),
@@ -97,6 +98,7 @@ impl HttpFramework {
             next_route_id: Arc::new(AtomicU64::new(1)),
             next_middleware_id: Arc::new(AtomicU64::new(1)),
             server_handles: Arc::new(RwLock::new(HashMap::new())),
+            permissions,
         }
     }
 

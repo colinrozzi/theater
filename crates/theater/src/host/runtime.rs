@@ -18,6 +18,7 @@ use wasmtime::StoreContextMut;
 #[derive(Clone)]
 pub struct RuntimeHost {
     theater_tx: Sender<TheaterCommand>,
+    permissions: Option<crate::config::permissions::RuntimePermissions>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -66,8 +67,8 @@ pub enum RuntimeError {
 }
 
 impl RuntimeHost {
-    pub fn new(_config: RuntimeHostConfig, theater_tx: Sender<TheaterCommand>) -> Self {
-        Self { theater_tx }
+    pub fn new(_config: RuntimeHostConfig, theater_tx: Sender<TheaterCommand>, permissions: Option<crate::config::permissions::RuntimePermissions>) -> Self {
+        Self { theater_tx, permissions }
     }
 
     pub async fn setup_host_functions(&self, actor_component: &mut ActorComponent) -> Result<()> {

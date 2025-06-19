@@ -19,6 +19,7 @@ use wasmtime::StoreContextMut;
 pub struct SupervisorHost {
     channel_tx: tokio::sync::mpsc::Sender<ActorResult>,
     channel_rx: tokio::sync::mpsc::Receiver<ActorResult>,
+    permissions: Option<crate::config::permissions::SupervisorPermissions>,
 }
 
 #[derive(Error, Debug)]
@@ -41,11 +42,12 @@ struct SupervisorEvent {
 }
 
 impl SupervisorHost {
-    pub fn new(_config: SupervisorHostConfig) -> Self {
+    pub fn new(_config: SupervisorHostConfig, permissions: Option<crate::config::permissions::SupervisorPermissions>) -> Self {
         let (channel_tx, channel_rx) = tokio::sync::mpsc::channel(100);
         Self {
             channel_tx,
             channel_rx,
+            permissions,
         }
     }
 
