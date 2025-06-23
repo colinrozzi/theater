@@ -11,6 +11,11 @@ keywords.workspace = true
 categories.workspace = true
 rust-version.workspace = true
 readme = "README.md"
+include = [
+    "src/**/*",
+    "Cargo.toml",
+    "README.md"
+]
 
 [[bin]]
 name = "theater"
