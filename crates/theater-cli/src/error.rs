@@ -205,7 +205,7 @@ impl CliError {
         }
     }
 
-    pub fn operation_timeout(operation: impl Into<String>, timeout: u64) -> Self {
+    pub fn operation_timeout(_operation: impl Into<String>, timeout: u64) -> Self {
         Self::ConnectionTimeout { timeout }
     }
 
