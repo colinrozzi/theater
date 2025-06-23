@@ -170,7 +170,9 @@ pub struct MemoryStats {
 /// ## Example
 ///
 /// ```rust,ignore
-/// // ActorComponent is an internal type
+/// // NOTE: This is an internal implementation detail.
+/// // End users should use TheaterRuntime and ActorHandle instead.
+/// // This example is for Theater contributors and internal documentation.
 /// use theater::ManifestConfig;
 /// use theater::ActorStore;
 /// use anyhow::Result;
