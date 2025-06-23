@@ -7,7 +7,7 @@ use uuid::Uuid;
 use theater::{messages::ChannelParticipant, ChainEvent};
 use theater_server::{ManagementCommand, ManagementResponse};
 
-use crate::config::Config;
+
 use crate::error::{CliError, CliResult};
 use theater_client::TheaterConnection;
 
@@ -52,7 +52,7 @@ impl TheaterClient {
     /// Close the connection
     pub async fn close(&self) {
         let mut conn = self.connection.lock().await;
-        conn.close().await;
+        let _ = conn.close().await;
     }
 
     /// List all running actors
