@@ -1,4 +1,4 @@
-use console::{style, Color, Style};
+use console::Style;
 
 /// Theme for consistent CLI styling
 #[derive(Debug, Clone)]
