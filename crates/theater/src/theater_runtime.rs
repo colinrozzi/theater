@@ -7,8 +7,8 @@
 use crate::actor::runtime::{ActorRuntime, StartActorResult};
 use crate::actor::types::{ActorControl, ActorError, ActorInfo, ActorOperation};
 use crate::chain::ChainEvent;
-use crate::config::permissions::HandlerPermission;
 use crate::config::enforcement::{validate_manifest_permissions, PermissionError};
+use crate::config::permissions::HandlerPermission;
 use crate::id::TheaterId;
 use crate::messages::{
     ActorChannelClose, ActorChannelMessage, ActorChannelOpen, ActorResult, ChannelId,
@@ -669,6 +669,7 @@ impl TheaterRuntime {
                                         if let Err(e) = tx.send(channel_event).await {
                                             error!("Failed to send message to server: {}", e);
                                         } else {
+                                            successful_delivery = true;
                                             debug!(
                                                 "Delivered message to server for channel {:?}",
                                                 channel_id
@@ -974,14 +975,14 @@ impl TheaterRuntime {
                 ))
             }
             Some(StartActorResult::Error(e)) => {
-                error!("Failed to start actor due to permission/validation error: {}", e);
+                error!(
+                    "Failed to start actor due to permission/validation error: {}",
+                    e
+                );
                 // Abort the runtime process since it failed
                 actor_runtime_process.abort();
                 // Return the specific error message to the spawner
-                Err(anyhow::anyhow!(
-                    "Actor startup failed: {}",
-                    e
-                ))
+                Err(anyhow::anyhow!("Actor startup failed: {}", e))
             }
             None => {
                 error!("Failed to receive actor ID from runtime");
