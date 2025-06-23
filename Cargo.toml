@@ -15,6 +15,9 @@ authors = ["Colin Rozzi <colinrozzi+theater@gmail.com>"]
 license = "Apache-2.0"
 repository = "https://github.com/colinrozzi/theater"
 homepage = "https://colinrozzi.github.io/theater"
+keywords = ["wasm", "actor", "ai", "agents", "webassembly"]
+categories = ["wasm", "concurrency", "development-tools"]
+rust-version = "1.81.0"
 
 [workspace.dependencies]
 anyhow = "1.0"
