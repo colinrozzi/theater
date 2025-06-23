@@ -133,9 +133,10 @@ impl ChainEventData {
     ///
     /// ## Example
     ///
-    /// ```rust,ignore
+    /// ```rust
     /// # use theater::events::ChainEventData;
     /// # use theater::events::EventData;
+    /// # use theater::events::runtime::RuntimeEventData;
     /// # let event = ChainEventData {
     /// #     event_type: "runtime.init".to_string(),
     /// #     data: EventData::Runtime(RuntimeEventData::InitCall { params: String::new() }),
@@ -152,7 +153,7 @@ impl ChainEventData {
     /// }
     /// ```
     #[allow(dead_code)]
-    fn event_type(&self) -> String {
+    pub fn event_type(&self) -> String {
         let event_type = self.event_type.clone();
         event_type
     }
@@ -171,7 +172,7 @@ impl ChainEventData {
     ///
     /// ## Example
     ///
-    /// ```rust,ignore,ignore,ignore,ignore,ignore
+    /// ```rust
     /// # use theater::events::ChainEventData;
     /// # use theater::events::EventData;
     /// # use theater::events::runtime::RuntimeEventData;
@@ -186,7 +187,7 @@ impl ChainEventData {
     /// println!("Event description: {}", description);
     /// ```
     #[allow(dead_code)]
-    fn description(&self) -> String {
+    pub fn description(&self) -> String {
         match &self.description {
             Some(desc) => desc.clone(),
             None => String::from(""),
@@ -207,9 +208,10 @@ impl ChainEventData {
     ///
     /// ## Example
     ///
-    /// ```rust,ignore
+    /// ```rust
     /// # use theater::events::ChainEventData;
     /// # use theater::events::EventData;
+    /// # use theater::events::runtime::RuntimeEventData;
     /// # let event = ChainEventData {
     /// #     event_type: "runtime.init".to_string(),
     /// #     data: EventData::Runtime(RuntimeEventData::InitCall { params: String::new() }),
@@ -226,7 +228,7 @@ impl ChainEventData {
     /// }
     /// ```
     #[allow(dead_code)]
-    fn to_json(&self) -> Result<Vec<u8>, serde_json::Error> {
+    pub fn to_json(&self) -> Result<Vec<u8>, serde_json::Error> {
         serde_json::to_vec(self)
     }
 
@@ -249,9 +251,10 @@ impl ChainEventData {
     ///
     /// ## Example
     ///
-    /// ```rust,ignore
+    /// ```rust
     /// # use theater::events::ChainEventData;
     /// # use theater::events::EventData;
+    /// # use theater::events::runtime::RuntimeEventData;
     /// # use theater::chain::ChainEvent;
     /// # let event_data = ChainEventData {
     /// #     event_type: "runtime.init".to_string(),
