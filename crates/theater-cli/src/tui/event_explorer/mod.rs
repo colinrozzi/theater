@@ -17,8 +17,8 @@ use tracing::debug;
 
 pub async fn run_explorer(
     mut app: EventExplorerApp,
-    ctx: &CommandContext,
-    server_address: SocketAddr,
+    _ctx: &CommandContext,
+    _server_address: SocketAddr,
 ) -> CliResult<()> {
     debug!("Starting event explorer TUI");
 
@@ -43,7 +43,7 @@ pub async fn run_explorer(
     })?;
 
     // Main event loop
-    let result = run_explorer_loop(&mut terminal, &mut app, ctx, server_address).await;
+    let result = run_explorer_loop(&mut terminal, &mut app, _ctx, _server_address).await;
 
     // Cleanup terminal
     disable_raw_mode().ok();
@@ -56,8 +56,8 @@ pub async fn run_explorer(
 async fn run_explorer_loop(
     terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
     app: &mut EventExplorerApp,
-    ctx: &CommandContext,
-    server_address: SocketAddr,
+    _ctx: &CommandContext,
+    _server_address: SocketAddr,
 ) -> CliResult<()> {
     use input::{handle_input, ExplorerAction};
 
