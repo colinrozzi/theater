@@ -27,6 +27,6 @@ serde_json = "1.0"
 tracing = "0.1"
 uuid = { version = "1.6", features = ["v4", "serde"] }
 
-theater = { path = "crates/theater" }
-theater-client = { path = "crates/theater-client" }
-theater-server = { path = "crates/theater-server" }
+theater = { version = "0.2.0", path = "crates/theater" }
+theater-client = { version = "0.2.0", path = "crates/theater-client" }
+theater-server = { version = "0.2.0", path = "crates/theater-server" }
