@@ -17,6 +17,7 @@ use wasmtime::StoreContextMut;
 
 #[derive(Clone)]
 pub struct TimingHost {
+    #[allow(dead_code)]
     config: TimingHostConfig,
     permissions: Option<crate::config::permissions::TimingPermissions>,
 }

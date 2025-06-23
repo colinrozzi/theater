@@ -19,6 +19,7 @@ use wasmtime::StoreContextMut;
 pub struct SupervisorHost {
     channel_tx: tokio::sync::mpsc::Sender<ActorResult>,
     channel_rx: tokio::sync::mpsc::Receiver<ActorResult>,
+    #[allow(dead_code)]
     permissions: Option<crate::config::permissions::SupervisorPermissions>,
 }
 
