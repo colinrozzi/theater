@@ -1,66 +1,47 @@
-# Theater Server CLI
+# theater-server-cli
 
-A standalone command-line tool for starting and managing Theater WebAssembly actor system servers.
+Standalone CLI for Theater server management.
+
+## Overview
+
+`theater-server-cli` provides a dedicated command-line interface for running and managing Theater servers. This is a lightweight alternative to the full `theater-cli` when you only need server functionality.
 
 ## Installation
 
-Build from the Theater workspace:
-
 ```bash
-cargo build --bin theater-server
+cargo install theater-server-cli
 ```
-
-The binary will be available at `target/debug/theater-server` (or `target/release/theater-server` for release builds).
 
 ## Usage
 
-### Start Server
-
 ```bash
-theater-server [OPTIONS]
+# Start a Theater server
+theater-server start
+
+# Start with custom configuration
+theater-server start --config server.toml
+
+# Show server status
+theater-server status
 ```
 
-### Options
+## Configuration
 
-- `-a, --address <ADDRESS>` - Address to bind the theater server to (default: 127.0.0.1:9000)
-- `-l, --log-level <LEVEL>` - Logging level: trace, debug, info, warn, error (default: info)
-- `--log-filter <FILTER>` - Advanced logging filter (e.g. "theater=debug,wasmtime=info")
-- `--log-dir <DIR>` - Log directory (default: $THEATER_HOME/logs/theater)
-- `--log-stdout` - Also log to stdout
-- `-h, --help` - Print help information
-- `-V, --version` - Print version information
+The server can be configured via TOML files:
 
-### Examples
+```toml
+[server]
+host = "127.0.0.1"
+port = 8080
+log_level = "info"
 
-Start server on default address:
-```bash
-theater-server
+[security]
+enable_cors = true
+max_actors = 100
 ```
 
-Start server on custom address with debug logging:
-```bash
-theater-server --address 0.0.0.0:8080 --log-level debug --log-stdout
-```
+For complete documentation, see the [Theater Guide](https://colinrozzi.github.io/theater/guide).
 
-Use advanced logging filter:
-```bash
-theater-server --log-filter "theater=debug,wasmtime=info,hyper=warn"
-```
+## License
 
-## Environment Variables
-
-- `THEATER_HOME` - Base directory for Theater data and logs (used in default log-dir path)
-
-## Migration from `theater server`
-
-This tool replaces the `theater server` command from the main Theater CLI. The arguments and functionality remain identical:
-
-**Old:**
-```bash
-theater server --address 127.0.0.1:9000 --log-level info
-```
-
-**New:**
-```bash
-theater-server --address 127.0.0.1:9000 --log-level info
-```
+This project is licensed under the Apache License 2.0 - see the [LICENSE](../../LICENSE) file for details.
