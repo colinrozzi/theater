@@ -6,9 +6,7 @@ pub use formatters::*;
 pub use progress::*;
 pub use theme::*;
 
-use console::{style, Term};
-use serde_json::Value;
-use std::io::Write;
+use console::Term;
 
 use crate::config::OutputConfig;
 use crate::error::CliResult;
