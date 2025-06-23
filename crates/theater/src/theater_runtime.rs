@@ -53,7 +53,7 @@ use tracing::{debug, error, info, warn};
 ///     let (theater_tx, theater_rx) = mpsc::channel(100);
 ///     
 ///     // Initialize the runtime
-///     let mut runtime = TheaterRuntime::new(theater_tx.clone(), theater_rx, None).await?;
+///     let mut runtime = TheaterRuntime::new(theater_tx.clone(), theater_rx, None, Default::default()).await?;
 ///     
 ///     // Start a background task to run the runtime
 ///     let runtime_handle = tokio::spawn(async move {
@@ -169,7 +169,7 @@ impl TheaterRuntime {
     /// #
     /// # async fn example() -> Result<()> {
     /// let (theater_tx, theater_rx) = mpsc::channel::<TheaterCommand>(100);
-    /// let runtime = TheaterRuntime::new(theater_tx, theater_rx, None).await?;
+    /// let runtime = TheaterRuntime::new(theater_tx, theater_rx, None, Default::default()).await?;
     /// # Ok(())
     /// # }
     /// ```
