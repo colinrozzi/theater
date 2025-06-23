@@ -339,7 +339,7 @@ impl StateChain {
     /// // Create event data
     /// let event_data = ChainEventData {
     ///     event_type: "state_change".to_string(),
-    ///     data: EventData::Runtime(/* ... */),
+    ///     data: EventData::Runtime(theater::events::runtime::RuntimeEventData::Log { level: "info".to_string(), message: "state changed".to_string() }),
     ///     timestamp: chrono::Utc::now().timestamp() as u64,
     ///     description: Some("Actor state changed".to_string()),
     /// };

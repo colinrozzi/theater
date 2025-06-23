@@ -85,6 +85,7 @@ pub struct HttpFramework {
     next_route_id: Arc<AtomicU64>,
     next_middleware_id: Arc<AtomicU64>,
     server_handles: Arc<RwLock<HashMap<u64, ServerHandle>>>,
+    #[allow(dead_code)]
     permissions: Option<crate::config::permissions::HttpFrameworkPermissions>,
 }
 

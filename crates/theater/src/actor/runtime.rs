@@ -8,6 +8,7 @@ use crate::actor::handle::ActorHandle;
 use crate::actor::store::ActorStore;
 use crate::actor::types::ActorError;
 use crate::actor::types::ActorOperation;
+use crate::config::permissions::HandlerPermission;
 use crate::events::theater_runtime::TheaterRuntimeEventData;
 use crate::events::wasm::WasmEventData;
 use crate::events::{ChainEventData, EventData};
@@ -120,6 +121,7 @@ impl ActorRuntime {
         parent_shutdown_receiver: ShutdownReceiver,
         response_tx: Sender<StartActorResult>,
         engine: wasmtime::Engine,
+        parent_permissions: HandlerPermission,
     ) {
         let actor_handle =
             ActorHandle::new(operation_tx.clone(), info_tx.clone(), control_tx.clone());
@@ -139,7 +141,7 @@ impl ActorRuntime {
         };
 
         // Calculate effective permissions (for now, use root permissions as default)
-        let parent_permissions = crate::config::permissions::HandlerPermission::root();
+        //let parent_permissions = crate::config::permissions::HandlerPermission::root();
         let effective_permissions = config.calculate_effective_permissions(&parent_permissions);
 
         // Validate that the manifest doesn't exceed effective permissions

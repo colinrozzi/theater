@@ -58,11 +58,16 @@ pub use actor::ActorStore;
 pub use actor::StartActorResult;
 pub use chain::{ChainEvent, StateChain};
 pub use config::actor_manifest::{
-    HandlerConfig, HttpServerHandlerConfig, ManifestConfig, MessageServerConfig,
+    HandlerConfig, HttpServerHandlerConfig, InterfacesConfig, ManifestConfig, MessageServerConfig,
     RandomHandlerConfig,
 };
 pub use errors::TheaterRuntimeError;
 pub use id::TheaterId;
 pub use messages::ChannelEvent;
-pub use metrics::{ActorMetrics, MetricsCollector, OperationStats};
+pub use metrics::{
+    ActorMetrics, MetricsCollector, OperationMetrics, OperationStats, ResourceMetrics,
+};
+pub use shutdown::{ShutdownController, ShutdownReceiver, ShutdownSignal, ShutdownType};
+pub use store::{ContentRef, ContentStore, Label};
+pub use theater_runtime::TheaterRuntime;
 pub use wasm::{MemoryStats, WasmError};

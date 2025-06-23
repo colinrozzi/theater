@@ -1,25 +1,24 @@
 use std::time::Duration;
 
-use theater::actor_executor::ActorOperation;
-use theater::actor_runtime::StartActorResult;
-use theater::actor_store::ActorStore;
-use theater::config::{HandlerConfig, InterfacesConfig, ManifestConfig, MessageServerConfig};
-use theater::id::TheaterId;
+use theater::{
+    ActorHandle, ActorOperation, StartActorResult, ActorStore, HandlerConfig, InterfacesConfig, ManifestConfig, MessageServerConfig,
+    TheaterId, ActorMetrics, OperationMetrics, ResourceMetrics, ShutdownController
+};
 use theater::messages::{ActorMessage, ActorSend, TheaterCommand};
-use theater::metrics::{ActorMetrics, OperationMetrics, ResourceMetrics};
-use theater::shutdown::ShutdownController;
 use tokio::sync::mpsc;
 
 /// Helper to create a test manifest
 fn create_test_manifest() -> ManifestConfig {
     ManifestConfig {
         name: "test-actor".to_string(),
-        component_path: "test_component.wasm".to_string(),
+        version: "1.0.0".to_string(),
+        component: "test_component.wasm".to_string(),
+        description: None,
+        long_description: None,
+        save_chain: None,
+        permission_policy: Default::default(),
         init_state: None,
-        interface: InterfacesConfig::default(),
         handlers: vec![HandlerConfig::MessageServer(MessageServerConfig {})],
-        logging: Default::default(),
-        event_server: None,
     }
 }
 
@@ -58,7 +57,8 @@ async fn test_actor_runtime_basic() {
     let (theater_tx, mut theater_rx) = mpsc::channel(10);
     let (actor_tx, _actor_rx) = mpsc::channel::<ActorMessage>(10);
     let (op_tx, _op_rx) = mpsc::channel::<ActorOperation>(10);
-    let (shutdown_controller, _shutdown_receiver) = ShutdownController::new();
+    let mut shutdown_controller = ShutdownController::new();
+    let _shutdown_receiver = shutdown_controller.subscribe();
     let (_result_tx, _result_rx) = mpsc::channel::<StartActorResult>(1);
 
     // Set up a monitor for TheaterCommands
@@ -77,7 +77,7 @@ async fn test_actor_runtime_basic() {
     // This would require more complex mocking of the component creation process
 
     // For now, just verify the basics
-    let actor_handle = theater::actor_handle::ActorHandle::new(op_tx.clone());
+    let actor_handle = ActorHandle::new(op_tx.clone());
     let _actor_store = ActorStore::new(actor_id.clone(), theater_tx.clone(), actor_handle.clone());
 
     // Send a test message

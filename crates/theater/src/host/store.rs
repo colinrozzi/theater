@@ -27,6 +27,7 @@ pub enum StoreError {
 
 #[derive(Clone)]
 pub struct StoreHost {
+    #[allow(dead_code)]
     permissions: Option<crate::config::permissions::StorePermissions>,
 }
 

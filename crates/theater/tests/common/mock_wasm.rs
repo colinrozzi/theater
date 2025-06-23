@@ -2,9 +2,9 @@ use anyhow::Result;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-use theater::actor_store::ActorStore;
-use theater::config::ManifestConfig;
-use wasmtime::component::Lower;
+use theater::ActorStore;
+use theater::ManifestConfig;
+// use wasmtime::component::Lower; // Not used
 
 /// A mock function result for testing
 pub struct MockFunctionResult {
@@ -71,7 +71,7 @@ impl MockActorInstance {
         R: for<'de> serde::Deserialize<'de>,
     {
         // Convert parameters to JSON
-        let params_json = serde_json::to_vec(&params)?;
+        let _params_json = serde_json::to_vec(&params)?;
 
         // Look up the function result
         let results = self.function_results.lock().unwrap();
@@ -124,12 +124,14 @@ impl MockActorComponentFactory {
     pub async fn create_basic_component(store: ActorStore) -> Result<MockActorComponent> {
         let config = ManifestConfig {
             name: "test-actor".to_string(),
-            component_path: "test-component.wasm".to_string(),
-            init_state: None,
-            interface: Default::default(),
+            component: "test-component.wasm".to_string(),
+            version: "1.0.0".to_string(),
             handlers: Vec::new(),
-            logging: Default::default(),
-            event_server: None,
+            description: None,
+            long_description: None,
+            save_chain: None,
+            permission_policy: Default::default(),
+            init_state: None,
         };
 
         let component = MockActorComponent::new(&config, store).await?;

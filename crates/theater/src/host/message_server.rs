@@ -26,6 +26,7 @@ pub struct MessageServerHost {
     theater_tx: Sender<TheaterCommand>,
     active_channels: HashMap<ChannelId, ChannelState>,
     outstanding_requests: Arc<Mutex<HashMap<String, tokio::sync::oneshot::Sender<Vec<u8>>>>>,
+    #[allow(dead_code)]
     permissions: Option<crate::config::permissions::MessageServerPermissions>,
 }
 

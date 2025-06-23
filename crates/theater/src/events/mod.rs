@@ -24,8 +24,8 @@ use serde::{Deserialize, Serialize};
 /// // Create a runtime initialization event
 /// let event_data = ChainEventData {
 ///     event_type: "actor.init".to_string(),
-///     data: EventData::Runtime(RuntimeEventData::Init {
-///         params: vec![1, 2, 3],
+///     data: EventData::Runtime(RuntimeEventData::InitCall {
+///         params: "init params".to_string(),
 ///     }),
 ///     timestamp: Utc::now().timestamp() as u64,
 ///     description: Some("Actor initialized".to_string()),
@@ -136,9 +136,10 @@ impl ChainEventData {
     /// ```rust
     /// # use theater::events::ChainEventData;
     /// # use theater::events::EventData;
+    /// # use theater::events::runtime::RuntimeEventData;
     /// # let event = ChainEventData {
     /// #     event_type: "runtime.init".to_string(),
-    /// #     data: EventData::Runtime(runtime::RuntimeEventData::Init { params: vec![] }),
+    /// #     data: EventData::Runtime(RuntimeEventData::InitCall { params: String::new() }),
     /// #     timestamp: 0,
     /// #     description: None,
     /// # };
@@ -152,7 +153,7 @@ impl ChainEventData {
     /// }
     /// ```
     #[allow(dead_code)]
-    fn event_type(&self) -> String {
+    pub fn event_type(&self) -> String {
         let event_type = self.event_type.clone();
         event_type
     }
@@ -174,9 +175,10 @@ impl ChainEventData {
     /// ```rust
     /// # use theater::events::ChainEventData;
     /// # use theater::events::EventData;
+    /// # use theater::events::runtime::RuntimeEventData;
     /// # let event = ChainEventData {
     /// #     event_type: "runtime.init".to_string(),
-    /// #     data: EventData::Runtime(runtime::RuntimeEventData::Init { params: vec![] }),
+    /// #     data: EventData::Runtime(RuntimeEventData::InitCall { params: String::new() }),
     /// #     timestamp: 0,
     /// #     description: Some("Actor initialized".to_string()),
     /// # };
@@ -185,7 +187,7 @@ impl ChainEventData {
     /// println!("Event description: {}", description);
     /// ```
     #[allow(dead_code)]
-    fn description(&self) -> String {
+    pub fn description(&self) -> String {
         match &self.description {
             Some(desc) => desc.clone(),
             None => String::from(""),
@@ -209,9 +211,10 @@ impl ChainEventData {
     /// ```rust
     /// # use theater::events::ChainEventData;
     /// # use theater::events::EventData;
+    /// # use theater::events::runtime::RuntimeEventData;
     /// # let event = ChainEventData {
     /// #     event_type: "runtime.init".to_string(),
-    /// #     data: EventData::Runtime(runtime::RuntimeEventData::Init { params: vec![] }),
+    /// #     data: EventData::Runtime(RuntimeEventData::InitCall { params: String::new() }),
     /// #     timestamp: 0,
     /// #     description: None,
     /// # };
@@ -225,7 +228,7 @@ impl ChainEventData {
     /// }
     /// ```
     #[allow(dead_code)]
-    fn to_json(&self) -> Result<Vec<u8>, serde_json::Error> {
+    pub fn to_json(&self) -> Result<Vec<u8>, serde_json::Error> {
         serde_json::to_vec(self)
     }
 
@@ -251,10 +254,11 @@ impl ChainEventData {
     /// ```rust
     /// # use theater::events::ChainEventData;
     /// # use theater::events::EventData;
+    /// # use theater::events::runtime::RuntimeEventData;
     /// # use theater::chain::ChainEvent;
     /// # let event_data = ChainEventData {
     /// #     event_type: "runtime.init".to_string(),
-    /// #     data: EventData::Runtime(runtime::RuntimeEventData::Init { params: vec![] }),
+    /// #     data: EventData::Runtime(RuntimeEventData::InitCall { params: String::new() }),
     /// #     timestamp: 0,
     /// #     description: None,
     /// # };
@@ -263,8 +267,14 @@ impl ChainEventData {
     /// let chain_event = event_data.to_chain_event(None);
     ///
     /// // Later, create child events in the chain
-    /// let child_event_data = /* create new event data */;
-    /// // let child_chain_event = child_event_data.to_chain_event(Some(chain_event.hash.clone()));
+    /// // Create a child event
+/// let child_event_data = ChainEventData {
+///     event_type: "child.event".to_string(),
+///     data: EventData::Runtime(RuntimeEventData::Log { level: "info".to_string(), message: "child event".to_string() }),
+///     timestamp: 0,
+///     description: None,
+/// };
+    /// let child_chain_event = child_event_data.to_chain_event(Some(chain_event.hash.clone()));
     /// ```
     ///
     /// ## Implementation Notes

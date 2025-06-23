@@ -27,6 +27,8 @@ use crate::actor::ActorError;
 ///         init_bytes: None,
 ///         response_tx: tx,
 ///         parent_id: None,
+///         supervisor_tx: None,
+///         subscription_tx: None,
 ///     };
 ///
 ///     // Send the command to the runtime...
@@ -96,7 +98,7 @@ use tokio::sync::oneshot;
 ///
 /// // Create a command to stop an actor
 /// let (tx, rx) = oneshot::channel();
-/// let actor_id = TheaterId::new();
+/// let actor_id = TheaterId::generate();
 /// let stop_command = TheaterCommand::StopActor {
 ///     actor_id,
 ///     response_tx: tx,
@@ -592,7 +594,7 @@ impl TheaterCommand {
 /// use theater::id::TheaterId;
 ///
 /// // Create participants
-/// let actor_id = TheaterId::new();
+/// let actor_id = TheaterId::generate();
 /// let initiator = ChannelParticipant::Actor(actor_id);
 /// let target = ChannelParticipant::External;
 ///
@@ -678,7 +680,7 @@ impl ChannelId {
 /// use theater::id::TheaterId;
 ///
 /// // Create an actor participant
-/// let actor_id = TheaterId::new();
+/// let actor_id = TheaterId::generate();
 /// let participant = ChannelParticipant::Actor(actor_id);
 ///
 /// // Create an external participant
@@ -932,7 +934,7 @@ pub enum ActorMessage {
 /// - System startup or explicit start commands transition to Running
 /// - Clean shutdown requests transition to Stopped
 /// - Errors or crashes transition to Failed
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum ActorStatus {
     /// Actor is active and processing messages
     Running,

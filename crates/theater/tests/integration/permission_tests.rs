@@ -8,7 +8,7 @@ use theater::config::permissions::{
 #[tokio::test]
 async fn test_handler_creation_permission_validation() {
     // Test case 1: Valid permissions should allow handler creation
-    let valid_permissions = HandlerPermission {
+    let _valid_permissions = HandlerPermission {
         file_system: Some(FileSystemPermissions {
             read: true,
             write: true,
@@ -27,8 +27,8 @@ async fn test_handler_creation_permission_validation() {
     };
     
     // Create a manifest that requests these handlers
-    let manifest = ManifestConfig {
-        name: Some("test-actor".to_string()),
+    let _manifest = ManifestConfig {
+        name: "test-actor".to_string(),
         component: "test.wasm".to_string(),
         handlers: vec![
             HandlerConfig::FileSystem(FileSystemHandlerConfig {
@@ -43,16 +43,16 @@ async fn test_handler_creation_permission_validation() {
                 allowed_prefixes: None,
             })
         ],
-        version: Some("1.0.0".to_string()),
+        version: "1.0.0".to_string(),
         description: None,
         long_description: None,
-        save_chain: false,
-        permissions: None,
-        interfaces: None,
+        save_chain: Some(false),
+        permission_policy: Default::default(),
+        init_state: None,
     };
     
     // Test case 2: Missing permissions should be detected
-    let invalid_permissions = HandlerPermission {
+    let _invalid_permissions = HandlerPermission {
         // Missing file_system permissions
         file_system: None,
         environment: Some(EnvironmentPermissions {

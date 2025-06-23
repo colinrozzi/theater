@@ -7,7 +7,6 @@
 use crate::actor::runtime::{ActorRuntime, StartActorResult};
 use crate::actor::types::{ActorControl, ActorError, ActorInfo, ActorOperation};
 use crate::chain::ChainEvent;
-use crate::config::enforcement::{validate_manifest_permissions, PermissionError};
 use crate::config::permissions::HandlerPermission;
 use crate::id::TheaterId;
 use crate::messages::{
@@ -54,7 +53,7 @@ use tracing::{debug, error, info, warn};
 ///     let (theater_tx, theater_rx) = mpsc::channel(100);
 ///     
 ///     // Initialize the runtime
-///     let mut runtime = TheaterRuntime::new(theater_tx.clone(), theater_rx, None).await?;
+///     let mut runtime = TheaterRuntime::new(theater_tx.clone(), theater_rx, None, Default::default()).await?;
 ///     
 ///     // Start a background task to run the runtime
 ///     let runtime_handle = tokio::spawn(async move {
@@ -170,7 +169,7 @@ impl TheaterRuntime {
     /// #
     /// # async fn example() -> Result<()> {
     /// let (theater_tx, theater_rx) = mpsc::channel::<TheaterCommand>(100);
-    /// let runtime = TheaterRuntime::new(theater_tx, theater_rx, None).await?;
+    /// let runtime = TheaterRuntime::new(theater_tx, theater_rx, None, Default::default()).await?;
     /// # Ok(())
     /// # }
     /// ```
@@ -895,6 +894,7 @@ impl TheaterRuntime {
         let actor_name = manifest.name.clone();
         let manifest_clone = manifest.clone();
         let engine = self.wasm_engine.clone();
+        let permissions = self.permissions.clone();
         let actor_runtime_process = tokio::spawn(async move {
             ActorRuntime::start(
                 actor_id_for_task.clone(),
@@ -913,6 +913,7 @@ impl TheaterRuntime {
                 shutdown_receiver_clone,
                 response_tx,
                 engine,
+                permissions,
             )
             .await;
 

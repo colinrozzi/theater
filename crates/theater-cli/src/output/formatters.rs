@@ -1,4 +1,4 @@
-use chrono::{DateTime, Utc};
+use chrono::DateTime;
 use serde_json::Value;
 use theater::ChainEvent;
 
@@ -377,7 +377,7 @@ impl OutputFormat for BuildResult {
         Ok(())
     }
 
-    fn format_detailed(&self, output: &OutputManager) -> CliResult<()> {
+    fn format_detailed(&self, _output: &OutputManager) -> CliResult<()> {
         todo!()
     }
 }
@@ -483,7 +483,7 @@ impl OutputFormat for ActorAction {
         Ok(())
     }
 
-    fn format_detailed(&self, output: &OutputManager) -> CliResult<()> {
+    fn format_detailed(&self, _output: &OutputManager) -> CliResult<()> {
         todo!()
     }
 }
@@ -583,7 +583,7 @@ impl OutputFormat for ComponentUpdate {
         output.table(&headers, &rows)?;
         Ok(())
     }
-    fn format_detailed(&self, output: &OutputManager) -> CliResult<()> {
+    fn format_detailed(&self, _output: &OutputManager) -> CliResult<()> {
         todo!()
     }
 }
@@ -667,7 +667,7 @@ impl OutputFormat for MessageSent {
         output.table(&headers, &rows)?;
         Ok(())
     }
-    fn format_detailed(&self, output: &OutputManager) -> CliResult<()> {
+    fn format_detailed(&self, _output: &OutputManager) -> CliResult<()> {
         todo!()
     }
 }
@@ -724,7 +724,7 @@ impl OutputFormat for MessageResponse {
         output.table(&headers, &rows)?;
         Ok(())
     }
-    fn format_detailed(&self, output: &OutputManager) -> CliResult<()> {
+    fn format_detailed(&self, _output: &OutputManager) -> CliResult<()> {
         todo!()
     }
 }
@@ -812,7 +812,7 @@ impl OutputFormat for StoredActorList {
         output.table(&headers, &rows)?;
         Ok(())
     }
-    fn format_detailed(&self, output: &OutputManager) -> CliResult<()> {
+    fn format_detailed(&self, _output: &OutputManager) -> CliResult<()> {
         todo!()
     }
 }
@@ -919,7 +919,7 @@ impl OutputFormat for ActorLogs {
         output.table(&headers, &rows)?;
         Ok(())
     }
-    fn format_detailed(&self, output: &OutputManager) -> CliResult<()> {
+    fn format_detailed(&self, _output: &OutputManager) -> CliResult<()> {
         todo!()
     }
 }
@@ -979,7 +979,7 @@ impl OutputFormat for ServerInfo {
         }
         Ok(())
     }
-    fn format_detailed(&self, output: &OutputManager) -> CliResult<()> {
+    fn format_detailed(&self, _output: &OutputManager) -> CliResult<()> {
         todo!()
     }
 }
@@ -1130,7 +1130,7 @@ impl OutputFormat for ActorInspection {
         output.table(&headers, &rows)?;
         Ok(())
     }
-    fn format_detailed(&self, output: &OutputManager) -> CliResult<()> {
+    fn format_detailed(&self, _output: &OutputManager) -> CliResult<()> {
         todo!()
     }
 }
@@ -1207,7 +1207,7 @@ impl OutputFormat for ProjectCreated {
         }
         Ok(())
     }
-    fn format_detailed(&self, output: &OutputManager) -> CliResult<()> {
+    fn format_detailed(&self, _output: &OutputManager) -> CliResult<()> {
         todo!()
     }
 }
@@ -1281,7 +1281,7 @@ impl OutputFormat for ActorStarted {
         output.table(&headers, &rows)?;
         Ok(())
     }
-    fn format_detailed(&self, output: &OutputManager) -> CliResult<()> {
+    fn format_detailed(&self, _output: &OutputManager) -> CliResult<()> {
         todo!()
     }
 }
@@ -1436,7 +1436,7 @@ impl OutputFormat for EventSubscription {
         output.table(&headers, &rows)?;
         Ok(())
     }
-    fn format_detailed(&self, output: &OutputManager) -> CliResult<()> {
+    fn format_detailed(&self, _output: &OutputManager) -> CliResult<()> {
         todo!()
     }
 }
@@ -1535,7 +1535,7 @@ impl OutputFormat for ServerStarted {
         output.table(&headers, &rows)?;
         Ok(())
     }
-    fn format_detailed(&self, output: &OutputManager) -> CliResult<()> {
+    fn format_detailed(&self, _output: &OutputManager) -> CliResult<()> {
         todo!()
     }
 }
@@ -1616,7 +1616,7 @@ impl OutputFormat for ChannelOpened {
         output.table(&headers, &rows)?;
         Ok(())
     }
-    fn format_detailed(&self, output: &OutputManager) -> CliResult<()> {
+    fn format_detailed(&self, _output: &OutputManager) -> CliResult<()> {
         todo!()
     }
 }
