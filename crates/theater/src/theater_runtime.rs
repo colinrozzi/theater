@@ -894,6 +894,7 @@ impl TheaterRuntime {
         let actor_name = manifest.name.clone();
         let manifest_clone = manifest.clone();
         let engine = self.wasm_engine.clone();
+        let permissions = self.permissions.clone();
         let actor_runtime_process = tokio::spawn(async move {
             ActorRuntime::start(
                 actor_id_for_task.clone(),
@@ -912,6 +913,7 @@ impl TheaterRuntime {
                 shutdown_receiver_clone,
                 response_tx,
                 engine,
+                permissions,
             )
             .await;
 
