@@ -127,6 +127,9 @@ pub enum CliError {
 
     #[error("Parse error: {message}")]
     ParseError { message: String },
+
+    #[error("Not implemented: {feature}")]
+    NotImplemented { feature: String, message: String },
 }
 
 impl CliError {
@@ -209,6 +212,14 @@ impl CliError {
         Self::ConnectionTimeout { timeout }
     }
 
+    /// Create a not implemented error
+    pub fn not_implemented(feature: impl Into<String>, message: impl Into<String>) -> Self {
+        Self::NotImplemented {
+            feature: feature.into(),
+            message: message.into(),
+        }
+    }
+
     /// Get a user-friendly error message with potential solutions
     pub fn user_message(&self) -> String {
         match self {
@@ -271,6 +282,14 @@ impl CliError {
             } => {
                 format!("Invalid {}: '{}'\n\n{}", field, value, suggestion)
             }
+            Self::NotImplemented { feature, message } => {
+                format!(
+                    "Feature '{}' is not implemented.\n\n\
+                    {}\n\n\
+                    ",
+                    feature, message
+                )
+            }
             _ => self.to_string(),
         }
     }
@@ -312,6 +331,7 @@ impl CliError {
             Self::NetworkError { .. } => "network",
             Self::InvalidResponse { .. } => "response",
             Self::IoError { .. } => "io",
+            Self::NotImplemented { .. } => "not_implemented",
         }
     }
 }

@@ -25,6 +25,16 @@ pub async fn execute_async(args: &CreateArgs, ctx: &CommandContext) -> Result<()
     debug!("Creating new actor project: {}", args.name);
     debug!("Using template: {}", args.template);
 
+    return Err(CliError::not_implemented(
+        "create",
+        "Theater CLI \n\
+        The create command is not implemented yet \n\
+        Please create a new component with cargo component new <name> --lib \n\
+        Then, import theater:simple from wa.dev and add the necessary dependencies in your Cargo.toml \n\
+        I do apologize for this, working on documenting / implementing this command soon! \n\
+        In the meantime, please feel free to reach out to me at colinrozzi@gmail.com and I will absolutely walk you through how I create actors!"
+    ));
+
     // Check if the name is valid
     if !is_valid_project_name(&args.name) {
         return Err(CliError::invalid_input(
