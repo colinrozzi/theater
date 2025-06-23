@@ -64,8 +64,10 @@ pub use config::actor_manifest::{
 pub use errors::TheaterRuntimeError;
 pub use id::TheaterId;
 pub use messages::ChannelEvent;
-pub use metrics::{ActorMetrics, MetricsCollector, OperationMetrics, OperationStats, ResourceMetrics};
-pub use wasm::{MemoryStats, WasmError};
+pub use metrics::{
+    ActorMetrics, MetricsCollector, OperationMetrics, OperationStats, ResourceMetrics,
+};
 pub use shutdown::{ShutdownController, ShutdownReceiver, ShutdownSignal, ShutdownType};
-pub use theater_runtime::TheaterRuntime;
 pub use store::{ContentRef, ContentStore, Label};
+pub use theater_runtime::TheaterRuntime;
+pub use wasm::{MemoryStats, WasmError};
