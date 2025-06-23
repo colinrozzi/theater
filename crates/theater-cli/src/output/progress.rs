@@ -7,7 +7,7 @@ use crate::output::Theme;
 #[derive(Debug)]
 pub struct ProgressBar {
     bar: IndicatifBar,
-    theme: Theme,
+    _theme: Theme,
 }
 
 impl ProgressBar {
@@ -25,7 +25,7 @@ impl ProgressBar {
         bar.set_style(style);
         bar.enable_steady_tick(Duration::from_millis(100));
 
-        Self { bar, theme }
+        Self { bar, _theme: theme }
     }
 
     /// Create an indeterminate progress bar (spinner)
@@ -40,7 +40,7 @@ impl ProgressBar {
         bar.set_style(style);
         bar.enable_steady_tick(Duration::from_millis(100));
 
-        Self { bar, theme }
+        Self { bar, _theme: theme }
     }
 
     /// Set the current position
