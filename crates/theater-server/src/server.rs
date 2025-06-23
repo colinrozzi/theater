@@ -34,6 +34,9 @@ pub enum ManagementCommand {
     StopActor {
         id: TheaterId,
     },
+    TerminateActor {
+        id: TheaterId,
+    },
     ListActors,
     SubscribeToActor {
         id: TheaterId,
@@ -292,8 +295,12 @@ impl TheaterServer {
                             message,
                         };
 
+                        tracing::debug!("Forwarding channel message to client: {:?}", response);
+
                         if let Err(e) = sub.client_tx.send(response).await {
                             tracing::warn!("Failed to forward channel message: {}", e);
+                        } else {
+                            tracing::debug!("Forwarded channel message to client");
                         }
                     }
                 }
@@ -308,6 +315,8 @@ impl TheaterServer {
 
                         if let Err(e) = sub.client_tx.send(response).await {
                             tracing::warn!("Failed to forward channel close event: {}", e);
+                        } else {
+                            tracing::debug!("Forwarded channel close event to client");
                         }
                     }
                 }
@@ -582,6 +591,29 @@ impl TheaterServer {
                         Err(e) => ManagementResponse::Error {
                             error: ManagementError::RuntimeError(format!(
                                 "Failed to stop actor: {}",
+                                e
+                            )),
+                        },
+                    }
+                }
+                ManagementCommand::TerminateActor { id } => {
+                    info!("Terminating actor: {:?}", id);
+                    let (cmd_tx, cmd_rx) = tokio::sync::oneshot::channel();
+                    runtime_tx
+                        .send(TheaterCommand::TerminateActor {
+                            actor_id: id.clone(),
+                            response_tx: cmd_tx,
+                        })
+                        .await?;
+
+                    match cmd_rx.await? {
+                        Ok(_) => {
+                            subscriptions.lock().await.remove(&id);
+                            ManagementResponse::ActorStopped { id }
+                        }
+                        Err(e) => ManagementResponse::Error {
+                            error: ManagementError::RuntimeError(format!(
+                                "Failed to terminate actor: {}",
                                 e
                             )),
                         },
