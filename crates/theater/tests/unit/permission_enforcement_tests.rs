@@ -292,6 +292,7 @@ fn test_random_permission_checking() {
 fn test_timing_permission_checking() {
     let timing_permissions = Some(TimingPermissions {
         max_sleep_duration: 5000,
+        min_sleep_duration: 100,
     });
 
     // Should allow sleep within limits

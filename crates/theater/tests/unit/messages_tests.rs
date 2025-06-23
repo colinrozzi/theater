@@ -70,6 +70,8 @@ async fn test_theater_command_spawn_actor() {
         init_bytes: None,
         response_tx: tx,
         parent_id: Some(parent_id.clone()),
+        supervisor_tx: None,
+        subscription_tx: None,
     };
 
     match command {

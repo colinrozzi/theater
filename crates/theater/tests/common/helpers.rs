@@ -1,12 +1,12 @@
 use chrono::Utc;
-use theater::actor_executor::ActorOperation;
+use theater::ActorOperation;
 use theater::chain::StateChain;
-use theater::config::{HandlerConfig, ManifestConfig, MessageServerConfig};
+use theater::{HandlerConfig, ManifestConfig, MessageServerConfig};
 use theater::events::message::MessageEventData;
 use theater::events::{ChainEventData, EventData};
 use theater::id::TheaterId;
 use theater::messages::{ActorMessage, TheaterCommand};
-use theater::shutdown::{ShutdownController, ShutdownReceiver};
+use theater::{ShutdownController, ShutdownReceiver};
 use tokio::sync::mpsc;
 
 /// Create a test event data object for testing
@@ -27,12 +27,14 @@ pub fn create_test_event_data(event_type: &str, data: &[u8]) -> ChainEventData {
 pub fn create_test_manifest(name: &str) -> ManifestConfig {
     let mut config = ManifestConfig {
         name: name.to_string(),
-        component_path: format!("{}.wasm", name),
-        interface: Default::default(),
-        handlers: Vec::new(),
+        version: "1.0.0".to_string(),
+        component: format!("{}.wasm", name),
+        description: None,
+        long_description: None,
+        save_chain: None,
+        permission_policy: Default::default(),
         init_state: None,
-        logging: Default::default(),
-        event_server: None,
+        handlers: Vec::new(),
     };
 
     // Add a message server handler
@@ -74,7 +76,8 @@ pub async fn setup_actor_test() -> (
     let (theater_tx, _) = mpsc::channel(10);
     let (actor_tx, actor_rx) = mpsc::channel(10);
     let (op_tx, op_rx) = mpsc::channel(10);
-    let (shutdown_controller, shutdown_receiver) = ShutdownController::new();
+    let mut shutdown_controller = ShutdownController::new();
+    let shutdown_receiver = shutdown_controller.subscribe();
 
     (
         actor_id,

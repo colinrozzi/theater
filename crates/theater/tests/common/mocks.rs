@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
-use theater::actor_executor::ActorOperation;
+use theater::ActorOperation;
 use tokio::sync::mpsc;
 
 /// Mock actor handle for testing

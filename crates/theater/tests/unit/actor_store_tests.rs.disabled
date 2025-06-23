@@ -1,6 +1,5 @@
 use chrono::Utc;
-use theater::actor_handle::ActorHandle;
-use theater::actor_store::ActorStore;
+use theater::{ActorHandle, ActorStore};
 use theater::events::message::MessageEventData;
 use theater::events::{ChainEventData, EventData};
 use theater::id::TheaterId;

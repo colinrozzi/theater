@@ -7,7 +7,6 @@
 use crate::actor::runtime::{ActorRuntime, StartActorResult};
 use crate::actor::types::{ActorControl, ActorError, ActorInfo, ActorOperation};
 use crate::chain::ChainEvent;
-use crate::config::enforcement::{validate_manifest_permissions, PermissionError};
 use crate::config::permissions::HandlerPermission;
 use crate::id::TheaterId;
 use crate::messages::{
