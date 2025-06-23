@@ -23,15 +23,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
-## API Endpoints
-
-The server provides REST endpoints for:
-- `/actors` - Actor management
-- `/events` - Event streaming
-- `/health` - Server health checks
-
-For complete API documentation, see the [Theater Guide](https://colinrozzi.github.io/theater/guide).
-
 ## License
 
 This project is licensed under the Apache License 2.0 - see the [LICENSE](../../LICENSE) file for details.
