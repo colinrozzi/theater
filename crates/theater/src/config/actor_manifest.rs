@@ -261,7 +261,7 @@ impl ManifestConfig {
     /// ## Example
     ///
     /// ```rust
-    /// use theater::config::ManifestConfig;
+    /// use theater::ManifestConfig;
     /// use std::path::Path;
     ///
     /// fn example() -> anyhow::Result<()> {
@@ -296,7 +296,7 @@ impl ManifestConfig {
     /// ## Example
     ///
     /// ```rust
-    /// use theater::config::ManifestConfig;
+    /// use theater::ManifestConfig;
     ///
     /// fn example() -> anyhow::Result<()> {
     ///     let toml_content = r#"
@@ -334,7 +334,7 @@ impl ManifestConfig {
     /// ## Example
     ///
     /// ```rust
-    /// use theater::config::ManifestConfig;
+    /// use theater::ManifestConfig;
     ///
     /// fn example() -> anyhow::Result<()> {
     ///     let bytes = vec![/* ... */];
@@ -362,7 +362,7 @@ impl ManifestConfig {
     /// ## Example
     ///
     /// ```rust
-    /// # use theater::config::ManifestConfig;
+    /// # use theater::ManifestConfig;
     /// # fn example(config: &ManifestConfig) {
     /// println!("Actor name: {}", config.name());
     /// # }
@@ -388,9 +388,9 @@ impl ManifestConfig {
     /// ## Example
     ///
     /// ```rust
-    /// # use theater::config::ManifestConfig;
-    /// # fn example(config: &ManifestConfig) -> anyhow::Result<()> {
-    /// if let Some(state_data) = config.load_init_state()? {
+    /// # use theater::ManifestConfig;
+    /// # async fn example(config: &ManifestConfig) -> anyhow::Result<()> {
+    /// if let Some(state_data) = config.load_init_state().await? {
     ///     println!("Loaded initial state: {} bytes", state_data.len());
     /// } else {
     ///     println!("No initial state specified");
@@ -423,10 +423,10 @@ impl ManifestConfig {
     /// ## Example
     ///
     /// ```rust
-    /// # use theater::config::ManifestConfig;
+    /// # use theater::ManifestConfig;
     /// # fn example(config: ManifestConfig) {
     /// let bytes = config.into_fixed_bytes();
-    /// println!("Serialized manifest: {} bytes", bytes.len());
+    /// println!("Serialized manifest: {} bytes", bytes.unwrap().len());
     /// # }
     /// ```
     ///
