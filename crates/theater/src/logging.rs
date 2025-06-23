@@ -22,7 +22,7 @@ pub fn setup_global_logging(
     }
 
     let enhanced_filter = format!(
-        "{},theater={},wasmtime={}",
+        "{},theater={},wasmtime={},cranelift=warn",
         log_level.as_str(),
         log_level.as_str(),
         "info"
