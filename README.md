@@ -3,7 +3,7 @@
 A WebAssembly actor system designed for secure, transparent, and reliable AI agent infrastructure.
 
 > [!NOTE]
-> This documentation is incomplete, please reach out to me at colinrozzi@gmail.com I very much appreciate your interest and would love to hear from you! This project is in early development, breaking changes are expected, security is not guarenteed
+> This documentation is incomplete, please reach out to me at colinrozzi@gmail.com. I very much appreciate your interest and would love to hear from you! This project is in early development, breaking changes are expected, security is not guarenteed
 
 ## The Challenge
 
