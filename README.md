@@ -26,124 +26,40 @@ Theater provides infrastructure specifically designed for AI agent systems. It m
 - **[Guide](https://colinrozzi.github.io/theater/guide)** - A comprehensive guide to Theater
 - **[Reference](https://colinrozzi.github.io/theater/api/theater)** - Full rustdoc documentation
 
-## Quick Start with Theater CLI
-
-Theater includes a powerful CLI tool for managing the entire agent lifecycle:
-
-```bash
-# Create a new agent project
-theater create my-agent
-
-# Build the WebAssembly agent
-cd my-agent
-theater build
-
-# Start a Theater server in another terminal
-theater server
-
-# Start the agent
-theater start manifest.toml
-
-# List running agents
-theater list
-
-# View agent logs
-theater events <agent-id>
-
-# Start agent and subscribe to its events in one command
-theater start manifest.toml --id-only | theater subscribe -
-```
-
-[See complete CLI documentation →](https://colinrozzi.github.io/theater/guide/user-guide/cli.html)
-
-## Agent System Architecture
-
-Theater enables sophisticated agent architectures through its actor model:
-
-- **Agent Hierarchy**: Structure agents in parent-child relationships where parent agents can spawn, monitor, and control child agents
-- **Specialized Agents**: Create purpose-built agents with specific capabilities and knowledge domains
-- **Secure Communication**: Enable agent-to-agent communication through explicit message passing
-- **Capability Controls**: Grant agents precisely the capabilities they need through configurable handlers
-
-## Agent Supervision
-
-Theater's supervision system enables robust agent management:
-
-```toml
-# Parent agent manifest
-name = "supervisor-agent"
-component_path = "supervisor.wasm"
-
-[[handlers]]
-type = "supervisor"
-config = {}
-```
-
-Supervisor agents can:
-- Spawn new specialized agents
-- Monitor agent status and performance
-- Restart failed agents automatically
-- Access agent state and event history
-
-Example usage in a supervisor agent:
-
-```rust
-use theater::supervisor::*;
-
-// Spawn a specialized agent
-let agent_id = supervisor::spawn_child("researcher_agent.toml")?;
-
-// Get agent status
-let status = supervisor::get_child_status(&agent_id)?;
-
-// Restart agent if needed
-if status != ActorStatus::Running {
-    supervisor::restart_child(&agent_id)?;
-}
-```
-
-## Complete Traceability
-
-Theater captures every action agents take in a verifiable event chain:
-
-- All messages between agents are recorded
-- Every external API call is logged with inputs and outputs
-- State changes are tracked with causal relationships
-- The entire system can be deterministically replayed for debugging
-
-## Development Setup
-
-### Using Nix [BROKEN]
-
-Theater uses Nix with flakes for reproducible development environments. Here's how to get started:
-
-1. First, install Nix:
-   https://nixos.org/download/
-
-2. Enable flakes by either:
-   - Adding to your `/etc/nix/nix.conf`:
-     ```
-     experimental-features = nix-command flakes
-     ```
-   - Or using the environment variable for each command:
-     ```bash
-     export NIX_CONFIG="experimental-features = nix-command flakes"
-     ```
-
-3. Clone the repository:
+### To get started:
+1. Download theater-server-cli
    ```bash
-   git clone https://github.com/colinrozzi/theater.git
-   cd theater
+   cargo install theater-server-cli
+   ```
+2. Download theater-cli
+   ```bash
+   cargo install theater-cli
+   ```
+3. Start the Theater server and leave it running in the background
+   ```bash
+   theater-server --log-stdout
+   ```
+4. Start an actor in a new terminal (this requires an actor, I will update this shortly with a link to a sample actor)
+   ```bash
+   theater start manifest.toml
+   ```
+5. Look at the running actors
+   ```bash
+   theater list
+   ```
+6. Look at an actor's event chain
+   ```bash
+   theater events <actor-id>
+   ```
+7. Stop an actor
+   ```bash
+   theater stop <actor-id>
    ```
 
-4. Enter the development environment:
-   ```bash
-   nix develop
-   ```
 
 ### Manual Setup
 
-If you prefer not to use Nix, you'll need:
+Most people will have these things, move on to cloning and download the dependencies as you need, but just for clarity you will need:
 
 1. Rust 1.81.0 or newer
 2. LLVM and Clang for building wasmtime
