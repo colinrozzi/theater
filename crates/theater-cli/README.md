@@ -1,5 +1,8 @@
 # theater-cli
 
+> [!NOTE]
+> This documentation is incomplete, please reach out to me at colinrozzi@gmail.com I very much appreciate your interest and would love to hear from you!
+
 Command-line interface for the Theater WebAssembly actor system.
 
 ## Installation
@@ -8,40 +11,64 @@ Command-line interface for the Theater WebAssembly actor system.
 cargo install theater-cli
 ```
 
-## Usage
-
-The `theater` CLI provides a complete interface for managing Theater actors:
-
+## Create a new agent project
+For now, we have to use cargo component manually
 ```bash
-# Create a new agent project
-theater create my-agent
-
-# Build the WebAssembly agent
+cargo component new my-agent --lib
+```
+Navigate to the agent directory
+```bash
 cd my-agent
-theater build
+```
+edit wit/world.wit to include theater runtime interfaces:
+[theater-simple](https://wa.dev/theater:simple)
+a minimal world is:
+```wit
+package component:my-agent;
 
-# Start a Theater server
-theater server
-
-# Start an agent
-theater start manifest.toml
-
-# List running agents
-theater list
-
-# View agent events
-theater events <agent-id>
+world default {
+    import theater:simple/runtime;
+    export theater:simple/actor;
+}
 ```
 
-For complete documentation, see the [Theater Guide](https://colinrozzi.github.io/theater/guide).
+Create a `manifest.toml` file in the agent directory with the following content:
+```toml
+name = "my-agent"
+version = "0.1.0"
+component = "will be replaced by theater build"
 
-## Features
+[[handlers]]
+type = "runtime"
 
-- Complete agent lifecycle management
-- Interactive terminal UI for monitoring
-- Server management and configuration
-- Real-time event streaming and analysis
-- Agent development workflows
+[handlers.config]
+```
+
+## Build the agent
+```bash
+theater build
+```
+OR 
+```bash
+cargo component build --target wasm32-unknown-unknown
+```
+theater build will automatically update the component path in `manifest.toml` to point to the built component, but it does hide some information that is nice to see.
+
+## Start an agent
+```bash
+theater start manifest.toml
+```
+Ensure the Theater server is running before starting agents, check out theater-server-cli for information on starting the server. The server manages the lifecycle of agents and provides a UI for monitoring.
+
+## List running agents
+```bash
+theater list
+```
+
+## View agent events
+```bash
+theater events <agent-id>
+```
 
 ## License
 
