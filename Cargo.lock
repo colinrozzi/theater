@@ -2995,7 +2995,7 @@ dependencies = [
 
 [[package]]
 name = "theater"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "anyhow",
  "axum",
@@ -3032,7 +3032,7 @@ dependencies = [
 
 [[package]]
 name = "theater-cli"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "anyhow",
  "bytes",
@@ -3070,7 +3070,7 @@ dependencies = [
 
 [[package]]
 name = "theater-client"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "anyhow",
  "bytes",
@@ -3088,7 +3088,7 @@ dependencies = [
 
 [[package]]
 name = "theater-server"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "anyhow",
  "axum",
@@ -3108,7 +3108,7 @@ dependencies = [
 
 [[package]]
 name = "theater-server-cli"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "anyhow",
  "clap",
