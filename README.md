@@ -27,11 +27,11 @@ Theater provides infrastructure specifically designed for AI agent systems. It m
 - **[Reference](https://colinrozzi.github.io/theater/api/theater)** - Full rustdoc documentation
 
 ### To get started:
-1. Download theater-server-cli
+1. Download [theater-server-cli](crates/theater-server-cli) 
    ```bash
    cargo install theater-server-cli
    ```
-2. Download theater-cli
+2. Download [theater-cli](crates/theater-cli) 
    ```bash
    cargo install theater-cli
    ```
