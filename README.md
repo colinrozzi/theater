@@ -2,7 +2,8 @@
 
 A WebAssembly actor system designed for secure, transparent, and reliable AI agent infrastructure.
 
-This project is in early development, breaking changes are expected. Now that the core functionality is in place, I am going to start building actors, if you are interested in being notified of future developments, have an idea of the some agents i should build, or want to help please email me at colinrozzi+theater@gmail.com
+> [!NOTE]
+> This documentation is incomplete, please reach out to me at colinrozzi@gmail.com I very much appreciate your interest and would love to hear from you! This project is in early development, breaking changes are expected, security is not guarenteed
 
 ## The Challenge
 
