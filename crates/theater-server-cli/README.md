@@ -1,5 +1,8 @@
 # theater-server-cli
 
+> [!NOTE]
+> This documentation is incomplete, please reach out to me at colinrozzi@gmail.com I very much appreciate your interest and would love to hear from you!
+
 Standalone CLI for Theater server management.
 
 ## Overview
@@ -18,29 +21,12 @@ cargo install theater-server-cli
 # Start a Theater server
 theater-server start
 
-# Start with custom configuration
-theater-server start --config server.toml
+# Start a Theater server and log to stdout
+theater-server start --log-stdout
 
-# Show server status
-theater-server status
+# Start a Theater server with debug logging
+theater-server start --log-level debug
 ```
-
-## Configuration
-
-The server can be configured via TOML files:
-
-```toml
-[server]
-host = "127.0.0.1"
-port = 8080
-log_level = "info"
-
-[security]
-enable_cors = true
-max_actors = 100
-```
-
-For complete documentation, see the [Theater Guide](https://colinrozzi.github.io/theater/guide).
 
 ## License
 
