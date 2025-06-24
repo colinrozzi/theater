@@ -1,7 +1,7 @@
 # theater-cli
 
 > [!NOTE]
-> This documentation is incomplete, please reach out to me at colinrozzi@gmail.com I very much appreciate your interest and would love to hear from you!
+> This documentation is incomplete, please reach out to me at colinrozzi@gmail.com. I very much appreciate your interest and would love to hear from you!
 
 Command-line interface for the Theater WebAssembly actor system.
 
