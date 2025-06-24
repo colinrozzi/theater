@@ -229,6 +229,31 @@ impl From<TheaterRuntimeError> for ManagementError {
     }
 }
 
+// Implement Display for ManagementError to provide better error messages
+impl std::fmt::Display for ManagementError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ManagementError::ActorNotFound => write!(f, "Actor not found"),
+            ManagementError::ActorAlreadyExists => write!(f, "Actor already exists"),
+            ManagementError::ActorNotRunning => write!(f, "Actor is not running"),
+            ManagementError::ActorError(msg) => write!(f, "Actor error: {}", msg),
+            ManagementError::ChannelNotFound => write!(f, "Channel not found"),
+            ManagementError::ChannelClosed => write!(f, "Channel is closed"),
+            ManagementError::ChannelRejected => write!(f, "Channel was rejected"),
+            ManagementError::StoreError(msg) => write!(f, "Store error: {}", msg),
+            ManagementError::CommunicationError(msg) => write!(f, "Communication error: {}", msg),
+            ManagementError::InvalidRequest(msg) => write!(f, "Invalid request: {}", msg),
+            ManagementError::Timeout => write!(f, "Operation timed out"),
+            ManagementError::RuntimeError(msg) => write!(f, "Runtime error: {}", msg),
+            ManagementError::InternalError(msg) => write!(f, "Internal error: {}", msg),
+            ManagementError::SerializationError(msg) => write!(f, "Serialization error: {}", msg),
+        }
+    }
+}
+
+// Implement Error trait for ManagementError
+impl std::error::Error for ManagementError {}
+
 #[derive(Debug)]
 #[allow(dead_code)]
 struct Subscription {

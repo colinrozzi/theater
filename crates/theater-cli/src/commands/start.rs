@@ -169,6 +169,9 @@ pub async fn execute_async(args: &StartArgs, ctx: &CommandContext) -> Result<(),
                                 println!("------------------------------------");
                             }
                         }
+                        ManagementResponse::Error { error } => {
+                            return Err(CliError::management_error(error));
+                        }
                         _ => {
                             println!("Unknown response received");
                             break;

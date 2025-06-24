@@ -1,4 +1,5 @@
 use std::net::SocketAddr;
+use theater_server::ManagementError;
 use thiserror::Error;
 
 /// Main error type for the Theater CLI
@@ -130,6 +131,9 @@ pub enum CliError {
 
     #[error("Not implemented: {feature}")]
     NotImplemented { feature: String, message: String },
+
+    #[error("Server Error: {0}")]
+    ManagementError(#[from] ManagementError),
 }
 
 impl CliError {
@@ -218,6 +222,11 @@ impl CliError {
             feature: feature.into(),
             message: message.into(),
         }
+    }
+
+    /// Create a management error from a Theater server error
+    pub fn management_error(error: ManagementError) -> Self {
+        Self::ManagementError(error)
     }
 
     /// Get a user-friendly error message with potential solutions
@@ -332,6 +341,7 @@ impl CliError {
             Self::InvalidResponse { .. } => "response",
             Self::IoError { .. } => "io",
             Self::NotImplemented { .. } => "not_implemented",
+            Self::ManagementError(_) => "management",
         }
     }
 }
