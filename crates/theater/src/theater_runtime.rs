@@ -11,7 +11,7 @@ use crate::config::permissions::HandlerPermission;
 use crate::id::TheaterId;
 use crate::messages::{
     ActorChannelClose, ActorChannelMessage, ActorChannelOpen, ActorResult, ChannelId,
-    ChannelParticipant, ChildError, ChildResult,
+    ChannelParticipant, ChildError, ChildExternalStop, ChildResult,
 };
 use crate::messages::{ActorMessage, ActorStatus, TheaterCommand};
 use crate::metrics::ActorMetrics;
@@ -1168,6 +1168,18 @@ impl TheaterRuntime {
             );
             Box::pin(self.stop_actor(child_id.clone(), shutdown_type)).await?;
             debug!("Successfully stopped child {:?}", child_id);
+        }
+
+        // notify the actors parents
+        if let Some(proc) = self.actors.get(&actor_id) {
+            if let Some(supervisor_tx) = &proc.supervisor_tx {
+                let error_message = ActorResult::ExternalStop(ChildExternalStop {
+                    actor_id: actor_id.clone(),
+                });
+                if let Err(e) = supervisor_tx.send(error_message).await {
+                    error!("Failed to send error message to supervisor: {}", e);
+                }
+            }
         }
 
         // Signal this specific actor to shutdown - we need to get the actor again since

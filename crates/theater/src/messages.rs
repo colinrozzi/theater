@@ -976,11 +976,23 @@ impl std::fmt::Display for ChildResult {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
+pub struct ChildExternalStop {
+    pub actor_id: TheaterId,
+}
+
+impl std::fmt::Display for ChildExternalStop {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "[{}] child-external-stop", self.actor_id)
+    }
+}
+
 /// # Actor Result
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum ActorResult {
     Error(ChildError),
     Success(ChildResult),
+    ExternalStop(ChildExternalStop),
 }
 
 impl std::fmt::Display for ActorResult {
@@ -988,6 +1000,7 @@ impl std::fmt::Display for ActorResult {
         match self {
             ActorResult::Error(err) => write!(f, "{}", err),
             ActorResult::Success(res) => write!(f, "{}", res),
+            ActorResult::ExternalStop(stop) => write!(f, "{}", stop),
         }
     }
 }

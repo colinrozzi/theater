@@ -910,6 +910,13 @@ impl SupervisorHost {
             )
             .expect("Failed to register handle-child-exit function");
 
+        actor_instance
+            .register_function_no_result::<(String,)>(
+                "theater:simple/supervisor-handlers",
+                "handle-child-external-stop",
+            )
+            .expect("Failed to register handle-child-external-stop function");
+
         info!("Added export functions for handle-child-error");
         Ok(())
     }
@@ -961,6 +968,15 @@ impl SupervisorHost {
                             child_result.actor_id.to_string(),
                             child_result.result.into(),
                         ),
+                    )
+                    .await?;
+            }
+            ActorResult::ExternalStop(stop_data) => {
+                info!("External stop received for actor: {}", stop_data.actor_id);
+                actor_handle
+                    .call_function::<(String,), ()>(
+                        "theater:simple/supervisor-handlers.handle-child-external-stop".to_string(),
+                        (stop_data.actor_id.to_string(),),
                     )
                     .await?;
             }
