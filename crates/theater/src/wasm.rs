@@ -245,7 +245,7 @@ impl ActorComponent {
     /// async fn example() -> Result<()> {
     ///     let config = ManifestConfig::from_file("path/to/manifest.toml")?;
     ///     // Create an actor store with required parameters
-///     // let actor_store = ActorStore::new(actor_id, theater_tx, actor_handle);
+    ///     // let actor_store = ActorStore::new(actor_id, theater_tx, actor_handle);
     ///     
     ///     let component = ActorComponent::new(&config, actor_store).await?;
     ///     println!("Loaded component: {}", component.name);
@@ -793,9 +793,9 @@ impl ActorInstance {
     ///     
     ///     // Register a function with complex parameter and result types
     ///     // For custom types, define them first:
-///     // struct User { name: String }
-///     // struct Response { success: bool }
-///     // instance.register_function::<(User,), Response>("example:api/users", "create_user")?;
+    ///     // struct User { name: String }
+    ///     // struct Response { success: bool }
+    ///     // instance.register_function::<(User,), Response>("example:api/users", "create_user")?;
     ///     
     ///     Ok(())
     /// }
@@ -1097,6 +1097,7 @@ where
                 }
             },
             Err(e) => {
+                error!("{:#?}", e);
                 let error_msg = format!("Failed to call WebAssembly function (no params): {}", e);
                 error!("{}", error_msg);
                 return Err(error_msg);
@@ -1178,8 +1179,9 @@ where
                 }
             },
             Err(e) => {
+                error!("{:#?}", e);
                 let error_msg = format!("Failed to call WebAssembly function (no result): {}", e);
-                error!("{}", error_msg);
+                //error!("{}", error_msg);
                 return Err(error_msg);
             }
         };
