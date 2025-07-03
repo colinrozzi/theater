@@ -86,6 +86,9 @@ pub enum ActorError {
     //#[error("Actor update failed: {0}")]
     //#[component(name = "update-error")]
     //UpdateError(String),
+    #[error("Handler error: {0}")]
+    #[component(name = "handler-error")]
+    HandlerError(String),
 }
 
 #[derive(Debug, Clone, ComponentType, Lift, Lower, Serialize, Deserialize)]
@@ -146,6 +149,7 @@ impl From<ActorError> for WitActorError {
             ActorError::Paused => (WitErrorType::Paused, None),
             ActorError::NotPaused => (WitErrorType::Paused, None),
             ActorError::UnexpectedError(data) => (WitErrorType::Internal, Some(data.into_bytes())),
+            ActorError::HandlerError(data) => (WitErrorType::Internal, Some(data.into_bytes())),
             //        ActorError::UpdateError(data) => (WitErrorType::UpdateError, Some(data.into_bytes())),
         };
         Self { error_type, data }
