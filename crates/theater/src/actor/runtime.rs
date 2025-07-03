@@ -123,60 +123,12 @@ impl ActorRuntime {
         control_tx: Sender<ActorControl>,
         init: bool,
         parent_shutdown_receiver: ShutdownReceiver,
-        response_tx: Sender<StartActorResult>,
         engine: wasmtime::Engine,
         parent_permissions: HandlerPermission,
     ) {
         let actor_handle =
             ActorHandle::new(operation_tx.clone(), info_tx.clone(), control_tx.clone());
 
-        // STEP 1: Return actor ID immediately
-        if let Err(e) = response_tx
-            .send(StartActorResult::Success(id.clone()))
-            .await
-        {
-            error!("Failed to send success response: {}", e);
-            return;
-        }
-        info!("Actor {} startup initiated, ID returned to caller", id);
-
-        // STEP 2: Start async startup process with immediate command responsiveness
-        Self::start_with_command_responsiveness(
-            id,
-            config,
-            state_bytes,
-            theater_tx,
-            actor_sender,
-            actor_mailbox,
-            operation_rx,
-            info_rx,
-            control_rx,
-            actor_handle,
-            init,
-            parent_shutdown_receiver,
-            engine,
-            parent_permissions,
-        )
-        .await;
-    }
-
-    /// Internal startup method that provides command responsiveness during startup
-    async fn start_with_command_responsiveness(
-        id: TheaterId,
-        config: &ManifestConfig,
-        state_bytes: Option<Vec<u8>>,
-        theater_tx: Sender<TheaterCommand>,
-        actor_sender: Sender<ActorMessage>,
-        actor_mailbox: Receiver<ActorMessage>,
-        operation_rx: Receiver<ActorOperation>,
-        mut info_rx: Receiver<ActorInfo>,
-        mut control_rx: Receiver<ActorControl>,
-        actor_handle: ActorHandle,
-        init: bool,
-        parent_shutdown_receiver: ShutdownReceiver,
-        engine: wasmtime::Engine,
-        parent_permissions: HandlerPermission,
-    ) {
         // Create channels for startup coordination
         let (startup_complete_tx, mut startup_complete_rx) = oneshot::channel::<ActorInstance>();
         let (startup_error_tx, mut startup_error_rx) = oneshot::channel::<ActorError>();
@@ -324,6 +276,7 @@ impl ActorRuntime {
                 info!("Actor {} transitioning to main runtime", id);
 
                 // Transition to main runtime with already-listening channels
+                /*
                 Self::run_communication_loops(
                     Arc::new(RwLock::new(actor_instance)),
                     operation_rx,
@@ -335,6 +288,23 @@ impl ActorRuntime {
                     ShutdownController::new(),
                     Vec::new(), // Handler tasks will be populated
                     config.clone(),
+                    engine,
+                )
+                .await;
+                */
+
+                Self::start_runtime(
+                    actor_instance,
+                    actor_handle,
+                    Vec::new(), // Handlers will be created in the main runtime
+                    operation_rx,
+                    info_rx,
+                    control_rx,
+                    parent_shutdown_receiver,
+                    theater_tx,
+                    id,
+                    init,
+                    config,
                     engine,
                 )
                 .await;
@@ -946,7 +916,6 @@ impl ActorRuntime {
         theater_tx: Sender<TheaterCommand>,
         id: TheaterId,
         init: bool,
-        response_tx: Sender<StartActorResult>,
         config: &ManifestConfig,
         engine: wasmtime::Engine,
     ) {
