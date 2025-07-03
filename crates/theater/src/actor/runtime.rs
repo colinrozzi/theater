@@ -943,6 +943,12 @@ impl ActorRuntime {
                     match control {
                         ActorControl::Pause { response_tx } => {
                             info!("Pausing actor");
+                            /* So, I am thinking about this. I think I just ran into an issue where
+                        * the actor got paused while it was processing an operation, but did not
+                        * release the lock on the actor instance, so I could not read out the chain
+                        * to try to debug the operation. Just making a note of this for now, but an
+                        * interesting problem
+                            */
                             if shutdown_requested {
                                 let _ = response_tx.send(Err(ActorError::ShuttingDown));
                             } else {
