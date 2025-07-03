@@ -122,32 +122,87 @@ impl ActorRuntime {
             parent_permissions,
             status_tx,
         )));
-        
+
         // These will be set once setup completes
         let mut actor_instance: Option<Arc<RwLock<ActorInstance>>> = None;
         let mut metrics: Option<Arc<RwLock<MetricsCollector>>> = None;
+        let mut handler_tasks: Vec<JoinHandle<()>> = Vec::new();
 
         let mut current_operation: Option<JoinHandle<()>> = None;
         let mut shutdown_requested = false;
         let mut shutdown_response_tx: Option<oneshot::Sender<Result<(), ActorError>>> = None;
+        let mut shutdown_controller = ShutdownController::new();
         let mut current_status = "Starting".to_string();
 
         loop {
             tokio::select! {
                 // Handle setup completion
-                result = async { 
+                result = async {
                     match setup_task.as_mut() {
                         Some(task) => task.await,
                         None => std::future::pending().await,
                     }
                 } => {
                     match result {
-                        Ok(Ok((instance, metrics_collector))) => {
+                        Ok(Ok((instance, handlers, metrics_collector))) => {
                             info!("Actor setup completed successfully");
                             actor_instance = Some(Arc::new(RwLock::new(instance)));
                             metrics = Some(Arc::new(RwLock::new(metrics_collector)));
                             setup_task = None; // Clear the task
                             current_status = "Running".to_string();
+                            let actor_handle = ActorHandle::new(operation_tx.clone(), info_tx.clone(), control_tx.clone());
+
+                            // Call init function if needed
+                            if init {
+                                let init_id = id.clone();
+                                let actor_handle = actor_handle.clone();
+                                info!("Calling init function for actor: {:?}", init_id);
+                                tokio::spawn(async move {
+                                    match actor_handle
+                                        .call_function::<(String,), ()>(
+                                            "theater:simple/actor.init".to_string(),
+                                            (init_id.to_string(),),
+                                        )
+                                        .await
+                                    {
+                                        Ok(_) => {
+                                            debug!("Successfully called init function for actor: {:?}", init_id);
+                                        }
+                                        Err(e) => {
+                                            error!("Failed to call init function for actor {}: {}", init_id, e);
+                                        }
+                                    }
+                                });
+                            }
+
+                            // Start the handler tasks
+                            for mut handler in handlers {
+                                info!("Starting handler: {:?}", handler.name());
+                                let handler_actor_handle = actor_handle.clone();
+                                let handler_shutdown = shutdown_controller.subscribe();
+                                let theater_tx = theater_tx.clone();
+                                let id = id.clone();
+                                let handler_task = tokio::spawn(async move {
+                                    match handler.start(
+                                        handler_actor_handle,
+                                        handler_shutdown,
+                                    ).await {
+                                        Ok(_) => {
+                                            info!("Handler {} started successfully", handler.name());
+                                        }
+                                        Err(e) => {
+                                            error!("Failed to start handler {}: {:?}", handler.name(), e);
+                                            // Notify theater runtime of the error
+                                            let _ = theater_tx.send(TheaterCommand::ActorError {
+                                                actor_id: id.clone(),
+                                                error: ActorError::HandlerError(e.to_string()),
+                                            }).await;
+                                        }
+                                    }
+                                });
+                                handler_tasks.push(handler_task);
+                            }
+                            info!("All handlers started successfully for actor: {}", id);
 
                             // If shutdown was requested during startup, handle it now
                             if shutdown_requested {
@@ -161,28 +216,29 @@ impl ActorRuntime {
                         Ok(Err(e)) => {
                             error!("Actor setup failed: {:?}", e);
                             current_status = format!("Setup failed: {}", e);
-                            
+
                             // Notify theater runtime of the error
                             let _ = theater_tx.send(TheaterCommand::ActorError {
                                 actor_id: id.clone(),
                                 error: e.clone(),
                             }).await;
 
+
                             // Handle any pending shutdown request
                             if let Some(response_tx) = shutdown_response_tx.take() {
                                 let _ = response_tx.send(Err(e));
                             }
-                            return; // Exit on setup failure
+                            break; // Exit on setup failure
                         }
                         Err(e) => {
                             error!("Setup task panicked: {:?}", e);
                             current_status = format!("Setup panicked: {}", e);
-                            
+
                             // Handle any pending shutdown request
                             if let Some(response_tx) = shutdown_response_tx.take() {
                                 let _ = response_tx.send(Err(ActorError::UnexpectedError(e.to_string())));
                             }
-                            return;
+                            break;
                         }
                     }
                 }
@@ -197,7 +253,7 @@ impl ActorRuntime {
                 Some(op) = operation_rx.recv(), if actor_instance.is_some() && current_operation.is_none() && !*paused.read().await => {
                     let actor_instance = actor_instance.as_ref().unwrap();
                     let metrics = metrics.as_ref().unwrap();
-                    
+
                     info!("Received operation: {:?}", op);
                     match op {
                         ActorOperation::CallFunction { name, params, response_tx } => {
@@ -206,7 +262,7 @@ impl ActorRuntime {
                             let metrics = metrics.clone();
                             let actor_instance = actor_instance.clone();
                             let paused = paused.clone();
-                            
+
                             current_operation = Some(tokio::spawn(async move {
                                 let mut actor_instance = actor_instance.write().await;
                                 let metrics = metrics.write().await;
@@ -291,7 +347,7 @@ impl ActorRuntime {
                             } else {
                                 "Idle".to_string()
                             };
-                            
+
                             if let Err(e) = response_tx.send(Ok(status)) {
                                 error!("Failed to send status response: {:?}", e);
                             }
@@ -463,7 +519,7 @@ impl ActorRuntime {
         info!("Actor runtime communication loop exiting, performing cleanup");
         if let Some(ref metrics) = metrics {
             let metrics = metrics.read().await;
-            Self::perform_cleanup(ShutdownController::new(), Vec::new(), &metrics).await;
+            Self::perform_cleanup(shutdown_controller, handler_tasks, &metrics).await;
         } else {
             info!("Actor was shut down during startup, no cleanup needed");
         }
@@ -530,7 +586,7 @@ impl ActorRuntime {
         // STEP 4: Run startup process in parallel
         let startup_process = tokio::spawn(async move {
             // Run the actual startup with status updates
-            match Self::build_actor_instance(
+            match Self::build_actor_resources(
                 id_for_startup,
                 &config_clone,
                 state_bytes,
@@ -545,7 +601,7 @@ impl ActorRuntime {
             )
             .await
             {
-                Ok(actor_instance) => {
+                Ok((actor_instance, _)) => {
                     let _ = startup_complete_tx.send(actor_instance);
                 }
                 Err(e) => {
@@ -724,11 +780,11 @@ impl ActorRuntime {
         engine: wasmtime::Engine,
         parent_permissions: HandlerPermission,
         status_tx: Sender<String>,
-    ) -> Result<(ActorInstance, MetricsCollector), ActorError> {
+    ) -> Result<(ActorInstance, Vec<Handler>, MetricsCollector), ActorError> {
         let actor_handle = ActorHandle::new(operation_tx, info_tx, control_tx);
-        
+
         // Use your existing build_actor_instance method
-        let actor_instance = Self::build_actor_instance(
+        let (actor_instance, handlers) = Self::build_actor_resources(
             id,
             &config,
             state_bytes,
@@ -740,15 +796,16 @@ impl ActorRuntime {
             engine,
             parent_permissions,
             status_tx,
-        ).await?;
+        )
+        .await?;
 
         let metrics = MetricsCollector::new();
-        
-        Ok((actor_instance, metrics))
+
+        Ok((actor_instance, handlers, metrics))
     }
 
     /// Builds the complete actor instance using existing startup logic
-    async fn build_actor_instance(
+    async fn build_actor_resources(
         id: TheaterId,
         config: &ManifestConfig,
         state_bytes: Option<Vec<u8>>,
@@ -760,7 +817,7 @@ impl ActorRuntime {
         engine: wasmtime::Engine,
         parent_permissions: HandlerPermission,
         status_tx: Sender<String>,
-    ) -> Result<ActorInstance, ActorError> {
+    ) -> Result<(ActorInstance, Vec<Handler>), ActorError> {
         // Use a dummy response channel for the existing methods
         let (dummy_response_tx, _dummy_response_rx) = mpsc::channel(1);
 
@@ -874,7 +931,7 @@ impl ActorRuntime {
 
         let _ = status_tx.send("Ready".to_string()).await;
 
-        Ok(actor_instance)
+        Ok((actor_instance, handlers))
     }
 
     /// Sets up the actor store and stores the manifest
@@ -1315,8 +1372,6 @@ impl ActorRuntime {
         }
     }
 
-
-
     ///
     /// Calls a function in the WebAssembly actor with the given parameters,
     /// updates the actor's state based on the result, and records the
@@ -1675,3 +1730,4 @@ impl ActorRuntime {
         Ok(())
     }
 }
+
