@@ -1,11 +1,11 @@
-use crate::store::ContentRef;
+use crate::{store::ContentRef, ManifestConfig};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum TheaterRuntimeEventData {
     // Theater runtime lifecycle events
     ActorLoadCall {
-        manifest_id: ContentRef,
+        manifest: ManifestConfig,
     },
 
     ActorLoadResult {
