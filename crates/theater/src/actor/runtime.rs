@@ -215,7 +215,6 @@ impl ActorRuntime {
                         }
                         Ok(Err(e)) => {
                             error!("Actor setup failed: {:?}", e);
-                            current_status = format!("Setup failed: {}", e);
 
                             // Notify theater runtime of the error
                             let _ = theater_tx.send(TheaterCommand::ActorError {
@@ -232,7 +231,6 @@ impl ActorRuntime {
                         }
                         Err(e) => {
                             error!("Setup task panicked: {:?}", e);
-                            current_status = format!("Setup panicked: {}", e);
 
                             // Handle any pending shutdown request
                             if let Some(response_tx) = shutdown_response_tx.take() {
@@ -541,9 +539,6 @@ impl ActorRuntime {
         parent_permissions: HandlerPermission,
         status_tx: Sender<String>,
     ) -> Result<(ActorInstance, Vec<Handler>, MetricsCollector), ActorError> {
-        // Use a dummy response channel for the existing methods
-        let (dummy_response_tx, _dummy_response_rx) = mpsc::channel(1);
-
         let actor_handle = ActorHandle::new(operation_tx, info_tx, control_tx);
 
         let _ = status_tx.send("Setting up actor store".to_string()).await;
@@ -554,7 +549,6 @@ impl ActorRuntime {
             theater_tx.clone(),
             actor_handle.clone(),
             &config,
-            &dummy_response_tx,
         )
         .await
         .map_err(|e| ActorError::UnexpectedError(format!("Failed to setup actor store: {}", e)))?;
@@ -591,59 +585,49 @@ impl ActorRuntime {
         let _ = status_tx.send("Creating component".to_string()).await;
 
         // Create component
-        let mut actor_component = Self::create_actor_component(
-            &config,
-            actor_store,
-            id.clone(),
-            &dummy_response_tx,
-            engine.clone(),
-        )
-        .await
-        .map_err(|e| ActorError::UnexpectedError(format!("Component creation failed: {}", e)))?;
+        let mut actor_component =
+            Self::create_actor_component(&config, actor_store, engine.clone())
+                .await
+                .map_err(|e| {
+                    ActorError::UnexpectedError(format!("Component creation failed: {}", e))
+                })?;
 
         let _ = status_tx
             .send("Setting up host functions".to_string())
             .await;
 
         // Setup host functions
-        let handlers = Self::setup_host_functions(
-            &mut actor_component,
-            handlers,
-            id.clone(),
-            &dummy_response_tx,
-        )
-        .await
-        .map_err(|e| ActorError::UnexpectedError(format!("Host function setup failed: {}", e)))?;
+        let handlers = Self::setup_host_functions(&mut actor_component, handlers)
+            .await
+            .map_err(|e| {
+                ActorError::UnexpectedError(format!("Host function setup failed: {}", e))
+            })?;
 
         let _ = status_tx.send("Instantiating component".to_string()).await;
 
         // Instantiate component
-        let mut actor_instance =
-            Self::instantiate_component(actor_component, id.clone(), &dummy_response_tx)
-                .await
-                .map_err(|e| {
-                    ActorError::UnexpectedError(format!("Component instantiation failed: {}", e))
-                })?;
+        let mut actor_instance = Self::instantiate_component(actor_component, id.clone())
+            .await
+            .map_err(|e| {
+                ActorError::UnexpectedError(format!("Component instantiation failed: {}", e))
+            })?;
 
         let _ = status_tx
             .send("Setting up export functions".to_string())
             .await;
 
         // Setup export functions
-        Self::setup_export_functions(
-            &mut actor_instance,
-            &handlers,
-            id.clone(),
-            &dummy_response_tx,
-        )
-        .await
-        .map_err(|e| ActorError::UnexpectedError(format!("Export function setup failed: {}", e)))?;
+        Self::setup_export_functions(&mut actor_instance, &handlers)
+            .await
+            .map_err(|e| {
+                ActorError::UnexpectedError(format!("Export function setup failed: {}", e))
+            })?;
 
         let _ = status_tx.send("Initializing state".to_string()).await;
 
         // Initialize state if needed
         let init_state = if init {
-            Self::initialize_state(&config, state_bytes, id.clone(), &dummy_response_tx)
+            Self::initialize_state(&config, state_bytes, id.clone())
                 .await
                 .map_err(|e| {
                     ActorError::UnexpectedError(format!("State initialization failed: {}", e))
@@ -667,7 +651,6 @@ impl ActorRuntime {
         theater_tx: Sender<TheaterCommand>,
         actor_handle: ActorHandle,
         config: &ManifestConfig,
-        response_tx: &Sender<StartActorResult>,
     ) -> Result<(ActorStore, String)> {
         // Create actor store
         let actor_store =
@@ -676,12 +659,6 @@ impl ActorRuntime {
                 Err(e) => {
                     let error_message = format!("Failed to create actor store: {}", e);
                     error!("{}", error_message);
-                    if let Err(send_err) = response_tx
-                        .send(StartActorResult::Failure(id.clone(), error_message))
-                        .await
-                    {
-                        error!("Failed to send failure response: {}", send_err);
-                    }
                     return Err(e.into());
                 }
             };
@@ -703,12 +680,6 @@ impl ActorRuntime {
             Err(e) => {
                 let error_message = format!("Failed to store manifest: {}", e);
                 error!("{}", error_message);
-                if let Err(send_err) = response_tx
-                    .send(StartActorResult::Failure(id.clone(), error_message))
-                    .await
-                {
-                    error!("Failed to send failure response: {}", send_err);
-                }
                 return Err(e.into());
             }
         };
@@ -912,8 +883,6 @@ impl ActorRuntime {
     async fn create_actor_component(
         config: &ManifestConfig,
         actor_store: ActorStore,
-        id: TheaterId,
-        response_tx: &Sender<StartActorResult>,
         engine: wasmtime::Engine,
     ) -> Result<ActorComponent> {
         match ActorComponent::new(
@@ -931,13 +900,6 @@ impl ActorRuntime {
                     config.name, e
                 );
                 error!("{}", error_message);
-                // Send failure result back to spawner with detailed error message
-                if let Err(send_err) = response_tx
-                    .send(StartActorResult::Failure(id.clone(), error_message))
-                    .await
-                {
-                    error!("Failed to send failure response: {}", send_err);
-                }
                 Err(e.into())
             }
         }
@@ -947,8 +909,6 @@ impl ActorRuntime {
     async fn setup_host_functions(
         actor_component: &mut ActorComponent,
         mut handlers: Vec<Handler>,
-        id: TheaterId,
-        response_tx: &Sender<StartActorResult>,
     ) -> Result<Vec<Handler>> {
         for handler in &mut handlers {
             info!(
@@ -962,13 +922,6 @@ impl ActorRuntime {
                     e
                 );
                 error!("{}", error_message);
-                // Send failure result back to spawner with detailed error message
-                if let Err(send_err) = response_tx
-                    .send(StartActorResult::Failure(id.clone(), error_message))
-                    .await
-                {
-                    error!("Failed to send failure response: {}", send_err);
-                }
                 return Err(e.into());
             }
         }
@@ -979,20 +932,12 @@ impl ActorRuntime {
     async fn instantiate_component(
         actor_component: ActorComponent,
         id: TheaterId,
-        response_tx: &Sender<StartActorResult>,
     ) -> Result<ActorInstance> {
         match actor_component.instantiate().await {
             Ok(instance) => Ok(instance),
             Err(e) => {
                 let error_message = format!("Failed to instantiate actor {}: {}", id, e);
                 error!("{}", error_message);
-                // Send failure result back to spawner with detailed error message
-                if let Err(send_err) = response_tx
-                    .send(StartActorResult::Failure(id.clone(), error_message))
-                    .await
-                {
-                    error!("Failed to send failure response: {}", send_err);
-                }
                 Err(e.into())
             }
         }
@@ -1002,8 +947,6 @@ impl ActorRuntime {
     async fn setup_export_functions(
         actor_instance: &mut ActorInstance,
         handlers: &[Handler],
-        id: TheaterId,
-        response_tx: &Sender<StartActorResult>,
     ) -> Result<()> {
         for handler in handlers {
             info!("Creating functions for handler: {:?}", handler.name());
@@ -1014,13 +957,6 @@ impl ActorRuntime {
                     e
                 );
                 error!("{}", error_message);
-                // Send failure result back to spawner with detailed error message
-                if let Err(send_err) = response_tx
-                    .send(StartActorResult::Failure(id.clone(), error_message))
-                    .await
-                {
-                    error!("Failed to send failure response: {}", send_err);
-                }
                 return Err(e.into());
             }
         }
@@ -1032,7 +968,6 @@ impl ActorRuntime {
         config: &ManifestConfig,
         state_bytes: Option<Vec<u8>>,
         id: TheaterId,
-        response_tx: &Sender<StartActorResult>,
     ) -> Result<Option<Vec<u8>>> {
         info!("Loading init state for actor: {:?}", id);
 
@@ -1051,12 +986,6 @@ impl ActorRuntime {
             Err(e) => {
                 let error_message = format!("Failed to merge initial states: {}", e);
                 error!("{}", error_message);
-                if let Err(send_err) = response_tx
-                    .send(StartActorResult::Failure(id.clone(), error_message))
-                    .await
-                {
-                    error!("Failed to send failure response: {}", send_err);
-                }
                 Err(e.into())
             }
         }
@@ -1213,9 +1142,6 @@ impl ActorRuntime {
         // Create a temporary config for the new component
         new_config.component = component_address.to_string();
 
-        // Create a temporary response channel for error handling during setup
-        let (response_tx, _) = mpsc::channel::<StartActorResult>(1);
-
         // Set up actor store - reuse the existing one without creating a new one
         let actor_store = actor_instance.actor_component.actor_store.clone();
 
@@ -1246,32 +1172,18 @@ impl ActorRuntime {
         };
 
         // Create new component - reusing existing method
-        let mut new_actor_component = match Self::create_actor_component(
-            &new_config,
-            actor_store,
-            actor_id.clone(),
-            &response_tx,
-            engine,
-        )
-        .await
-        {
-            Ok(component) => component,
-            Err(e) => {
-                let error_message = format!("Failed to create actor component: {}", e);
-                Self::record_update_error(actor_instance, component_address, &error_message);
-                return Err(ActorError::UpdateComponentError(error_message));
-            }
-        };
+        let mut new_actor_component =
+            match Self::create_actor_component(&new_config, actor_store, engine).await {
+                Ok(component) => component,
+                Err(e) => {
+                    let error_message = format!("Failed to create actor component: {}", e);
+                    Self::record_update_error(actor_instance, component_address, &error_message);
+                    return Err(ActorError::UpdateComponentError(error_message));
+                }
+            };
 
         // Setup host functions - reusing existing method
-        let handlers = match Self::setup_host_functions(
-            &mut new_actor_component,
-            handlers,
-            actor_id.clone(),
-            &response_tx,
-        )
-        .await
-        {
+        let handlers = match Self::setup_host_functions(&mut new_actor_component, handlers).await {
             Ok(handlers) => handlers,
             Err(e) => {
                 let error_message = format!("Failed to setup host functions: {}", e);
@@ -1282,9 +1194,7 @@ impl ActorRuntime {
 
         // Instantiate component - reusing existing method
         let mut new_instance =
-            match Self::instantiate_component(new_actor_component, actor_id.clone(), &response_tx)
-                .await
-            {
+            match Self::instantiate_component(new_actor_component, actor_id.clone()).await {
                 Ok(instance) => instance,
                 Err(e) => {
                     let error_message = format!("Failed to instantiate component: {}", e);
@@ -1294,14 +1204,7 @@ impl ActorRuntime {
             };
 
         // Setup export functions - reusing existing method
-        if let Err(e) = Self::setup_export_functions(
-            &mut new_instance,
-            &handlers,
-            actor_id.clone(),
-            &response_tx,
-        )
-        .await
-        {
+        if let Err(e) = Self::setup_export_functions(&mut new_instance, &handlers).await {
             let error_message = format!("Failed to setup export functions: {}", e);
             Self::record_update_error(actor_instance, component_address, &error_message);
             return Err(ActorError::UpdateComponentError(error_message));
