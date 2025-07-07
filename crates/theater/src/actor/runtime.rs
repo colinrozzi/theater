@@ -33,7 +33,7 @@ use crate::store::ContentStore;
 use crate::wasm::{ActorComponent, ActorInstance};
 use crate::HandlerConfig;
 use crate::ManifestConfig;
-use crate::MessageServerConfig;
+
 use crate::Result;
 use std::sync::Arc;
 use tokio::sync::mpsc::{self, Receiver, Sender};
@@ -710,7 +710,8 @@ impl ActorRuntime {
         // Check if message server is permitted and requested
         if config
             .handlers
-            .contains(&HandlerConfig::MessageServer(MessageServerConfig {}))
+            .iter()
+            .any(|h| matches!(h, HandlerConfig::MessageServer { .. }))
         {
             if effective_permissions.message_server.is_none() {
                 return Err(
@@ -731,11 +732,11 @@ impl ActorRuntime {
 
         for handler_config in &config.handlers {
             let handler = match handler_config {
-                HandlerConfig::MessageServer(_) => {
+                HandlerConfig::MessageServer { .. } => {
                     debug!("MessageServer handler already created");
                     None
                 }
-                HandlerConfig::Environment(config) => {
+                HandlerConfig::Environment { config } => {
                     // Check permission before creating handler
                     if effective_permissions.environment.is_none() {
                         return Err("Environment handler requested but not permitted by effective permissions".to_string());
@@ -748,7 +749,7 @@ impl ActorRuntime {
                         effective_permissions.environment.clone(),
                     ))
                 }
-                HandlerConfig::FileSystem(config) => {
+                HandlerConfig::FileSystem { config } => {
                     // Check permission before creating handler
                     if effective_permissions.file_system.is_none() {
                         return Err("FileSystem handler requested but not permitted by effective permissions".to_string());
@@ -761,7 +762,7 @@ impl ActorRuntime {
                         effective_permissions.file_system.clone(),
                     ))
                 }
-                HandlerConfig::HttpClient(config) => {
+                HandlerConfig::HttpClient { config } => {
                     // Check permission before creating handler
                     if effective_permissions.http_client.is_none() {
                         return Err("HttpClient handler requested but not permitted by effective permissions".to_string());
@@ -774,7 +775,7 @@ impl ActorRuntime {
                         effective_permissions.http_client.clone(),
                     ))
                 }
-                HandlerConfig::HttpFramework(_) => {
+                HandlerConfig::HttpFramework { .. } => {
                     // Check permission before creating handler
                     if effective_permissions.http_framework.is_none() {
                         return Err("HttpFramework handler requested but not permitted by effective permissions".to_string());
@@ -784,7 +785,7 @@ impl ActorRuntime {
                         effective_permissions.http_framework.clone(),
                     ))
                 }
-                HandlerConfig::Runtime(config) => {
+                HandlerConfig::Runtime { config } => {
                     // Check permission before creating handler
                     if effective_permissions.runtime.is_none() {
                         return Err(
@@ -801,7 +802,7 @@ impl ActorRuntime {
                         effective_permissions.runtime.clone(),
                     ))
                 }
-                HandlerConfig::Supervisor(config) => {
+                HandlerConfig::Supervisor { config } => {
                     // Check permission before creating handler
                     if effective_permissions.supervisor.is_none() {
                         return Err("Supervisor handler requested but not permitted by effective permissions".to_string());
@@ -814,7 +815,7 @@ impl ActorRuntime {
                         effective_permissions.supervisor.clone(),
                     ))
                 }
-                HandlerConfig::Process(config) => {
+                HandlerConfig::Process { config } => {
                     // Check permission before creating handler
                     if effective_permissions.process.is_none() {
                         return Err(
@@ -831,7 +832,7 @@ impl ActorRuntime {
                         effective_permissions.process.clone(),
                     ))
                 }
-                HandlerConfig::Store(config) => {
+                HandlerConfig::Store { config } => {
                     // Check permission before creating handler
                     if effective_permissions.store.is_none() {
                         return Err(
@@ -844,7 +845,7 @@ impl ActorRuntime {
                         effective_permissions.store.clone(),
                     ))
                 }
-                HandlerConfig::Timing(config) => {
+                HandlerConfig::Timing { config } => {
                     // Check permission before creating handler
                     if effective_permissions.timing.is_none() {
                         return Err(
@@ -857,7 +858,7 @@ impl ActorRuntime {
                         effective_permissions.timing.clone(),
                     ))
                 }
-                HandlerConfig::Random(config) => {
+                HandlerConfig::Random { config } => {
                     // Check permission before creating handler
                     if effective_permissions.random.is_none() {
                         return Err(
