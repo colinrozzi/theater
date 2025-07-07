@@ -41,49 +41,49 @@ pub fn validate_manifest_permissions(
 ) -> PermissionResult<()> {
     for handler_config in &manifest.handlers {
         match handler_config {
-            HandlerConfig::FileSystem(config) => {
+            HandlerConfig::FileSystem { config } => {
                 validate_filesystem_config(config, &effective_permissions.file_system)?;
             }
-            HandlerConfig::HttpClient(config) => {
+            HandlerConfig::HttpClient { config } => {
                 validate_http_client_config(config, &effective_permissions.http_client)?;
             }
-            HandlerConfig::HttpFramework(config) => {
+            HandlerConfig::HttpFramework { config } => {
                 validate_http_framework_config(config, &effective_permissions.http_framework)?;
             }
-            HandlerConfig::Process(config) => {
+            HandlerConfig::Process { config } => {
                 validate_process_config(config, &effective_permissions.process)?;
             }
-            HandlerConfig::Environment(config) => {
+            HandlerConfig::Environment { config } => {
                 validate_environment_config(config, &effective_permissions.environment)?;
             }
-            HandlerConfig::Random(config) => {
+            HandlerConfig::Random { config } => {
                 validate_random_config(config, &effective_permissions.random)?;
             }
-            HandlerConfig::Timing(config) => {
+            HandlerConfig::Timing { config } => {
                 validate_timing_config(config, &effective_permissions.timing)?;
             }
-            HandlerConfig::MessageServer(_) => {
+            HandlerConfig::MessageServer { .. } => {
                 if effective_permissions.message_server.is_none() {
                     return Err(PermissionError::HandlerNotPermitted {
                         handler_type: "message-server".to_string(),
                     });
                 }
             }
-            HandlerConfig::Runtime(_) => {
+            HandlerConfig::Runtime { .. } => {
                 if effective_permissions.runtime.is_none() {
                     return Err(PermissionError::HandlerNotPermitted {
                         handler_type: "runtime".to_string(),
                     });
                 }
             }
-            HandlerConfig::Supervisor(_) => {
+            HandlerConfig::Supervisor { .. } => {
                 if effective_permissions.supervisor.is_none() {
                     return Err(PermissionError::HandlerNotPermitted {
                         handler_type: "supervisor".to_string(),
                     });
                 }
             }
-            HandlerConfig::Store(_) => {
+            HandlerConfig::Store { .. } => {
                 if effective_permissions.store.is_none() {
                     return Err(PermissionError::HandlerNotPermitted {
                         handler_type: "store".to_string(),
