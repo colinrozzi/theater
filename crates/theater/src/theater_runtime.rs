@@ -863,8 +863,6 @@ impl TheaterRuntime {
             manifest = ManifestConfig::from_str(&manifest_path.clone())?;
         }
 
-        // start the actor in a new process
-        let (response_tx, mut response_rx) = mpsc::channel(1);
         // Create a shutdown controller for this specific actor
         let mut shutdown_controller = ShutdownController::new();
         let (mailbox_tx, mailbox_rx) = mpsc::channel(100);
@@ -911,7 +909,6 @@ impl TheaterRuntime {
                 actor_control_tx,
                 init,
                 shutdown_receiver_clone,
-                response_tx,
                 engine,
                 permissions,
             )
@@ -925,75 +922,38 @@ impl TheaterRuntime {
             }
         });
 
-        match response_rx.recv().await {
-            Some(StartActorResult::Success(actor_id)) => {
-                debug!(
-                    "Received actor ID from runtime initialization: {:?}",
-                    actor_id
-                );
-                let process = ActorProcess {
-                    actor_id: actor_id.clone(),
-                    name: actor_name,
-                    process: actor_runtime_process,
-                    mailbox_tx,
-                    operation_tx,
-                    info_tx,
-                    control_tx,
-                    children: HashSet::new(),
-                    status: ActorStatus::Running,
-                    manifest_path: manifest_path.clone(),
-                    manifest,
-                    shutdown_controller,
-                    supervisor_tx,
-                };
+        let process = ActorProcess {
+            actor_id: actor_id.clone(),
+            name: actor_name,
+            process: actor_runtime_process,
+            mailbox_tx,
+            operation_tx,
+            info_tx,
+            control_tx,
+            children: HashSet::new(),
+            status: ActorStatus::Running,
+            manifest_path: manifest_path.clone(),
+            manifest,
+            shutdown_controller,
+            supervisor_tx,
+        };
 
-                if let Some(parent_id) = parent_id {
-                    debug!("Adding actor {:?} as child of {:?}", actor_id, parent_id);
-                    if let Some(parent) = self.actors.get_mut(&parent_id) {
-                        parent.children.insert(actor_id.clone());
-                        debug!("Added actor {:?} as child of {:?}", actor_id, parent_id);
-                    } else {
-                        warn!(
-                            "Parent actor {:?} not found for new actor {:?}",
-                            parent_id, actor_id
-                        );
-                    }
-                }
-
-                self.actors.insert(actor_id.clone(), process);
-                debug!("Actor process registered with runtime");
-                Ok(actor_id)
-            }
-            Some(StartActorResult::Failure(actor_id, e)) => {
-                error!("Failed to start actor [{}]: {}", actor_id, e);
-                // Abort the runtime process since it failed
-                actor_runtime_process.abort();
-                // Return the specific error message to the spawner
-                Err(anyhow::anyhow!(
-                    "Actor startup failed: [{}] {}",
-                    actor_id,
-                    e
-                ))
-            }
-            Some(StartActorResult::Error(e)) => {
-                error!(
-                    "Failed to start actor due to permission/validation error: {}",
-                    e
+        if let Some(parent_id) = parent_id {
+            debug!("Adding actor {:?} as child of {:?}", actor_id, parent_id);
+            if let Some(parent) = self.actors.get_mut(&parent_id) {
+                parent.children.insert(actor_id.clone());
+                debug!("Added actor {:?} as child of {:?}", actor_id, parent_id);
+            } else {
+                warn!(
+                    "Parent actor {:?} not found for new actor {:?}",
+                    parent_id, actor_id
                 );
-                // Abort the runtime process since it failed
-                actor_runtime_process.abort();
-                // Return the specific error message to the spawner
-                Err(anyhow::anyhow!("Actor startup failed: {}", e))
-            }
-            None => {
-                error!("Failed to receive actor ID from runtime");
-                // Abort the runtime process since we couldn't get a response
-                actor_runtime_process.abort();
-                Err(anyhow::anyhow!(
-                    "Failed to receive response from actor runtime",
-                ))
             }
         }
+
+        self.actors.insert(actor_id.clone(), process);
+        debug!("Actor process registered with runtime");
+        Ok(actor_id)
     }
 
     fn subscribe_to_actor(

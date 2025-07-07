@@ -84,26 +84,6 @@ pub enum StartActorResult {
 }
 
 impl ActorRuntime {
-    /// # Start a new actor runtime
-    ///
-    /// Initializes and starts an actor runtime with the specified configuration,
-    /// setting up all necessary components for the actor to run.
-    ///
-    /// ## Parameters
-    ///
-    /// * `id` - Unique identifier for the actor
-    /// * `config` - Configuration for the actor from its manifest
-    /// * `state_bytes` - Optional initial state for the actor
-    /// * `theater_tx` - Channel for sending commands back to the Theater runtime
-    /// * `actor_sender` - Channel for sending messages to the actor
-    /// * `actor_mailbox` - Channel for receiving messages from other actors
-    /// * `operation_rx` - Channel for receiving operations to perform
-    /// * `operation_tx` - Channel for sending operations to the executor
-    /// * `init` - Whether to initialize the actor (call the init function)
-    /// * `parent_shutdown_receiver` - Receiver for shutdown signals from the parent
-    /// * `response_tx` - Channel for sending the start result back to the caller
-    ///
-    /// This method is "start and forget" - it spawns the actor task and does not return anything.
     pub async fn start(
         id: TheaterId,
         config: &ManifestConfig,
@@ -111,147 +91,558 @@ impl ActorRuntime {
         theater_tx: Sender<TheaterCommand>,
         actor_sender: Sender<ActorMessage>,
         actor_mailbox: Receiver<ActorMessage>,
-        operation_rx: Receiver<ActorOperation>,
+        mut operation_rx: Receiver<ActorOperation>,
         operation_tx: Sender<ActorOperation>,
-        info_rx: Receiver<ActorInfo>,
+        mut info_rx: Receiver<ActorInfo>,
         info_tx: Sender<ActorInfo>,
-        control_rx: Receiver<ActorControl>,
+        mut control_rx: Receiver<ActorControl>,
         control_tx: Sender<ActorControl>,
         init: bool,
-        parent_shutdown_receiver: ShutdownReceiver,
-        response_tx: Sender<StartActorResult>,
+        mut parent_shutdown_receiver: ShutdownReceiver,
         engine: wasmtime::Engine,
         parent_permissions: HandlerPermission,
     ) {
-        let actor_handle =
-            ActorHandle::new(operation_tx.clone(), info_tx.clone(), control_tx.clone());
+        info!("Actor runtime starting communication loops");
+        let paused = Arc::new(RwLock::new(false));
+
+        // Create setup task with status reporting
+        let (status_tx, mut status_rx) = mpsc::channel::<String>(10);
+        let mut setup_task = Some(tokio::spawn(Self::build_actor_resources(
+            id.clone(),
+            config.clone(),
+            state_bytes,
+            theater_tx.clone(),
+            actor_sender,
+            actor_mailbox,
+            operation_tx.clone(),
+            info_tx.clone(),
+            control_tx.clone(),
+            init,
+            engine,
+            parent_permissions,
+            status_tx,
+        )));
+
+        // These will be set once setup completes
+        let mut actor_instance: Option<Arc<RwLock<ActorInstance>>> = None;
+        let mut metrics: Option<Arc<RwLock<MetricsCollector>>> = None;
+        let mut handler_tasks: Vec<JoinHandle<()>> = Vec::new();
+
+        let mut current_operation: Option<JoinHandle<()>> = None;
+        let mut shutdown_requested = false;
+        let mut shutdown_response_tx: Option<oneshot::Sender<Result<(), ActorError>>> = None;
+        let mut shutdown_controller = ShutdownController::new();
+        let mut current_status = "Starting".to_string();
+
+        loop {
+            tokio::select! {
+                // Handle setup completion
+                result = async {
+                    match setup_task.as_mut() {
+                        Some(task) => task.await,
+                        None => std::future::pending().await,
+                    }
+                } => {
+                    match result {
+                        Ok(Ok((instance, handlers, metrics_collector))) => {
+                            info!("Actor setup completed successfully");
+                            actor_instance = Some(Arc::new(RwLock::new(instance)));
+                            metrics = Some(Arc::new(RwLock::new(metrics_collector)));
+                            setup_task = None; // Clear the task
+                            current_status = "Running".to_string();
+                            let actor_handle = ActorHandle::new(operation_tx.clone(), info_tx.clone(), control_tx.clone());
+
+                            // Call init function if needed
+                            if init {
+                                let init_id = id.clone();
+                                let actor_handle = actor_handle.clone();
+                                info!("Calling init function for actor: {:?}", init_id);
+                                tokio::spawn(async move {
+                                    match actor_handle
+                                        .call_function::<(String,), ()>(
+                                            "theater:simple/actor.init".to_string(),
+                                            (init_id.to_string(),),
+                                        )
+                                        .await
+                                    {
+                                        Ok(_) => {
+                                            debug!("Successfully called init function for actor: {:?}", init_id);
+                                        }
+                                        Err(e) => {
+                                            error!("Failed to call init function for actor {}: {}", init_id, e);
+                                        }
+                                    }
+                                });
+                            }
+
+                            // Start the handler tasks
+                            for mut handler in handlers {
+                                info!("Starting handler: {:?}", handler.name());
+                                let handler_actor_handle = actor_handle.clone();
+                                let handler_shutdown = shutdown_controller.subscribe();
+                                let theater_tx = theater_tx.clone();
+                                let id = id.clone();
+                                let handler_task = tokio::spawn(async move {
+                                    match handler.start(
+                                        handler_actor_handle,
+                                        handler_shutdown,
+                                    ).await {
+                                        Ok(_) => {
+                                            info!("Handler {} started successfully", handler.name());
+                                        }
+                                        Err(e) => {
+                                            error!("Failed to start handler {}: {:?}", handler.name(), e);
+                                            // Notify theater runtime of the error
+                                            let _ = theater_tx.send(TheaterCommand::ActorError {
+                                                actor_id: id.clone(),
+                                                error: ActorError::HandlerError(e.to_string()),
+                                            }).await;
+                                        }
+                                    }
+                                });
+                                handler_tasks.push(handler_task);
+                            }
+                            info!("All handlers started successfully for actor: {}", id);
+
+                            // If shutdown was requested during startup, handle it now
+                            if shutdown_requested {
+                                info!("Shutdown was requested during startup, shutting down now");
+                                if let Some(response_tx) = shutdown_response_tx.take() {
+                                    let _ = response_tx.send(Ok(()));
+                                }
+                                break; // Exit the loop
+                            }
+                        }
+                        Ok(Err(e)) => {
+                            error!("Actor setup failed: {:?}", e);
+
+                            // Notify theater runtime of the error
+                            let _ = theater_tx.send(TheaterCommand::ActorError {
+                                actor_id: id.clone(),
+                                error: e.clone(),
+                            }).await;
+
+
+                            // Handle any pending shutdown request
+                            if let Some(response_tx) = shutdown_response_tx.take() {
+                                let _ = response_tx.send(Err(e));
+                            }
+                            break; // Exit on setup failure
+                        }
+                        Err(e) => {
+                            error!("Setup task panicked: {:?}", e);
+
+                            // Handle any pending shutdown request
+                            if let Some(response_tx) = shutdown_response_tx.take() {
+                                let _ = response_tx.send(Err(ActorError::UnexpectedError(e.to_string())));
+                            }
+                            break;
+                        }
+                    }
+                }
+
+                // Handle status updates from setup process
+                Some(new_status) = status_rx.recv() => {
+                    current_status = new_status;
+                    debug!("Actor {} startup status: {}", id, current_status);
+                }
+
+                // Handle operations only after setup is complete
+                Some(op) = operation_rx.recv(), if actor_instance.is_some() && current_operation.is_none() && !*paused.read().await => {
+                    let actor_instance = actor_instance.as_ref().unwrap();
+                    let metrics = metrics.as_ref().unwrap();
+
+                    info!("Received operation: {:?}", op);
+                    match op {
+                        ActorOperation::CallFunction { name, params, response_tx } => {
+                            info!("Processing function call: {}", name);
+                            let theater_tx = theater_tx.clone();
+                            let metrics = metrics.clone();
+                            let actor_instance = actor_instance.clone();
+                            let paused = paused.clone();
+
+                            current_operation = Some(tokio::spawn(async move {
+                                let mut actor_instance = actor_instance.write().await;
+                                let metrics = metrics.write().await;
+                                match Self::execute_call(
+                                    &mut actor_instance,
+                                    &name,
+                                    params,
+                                    &theater_tx,
+                                    &metrics,
+                                ).await {
+                                    Ok(result) => {
+                                        if let Err(e) = response_tx.send(Ok(result)) {
+                                            error!("Failed to send function call response for operation '{}': {:?}", name, e);
+                                        }
+                                    }
+                                    Err(actor_error) => {
+                                        let _ = theater_tx
+                                            .send(TheaterCommand::ActorError {
+                                                actor_id: actor_instance.id().clone(),
+                                                error: actor_error.clone(),
+                                            })
+                                            .await;
+
+                                        error!("Operation '{}' failed with error: {:?}", name, actor_error);
+                                        if let Err(send_err) = response_tx.send(Err(actor_error)) {
+                                            error!("Failed to send function call error response for operation '{}': {:?}", name, send_err);
+                                        }
+
+                                        *paused.write().await = true;
+                                    }
+                                }
+                            }));
+                        }
+                        ActorOperation::UpdateComponent { component_address: _, response_tx } => {
+                            error!("UpdateComponent operation is not implemented yet");
+                            if let Err(e) = response_tx.send(Err(ActorError::UpdateComponentError("Not implemented".to_string()))) {
+                                error!("Failed to send update component response: {:?}", e);
+                            }
+                        }
+                    }
+                }
+
+                // Clean up completed operations
+                _ = async {
+                    match current_operation.as_mut() {
+                        Some(task) => task.await,
+                        None => std::future::pending().await,
+                    }
+                } => {
+                    info!("Operation completed");
+                    current_operation = None;
+
+                    // Check if shutdown was requested and no more operations are running
+                    if shutdown_requested {
+                        info!("Shutdown requested and operation completed - shutting down gracefully");
+                        if let Some(response_tx) = shutdown_response_tx.take() {
+                            let _ = response_tx.send(Ok(()));
+                        }
+                        break;
+                    }
+                }
+
+                // Handle info requests (works during startup too!)
+                Some(info) = info_rx.recv() => {
+                    info!("Received info request: {:?}", info);
+                    match info {
+                        ActorInfo::GetStatus { response_tx } => {
+                            let status = if shutdown_requested {
+                                if setup_task.is_some() {
+                                    "Shutting down (during startup)".to_string()
+                                } else if current_operation.is_some() {
+                                    "Shutting down (waiting for operation)".to_string()
+                                } else {
+                                    "Shutting down".to_string()
+                                }
+                            } else if setup_task.is_some() {
+                                current_status.clone()
+                            } else if *paused.read().await {
+                                "Paused".to_string()
+                            } else if current_operation.is_some() {
+                                "Processing".to_string()
+                            } else {
+                                "Idle".to_string()
+                            };
+
+                            if let Err(e) = response_tx.send(Ok(status)) {
+                                error!("Failed to send status response: {:?}", e);
+                            }
+                        }
+                        ActorInfo::GetState { response_tx } => {
+                            if let Some(ref actor_instance) = actor_instance {
+                                let actor_instance = actor_instance.read().await;
+                                let state = actor_instance.store.data().get_state();
+                                if let Err(e) = response_tx.send(Ok(state)) {
+                                    error!("Failed to send state response: {:?}", e);
+                                }
+                            } else {
+                                let _ = response_tx.send(Err(ActorError::UnexpectedError("Actor still starting".to_string())));
+                            }
+                        }
+                        ActorInfo::GetChain { response_tx } => {
+                            if let Some(ref actor_instance) = actor_instance {
+                                let actor_instance = actor_instance.read().await;
+                                let chain = actor_instance.store.data().get_chain();
+                                if let Err(e) = response_tx.send(Ok(chain)) {
+                                    error!("Failed to send chain response: {:?}", e);
+                                }
+                            } else {
+                                let _ = response_tx.send(Err(ActorError::UnexpectedError("Actor still starting".to_string())));
+                            }
+                        }
+                        ActorInfo::GetMetrics { response_tx } => {
+                            if let Some(ref metrics) = metrics {
+                                let metrics = metrics.read().await;
+                                let metrics_data = metrics.get_metrics().await;
+                                if let Err(e) = response_tx.send(Ok(metrics_data)) {
+                                    error!("Failed to send metrics response: {:?}", e);
+                                }
+                            } else {
+                                let _ = response_tx.send(Err(ActorError::UnexpectedError("Actor still starting".to_string())));
+                            }
+                        }
+                        ActorInfo::SaveChain { response_tx } => {
+                            if let Some(ref actor_instance) = actor_instance {
+                                let actor_instance = actor_instance.read().await;
+                                match actor_instance.save_chain() {
+                                    Ok(_) => {
+                                        if let Err(e) = response_tx.send(Ok(())) {
+                                            error!("Failed to send save chain response: {:?}", e);
+                                        }
+                                    }
+                                    Err(e) => {
+                                        if let Err(send_err) = response_tx.send(Err(ActorError::UnexpectedError(e.to_string()))) {
+                                            error!("Failed to send save chain error response: {:?}", send_err);
+                                        }
+                                    }
+                                }
+                            } else {
+                                let _ = response_tx.send(Err(ActorError::UnexpectedError("Actor still starting".to_string())));
+                            }
+                        }
+                    }
+                }
+
+                // Handle control commands (works during startup too!)
+                Some(control) = control_rx.recv() => {
+                    info!("Received control command: {:?}", control);
+                    match control {
+                        ActorControl::Shutdown { response_tx } => {
+                            info!("Shutdown requested");
+                            if setup_task.is_some() {
+                                // Still setting up - mark for shutdown after setup completes
+                                info!("Shutdown requested during setup - will shutdown after setup completes");
+                                shutdown_requested = true;
+                                shutdown_response_tx = Some(response_tx);
+                                current_status = "Shutting down (during startup)".to_string();
+                            } else if current_operation.is_some() {
+                                // Operation running - mark for shutdown after completion
+                                info!("Operation running - will shutdown after completion");
+                                shutdown_requested = true;
+                                shutdown_response_tx = Some(response_tx);
+                            } else {
+                                // No operation running - shutdown immediately
+                                info!("No operation running - shutting down immediately");
+                                let _ = response_tx.send(Ok(()));
+                                break;
+                            }
+                        }
+                        ActorControl::Terminate { response_tx } => {
+                            info!("Terminate requested");
+                            // Abort setup or current operation
+                            if let Some(task) = setup_task.take() {
+                                task.abort();
+                            }
+                            if let Some(task) = current_operation.take() {
+                                task.abort();
+                            }
+                            if let Err(e) = response_tx.send(Ok(())) {
+                                error!("Failed to send terminate confirmation: {:?}", e);
+                            }
+                            break;
+                        }
+                        ActorControl::Pause { response_tx } => {
+                            if setup_task.is_some() {
+                                let _ = response_tx.send(Err(ActorError::UnexpectedError("Cannot pause during startup".to_string())));
+                            } else if shutdown_requested {
+                                let _ = response_tx.send(Err(ActorError::ShuttingDown));
+                            } else {
+                                *paused.write().await = true;
+                                let _ = response_tx.send(Ok(()));
+                            }
+                        }
+                        ActorControl::Resume { response_tx } => {
+                            if setup_task.is_some() {
+                                let _ = response_tx.send(Err(ActorError::UnexpectedError("Cannot resume during startup".to_string())));
+                            } else if shutdown_requested {
+                                let _ = response_tx.send(Err(ActorError::ShuttingDown));
+                            } else {
+                                let response = if *paused.read().await {
+                                    *paused.write().await = false;
+                                    Ok(())
+                                } else {
+                                    Err(ActorError::NotPaused)
+                                };
+                                let _ = response_tx.send(response);
+                            }
+                        }
+                    }
+                }
+
+                // Handle parent shutdown signals
+                shutdown_signal = &mut parent_shutdown_receiver.receiver => {
+                    info!("Received shutdown signal from parent");
+                    match shutdown_signal {
+                        Ok(shutdown_signal) => {
+                            info!("Shutdown signal received: {:?}", shutdown_signal);
+                            match shutdown_signal.shutdown_type {
+                                ShutdownType::Graceful => {
+                                    info!("Graceful shutdown requested");
+                                    if setup_task.is_some() || current_operation.is_some() {
+                                        info!("Setup/operation running - will shutdown after completion");
+                                        shutdown_requested = true;
+                                    } else {
+                                        info!("No setup/operation running - shutting down immediately");
+                                        break;
+                                    }
+                                }
+                                ShutdownType::Force => {
+                                    info!("Forceful shutdown requested");
+                                    if let Some(task) = setup_task.take() {
+                                        task.abort();
+                                    }
+                                    if let Some(task) = current_operation.take() {
+                                        task.abort();
+                                    }
+                                    break;
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            error!("Failed to receive shutdown signal: {:?}", e);
+                            info!("Exiting runtime communication loop due to shutdown signal error");
+                            if setup_task.is_some() || current_operation.is_some() {
+                                shutdown_requested = true;
+                            } else {
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        info!("Actor runtime communication loop exiting, performing cleanup");
+        if let Some(ref metrics) = metrics {
+            let metrics = metrics.read().await;
+            Self::perform_cleanup(shutdown_controller, handler_tasks, &metrics).await;
+        } else {
+            info!("Actor was shut down during startup, no cleanup needed");
+        }
+    }
+
+    /// Builds the complete actor instance using existing startup logic
+    async fn build_actor_resources(
+        id: TheaterId,
+        config: ManifestConfig,
+        state_bytes: Option<Vec<u8>>,
+        theater_tx: Sender<TheaterCommand>,
+        actor_sender: Sender<ActorMessage>,
+        actor_mailbox: Receiver<ActorMessage>,
+        operation_tx: Sender<ActorOperation>,
+        info_tx: Sender<ActorInfo>,
+        control_tx: Sender<ActorControl>,
+        init: bool,
+        engine: wasmtime::Engine,
+        parent_permissions: HandlerPermission,
+        status_tx: Sender<String>,
+    ) -> Result<(ActorInstance, Vec<Handler>, MetricsCollector), ActorError> {
+        let actor_handle = ActorHandle::new(operation_tx, info_tx, control_tx);
+
+        let _ = status_tx.send("Setting up actor store".to_string()).await;
 
         // Setup actor store and manifest
-        let (actor_store, _manifest_id) = match Self::setup_actor_store(
+        let (actor_store, _manifest_id) = Self::setup_actor_store(
             id.clone(),
             theater_tx.clone(),
             actor_handle.clone(),
-            config,
-            &response_tx,
+            &config,
         )
         .await
-        {
-            Ok(result) => result,
-            Err(_) => return, // Error already reported
-        };
+        .map_err(|e| ActorError::UnexpectedError(format!("Failed to setup actor store: {}", e)))?;
 
-        // Calculate effective permissions (for now, use root permissions as default)
-        //let parent_permissions = crate::config::permissions::HandlerPermission::root();
+        let _ = status_tx.send("Validating permissions".to_string()).await;
+
+        // Calculate effective permissions
         let effective_permissions = config.calculate_effective_permissions(&parent_permissions);
 
         // Validate that the manifest doesn't exceed effective permissions
         if let Err(e) = crate::config::enforcement::validate_manifest_permissions(
-            config,
+            &config,
             &effective_permissions,
         ) {
-            error!("Manifest validation failed: {}", e);
-            let _ = response_tx
-                .send(StartActorResult::Error(format!(
-                    "Permission validation failed: {}",
-                    e
-                )))
-                .await;
-            return;
+            return Err(ActorError::UnexpectedError(format!(
+                "Permission validation failed: {}",
+                e
+            )));
         }
 
+        let _ = status_tx.send("Creating handlers".to_string()).await;
+
         // Create handlers with effective permissions and validation
-        let handlers = match Self::create_handlers(
+        let handlers = Self::create_handlers(
             actor_sender,
             actor_mailbox,
             theater_tx.clone(),
-            config,
+            &config,
             actor_handle.clone(),
             &effective_permissions,
-        ) {
-            Ok(handlers) => handlers,
-            Err(e) => {
-                error!("Handler creation failed: {}", e);
-                let _ = response_tx
-                    .send(StartActorResult::Error(format!(
-                        "Handler creation failed: {}",
-                        e
-                    )))
-                    .await;
-                return;
-            }
-        };
+        )
+        .map_err(|e| ActorError::UnexpectedError(format!("Handler creation failed: {}", e)))?;
+
+        let _ = status_tx.send("Creating component".to_string()).await;
 
         // Create component
-        let mut actor_component = match Self::create_actor_component(
-            config,
-            actor_store,
-            id.clone(),
-            &response_tx,
-            engine.clone(),
-        )
-        .await
-        {
-            Ok(component) => component,
-            Err(_) => return, // Error already reported
-        };
+        let mut actor_component =
+            Self::create_actor_component(&config, actor_store, engine.clone())
+                .await
+                .map_err(|e| {
+                    ActorError::UnexpectedError(format!("Component creation failed: {}", e))
+                })?;
+
+        let _ = status_tx
+            .send("Setting up host functions".to_string())
+            .await;
 
         // Setup host functions
-        let handlers = match Self::setup_host_functions(
-            &mut actor_component,
-            handlers,
-            id.clone(),
-            &response_tx,
-        )
-        .await
-        {
-            Ok(handlers) => handlers,
-            Err(_) => return, // Error already reported
-        };
+        let handlers = Self::setup_host_functions(&mut actor_component, handlers)
+            .await
+            .map_err(|e| {
+                ActorError::UnexpectedError(format!("Host function setup failed: {}", e))
+            })?;
+
+        let _ = status_tx.send("Instantiating component".to_string()).await;
 
         // Instantiate component
-        let mut actor_instance =
-            match Self::instantiate_component(actor_component, id.clone(), &response_tx).await {
-                Ok(instance) => instance,
-                Err(_) => return, // Error already reported
-            };
+        let mut actor_instance = Self::instantiate_component(actor_component, id.clone())
+            .await
+            .map_err(|e| {
+                ActorError::UnexpectedError(format!("Component instantiation failed: {}", e))
+            })?;
+
+        let _ = status_tx
+            .send("Setting up export functions".to_string())
+            .await;
 
         // Setup export functions
-        if let Err(_) =
-            Self::setup_export_functions(&mut actor_instance, &handlers, id.clone(), &response_tx)
-                .await
-        {
-            return; // Error already reported
-        }
+        Self::setup_export_functions(&mut actor_instance, &handlers)
+            .await
+            .map_err(|e| {
+                ActorError::UnexpectedError(format!("Export function setup failed: {}", e))
+            })?;
+
+        let _ = status_tx.send("Initializing state".to_string()).await;
 
         // Initialize state if needed
         let init_state = if init {
-            match Self::initialize_state(config, state_bytes, id.clone(), &response_tx).await {
-                Ok(state) => state,
-                Err(_) => return, // Error already reported
-            }
+            Self::initialize_state(&config, state_bytes, id.clone())
+                .await
+                .map_err(|e| {
+                    ActorError::UnexpectedError(format!("State initialization failed: {}", e))
+                })?
         } else {
             None
         };
 
         actor_instance.store.data_mut().set_state(init_state);
 
-        // Start runtime
-        Self::start_runtime(
-            actor_instance,
-            actor_handle.clone(),
-            handlers,
-            operation_rx,
-            info_rx,
-            control_rx,
-            parent_shutdown_receiver,
-            theater_tx,
-            id.clone(),
-            init,
-            response_tx,
-            config,
-            engine,
-        )
-        .await;
+        let _ = status_tx.send("Ready".to_string()).await;
+
+        let metrics = MetricsCollector::new();
+
+        Ok((actor_instance, handlers, metrics))
     }
 
     /// Sets up the actor store and stores the manifest
@@ -260,7 +651,6 @@ impl ActorRuntime {
         theater_tx: Sender<TheaterCommand>,
         actor_handle: ActorHandle,
         config: &ManifestConfig,
-        response_tx: &Sender<StartActorResult>,
     ) -> Result<(ActorStore, String)> {
         // Create actor store
         let actor_store =
@@ -269,12 +659,6 @@ impl ActorRuntime {
                 Err(e) => {
                     let error_message = format!("Failed to create actor store: {}", e);
                     error!("{}", error_message);
-                    if let Err(send_err) = response_tx
-                        .send(StartActorResult::Failure(id.clone(), error_message))
-                        .await
-                    {
-                        error!("Failed to send failure response: {}", send_err);
-                    }
                     return Err(e.into());
                 }
             };
@@ -296,12 +680,6 @@ impl ActorRuntime {
             Err(e) => {
                 let error_message = format!("Failed to store manifest: {}", e);
                 error!("{}", error_message);
-                if let Err(send_err) = response_tx
-                    .send(StartActorResult::Failure(id.clone(), error_message))
-                    .await
-                {
-                    error!("Failed to send failure response: {}", send_err);
-                }
                 return Err(e.into());
             }
         };
@@ -309,7 +687,7 @@ impl ActorRuntime {
         actor_store.record_event(ChainEventData {
             event_type: "theater-runtime".to_string(),
             data: EventData::TheaterRuntime(TheaterRuntimeEventData::ActorLoadCall {
-                manifest_id: manifest_id.clone(),
+                manifest: config.clone(),
             }),
             timestamp: chrono::Utc::now().timestamp_millis() as u64,
             description: format!("Loading actor [{}] from manifest [{}] ", id, manifest_id).into(),
@@ -505,8 +883,6 @@ impl ActorRuntime {
     async fn create_actor_component(
         config: &ManifestConfig,
         actor_store: ActorStore,
-        id: TheaterId,
-        response_tx: &Sender<StartActorResult>,
         engine: wasmtime::Engine,
     ) -> Result<ActorComponent> {
         match ActorComponent::new(
@@ -524,13 +900,6 @@ impl ActorRuntime {
                     config.name, e
                 );
                 error!("{}", error_message);
-                // Send failure result back to spawner with detailed error message
-                if let Err(send_err) = response_tx
-                    .send(StartActorResult::Failure(id.clone(), error_message))
-                    .await
-                {
-                    error!("Failed to send failure response: {}", send_err);
-                }
                 Err(e.into())
             }
         }
@@ -540,8 +909,6 @@ impl ActorRuntime {
     async fn setup_host_functions(
         actor_component: &mut ActorComponent,
         mut handlers: Vec<Handler>,
-        id: TheaterId,
-        response_tx: &Sender<StartActorResult>,
     ) -> Result<Vec<Handler>> {
         for handler in &mut handlers {
             info!(
@@ -555,13 +922,6 @@ impl ActorRuntime {
                     e
                 );
                 error!("{}", error_message);
-                // Send failure result back to spawner with detailed error message
-                if let Err(send_err) = response_tx
-                    .send(StartActorResult::Failure(id.clone(), error_message))
-                    .await
-                {
-                    error!("Failed to send failure response: {}", send_err);
-                }
                 return Err(e.into());
             }
         }
@@ -572,20 +932,12 @@ impl ActorRuntime {
     async fn instantiate_component(
         actor_component: ActorComponent,
         id: TheaterId,
-        response_tx: &Sender<StartActorResult>,
     ) -> Result<ActorInstance> {
         match actor_component.instantiate().await {
             Ok(instance) => Ok(instance),
             Err(e) => {
                 let error_message = format!("Failed to instantiate actor {}: {}", id, e);
                 error!("{}", error_message);
-                // Send failure result back to spawner with detailed error message
-                if let Err(send_err) = response_tx
-                    .send(StartActorResult::Failure(id.clone(), error_message))
-                    .await
-                {
-                    error!("Failed to send failure response: {}", send_err);
-                }
                 Err(e.into())
             }
         }
@@ -595,8 +947,6 @@ impl ActorRuntime {
     async fn setup_export_functions(
         actor_instance: &mut ActorInstance,
         handlers: &[Handler],
-        id: TheaterId,
-        response_tx: &Sender<StartActorResult>,
     ) -> Result<()> {
         for handler in handlers {
             info!("Creating functions for handler: {:?}", handler.name());
@@ -607,13 +957,6 @@ impl ActorRuntime {
                     e
                 );
                 error!("{}", error_message);
-                // Send failure result back to spawner with detailed error message
-                if let Err(send_err) = response_tx
-                    .send(StartActorResult::Failure(id.clone(), error_message))
-                    .await
-                {
-                    error!("Failed to send failure response: {}", send_err);
-                }
                 return Err(e.into());
             }
         }
@@ -625,7 +968,6 @@ impl ActorRuntime {
         config: &ManifestConfig,
         state_bytes: Option<Vec<u8>>,
         id: TheaterId,
-        response_tx: &Sender<StartActorResult>,
     ) -> Result<Option<Vec<u8>>> {
         info!("Loading init state for actor: {:?}", id);
 
@@ -644,415 +986,11 @@ impl ActorRuntime {
             Err(e) => {
                 let error_message = format!("Failed to merge initial states: {}", e);
                 error!("{}", error_message);
-                if let Err(send_err) = response_tx
-                    .send(StartActorResult::Failure(id.clone(), error_message))
-                    .await
-                {
-                    error!("Failed to send failure response: {}", send_err);
-                }
                 Err(e.into())
             }
         }
     }
 
-    /// Starts the runtime, handlers, and operations processor
-    async fn start_runtime(
-        actor_instance: ActorInstance,
-        actor_handle: ActorHandle,
-        handlers: Vec<Handler>,
-        operation_rx: Receiver<ActorOperation>,
-        info_rx: Receiver<ActorInfo>,
-        control_rx: Receiver<ActorControl>,
-        parent_shutdown_receiver: ShutdownReceiver,
-        theater_tx: Sender<TheaterCommand>,
-        id: TheaterId,
-        init: bool,
-        response_tx: Sender<StartActorResult>,
-        config: &ManifestConfig,
-        engine: wasmtime::Engine,
-    ) {
-        // Create a local shutdown controller for this runtime
-        let mut shutdown_controller = ShutdownController::new();
-
-        // Start the handlers
-        let mut handler_tasks: Vec<JoinHandle<()>> = Vec::new();
-        for mut handler in handlers {
-            info!("Starting handler: {:?}", handler.name());
-            let handler_actor_handle = actor_handle.clone();
-            let handler_shutdown = shutdown_controller.subscribe();
-            let handler_task = tokio::spawn(async move {
-                if let Err(e) = handler.start(handler_actor_handle, handler_shutdown).await {
-                    warn!("Handler failed: {:?}", e);
-                }
-            });
-            handler_tasks.push(handler_task);
-        }
-
-        // Notify the caller that the actor has started
-        if let Err(e) = response_tx
-            .send(StartActorResult::Success(id.clone()))
-            .await
-        {
-            error!("Failed to send success response: {}", e);
-            // Even though we couldn't send the response, we'll continue since setup was successful
-        }
-
-        // Prepare metrics collector
-        let metrics = MetricsCollector::new();
-
-        let config = config.clone();
-
-        // Spawn the main runtime task that runs and processes operations
-        tokio::spawn(async move {
-            Self::run_communication_loops(
-                Arc::new(RwLock::new(actor_instance)),
-                operation_rx,
-                info_rx,
-                control_rx,
-                Arc::new(RwLock::new(metrics)),
-                parent_shutdown_receiver,
-                theater_tx,
-                shutdown_controller,
-                handler_tasks,
-                config,
-                engine,
-            )
-            .await;
-        });
-
-        // Initialize the actor if needed
-        if init {
-            tokio::spawn(async move {
-                info!("Calling init function for actor: {:?}", id);
-                match actor_handle
-                    .call_function::<(String,), ()>(
-                        "theater:simple/actor.init".to_string(),
-                        (id.to_string(),),
-                    )
-                    .await
-                {
-                    Ok(_) => {
-                        debug!("Successfully called init function for actor: {:?}", id);
-                    } // Successfully called init function
-                    Err(e) => {
-                        let error_message =
-                            format!("Failed to call init function for actor {}: {}", id, e);
-                        error!("{}", error_message);
-                        // We already notified success, so we can't send a failure now
-                        // The best we can do is log the error
-                    }
-                }
-            });
-        }
-    }
-
-    async fn run_communication_loops(
-        actor_instance: Arc<RwLock<ActorInstance>>,
-        mut operation_rx: Receiver<ActorOperation>,
-        mut info_rx: Receiver<ActorInfo>,
-        mut control_rx: Receiver<ActorControl>,
-        metrics: Arc<RwLock<MetricsCollector>>,
-        mut shutdown_receiver: ShutdownReceiver,
-        theater_tx: Sender<TheaterCommand>,
-        shutdown_controller: ShutdownController,
-        handler_tasks: Vec<JoinHandle<()>>,
-        _config: ManifestConfig,
-        _engine: wasmtime::Engine,
-    ) {
-        info!("Actor runtime starting communication loops");
-        let paused = Arc::new(RwLock::new(false));
-        let mut current_operation: Option<JoinHandle<()>> = None;
-
-        // Add shutdown state tracking
-        let mut shutdown_requested = false;
-        let mut shutdown_response_tx: Option<oneshot::Sender<Result<(), ActorError>>> = None;
-
-        loop {
-            tokio::select! {
-                // Clean up completed operations
-                _ = async {
-                    match current_operation.as_mut() {
-                        Some(task) => task.await,
-                        None => std::future::pending().await,
-                    }
-                } => {
-                    info!("Operation completed");
-                    current_operation = None;
-
-                    // Check if shutdown was requested and no more operations are running
-                    if shutdown_requested {
-                        info!("Shutdown requested and operation completed - shutting down gracefully");
-
-                        // Send success response if we have one
-                        if let Some(response_tx) = shutdown_response_tx.take() {
-                            let _ = response_tx.send(Ok(()));
-                        }
-
-                        break; // Exit the loop
-                    }
-                }
-
-
-                // Process operations
-                Some(op) = operation_rx.recv(), if current_operation.is_none() && !*paused.read().await => {
-                    info!("Received operation: {:?}", op);
-                    match op {
-                        ActorOperation::CallFunction { name, params, response_tx } => {
-                            // Check if the actor is paused
-                            // Think about this, if the actor is paused, do we want to add the
-                            // check to the conditional above and hang, but keep the operation in the
-                            // queue? or do we want to take in and reject the operation?
-                            /*
-                            if *paused.read().await {
-                                error!("Actor is paused, rejecting function call: {}", name);
-                                if let Err(e) = response_tx.send(Err(ActorError::Paused)) {
-                                    error!("Failed to send paused error response for operation '{}': {:?}", name, e);
-                                }
-                                continue;
-                            }
-                            */
-                            info!("Processing function call: {}", name);
-                            let theater_tx = theater_tx.clone();
-                            let metrics = metrics.clone();
-                            let actor_instance = actor_instance.clone();
-                            let paused = paused.clone();
-                            current_operation = Some(tokio::spawn(async move {
-                                // Execute the function call
-                                let mut actor_instance = actor_instance.write().await;
-                                let metrics = metrics.write().await;
-                                match Self::execute_call(
-                                    &mut actor_instance,
-                                    &name,
-                                    params,
-                                    &theater_tx,
-                                    &metrics,
-                                ).await {
-                                    Ok(result) => {
-                                        if let Err(e) = response_tx.send(Ok(result)) {
-                                            error!("Failed to send function call response for operation '{}': {:?}", name, e);
-                                        }
-                                    }
-                                    Err(actor_error) => {
-                                        // Notify the theater runtime about the error
-                                        let _ = theater_tx
-                                            .send(TheaterCommand::ActorError {
-                                                actor_id: actor_instance.id().clone(),
-                                                error: actor_error.clone(),
-                                            })
-                                            .await;
-
-                                        error!("Operation '{}' failed with error: {:?}", name, actor_error);
-                                        if let Err(send_err) = response_tx.send(Err(actor_error)) {
-                                            error!("Failed to send function call error response for operation '{}': {:?}", name, send_err);
-                                        }
-
-                                        *paused.write().await = true; // Pause the actor on error
-                                    }
-                                }
-
-                            }));
-                        }
-                        ActorOperation::UpdateComponent { component_address: _, response_tx } => {
-                            /*
-                            info!("Processing UpdateComponent operation for component: {}", component_address);
-                            match Self::update_component(&mut actor_instance, &component_address, &config, engine.clone()).await {
-                                Ok(_) => {
-                                    if let Err(e) = response_tx.send(Ok(())) {
-                                        error!("Failed to send update component response: {:?}", e);
-                                    }
-                                }
-                                Err(e) => {
-                                    error!("UpdateComponent operation failed: {:?}", e);
-                                    if let Err(send_err) = response_tx.send(Err(e)) {
-                                        error!("Failed to send update component error response: {:?}", send_err);
-                                    }
-                                }
-                            }
-                            */
-                            error!("UpdateComponent operation is not implemented yet");
-                            if let Err(e) = response_tx.send(Err(ActorError::UpdateComponentError("Not implemented".to_string()))) {
-                                error!("Failed to send update component response: {:?}", e);
-                            }
-                        }
-                    }
-                }
-
-                // Process info requests
-                Some(info) = info_rx.recv() => {
-                    info!("Received info request: {:?}", info);
-                    match info {
-                        ActorInfo::GetState { response_tx } => {
-                            let actor_instance = actor_instance.read().await;
-                            let state = actor_instance.store.data().get_state();
-                            if let Err(e) = response_tx.send(Ok(state)) {
-                                error!("Failed to send state response: {:?}", e);
-                            }
-                        }
-                        ActorInfo::GetChain { response_tx } => {
-                            let actor_instance = actor_instance.read().await;
-                            let chain = actor_instance.store.data().get_chain();
-                            if let Err(e) = response_tx.send(Ok(chain)) {
-                                error!("Failed to send chain response: {:?}", e);
-                            }
-                        }
-                        ActorInfo::GetMetrics { response_tx } => {
-                            let metrics = metrics.read().await;
-                            let metrics_data = metrics.get_metrics().await;
-                            if let Err(e) = response_tx.send(Ok(metrics_data)) {
-                                error!("Failed to send metrics response: {:?}", e);
-                           }
-                        }
-                        ActorInfo::GetStatus { response_tx } => {
-                            let processing_state = if shutdown_requested {
-                                if current_operation.is_some() {
-                                    "Shutting down (waiting for operation)"
-                                } else {
-                                    "Shutting down"
-                                }
-                            } else if *paused.read().await {
-                                "Paused"
-                            } else if current_operation.is_some() {
-                                "Processing"
-                            } else {
-                                "Idle"
-                            };
-                            if let Err(e) = response_tx.send(Ok(processing_state.to_string())) {
-                                error!("Failed to send processing state response: {:?}", e);
-                            }
-                        }
-                        ActorInfo::SaveChain { response_tx } => {
-                            let actor_instance = actor_instance.read().await;
-                            match actor_instance.save_chain() {
-                                Ok(_) => {
-                                    if let Err(e) = response_tx.send(Ok(())) {
-                                        error!("Failed to send save chain response: {:?}", e);
-                                    }
-                                }
-                                Err(e) => {
-                                    if let Err(send_err) = response_tx.send(Err(ActorError::UnexpectedError(e.to_string()))) {
-                                        error!("Failed to send save chain error response: {:?}", send_err);
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-                // Process control commands
-                Some(control) = control_rx.recv() => {
-                    info!("Received control command: {:?}", control);
-                    match control {
-                        ActorControl::Pause { response_tx } => {
-                            info!("Pausing actor");
-                            /* So, I am thinking about this. I think I just ran into an issue where
-                        * the actor got paused while it was processing an operation, but did not
-                        * release the lock on the actor instance, so I could not read out the chain
-                        * to try to debug the operation. Just making a note of this for now, but an
-                        * interesting problem
-                            */
-                            if shutdown_requested {
-                                let _ = response_tx.send(Err(ActorError::ShuttingDown));
-                            } else {
-                                *paused.write().await = true;
-                                let _ = response_tx.send(Ok(()));
-                            }
-                        }
-                        ActorControl::Resume { response_tx } => {
-                            info!("Resuming actor");
-                            if shutdown_requested {
-                                let _ = response_tx.send(Err(ActorError::ShuttingDown));
-                            } else {
-                                let response = if *paused.read().await {
-                                    *paused.write().await = false;
-                                    Ok(())
-                                } else {
-                                    Err(ActorError::NotPaused)
-                                };
-                                let _ = response_tx.send(response);
-                            }
-                        }
-                        ActorControl::Shutdown { response_tx } => {
-                            info!("Received shutdown command");
-                            if current_operation.is_some() {
-                                // Operation is running - mark for shutdown after completion
-                                info!("Operation running - will shutdown after completion");
-                                shutdown_requested = true;
-                                shutdown_response_tx = Some(response_tx);
-                            } else {
-                                // No operation running - shutdown immediately
-                                info!("No operation running - shutting down immediately");
-                                let _ = response_tx.send(Ok(()));
-                                break;
-                            }
-                        }
-                        ActorControl::Terminate { response_tx } => {
-                            info!("Received force shutdown command");
-                            // Abort any ongoing operations
-                            if let Some(task) = current_operation.take() {
-                                task.abort();
-                            }
-                            if let Err(e) = response_tx.send(Ok(())) {
-                                error!("Failed to send force shutdown confirmation: {:?}", e);
-                            }
-                            break; // Exit the loop to start shutdown
-                        }
-                    }
-                }
-
-                // Shutdown signal received
-                shutdown_signal = &mut shutdown_receiver.receiver => {
-                    info!("Received shutdown signal from parent");
-                    match shutdown_signal {
-                        Ok(shutdown_signal) => {
-                            info!("Shutdown signal received: {:?}", shutdown_signal);
-                            match shutdown_signal.shutdown_type {
-                                ShutdownType::Graceful => {
-                                    info!("Graceful shutdown requested");
-                                    if current_operation.is_some() {
-                                        // Operation is running - mark for shutdown after completion
-                                        info!("Operation running - will shutdown after completion");
-                                        shutdown_requested = true;
-                                    } else {
-                                        // No operation running - shutdown immediately
-                                        info!("No operation running - shutting down immediately");
-                                        break;
-                                    }
-                                }
-                                ShutdownType::Force => {
-                                    info!("Forceful shutdown requested");
-                                    // Abort any ongoing operations
-                                    if let Some(task) = current_operation.take() {
-                                        task.abort();
-                                    }
-                                    break; // Exit the loop to start shutdown
-                                }
-                            }
-                        }
-                        Err(e) => {
-                            error!("Failed to receive shutdown signal: {:?}", e);
-                            // If the shutdown signal fails, there has been an error with the
-                            // runtime communication, we should exit the loop gracefully
-                            info!("Exiting runtime communication loop due to shutdown signal error");
-                            if current_operation.is_some() {
-                                // Operation is running - mark for shutdown after completion
-                                info!("Operation running - will shutdown after completion");
-                                shutdown_requested = true;
-                            } else {
-                                // No operation running - shutdown immediately
-                                info!("No operation running - shutting down immediately");
-                                break;
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        info!("Actor runtime communication loop exiting, performing cleanup");
-        let metrics = metrics.read().await;
-        Self::perform_cleanup(shutdown_controller, handler_tasks, &metrics).await;
-    }
-
-    /// # Execute a function call in the WebAssembly actor
     ///
     /// Calls a function in the WebAssembly actor with the given parameters,
     /// updates the actor's state based on the result, and records the
@@ -1204,9 +1142,6 @@ impl ActorRuntime {
         // Create a temporary config for the new component
         new_config.component = component_address.to_string();
 
-        // Create a temporary response channel for error handling during setup
-        let (response_tx, _) = mpsc::channel::<StartActorResult>(1);
-
         // Set up actor store - reuse the existing one without creating a new one
         let actor_store = actor_instance.actor_component.actor_store.clone();
 
@@ -1237,32 +1172,18 @@ impl ActorRuntime {
         };
 
         // Create new component - reusing existing method
-        let mut new_actor_component = match Self::create_actor_component(
-            &new_config,
-            actor_store,
-            actor_id.clone(),
-            &response_tx,
-            engine,
-        )
-        .await
-        {
-            Ok(component) => component,
-            Err(e) => {
-                let error_message = format!("Failed to create actor component: {}", e);
-                Self::record_update_error(actor_instance, component_address, &error_message);
-                return Err(ActorError::UpdateComponentError(error_message));
-            }
-        };
+        let mut new_actor_component =
+            match Self::create_actor_component(&new_config, actor_store, engine).await {
+                Ok(component) => component,
+                Err(e) => {
+                    let error_message = format!("Failed to create actor component: {}", e);
+                    Self::record_update_error(actor_instance, component_address, &error_message);
+                    return Err(ActorError::UpdateComponentError(error_message));
+                }
+            };
 
         // Setup host functions - reusing existing method
-        let handlers = match Self::setup_host_functions(
-            &mut new_actor_component,
-            handlers,
-            actor_id.clone(),
-            &response_tx,
-        )
-        .await
-        {
+        let handlers = match Self::setup_host_functions(&mut new_actor_component, handlers).await {
             Ok(handlers) => handlers,
             Err(e) => {
                 let error_message = format!("Failed to setup host functions: {}", e);
@@ -1273,9 +1194,7 @@ impl ActorRuntime {
 
         // Instantiate component - reusing existing method
         let mut new_instance =
-            match Self::instantiate_component(new_actor_component, actor_id.clone(), &response_tx)
-                .await
-            {
+            match Self::instantiate_component(new_actor_component, actor_id.clone()).await {
                 Ok(instance) => instance,
                 Err(e) => {
                     let error_message = format!("Failed to instantiate component: {}", e);
@@ -1285,14 +1204,7 @@ impl ActorRuntime {
             };
 
         // Setup export functions - reusing existing method
-        if let Err(e) = Self::setup_export_functions(
-            &mut new_instance,
-            &handlers,
-            actor_id.clone(),
-            &response_tx,
-        )
-        .await
-        {
+        if let Err(e) = Self::setup_export_functions(&mut new_instance, &handlers).await {
             let error_message = format!("Failed to setup export functions: {}", e);
             Self::record_update_error(actor_instance, component_address, &error_message);
             return Err(ActorError::UpdateComponentError(error_message));
@@ -1411,3 +1323,4 @@ impl ActorRuntime {
         Ok(())
     }
 }
+
