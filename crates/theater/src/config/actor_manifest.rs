@@ -4,7 +4,7 @@ use tracing::debug;
 
 use crate::utils::resolve_reference;
 
-use super::inheritance::HandlerPermissionPolicy;
+use super::inheritance::{HandlerPermissionPolicy, is_default_permission_policy};
 use super::permissions::HandlerPermission;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -21,7 +21,7 @@ pub struct ManifestConfig {
     pub description: Option<String>,
     pub long_description: Option<String>,
     pub save_chain: Option<bool>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "is_default_permission_policy")]
     pub permission_policy: HandlerPermissionPolicy,
     #[serde(default)]
     pub init_state: Option<String>,
