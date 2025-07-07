@@ -40,7 +40,7 @@ pub fn create_test_manifest(name: &str) -> ManifestConfig {
     // Add a message server handler
     config
         .handlers
-        .push(HandlerConfig::MessageServer(MessageServerConfig {}));
+        .push(HandlerConfig::MessageServer { config: MessageServerConfig {} });
 
     config
 }
