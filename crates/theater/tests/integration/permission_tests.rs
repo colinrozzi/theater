@@ -31,17 +31,21 @@ async fn test_handler_creation_permission_validation() {
         name: "test-actor".to_string(),
         component: "test.wasm".to_string(),
         handlers: vec![
-            HandlerConfig::FileSystem(FileSystemHandlerConfig {
-                path: Some("/tmp/test".into()),
-                new_dir: Some(false),
-                allowed_commands: None,
-            }),
-            HandlerConfig::Environment(EnvironmentHandlerConfig {
-                allowed_vars: None,
-                denied_vars: None,
-                allow_list_all: false,
-                allowed_prefixes: None,
-            })
+            HandlerConfig::FileSystem { 
+                config: FileSystemHandlerConfig {
+                    path: Some("/tmp/test".into()),
+                    new_dir: Some(false),
+                    allowed_commands: None,
+                }
+            },
+            HandlerConfig::Environment { 
+                config: EnvironmentHandlerConfig {
+                    allowed_vars: None,
+                    denied_vars: None,
+                    allow_list_all: false,
+                    allowed_prefixes: None,
+                }
+            }
         ],
         version: "1.0.0".to_string(),
         description: None,
