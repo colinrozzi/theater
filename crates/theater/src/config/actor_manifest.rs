@@ -25,7 +25,7 @@ pub struct ManifestConfig {
     pub permission_policy: HandlerPermissionPolicy,
     #[serde(default)]
     pub init_state: Option<String>,
-    #[serde(default)]
+    #[serde(default, rename = "handler")]
     pub handlers: Vec<HandlerConfig>,
 }
 
@@ -71,30 +71,63 @@ pub struct InterfacesConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(tag = "type", content = "config")]
+#[serde(tag = "type")]
 pub enum HandlerConfig {
     #[serde(rename = "message-server")]
-    MessageServer(MessageServerConfig),
+    MessageServer {
+        #[serde(flatten)]
+        config: MessageServerConfig,
+    },
     #[serde(rename = "filesystem")]
-    FileSystem(FileSystemHandlerConfig),
+    FileSystem {
+        #[serde(flatten)]
+        config: FileSystemHandlerConfig,
+    },
     #[serde(rename = "http-client")]
-    HttpClient(HttpClientHandlerConfig),
+    HttpClient {
+        #[serde(flatten)]
+        config: HttpClientHandlerConfig,
+    },
     #[serde(rename = "http-framework")]
-    HttpFramework(HttpFrameworkHandlerConfig),
+    HttpFramework {
+        #[serde(flatten)]
+        config: HttpFrameworkHandlerConfig,
+    },
     #[serde(rename = "runtime")]
-    Runtime(RuntimeHostConfig),
+    Runtime {
+        #[serde(flatten)]
+        config: RuntimeHostConfig,
+    },
     #[serde(rename = "supervisor")]
-    Supervisor(SupervisorHostConfig),
+    Supervisor {
+        #[serde(flatten)]
+        config: SupervisorHostConfig,
+    },
     #[serde(rename = "store")]
-    Store(StoreHandlerConfig),
+    Store {
+        #[serde(flatten)]
+        config: StoreHandlerConfig,
+    },
     #[serde(rename = "timing")]
-    Timing(TimingHostConfig),
+    Timing {
+        #[serde(flatten)]
+        config: TimingHostConfig,
+    },
     #[serde(rename = "process")]
-    Process(ProcessHostConfig),
+    Process {
+        #[serde(flatten)]
+        config: ProcessHostConfig,
+    },
     #[serde(rename = "environment")]
-    Environment(EnvironmentHandlerConfig),
+    Environment {
+        #[serde(flatten)]
+        config: EnvironmentHandlerConfig,
+    },
     #[serde(rename = "random")]
-    Random(RandomHandlerConfig),
+    Random {
+        #[serde(flatten)]
+        config: RandomHandlerConfig,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
