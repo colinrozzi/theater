@@ -1086,6 +1086,12 @@ impl TheaterRuntime {
     async fn stop_actor(&mut self, actor_id: TheaterId, shutdown_type: ShutdownType) -> Result<()> {
         debug!("Stopping actor: {:?}", actor_id);
 
+        // Check if the actor exists in the registry
+        if !self.actors.contains_key(&actor_id) {
+            warn!("Actor {:?} not found in registry", actor_id);
+            return Ok(());
+        }
+
         // If the actor's manifest says we should save the chain, save it
         if let Some(proc) = self.actors.get(&actor_id) {
             if proc.manifest.save_chain() {
@@ -1093,9 +1099,17 @@ impl TheaterRuntime {
                     oneshot::Sender<Result<(), ActorError>>,
                     oneshot::Receiver<Result<(), ActorError>>,
                 ) = oneshot::channel();
-                proc.info_tx
+                match proc
+                    .info_tx
                     .send(ActorInfo::SaveChain { response_tx: tx })
-                    .await?;
+                    .await
+                    .map_err(|e| anyhow::anyhow!("Failed to send save chain request: {}", e))
+                {
+                    Ok(_) => debug!("Save chain request sent successfully"),
+                    Err(e) => {
+                        error!("Failed to send save chain request: {}", e);
+                    }
+                };
 
                 match rx.await {
                     Ok(result) => result?,
