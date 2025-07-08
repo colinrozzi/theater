@@ -448,6 +448,10 @@ impl TheaterServer {
             while let Some(response) = client_rx.recv().await {
                 match serde_json::to_vec(&response) {
                     Ok(data) => {
+                        debug!("Serialized response: {} bytes", data.len());
+                        if data.len() > 10 * 1024 * 1024 {
+                            debug!("Large response detected: {} MB", data.len() / 1024 / 1024);
+                        }
                         if let Err(e) = framed_sink.send(Bytes::from(data)).await {
                             debug!("Error sending response to client: {}", e);
                             break;
