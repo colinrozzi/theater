@@ -1,13 +1,11 @@
-//! # Fragmenting Codec
-//!
-//! A codec that transparently handles fragmentation of large messages.
-//! Built on top of LengthDelimitedCodec to maintain compatibility with existing Theater infrastructure.
+//! Fixed FragmentingCodec that works properly with Framed::split()
 
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use bytes::{Bytes, BytesMut};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::io;
+use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 use tokio_util::codec::{Decoder, Encoder, LengthDelimitedCodec};
@@ -15,7 +13,7 @@ use tracing::{debug, warn};
 
 /// Maximum size for a single fragment data (12MB)
 /// This leaves room for JSON serialization overhead while staying well under the 32MB frame limit
-const MAX_FRAGMENT_DATA_SIZE: usize = 12 * 1024 * 1024;
+const MAX_FRAGMENT_DATA_SIZE: usize = 8 * 1024 * 1024;  // Reduced to 8MB to account for base64 + JSON overhead
 
 /// How long to keep partial messages before timing out (30 seconds)
 const FRAGMENT_TIMEOUT: Duration = Duration::from_secs(30);
@@ -100,17 +98,67 @@ impl PartialMessage {
     }
 }
 
+/// Shared state between encoder and decoder
+#[derive(Debug)]
+struct SharedState {
+    /// Counter for generating unique message IDs
+    next_message_id: AtomicU64,
+    /// Partial messages being reassembled (keyed by message_id)
+    partial_messages: Mutex<HashMap<u64, PartialMessage>>,
+    /// Last time we cleaned up expired partial messages
+    last_cleanup: Mutex<Instant>,
+}
+
+impl SharedState {
+    fn new() -> Self {
+        Self {
+            next_message_id: AtomicU64::new(1),
+            partial_messages: Mutex::new(HashMap::new()),
+            last_cleanup: Mutex::new(Instant::now()),
+        }
+    }
+
+    fn next_message_id(&self) -> u64 {
+        self.next_message_id.fetch_add(1, Ordering::Relaxed)
+    }
+
+    fn cleanup_expired(&self) {
+        // Only cleanup periodically to avoid overhead
+        {
+            let last_cleanup = self.last_cleanup.lock().unwrap();
+            if last_cleanup.elapsed() < Duration::from_secs(10) {
+                return;
+            }
+        }
+
+        let mut partial_messages = self.partial_messages.lock().unwrap();
+        let before_count = partial_messages.len();
+        
+        partial_messages.retain(|message_id, partial| {
+            if partial.is_expired() {
+                warn!("Cleaning up expired partial message {}", message_id);
+                false
+            } else {
+                true
+            }
+        });
+
+        let cleaned = before_count - partial_messages.len();
+        if cleaned > 0 {
+            debug!("Cleaned up {} expired partial messages", cleaned);
+        }
+
+        *self.last_cleanup.lock().unwrap() = Instant::now();
+    }
+}
+
 /// A codec that transparently handles message fragmentation
 #[derive(Debug)]
 pub struct FragmentingCodec {
     /// Underlying length-delimited codec
     inner: LengthDelimitedCodec,
-    /// Counter for generating unique message IDs
-    next_message_id: AtomicU64,
-    /// Partial messages being reassembled (keyed by message_id)
-    partial_messages: HashMap<u64, PartialMessage>,
-    /// Last time we cleaned up expired partial messages
-    last_cleanup: Instant,
+    /// Shared state between encoder and decoder
+    shared_state: Arc<SharedState>,
 }
 
 impl FragmentingCodec {
@@ -121,45 +169,13 @@ impl FragmentingCodec {
 
         Self {
             inner,
-            next_message_id: AtomicU64::new(1),
-            partial_messages: HashMap::new(),
-            last_cleanup: Instant::now(),
+            shared_state: Arc::new(SharedState::new()),
         }
-    }
-
-    /// Generate the next unique message ID
-    fn next_message_id(&self) -> u64 {
-        self.next_message_id.fetch_add(1, Ordering::Relaxed)
-    }
-
-    /// Clean up expired partial messages
-    fn cleanup_expired(&mut self) {
-        // Only cleanup periodically to avoid overhead
-        if self.last_cleanup.elapsed() < Duration::from_secs(10) {
-            return;
-        }
-
-        let before_count = self.partial_messages.len();
-        self.partial_messages.retain(|message_id, partial| {
-            if partial.is_expired() {
-                warn!("Cleaning up expired partial message {}", message_id);
-                false
-            } else {
-                true
-            }
-        });
-
-        let cleaned = before_count - self.partial_messages.len();
-        if cleaned > 0 {
-            debug!("Cleaned up {} expired partial messages", cleaned);
-        }
-
-        self.last_cleanup = Instant::now();
     }
 
     /// Fragment a large message into chunks
     fn fragment_message(&self, data: &[u8]) -> Vec<Fragment> {
-        let message_id = self.next_message_id();
+        let message_id = self.shared_state.next_message_id();
         let total_size = data.len();
 
         // Use the defined chunk size constant
@@ -202,6 +218,18 @@ impl FragmentingCodec {
 impl Default for FragmentingCodec {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+impl Clone for FragmentingCodec {
+    fn clone(&self) -> Self {
+        let mut inner = LengthDelimitedCodec::new();
+        inner.set_max_frame_length(32 * 1024 * 1024); // 32MB max frame - CRITICAL!
+        
+        Self {
+            inner,
+            shared_state: Arc::clone(&self.shared_state),
+        }
     }
 }
 
@@ -257,7 +285,7 @@ impl Decoder for FragmentingCodec {
 
     fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
         // Clean up expired messages periodically
-        self.cleanup_expired();
+        self.shared_state.cleanup_expired();
 
         // Try to decode a frame from the underlying codec
         if let Some(frame_bytes) = self.inner.decode(src)? {
@@ -296,8 +324,8 @@ impl Decoder for FragmentingCodec {
                     })?;
 
                     // Get or create partial message
-                    let partial = self
-                        .partial_messages
+                    let mut partial_messages = self.shared_state.partial_messages.lock().unwrap();
+                    let partial = partial_messages
                         .entry(message_id)
                         .or_insert_with(|| PartialMessage::new(total_fragments));
 
@@ -309,9 +337,10 @@ impl Decoder for FragmentingCodec {
                         debug!("Message {} is complete, reassembling", message_id);
 
                         // Remove from partial messages and reassemble
-                        let partial = self.partial_messages.remove(&message_id).unwrap();
+                        let partial = partial_messages.remove(&message_id).unwrap();
+                        drop(partial_messages); // Release the lock
+                        
                         let complete_data = partial.reassemble()?;
-
                         Ok(Some(Bytes::from(complete_data)))
                     } else {
                         // Still waiting for more fragments
