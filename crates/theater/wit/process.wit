@@ -33,6 +33,8 @@ interface process {
         stderr-mode: output-mode,
         /// Chunk size for chunked mode (in bytes)
         chunk-size: option<u32>,
+        /// Execution timeout in seconds (optional)
+        execution-timeout: option<u64>,
     }
 
     /// Status of a running process
