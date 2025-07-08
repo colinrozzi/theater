@@ -80,4 +80,24 @@ pub enum ProcessEventData {
         /// Reason for denial
         reason: String,
     },
+
+    /// Process timeout triggered
+    TimeoutTriggered {
+        /// Process ID
+        process_id: u64,
+        /// Timeout duration in seconds
+        timeout_seconds: u64,
+        /// Action taken (SIGTERM, SIGKILL, etc.)
+        action: String,
+    },
+
+    /// Process timeout warning (optional future enhancement)
+    TimeoutWarning {
+        /// Process ID
+        process_id: u64,
+        /// Timeout duration in seconds
+        timeout_seconds: u64,
+        /// Warning threshold in seconds
+        warning_seconds: u64,
+    },
 }

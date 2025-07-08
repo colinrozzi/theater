@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::future::Future;
 use std::sync::{Arc, Mutex};
-use std::time::SystemTime;
+use std::time::{Duration, SystemTime};
 use thiserror::Error;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::process::{Child, Command};
@@ -88,6 +88,10 @@ struct ManagedProcess {
     stderr_reader: Option<JoinHandle<()>>,
     /// Last known exit code
     exit_code: Option<i32>,
+    /// Timeout monitoring task
+    timeout_handle: Option<JoinHandle<()>>,
+    /// Flag to indicate if process was terminated due to timeout
+    timeout_terminated: bool,
 }
 
 /// Configuration for a process
@@ -114,6 +118,9 @@ pub struct ProcessConfig {
     /// Chunk size for chunked mode
     #[component(name = "chunk-size")]
     pub chunk_size: Option<u32>,
+    /// Execution timeout in seconds (None = no timeout)
+    #[component(name = "execution-timeout")]
+    pub execution_timeout: Option<u64>,
 }
 
 /// Status of a running process
@@ -641,6 +648,35 @@ impl ProcessHost {
                                     // Give a small additional delay to ensure all async calls complete
                                     tokio::time::sleep(std::time::Duration::from_millis(50)).await;
                                     
+                                    // Cancel timeout if it exists
+                                    if let Some(timeout_handle) = {
+                                        let mut processes = processes_clone.lock().unwrap();
+                                        if let Some(process) = processes.get_mut(&process_id_clone) {
+                                            process.timeout_handle.take()
+                                        } else {
+                                            None
+                                        }
+                                    } {
+                                        timeout_handle.abort();
+                                    }
+                                    
+                                    // Check if process was terminated due to timeout
+                                    let was_timeout_terminated = {
+                                        let processes = processes_clone.lock().unwrap();
+                                        if let Some(process) = processes.get(&process_id_clone) {
+                                            process.timeout_terminated
+                                        } else {
+                                            false
+                                        }
+                                    };
+                                    
+                                    // Update the exit description
+                                    let exit_description = if was_timeout_terminated {
+                                        format!("Process {} exited with code {} (terminated due to timeout)", process_id_clone, exit_code)
+                                    } else {
+                                        format!("Process {} exited with code {}", process_id_clone, exit_code)
+                                    };
+                                    
                                     // Create the event data
                                     let event_data = ChainEventData {
                                         event_type: "process/exit".to_string(),
@@ -649,7 +685,7 @@ impl ProcessHost {
                                             exit_code,
                                         }),
                                         timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                                        description: Some(format!("Process {} exited with code {}", process_id_clone, exit_code)),
+                                        description: Some(exit_description),
                                     };
                                     
                                     // Send exit event to the actor
@@ -682,6 +718,74 @@ impl ProcessHost {
                                 }
                             });
                             
+                            // Set up execution timeout if configured
+                            let timeout_handle = if let Some(timeout_secs) = process_config.execution_timeout {
+                                if timeout_secs > 0 {
+                                    let processes_for_timeout = processes.clone();
+                                    let actor_handle_for_timeout = actor_handle.clone();
+                                    let theater_tx_for_timeout = theater_tx.clone();
+                                    let actor_id_for_timeout = actor_id.clone();
+                                    
+                                    Some(tokio::spawn(async move {
+                                        // Wait for the timeout duration
+                                        tokio::time::sleep(Duration::from_secs(timeout_secs)).await;
+                                        
+                                        // Check if process still exists and is running
+                                        let should_terminate = {
+                                            let processes_lock = processes_for_timeout.lock().unwrap();
+                                            if let Some(process) = processes_lock.get(&process_id) {
+                                                // Only terminate if process is still running
+                                                process.child.is_some() && process.exit_code.is_none()
+                                            } else {
+                                                false
+                                            }
+                                        };
+                                        
+                                        if should_terminate {
+                                            info!("Process {} execution timeout after {} seconds", process_id, timeout_secs);
+                                            
+                                            // Mark process as timeout terminated
+                                            {
+                                                let mut processes_lock = processes_for_timeout.lock().unwrap();
+                                                if let Some(process) = processes_lock.get_mut(&process_id) {
+                                                    process.timeout_terminated = true;
+                                                }
+                                            }
+                                            
+                                            // Record timeout event
+                                            let timeout_event = ChainEventData {
+                                                event_type: "process/timeout".to_string(),
+                                                data: EventData::Process(ProcessEventData::TimeoutTriggered {
+                                                    process_id,
+                                                    timeout_seconds: timeout_secs,
+                                                    action: "SIGTERM".to_string(),
+                                                }),
+                                                timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                                                description: Some(format!(
+                                                    "Process {} execution timeout after {} seconds, initiating graceful termination",
+                                                    process_id, timeout_secs
+                                                )),
+                                            };
+                                            
+                                            // Send timeout event
+                                            if let Err(e) = theater_tx_for_timeout.send(crate::messages::TheaterCommand::NewEvent {
+                                                actor_id: actor_id_for_timeout.clone(),
+                                                event: timeout_event.to_chain_event(None),
+                                            }).await {
+                                                error!("Failed to send timeout event: {}", e);
+                                            }
+                                            
+                                            // Attempt graceful termination
+                                            Self::graceful_terminate_process(process_id, processes_for_timeout, actor_handle_for_timeout, theater_tx_for_timeout, actor_id_for_timeout).await;
+                                        }
+                                    }))
+                                } else {
+                                    None
+                                }
+                            } else {
+                                None
+                            };
+                            
                             // Create the managed process with the child's details but not the child itself
                             // Since we'll move the child to the monitoring task
                             let managed_process = ManagedProcess {
@@ -691,6 +795,7 @@ impl ProcessHost {
                                 config: ProcessConfig {
                                     stdout_mode: process_config.stdout_mode,
                                     stderr_mode: process_config.stderr_mode,
+                                    execution_timeout: process_config.execution_timeout,
                                     ..process_config.clone()
                                 },
                                 start_time: SystemTime::now(),
@@ -699,6 +804,8 @@ impl ProcessHost {
                                 stdout_reader: stdout_handle,
                                 stderr_reader: stderr_handle,
                                 exit_code: None,
+                                timeout_handle,
+                                timeout_terminated: false,
                             };
                             
                             // Store the managed process
@@ -1079,5 +1186,135 @@ impl ProcessHost {
         )?;
 
         Ok(())
+    }
+
+    /// Gracefully terminate a process (SIGTERM -> wait -> SIGKILL)
+    async fn graceful_terminate_process(
+        process_id: u64,
+        processes: Arc<Mutex<HashMap<u64, ManagedProcess>>>,
+        _actor_handle: ActorHandle,
+        theater_tx: tokio::sync::mpsc::Sender<crate::messages::TheaterCommand>,
+        actor_id: crate::id::TheaterId,
+    ) {
+        const GRACE_PERIOD_SECS: u64 = 5;
+        
+        // First, try SIGTERM
+        let sigterm_result = Self::send_signal_to_process(process_id, 15, &processes).await; // SIGTERM = 15
+        
+        if sigterm_result.is_ok() {
+            info!("Sent SIGTERM to process {}, waiting {} seconds for graceful exit", process_id, GRACE_PERIOD_SECS);
+            
+            // Wait for grace period
+            tokio::time::sleep(Duration::from_secs(GRACE_PERIOD_SECS)).await;
+            
+            // Check if process is still running
+            let still_running = {
+                let processes_lock = processes.lock().unwrap();
+                if let Some(process) = processes_lock.get(&process_id) {
+                    process.child.is_some() && process.exit_code.is_none()
+                } else {
+                    false
+                }
+            };
+            
+            if still_running {
+                info!("Process {} did not exit gracefully, sending SIGKILL", process_id);
+                
+                // Record escalation event
+                let escalation_event = ChainEventData {
+                    event_type: "process/timeout".to_string(),
+                    data: EventData::Process(ProcessEventData::TimeoutTriggered {
+                        process_id,
+                        timeout_seconds: GRACE_PERIOD_SECS,
+                        action: "SIGKILL".to_string(),
+                    }),
+                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                    description: Some(format!(
+                        "Process {} did not exit gracefully, escalating to SIGKILL",
+                        process_id
+                    )),
+                };
+                
+                // Send escalation event
+                if let Err(e) = theater_tx.send(crate::messages::TheaterCommand::NewEvent {
+                    actor_id: actor_id.clone(),
+                    event: escalation_event.to_chain_event(None),
+                }).await {
+                    error!("Failed to send timeout escalation event: {}", e);
+                }
+                
+                // Send SIGKILL
+                let _sigkill_result = Self::send_signal_to_process(process_id, 9, &processes).await; // SIGKILL = 9
+            }
+        } else {
+            // If SIGTERM failed, try direct kill
+            info!("SIGTERM failed for process {}, attempting direct kill", process_id);
+            Self::kill_process_directly(process_id, &processes).await;
+        }
+    }
+    
+    /// Send signal to process (helper function)
+    async fn send_signal_to_process(
+        process_id: u64,
+        signal: i32,
+        processes: &Arc<Mutex<HashMap<u64, ManagedProcess>>>,
+    ) -> Result<(), String> {
+        let os_pid = {
+            let processes_lock = processes.lock().unwrap();
+            if let Some(process) = processes_lock.get(&process_id) {
+                process.os_pid
+            } else {
+                return Err("Process not found".to_string());
+            }
+        };
+        
+        if let Some(os_pid) = os_pid {
+            #[cfg(unix)]
+            {
+                unsafe {
+                    if libc::kill(os_pid as i32, signal) == 0 {
+                        Ok(())
+                    } else {
+                        Err(format!("Failed to send signal {}: {}", signal, std::io::Error::last_os_error()))
+                    }
+                }
+            }
+            
+            #[cfg(not(unix))]
+            {
+                // On non-Unix platforms, we can only kill
+                if signal == 9 || signal == 15 {
+                    Self::kill_process_directly(process_id, processes).await;
+                    Ok(())
+                } else {
+                    Err(format!("Signal {} not supported on this platform", signal))
+                }
+            }
+        } else {
+            Err("Process OS PID not available".to_string())
+        }
+    }
+    
+    /// Kill process directly using Child::kill()
+    async fn kill_process_directly(
+        process_id: u64,
+        processes: &Arc<Mutex<HashMap<u64, ManagedProcess>>>,
+    ) {
+        let child_opt = {
+            let mut processes_lock = processes.lock().unwrap();
+            if let Some(process) = processes_lock.get_mut(&process_id) {
+                process.child.take()
+            } else {
+                None
+            }
+        };
+        
+        if let Some(mut child) = child_opt {
+            if let Err(e) = child.kill().await {
+                error!("Failed to kill process {}: {}", process_id, e);
+            } else {
+                info!("Successfully killed process {} directly", process_id);
+            }
+        }
     }
 }
