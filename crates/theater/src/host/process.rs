@@ -611,6 +611,36 @@ impl ProcessHost {
                                 if let Ok(status) = child.wait().await {
                                     let exit_code = status.code().unwrap_or(-10);
                                     
+                                    // IMPORTANT: Wait for stdout/stderr readers to complete before calling handle_exit
+                                    // This prevents race conditions where the actor shuts down before all output is processed
+                                    
+                                    // Get handles to the reader tasks
+                                    let (stdout_handle, stderr_handle) = {
+                                        let mut processes = processes_clone.lock().unwrap();
+                                        if let Some(process) = processes.get_mut(&process_id_clone) {
+                                            (process.stdout_reader.take(), process.stderr_reader.take())
+                                        } else {
+                                            (None, None)
+                                        }
+                                    };
+                                    
+                                    // Wait for stdout reader to complete
+                                    if let Some(handle) = stdout_handle {
+                                        if let Err(e) = handle.await {
+                                            error!("Error waiting for stdout reader to complete: {}", e);
+                                        }
+                                    }
+                                    
+                                    // Wait for stderr reader to complete
+                                    if let Some(handle) = stderr_handle {
+                                        if let Err(e) = handle.await {
+                                            error!("Error waiting for stderr reader to complete: {}", e);
+                                        }
+                                    }
+                                    
+                                    // Give a small additional delay to ensure all async calls complete
+                                    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                                    
                                     // Create the event data
                                     let event_data = ChainEventData {
                                         event_type: "process/exit".to_string(),
