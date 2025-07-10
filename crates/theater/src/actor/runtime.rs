@@ -558,43 +558,110 @@ impl ActorRuntime {
         // Calculate effective permissions
         let effective_permissions = config.calculate_effective_permissions(&parent_permissions);
 
+        actor_store.record_event(ChainEventData {
+            event_type: "theater-runtime".to_string(),
+            data: EventData::TheaterRuntime(TheaterRuntimeEventData::ValidatingPermissions {
+                permissions: effective_permissions.clone(),
+            }),
+            timestamp: chrono::Utc::now().timestamp_millis() as u64,
+            description: format!("Actor [{}] loaded successfully", id).into(),
+        });
+
         // Validate that the manifest doesn't exceed effective permissions
-        if let Err(e) = crate::config::enforcement::validate_manifest_permissions(
+        match crate::config::enforcement::validate_manifest_permissions(
             &config,
             &effective_permissions,
         ) {
-            return Err(ActorError::UnexpectedError(format!(
-                "Permission validation failed: {}",
-                e
-            )));
+            Ok(_) => {}
+            Err(e) => {
+                actor_store.record_event(ChainEventData {
+                    event_type: "theater-runtime".to_string(),
+                    data: EventData::TheaterRuntime(TheaterRuntimeEventData::ActorSetupError {
+                        error: e.to_string(),
+                    }),
+                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                    description: format!(
+                        "Loading actor [{}] from manifest failed validation: {}",
+                        id, e
+                    )
+                    .into(),
+                });
+                return Err(ActorError::UnexpectedError(format!(
+                    "Permission validation failed: {}",
+                    e
+                )));
+            }
         }
 
         let _ = status_tx.send("Creating handlers".to_string()).await;
 
+        actor_store.record_event(ChainEventData {
+            event_type: "theater-runtime".to_string(),
+            data: EventData::TheaterRuntime(TheaterRuntimeEventData::CreatingHandlers),
+            timestamp: chrono::Utc::now().timestamp_millis() as u64,
+            description: format!("Creating handlers for actor [{}]", id).into(),
+        });
+
         // Create handlers with effective permissions and validation
-        let handlers = Self::create_handlers(
+        let handlers = match Self::create_handlers(
             actor_sender,
             actor_mailbox,
             theater_tx.clone(),
             &config,
             actor_handle.clone(),
             &effective_permissions,
-        )
-        .map_err(|e| ActorError::UnexpectedError(format!("Handler creation failed: {}", e)))?;
+        ) {
+            Ok(handlers) => handlers,
+            Err(e) => {
+                error!("Failed to create handlers: {}", e);
+                actor_store.record_event(ChainEventData {
+                    event_type: "theater-runtime".to_string(),
+                    data: EventData::TheaterRuntime(TheaterRuntimeEventData::ActorSetupError {
+                        error: e.clone(),
+                    }),
+                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                    description: format!("Creating handlers for actor [{}] failed: {}", id, e)
+                        .into(),
+                });
+                return Err(ActorError::UnexpectedError(format!(
+                    "Handler creation failed: {}",
+                    e
+                )));
+            }
+        };
 
         let _ = status_tx.send("Creating component".to_string()).await;
 
+        actor_store.record_event(ChainEventData {
+            event_type: "theater-runtime".to_string(),
+            data: EventData::TheaterRuntime(TheaterRuntimeEventData::CreatingComponent),
+            timestamp: chrono::Utc::now().timestamp_millis() as u64,
+            description: format!("Creating component for actor [{}]", id).into(),
+        });
+
         // Create component
         let mut actor_component =
-            Self::create_actor_component(&config, actor_store, engine.clone())
-                .await
-                .map_err(|e| {
-                    ActorError::UnexpectedError(format!("Component creation failed: {}", e))
-                })?;
+            match Self::create_actor_component(&config, actor_store, engine.clone()).await {
+                Ok(component) => component,
+                Err(e) => {
+                    error!("Failed to create actor component: {}", e);
+                    return Err(ActorError::UnexpectedError(format!(
+                        "Component creation failed: {}",
+                        e
+                    )));
+                }
+            };
 
         let _ = status_tx
             .send("Setting up host functions".to_string())
             .await;
+
+        actor_component.actor_store.record_event(ChainEventData {
+            event_type: "theater-runtime".to_string(),
+            data: EventData::TheaterRuntime(TheaterRuntimeEventData::CreatingHandlers),
+            timestamp: chrono::Utc::now().timestamp_millis() as u64,
+            description: format!("Setting up host functions for actor [{}]", id).into(),
+        });
 
         // Setup host functions
         let handlers = Self::setup_host_functions(&mut actor_component, handlers)
@@ -1324,4 +1391,3 @@ impl ActorRuntime {
         Ok(())
     }
 }
-

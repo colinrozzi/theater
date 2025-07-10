@@ -14,6 +14,9 @@ pub enum WasmEventData {
         function_name: String,
         message: String,
     },
+    WasmComponentCreationError {
+        error: String,
+    },
 }
 
 pub struct WasmEvent {

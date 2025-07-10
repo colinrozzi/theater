@@ -44,10 +44,13 @@ use wasmtime::component::{
 use wasmtime::{Engine, Store};
 
 use crate::actor::store::ActorStore;
+use crate::events::theater_runtime::TheaterRuntimeEventData;
+use crate::events::wasm::WasmEventData;
+use crate::events::{ChainEventData, EventData};
 // use crate::config::ManifestConfig;
 use crate::id::TheaterId;
-use crate::store;
 use crate::utils::resolve_reference;
+use crate::{store, ChainEvent};
 use tracing::{debug, error, info};
 use wasmtime::component::types::ComponentItem;
 
@@ -267,18 +270,67 @@ impl ActorComponent {
         // Load WASM component
         //        let engine = Engine::new(wasmtime::Config::new().async_support(true))?;
         info!("Loading WASM component from: {}", component_path);
-        let _wasm_bytes = resolve_reference(&component_path).await?;
-        let wasm_bytes = Self::get_wasm_component_bytes(component_path)
-            .await
-            .map_err(|e| {
-                error!("Failed to load WASM component: {}", e);
-                WasmError::WasmError {
+        let _wasm_bytes = match resolve_reference(&component_path).await {
+            Ok(bytes) => bytes,
+            Err(e) => {
+                error!("Failed to resolve component reference: {}", e);
+                actor_store.record_event(ChainEventData {
+                    event_type: "theater-runtime".to_string(),
+                    data: EventData::TheaterRuntime(TheaterRuntimeEventData::ActorSetupError {
+                        error: e.to_string(),
+                    }),
+                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                    description: format!("Failed to resolve component [{}]: {}", name, e).into(),
+                });
+                return Err(WasmError::WasmError {
+                    context: "resolving component reference",
+                    message: e.to_string(),
+                }
+                .into());
+            }
+        };
+        let wasm_bytes = match Self::get_wasm_component_bytes(component_path).await {
+            Ok(bytes) => bytes,
+            Err(e) => {
+                error!("Failed to load WASM component bytes: {}", e);
+                actor_store.record_event(ChainEventData {
+                    event_type: "theater-runtime".to_string(),
+                    data: EventData::TheaterRuntime(TheaterRuntimeEventData::ActorSetupError {
+                        error: e.to_string(),
+                    }),
+                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                    description: format!("Failed to load component [{}]: {}", name, e).into(),
+                });
+                return Err(WasmError::WasmError {
                     context: "loading component",
                     message: e.to_string(),
                 }
-            })?;
+                .into());
+            }
+        };
 
-        let component = Component::new(&engine, &wasm_bytes)?;
+        let component = match Component::new(&engine, &wasm_bytes) {
+            Ok(comp) => {
+                info!("Successfully loaded component: {}", name);
+                comp
+            }
+            Err(e) => {
+                error!("Failed to create component: {}", e);
+                actor_store.record_event(ChainEventData {
+                    event_type: "theater-runtime".to_string(),
+                    data: EventData::Wasm(WasmEventData::WasmComponentCreationError {
+                        error: e.to_string(),
+                    }),
+                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                    description: format!("Failed to create component [{}]: {}", name, e).into(),
+                });
+                return Err(WasmError::WasmError {
+                    context: "creating component",
+                    message: e.to_string(),
+                }
+                .into());
+            }
+        };
         let linker = Linker::new(&engine);
 
         Ok(ActorComponent {

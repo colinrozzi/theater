@@ -1,4 +1,4 @@
-use crate::{store::ContentRef, ManifestConfig};
+use crate::{config::permissions::HandlerPermission, store::ContentRef, ManifestConfig};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -11,9 +11,21 @@ pub enum TheaterRuntimeEventData {
     ActorLoadResult {
         success: bool,
     },
+
     ActorLoadError {
         error: String,
     },
+
+    ActorSetupError {
+        error: String,
+    },
+
+    ValidatingPermissions {
+        /// The permissions being validated
+        permissions: HandlerPermission,
+    },
+    CreatingComponent,
+    CreatingHandlers,
 
     /// Event indicating an actor component update has started
     ActorUpdateStart {
