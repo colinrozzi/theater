@@ -58,12 +58,44 @@ impl RandomHost {
         &mut self,
         actor_component: &mut ActorComponent,
     ) -> Result<()> {
+        // Record setup start
+        actor_component.actor_store.record_event(ChainEventData {
+            event_type: "random-setup".to_string(),
+            data: EventData::Random(RandomEventData::HandlerSetupStart),
+            timestamp: chrono::Utc::now().timestamp_millis() as u64,
+            description: Some("Starting random host function setup".to_string()),
+        });
+
         info!("Setting up random number generator host functions");
 
-        let mut interface = actor_component
+        let mut interface = match actor_component
             .linker
             .instance("theater:simple/random")
-            .expect("Could not instantiate theater:simple/random");
+        {
+            Ok(interface) => {
+                // Record successful linker instance creation
+                actor_component.actor_store.record_event(ChainEventData {
+                    event_type: "random-setup".to_string(),
+                    data: EventData::Random(RandomEventData::LinkerInstanceSuccess),
+                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                    description: Some("Successfully created linker instance".to_string()),
+                });
+                interface
+            }
+            Err(e) => {
+                // Record the specific error where it happens
+                actor_component.actor_store.record_event(ChainEventData {
+                    event_type: "random-setup".to_string(),
+                    data: EventData::Random(RandomEventData::HandlerSetupError {
+                        error: e.to_string(),
+                        step: "linker_instance".to_string(),
+                    }),
+                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                    description: Some(format!("Failed to create linker instance: {}", e)),
+                });
+                return Err(anyhow::anyhow!("Could not instantiate theater:simple/random: {}", e));
+            }
+        };
 
         let rng = Arc::clone(&self.rng);
         let config = self.config.clone();
@@ -378,6 +410,14 @@ impl RandomHost {
                     })
                 },
             )?;
+
+        // Record overall setup completion
+        actor_component.actor_store.record_event(ChainEventData {
+            event_type: "random-setup".to_string(),
+            data: EventData::Random(RandomEventData::HandlerSetupSuccess),
+            timestamp: chrono::Utc::now().timestamp_millis() as u64,
+            description: Some("Random host functions setup completed successfully".to_string()),
+        });
 
         info!("Random number generator host functions setup complete");
         Ok(())

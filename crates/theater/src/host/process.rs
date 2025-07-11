@@ -189,26 +189,50 @@ impl ProcessHost {
         info!("Adding export functions for process handling");
 
         // Register the process handler export functions
-        actor_instance
+        match actor_instance
             .register_function_no_result::<(u64, Vec<u8>)>(
                 "theater:simple/process-handlers",
                 "handle-stdout",
             )
-            .expect("Failed to register handle-stdout function");
+        {
+            Ok(_) => {
+                info!("Successfully registered handle-stdout function");
+            }
+            Err(e) => {
+                error!("Failed to register handle-stdout function: {}", e);
+                return Err(anyhow::anyhow!("Failed to register handle-stdout function: {}", e));
+            }
+        }
 
-        actor_instance
+        match actor_instance
             .register_function_no_result::<(u64, Vec<u8>)>(
                 "theater:simple/process-handlers",
                 "handle-stderr",
             )
-            .expect("Failed to register handle-stderr function");
+        {
+            Ok(_) => {
+                info!("Successfully registered handle-stderr function");
+            }
+            Err(e) => {
+                error!("Failed to register handle-stderr function: {}", e);
+                return Err(anyhow::anyhow!("Failed to register handle-stderr function: {}", e));
+            }
+        }
 
-        actor_instance
+        match actor_instance
             .register_function_no_result::<(u64, i32)>(
                 "theater:simple/process-handlers",
                 "handle-exit",
             )
-            .expect("Failed to register handle-exit function");
+        {
+            Ok(_) => {
+                info!("Successfully registered handle-exit function");
+            }
+            Err(e) => {
+                error!("Failed to register handle-exit function: {}", e);
+                return Err(anyhow::anyhow!("Failed to register handle-exit function: {}", e));
+            }
+        }
 
         Ok(())
     }
@@ -437,12 +461,44 @@ impl ProcessHost {
 
     /// Set up WebAssembly host functions for the process interface
     pub async fn setup_host_functions(&self, actor_component: &mut ActorComponent) -> Result<()> {
+        // Record setup start
+        actor_component.actor_store.record_event(ChainEventData {
+            event_type: "process-setup".to_string(),
+            data: EventData::Process(ProcessEventData::HandlerSetupStart),
+            timestamp: chrono::Utc::now().timestamp_millis() as u64,
+            description: Some("Starting process host function setup".to_string()),
+        });
+
         info!("Setting up host functions for process handling");
 
-        let mut interface = actor_component
+        let mut interface = match actor_component
             .linker
             .instance("theater:simple/process")
-            .expect("Could not instantiate theater:simple/process");
+        {
+            Ok(interface) => {
+                // Record successful linker instance creation
+                actor_component.actor_store.record_event(ChainEventData {
+                    event_type: "process-setup".to_string(),
+                    data: EventData::Process(ProcessEventData::LinkerInstanceSuccess),
+                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                    description: Some("Successfully created linker instance".to_string()),
+                });
+                interface
+            }
+            Err(e) => {
+                // Record the specific error where it happens
+                actor_component.actor_store.record_event(ChainEventData {
+                    event_type: "process-setup".to_string(),
+                    data: EventData::Process(ProcessEventData::HandlerSetupError {
+                        error: e.to_string(),
+                        step: "linker_instance".to_string(),
+                    }),
+                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                    description: Some(format!("Failed to create linker instance: {}", e)),
+                });
+                return Err(anyhow::anyhow!("Could not instantiate theater:simple/process: {}", e));
+            }
+        };
 
         // Implementation for os-spawn
         let processes = self.processes.clone();

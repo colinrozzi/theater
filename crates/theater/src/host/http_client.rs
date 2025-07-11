@@ -61,12 +61,44 @@ impl HttpClientHost {
     }
 
     pub async fn setup_host_functions(&self, actor_component: &mut ActorComponent) -> Result<()> {
+        // Record setup start
+        actor_component.actor_store.record_event(ChainEventData {
+            event_type: "http-client-setup".to_string(),
+            data: EventData::Http(HttpEventData::HandlerSetupStart),
+            timestamp: chrono::Utc::now().timestamp_millis() as u64,
+            description: Some("Starting HTTP client host function setup".to_string()),
+        });
+
         info!("Setting up http client host functions");
 
-        let mut interface = actor_component
+        let mut interface = match actor_component
             .linker
             .instance("theater:simple/http-client")
-            .expect("could not instantiate theater:simple/http-client");
+        {
+            Ok(interface) => {
+                // Record successful linker instance creation
+                actor_component.actor_store.record_event(ChainEventData {
+                    event_type: "http-client-setup".to_string(),
+                    data: EventData::Http(HttpEventData::LinkerInstanceSuccess),
+                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                    description: Some("Successfully created linker instance".to_string()),
+                });
+                interface
+            }
+            Err(e) => {
+                // Record the specific error where it happens
+                actor_component.actor_store.record_event(ChainEventData {
+                    event_type: "http-client-setup".to_string(),
+                    data: EventData::Http(HttpEventData::HandlerSetupError {
+                        error: e.to_string(),
+                        step: "linker_instance".to_string(),
+                    }),
+                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                    description: Some(format!("Failed to create linker instance: {}", e)),
+                });
+                return Err(anyhow::anyhow!("Could not instantiate theater:simple/http-client: {}", e));
+            }
+        };
 
         let permissions = self.permissions.clone();
         interface.func_wrap_async(
@@ -231,6 +263,14 @@ impl HttpClientHost {
                 })
             },
         )?;
+
+        // Record overall setup completion
+        actor_component.actor_store.record_event(ChainEventData {
+            event_type: "http-client-setup".to_string(),
+            data: EventData::Http(HttpEventData::HandlerSetupSuccess),
+            timestamp: chrono::Utc::now().timestamp_millis() as u64,
+            description: Some("HTTP client host functions setup completed successfully".to_string()),
+        });
 
         info!("Host functions set up for http-client");
 

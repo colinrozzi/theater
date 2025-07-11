@@ -95,6 +95,21 @@ pub enum FilesystemEventData {
     CommandCompleted {
         result: CommandResult,
     },
+
+    // Handler setup events
+    HandlerSetupStart,
+    HandlerSetupSuccess,
+    HandlerSetupError {
+        error: String,
+        step: String,
+    },
+    LinkerInstanceSuccess,
+    FunctionSetupStart {
+        function_name: String,
+    },
+    FunctionSetupSuccess {
+        function_name: String,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ComponentType, Lift, Lower)]

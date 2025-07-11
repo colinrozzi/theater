@@ -46,12 +46,44 @@ impl TimingHost {
     }
 
     pub async fn setup_host_functions(&self, actor_component: &mut ActorComponent) -> Result<()> {
+        // Record setup start
+        actor_component.actor_store.record_event(ChainEventData {
+            event_type: "timing-setup".to_string(),
+            data: EventData::Timing(TimingEventData::HandlerSetupStart),
+            timestamp: chrono::Utc::now().timestamp_millis() as u64,
+            description: Some("Starting timing host function setup".to_string()),
+        });
+
         info!("Setting up timing host functions");
 
-        let mut interface = actor_component
+        let mut interface = match actor_component
             .linker
             .instance("theater:simple/timing")
-            .expect("Could not instantiate theater:simple/timing");
+        {
+            Ok(interface) => {
+                // Record successful linker instance creation
+                actor_component.actor_store.record_event(ChainEventData {
+                    event_type: "timing-setup".to_string(),
+                    data: EventData::Timing(TimingEventData::LinkerInstanceSuccess),
+                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                    description: Some("Successfully created linker instance".to_string()),
+                });
+                interface
+            }
+            Err(e) => {
+                // Record the specific error where it happens
+                actor_component.actor_store.record_event(ChainEventData {
+                    event_type: "timing-setup".to_string(),
+                    data: EventData::Timing(TimingEventData::HandlerSetupError {
+                        error: e.to_string(),
+                        step: "linker_instance".to_string(),
+                    }),
+                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                    description: Some(format!("Failed to create linker instance: {}", e)),
+                });
+                return Err(anyhow::anyhow!("Could not instantiate theater:simple/timing: {}", e));
+            }
+        };
 
         let permissions = self.permissions.clone();
 
@@ -81,7 +113,19 @@ impl TimingHost {
                     Ok((now,))
                 },
             )
-            .expect("Failed to wrap now function");
+            .map_err(|e| {
+                // Record function setup error
+                actor_component.actor_store.record_event(ChainEventData {
+                    event_type: "timing-setup".to_string(),
+                    data: EventData::Timing(TimingEventData::HandlerSetupError {
+                        error: e.to_string(),
+                        step: "now_function_wrap".to_string(),
+                    }),
+                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                    description: Some(format!("Failed to wrap now function: {}", e)),
+                });
+                anyhow::anyhow!("Failed to wrap now function: {}", e)
+            })?;
 
         // Implementation of the sleep() function
         let permissions_clone = permissions.clone();
@@ -146,7 +190,19 @@ impl TimingHost {
                     })
                 },
             )
-            .expect("Failed to wrap sleep function");
+            .map_err(|e| {
+                // Record function setup error
+                actor_component.actor_store.record_event(ChainEventData {
+                    event_type: "timing-setup".to_string(),
+                    data: EventData::Timing(TimingEventData::HandlerSetupError {
+                        error: e.to_string(),
+                        step: "sleep_function_wrap".to_string(),
+                    }),
+                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                    description: Some(format!("Failed to wrap sleep function: {}", e)),
+                });
+                anyhow::anyhow!("Failed to wrap sleep function: {}", e)
+            })?;
 
         // Implementation of the deadline() function
         let permissions_clone2 = permissions.clone();
@@ -236,7 +292,27 @@ impl TimingHost {
                     })
                 },
             )
-            .expect("Failed to wrap deadline function");
+            .map_err(|e| {
+                // Record function setup error
+                actor_component.actor_store.record_event(ChainEventData {
+                    event_type: "timing-setup".to_string(),
+                    data: EventData::Timing(TimingEventData::HandlerSetupError {
+                        error: e.to_string(),
+                        step: "deadline_function_wrap".to_string(),
+                    }),
+                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                    description: Some(format!("Failed to wrap deadline function: {}", e)),
+                });
+                anyhow::anyhow!("Failed to wrap deadline function: {}", e)
+            })?;
+
+        // Record overall setup completion
+        actor_component.actor_store.record_event(ChainEventData {
+            event_type: "timing-setup".to_string(),
+            data: EventData::Timing(TimingEventData::HandlerSetupSuccess),
+            timestamp: chrono::Utc::now().timestamp_millis() as u64,
+            description: Some("Timing host functions setup completed successfully".to_string()),
+        });
 
         info!("Timing host functions added successfully");
         Ok(())

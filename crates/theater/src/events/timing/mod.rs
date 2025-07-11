@@ -10,4 +10,19 @@ pub enum TimingEventData {
     DeadlineResult { timestamp: u64, success: bool },
     Error { operation: String, message: String },
     PermissionDenied { operation: String, reason: String },
+
+    // Handler setup events
+    HandlerSetupStart,
+    HandlerSetupSuccess,
+    HandlerSetupError {
+        error: String,
+        step: String,
+    },
+    LinkerInstanceSuccess,
+    FunctionSetupStart {
+        function_name: String,
+    },
+    FunctionSetupSuccess {
+        function_name: String,
+    },
 }

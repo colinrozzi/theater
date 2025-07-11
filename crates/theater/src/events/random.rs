@@ -91,4 +91,19 @@ pub enum RandomEventData {
         /// Reason for denial
         reason: String,
     },
+
+    // Handler setup events
+    HandlerSetupStart,
+    HandlerSetupSuccess,
+    HandlerSetupError {
+        error: String,
+        step: String,
+    },
+    LinkerInstanceSuccess,
+    FunctionSetupStart {
+        function_name: String,
+    },
+    FunctionSetupSuccess {
+        function_name: String,
+    },
 }

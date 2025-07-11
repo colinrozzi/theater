@@ -104,6 +104,14 @@ impl HttpFramework {
     }
 
     pub async fn setup_host_functions(&self, actor_component: &mut ActorComponent) -> Result<()> {
+        // Record setup start
+        actor_component.actor_store.record_event(ChainEventData {
+            event_type: "http-framework-setup".to_string(),
+            data: EventData::Http(HttpEventData::HandlerSetupStart),
+            timestamp: chrono::Utc::now().timestamp_millis() as u64,
+            description: Some("Starting HTTP framework host function setup".to_string()),
+        });
+
         info!("Setting up HTTP framework host functions");
 
         let servers_clone = self.servers.clone();
@@ -114,10 +122,34 @@ impl HttpFramework {
         let _next_middleware_id = self.next_middleware_id.clone();
         let _server_handles_clone = self.server_handles.clone();
 
-        let mut interface = actor_component
+        let mut interface = match actor_component
             .linker
             .instance("theater:simple/http-framework")
-            .expect("could not instantiate http-framework");
+        {
+            Ok(interface) => {
+                // Record successful linker instance creation
+                actor_component.actor_store.record_event(ChainEventData {
+                    event_type: "http-framework-setup".to_string(),
+                    data: EventData::Http(HttpEventData::LinkerInstanceSuccess),
+                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                    description: Some("Successfully created linker instance".to_string()),
+                });
+                interface
+            }
+            Err(e) => {
+                // Record the specific error where it happens
+                actor_component.actor_store.record_event(ChainEventData {
+                    event_type: "http-framework-setup".to_string(),
+                    data: EventData::Http(HttpEventData::HandlerSetupError {
+                        error: e.to_string(),
+                        step: "linker_instance".to_string(),
+                    }),
+                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                    description: Some(format!("Failed to create linker instance: {}", e)),
+                });
+                return Err(anyhow::anyhow!("Could not instantiate theater:simple/http-framework: {}", e));
+            }
+        };
 
         // Create server implementation
         interface.func_wrap(
@@ -1061,6 +1093,14 @@ impl HttpFramework {
             },
         )?;
 
+        // Record overall setup completion
+        actor_component.actor_store.record_event(ChainEventData {
+            event_type: "http-framework-setup".to_string(),
+            data: EventData::Http(HttpEventData::HandlerSetupSuccess),
+            timestamp: chrono::Utc::now().timestamp_millis() as u64,
+            description: Some("HTTP framework host functions setup completed successfully".to_string()),
+        });
+
         info!("HTTP framework host functions set up");
 
         Ok(())
@@ -1069,40 +1109,80 @@ impl HttpFramework {
     pub async fn add_export_functions(&self, actor_instance: &mut ActorInstance) -> Result<()> {
         info!("Adding export functions for HTTP framework");
 
-        actor_instance
+        match actor_instance
             .register_function::<(u64, HttpRequest), (HttpResponse,)>(
                 "theater:simple/http-handlers",
                 "handle-request",
             )
-            .expect("Failed to register handle-request function");
+        {
+            Ok(_) => {
+                info!("Successfully registered handle-request function");
+            }
+            Err(e) => {
+                error!("Failed to register handle-request function: {}", e);
+                return Err(anyhow::anyhow!("Failed to register handle-request function: {}", e));
+            }
+        }
 
-        actor_instance
+        match actor_instance
             .register_function::<(u64, HttpRequest), (MiddlewareResult,)>(
                 "theater:simple/http-handlers",
                 "handle-middleware",
             )
-            .expect("Failed to register handle-middleware function");
+        {
+            Ok(_) => {
+                info!("Successfully registered handle-middleware function");
+            }
+            Err(e) => {
+                error!("Failed to register handle-middleware function: {}", e);
+                return Err(anyhow::anyhow!("Failed to register handle-middleware function: {}", e));
+            }
+        }
 
-        actor_instance
+        match actor_instance
             .register_function_no_result::<(u64, u64, String, Option<String>)>(
                 "theater:simple/http-handlers",
                 "handle-websocket-connect",
             )
-            .expect("Failed to register handle-websocket-connect function");
+        {
+            Ok(_) => {
+                info!("Successfully registered handle-websocket-connect function");
+            }
+            Err(e) => {
+                error!("Failed to register handle-websocket-connect function: {}", e);
+                return Err(anyhow::anyhow!("Failed to register handle-websocket-connect function: {}", e));
+            }
+        }
 
-        actor_instance
+        match actor_instance
             .register_function::<(u64, u64, WebSocketMessage), (Vec<WebSocketMessage>,)>(
                 "theater:simple/http-handlers",
                 "handle-websocket-message",
             )
-            .expect("Failed to register handle-websocket-message function");
+        {
+            Ok(_) => {
+                info!("Successfully registered handle-websocket-message function");
+            }
+            Err(e) => {
+                error!("Failed to register handle-websocket-message function: {}", e);
+                return Err(anyhow::anyhow!("Failed to register handle-websocket-message function: {}", e));
+            }
+        }
 
-        actor_instance
+        match actor_instance
             .register_function_no_result::<(u64, u64)>(
                 "theater:simple/http-handlers",
                 "handle-websocket-disconnect",
             )
-            .expect("Failed to register handle-websocket-disconnect function");
+        {
+            Ok(_) => {
+                info!("Successfully registered handle-websocket-disconnect function");
+            }
+            Err(e) => {
+                error!("Failed to register handle-websocket-disconnect function: {}", e);
+                return Err(anyhow::anyhow!("Failed to register handle-websocket-disconnect function: {}", e));
+            }
+        }
 
         info!("Export functions added for HTTP framework");
 

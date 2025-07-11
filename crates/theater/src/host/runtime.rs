@@ -82,10 +82,34 @@ impl RuntimeHost {
     pub async fn setup_host_functions(&self, actor_component: &mut ActorComponent) -> Result<()> {
         info!("Setting up runtime host functions");
         let name = actor_component.name.clone();
-        let mut interface = actor_component
+        let mut interface = match actor_component
             .linker
             .instance("theater:simple/runtime")
-            .expect("Could not instantiate theater:simple/runtime");
+        {
+            Ok(interface) => {
+                // Record successful linker instance creation
+                actor_component.actor_store.record_event(ChainEventData {
+                    event_type: "runtime-setup".to_string(),
+                    data: EventData::Runtime(RuntimeEventData::LinkerInstanceSuccess),
+                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                    description: Some("Successfully created linker instance".to_string()),
+                });
+                interface
+            }
+            Err(e) => {
+                // Record the specific error where it happens
+                actor_component.actor_store.record_event(ChainEventData {
+                    event_type: "runtime-setup".to_string(),
+                    data: EventData::Runtime(RuntimeEventData::HandlerSetupError {
+                        error: e.to_string(),
+                        step: "linker_instance".to_string(),
+                    }),
+                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                    description: Some(format!("Failed to create linker instance: {}", e)),
+                });
+                return Err(anyhow::anyhow!("Could not instantiate theater:simple/runtime: {}", e));
+            }
+        };
 
         interface
             .func_wrap(
@@ -108,7 +132,19 @@ impl RuntimeHost {
                     Ok(())
                 },
             )
-            .expect("Failed to wrap log function");
+            .map_err(|e| {
+                // Record function setup error
+                actor_component.actor_store.record_event(ChainEventData {
+                    event_type: "runtime-setup".to_string(),
+                    data: EventData::Runtime(RuntimeEventData::HandlerSetupError {
+                        error: e.to_string(),
+                        step: "log_function_wrap".to_string(),
+                    }),
+                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                    description: Some(format!("Failed to wrap log function: {}", e)),
+                });
+                anyhow::anyhow!("Failed to wrap log function: {}", e)
+            })?;
 
         interface
             .func_wrap(
@@ -145,7 +181,19 @@ impl RuntimeHost {
                     Ok((state,))
                 },
             )
-            .expect("Failed to wrap get-state function");
+            .map_err(|e| {
+                // Record function setup error
+                actor_component.actor_store.record_event(ChainEventData {
+                    event_type: "runtime-setup".to_string(),
+                    data: EventData::Runtime(RuntimeEventData::HandlerSetupError {
+                        error: e.to_string(),
+                        step: "get_state_function_wrap".to_string(),
+                    }),
+                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                    description: Some(format!("Failed to wrap get-state function: {}", e)),
+                });
+                anyhow::anyhow!("Failed to wrap get-state function: {}", e)
+            })?;
 
         let name = actor_component.name.clone();
         let theater_tx = self.theater_tx.clone();
@@ -212,7 +260,27 @@ impl RuntimeHost {
                     })
                 },
             )
-            .expect("Failed to wrap shutdown function");
+            .map_err(|e| {
+                // Record function setup error
+                actor_component.actor_store.record_event(ChainEventData {
+                    event_type: "runtime-setup".to_string(),
+                    data: EventData::Runtime(RuntimeEventData::HandlerSetupError {
+                        error: e.to_string(),
+                        step: "shutdown_function_wrap".to_string(),
+                    }),
+                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                    description: Some(format!("Failed to wrap shutdown function: {}", e)),
+                });
+                anyhow::anyhow!("Failed to wrap shutdown function: {}", e)
+            })?;
+
+        // Record overall setup completion
+        actor_component.actor_store.record_event(ChainEventData {
+            event_type: "runtime-setup".to_string(),
+            data: EventData::Runtime(RuntimeEventData::HandlerSetupSuccess),
+            timestamp: chrono::Utc::now().timestamp_millis() as u64,
+            description: Some("Runtime host functions setup completed successfully".to_string()),
+        });
 
         Ok(())
     }

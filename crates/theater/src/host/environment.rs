@@ -49,12 +49,44 @@ impl EnvironmentHost {
     }
 
     pub async fn setup_host_functions(&self, actor_component: &mut ActorComponent) -> Result<()> {
+        // Record setup start
+        actor_component.actor_store.record_event(ChainEventData {
+            event_type: "environment-setup".to_string(),
+            data: EventData::Environment(EnvironmentEventData::HandlerSetupStart),
+            timestamp: chrono::Utc::now().timestamp_millis() as u64,
+            description: Some("Starting environment host function setup".to_string()),
+        });
+
         info!("Setting up environment host functions (read-only)");
 
-        let mut interface = actor_component
+        let mut interface = match actor_component
             .linker
             .instance("theater:simple/environment")
-            .expect("Could not instantiate theater:simple/environment");
+        {
+            Ok(interface) => {
+                // Record successful linker instance creation
+                actor_component.actor_store.record_event(ChainEventData {
+                    event_type: "environment-setup".to_string(),
+                    data: EventData::Environment(EnvironmentEventData::LinkerInstanceSuccess),
+                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                    description: Some("Successfully created linker instance".to_string()),
+                });
+                interface
+            }
+            Err(e) => {
+                // Record the specific error where it happens
+                actor_component.actor_store.record_event(ChainEventData {
+                    event_type: "environment-setup".to_string(),
+                    data: EventData::Environment(EnvironmentEventData::HandlerSetupError {
+                        error: e.to_string(),
+                        step: "linker_instance".to_string(),
+                    }),
+                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                    description: Some(format!("Failed to create linker instance: {}", e)),
+                });
+                return Err(anyhow::anyhow!("Could not instantiate theater:simple/environment: {}", e));
+            }
+        };
 
         let _config = self.config.clone();
         let permissions = self.permissions.clone();
@@ -75,12 +107,10 @@ impl EnvironmentHost {
                     // Record permission denied event
                     ctx.data_mut().record_event(ChainEventData {
                         event_type: "theater:simple/environment/permission-denied".to_string(),
-                        data: EventData::Environment(EnvironmentEventData {
+                        data: EventData::Environment(EnvironmentEventData::PermissionDenied {
                             operation: "get-var".to_string(),
                             variable_name: var_name.clone(),
-                            success: false,
-                            value_found: false,
-                            timestamp: chrono::Utc::now(),
+                            reason: e.to_string(),
                         }),
                         timestamp: now,
                         description: Some(format!(
@@ -97,8 +127,7 @@ impl EnvironmentHost {
                 // Record the access attempt
                 ctx.data_mut().record_event(ChainEventData {
                     event_type: "theater:simple/environment/get-var".to_string(),
-                    data: EventData::Environment(EnvironmentEventData {
-                        operation: "get-var".to_string(),
+                    data: EventData::Environment(EnvironmentEventData::GetVar {
                         variable_name: var_name.clone(),
                         success: true,
                         value_found,
@@ -133,12 +162,10 @@ impl EnvironmentHost {
                     // Record permission denied event
                     ctx.data_mut().record_event(ChainEventData {
                         event_type: "theater:simple/environment/permission-denied".to_string(),
-                        data: EventData::Environment(EnvironmentEventData {
+                        data: EventData::Environment(EnvironmentEventData::PermissionDenied {
                             operation: "exists".to_string(),
                             variable_name: var_name.clone(),
-                            success: false,
-                            value_found: false,
-                            timestamp: chrono::Utc::now(),
+                            reason: e.to_string(),
                         }),
                         timestamp: now,
                         description: Some(format!(
@@ -154,8 +181,7 @@ impl EnvironmentHost {
                 // Record the check
                 ctx.data_mut().record_event(ChainEventData {
                     event_type: "theater:simple/environment/exists".to_string(),
-                    data: EventData::Environment(EnvironmentEventData {
-                        operation: "exists".to_string(),
+                    data: EventData::Environment(EnvironmentEventData::GetVar {
                         variable_name: var_name.clone(),
                         success: true,
                         value_found: exists,
@@ -186,12 +212,10 @@ impl EnvironmentHost {
                     // Record denied list attempt
                     ctx.data_mut().record_event(ChainEventData {
                         event_type: "theater:simple/environment/list-vars".to_string(),
-                        data: EventData::Environment(EnvironmentEventData {
+                        data: EventData::Environment(EnvironmentEventData::PermissionDenied {
                             operation: "list-vars".to_string(),
                             variable_name: "(list-all disabled)".to_string(),
-                            success: false,
-                            value_found: false,
-                            timestamp: chrono::Utc::now(),
+                            reason: "allow_list_all is false".to_string(),
                         }),
                         timestamp: now,
                         description: Some(
@@ -214,8 +238,7 @@ impl EnvironmentHost {
                 let count = accessible_vars.len();
                 ctx.data_mut().record_event(ChainEventData {
                     event_type: "theater:simple/environment/list-vars".to_string(),
-                    data: EventData::Environment(EnvironmentEventData {
-                        operation: "list-vars".to_string(),
+                    data: EventData::Environment(EnvironmentEventData::GetVar {
                         variable_name: format!("(returned {} variables)", count),
                         success: true,
                         value_found: count > 0,
@@ -231,6 +254,14 @@ impl EnvironmentHost {
                 Ok((accessible_vars,))
             },
         )?;
+
+        // Record overall setup completion
+        actor_component.actor_store.record_event(ChainEventData {
+            event_type: "environment-setup".to_string(),
+            data: EventData::Environment(EnvironmentEventData::HandlerSetupSuccess),
+            timestamp: chrono::Utc::now().timestamp_millis() as u64,
+            description: Some("Environment host functions setup completed successfully".to_string()),
+        });
 
         Ok(())
     }

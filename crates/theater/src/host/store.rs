@@ -37,12 +37,44 @@ impl StoreHost {
     }
 
     pub async fn setup_host_functions(&self, actor_component: &mut ActorComponent) -> Result<()> {
+        // Record setup start
+        actor_component.actor_store.record_event(ChainEventData {
+            event_type: "store-setup".to_string(),
+            data: EventData::Store(StoreEventData::HandlerSetupStart),
+            timestamp: chrono::Utc::now().timestamp_millis() as u64,
+            description: Some("Starting store host function setup".to_string()),
+        });
+
         info!("Setting up store host functions");
 
-        let mut interface = actor_component
+        let mut interface = match actor_component
             .linker
             .instance("theater:simple/store")
-            .expect("could not instantiate theater:simple/store");
+        {
+            Ok(interface) => {
+                // Record successful linker instance creation
+                actor_component.actor_store.record_event(ChainEventData {
+                    event_type: "store-setup".to_string(),
+                    data: EventData::Store(StoreEventData::LinkerInstanceSuccess),
+                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                    description: Some("Successfully created linker instance".to_string()),
+                });
+                interface
+            }
+            Err(e) => {
+                // Record the specific error where it happens
+                actor_component.actor_store.record_event(ChainEventData {
+                    event_type: "store-setup".to_string(),
+                    data: EventData::Store(StoreEventData::HandlerSetupError {
+                        error: e.to_string(),
+                        step: "linker_instance".to_string(),
+                    }),
+                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                    description: Some(format!("Failed to create linker instance: {}", e)),
+                });
+                return Err(anyhow::anyhow!("Could not instantiate theater:simple/store: {}", e));
+            }
+        };
 
         interface.func_wrap(
             "new",
@@ -830,6 +862,14 @@ impl StoreHost {
                 })
             },
         )?;
+
+        // Record overall setup completion
+        actor_component.actor_store.record_event(ChainEventData {
+            event_type: "store-setup".to_string(),
+            data: EventData::Store(StoreEventData::HandlerSetupSuccess),
+            timestamp: chrono::Utc::now().timestamp_millis() as u64,
+            description: Some("Store host functions setup completed successfully".to_string()),
+        });
 
         info!("Store host functions set up successfully");
 

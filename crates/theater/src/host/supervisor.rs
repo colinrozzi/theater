@@ -53,12 +53,44 @@ impl SupervisorHost {
     }
 
     pub async fn setup_host_functions(&self, actor_component: &mut ActorComponent) -> Result<()> {
+        // Record setup start
+        actor_component.actor_store.record_event(ChainEventData {
+            event_type: "supervisor-setup".to_string(),
+            data: EventData::Supervisor(SupervisorEventData::HandlerSetupStart),
+            timestamp: chrono::Utc::now().timestamp_millis() as u64,
+            description: Some("Starting supervisor host function setup".to_string()),
+        });
+
         info!("Setting up host functions for supervisor");
 
-        let mut interface = actor_component
+        let mut interface = match actor_component
             .linker
             .instance("theater:simple/supervisor")
-            .expect("Could not instantiate theater:simple/supervisor");
+        {
+            Ok(interface) => {
+                // Record successful linker instance creation
+                actor_component.actor_store.record_event(ChainEventData {
+                    event_type: "supervisor-setup".to_string(),
+                    data: EventData::Supervisor(SupervisorEventData::LinkerInstanceSuccess),
+                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                    description: Some("Successfully created linker instance".to_string()),
+                });
+                interface
+            }
+            Err(e) => {
+                // Record the specific error where it happens
+                actor_component.actor_store.record_event(ChainEventData {
+                    event_type: "supervisor-setup".to_string(),
+                    data: EventData::Supervisor(SupervisorEventData::HandlerSetupError {
+                        error: e.to_string(),
+                        step: "linker_instance".to_string(),
+                    }),
+                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                    description: Some(format!("Failed to create linker instance: {}", e)),
+                });
+                return Err(anyhow::anyhow!("Could not instantiate theater:simple/supervisor: {}", e));
+            }
+        };
 
         let supervisor_tx = self.channel_tx.clone();
         // spawn-child implementation
@@ -888,6 +920,14 @@ impl SupervisorHost {
             )
             .expect("Failed to wrap get-child-events function");
 
+        // Record overall setup completion
+        actor_component.actor_store.record_event(ChainEventData {
+            event_type: "supervisor-setup".to_string(),
+            data: EventData::Supervisor(SupervisorEventData::HandlerSetupSuccess),
+            timestamp: chrono::Utc::now().timestamp_millis() as u64,
+            description: Some("Supervisor host functions setup completed successfully".to_string()),
+        });
+
         info!("Supervisor host functions added");
 
         Ok(())
@@ -896,26 +936,50 @@ impl SupervisorHost {
     pub async fn add_export_functions(&self, actor_instance: &mut ActorInstance) -> Result<()> {
         info!("Adding export functions for supervisor");
 
-        actor_instance
+        match actor_instance
             .register_function_no_result::<(String, WitActorError)>(
                 "theater:simple/supervisor-handlers",
                 "handle-child-error",
             )
-            .expect("Failed to register handle-child-error function");
+        {
+            Ok(_) => {
+                info!("Successfully registered handle-child-error function");
+            }
+            Err(e) => {
+                error!("Failed to register handle-child-error function: {}", e);
+                return Err(anyhow::anyhow!("Failed to register handle-child-error function: {}", e));
+            }
+        }
 
-        actor_instance
+        match actor_instance
             .register_function_no_result::<(String, Option<Vec<u8>>)>(
                 "theater:simple/supervisor-handlers",
                 "handle-child-exit",
             )
-            .expect("Failed to register handle-child-exit function");
+        {
+            Ok(_) => {
+                info!("Successfully registered handle-child-exit function");
+            }
+            Err(e) => {
+                error!("Failed to register handle-child-exit function: {}", e);
+                return Err(anyhow::anyhow!("Failed to register handle-child-exit function: {}", e));
+            }
+        }
 
-        actor_instance
+        match actor_instance
             .register_function_no_result::<(String,)>(
                 "theater:simple/supervisor-handlers",
                 "handle-child-external-stop",
             )
-            .expect("Failed to register handle-child-external-stop function");
+        {
+            Ok(_) => {
+                info!("Successfully registered handle-child-external-stop function");
+            }
+            Err(e) => {
+                error!("Failed to register handle-child-external-stop function: {}", e);
+                return Err(anyhow::anyhow!("Failed to register handle-child-external-stop function: {}", e));
+            }
+        }
 
         info!("Added export functions for handle-child-error");
         Ok(())

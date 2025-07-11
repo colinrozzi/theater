@@ -2,10 +2,42 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct EnvironmentEventData {
-    pub operation: String,     // "get-var", "exists", "list-vars"
-    pub variable_name: String, // The variable name accessed
-    pub success: bool,         // Whether the operation was allowed
-    pub value_found: bool,     // Whether the variable actually existed
-    pub timestamp: DateTime<Utc>,
+#[serde(tag = "type")]
+pub enum EnvironmentEventData {
+    // Environment variable access events
+    #[serde(rename = "get_var")]
+    GetVar {
+        variable_name: String,
+        success: bool,
+        value_found: bool,
+        timestamp: DateTime<Utc>,
+    },
+    
+    #[serde(rename = "permission_denied")]
+    PermissionDenied {
+        operation: String,
+        variable_name: String,
+        reason: String,
+    },
+    
+    #[serde(rename = "error")]
+    Error {
+        operation: String,
+        message: String,
+    },
+
+    // Handler setup events
+    HandlerSetupStart,
+    HandlerSetupSuccess,
+    HandlerSetupError {
+        error: String,
+        step: String,
+    },
+    LinkerInstanceSuccess,
+    FunctionSetupStart {
+        function_name: String,
+    },
+    FunctionSetupSuccess {
+        function_name: String,
+    },
 }

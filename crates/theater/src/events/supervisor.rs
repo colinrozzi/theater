@@ -72,6 +72,21 @@ pub enum SupervisorEventData {
         child_id: Option<String>,
         message: String,
     },
+
+    // Handler setup events
+    HandlerSetupStart,
+    HandlerSetupSuccess,
+    HandlerSetupError {
+        error: String,
+        step: String,
+    },
+    LinkerInstanceSuccess,
+    FunctionSetupStart {
+        function_name: String,
+    },
+    FunctionSetupSuccess {
+        function_name: String,
+    },
 }
 
 pub struct SupervisorEvent {
