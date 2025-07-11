@@ -2,7 +2,6 @@ use clap::Parser;
 use std::net::SocketAddr;
 use tracing::debug;
 
-use crate::client::cli_wrapper;
 use crate::error::CliResult;
 use crate::output::formatters::ActorList;
 use crate::CommandContext;
@@ -14,13 +13,16 @@ pub struct ListArgs {
     pub address: SocketAddr,
 }
 
-/// Execute the list command asynchronously using theater-client
+/// Execute the list command asynchronously with cancellation support
 pub async fn execute_async(args: &ListArgs, ctx: &CommandContext) -> CliResult<()> {
-    debug!("Listing actors using theater-client");
+    debug!("Listing actors with cancellation support");
     debug!("Connecting to server at: {}", args.address);
 
-    // Use the CLI wrapper - all the timeout/retry logic is handled internally
-    let actors = cli_wrapper::list_actors(args.address, &ctx.config).await?;
+    // Create a client with the specified address and cancellation token
+    let client = crate::client::TheaterClient::new(args.address, ctx.shutdown_token.clone());
+    
+    // This will now properly respond to Ctrl+C during the network operation
+    let actors = client.list_actors().await?;
 
     // Create formatted output
     let actor_list = ActorList {
@@ -43,12 +45,14 @@ pub fn execute(args: &ListArgs, verbose: bool, json: bool) -> anyhow::Result<()>
     runtime.block_on(async {
         let config = crate::config::Config::load().unwrap_or_default();
         let output = crate::output::OutputManager::new(config.output.clone());
+        let shutdown_token = tokio_util::sync::CancellationToken::new();
 
         let ctx = CommandContext {
             config,
             output,
             verbose,
             json,
+            shutdown_token,
         };
 
         execute_async(args, &ctx).await.map_err(Into::into)
@@ -68,12 +72,14 @@ mod tests {
         };
         let config = Config::default();
         let output = OutputManager::new(config.output.clone());
+        let shutdown_token = tokio_util::sync::CancellationToken::new();
 
         let ctx = CommandContext {
             config,
             output,
             verbose: false,
             json: false,
+            shutdown_token,
         };
 
         // This would fail without a server, but tests the structure
