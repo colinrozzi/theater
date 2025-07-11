@@ -77,10 +77,52 @@ impl MessageServerHost {
     ) -> Result<()> {
         info!("Setting up message server host functions");
 
-        let mut interface = actor_component
+        // Record setup start
+        actor_component.actor_store.record_event(ChainEventData {
+            event_type: "message-server-setup".to_string(),
+            data: EventData::Message(MessageEventData::HandlerSetupStart),
+            timestamp: chrono::Utc::now().timestamp_millis() as u64,
+            description: Some("Starting message server host function setup".to_string()),
+        });
+
+        let mut interface = match actor_component
             .linker
             .instance("theater:simple/message-server-host")
-            .expect("Could not instantiate theater:simple/message-server-host");
+        {
+            Ok(interface) => {
+                // Record successful linker instance creation
+                actor_component.actor_store.record_event(ChainEventData {
+                    event_type: "message-server-setup".to_string(),
+                    data: EventData::Message(MessageEventData::LinkerInstanceSuccess),
+                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                    description: Some("Successfully created linker instance for message-server-host".to_string()),
+                });
+                interface
+            }
+            Err(e) => {
+                // Record the specific error where it happens
+                actor_component.actor_store.record_event(ChainEventData {
+                    event_type: "message-server-setup".to_string(),
+                    data: EventData::Message(MessageEventData::HandlerSetupError {
+                        error: e.to_string(),
+                        step: "linker_instance".to_string(),
+                    }),
+                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                    description: Some(format!("Failed to create linker instance: {}", e)),
+                });
+                return Err(anyhow::anyhow!("Could not instantiate theater:simple/message-server-host: {}", e));
+            }
+        };
+
+        // Record attempt to setup 'send' function
+        actor_component.actor_store.record_event(ChainEventData {
+            event_type: "message-server-setup".to_string(),
+            data: EventData::Message(MessageEventData::FunctionSetupStart {
+                function_name: "send".to_string(),
+            }),
+            timestamp: chrono::Utc::now().timestamp_millis() as u64,
+            description: Some("Setting up 'send' function wrapper".to_string()),
+        });
 
         let theater_tx = self.theater_tx.clone();
 
@@ -164,7 +206,39 @@ impl MessageServerHost {
                     })
                 },
             )
-            .expect("Failed to wrap async send function");
+            .map_err(|e| {
+                // Record the specific function setup error
+                actor_component.actor_store.record_event(ChainEventData {
+                    event_type: "message-server-setup".to_string(),
+                    data: EventData::Message(MessageEventData::HandlerSetupError {
+                        error: e.to_string(),
+                        step: "send_function_wrap".to_string(),
+                    }),
+                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                    description: Some(format!("Failed to set up 'send' function wrapper: {}", e)),
+                });
+                anyhow::anyhow!("Failed to wrap async send function: {}", e)
+            })?;
+
+        // Record successful 'send' function setup
+        actor_component.actor_store.record_event(ChainEventData {
+            event_type: "message-server-setup".to_string(),
+            data: EventData::Message(MessageEventData::FunctionSetupSuccess {
+                function_name: "send".to_string(),
+            }),
+            timestamp: chrono::Utc::now().timestamp_millis() as u64,
+            description: Some("Successfully set up 'send' function wrapper".to_string()),
+        });
+
+        // Record attempt to setup 'request' function
+        actor_component.actor_store.record_event(ChainEventData {
+            event_type: "message-server-setup".to_string(),
+            data: EventData::Message(MessageEventData::FunctionSetupStart {
+                function_name: "request".to_string(),
+            }),
+            timestamp: chrono::Utc::now().timestamp_millis() as u64,
+            description: Some("Setting up 'request' function wrapper".to_string()),
+        });
 
         let theater_tx = self.theater_tx.clone();
 
@@ -268,7 +342,39 @@ impl MessageServerHost {
                     })
                 },
             )
-            .expect("Failed to wrap async request function");
+            .map_err(|e| {
+                // Record the specific function setup error
+                actor_component.actor_store.record_event(ChainEventData {
+                    event_type: "message-server-setup".to_string(),
+                    data: EventData::Message(MessageEventData::HandlerSetupError {
+                        error: e.to_string(),
+                        step: "request_function_wrap".to_string(),
+                    }),
+                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                    description: Some(format!("Failed to set up 'request' function wrapper: {}", e)),
+                });
+                anyhow::anyhow!("Failed to wrap async request function: {}", e)
+            })?;
+
+        // Record successful 'request' function setup
+        actor_component.actor_store.record_event(ChainEventData {
+            event_type: "message-server-setup".to_string(),
+            data: EventData::Message(MessageEventData::FunctionSetupSuccess {
+                function_name: "request".to_string(),
+            }),
+            timestamp: chrono::Utc::now().timestamp_millis() as u64,
+            description: Some("Successfully set up 'request' function wrapper".to_string()),
+        });
+
+        // Record attempt to setup 'list-outstanding-requests' function
+        actor_component.actor_store.record_event(ChainEventData {
+            event_type: "message-server-setup".to_string(),
+            data: EventData::Message(MessageEventData::FunctionSetupStart {
+                function_name: "list-outstanding-requests".to_string(),
+            }),
+            timestamp: chrono::Utc::now().timestamp_millis() as u64,
+            description: Some("Setting up 'list-outstanding-requests' function wrapper".to_string()),
+        });
 
         // Use a thread-safe reference to the outstanding_requests field
         let outstanding_requests = self.outstanding_requests.clone();
@@ -313,10 +419,42 @@ impl MessageServerHost {
                     })
                 },
             )
-            .expect("Failed to wrap async list-outstanding-requests function");
+            .map_err(|e| {
+                // Record the specific function setup error
+                actor_component.actor_store.record_event(ChainEventData {
+                    event_type: "message-server-setup".to_string(),
+                    data: EventData::Message(MessageEventData::HandlerSetupError {
+                        error: e.to_string(),
+                        step: "list_outstanding_requests_function_wrap".to_string(),
+                    }),
+                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                    description: Some(format!("Failed to set up 'list-outstanding-requests' function wrapper: {}", e)),
+                });
+                anyhow::anyhow!("Failed to wrap async list-outstanding-requests function: {}", e)
+            })?;
+
+        // Record successful 'list-outstanding-requests' function setup
+        actor_component.actor_store.record_event(ChainEventData {
+            event_type: "message-server-setup".to_string(),
+            data: EventData::Message(MessageEventData::FunctionSetupSuccess {
+                function_name: "list-outstanding-requests".to_string(),
+            }),
+            timestamp: chrono::Utc::now().timestamp_millis() as u64,
+            description: Some("Successfully set up 'list-outstanding-requests' function wrapper".to_string()),
+        });
 
         // Use a thread-safe reference to the outstanding_requests field
         let outstanding_requests = self.outstanding_requests.clone();
+
+        // Record attempt to setup 'respond-to-request' function
+        actor_component.actor_store.record_event(ChainEventData {
+            event_type: "message-server-setup".to_string(),
+            data: EventData::Message(MessageEventData::FunctionSetupStart {
+                function_name: "respond-to-request".to_string(),
+            }),
+            timestamp: chrono::Utc::now().timestamp_millis() as u64,
+            description: Some("Setting up 'respond-to-request' function wrapper".to_string()),
+        });
 
         interface
             .func_wrap_async(
@@ -389,10 +527,42 @@ impl MessageServerHost {
                     })
                 },
             )
-            .expect("Failed to wrap async respond-to-request function");
+            .map_err(|e| {
+                // Record the specific function setup error
+                actor_component.actor_store.record_event(ChainEventData {
+                    event_type: "message-server-setup".to_string(),
+                    data: EventData::Message(MessageEventData::HandlerSetupError {
+                        error: e.to_string(),
+                        step: "respond_to_request_function_wrap".to_string(),
+                    }),
+                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                    description: Some(format!("Failed to set up 'respond-to-request' function wrapper: {}", e)),
+                });
+                anyhow::anyhow!("Failed to wrap async respond-to-request function: {}", e)
+            })?;
+
+        // Record successful 'respond-to-request' function setup
+        actor_component.actor_store.record_event(ChainEventData {
+            event_type: "message-server-setup".to_string(),
+            data: EventData::Message(MessageEventData::FunctionSetupSuccess {
+                function_name: "respond-to-request".to_string(),
+            }),
+            timestamp: chrono::Utc::now().timestamp_millis() as u64,
+            description: Some("Successfully set up 'respond-to-request' function wrapper".to_string()),
+        });
 
         // Use a thread-safe reference to the outstanding_requests field
         let outstanding_requests = self.outstanding_requests.clone();
+
+        // Record attempt to setup 'cancel-request' function
+        actor_component.actor_store.record_event(ChainEventData {
+            event_type: "message-server-setup".to_string(),
+            data: EventData::Message(MessageEventData::FunctionSetupStart {
+                function_name: "cancel-request".to_string(),
+            }),
+            timestamp: chrono::Utc::now().timestamp_millis() as u64,
+            description: Some("Setting up 'cancel-request' function wrapper".to_string()),
+        });
 
         interface
             .func_wrap_async(
@@ -450,12 +620,44 @@ impl MessageServerHost {
                     })
                 },
             )
-            .expect("Failed to wrap async cancel-request function");
+            .map_err(|e| {
+                // Record the specific function setup error
+                actor_component.actor_store.record_event(ChainEventData {
+                    event_type: "message-server-setup".to_string(),
+                    data: EventData::Message(MessageEventData::HandlerSetupError {
+                        error: e.to_string(),
+                        step: "cancel_request_function_wrap".to_string(),
+                    }),
+                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                    description: Some(format!("Failed to set up 'cancel-request' function wrapper: {}", e)),
+                });
+                anyhow::anyhow!("Failed to wrap async cancel-request function: {}", e)
+            })?;
+
+        // Record successful 'cancel-request' function setup
+        actor_component.actor_store.record_event(ChainEventData {
+            event_type: "message-server-setup".to_string(),
+            data: EventData::Message(MessageEventData::FunctionSetupSuccess {
+                function_name: "cancel-request".to_string(),
+            }),
+            timestamp: chrono::Utc::now().timestamp_millis() as u64,
+            description: Some("Successfully set up 'cancel-request' function wrapper".to_string()),
+        });
 
         let theater_tx = self.theater_tx.clone();
         let mailbox_tx = self.mailbox_tx.clone();
 
         // Add open-channel function
+        // Record attempt to setup 'open-channel' function
+        actor_component.actor_store.record_event(ChainEventData {
+            event_type: "message-server-setup".to_string(),
+            data: EventData::Message(MessageEventData::FunctionSetupStart {
+                function_name: "open-channel".to_string(),
+            }),
+            timestamp: chrono::Utc::now().timestamp_millis() as u64,
+            description: Some("Setting up 'open-channel' function wrapper".to_string()),
+        });
+
         interface
             .func_wrap_async(
                 "open-channel",
@@ -543,11 +745,13 @@ impl MessageServerHost {
                                                 if accepted {
                                                     tokio::spawn(async move {
                                                         // Send the initial message
-                                                        mailbox_tx.send(ActorMessage::ChannelInitiated(ActorChannelInitiated {
+                                                        if let Err(e) = mailbox_tx.send(ActorMessage::ChannelInitiated(ActorChannelInitiated {
                                                             target_id: target_id.clone(),
                                                             channel_id: channel_id.clone(),
                                                             initial_msg: initial_msg.clone(),
-                                                        })).await.expect("Failed to send channel initiated message");
+                                                        })).await {
+                                                            error!("Failed to send channel initiated message: {}", e);
+                                                        }
                                                     });
                                                     Ok((Ok(channel_id_clone),))
                                                 } else {
@@ -604,10 +808,42 @@ impl MessageServerHost {
                     })
                 },
             )
-            .expect("Failed to wrap async open-channel function");
+            .map_err(|e| {
+                // Record the specific function setup error
+                actor_component.actor_store.record_event(ChainEventData {
+                    event_type: "message-server-setup".to_string(),
+                    data: EventData::Message(MessageEventData::HandlerSetupError {
+                        error: e.to_string(),
+                        step: "open_channel_function_wrap".to_string(),
+                    }),
+                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                    description: Some(format!("Failed to set up 'open-channel' function wrapper: {}", e)),
+                });
+                anyhow::anyhow!("Failed to wrap async open-channel function: {}", e)
+            })?;
+
+        // Record successful 'open-channel' function setup
+        actor_component.actor_store.record_event(ChainEventData {
+            event_type: "message-server-setup".to_string(),
+            data: EventData::Message(MessageEventData::FunctionSetupSuccess {
+                function_name: "open-channel".to_string(),
+            }),
+            timestamp: chrono::Utc::now().timestamp_millis() as u64,
+            description: Some("Successfully set up 'open-channel' function wrapper".to_string()),
+        });
 
         // Add send-on-channel function
         let theater_tx = self.theater_tx.clone();
+
+        // Record attempt to setup 'send-on-channel' function
+        actor_component.actor_store.record_event(ChainEventData {
+            event_type: "message-server-setup".to_string(),
+            data: EventData::Message(MessageEventData::FunctionSetupStart {
+                function_name: "send-on-channel".to_string(),
+            }),
+            timestamp: chrono::Utc::now().timestamp_millis() as u64,
+            description: Some("Setting up 'send-on-channel' function wrapper".to_string()),
+        });
 
         interface
             .func_wrap_async(
@@ -680,10 +916,52 @@ impl MessageServerHost {
                     })
                 },
             )
-            .expect("Failed to wrap async send-on-channel function");
+            .map_err(|e| {
+                // Record the specific function setup error
+                actor_component.actor_store.record_event(ChainEventData {
+                    event_type: "message-server-setup".to_string(),
+                    data: EventData::Message(MessageEventData::HandlerSetupError {
+                        error: e.to_string(),
+                        step: "send_on_channel_function_wrap".to_string(),
+                    }),
+                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                    description: Some(format!("Failed to set up 'send-on-channel' function wrapper: {}", e)),
+                });
+                anyhow::anyhow!("Failed to wrap async send-on-channel function: {}", e)
+            })?;
+
+        // Record successful 'send-on-channel' function setup
+        actor_component.actor_store.record_event(ChainEventData {
+            event_type: "message-server-setup".to_string(),
+            data: EventData::Message(MessageEventData::FunctionSetupSuccess {
+                function_name: "send-on-channel".to_string(),
+            }),
+            timestamp: chrono::Utc::now().timestamp_millis() as u64,
+            description: Some("Successfully set up 'send-on-channel' function wrapper".to_string()),
+        });
 
         // Add close-channel function
         let theater_tx = self.theater_tx.clone();
+
+        // Record attempt to setup 'close-channel' function
+        actor_component.actor_store.record_event(ChainEventData {
+            event_type: "message-server-setup".to_string(),
+            data: EventData::Message(MessageEventData::FunctionSetupStart {
+                function_name: "close-channel".to_string(),
+            }),
+            timestamp: chrono::Utc::now().timestamp_millis() as u64,
+            description: Some("Setting up 'close-channel' function wrapper".to_string()),
+        });
+
+        // Record attempt to setup 'close-channel' function
+        actor_component.actor_store.record_event(ChainEventData {
+            event_type: "message-server-setup".to_string(),
+            data: EventData::Message(MessageEventData::FunctionSetupStart {
+                function_name: "close-channel".to_string(),
+            }),
+            timestamp: chrono::Utc::now().timestamp_millis() as u64,
+            description: Some("Setting up 'close-channel' function wrapper".to_string()),
+        });
 
         interface
             .func_wrap_async(
@@ -746,7 +1024,37 @@ impl MessageServerHost {
                     })
                 },
             )
-            .expect("Failed to wrap async close-channel function");
+            .map_err(|e| {
+                // Record the specific function setup error
+                actor_component.actor_store.record_event(ChainEventData {
+                    event_type: "message-server-setup".to_string(),
+                    data: EventData::Message(MessageEventData::HandlerSetupError {
+                        error: e.to_string(),
+                        step: "close_channel_function_wrap".to_string(),
+                    }),
+                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                    description: Some(format!("Failed to set up 'close-channel' function wrapper: {}", e)),
+                });
+                anyhow::anyhow!("Failed to wrap async close-channel function: {}", e)
+            })?;
+
+        // Record successful 'close-channel' function setup
+        actor_component.actor_store.record_event(ChainEventData {
+            event_type: "message-server-setup".to_string(),
+            data: EventData::Message(MessageEventData::FunctionSetupSuccess {
+                function_name: "close-channel".to_string(),
+            }),
+            timestamp: chrono::Utc::now().timestamp_millis() as u64,
+            description: Some("Successfully set up 'close-channel' function wrapper".to_string()),
+        });
+
+        // Record overall setup completion
+        actor_component.actor_store.record_event(ChainEventData {
+            event_type: "message-server-setup".to_string(),
+            data: EventData::Message(MessageEventData::HandlerSetupSuccess),
+            timestamp: chrono::Utc::now().timestamp_millis() as u64,
+            description: Some("Message server host functions setup completed successfully".to_string()),
+        });
 
         Ok(())
     }
@@ -757,13 +1065,13 @@ impl MessageServerHost {
                 "theater:simple/message-server-client",
                 "handle-send",
             )
-            .expect("Failed to register handle-send function");
+            .map_err(|e| anyhow::anyhow!("Failed to register handle-send function: {}", e))?;
         actor_instance
             .register_function::<(String, Vec<u8>), (Option<Vec<u8>>,)>(
                 "theater:simple/message-server-client",
                 "handle-request",
             )
-            .expect("Failed to register handle-request function");
+            .map_err(|e| anyhow::anyhow!("Failed to register handle-request function: {}", e))?;
 
         // Register channel functions
         actor_instance
@@ -771,19 +1079,19 @@ impl MessageServerHost {
                 "theater:simple/message-server-client",
                 "handle-channel-open",
             )
-            .expect("Failed to register handle-channel-open function");
+            .map_err(|e| anyhow::anyhow!("Failed to register handle-channel-open function: {}", e))?;
         actor_instance
             .register_function_no_result::<(String, Vec<u8>)>(
                 "theater:simple/message-server-client",
                 "handle-channel-message",
             )
-            .expect("Failed to register handle-channel-message function");
+            .map_err(|e| anyhow::anyhow!("Failed to register handle-channel-message function: {}", e))?;
         actor_instance
             .register_function_no_result::<(String,)>(
                 "theater:simple/message-server-client",
                 "handle-channel-close",
             )
-            .expect("Failed to register handle-channel-close function");
+            .map_err(|e| anyhow::anyhow!("Failed to register handle-channel-close function: {}", e))?;
 
         Ok(())
     }
