@@ -1241,6 +1241,14 @@ impl ProcessHost {
             },
         )?;
 
+        // Record overall setup completion
+        actor_component.actor_store.record_event(ChainEventData {
+            event_type: "process-setup".to_string(),
+            data: EventData::Process(ProcessEventData::HandlerSetupSuccess),
+            timestamp: chrono::Utc::now().timestamp_millis() as u64,
+            description: Some("Process host functions setup completed successfully".to_string()),
+        });
+
         Ok(())
     }
 
