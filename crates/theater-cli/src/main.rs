@@ -30,14 +30,34 @@ async fn main() -> Result<()> {
         .with(tracing_subscriber::fmt::layer().with_target(false))
         .init();
 
-    // Setup graceful shutdown handling
-    let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
+    // Setup graceful shutdown handling with immediate response to Ctrl+C
+    let shutdown_token = tokio_util::sync::CancellationToken::new();
+    let shutdown_token_clone = shutdown_token.clone();
 
+    // Handle Ctrl+C and other termination signals
     tokio::spawn(async move {
-        tokio::signal::ctrl_c().await.ok();
-        let _ = shutdown_tx.send(());
+        // Use a simpler approach for cross-platform compatibility
+        match tokio::signal::ctrl_c().await {
+            Ok(()) => {
+                println!("\nReceived interrupt signal, shutting down...");
+                shutdown_token_clone.cancel();
+            }
+            Err(err) => {
+                eprintln!("Unable to listen for shutdown signal: {}", err);
+                // We also shut down in this case
+                shutdown_token_clone.cancel();
+            }
+        }
     });
 
-    // Run the CLI
-    run(cli, config, shutdown_rx).await
+    // Run the CLI with cancellation support
+    let result = tokio::select! {
+        result = run(cli, config, shutdown_token.clone()) => result,
+        _ = shutdown_token.cancelled() => {
+            println!("Operation cancelled by user");
+            std::process::exit(130); // Standard exit code for Ctrl+C
+        }
+    };
+
+    result
 }
