@@ -1,5 +1,6 @@
-use crate::actor::handle::ActorHandle;
 use anyhow::{anyhow, Result};
+use crate::actor::handle::ActorHandle;
+use std::panic;
 use axum::{
     extract::{State, WebSocketUpgrade},
     http::{HeaderName, HeaderValue, Request, StatusCode},
@@ -214,8 +215,14 @@ impl ServerInstance {
             return Ok(self.port);
         }
 
-        // Build router based on current configuration
-        let router = self.build_router(actor_handle.clone());
+        // Build router with panic catching
+        let router = match self.build_router_safe(actor_handle.clone()) {
+            Ok(router) => router,
+            Err(e) => {
+                error!("Failed to build router for server {}: {}", self.id, e);
+                return Err(anyhow!("Failed to build router: {}", e));
+            }
+        };
 
         // Create address
         let host = self
@@ -482,6 +489,63 @@ impl ServerInstance {
         }
 
         router
+    }
+
+    // New safe router building method with panic catching
+    fn build_router_safe(&self, actor_handle: ActorHandle) -> Result<Router, String> {
+        // Use panic::catch_unwind to catch any panics from Axum
+        let result = panic::catch_unwind(panic::AssertUnwindSafe(|| {
+            self.build_router(actor_handle)
+        }));
+
+        match result {
+            Ok(router) => Ok(router),
+            Err(panic_payload) => {
+                // Convert panic to error message
+                let panic_msg = if let Some(s) = panic_payload.downcast_ref::<String>() {
+                    s.clone()
+                } else if let Some(s) = panic_payload.downcast_ref::<&str>() {
+                    s.to_string()
+                } else {
+                    "Unknown panic occurred while building router".to_string()
+                };
+
+                // Try to extract more specific route validation errors
+                let error_msg = if panic_msg.contains("Path segments must not start with `*`") {
+                    let suggestion = "Path segments must not start with `*`. For wildcard capture, use `{*wildcard}` syntax instead.";
+                    format!("Invalid route pattern: {}. {}", panic_msg, suggestion)
+                } else if panic_msg.contains("without_v07_checks") {
+                    format!("Route pattern validation failed: {}. Please update route patterns to use Axum v0.7+ syntax.", panic_msg)
+                } else {
+                    format!("Router building failed: {}", panic_msg)
+                };
+
+                Err(error_msg)
+            }
+        }
+    }
+
+    // Optional: Add route pattern validation helper
+    fn validate_route_pattern(path: &str) -> Result<(), String> {
+        // Basic validation for common Axum v0.7+ pattern issues
+        if path.contains("/*") && !path.contains("/{*") {
+            return Err(format!(
+                "Invalid wildcard pattern '{}'. Use '{{*wildcard}}' instead of '*' for wildcard capture.",
+                path
+            ));
+        }
+
+        // Check for other common pattern issues
+        if path.contains("{") && !path.contains("}") {
+            return Err(format!("Unmatched '{{' in route pattern: {}", path));
+        }
+
+        if path.contains("}") && !path.contains("{") {
+            return Err(format!("Unmatched '}}' in route pattern: {}", path));
+        }
+
+        // More validation rules can be added here
+        Ok(())
     }
 
     async fn handle_http_request(
