@@ -306,11 +306,13 @@ pub fn execute(args: &OpenArgs, verbose: bool, json: bool) -> Result<()> {
     runtime.block_on(async {
         let config = crate::config::Config::load().unwrap_or_default();
         let output = crate::output::OutputManager::new(config.output.clone());
+        let shutdown_token = tokio_util::sync::CancellationToken::new();
         let ctx = crate::CommandContext {
             config,
             output,
             verbose,
             json,
+            shutdown_token,
         };
         execute_async(args, &ctx)
             .await
