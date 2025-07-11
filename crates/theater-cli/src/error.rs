@@ -96,6 +96,10 @@ pub enum CliError {
     #[error("Event filter error: {filter} is invalid")]
     EventFilterError { filter: String },
 
+    /// Cancellation errors
+    #[error("Operation was cancelled by user")]
+    OperationCancelled,
+
     /// Generic wrapper for other errors
     #[error("Internal error: {0}")]
     Internal(#[from] anyhow::Error),
@@ -334,6 +338,7 @@ impl CliError {
             | Self::ProtocolError { .. }
             | Self::UnexpectedResponse { .. } => "server",
             Self::EventStreamError { .. } | Self::EventFilterError { .. } => "events",
+            Self::OperationCancelled => "cancellation",
             Self::Internal(_) | Self::Serialization(_) | Self::Io(_) | Self::ParseError { .. } => {
                 "internal"
             }
