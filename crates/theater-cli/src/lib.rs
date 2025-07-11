@@ -90,11 +90,11 @@ pub enum Commands {
     DynamicCompletion(commands::dynamic_completion::DynamicCompletionArgs),
 }
 
-/// Run the Theater CLI asynchronously
+/// Run the Theater CLI asynchronously with cancellation support
 pub async fn run(
     cli: Cli,
     config: config::Config,
-    _shutdown_rx: tokio::sync::oneshot::Receiver<()>,
+    shutdown_token: tokio_util::sync::CancellationToken,
 ) -> anyhow::Result<()> {
     // Create output manager
     let output = output::OutputManager::new(config.output.clone());
@@ -105,60 +105,71 @@ pub async fn run(
         output,
         verbose: cli.verbose,
         json: cli.json,
+        shutdown_token: shutdown_token.clone(),
     };
 
-    // Execute the command - using legacy functions for now, can be modernized incrementally
-    let result = match &cli.command {
-        Commands::Subscribe(args) => commands::subscribe::execute_async(args, &ctx)
-            .await
-            .map_err(|e| anyhow::Error::from(e)),
-        Commands::Create(args) => commands::create::execute_async(args, &ctx)
-            .await
-            .map_err(|e| anyhow::Error::from(e)),
-        Commands::Build(args) => commands::build::execute_async(args, &ctx)
-            .await
-            .map_err(|e| anyhow::Error::from(e)),
-        Commands::List(args) => commands::list::execute_async(args, &ctx)
-            .await
-            .map_err(|e| anyhow::Error::from(e)),
-        Commands::State(args) => commands::state::execute_async(args, &ctx)
-            .await
-            .map_err(|e| anyhow::Error::from(e)),
-        Commands::Events(args) => commands::events::execute_async(args, &ctx)
-            .await
-            .map_err(|e| anyhow::Error::from(e)),
-        Commands::EventsExplore(args) => commands::events_explore::execute_async(args, &ctx)
-            .await
-            .map_err(|e| anyhow::Error::from(e)),
-        Commands::Inspect(args) => commands::inspect::execute_async(args, &ctx)
-            .await
-            .map_err(|e| anyhow::Error::from(e)),
-        Commands::Start(args) => commands::start::execute_async(args, &ctx)
-            .await
-            .map_err(|e| anyhow::Error::from(e)),
-        Commands::Stop(args) => commands::stop::execute_async(args, &ctx)
-            .await
-            .map_err(|e| anyhow::Error::from(e)),
-        Commands::Message(args) => commands::message::execute_async(args, &ctx)
-            .await
-            .map_err(|e| anyhow::Error::from(e)),
-        Commands::Channel(args) => match &args.command {
-            commands::channel::ChannelCommands::Open(open_args) => {
-                commands::channel::open::execute_async(open_args, &ctx)
+    // Execute the command with cancellation support
+    let command_future = async {
+        match &cli.command {
+            Commands::Subscribe(args) => commands::subscribe::execute_async(args, &ctx)
+                .await
+                .map_err(|e| anyhow::Error::from(e)),
+            Commands::Create(args) => commands::create::execute_async(args, &ctx)
+                .await
+                .map_err(|e| anyhow::Error::from(e)),
+            Commands::Build(args) => commands::build::execute_async(args, &ctx)
+                .await
+                .map_err(|e| anyhow::Error::from(e)),
+            Commands::List(args) => commands::list::execute_async(args, &ctx)
+                .await
+                .map_err(|e| anyhow::Error::from(e)),
+            Commands::State(args) => commands::state::execute_async(args, &ctx)
+                .await
+                .map_err(|e| anyhow::Error::from(e)),
+            Commands::Events(args) => commands::events::execute_async(args, &ctx)
+                .await
+                .map_err(|e| anyhow::Error::from(e)),
+            Commands::EventsExplore(args) => commands::events_explore::execute_async(args, &ctx)
+                .await
+                .map_err(|e| anyhow::Error::from(e)),
+            Commands::Inspect(args) => commands::inspect::execute_async(args, &ctx)
+                .await
+                .map_err(|e| anyhow::Error::from(e)),
+            Commands::Start(args) => commands::start::execute_async(args, &ctx)
+                .await
+                .map_err(|e| anyhow::Error::from(e)),
+            Commands::Stop(args) => commands::stop::execute_async(args, &ctx)
+                .await
+                .map_err(|e| anyhow::Error::from(e)),
+            Commands::Message(args) => commands::message::execute_async(args, &ctx)
+                .await
+                .map_err(|e| anyhow::Error::from(e)),
+            Commands::Channel(args) => match &args.command {
+                commands::channel::ChannelCommands::Open(open_args) => {
+                    commands::channel::open::execute_async(open_args, &ctx)
+                        .await
+                        .map_err(|e| anyhow::Error::from(e))
+                }
+            },
+            Commands::ListStored(args) => commands::list_stored::execute_async(args, &ctx)
+                .await
+                .map_err(|e| anyhow::Error::from(e)),
+            Commands::Completion(args) => commands::completion::execute_async(args, &ctx)
+                .await
+                .map_err(|e| anyhow::Error::from(e)),
+            Commands::DynamicCompletion(args) => {
+                commands::dynamic_completion::execute_async(args, &ctx)
                     .await
                     .map_err(|e| anyhow::Error::from(e))
             }
-        },
-        Commands::ListStored(args) => commands::list_stored::execute_async(args, &ctx)
-            .await
-            .map_err(|e| anyhow::Error::from(e)),
-        Commands::Completion(args) => commands::completion::execute_async(args, &ctx)
-            .await
-            .map_err(|e| anyhow::Error::from(e)),
-        Commands::DynamicCompletion(args) => {
-            commands::dynamic_completion::execute_async(args, &ctx)
-                .await
-                .map_err(|e| anyhow::Error::from(e))
+        }
+    };
+
+    // Race the command execution against cancellation
+    let result = tokio::select! {
+        result = command_future => result,
+        _ = shutdown_token.cancelled() => {
+            return Err(anyhow::anyhow!("Operation cancelled"));
         }
     };
 
@@ -189,12 +200,13 @@ pub struct CommandContext {
     pub output: output::OutputManager,
     pub verbose: bool,
     pub json: bool,
+    pub shutdown_token: tokio_util::sync::CancellationToken,
 }
 
 impl CommandContext {
     /// Create a theater client using the configured server address
     pub fn create_client(&self) -> client::TheaterClient {
-        client::TheaterClient::new(self.config.server.default_address)
+        client::TheaterClient::new(self.config.server.default_address, self.shutdown_token.clone())
     }
 
     /// Get the server address from config or override
