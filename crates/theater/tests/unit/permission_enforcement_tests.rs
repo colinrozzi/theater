@@ -110,6 +110,46 @@ fn test_filesystem_no_permissions() {
 }
 
 #[test]
+fn test_filesystem_fail_closed_no_allowed_paths() {
+    // Test permissions with no allowed_paths configured (should fail closed)
+    let permissions_no_paths = Some(FileSystemPermissions {
+        read: true,
+        write: true,
+        execute: false,
+        allowed_commands: None,
+        new_dir: Some(false),
+        allowed_paths: None,  // No paths configured - should deny all
+    });
+
+    // Should deny all path operations when no allowed_paths is configured
+    assert!(PermissionChecker::check_filesystem_operation(
+        &permissions_no_paths,
+        "read",
+        Some("/tmp/test/file.txt"),
+        None,
+    )
+    .is_err());
+
+    // Should also deny any other path
+    assert!(PermissionChecker::check_filesystem_operation(
+        &permissions_no_paths,
+        "read",
+        Some("/etc/passwd"),
+        None,
+    )
+    .is_err());
+
+    // Should still allow operations without paths (like commands without path context)
+    assert!(PermissionChecker::check_filesystem_operation(
+        &permissions_no_paths,
+        "read",
+        None,  // No path specified
+        None,
+    )
+    .is_ok());
+}
+
+#[test]
 fn test_http_permission_checking() {
     let http_permissions = Some(HttpClientPermissions {
         allowed_methods: Some(vec!["GET".to_string(), "POST".to_string()]),

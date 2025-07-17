@@ -65,17 +65,23 @@ pub struct FileSystemHost {
 }
 
 impl FileSystemHost {
-    pub fn new(config: FileSystemHandlerConfig, permissions: Option<crate::config::permissions::FileSystemPermissions>) -> Self {
+    pub fn new(
+        config: FileSystemHandlerConfig,
+        permissions: Option<crate::config::permissions::FileSystemPermissions>,
+    ) -> Self {
         let path: PathBuf;
         match config.new_dir {
             Some(true) => {
                 path = Self::create_temp_dir().unwrap();
             }
             _ => {
-                path = PathBuf::from(config.path.unwrap());
+                path = PathBuf::from(config.clone().path.unwrap());
             }
         }
-        info!("Filesystem host path: {:?}", path);
+        info!(
+            "Creating filesystem host with config: {:?}, permissions: {:?}",
+            config, permissions
+        );
         Self {
             path,
             allowed_commands: config.allowed_commands,
@@ -107,10 +113,7 @@ impl FileSystemHost {
             description: Some("Starting filesystem host function setup".to_string()),
         });
 
-        let mut interface = match actor_component
-            .linker
-            .instance("theater:simple/filesystem")
-        {
+        let mut interface = match actor_component.linker.instance("theater:simple/filesystem") {
             Ok(interface) => {
                 // Record successful linker instance creation
                 actor_component.actor_store.record_event(ChainEventData {
@@ -132,7 +135,10 @@ impl FileSystemHost {
                     timestamp: chrono::Utc::now().timestamp_millis() as u64,
                     description: Some(format!("Failed to create linker instance: {}", e)),
                 });
-                return Err(anyhow::anyhow!("Could not instantiate theater:simple/filesystem: {}", e));
+                return Err(anyhow::anyhow!(
+                    "Could not instantiate theater:simple/filesystem: {}",
+                    e
+                ));
             }
         };
 
@@ -160,7 +166,10 @@ impl FileSystemHost {
                             reason: e.to_string(),
                         }),
                         timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                        description: Some(format!("Permission denied for read operation on {}", file_path)),
+                        description: Some(format!(
+                            "Permission denied for read operation on {}",
+                            file_path
+                        )),
                     });
                     return Ok((Err(format!("Permission denied: {}", e)),));
                 }
@@ -257,7 +266,10 @@ impl FileSystemHost {
                             reason: e.to_string(),
                         }),
                         timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                        description: Some(format!("Permission denied for write operation on {}", file_path)),
+                        description: Some(format!(
+                            "Permission denied for write operation on {}",
+                            file_path
+                        )),
                     });
                     return Ok((Err(format!("Permission denied: {}", e)),));
                 }
@@ -367,7 +379,10 @@ impl FileSystemHost {
                             reason: e.to_string(),
                         }),
                         timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                        description: Some(format!("Permission denied for list operation on {}", dir_path)),
+                        description: Some(format!(
+                            "Permission denied for list operation on {}",
+                            dir_path
+                        )),
                     });
                     return Ok((Err(format!("Permission denied: {}", e)),));
                 }
@@ -461,7 +476,10 @@ impl FileSystemHost {
                             reason: e.to_string(),
                         }),
                         timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                        description: Some(format!("Permission denied for delete operation on {}", file_path)),
+                        description: Some(format!(
+                            "Permission denied for delete operation on {}",
+                            file_path
+                        )),
                     });
                     return Ok((Err(format!("Permission denied: {}", e)),));
                 }
@@ -541,7 +559,10 @@ impl FileSystemHost {
                             reason: e.to_string(),
                         }),
                         timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                        description: Some(format!("Permission denied for create-dir operation on {}", dir_path)),
+                        description: Some(format!(
+                            "Permission denied for create-dir operation on {}",
+                            dir_path
+                        )),
                     });
                     return Ok((Err(format!("Permission denied: {}", e)),));
                 }
@@ -627,7 +648,10 @@ impl FileSystemHost {
                             reason: e.to_string(),
                         }),
                         timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                        description: Some(format!("Permission denied for delete-dir operation on {}", dir_path)),
+                        description: Some(format!(
+                            "Permission denied for delete-dir operation on {}",
+                            dir_path
+                        )),
                     });
                     return Ok((Err(format!("Permission denied: {}", e)),));
                 }
@@ -712,7 +736,10 @@ impl FileSystemHost {
                             reason: e.to_string(),
                         }),
                         timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                        description: Some(format!("Permission denied for path-exists operation on {}", path)),
+                        description: Some(format!(
+                            "Permission denied for path-exists operation on {}",
+                            path
+                        )),
                     });
                     return Ok((Err(format!("Permission denied: {}", e)),));
                 }

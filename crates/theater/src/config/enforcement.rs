@@ -364,16 +364,19 @@ impl PermissionChecker {
             _ => {}
         }
 
-        // Check path restrictions
+        // Check path restrictions - FAIL CLOSED: require explicit path allowlist
         if let Some(path) = path {
-            if let Some(allowed_paths) = &perms.allowed_paths {
-                let path_allowed = allowed_paths.iter().any(|allowed| path.starts_with(allowed));
-                if !path_allowed {
-                    return Err(PermissionError::PathNotAllowed {
-                        path: path.to_string(),
-                        allowed_paths: allowed_paths.clone(),
-                    });
-                }
+            let allowed_paths = perms.allowed_paths.as_ref().ok_or_else(|| PermissionError::PathNotAllowed {
+                path: path.to_string(),
+                allowed_paths: vec!["<none configured>".to_string()],
+            })?;
+            
+            let path_allowed = allowed_paths.iter().any(|allowed| path.starts_with(allowed));
+            if !path_allowed {
+                return Err(PermissionError::PathNotAllowed {
+                    path: path.to_string(),
+                    allowed_paths: allowed_paths.clone(),
+                });
             }
         }
 
