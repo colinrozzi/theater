@@ -65,6 +65,60 @@ pub struct FileSystemHost {
 }
 
 impl FileSystemHost {
+    /// Resolve and validate a path against permissions
+    /// 
+    /// This function:
+    /// 1. Appends the requested path to the base path
+    /// 2. Resolves the path (handles ., .., etc.)
+    /// 3. Checks if the resolved path is within allowed paths
+    /// 
+    /// Returns (resolved_path, canonical_path_for_permission_check)
+    fn resolve_and_validate_path(
+        &self,
+        requested_path: &str,
+        operation: &str,
+        permissions: &Option<crate::config::permissions::FileSystemPermissions>,
+    ) -> Result<PathBuf, String> {
+        // 1. Append requested path to base path
+        let full_path = self.path.join(requested_path);
+        
+        // 2. Resolve the path (canonicalize to handle . and .. and get absolute path)
+        let resolved_path = match full_path.canonicalize() {
+            Ok(path) => path,
+            Err(_) => {
+                // If canonicalize fails, try to resolve as much as possible
+                // This handles cases where the file doesn't exist yet
+                let mut resolved = PathBuf::new();
+                for component in full_path.components() {
+                    match component {
+                        std::path::Component::ParentDir => {
+                            resolved.pop();
+                        }
+                        std::path::Component::CurDir => {
+                            // Skip current directory
+                        }
+                        other => {
+                            resolved.push(other);
+                        }
+                    }
+                }
+                resolved
+            }
+        };
+        
+        // 3. Check if resolved path is within allowed paths
+        let resolved_str = resolved_path.to_string_lossy();
+        if let Err(e) = PermissionChecker::check_filesystem_operation(
+            permissions,
+            operation,
+            Some(&resolved_str),
+            None,
+        ) {
+            return Err(format!("Permission denied: {}", e));
+        }
+        
+        Ok(resolved_path)
+    }
     pub fn new(
         config: FileSystemHandlerConfig,
         permissions: Option<crate::config::permissions::FileSystemPermissions>,
@@ -142,49 +196,47 @@ impl FileSystemHost {
             }
         };
 
-        let allowed_path = self.path.clone();
+        let _allowed_path = self.path.clone();
         let permissions = self.permissions.clone();
 
+        let filesystem_host = self.clone();
         let _ = interface.func_wrap(
             "read-file",
             move |mut ctx: StoreContextMut<'_, ActorStore>,
-                  (file_path,): (String,)|
+                  (requested_path,): (String,)|
                   -> Result<(Result<Vec<u8>, String>,)> {
-                // PERMISSION CHECK BEFORE OPERATION
-                if let Err(e) = PermissionChecker::check_filesystem_operation(
-                    &permissions,
-                    "read",
-                    Some(&file_path),
-                    None,
-                ) {
-                    error!("Filesystem read permission denied: {}", e);
-                    ctx.data_mut().record_event(ChainEventData {
-                        event_type: "theater:simple/filesystem/permission-denied".to_string(),
-                        data: EventData::Filesystem(FilesystemEventData::PermissionDenied {
-                            operation: "read".to_string(),
-                            path: file_path.clone(),
-                            reason: e.to_string(),
-                        }),
-                        timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                        description: Some(format!(
-                            "Permission denied for read operation on {}",
-                            file_path
-                        )),
-                    });
-                    return Ok((Err(format!("Permission denied: {}", e)),));
-                }
+                // RESOLVE AND VALIDATE PATH
+                let file_path = match filesystem_host.resolve_and_validate_path(&requested_path, "read", &permissions) {
+                    Ok(path) => path,
+                    Err(e) => {
+                        error!("Filesystem read permission denied: {}", e);
+                        ctx.data_mut().record_event(ChainEventData {
+                            event_type: "theater:simple/filesystem/permission-denied".to_string(),
+                            data: EventData::Filesystem(FilesystemEventData::PermissionDenied {
+                                operation: "read".to_string(),
+                                path: requested_path.clone(),
+                                reason: e.to_string(),
+                            }),
+                            timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                            description: Some(format!(
+                                "Permission denied for read operation on {}",
+                                requested_path
+                            )),
+                        });
+                        return Ok((Err(format!("Permission denied: {}", e)),));
+                    }
+                };
 
                 // Record file read call event
                 ctx.data_mut().record_event(ChainEventData {
                     event_type: "theater:simple/filesystem/read-file".to_string(),
                     data: EventData::Filesystem(FilesystemEventData::FileReadCall {
-                        path: file_path.clone(),
+                        path: requested_path.clone(),
                     }),
                     timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                    description: Some(format!("Read file {:?}", file_path)),
+                    description: Some(format!("Read file {:?}", requested_path)),
                 });
 
-                let file_path = allowed_path.join(Path::new(&file_path));
                 info!("Reading file {:?}", file_path);
 
                 let file = match File::open(&file_path) {
