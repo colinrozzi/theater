@@ -81,6 +81,36 @@ fn intersect_options<T: Clone + Eq + std::hash::Hash>(
     }
 }
 
+/// Helper: intersection of path lists with hierarchical logic
+/// A path is allowed if it's a subdirectory of any allowed parent path
+fn intersect_path_options(
+    parent_paths: &Option<Vec<String>>,
+    child_paths: &Option<Vec<String>>,
+) -> Option<Vec<String>> {
+    match (parent_paths, child_paths) {
+        (Some(parent_list), Some(child_list)) => {
+            let allowed_paths: Vec<String> = child_list
+                .iter()
+                .filter(|child_path| {
+                    // Check if child_path is a subdirectory of any parent path
+                    parent_list.iter().any(|parent_path| {
+                        let child_canonical = std::path::Path::new(child_path);
+                        let parent_canonical = std::path::Path::new(parent_path);
+                        
+                        // Check if child path starts with parent path
+                        child_canonical.starts_with(parent_canonical)
+                    })
+                })
+                .cloned()
+                .collect();
+            Some(allowed_paths)
+        }
+        (Some(parent_list), None) => Some(parent_list.clone()),
+        (None, Some(_)) => None, // Parent denies all paths
+        (None, None) => None,
+    }
+}
+
 /* ─────────────────────────────────────────────────────────────────────────── */
 /*  File-system permissions                                                   */
 /* ─────────────────────────────────────────────────────────────────────────── */
@@ -532,7 +562,7 @@ impl RestrictWith<FileSystemPermissions> for FileSystemPermissions {
             execute: self.execute && restriction.execute,
             allowed_commands: intersect_options(&self.allowed_commands, &restriction.allowed_commands),
             new_dir: self.new_dir.and_then(|p| restriction.new_dir.map(|r| p && r)),
-            allowed_paths: intersect_options(&self.allowed_paths, &restriction.allowed_paths),
+            allowed_paths: intersect_path_options(&self.allowed_paths, &restriction.allowed_paths),
         }
     }
 }
@@ -576,7 +606,7 @@ impl RestrictWith<ProcessPermissions> for ProcessPermissions {
             max_processes: self.max_processes.min(restriction.max_processes),
             max_output_buffer: self.max_output_buffer.min(restriction.max_output_buffer),
             allowed_programs: intersect_options(&self.allowed_programs, &restriction.allowed_programs),
-            allowed_paths: intersect_options(&self.allowed_paths, &restriction.allowed_paths),
+            allowed_paths: intersect_path_options(&self.allowed_paths, &restriction.allowed_paths),
         }
     }
 }
