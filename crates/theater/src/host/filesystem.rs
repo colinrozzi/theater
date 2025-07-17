@@ -19,6 +19,7 @@ use thiserror::Error;
 use tokio::process::Command as AsyncCommand;
 use tracing::{error, info};
 use wasmtime::StoreContextMut;
+use dunce;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 enum FileSystemCommand {
@@ -66,57 +67,52 @@ pub struct FileSystemHost {
 
 impl FileSystemHost {
     /// Resolve and validate a path against permissions
-    /// 
+    ///
     /// This function:
     /// 1. Appends the requested path to the base path
     /// 2. Resolves the path (handles ., .., etc.)
     /// 3. Checks if the resolved path is within allowed paths
-    /// 
+    ///
     /// Returns (resolved_path, canonical_path_for_permission_check)
     fn resolve_and_validate_path(
         &self,
         requested_path: &str,
-        operation: &str,
+        _operation: &str,
         permissions: &Option<crate::config::permissions::FileSystemPermissions>,
     ) -> Result<PathBuf, String> {
         // 1. Append requested path to base path
         let full_path = self.path.join(requested_path);
+
+        // 2. Use dunce for robust path canonicalization (handles . and .. properly)
+        let resolved_path = dunce::canonicalize(&full_path).map_err(|e| {
+            format!("Failed to resolve path '{}': {}", full_path.display(), e)
+        })?;
+
+        // 3. Check if resolved path is within allowed paths using directory-aware logic
+        let _resolved_str = resolved_path.to_string_lossy();
         
-        // 2. Resolve the path (canonicalize to handle . and .. and get absolute path)
-        let resolved_path = match full_path.canonicalize() {
-            Ok(path) => path,
-            Err(_) => {
-                // If canonicalize fails, try to resolve as much as possible
-                // This handles cases where the file doesn't exist yet
-                let mut resolved = PathBuf::new();
-                for component in full_path.components() {
-                    match component {
-                        std::path::Component::ParentDir => {
-                            resolved.pop();
-                        }
-                        std::path::Component::CurDir => {
-                            // Skip current directory
-                        }
-                        other => {
-                            resolved.push(other);
-                        }
-                    }
+        // 3. Check if resolved path is within allowed paths using dunce
+        if let Some(perms) = permissions {
+            if let Some(allowed_paths) = &perms.allowed_paths {
+                let is_allowed = allowed_paths.iter().any(|allowed_path| {
+                    // Canonicalize the allowed path for comparison using dunce
+                    let allowed_canonical = dunce::canonicalize(allowed_path)
+                        .unwrap_or_else(|_| PathBuf::from(allowed_path));
+                    
+                    // Check if resolved path is within the allowed directory
+                    resolved_path == allowed_canonical || resolved_path.starts_with(&allowed_canonical)
+                });
+                
+                if !is_allowed {
+                    return Err(format!(
+                        "Path '{}' not in allowed paths: {:?}", 
+                        resolved_path.display(), 
+                        allowed_paths
+                    ));
                 }
-                resolved
             }
-        };
-        
-        // 3. Check if resolved path is within allowed paths
-        let resolved_str = resolved_path.to_string_lossy();
-        if let Err(e) = PermissionChecker::check_filesystem_operation(
-            permissions,
-            operation,
-            Some(&resolved_str),
-            None,
-        ) {
-            return Err(format!("Permission denied: {}", e));
         }
-        
+
         Ok(resolved_path)
     }
     pub fn new(
@@ -206,7 +202,11 @@ impl FileSystemHost {
                   (requested_path,): (String,)|
                   -> Result<(Result<Vec<u8>, String>,)> {
                 // RESOLVE AND VALIDATE PATH
-                let file_path = match filesystem_host.resolve_and_validate_path(&requested_path, "read", &permissions) {
+                let file_path = match filesystem_host.resolve_and_validate_path(
+                    &requested_path,
+                    "read",
+                    &permissions,
+                ) {
                     Ok(path) => path,
                     Err(e) => {
                         error!("Filesystem read permission denied: {}", e);
@@ -410,50 +410,49 @@ impl FileSystemHost {
         let allowed_path = self.path.clone();
         let permissions = self.permissions.clone();
 
+        let filesystem_host = self.clone();
         let _ = interface.func_wrap(
             "list-files",
             move |mut ctx: StoreContextMut<'_, ActorStore>,
-                  (dir_path,): (String,)|
+                  (requested_path,): (String,)|
                   -> Result<(Result<Vec<String>, String>,)> {
-                // PERMISSION CHECK BEFORE OPERATION
-                if let Err(e) = PermissionChecker::check_filesystem_operation(
+                // RESOLVE AND VALIDATE PATH
+                let dir_path = match filesystem_host.resolve_and_validate_path(
+                    &requested_path,
+                    "read",
                     &permissions,
-                    "list",
-                    Some(&dir_path),
-                    None,
                 ) {
-                    error!("Filesystem list permission denied: {}", e);
-                    ctx.data_mut().record_event(ChainEventData {
-                        event_type: "theater:simple/filesystem/permission-denied".to_string(),
-                        data: EventData::Filesystem(FilesystemEventData::PermissionDenied {
-                            operation: "list".to_string(),
-                            path: dir_path.clone(),
-                            reason: e.to_string(),
-                        }),
-                        timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                        description: Some(format!(
-                            "Permission denied for list operation on {}",
-                            dir_path
-                        )),
-                    });
-                    return Ok((Err(format!("Permission denied: {}", e)),));
-                }
+                    Ok(path) => path,
+                    Err(e) => {
+                        error!("Filesystem list permission denied: {}", e);
+                        ctx.data_mut().record_event(ChainEventData {
+                            event_type: "theater:simple/filesystem/permission-denied".to_string(),
+                            data: EventData::Filesystem(FilesystemEventData::PermissionDenied {
+                                operation: "list".to_string(),
+                                path: requested_path.clone(),
+                                reason: e.to_string(),
+                            }),
+                            timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                            description: Some(format!(
+                                "Permission denied for list operation on {}",
+                                requested_path
+                            )),
+                        });
+                        return Ok((Err(format!("Permission denied: {}", e)),));
+                    }
+                };
 
                 // Record directory listed call event
                 ctx.data_mut().record_event(ChainEventData {
                     event_type: "theater:simple/filesystem/list-files".to_string(),
                     data: EventData::Filesystem(FilesystemEventData::DirectoryListedCall {
-                        path: dir_path.clone(),
+                        path: requested_path.clone(),
                     }),
                     timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                    description: Some(format!("Listing files in directory {:?}", dir_path)),
+                    description: Some(format!("Listing files in directory {:?}", requested_path)),
                 });
 
                 info!("Listing files in {:?}", dir_path);
-                let dir_path = Path::new(&dir_path);
-
-                // append the file path to the allowed path
-                let dir_path = allowed_path.join(dir_path);
 
                 match dir_path.read_dir() {
                     Ok(entries) => {
