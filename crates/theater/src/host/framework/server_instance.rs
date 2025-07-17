@@ -1,20 +1,20 @@
-use anyhow::{anyhow, Result};
 use crate::actor::handle::ActorHandle;
 use std::panic;
 use axum::{
-    extract::{State, WebSocketUpgrade},
+    extract::{Path, State, WebSocketUpgrade, MatchedPath},
     http::{HeaderName, HeaderValue, Request, StatusCode},
     response::Response,
-    routing::{any, get},
+    routing::{any, get, post, put, delete, patch, head, options},
     Router,
 };
 use futures::{SinkExt, StreamExt};
 use std::collections::HashMap;
-use std::net::SocketAddr;
+
 use std::sync::Arc;
 use tokio::sync::{mpsc, RwLock};
 use tokio::task::JoinHandle;
 use tracing::{debug, error, info, warn};
+use anyhow::Result;
 
 use super::types::*;
 
@@ -52,6 +52,29 @@ pub struct WebSocketConfig {
 pub struct WebSocketConnection {
     pub id: u64,
     pub sender: mpsc::Sender<WebSocketMessage>,
+}
+
+// New: State for individual route handlers
+#[derive(Clone)]
+pub struct RouteHandlerState {
+    pub handler_id: u64,
+    pub server_state: Arc<ServerState>,
+}
+
+// New: State for WebSocket handlers  
+#[derive(Clone)]
+pub struct WebSocketHandlerState {
+    pub config: WebSocketConfig,
+    pub server_state: Arc<ServerState>,
+}
+
+// Simplified server state (no more route mapping needed)
+pub struct ServerState {
+    pub id: u64,
+    pub actor_handle: ActorHandle,
+    pub middlewares: HashMap<u64, MiddlewareConfig>,
+    pub websockets: HashMap<String, WebSocketConfig>,
+    pub active_ws_connections: Arc<RwLock<HashMap<u64, WebSocketConnection>>>,
 }
 
 pub struct ServerInstance {
@@ -104,18 +127,7 @@ impl ServerInstance {
         }
     }
 
-    pub fn is_running(&self) -> bool {
-        self.running
-    }
-
-    pub fn has_route(&self, route_id: u64) -> bool {
-        self.routes.contains_key(&route_id)
-    }
-
-    pub fn has_middleware(&self, middleware_id: u64) -> bool {
-        self.middlewares.contains_key(&middleware_id)
-    }
-
+    // Existing route/middleware/websocket management methods remain the same
     pub async fn add_route(
         &mut self,
         route_id: u64,
@@ -125,7 +137,12 @@ impl ServerInstance {
     ) -> Result<()> {
         // Validate path and method
         if !path.starts_with('/') {
-            return Err(anyhow!("Path must start with /"));
+            return Err(anyhow::anyhow!("Path must start with /"));
+        }
+
+        // Validate route pattern before adding
+        if let Err(e) = validate_route_pattern(&path) {
+            return Err(anyhow::anyhow!("Invalid route pattern: {}", e));
         }
 
         let route_config = RouteConfig {
@@ -140,32 +157,23 @@ impl ServerInstance {
     }
 
     pub fn remove_route(&mut self, route_id: u64) -> Result<()> {
-        if self.routes.remove(&route_id).is_none() {
-            return Err(anyhow!("Route not found: {}", route_id));
+        if self.routes.remove(&route_id).is_some() {
+            Ok(())
+        } else {
+            Err(anyhow::anyhow!("Route not found: {}", route_id))
         }
-        Ok(())
     }
 
-    pub fn add_middleware(
-        &mut self,
-        middleware_id: u64,
-        path: String,
-        handler_id: u64,
-    ) -> Result<()> {
-        // Validate path
-        if !path.starts_with('/') {
-            return Err(anyhow!("Path must start with /"));
-        }
+    pub fn has_route(&self, route_id: u64) -> bool {
+        self.routes.contains_key(&route_id)
+    }
 
-        // Calculate priority based on path specificity
-        // More specific paths (longer) should run later
-        let priority = path.len() as u32;
-
+    pub fn add_middleware(&mut self, middleware_id: u64, path: String, handler_id: u64) -> Result<()> {
         let middleware_config = MiddlewareConfig {
             id: middleware_id,
             path,
             handler_id,
-            priority,
+            priority: 100, // Default priority
         };
 
         self.middlewares.insert(middleware_id, middleware_config);
@@ -173,10 +181,15 @@ impl ServerInstance {
     }
 
     pub fn remove_middleware(&mut self, middleware_id: u64) -> Result<()> {
-        if self.middlewares.remove(&middleware_id).is_none() {
-            return Err(anyhow!("Middleware not found: {}", middleware_id));
+        if self.middlewares.remove(&middleware_id).is_some() {
+            Ok(())
+        } else {
+            Err(anyhow::anyhow!("Middleware not found: {}", middleware_id))
         }
-        Ok(())
+    }
+
+    pub fn has_middleware(&self, middleware_id: u64) -> bool {
+        self.middlewares.contains_key(&middleware_id)
     }
 
     pub fn enable_websocket(
@@ -186,168 +199,353 @@ impl ServerInstance {
         message_handler_id: u64,
         disconnect_handler_id: Option<u64>,
     ) -> Result<()> {
-        // Validate path
-        if !path.starts_with('/') {
-            return Err(anyhow!("Path must start with /"));
-        }
-
-        let websocket_config = WebSocketConfig {
+        let ws_config = WebSocketConfig {
             path: path.clone(),
             connect_handler_id,
             message_handler_id,
             disconnect_handler_id,
         };
 
-        self.websockets.insert(path, websocket_config);
+        self.websockets.insert(path, ws_config);
         Ok(())
     }
 
     pub fn disable_websocket(&mut self, path: &str) -> Result<()> {
-        if self.websockets.remove(path).is_none() {
-            return Err(anyhow!("WebSocket not enabled on path: {}", path));
+        if self.websockets.remove(path).is_some() {
+            Ok(())
+        } else {
+            Err(anyhow::anyhow!("WebSocket not found for path: {}", path))
         }
-        Ok(())
+    }
+
+    pub fn is_running(&self) -> bool {
+        self.running
+    }
+
+    // NEW: Completely rewritten router building using Axum's native routing
+    fn build_router(&self, actor_handle: ActorHandle) -> Router {
+        let mut router = Router::new();
+        
+        // Create shared base state
+        let base_state = Arc::new(ServerState {
+            id: self.id,
+            actor_handle,
+            middlewares: self.middlewares.clone(),
+            websockets: self.websockets.clone(),
+            active_ws_connections: self.active_ws_connections.clone(),
+        });
+
+        // Add each route individually with Axum's native method routing
+        for route in self.routes.values() {
+            let route_state = RouteHandlerState {
+                handler_id: route.handler_id,
+                server_state: base_state.clone(),
+            };
+
+            debug!("Adding route: {} {} -> handler {}", route.method, route.path, route.handler_id);
+
+            // Use the appropriate HTTP method handler - Axum handles all the wildcard magic!
+            let method_handler = match route.method.as_str() {
+                "GET" => get(Self::handle_request),
+                "POST" => post(Self::handle_request),
+                "PUT" => put(Self::handle_request),
+                "DELETE" => delete(Self::handle_request),
+                "PATCH" => patch(Self::handle_request),
+                "HEAD" => head(Self::handle_request),
+                "OPTIONS" => options(Self::handle_request),
+                "*" => any(Self::handle_request),
+                _ => {
+                    warn!("Unknown HTTP method: {}, using any()", route.method);
+                    any(Self::handle_request)
+                }
+            };
+
+            // Let Axum handle the path pattern matching - this is where the magic happens!
+            router = router.route(&route.path, method_handler.with_state(route_state));
+        }
+
+        // Add WebSocket routes
+        for (ws_path, ws_config) in &self.websockets {
+            let ws_state = WebSocketHandlerState {
+                config: ws_config.clone(),
+                server_state: base_state.clone(),
+            };
+            
+            debug!("Adding WebSocket route: {}", ws_path);
+            router = router.route(
+                ws_path,
+                get(Self::handle_websocket_upgrade).with_state(ws_state),
+            );
+        }
+
+        info!("Built router with {} routes and {} WebSocket endpoints", self.routes.len(), self.websockets.len());
+        router
+    }
+
+    // NEW: Much simpler request handler - Axum has done all the routing work!
+    async fn handle_request(
+        State(route_state): State<RouteHandlerState>,
+        matched_path: MatchedPath,
+        // Axum automatically extracts path parameters based on the route pattern
+        path_params: Option<Path<HashMap<String, String>>>,
+        req: Request<axum::body::Body>,
+    ) -> Response<axum::body::Body> {
+        
+        let actual_path = req.uri().path().to_string();
+        let method = req.method().as_str().to_uppercase();
+        
+        debug!("Handling {} request to {} (matched pattern: {})", method, actual_path, matched_path.as_str());
+        
+        // Convert request, including path parameters extracted by Axum
+        let mut theater_request = convert_request_with_axum_params(req, path_params).await;
+        
+        // Apply middlewares (using the actual requested path, not the pattern)
+        let middlewares = route_state.server_state.find_middlewares(&actual_path);
+        for middleware in middlewares {
+            match route_state.server_state.call_middleware(middleware.handler_id, theater_request.clone()).await {
+                Ok(result) => {
+                    if !result.proceed {
+                        debug!("Middleware {} rejected request", middleware.handler_id);
+                        return Response::builder()
+                            .status(StatusCode::FORBIDDEN)
+                            .body(axum::body::Body::empty())
+                            .unwrap_or_default();
+                    }
+                    theater_request = result.request;
+                }
+                Err(e) => {
+                    error!("Middleware error: {}", e);
+                    return Response::builder()
+                        .status(StatusCode::INTERNAL_SERVER_ERROR)
+                        .body(format!("Middleware error: {}", e).into())
+                        .unwrap_or_default();
+                }
+            }
+        }
+
+        // Call the specific handler for this route
+        match route_state.server_state.call_route_handler(route_state.handler_id, theater_request).await {
+            Ok(response) => {
+                debug!("Handler {} completed successfully", route_state.handler_id);
+                convert_response(response)
+            }
+            Err(e) => {
+                error!("Handler error for route {} ({}): {}", matched_path.as_str(), route_state.handler_id, e);
+                Response::builder()
+                    .status(StatusCode::INTERNAL_SERVER_ERROR)
+                    .body(format!("Handler error: {}", e).into())
+                    .unwrap_or_default()
+            }
+        }
+    }
+
+    // Updated WebSocket handler to use new state structure
+    async fn handle_websocket_upgrade(
+        State(ws_state): State<WebSocketHandlerState>,
+        ws: WebSocketUpgrade,
+        req: Request<axum::body::Body>,
+    ) -> Response<axum::body::Body> {
+        let path = req.uri().path().to_string();
+        
+        ws.on_upgrade(move |socket| async move {
+            Self::handle_websocket_connection(ws_state, socket, path).await;
+        })
+    }
+
+    async fn handle_websocket_connection(
+        ws_state: WebSocketHandlerState,
+        socket: axum::extract::ws::WebSocket,
+        path: String,
+    ) {
+        let connection_id = rand::random::<u64>();
+        let (mut sender, mut receiver) = socket.split();
+        let (tx, mut rx) = mpsc::channel::<WebSocketMessage>(100);
+
+        // Store connection
+        {
+            let mut connections = ws_state.server_state.active_ws_connections.write().await;
+            connections.insert(connection_id, WebSocketConnection {
+                id: connection_id,
+                sender: tx,
+            });
+        }
+
+        // Handle connect event
+        if let Some(connect_handler_id) = ws_state.config.connect_handler_id {
+            if let Err(e) = ws_state.server_state.actor_handle
+                .call_function::<(u64, u64, String, Option<String>), ()>(
+                    "theater:simple/http-handlers.handle-websocket-connect".to_string(),
+                    (connect_handler_id, connection_id, path.clone(), None),
+                )
+                .await
+            {
+                error!("WebSocket connect handler error: {}", e);
+            }
+        }
+
+        // Spawn task to send messages from channel to WebSocket
+        let send_task = tokio::spawn(async move {
+            while let Some(message) = rx.recv().await {
+                let ws_message = match message.ty {
+                    MessageType::Text => {
+                        if let Some(text) = message.text {
+                            axum::extract::ws::Message::Text(text.into())
+                        } else {
+                            continue;
+                        }
+                    }
+                    MessageType::Binary => {
+                        if let Some(data) = message.data {
+                            axum::extract::ws::Message::Binary(data.into())
+                        } else {
+                            continue;
+                        }
+                    }
+                    MessageType::Close => axum::extract::ws::Message::Close(None),
+                    MessageType::Ping => {
+                        if let Some(data) = message.data {
+                            axum::extract::ws::Message::Ping(data.into())
+                        } else {
+                            axum::extract::ws::Message::Ping(vec![].into())
+                        }
+                    }
+                    MessageType::Pong => {
+                        if let Some(data) = message.data {
+                            axum::extract::ws::Message::Pong(data.into())
+                        } else {
+                            axum::extract::ws::Message::Pong(vec![].into())
+                        }
+                    }
+                    _ => continue,
+                };
+
+                if sender.send(ws_message).await.is_err() {
+                    break;
+                }
+            }
+        });
+
+        // Handle incoming messages
+        while let Some(msg) = receiver.next().await {
+            match msg {
+                Ok(axum::extract::ws::Message::Text(text)) => {
+                    let message = WebSocketMessage {
+                        ty: MessageType::Text,
+                        data: None,
+                        text: Some(text.to_string()),
+                    };
+
+                    if let Err(e) = ws_state.server_state.actor_handle
+                        .call_function::<(u64, u64, WebSocketMessage), (Vec<WebSocketMessage>,)>(
+                            "theater:simple/http-handlers.handle-websocket-message".to_string(),
+                            (ws_state.config.message_handler_id, connection_id, message),
+                        )
+                        .await
+                    {
+                        error!("WebSocket message handler error: {}", e);
+                    }
+                }
+                Ok(axum::extract::ws::Message::Binary(data)) => {
+                    let message = WebSocketMessage {
+                        ty: MessageType::Binary,
+                        data: Some(data.to_vec()),
+                        text: None,
+                    };
+
+                    if let Err(e) = ws_state.server_state.actor_handle
+                        .call_function::<(u64, u64, WebSocketMessage), (Vec<WebSocketMessage>,)>(
+                            "theater:simple/http-handlers.handle-websocket-message".to_string(),
+                            (ws_state.config.message_handler_id, connection_id, message),
+                        )
+                        .await
+                    {
+                        error!("WebSocket message handler error: {}", e);
+                    }
+                }
+                Ok(axum::extract::ws::Message::Close(_)) => {
+                    break;
+                }
+                Err(e) => {
+                    error!("WebSocket error: {}", e);
+                    break;
+                }
+                _ => {}
+            }
+        }
+
+        // Clean up connection
+        {
+            let mut connections = ws_state.server_state.active_ws_connections.write().await;
+            connections.remove(&connection_id);
+        }
+
+        // Handle disconnect event
+        if let Some(disconnect_handler_id) = ws_state.config.disconnect_handler_id {
+            if let Err(e) = ws_state.server_state.actor_handle
+                .call_function::<(u64, u64), ()>(
+                    "theater:simple/http-handlers.handle-websocket-disconnect".to_string(),
+                    (disconnect_handler_id, connection_id),
+                )
+                .await
+            {
+                error!("WebSocket disconnect handler error: {}", e);
+            }
+        }
+
+        send_task.abort();
     }
 
     pub async fn start(&mut self, actor_handle: ActorHandle) -> Result<u16> {
         if self.running {
-            debug!("Server {} already running on port {}", self.id, self.port);
-            return Ok(self.port);
+            return Err(anyhow::anyhow!("Server is already running"));
         }
 
-        // Build router with panic catching
-        let router = match self.build_router_safe(actor_handle.clone()) {
-            Ok(router) => router,
-            Err(e) => {
-                error!("Failed to build router for server {}: {}", self.id, e);
-                return Err(anyhow!("Failed to build router: {}", e));
-            }
+        let router = self.build_router_safe(actor_handle).map_err(|e| anyhow::anyhow!(e))?;
+        let host = self.config.host.clone().unwrap_or_else(|| "0.0.0.0".to_string());
+        
+        let addr = if self.port == 0 {
+            format!("{}:0", host)
+        } else {
+            format!("{}:{}", host, self.port)
         };
 
-        // Create address
-        let host = self
-            .config
-            .host
-            .clone()
-            .unwrap_or_else(|| "127.0.0.1".to_string());
-
-        // Use port 0 to let the OS assign a free port if none specified
-        let port = self.config.port.unwrap_or(0);
-        let addr = format!("{}:{}", host, port).parse::<SocketAddr>()?;
-
-        // Start listener
-        debug!("Binding HTTP server {} to {}:{}", self.id, host, port);
-        let listener = match tokio::net::TcpListener::bind(addr).await {
-            Ok(l) => l,
-            Err(e) => {
-                error!(
-                    "Failed to bind HTTP server {} to {}:{}: {}",
-                    self.id, host, port, e
-                );
-                return Err(anyhow!("Failed to bind to address: {}", e));
-            }
-        };
-
+        let listener = tokio::net::TcpListener::bind(&addr).await?;
         let actual_addr = listener.local_addr()?;
-        let actual_port = actual_addr.port();
-        self.port = actual_port;
+        self.port = actual_addr.port();
 
-        // Create shutdown channel
         let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
         self.shutdown_tx = Some(shutdown_tx);
 
-        // Launch server in separate task with graceful shutdown
-        let server_id = self.id; // Clone for use in the task
         let server_handle = tokio::spawn(async move {
-            info!("HTTP server {} starting on {}", server_id, actual_addr);
+            let graceful = axum::serve(listener, router)
+                .with_graceful_shutdown(async {
+                    shutdown_rx.await.ok();
+                });
 
-            // Use Axum's serve function with our router and graceful shutdown
-            let server = axum::serve(listener, router);
-
-            // Run with graceful shutdown
-            match server
-                .with_graceful_shutdown(async move {
-                    match shutdown_rx.await {
-                        Ok(_) => debug!(
-                            "HTTP server {} received graceful shutdown signal",
-                            server_id
-                        ),
-                        Err(e) => {
-                            debug!("HTTP server {} shutdown channel closed: {}", server_id, e)
-                        }
-                    }
-                })
-                .await
-            {
-                Ok(_) => info!("HTTP server {} stopped gracefully", server_id),
-                Err(e) => error!("HTTP server {} error: {}", server_id, e),
+            if let Err(e) = graceful.await {
+                error!("Server error: {}", e);
             }
         });
 
         self.server_handle = Some(server_handle);
         self.running = true;
 
-        info!("HTTP server {} started on port {}", self.id, actual_port);
-        Ok(actual_port)
+        info!("HTTP server {} started on {}:{}", self.id, host, self.port);
+        Ok(self.port)
     }
 
     pub async fn stop(&mut self) -> Result<()> {
         if !self.running {
-            debug!("Server {} is not running, nothing to stop", self.id);
             return Ok(());
         }
 
-        debug!("Stopping HTTP server {} on port {}", self.id, self.port);
-
-        // First, signal graceful shutdown through the channel
-        if let Some(tx) = self.shutdown_tx.take() {
-            debug!(
-                "Sending graceful shutdown signal to HTTP server {}",
-                self.id
-            );
-            if let Err(e) = tx.send(()) {
-                warn!(
-                    "Failed to send shutdown signal to server {}: {:?}",
-                    self.id, e
-                );
-                // Continue with forceful shutdown as fallback
-            } else {
-                debug!("Graceful shutdown signal sent to HTTP server {}", self.id);
-            }
-        } else {
-            warn!(
-                "No shutdown channel available for server {}, using forceful shutdown",
-                self.id
-            );
+        if let Some(shutdown_tx) = self.shutdown_tx.take() {
+            let _ = shutdown_tx.send(());
         }
 
-        // Wait for the server task to finish with a timeout
         if let Some(handle) = self.server_handle.take() {
-            debug!("Waiting for HTTP server {} task to complete", self.id);
-            match tokio::time::timeout(std::time::Duration::from_secs(5), handle).await {
-                Ok(result) => match result {
-                    Ok(_) => debug!("HTTP server {} task completed normally", self.id),
-                    Err(e) => {
-                        if e.is_cancelled() {
-                            debug!("HTTP server {} task was cancelled", self.id);
-                        } else {
-                            error!("HTTP server {} task failed: {}", self.id, e);
-                        }
-                    }
-                },
-                Err(_) => {
-                    warn!(
-                        "HTTP server {} shutdown timed out after 5s, forcing abort",
-                        self.id
-                    );
-                    // Wait a bit more to ensure the abort happens
-                    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-                }
-            }
-        }
-
-        // Close all WebSocket connections
-        {
+            handle.abort();
+            
             let connections_count = self.active_ws_connections.read().await.len();
             if connections_count > 0 {
                 debug!(
@@ -362,138 +560,11 @@ impl ServerInstance {
         self.running = false;
         info!("HTTP server {} on port {} stopped", self.id, self.port);
 
-        // Add a small delay to ensure socket is released by the OS
-        debug!(
-            "Waiting for OS to release socket resources for server {}",
-            self.id
-        );
         tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-
         Ok(())
     }
 
-    fn build_router(&self, actor_handle: ActorHandle) -> Router {
-        // Start with an empty router
-        let mut router = Router::new();
-
-        // Create shared state for all handlers
-        let state = Arc::new(ServerState {
-            id: self.id,
-            actor_handle,
-            routes: self.routes.clone(),
-            middlewares: self.middlewares.clone(),
-            websockets: self.websockets.clone(),
-            active_ws_connections: self.active_ws_connections.clone(),
-        });
-
-        // Add routes
-        let mut route_paths = HashMap::<String, HashMap<String, RouteConfig>>::new();
-
-        // Group routes by path
-        for route in self.routes.values() {
-            route_paths
-                .entry(route.path.clone())
-                .or_insert_with(HashMap::new)
-                .insert(route.method.clone(), route.clone());
-        }
-
-        let route_paths_clone = route_paths.clone();
-
-        // Add each path with its methods
-        for (path, methods) in route_paths_clone {
-            // Check if this path has a WebSocket handler
-            let has_ws = self.websockets.contains_key(&path);
-
-            // For each path, collect the appropriate HTTP methods
-            let mut get_methods = Vec::new();
-            let mut post_methods = Vec::new();
-            let mut put_methods = Vec::new();
-            let mut delete_methods = Vec::new();
-            let mut patch_methods = Vec::new();
-            let mut options_methods = Vec::new();
-            let mut head_methods = Vec::new();
-            let mut other_methods = Vec::new();
-
-            for (method_name, route_config) in methods {
-                match method_name.as_str() {
-                    "GET" => get_methods.push(route_config),
-                    "POST" => post_methods.push(route_config),
-                    "PUT" => put_methods.push(route_config),
-                    "DELETE" => delete_methods.push(route_config),
-                    "PATCH" => patch_methods.push(route_config),
-                    "OPTIONS" => options_methods.push(route_config),
-                    "HEAD" => head_methods.push(route_config),
-                    _ => other_methods.push(route_config),
-                }
-            }
-
-            // Build router for this path
-            let mut path_router = Router::new();
-
-            // Add each method handler
-            if !get_methods.is_empty() {
-                path_router = path_router.route(&path, get(Self::handle_http_request));
-            }
-
-            if !post_methods.is_empty() {
-                path_router =
-                    path_router.route(&path, axum::routing::post(Self::handle_http_request));
-            }
-
-            if !put_methods.is_empty() {
-                path_router =
-                    path_router.route(&path, axum::routing::put(Self::handle_http_request));
-            }
-
-            if !delete_methods.is_empty() {
-                path_router =
-                    path_router.route(&path, axum::routing::delete(Self::handle_http_request));
-            }
-
-            if !patch_methods.is_empty() {
-                path_router =
-                    path_router.route(&path, axum::routing::patch(Self::handle_http_request));
-            }
-
-            if !options_methods.is_empty() {
-                path_router =
-                    path_router.route(&path, axum::routing::options(Self::handle_http_request));
-            }
-
-            if !head_methods.is_empty() {
-                path_router =
-                    path_router.route(&path, axum::routing::head(Self::handle_http_request));
-            }
-
-            if !other_methods.is_empty() {
-                path_router = path_router.route(&path, any(Self::handle_http_request));
-            }
-
-            // Add WebSocket handler if needed
-            if has_ws {
-                path_router = path_router.route(&path, get(Self::handle_websocket_upgrade));
-            }
-
-            // Merge with main router
-            router = router.merge(path_router.with_state(state.clone()));
-        }
-
-        // Add WebSocket paths that don't have HTTP handlers
-        for (ws_path, _) in &self.websockets {
-            if !route_paths.contains_key(ws_path) {
-                router = router.route(
-                    ws_path,
-                    get(Self::handle_websocket_upgrade).with_state(state.clone()),
-                );
-            }
-        }
-
-        router
-    }
-
-    // New safe router building method with panic catching
     fn build_router_safe(&self, actor_handle: ActorHandle) -> Result<Router, String> {
-        // Use panic::catch_unwind to catch any panics from Axum
         let result = panic::catch_unwind(panic::AssertUnwindSafe(|| {
             self.build_router(actor_handle)
         }));
@@ -501,7 +572,6 @@ impl ServerInstance {
         match result {
             Ok(router) => Ok(router),
             Err(panic_payload) => {
-                // Convert panic to error message
                 let panic_msg = if let Some(s) = panic_payload.downcast_ref::<String>() {
                     s.clone()
                 } else if let Some(s) = panic_payload.downcast_ref::<&str>() {
@@ -510,7 +580,6 @@ impl ServerInstance {
                     "Unknown panic occurred while building router".to_string()
                 };
 
-                // Try to extract more specific route validation errors
                 let error_msg = if panic_msg.contains("Path segments must not start with `*`") {
                     let suggestion = "Path segments must not start with `*`. For wildcard capture, use `{*wildcard}` syntax instead.";
                     format!("Invalid route pattern: {}. {}", panic_msg, suggestion)
@@ -524,347 +593,21 @@ impl ServerInstance {
             }
         }
     }
-
-    // Optional: Add route pattern validation helper
-    fn validate_route_pattern(path: &str) -> Result<(), String> {
-        // Basic validation for common Axum v0.7+ pattern issues
-        if path.contains("/*") && !path.contains("/{*") {
-            return Err(format!(
-                "Invalid wildcard pattern '{}'. Use '{{*wildcard}}' instead of '*' for wildcard capture.",
-                path
-            ));
-        }
-
-        // Check for other common pattern issues
-        if path.contains("{") && !path.contains("}") {
-            return Err(format!("Unmatched '{{' in route pattern: {}", path));
-        }
-
-        if path.contains("}") && !path.contains("{") {
-            return Err(format!("Unmatched '}}' in route pattern: {}", path));
-        }
-
-        // More validation rules can be added here
-        Ok(())
-    }
-
-    async fn handle_http_request(
-        State(state): State<Arc<ServerState>>,
-        req: Request<axum::body::Body>,
-    ) -> Response<axum::body::Body> {
-        // Extract path and method
-        let path = req.uri().path().to_string();
-        let method = req.method().as_str().to_uppercase();
-
-        // Find matching route
-        let route = state.find_route(&path, &method);
-
-        if let Some(route) = route {
-            // Convert Axum request to our HTTP request format
-            let mut theater_request = convert_request(req).await;
-
-            // Apply middlewares
-            let middlewares = state.find_middlewares(&path);
-            for middleware in middlewares {
-                match state
-                    .call_middleware(middleware.handler_id, theater_request.clone())
-                    .await
-                {
-                    Ok(result) => {
-                        if !result.proceed {
-                            // Middleware rejected the request
-                            return Response::builder()
-                                .status(StatusCode::FORBIDDEN)
-                                .body(axum::body::Body::empty())
-                                .unwrap_or_default();
-                        }
-                        theater_request = result.request;
-                    }
-                    Err(e) => {
-                        error!("Middleware error: {}", e);
-                        return Response::builder()
-                            .status(StatusCode::INTERNAL_SERVER_ERROR)
-                            .body(format!("Middleware error: {}", e).into())
-                            .unwrap_or_default();
-                    }
-                }
-            }
-
-            // Call the route handler
-            match state
-                .call_route_handler(route.handler_id, theater_request)
-                .await
-            {
-                Ok(response) => convert_response(response),
-                Err(e) => {
-                    error!("Handler error: {}", e);
-                    Response::builder()
-                        .status(StatusCode::INTERNAL_SERVER_ERROR)
-                        .body(format!("Handler error: {}", e).into())
-                        .unwrap_or_default()
-                }
-            }
-        } else {
-            // No matching route
-            Response::builder()
-                .status(StatusCode::NOT_FOUND)
-                .body(axum::body::Body::empty())
-                .unwrap_or_default()
-        }
-    }
-
-    async fn handle_websocket_upgrade(
-        State(state): State<Arc<ServerState>>,
-        ws: WebSocketUpgrade,
-        req: Request<axum::body::Body>,
-    ) -> Response<axum::body::Body> {
-        // Extract path
-        let path = req.uri().path().to_string();
-
-        // Find WebSocket configuration for this path
-        if let Some(config) = state.websockets.get(&path).cloned() {
-            // Generate a connection ID
-            let connection_id = rand::random::<u64>();
-
-            // Extract query parameters
-            let query = req.uri().query().map(|q| q.to_string());
-
-            // Clone the path and state for use in the closure
-            let path_clone = path.clone();
-            let state_clone = state.clone();
-
-            // Upgrade the connection
-            ws.on_upgrade(move |socket| async move {
-                // Handle the WebSocket connection
-                Self::handle_websocket_connection(
-                    state_clone,
-                    socket,
-                    connection_id,
-                    path_clone,
-                    query,
-                    config,
-                )
-                .await;
-            })
-        } else {
-            // No WebSocket configured for this path
-            Response::builder()
-                .status(StatusCode::NOT_FOUND)
-                .body("WebSocket not available on this path".into())
-                .unwrap_or_default()
-        }
-    }
-
-    async fn handle_websocket_connection(
-        state: Arc<ServerState>,
-        socket: axum::extract::ws::WebSocket,
-        connection_id: u64,
-        path: String,
-        query: Option<String>,
-        config: WebSocketConfig,
-    ) {
-        let (mut ws_sender, mut ws_receiver) = socket.split();
-
-        // Create a channel for sending messages back to the WebSocket
-        let (sender, mut receiver) = mpsc::channel::<WebSocketMessage>(100);
-
-        // Store the connection
-        {
-            let mut connections = state.active_ws_connections.write().await;
-            connections.insert(
-                connection_id,
-                WebSocketConnection {
-                    id: connection_id,
-                    sender: sender.clone(),
-                },
-            );
-        }
-
-        // Call connect handler if configured
-        if let Some(handler_id) = config.connect_handler_id {
-            if let Err(e) = state
-                .call_websocket_connect(handler_id, connection_id, path.clone(), query.clone())
-                .await
-            {
-                error!("WebSocket connect handler error: {}", e);
-            }
-        }
-
-        // Spawn task to forward messages to WebSocket
-        let forward_task = tokio::spawn(async move {
-            while let Some(message) = receiver.recv().await {
-                match message.ty {
-                    MessageType::Text => {
-                        if let Some(text) = message.text {
-                            if let Err(e) = ws_sender
-                                .send(axum::extract::ws::Message::Text(text.into()))
-                                .await
-                            {
-                                error!("Error sending WebSocket text message: {}", e);
-                                break;
-                            }
-                        }
-                    }
-                    MessageType::Binary => {
-                        if let Some(data) = message.data {
-                            if let Err(e) = ws_sender
-                                .send(axum::extract::ws::Message::Binary(data.into()))
-                                .await
-                            {
-                                error!("Error sending WebSocket binary message: {}", e);
-                                break;
-                            }
-                        }
-                    }
-                    MessageType::Close => {
-                        let _ = ws_sender.close().await;
-                        break;
-                    }
-                    MessageType::Ping => {
-                        if let Err(e) = ws_sender
-                            .send(axum::extract::ws::Message::Ping(vec![].into()))
-                            .await
-                        {
-                            error!("Error sending WebSocket ping: {}", e);
-                            break;
-                        }
-                    }
-                    MessageType::Pong => {
-                        if let Err(e) = ws_sender
-                            .send(axum::extract::ws::Message::Pong(vec![].into()))
-                            .await
-                        {
-                            error!("Error sending WebSocket pong: {}", e);
-                            break;
-                        }
-                    }
-                    _ => {}
-                }
-            }
-        });
-
-        // Process incoming messages
-        while let Some(result) = ws_receiver.next().await {
-            match result {
-                Ok(message) => {
-                    let theater_message = match message {
-                        axum::extract::ws::Message::Text(text) => WebSocketMessage {
-                            ty: MessageType::Text,
-                            data: None,
-                            text: Some(text.to_string()),
-                        },
-                        axum::extract::ws::Message::Binary(data) => WebSocketMessage {
-                            ty: MessageType::Binary,
-                            data: Some(data.to_vec()),
-                            text: None,
-                        },
-                        axum::extract::ws::Message::Close(_) => {
-                            // Call disconnect handler
-                            if let Some(handler_id) = config.disconnect_handler_id {
-                                if let Err(e) = state
-                                    .call_websocket_disconnect(handler_id, connection_id)
-                                    .await
-                                {
-                                    error!("WebSocket disconnect handler error: {}", e);
-                                }
-                            }
-
-                            break;
-                        }
-                        axum::extract::ws::Message::Ping(_) => WebSocketMessage {
-                            ty: MessageType::Ping,
-                            data: None,
-                            text: None,
-                        },
-                        axum::extract::ws::Message::Pong(_) => WebSocketMessage {
-                            ty: MessageType::Pong,
-                            data: None,
-                            text: None,
-                        },
-                    };
-
-                    // Call message handler
-                    match state
-                        .call_websocket_message(
-                            config.message_handler_id,
-                            connection_id,
-                            theater_message,
-                        )
-                        .await
-                    {
-                        Ok(responses) => {
-                            // Forward any response messages back
-                            for response in responses {
-                                if let Err(e) = sender.send(response).await {
-                                    error!("Error sending response to WebSocket: {}", e);
-                                }
-                            }
-                        }
-                        Err(e) => {
-                            error!("WebSocket message handler error: {}", e);
-                        }
-                    }
-                }
-                Err(e) => {
-                    error!("WebSocket error: {}", e);
-                    break;
-                }
-            }
-        }
-
-        // Clean up
-        forward_task.abort();
-
-        // Remove the connection
-        {
-            let mut connections = state.active_ws_connections.write().await;
-            connections.remove(&connection_id);
-        }
-
-        // Call disconnect handler if not already called
-        if let Some(handler_id) = config.disconnect_handler_id {
-            if let Err(e) = state
-                .call_websocket_disconnect(handler_id, connection_id)
-                .await
-            {
-                error!("WebSocket disconnect handler error: {}", e);
-            }
-        }
-    }
-}
-
-// Helper struct for router state
-#[allow(dead_code)]
-pub struct ServerState {
-    pub id: u64,
-    pub actor_handle: ActorHandle,
-    pub routes: HashMap<u64, RouteConfig>,
-    pub middlewares: HashMap<u64, MiddlewareConfig>,
-    pub websockets: HashMap<String, WebSocketConfig>,
-    pub active_ws_connections: Arc<RwLock<HashMap<u64, WebSocketConnection>>>,
 }
 
 impl ServerState {
-    pub fn find_route(&self, path: &str, method: &str) -> Option<&RouteConfig> {
-        self.routes
-            .values()
-            .find(|route| route.path == path && (route.method == method || route.method == "*"))
-    }
-
     pub fn find_middlewares(&self, path: &str) -> Vec<&MiddlewareConfig> {
         let mut result: Vec<&MiddlewareConfig> = self
             .middlewares
             .values()
             .filter(|middleware| {
                 // Match if the middleware path is a prefix of the request path
-                // or is exactly the request path
+                // or is exactly the request path or is catch-all
                 path.starts_with(&middleware.path) || middleware.path == "/*"
             })
             .collect();
 
-        // Sort by priority
         result.sort_by(|a, b| a.priority.cmp(&b.priority));
-
         result
     }
 
@@ -873,7 +616,6 @@ impl ServerState {
         handler_id: u64,
         request: HttpRequest,
     ) -> Result<HttpResponse> {
-        // Find handler function name
         let result = self
             .actor_handle
             .call_function::<(u64, HttpRequest), (HttpResponse,)>(
@@ -890,7 +632,6 @@ impl ServerState {
         handler_id: u64,
         request: HttpRequest,
     ) -> Result<MiddlewareResult> {
-        // Call middleware function
         let result = self
             .actor_handle
             .call_function::<(u64, HttpRequest), (MiddlewareResult,)>(
@@ -901,79 +642,56 @@ impl ServerState {
 
         Ok(result.0)
     }
-
-    pub async fn call_websocket_connect(
-        &self,
-        handler_id: u64,
-        connection_id: u64,
-        path: String,
-        query: Option<String>,
-    ) -> Result<()> {
-        // Call connect handler
-        self.actor_handle
-            .call_function::<(u64, u64, String, Option<String>), ()>(
-                "theater:simple/http-handlers.handle-websocket-connect".to_string(),
-                (handler_id, connection_id, path, query),
-            )
-            .await?;
-
-        Ok(())
-    }
-
-    pub async fn call_websocket_message(
-        &self,
-        handler_id: u64,
-        connection_id: u64,
-        message: WebSocketMessage,
-    ) -> Result<Vec<WebSocketMessage>> {
-        // Call message handler
-        let result = self
-            .actor_handle
-            .call_function::<(u64, u64, WebSocketMessage), (Vec<WebSocketMessage>,)>(
-                "theater:simple/http-handlers.handle-websocket-message".to_string(),
-                (handler_id, connection_id, message),
-            )
-            .await?;
-
-        Ok(result.0)
-    }
-
-    pub async fn call_websocket_disconnect(
-        &self,
-        handler_id: u64,
-        connection_id: u64,
-    ) -> Result<()> {
-        // Call disconnect handler
-        self.actor_handle
-            .call_function::<(u64, u64), ()>(
-                "theater:simple/http-handlers.handle-websocket-disconnect".to_string(),
-                (handler_id, connection_id),
-            )
-            .await?;
-
-        Ok(())
-    }
 }
 
-// Helper functions to convert between Axum and Theater types
-async fn convert_request(req: Request<axum::body::Body>) -> HttpRequest {
-    // Split into parts to access headers and body separately
-    let (parts, body) = req.into_parts();
+// Route pattern validation helper
+fn validate_route_pattern(path: &str) -> Result<(), String> {
+    // Basic validation for common Axum v0.7+ pattern issues
+    if path.contains("/*") && !path.contains("/{*") {
+        return Err(format!(
+            "Invalid wildcard pattern '{}'. Use '{{*wildcard}}' instead of '*' for wildcard capture.",
+            path
+        ));
+    }
 
+    // Check for other common pattern issues
+    if path.contains("{") && !path.contains("}") {
+        return Err(format!("Unmatched '{{' in route pattern: {}", path));
+    }
+
+    if path.contains("}") && !path.contains("{") {
+        return Err(format!("Unmatched '}}' in route pattern: {}", path));
+    }
+
+    Ok(())
+}
+
+// NEW: Enhanced request conversion that includes Axum-extracted path parameters
+async fn convert_request_with_axum_params(
+    req: Request<axum::body::Body>,
+    path_params: Option<Path<HashMap<String, String>>>,
+) -> HttpRequest {
+    let method = req.method().as_str().to_string();
+    let uri = req.uri().to_string();
+    
     // Extract headers
-    let headers = parts
-        .headers
-        .iter()
-        .map(|(name, value)| {
-            (
-                name.as_str().to_string(),
-                value.to_str().unwrap_or_default().to_string(),
-            )
-        })
-        .collect();
-
+    let mut headers = Vec::new();
+    for (name, value) in req.headers() {
+        if let Ok(value_str) = value.to_str() {
+            headers.push((name.to_string(), value_str.to_string()));
+        }
+    }
+    
+    // Add path parameters as special headers so WASM handlers can access them
+    if let Some(Path(params)) = path_params {
+        for (key, value) in params {
+            headers.push((format!("X-Route-Param-{}", key), value.clone()));
+            debug!("Extracted path parameter: {} = {}", key, value);
+        }
+    }
+    
     // Read body
-    let body_bytes = match axum::body::to_bytes(body, 100 * 1024 * 1024).await {
+    let body = match axum::body::to_bytes(req.into_body(), 100 * 1024 * 1024).await {
         Ok(bytes) => Some(bytes.to_vec()),
         Err(e) => {
             error!("Failed to read request body: {}", e);
@@ -982,35 +700,28 @@ async fn convert_request(req: Request<axum::body::Body>) -> HttpRequest {
     };
 
     HttpRequest {
-        method: parts.method.as_str().to_string(),
-        uri: parts.uri.to_string(),
+        method,
+        uri,
         headers,
-        body: body_bytes,
+        body,
     }
 }
 
+// Helper function to convert Theater response to Axum response
 fn convert_response(response: HttpResponse) -> Response<axum::body::Body> {
-    // Create response builder with status
-    let status = StatusCode::from_u16(response.status).unwrap_or(StatusCode::OK);
-    let mut builder = Response::builder().status(status);
+    let mut builder = Response::builder().status(response.status);
 
     // Add headers
-    if let Some(headers) = builder.headers_mut() {
-        for (name, value) in response.headers {
-            if let Ok(header_name) = HeaderName::from_bytes(name.as_bytes()) {
-                if let Ok(header_value) = HeaderValue::from_str(&value) {
-                    headers.insert(header_name, header_value);
-                }
-            }
+    for (name, value) in response.headers {
+        if let (Ok(header_name), Ok(header_value)) = (
+            HeaderName::try_from(name),
+            HeaderValue::try_from(value),
+        ) {
+            builder = builder.header(header_name, header_value);
         }
     }
 
-    // Create response with body
-    if let Some(body) = response.body {
-        builder
-            .body(axum::body::Body::from(body))
-            .unwrap_or_default()
-    } else {
-        builder.body(axum::body::Body::empty()).unwrap_or_default()
-    }
+    // Set body
+    let body = response.body.unwrap_or_default();
+    builder.body(axum::body::Body::from(body)).unwrap_or_default()
 }
