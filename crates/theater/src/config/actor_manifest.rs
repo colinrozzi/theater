@@ -343,7 +343,23 @@ impl ManifestConfig {
     /// }
     /// ```
     pub fn from_str(content: &str) -> anyhow::Result<Self> {
-        let config: ManifestConfig = toml::from_str(content)?;
+        tracing::info!("Parsing manifest TOML content: {}", content);
+        
+        let config: ManifestConfig = match toml::from_str(content) {
+            Ok(config) => {
+                tracing::info!("Successfully parsed manifest TOML");
+                config
+            }
+            Err(e) => {
+                tracing::error!("Failed to parse manifest TOML: {}", e);
+                return Err(e.into());
+            }
+        };
+        
+        // Debug logging to trace permission parsing
+        tracing::info!("Parsed manifest permission_policy: {:?}", config.permission_policy);
+        tracing::info!("Parsed manifest file_system inheritance: {:?}", config.permission_policy.file_system);
+        
         Ok(config)
     }
 
@@ -486,6 +502,77 @@ impl ManifestConfig {
         &self,
         parent_permissions: &HandlerPermission,
     ) -> HandlerPermission {
-        HandlerPermission::calculate_effective(parent_permissions, &self.permission_policy)
+        tracing::info!("Calculating effective permissions from parent: {:?}", parent_permissions);
+        tracing::info!("Using permission policy: {:?}", self.permission_policy);
+        
+        let effective = HandlerPermission::calculate_effective(parent_permissions, &self.permission_policy);
+        
+        tracing::info!("Calculated effective permissions: {:?}", effective);
+        tracing::info!("Effective filesystem permissions: {:?}", effective.file_system);
+        
+        effective
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::permissions::*;
+    
+    #[test]
+    fn test_manifest_permission_policy_parsing() {
+        // Test the correct permission_policy structure
+        let toml_content = r#"
+            name = "test-actor"
+            version = "0.1.0"
+            component = "test.wasm"
+            
+            [permission_policy.file_system]
+            type = "restrict"
+            [permission_policy.file_system.config]
+            read = true
+            write = true
+            execute = false
+            allowed_paths = ["/tmp/test"]
+        "#;
+        
+        let manifest = ManifestConfig::from_str(toml_content).unwrap();
+        
+        // Check that the permission policy was parsed correctly
+        match &manifest.permission_policy.file_system {
+            crate::config::inheritance::HandlerInheritance::Restrict(perms) => {
+                assert_eq!(perms.read, true);
+                assert_eq!(perms.write, true);
+                assert_eq!(perms.execute, false);
+                assert_eq!(perms.allowed_paths, Some(vec!["/tmp/test".to_string()]));
+            }
+            _ => panic!("Expected Restrict variant with FileSystemPermissions"),
+        }
+    }
+    
+    #[test]
+    fn test_manifest_wrong_permissions_structure() {
+        // Test what happens with your original structure
+        let toml_content = r#"
+            name = "test-actor"
+            version = "0.1.0"
+            component = "test.wasm"
+            
+            [permissions.file_system]
+            read = true
+            write = true
+            execute = false
+            allowed_paths = ["/tmp/test"]
+        "#;
+        
+        let manifest = ManifestConfig::from_str(toml_content).unwrap();
+        
+        // This should result in default (Inherit) since the structure is wrong
+        match &manifest.permission_policy.file_system {
+            crate::config::inheritance::HandlerInheritance::Inherit => {
+                println!("As expected, wrong structure results in Inherit");
+            }
+            other => panic!("Expected Inherit, got: {:?}", other),
+        }
     }
 }

@@ -385,7 +385,7 @@ impl HandlerPermission {
                 execute: true,
                 allowed_commands: None, // None means all commands allowed
                 new_dir: Some(true),
-                allowed_paths: None, // None means all paths allowed
+                allowed_paths: Some(vec!["/".to_string()]), // Root can access all paths
             }),
             http_client: Some(HttpClientPermissions {
                 allowed_methods: None, // None means all methods allowed
