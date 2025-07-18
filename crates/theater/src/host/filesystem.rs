@@ -2,7 +2,7 @@ use crate::actor::handle::ActorHandle;
 use crate::actor::store::ActorStore;
 use crate::actor::types::ActorError;
 use crate::config::actor_manifest::FileSystemHandlerConfig;
-use crate::config::enforcement::PermissionChecker;
+
 use crate::events::filesystem::{CommandError, CommandResult, CommandSuccess, FilesystemEventData};
 use crate::events::{ChainEventData, EventData};
 use crate::shutdown::ShutdownReceiver;
@@ -88,9 +88,6 @@ impl FileSystemHost {
             format!("Failed to resolve path '{}': {}", full_path.display(), e)
         })?;
 
-        // 3. Check if resolved path is within allowed paths using directory-aware logic
-        let _resolved_str = resolved_path.to_string_lossy();
-        
         // 3. Check if resolved path is within allowed paths using dunce
         if let Some(perms) = permissions {
             if let Some(allowed_paths) = &perms.allowed_paths {
@@ -294,56 +291,56 @@ impl FileSystemHost {
             },
         );
 
-        let allowed_path = self.path.clone();
         let permissions = self.permissions.clone();
 
+        let filesystem_host = self.clone();
         let _ = interface.func_wrap(
             "write-file",
             move |mut ctx: StoreContextMut<'_, ActorStore>,
-                  (file_path, contents): (String, String)|
+                  (requested_path, contents): (String, String)|
                   -> Result<(Result<(), String>,)> {
-                // PERMISSION CHECK BEFORE OPERATION
-                if let Err(e) = PermissionChecker::check_filesystem_operation(
-                    &permissions,
+                // RESOLVE AND VALIDATE PATH
+                let file_path = match filesystem_host.resolve_and_validate_path(
+                    &requested_path,
                     "write",
-                    Some(&file_path),
-                    None,
+                    &permissions,
                 ) {
-                    error!("Filesystem write permission denied: {}", e);
-                    ctx.data_mut().record_event(ChainEventData {
-                        event_type: "theater:simple/filesystem/permission-denied".to_string(),
-                        data: EventData::Filesystem(FilesystemEventData::PermissionDenied {
-                            operation: "write".to_string(),
-                            path: file_path.clone(),
-                            reason: e.to_string(),
-                        }),
-                        timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                        description: Some(format!(
-                            "Permission denied for write operation on {}",
-                            file_path
-                        )),
-                    });
-                    return Ok((Err(format!("Permission denied: {}", e)),));
-                }
+                    Ok(path) => path,
+                    Err(e) => {
+                        error!("Filesystem write permission denied: {}", e);
+                        ctx.data_mut().record_event(ChainEventData {
+                            event_type: "theater:simple/filesystem/permission-denied".to_string(),
+                            data: EventData::Filesystem(FilesystemEventData::PermissionDenied {
+                                operation: "write".to_string(),
+                                path: requested_path.clone(),
+                                reason: e.to_string(),
+                            }),
+                            timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                            description: Some(format!(
+                                "Permission denied for write operation on {}",
+                                requested_path
+                            )),
+                        });
+                        return Ok((Err(format!("Permission denied: {}", e)),));
+                    }
+                };
 
                 // Record file write call event
                 ctx.data_mut().record_event(ChainEventData {
                     event_type: "theater:simple/filesystem/write-file".to_string(),
                     data: EventData::Filesystem(FilesystemEventData::FileWriteCall {
-                        path: file_path.clone(),
+                        path: requested_path.clone(),
                         contents: contents.clone().into(),
                     }),
                     timestamp: chrono::Utc::now().timestamp_millis() as u64,
                     description: Some(format!(
                         "Writing {} bytes to file {:?}",
                         contents.len(),
-                        file_path
+                        requested_path
                     )),
                 });
 
-                let file_path = allowed_path.join(Path::new(&file_path));
                 info!("Writing file {:?}", file_path);
-                info!("Base path: {:?}", allowed_path);
 
                 match File::create(&file_path) {
                     Ok(mut file) => match file.write_all(contents.as_bytes()) {
@@ -407,7 +404,6 @@ impl FileSystemHost {
             },
         );
 
-        let allowed_path = self.path.clone();
         let permissions = self.permissions.clone();
 
         let filesystem_host = self.clone();
@@ -503,49 +499,50 @@ impl FileSystemHost {
             },
         );
 
-        let allowed_path = self.path.clone();
+        let filesystem_host = self.clone();
         let permissions = self.permissions.clone();
 
         let _ = interface.func_wrap(
             "delete-file",
             move |mut ctx: StoreContextMut<'_, ActorStore>,
-                  (file_path,): (String,)|
+                  (requested_path,): (String,)|
                   -> Result<(Result<(), String>,)> {
-                // PERMISSION CHECK BEFORE OPERATION
-                if let Err(e) = PermissionChecker::check_filesystem_operation(
-                    &permissions,
+                // RESOLVE AND VALIDATE PATH
+                let file_path = match filesystem_host.resolve_and_validate_path(
+                    &requested_path,
                     "delete",
-                    Some(&file_path),
-                    None,
+                    &permissions,
                 ) {
-                    error!("Filesystem delete permission denied: {}", e);
-                    ctx.data_mut().record_event(ChainEventData {
-                        event_type: "theater:simple/filesystem/permission-denied".to_string(),
-                        data: EventData::Filesystem(FilesystemEventData::PermissionDenied {
-                            operation: "delete".to_string(),
-                            path: file_path.clone(),
-                            reason: e.to_string(),
-                        }),
-                        timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                        description: Some(format!(
-                            "Permission denied for delete operation on {}",
-                            file_path
-                        )),
-                    });
-                    return Ok((Err(format!("Permission denied: {}", e)),));
-                }
+                    Ok(path) => path,
+                    Err(e) => {
+                        error!("Filesystem delete permission denied: {}", e);
+                        ctx.data_mut().record_event(ChainEventData {
+                            event_type: "theater:simple/filesystem/permission-denied".to_string(),
+                            data: EventData::Filesystem(FilesystemEventData::PermissionDenied {
+                                operation: "delete".to_string(),
+                                path: requested_path.clone(),
+                                reason: e.to_string(),
+                            }),
+                            timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                            description: Some(format!(
+                                "Permission denied for delete operation on {}",
+                                requested_path
+                            )),
+                        });
+                        return Ok((Err(format!("Permission denied: {}", e)),));
+                    }
+                };
 
                 // Record file delete call event
                 ctx.data_mut().record_event(ChainEventData {
                     event_type: "theater:simple/filesystem/delete-file".to_string(),
                     data: EventData::Filesystem(FilesystemEventData::FileDeleteCall {
-                        path: file_path.clone(),
+                        path: requested_path.clone(),
                     }),
                     timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                    description: Some(format!("Deleting file {:?}", file_path)),
+                    description: Some(format!("Deleting file {:?}", requested_path)),
                 });
 
-                let file_path = allowed_path.join(Path::new(&file_path));
                 info!("Deleting file {:?}", file_path);
 
                 match std::fs::remove_file(&file_path) {
@@ -586,50 +583,50 @@ impl FileSystemHost {
             },
         );
 
-        let allowed_path = self.path.clone();
+        let filesystem_host = self.clone();
         let permissions = self.permissions.clone();
 
         let _ = interface.func_wrap(
             "create-dir",
             move |mut ctx: StoreContextMut<'_, ActorStore>,
-                  (dir_path,): (String,)|
+                  (requested_path,): (String,)|
                   -> Result<(Result<(), String>,)> {
-                // PERMISSION CHECK BEFORE OPERATION
-                if let Err(e) = PermissionChecker::check_filesystem_operation(
-                    &permissions,
+                // RESOLVE AND VALIDATE PATH
+                let dir_path = match filesystem_host.resolve_and_validate_path(
+                    &requested_path,
                     "write",
-                    Some(&dir_path),
-                    None,
+                    &permissions,
                 ) {
-                    error!("Filesystem create directory permission denied: {}", e);
-                    ctx.data_mut().record_event(ChainEventData {
-                        event_type: "theater:simple/filesystem/permission-denied".to_string(),
-                        data: EventData::Filesystem(FilesystemEventData::PermissionDenied {
-                            operation: "create-dir".to_string(),
-                            path: dir_path.clone(),
-                            reason: e.to_string(),
-                        }),
-                        timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                        description: Some(format!(
-                            "Permission denied for create-dir operation on {}",
-                            dir_path
-                        )),
-                    });
-                    return Ok((Err(format!("Permission denied: {}", e)),));
-                }
+                    Ok(path) => path,
+                    Err(e) => {
+                        error!("Filesystem create directory permission denied: {}", e);
+                        ctx.data_mut().record_event(ChainEventData {
+                            event_type: "theater:simple/filesystem/permission-denied".to_string(),
+                            data: EventData::Filesystem(FilesystemEventData::PermissionDenied {
+                                operation: "create-dir".to_string(),
+                                path: requested_path.clone(),
+                                reason: e.to_string(),
+                            }),
+                            timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                            description: Some(format!(
+                                "Permission denied for create-dir operation on {}",
+                                requested_path
+                            )),
+                        });
+                        return Ok((Err(format!("Permission denied: {}", e)),));
+                    }
+                };
 
                 // Record directory created call event
                 ctx.data_mut().record_event(ChainEventData {
                     event_type: "theater:simple/filesystem/create-dir".to_string(),
                     data: EventData::Filesystem(FilesystemEventData::DirectoryCreatedCall {
-                        path: dir_path.clone(),
+                        path: requested_path.clone(),
                     }),
                     timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                    description: Some(format!("Creating directory {:?}", dir_path)),
+                    description: Some(format!("Creating directory {:?}", requested_path)),
                 });
 
-                info!("Allowed path: {:?}", allowed_path);
-                let dir_path = allowed_path.join(Path::new(&dir_path));
                 info!("Creating directory {:?}", dir_path);
 
                 match std::fs::create_dir(&dir_path) {
@@ -675,49 +672,50 @@ impl FileSystemHost {
             },
         );
 
-        let allowed_path = self.path.clone();
+        let filesystem_host = self.clone();
         let permissions = self.permissions.clone();
 
         let _ = interface.func_wrap(
             "delete-dir",
             move |mut ctx: StoreContextMut<'_, ActorStore>,
-                  (dir_path,): (String,)|
+                  (requested_path,): (String,)|
                   -> Result<(Result<(), String>,)> {
-                // PERMISSION CHECK BEFORE OPERATION
-                if let Err(e) = PermissionChecker::check_filesystem_operation(
-                    &permissions,
+                // RESOLVE AND VALIDATE PATH
+                let dir_path = match filesystem_host.resolve_and_validate_path(
+                    &requested_path,
                     "delete",
-                    Some(&dir_path),
-                    None,
+                    &permissions,
                 ) {
-                    error!("Filesystem delete directory permission denied: {}", e);
-                    ctx.data_mut().record_event(ChainEventData {
-                        event_type: "theater:simple/filesystem/permission-denied".to_string(),
-                        data: EventData::Filesystem(FilesystemEventData::PermissionDenied {
-                            operation: "delete-dir".to_string(),
-                            path: dir_path.clone(),
-                            reason: e.to_string(),
-                        }),
-                        timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                        description: Some(format!(
-                            "Permission denied for delete-dir operation on {}",
-                            dir_path
-                        )),
-                    });
-                    return Ok((Err(format!("Permission denied: {}", e)),));
-                }
+                    Ok(path) => path,
+                    Err(e) => {
+                        error!("Filesystem delete directory permission denied: {}", e);
+                        ctx.data_mut().record_event(ChainEventData {
+                            event_type: "theater:simple/filesystem/permission-denied".to_string(),
+                            data: EventData::Filesystem(FilesystemEventData::PermissionDenied {
+                                operation: "delete-dir".to_string(),
+                                path: requested_path.clone(),
+                                reason: e.to_string(),
+                            }),
+                            timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                            description: Some(format!(
+                                "Permission denied for delete-dir operation on {}",
+                                requested_path
+                            )),
+                        });
+                        return Ok((Err(format!("Permission denied: {}", e)),));
+                    }
+                };
 
                 // Record directory deleted call event
                 ctx.data_mut().record_event(ChainEventData {
                     event_type: "theater:simple/filesystem/delete-dir".to_string(),
                     data: EventData::Filesystem(FilesystemEventData::DirectoryDeletedCall {
-                        path: dir_path.clone(),
+                        path: requested_path.clone(),
                     }),
                     timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                    description: Some(format!("Deleting directory {:?}", dir_path)),
+                    description: Some(format!("Deleting directory {:?}", requested_path)),
                 });
 
-                let dir_path = allowed_path.join(Path::new(&dir_path));
                 info!("Deleting directory {:?}", dir_path);
 
                 match std::fs::remove_dir_all(&dir_path) {
@@ -763,49 +761,50 @@ impl FileSystemHost {
             },
         );
 
-        let allowed_path = self.path.clone();
+        let filesystem_host = self.clone();
         let permissions = self.permissions.clone();
 
         let _ = interface.func_wrap(
             "path-exists",
             move |mut ctx: StoreContextMut<'_, ActorStore>,
-                  (path,): (String,)|
+                  (requested_path,): (String,)|
                   -> Result<(Result<bool, String>,)> {
-                // PERMISSION CHECK BEFORE OPERATION
-                if let Err(e) = PermissionChecker::check_filesystem_operation(
-                    &permissions,
+                // RESOLVE AND VALIDATE PATH
+                let path = match filesystem_host.resolve_and_validate_path(
+                    &requested_path,
                     "read",
-                    Some(&path),
-                    None,
+                    &permissions,
                 ) {
-                    error!("Filesystem path-exists permission denied: {}", e);
-                    ctx.data_mut().record_event(ChainEventData {
-                        event_type: "theater:simple/filesystem/permission-denied".to_string(),
-                        data: EventData::Filesystem(FilesystemEventData::PermissionDenied {
-                            operation: "path-exists".to_string(),
-                            path: path.clone(),
-                            reason: e.to_string(),
-                        }),
-                        timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                        description: Some(format!(
-                            "Permission denied for path-exists operation on {}",
-                            path
-                        )),
-                    });
-                    return Ok((Err(format!("Permission denied: {}", e)),));
-                }
+                    Ok(path) => path,
+                    Err(e) => {
+                        error!("Filesystem path-exists permission denied: {}", e);
+                        ctx.data_mut().record_event(ChainEventData {
+                            event_type: "theater:simple/filesystem/permission-denied".to_string(),
+                            data: EventData::Filesystem(FilesystemEventData::PermissionDenied {
+                                operation: "path-exists".to_string(),
+                                path: requested_path.clone(),
+                                reason: e.to_string(),
+                            }),
+                            timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                            description: Some(format!(
+                                "Permission denied for path-exists operation on {}",
+                                requested_path
+                            )),
+                        });
+                        return Ok((Err(format!("Permission denied: {}", e)),));
+                    }
+                };
 
                 // Record path exists call event
                 ctx.data_mut().record_event(ChainEventData {
                     event_type: "theater:simple/filesystem/path-exists".to_string(),
                     data: EventData::Filesystem(FilesystemEventData::PathExistsCall {
-                        path: path.clone(),
+                        path: requested_path.clone(),
                     }),
                     timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                    description: Some(format!("Checking if path {:?} exists", path)),
+                    description: Some(format!("Checking if path {:?} exists", requested_path)),
                 });
 
-                let path = allowed_path.join(Path::new(&path));
                 info!("Checking if path {:?} exists", path);
 
                 let exists = path.exists();
@@ -826,13 +825,14 @@ impl FileSystemHost {
             },
         );
 
-        let allowed_path = self.path.clone();
+        let filesystem_host = self.clone();
+        let permissions = self.permissions.clone();
         let allowed_commands = self.allowed_commands.clone();
         let _ =
             interface.func_wrap_async(
                 "execute-command",
                 move |mut ctx: StoreContextMut<'_, ActorStore>,
-                      (dir, command, args): (String, String, Vec<String>)|
+                      (requested_dir, command, args): (String, String, Vec<String>)|
                       -> Box<
                     dyn Future<Output = Result<(Result<CommandResult, String>,)>> + Send,
                 > {
@@ -845,29 +845,42 @@ impl FileSystemHost {
                         }
                     }
 
+                    // RESOLVE AND VALIDATE PATH
+                    let dir_path = match filesystem_host.resolve_and_validate_path(
+                        &requested_dir,
+                        "execute",
+                        &permissions,
+                    ) {
+                        Ok(path) => path,
+                        Err(e) => {
+                            return Box::new(async move {
+                                Ok((Err(format!("Permission denied: {}", e)),))
+                            });
+                        }
+                    };
+
                     // Record command execution event
                     ctx.data_mut().record_event(ChainEventData {
                         event_type: "theater:simple/filesystem/execute-command".to_string(),
                         data: EventData::Filesystem(FilesystemEventData::CommandExecuted {
-                            directory: dir.clone(),
+                            directory: requested_dir.clone(),
                             command: command.clone(),
                             args: args.clone(),
                         }),
                         timestamp: chrono::Utc::now().timestamp_millis() as u64,
                         description: Some(format!(
                             "Executing command '{}' in directory '{}'",
-                            command, dir
+                            command, requested_dir
                         )),
                     });
 
-                    let dir_path = allowed_path.join(Path::new(&dir));
                     let args_refs: Vec<String> = args.clone();
-                    let allowed_path = allowed_path.clone();
+                    let base_path = filesystem_host.path.clone();
                     let command_clone = command.clone();
 
                     Box::new(async move {
                         match execute_command(
-                            allowed_path,
+                            base_path,
                             &dir_path,
                             &command_clone,
                             &args_refs.iter().map(AsRef::as_ref).collect::<Vec<&str>>(),
@@ -895,36 +908,50 @@ impl FileSystemHost {
                 },
             )?;
 
-        let allowed_path = self.path.clone();
+        let filesystem_host = self.clone();
+        let permissions = self.permissions.clone();
 
         let _ =
             interface.func_wrap_async(
                 "execute-nix-command",
                 move |mut ctx: StoreContextMut<'_, ActorStore>,
-                      (dir, command): (String, String)|
+                      (requested_dir, command): (String, String)|
                       -> Box<
                     dyn Future<Output = Result<(Result<CommandResult, String>,)>> + Send,
                 > {
+                    // RESOLVE AND VALIDATE PATH
+                    let dir_path = match filesystem_host.resolve_and_validate_path(
+                        &requested_dir,
+                        "execute",
+                        &permissions,
+                    ) {
+                        Ok(path) => path,
+                        Err(e) => {
+                            return Box::new(async move {
+                                Ok((Err(format!("Permission denied: {}", e)),))
+                            });
+                        }
+                    };
+
                     // Record nix command execution event
                     ctx.data_mut().record_event(ChainEventData {
                         event_type: "theater:simple/filesystem/execute-nix-command".to_string(),
                         data: EventData::Filesystem(FilesystemEventData::NixCommandExecuted {
-                            directory: dir.clone(),
+                            directory: requested_dir.clone(),
                             command: command.clone(),
                         }),
                         timestamp: chrono::Utc::now().timestamp_millis() as u64,
                         description: Some(format!(
                             "Executing nix command '{}' in directory '{}'",
-                            command, dir
+                            command, requested_dir
                         )),
                     });
 
-                    let dir_path = allowed_path.join(Path::new(&dir));
-                    let allowed_path = allowed_path.clone();
+                    let base_path = filesystem_host.path.clone();
                     let command_clone = command.clone();
 
                     Box::new(async move {
-                        match execute_nix_command(allowed_path, &dir_path, &command_clone).await {
+                        match execute_nix_command(base_path, &dir_path, &command_clone).await {
                             Ok(result) => {
                                 // Record successful execution
                                 ctx.data_mut().record_event(ChainEventData {
