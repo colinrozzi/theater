@@ -152,10 +152,13 @@ impl ActorRuntime {
                             current_status = "Running".to_string();
                             let actor_handle = ActorHandle::new(operation_tx.clone(), info_tx.clone(), control_tx.clone());
 
+                            let (init_tx, mut init_rx) = tokio::sync::broadcast::channel(1);
+
                             // Call init function if needed
                             if init {
                                 let init_id = id.clone();
                                 let actor_handle = actor_handle.clone();
+                                let init_tx = init_tx.clone();
                                 info!("Calling init function for actor: {:?}", init_id);
                                 tokio::spawn(async move {
                                     match actor_handle
@@ -167,12 +170,21 @@ impl ActorRuntime {
                                     {
                                         Ok(_) => {
                                             debug!("Successfully called init function for actor: {:?}", init_id);
+                                            // Notify that init is complete
+                                            if let Err(e) = init_tx.send(()) {
+                                                error!("Failed to send init completion: {:?}", e);
+                                            }
                                         }
                                         Err(e) => {
                                             error!("Failed to call init function for actor {}: {}", init_id, e);
                                         }
                                     }
                                 });
+                            } else {
+                                // If no init function, just send completion
+                                if let Err(e) = init_tx.send(()) {
+                                    error!("Failed to send init completion: {:?}", e);
+                                }
                             }
 
                             // Start the handler tasks
@@ -182,7 +194,13 @@ impl ActorRuntime {
                                 let handler_shutdown = shutdown_controller.subscribe();
                                 let theater_tx = theater_tx.clone();
                                 let id = id.clone();
+                                let mut init_rx = init_tx.subscribe();
                                 let handler_task = tokio::spawn(async move {
+                                    // Wait for init to complete before starting handler
+                                    if let Err(e) = init_rx.recv().await {
+                                        error!("Failed to receive init completion for handler {}: {:?}", handler.name(), e);
+                                        return;
+                                    }
                                     match handler.start(
                                         handler_actor_handle,
                                         handler_shutdown,
@@ -248,6 +266,7 @@ impl ActorRuntime {
                 }
 
                 // Handle operations only after setup is complete
+                // not a huge fan of all these reads and awaits, but it works for now
                 Some(op) = operation_rx.recv(), if actor_instance.is_some() && current_operation.is_none() && !*paused.read().await => {
                     let actor_instance = actor_instance.as_ref().unwrap();
                     let metrics = metrics.as_ref().unwrap();
