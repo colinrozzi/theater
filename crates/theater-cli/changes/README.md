@@ -24,7 +24,21 @@ The primary change request documenting the complete modernization of the Theater
 - **Testing Strategy**: Unit, integration, and compatibility testing
 - **Success Metrics**: Developer experience, user experience, maintainability
 
-**Status**: Phase 1 Foundation Complete, Phase 2 In Progress
+**Status**: Phase 1 Foundation Complete, Phase 2 Complete
+
+### [command-restructure-cr-002.md](./command-restructure-cr-002.md)
+**Theater CLI Command Structure Restructure - Change Request**
+
+Proposal for restructuring the CLI from flat command structure to hierarchical organization with logical groupings. Includes:
+
+- **Problem Statement**: Scalability and discoverability issues with 18+ top-level commands
+- **Solution Overview**: Hierarchical command groups (actor, event, message, server, config)
+- **Implementation Plan**: 4-phase approach with backward compatibility
+- **Directory Restructuring**: Complete reorganization of `src/commands/` structure
+- **New Functionality**: Server management, advanced event operations, config management
+- **Migration Strategy**: Automated migration script with comprehensive testing
+
+**Status**: Planning Phase - Ready for Implementation
 
 ## Quick Reference
 
@@ -35,17 +49,23 @@ The primary change request documenting the complete modernization of the Theater
 - [x] Rich output system (`src/output/`)
 - [x] Async-first architecture (`src/lib.rs`, `src/main.rs`)
 
-### Phase 2: Command Modernization 🚧
-- [ ] Convert all commands to async pattern
-- [ ] Add progress indicators
-- [ ] Enhanced input validation
-- [ ] Interactive prompts
+### Phase 2: Command Modernization ✅
+- [x] Convert all commands to async pattern
+- [x] Add progress indicators
+- [x] Enhanced input validation
+- [x] Interactive prompts
 
-### Phase 3: Advanced Features 📋
-- [ ] Configuration management commands
-- [ ] Shell completion support
+### Phase 3: Command Structure Restructure ⏳
+- [ ] Hierarchical command organization
+- [ ] Directory restructuring
+- [ ] Enhanced functionality (server, config commands)
+- [ ] Advanced features (completion, context-awareness)
+
+### Phase 4: Advanced Features 📋
 - [ ] Plugin system architecture
 - [ ] Interactive TUI mode
+- [ ] Command aliasing and templates
+- [ ] Advanced workflow automation
 
 ## Contributing
 
