@@ -47,17 +47,16 @@ theater actor create <name>
 theater actor build [path]
 theater actor start <manifest>
 theater actor stop <id>
-theater actor list
+theater actor send <id> <msg>
+theater actor request <id> <msg>
+theater actor channel <id>
+theater actor subscribe <id>
 
-theater event list <id>
-theater event explore <id>
-theater event subscribe <id>
-
-theater message send <id> <msg>
-theater message channel open <id>
+theater event list
+theater event <event-id>
+theater event chain <event-id>
 
 theater server status
-theater server logs
 ```
 
 ---
@@ -102,12 +101,12 @@ theater actor create <name> [--template <template>]
 theater actor build [path] [--release] [--clean]
 theater actor start <manifest> [--subscribe] [--parent]
 theater actor stop <id> [--timeout <sec>] [--force]
-theater actor restart <id> [--timeout <sec>]
-theater actor list [--format <format>]
 theater actor inspect <id>
 theater actor state <id>
-theater actor scale <id> <instances>
-theater actor list-stored
+theater actor send <id> <message>
+theater actor request <id> <message> [--timeout <sec>]
+theater actor channel <id> [--create] [--list]
+theater actor subscribe <id> [--format <format>]
 ```
 
 #### Event Commands (`theater event`)
@@ -115,47 +114,20 @@ theater actor list-stored
 
 ```bash
 theater event list <actor-id> [--limit <n>] [--format <format>]
-theater event explore <actor-id> [--live] [--follow]
-theater event subscribe <actor-id> [--format <format>]
 theater event export <actor-id> [--output <file>] [--format <format>]
-theater event replay <actor-id> [--from <index>] [--to <index>] [--speed <multiplier>]
-theater event search <query> [--actor-id <id>] [--type <type>]
-theater event analyze <actor-id> [--analysis <type>] [--window <time>]
-theater event watch <actor-id> [--follow] [--format <format>]
-```
-
-#### Message Commands (`theater message`)
-**Purpose**: All communication and messaging operations
-
-```bash
-theater message send <actor-id> <message>
-theater message broadcast <message> [--targets <ids>] [--selector <selector>]
-theater message channel open <actor-id>
-theater message channel close <channel-id>
-theater message channel list [--actor-id <id>]
-theater message list-channels [--actor-id <id>]
 ```
 
 #### Server Commands (`theater server`) - NEW
 **Purpose**: Server management and monitoring
 
 ```bash
+theater server list [--all] [--format <format>]
 theater server status [--watch <interval>]
-theater server logs [--lines <n>] [--follow] [--level <level>]
 theater server config [--key <key>]
+theater server config show [--section <section>]
+theater server config edit [--editor <editor>]
 theater server metrics [--type <type>] [--window <time>]
 theater server health [--check] [--monitor]
-```
-
-#### Config Commands (`theater config`) - NEW
-**Purpose**: CLI configuration management
-
-```bash
-theater config show [--section <section>]
-theater config set <key> <value>
-theater config get <key>
-theater config reset [--section <section>] [--force]
-theater config edit [--editor <editor>]
 ```
 
 #### Completion Commands (`theater completion`)
@@ -164,75 +136,6 @@ theater config edit [--editor <editor>]
 ```bash
 theater completion generate <shell>
 theater completion install <shell> [--force]
-```
-
-### Backward Compatibility
-
-Maintain top-level shortcuts for the most common operations:
-
-```bash
-# These still work (shortcuts to new commands)
-theater start <manifest>    # -> theater actor start <manifest>
-theater list                # -> theater actor list
-theater stop <id>           # -> theater actor stop <id>
-```
-
-### Directory Structure
-
-```
-src/commands/
-├── mod.rs                 # Re-exports all command modules
-├── actor/                 # Actor lifecycle commands
-│   ├── mod.rs
-│   ├── create.rs          # theater actor create
-│   ├── build.rs           # theater actor build
-│   ├── start.rs           # theater actor start
-│   ├── stop.rs            # theater actor stop
-│   ├── restart.rs         # theater actor restart (NEW)
-│   ├── list.rs            # theater actor list
-│   ├── inspect.rs         # theater actor inspect
-│   ├── state.rs           # theater actor state
-│   ├── scale.rs           # theater actor scale (NEW)
-│   └── list_stored.rs     # theater actor list-stored
-├── event/                 # Event system commands
-│   ├── mod.rs
-│   ├── list.rs            # theater event list (was events.rs)
-│   ├── explore.rs         # theater event explore (was events_explore.rs)
-│   ├── subscribe.rs       # theater event subscribe
-│   ├── export.rs          # theater event export (NEW)
-│   ├── replay.rs          # theater event replay (NEW)
-│   ├── search.rs          # theater event search (NEW)
-│   ├── analyze.rs         # theater event analyze (NEW)
-│   └── watch.rs           # theater event watch (NEW)
-├── message/               # Messaging commands
-│   ├── mod.rs
-│   ├── send.rs            # theater message send (was message.rs)
-│   ├── broadcast.rs       # theater message broadcast (NEW)
-│   ├── list_channels.rs   # theater message list-channels (NEW)
-│   └── channel/           # Channel subcommands
-│       ├── mod.rs
-│       ├── open.rs        # theater message channel open
-│       ├── close.rs       # theater message channel close (NEW)
-│       └── list.rs        # theater message channel list (NEW)
-├── server/                # Server management commands (NEW)
-│   ├── mod.rs
-│   ├── status.rs          # theater server status
-│   ├── logs.rs            # theater server logs
-│   ├── config.rs          # theater server config
-│   ├── metrics.rs         # theater server metrics
-│   └── health.rs          # theater server health
-├── config/                # Configuration commands (NEW)
-│   ├── mod.rs
-│   ├── show.rs            # theater config show
-│   ├── set.rs             # theater config set
-│   ├── get.rs             # theater config get
-│   ├── reset.rs           # theater config reset
-│   └── edit.rs            # theater config edit
-└── completion/            # Completion commands
-    ├── mod.rs
-    ├── generate.rs        # theater completion generate (was completion.rs)
-    ├── install.rs         # theater completion install (NEW)
-    └── dynamic_completion.rs
 ```
 
 ---
@@ -260,29 +163,12 @@ pub enum Commands {
     Actor(ActorCommands),
     /// Event system operations  
     Event(EventCommands),
-    /// Messaging operations
-    Message(MessageCommands),
     /// Server operations
     Server(ServerCommands),
-    /// Configuration management
-    Config(ConfigCommands),
     /// Completion management
-    Completion(CompletionCommands),
-    
-    // Backward compatibility shortcuts
-    Start(commands::actor::start::StartArgs),
-    List(commands::actor::list::ListArgs),
-    Stop(commands::actor::stop::StopArgs),
+    Completion(CompletionCommands)
 }
 ```
-
-### Migration Strategy
-
-1. **File Movement**: Use automated script to move existing command files to new directory structure
-2. **Import Updates**: Update module imports to reflect new structure
-3. **Command Registration**: Update CLI definitions to use new hierarchy
-4. **Stub Creation**: Create placeholder implementations for new commands
-5. **Testing**: Verify all existing functionality still works
 
 ### New Command Implementations
 
@@ -300,30 +186,11 @@ Priority new commands to implement:
    - Event type filtering
    - Large dataset handling
 
-3. **Config Management** (`theater config show/set/get`)
+3. **Config Management** (`theater server config show/set/get`)
    - Display current configuration
    - Set configuration values
    - Reset to defaults
    - Edit in preferred editor
-
----
-
-## 📊 Success Metrics
-
-### User Experience Metrics
-- **Discoverability**: Time to find relevant command reduced by 50%
-- **Learning Curve**: New users can understand command structure in < 5 minutes
-- **Efficiency**: Power users can access functionality 30% faster
-
-### Developer Metrics  
-- **Maintainability**: Adding new commands requires 60% less boilerplate
-- **Testing**: Command-specific tests can be written more easily
-- **Documentation**: Help text is automatically organized and discoverable
-
-### Backward Compatibility
-- **No Breaking Changes**: All existing scripts continue to work
-- **Transition Path**: Users can gradually adopt new command structure
-- **Migration Support**: Clear documentation for moving to new commands
 
 ---
 
@@ -373,13 +240,6 @@ Priority new commands to implement:
 
 ## 🔮 Future Enhancements
 
-### Command Aliasing
-Allow users to create custom shortcuts:
-```bash
-theater alias create deploy "actor start --subscribe"
-theater deploy my-manifest.toml  # runs: theater actor start --subscribe my-manifest.toml
-```
-
 ### Command Context
 Remember context to reduce typing:
 ```bash
@@ -396,12 +256,6 @@ theater> actor start my-new-actor/manifest.toml
 theater> event subscribe my-new-actor
 ```
 
-### Command Templates
-```bash
-theater template create deployment
-theater template run deployment --actor my-actor
-```
-
 ---
 
 ## 📝 Implementation Checklist
@@ -409,7 +263,6 @@ theater template run deployment --actor my-actor
 ### Phase 3.1: Foundation
 - [ ] Create new CLI command structure definitions
 - [ ] Implement hierarchical command dispatch
-- [ ] Add backward compatibility shortcuts
 - [ ] Update help text and documentation
 
 ### Phase 3.2: File Organization  
@@ -445,6 +298,6 @@ theater template run deployment --actor my-actor
 
 This command structure restructuring represents a significant improvement in the Theater CLI's usability, maintainability, and extensibility. By organizing commands into logical groups, we create a foundation that can grow naturally while maintaining the excellent user experience established in the previous modernization phase.
 
-The hierarchical structure aligns with user mental models (actors, events, messages, server) and provides clear pathways for discovering and using functionality. Combined with backward compatibility shortcuts, this change will benefit both new and existing users.
+The hierarchical structure aligns with user mental models (actors, events, messages, server) and provides clear pathways for discovering and using functionality. This change will benefit both new and existing users.
 
 **Next Steps**: Begin Phase 3.1 implementation with the new CLI command structure definitions.
