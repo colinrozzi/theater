@@ -1,11 +1,9 @@
 use anyhow::Result;
 use clap::Parser;
 use std::net::SocketAddr;
-use tokio::sync::mpsc;
 use tracing::debug;
 
 use crate::client::ManagementResponse;
-use crate::tui;
 use crate::utils::event_display::{display_structured_event, parse_event_fields};
 use crate::{error::CliError, output::formatters::ActorStarted, CommandContext};
 use theater::utils::resolve_reference;
@@ -95,13 +93,7 @@ pub async fn execute_async(args: &StartArgs, ctx: &CommandContext) -> Result<(),
         .map_err(|e| CliError::actor_not_found(format!("Failed to start actor: {}", e)))?;
     debug!("Actor start request sent successfully");
 
-    // Check if we should use TUI mode (only when both parent and subscribe, and not in JSON mode)
-    let use_tui = args.subscribe && args.parent && !ctx.json && !args.verbose;
-
-    if use_tui {
-        // Use TUI mode
-        return run_with_tui(args, client).await;
-    }
+    // TUI mode removed - always use structured output
 
     // Parse event fields for structured output
     let event_fields = if args.subscribe {
@@ -204,87 +196,4 @@ pub async fn execute_async(args: &StartArgs, ctx: &CommandContext) -> Result<(),
     Ok(())
 }
 
-/// Run the start command with TUI interface
-async fn run_with_tui(
-    args: &StartArgs,
-    client: crate::client::TheaterClient,
-) -> Result<(), CliError> {
-    debug!("Starting TUI mode for actor monitoring");
 
-    // Create channel for communication with TUI
-    let (response_tx, response_rx) = mpsc::unbounded_channel();
-
-    // We'll need to get the actor ID from the first ActorStarted response
-    let mut _actor_id: Option<String> = None;
-    let mut tui_started = false;
-    let mut tui_completed = false;
-
-    // Add a timeout for actor startup
-    let timeout_duration = tokio::time::Duration::from_secs(30);
-
-    // Start TUI task early and wait for first actor started event
-    let mut tui_handle = {
-        let manifest_path = args.manifest.clone();
-        tokio::spawn(async move {
-            // Use a placeholder actor ID initially
-            if let Err(e) =
-                tui::run_tui("Starting...".to_string(), manifest_path, response_rx).await
-            {
-                eprintln!("TUI error: {}", e);
-            }
-        })
-    };
-
-    loop {
-        tokio::select! {
-            data = client.next_response() => {
-                if let Ok(response) = data {
-                    match &response {
-                        ManagementResponse::ActorStarted { id } => {
-                            _actor_id = Some(id.to_string());
-                            debug!("Actor started with ID: {}", id);
-                            tui_started = true;
-                        }
-                        ManagementResponse::ActorStopped { .. } => {
-                            // Send to TUI and break
-                            let _ = response_tx.send(response);
-                            break;
-                        }
-                        _ => {}
-                    }
-
-                    // Send all responses to TUI
-                    if let Err(_) = response_tx.send(response) {
-                        // TUI channel closed, probably user quit
-                        debug!("TUI channel closed, stopping");
-                        break;
-                    }
-                }
-            }
-            _ = tokio::time::sleep(timeout_duration) => {
-                if !tui_started {
-                    return Err(CliError::operation_timeout("Actor startup", timeout_duration.as_secs()));
-                }
-            }
-            _ = tokio::signal::ctrl_c() => {
-                debug!("Received Ctrl-C, stopping TUI mode");
-                break;
-            }
-            result = &mut tui_handle, if !tui_completed => {
-                match result {
-                    Ok(_) => debug!("TUI task completed"),
-                    Err(e) => debug!("TUI task error: {}", e),
-                }
-                tui_completed = true;
-                break;
-            }
-        }
-    }
-
-    // Clean up - wait for TUI to finish if it hasn't already
-    if !tui_completed {
-        let _ = tokio::time::timeout(tokio::time::Duration::from_millis(500), tui_handle).await;
-    }
-
-    Ok(())
-}
