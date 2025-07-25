@@ -86,10 +86,8 @@ component = "./target/wasm32-unknown-unknown/release/{{project_name_snake}}.wasm
 description = "A basic Theater actor"
 save_chain = true
 
-[[handlers]]
+[[handler]]
 type = "runtime"
-
-[handlers.config]
 "#);
 
     // wit/world.wit
@@ -228,10 +226,11 @@ component = "./target/wasm32-unknown-unknown/release/{{project_name_snake}}.wasm
 description = "A Theater actor with message server capabilities"
 save_chain = true
 
-[[handlers]]
-type = "runtime"
+[[handler]]
+type = "message-server"
 
-[handlers.config]
+[[handler]]
+type = "runtime"
 "#);
 
     // wit/world.wit
@@ -452,10 +451,11 @@ component = "./target/wasm32-unknown-unknown/release/{{project_name_snake}}.wasm
 description = "A Theater supervisor actor"
 save_chain = true
 
-[[handlers]]
-type = "runtime"
+[[handler]]
+type = "supervisor"
 
-[handlers.config]
+[[handler]]
+type = "runtime"
 "#);
 
     // wit/world.wit
