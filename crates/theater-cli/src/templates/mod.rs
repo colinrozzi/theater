@@ -1,9 +1,8 @@
-
 use std::collections::HashMap;
 use std::fs;
 use std::io;
-use std::path::{Path, PathBuf};
-use tracing::{debug, info, warn};
+use std::path::Path;
+use tracing::{debug, info};
 
 /// Template metadata
 #[derive(Debug, Clone)]
@@ -28,24 +27,34 @@ pub fn available_templates() -> HashMap<String, Template> {
         },
     );
 
-    // HTTP actor template
+    // Message server actor template
     templates.insert(
-        "http".to_string(),
+        "message-server".to_string(),
         Template {
-            name: "http".to_string(),
-            description: "A Theater actor with HTTP server capabilities".to_string(),
-            files: http_template_files(),
+            name: "message-server".to_string(),
+            description: "A Theater actor with message server capabilities".to_string(),
+            files: message_server_template_files(),
+        },
+    );
+
+    // Supervisor actor template
+    templates.insert(
+        "supervisor".to_string(),
+        Template {
+            name: "supervisor".to_string(),
+            description: "A Theater actor with supervisor capabilities for managing child actors".to_string(),
+            files: supervisor_template_files(),
         },
     );
 
     templates
 }
 
-/// Basic actor template files
+/// Basic actor template files (like hello-world)
 fn basic_template_files() -> HashMap<&'static str, &'static str> {
     let mut files = HashMap::new();
 
-    // Add Cargo.toml
+    // Cargo.toml
     files.insert("Cargo.toml", r#"[package]
 name = "{{project_name}}"
 version = "0.1.0"
@@ -57,42 +66,60 @@ crate-type = ["cdylib"]
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-wit-bindgen-rt = { version = "0.39.0", features = ["bitflags"] }
+wit-bindgen-rt = { version = "0.43.0", features = ["bitflags"] }
+
+[package.metadata.component]
+package = "component:{{project_name}}"
+
+[package.metadata.component.target.dependencies]
+"theater:simple" = { path = "./wit/deps/theater-simple" }
+
+[package.metadata.component.bindings]
+derives = ["serde::Serialize", "serde::Deserialize", "PartialEq"]
+generate_unused_types = true
 "#);
 
-    // Add manifest.toml
+    // manifest.toml
     files.insert("manifest.toml", r#"name = "{{project_name}}"
 version = "0.1.0"
+component = "./target/wasm32-unknown-unknown/release/{{project_name_snake}}.wasm"
 description = "A basic Theater actor"
-component_path = "not yet build"
 save_chain = true
-
-[interface]
-implements = "theater:simple/actor"
-requires = []
 
 [[handlers]]
 type = "runtime"
-config = {}
+
+[handlers.config]
 "#);
 
-    // Add src/lib.rs
-    files.insert("src/lib.rs", r#"mod bindings;
+    // wit/world.wit
+    files.insert("wit/world.wit", r#"package component:{{project_name}};
 
-use crate::bindings::exports::ntwk::theater::actor::Guest;
-use crate::bindings::ntwk::theater::runtime::{log, shutdown};
+world default {
+    import theater:simple/runtime;
+    export theater:simple/actor;
+}
+"#);
 
+    // src/lib.rs
+    files.insert("src/lib.rs", r#"#[allow(warnings)]
+mod bindings;
+
+use bindings::exports::theater::simple::actor::Guest;
+use bindings::theater::simple::runtime::{log, shutdown};
 use serde::{Deserialize, Serialize};
 
-#[derive(Serialize, Deserialize)]
-struct State {
+#[derive(Serialize, Deserialize, Debug, Default)]
+struct ActorState {
+    counter: u32,
     messages: Vec<String>,
 }
 
-struct Actor;
-impl Guest for Actor {
+struct Component;
+
+impl Guest for Component {
     fn init(
-        _init_state_bytes: Option<Vec<u8>>,
+        state: Option<Vec<u8>>,
         params: (String,),
     ) -> Result<(Option<Vec<u8>>,), String> {
         log("Initializing {{project_name}} actor");
@@ -100,16 +127,30 @@ impl Guest for Actor {
         log(&format!("Actor ID: {}", &self_id));
         log("Hello from {{project_name}} actor!");
 
-        shutdown("{{project_name}} actor shutting down");
+        // Parse existing state or create new
+        let actor_state = match state {
+            Some(bytes) => {
+                serde_json::from_slice::<ActorState>(&bytes)
+                    .unwrap_or_else(|_| ActorState::default())
+            }
+            None => ActorState::default(),
+        };
 
-        Ok((None,))
+        // Serialize state back
+        let new_state = serde_json::to_vec(&actor_state)
+            .map_err(|e| format!("Failed to serialize state: {}", e))?;
+
+        // For demo, we'll shutdown after init - remove this for persistent actors
+        shutdown(None);
+
+        Ok((Some(new_state),))
     }
 }
 
-bindings::export!(Actor with_types_in bindings);
+bindings::export!(Component with_types_in bindings);
 "#);
 
-    // Add README.md
+    // README.md
     files.insert("README.md", r#"# {{project_name}}
 
 A basic Theater actor created from the template.
@@ -119,7 +160,7 @@ A basic Theater actor created from the template.
 To build the actor:
 
 ```bash
-theater build
+cargo component build --release
 ```
 
 ## Running
@@ -134,36 +175,32 @@ theater start manifest.toml
 
 This basic actor supports:
 
-- Storing and retrieving state
-- Handling simple messages
-- Incrementing a counter
-- Storing text messages
+- State management with serialization
+- Initialization logging
+- Runtime integration
 
-## API
+## Development
 
-You can interact with this actor using the following commands:
+The actor implements the `theater:simple/actor` interface and can be extended with additional capabilities.
+"#);
 
-- `count` - Get the current count
-- `messages` - Get all stored messages
-- `increment` - Increment the counter
-- Any other text - Store as a message
+    // wkg.toml for dependency management
+    files.insert("wkg.toml", r#"[metadata]
+name = "{{project_name}}"
+version = "0.1.0"
 
-## Example
-
-```bash
-# Send a request to get the current count
-theater message {{project_name}} count
-```
+[dependencies]
+"theater:simple" = "*"
 "#);
 
     files
 }
 
-/// HTTP actor template files
-fn http_template_files() -> HashMap<&'static str, &'static str> {
+/// Message server actor template files
+fn message_server_template_files() -> HashMap<&'static str, &'static str> {
     let mut files = HashMap::new();
 
-    // Add Cargo.toml
+    // Cargo.toml
     files.insert("Cargo.toml", r#"[package]
 name = "{{project_name}}"
 version = "0.1.0"
@@ -175,577 +212,173 @@ crate-type = ["cdylib"]
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-wit-bindgen-rt = { version = "0.39.0", features = ["bitflags"] }
+wit-bindgen-rt = { version = "0.43.0", features = ["bitflags"] }
+
+[package.metadata.component]
+package = "component:{{project_name}}"
+
+[package.metadata.component.target.dependencies]
+"theater:simple" = { path = "./wit/deps/theater-simple" }
+
+[package.metadata.component.bindings]
+derives = ["serde::Serialize", "serde::Deserialize", "PartialEq"]
+generate_unused_types = true
 "#);
 
-    // Add manifest.toml
+    // manifest.toml
     files.insert("manifest.toml", r#"name = "{{project_name}}"
 version = "0.1.0"
-description = "An HTTP server Theater actor"
-component_path = "target/wasm32-unknown-unknown/release/{{project_name_snake}}.wasm"
-
-[interface]
-implements = "theater:simple/actor"
-requires = []
+component = "./target/wasm32-unknown-unknown/release/{{project_name_snake}}.wasm"
+description = "A Theater actor with message server capabilities"
+save_chain = true
 
 [[handlers]]
 type = "runtime"
-config = {}
 
-[[handlers]]
-type = "http-framework"
-config = {}
+[handlers.config]
 "#);
 
-    // Add src/lib.rs
-    files.insert("src/lib.rs", r#"mod bindings;
+    // wit/world.wit
+    files.insert("wit/world.wit", r#"package component:{{project_name}};
 
-use crate::bindings::exports::ntwk::theater::actor::Guest;
-use crate::bindings::exports::ntwk::theater::http_handlers::Guest as HttpHandlers;
-use crate::bindings::exports::ntwk::theater::message_server_client::Guest as MessageServerClient;
-use crate::bindings::ntwk::theater::http_framework::{
-    add_middleware, add_route, create_server, enable_websocket, register_handler, start_server,
-    ServerConfig,
-};
-use crate::bindings::ntwk::theater::http_types::{HttpRequest, HttpResponse, MiddlewareResult};
-use crate::bindings::ntwk::theater::runtime::log;
-use crate::bindings::ntwk::theater::types::State;
-use crate::bindings::ntwk::theater::websocket_types::{MessageType, WebsocketMessage};
+world default {
+    import theater:simple/runtime;
+    export theater:simple/actor;
+    export theater:simple/message-server-client;
+}
+"#);
 
+    // src/lib.rs
+    files.insert("src/lib.rs", r#"#[allow(warnings)]
+mod bindings;
+
+use bindings::exports::theater::simple::actor::Guest;
+use bindings::exports::theater::simple::message_server_client::Guest as MessageServerClient;
+use bindings::theater::simple::runtime::log;
+use bindings::theater::simple::types::{ChannelAccept, ChannelId};
 use serde::{Deserialize, Serialize};
 
-#[derive(Serialize, Deserialize)]
-struct AppState {
-    count: u32,
+#[derive(Serialize, Deserialize, Debug, Default)]
+struct ActorState {
     messages: Vec<String>,
+    channels: Vec<String>,
 }
 
-impl Default for AppState {
-    fn default() -> Self {
-        Self {
-            count: 0,
-            messages: Vec::new(),
-        }
-    }
-}
+struct Component;
 
-struct Actor;
-impl Guest for Actor {
-    fn init(_state: State, params: (String,)) -> Result<(State,), String> {
-        log("Initializing HTTP Actor");
-        let (param,) = params;
-        log(&format!("Init parameter: {}", param));
+impl Guest for Component {
+    fn init(
+        state: Option<Vec<u8>>,
+        params: (String,),
+    ) -> Result<(Option<Vec<u8>>,), String> {
+        log("Initializing {{project_name}} message server actor");
+        let (self_id,) = params;
+        log(&format!("Actor ID: {}", &self_id));
 
-        let app_state = AppState::default();
-        log("Created default app state");
-        let state_bytes = serde_json::to_vec(&app_state).map_err(|e| e.to_string())?;
-
-        // Create the initial state
-        let new_state = Some(state_bytes);
-
-        // Set up the HTTP server
-        log("Setting up HTTP server...");
-        setup_http_server().map_err(|e| e.to_string())?;
-        log("HTTP server set up successfully");
-
-        Ok((new_state,))
-    }
-}
-
-// Setup the HTTP server and return the server ID
-fn setup_http_server() -> Result<u64, String> {
-    log("Setting up HTTP server");
-
-    // Create server configuration
-    let config = ServerConfig {
-        port: Some(8080),
-        host: Some("0.0.0.0".to_string()),
-        tls_config: None,
-    };
-
-    // Create a new HTTP server
-    let server_id = create_server(&config)?;
-    log(&format!("Created server with ID: {}", server_id));
-
-    // Register handlers
-    let api_handler_id = register_handler("handle_api")?;
-    let middleware_handler_id = register_handler("auth_middleware")?;
-    let ws_handler_id = register_handler("handle_websocket")?;
-
-    log(&format!(
-        "Registered handlers - API: {}, Middleware: {}, WebSocket: {}",
-        api_handler_id, middleware_handler_id, ws_handler_id
-    ));
-
-    // Add middleware
-    add_middleware(server_id, "/api", middleware_handler_id)?;
-
-    // Add routes
-    add_route(server_id, "/api/count", "GET", api_handler_id)?;
-    add_route(server_id, "/api/count", "POST", api_handler_id)?;
-    add_route(server_id, "/api/messages", "GET", api_handler_id)?;
-    add_route(server_id, "/api/messages", "POST", api_handler_id)?;
-
-    // Enable WebSocket
-    enable_websocket(
-        server_id,
-        "/ws",
-        Some(ws_handler_id), // Connect handler
-        ws_handler_id,       // Message handler
-        Some(ws_handler_id), // Disconnect handler
-    )?;
-
-    // Start the server
-    let port = start_server(server_id)?;
-    log(&format!("Server started on port {}", port));
-
-    Ok(server_id)
-}
-
-impl HttpHandlers for Actor {
-    // HTTP Request Handler
-    fn handle_request(
-        state: State,
-        params: (u64, HttpRequest),
-    ) -> Result<(State, (HttpResponse,)), String> {
-        let (handler_id, request) = params;
-        log(&format!(
-            "Handling HTTP request with handler ID: {}",
-            handler_id
-        ));
-        log(&format!(
-            "  Method: {}, Path: {}",
-            request.method, request.uri
-        ));
-
-        // Parse the current state
-        let state_bytes = state.unwrap_or_default();
-        let mut app_state: AppState = if !state_bytes.is_empty() {
-            log("Deserializing existing state");
-            let app_state: AppState =
-                serde_json::from_slice(&state_bytes).map_err(|e| e.to_string())?;
-            log(&format!(
-                "Current state: count={}, messages={}",
-                app_state.count,
-                app_state.messages.len()
-            ));
-            app_state
-        } else {
-            log("Creating default state");
-            AppState::default()
+        // Parse existing state or create new
+        let actor_state = match state {
+            Some(bytes) => {
+                serde_json::from_slice::<ActorState>(&bytes)
+                    .unwrap_or_else(|_| ActorState::default())
+            }
+            None => ActorState::default(),
         };
 
-        // Process the request based on the path and method
-        log(&format!(
-            "Processing request: {} {}",
-            request.method, request.uri
-        ));
-        let response = match (request.uri.as_str(), request.method.as_str()) {
-            ("/api/count", "GET") => {
-                log("Handling GET /api/count");
-                // Return the current count
-                let data = serde_json::json!({ "count": app_state.count });
-                let body = serde_json::to_vec(&data).map_err(|e| e.to_string())?;
-                log(&format!("Returning count: {}", app_state.count));
+        // Serialize state back
+        let new_state = serde_json::to_vec(&actor_state)
+            .map_err(|e| format!("Failed to serialize state: {}", e))?;
 
-                HttpResponse {
-                    status: 200,
-                    headers: vec![("content-type".to_string(), "application/json".to_string())],
-                    body: Some(body),
-                }
-            }
-            ("/api/count", "POST") => {
-                log("Handling POST /api/count");
-                // Increment the count
-                app_state.count += 1;
-                log(&format!("Incremented count to: {}", app_state.count));
-
-                // Return the new count
-                let data = serde_json::json!({ "count": app_state.count });
-                let body = serde_json::to_vec(&data).map_err(|e| e.to_string())?;
-
-                HttpResponse {
-                    status: 200,
-                    headers: vec![("content-type".to_string(), "application/json".to_string())],
-                    body: Some(body),
-                }
-            }
-            ("/api/messages", "GET") => {
-                log("Handling GET /api/messages");
-                // Return all messages
-                let data = serde_json::json!({ "messages": app_state.messages });
-                let body = serde_json::to_vec(&data).map_err(|e| e.to_string())?;
-                log(&format!("Returning {} messages", app_state.messages.len()));
-
-                HttpResponse {
-                    status: 200,
-                    headers: vec![("content-type".to_string(), "application/json".to_string())],
-                    body: Some(body),
-                }
-            }
-            ("/api/messages", "POST") => {
-                log("Handling POST /api/messages");
-                // Parse the message from the request body
-                if let Some(body) = &request.body {
-                    log(&format!("Received request body of {} bytes", body.len()));
-                    // Attempt to parse the body as a JSON object with a message field
-                    if let Ok(json) = serde_json::from_slice::<serde_json::Value>(body) {
-                        log("Successfully parsed JSON body");
-                        if let Some(message) = json.get("message").and_then(|m| m.as_str()) {
-                            log(&format!("Adding message: {}", message));
-                            // Add the message to our state
-                            app_state.messages.push(message.to_string());
-
-                            // Return success
-                            let data = serde_json::json!({
-                                "success": true,
-                                "message": "Message added successfully"
-                            });
-                            let body = serde_json::to_vec(&data).map_err(|e| e.to_string())?;
-                            log("Message added successfully");
-
-                            HttpResponse {
-                                status: 200,
-                                headers: vec![(
-                                    "content-type".to_string(),
-                                    "application/json".to_string(),
-                                )],
-                                body: Some(body),
-                            }
-                        } else {
-                            // No message field found
-                            log("Error: No message field found in request");
-                            let data = serde_json::json!({
-                                "success": false,
-                                "error": "No message field found in request"
-                            });
-                            let body = serde_json::to_vec(&data).map_err(|e| e.to_string())?;
-
-                            HttpResponse {
-                                status: 400,
-                                headers: vec![(
-                                    "content-type".to_string(),
-                                    "application/json".to_string(),
-                                )],
-                                body: Some(body),
-                            }
-                        }
-                    } else {
-                        // Invalid JSON
-                        log("Error: Invalid JSON in request body");
-                        let data = serde_json::json!({
-                            "success": false,
-                            "error": "Invalid JSON in request body"
-                        });
-                        let body = serde_json::to_vec(&data).map_err(|e| e.to_string())?;
-
-                        HttpResponse {
-                            status: 400,
-                            headers: vec![(
-                                "content-type".to_string(),
-                                "application/json".to_string(),
-                            )],
-                            body: Some(body),
-                        }
-                    }
-                } else {
-                    // No body provided
-                    log("Error: No request body provided");
-                    let data = serde_json::json!({
-                        "success": false,
-                        "error": "No request body provided"
-                    });
-                    let body = serde_json::to_vec(&data).map_err(|e| e.to_string())?;
-
-                    HttpResponse {
-                        status: 400,
-                        headers: vec![("content-type".to_string(), "application/json".to_string())],
-                        body: Some(body),
-                    }
-                }
-            }
-            _ => {
-                // Path not found
-                log(&format!(
-                    "Error: Path not found - {} {}",
-                    request.method, request.uri
-                ));
-                let data = serde_json::json!({
-                    "success": false,
-                    "error": "Not found"
-                });
-                let body = serde_json::to_vec(&data).map_err(|e| e.to_string())?;
-
-                HttpResponse {
-                    status: 404,
-                    headers: vec![("content-type".to_string(), "application/json".to_string())],
-                    body: Some(body),
-                }
-            }
-        };
-
-        // Save the updated state
-        log(&format!(
-            "Saving updated state: count={}, messages={}",
-            app_state.count,
-            app_state.messages.len()
-        ));
-        let updated_state_bytes = serde_json::to_vec(&app_state).map_err(|e| e.to_string())?;
-        let updated_state = Some(updated_state_bytes);
-
-        Ok((updated_state, (response,)))
-    }
-
-    // Middleware Handler
-    fn handle_middleware(
-        state: State,
-        params: (u64, HttpRequest),
-    ) -> Result<(State, (MiddlewareResult,)), String> {
-        let (handler_id, request) = params;
-        log(&format!(
-            "Handling middleware with handler ID: {}",
-            handler_id
-        ));
-
-        // Check for an API key header
-        log("Checking for API key header");
-        let auth_header = request
-            .headers
-            .iter()
-            .find(|(name, _)| name.to_lowercase() == "x-api-key");
-
-        if let Some((_, value)) = auth_header {
-            log(&format!("Found API key header: {}", value));
-            // Check if the API key is valid
-            if value == "theater-demo-key" {
-                // Allow the request to proceed
-                log("API key is valid, allowing request to proceed");
-                Ok((
-                    state,
-                    (MiddlewareResult {
-                        proceed: true,
-                        request,
-                    },),
-                ))
-            } else {
-                // Invalid API key
-                log(&format!("Invalid API key: {}", value));
-                Ok((
-                    state,
-                    (MiddlewareResult {
-                        proceed: false,
-                        request,
-                    },),
-                ))
-            }
-        } else {
-            // No API key provided
-            log("No API key provided");
-            Ok((
-                state,
-                (MiddlewareResult {
-                    proceed: false,
-                    request,
-                },),
-            ))
-        }
-    }
-
-    // WebSocket Connect Handler
-    fn handle_websocket_connect(
-        state: State,
-        params: (u64, u64, String, Option<String>),
-    ) -> Result<(State,), String> {
-        let (handler_id, connection_id, path, query) = params;
-        log(&format!(
-            "WebSocket connected - Handler: {}, Connection: {}, Path: {}",
-            handler_id, connection_id, path
-        ));
-
-        if let Some(q) = query {
-            log(&format!("  Query parameters: {}", q));
-        }
-
-        Ok((state,))
-    }
-
-    // WebSocket Message Handler
-    fn handle_websocket_message(
-        state: State,
-        params: (u64, u64, WebsocketMessage),
-    ) -> Result<(State, (Vec<WebsocketMessage>,)), String> {
-        let (handler_id, connection_id, message) = params;
-        log(&format!(
-            "WebSocket message received - Handler: {}, Connection: {}",
-            handler_id, connection_id
-        ));
-
-        // Parse the current state
-        let state_bytes = state.unwrap_or_default();
-        let mut app_state: AppState = if !state_bytes.is_empty() {
-            log("WebSocket: Deserializing existing state");
-            let app_state: AppState =
-                serde_json::from_slice(&state_bytes).map_err(|e| e.to_string())?;
-            app_state
-        } else {
-            log("WebSocket: Creating default state");
-            AppState::default()
-        };
-
-        let responses = match message.ty {
-            MessageType::Text => {
-                // Echo the message back
-                if let Some(text) = message.text {
-                    log(&format!("  Text message: {}", text));
-
-                    // Add the message to our state
-                    app_state.messages.push(text.clone());
-
-                    // Echo back the message
-                    let echo_message = WebsocketMessage {
-                        ty: MessageType::Text,
-                        data: None,
-                        text: Some(format!("Echo: {}", text)),
-                    };
-
-                    // Also send the current count
-                    let count_message = WebsocketMessage {
-                        ty: MessageType::Text,
-                        data: None,
-                        text: Some(format!("Current count: {}", app_state.count)),
-                    };
-
-                    vec![echo_message, count_message]
-                } else {
-                    vec![]
-                }
-            }
-            MessageType::Binary => {
-                // Echo binary data
-                if let Some(data) = message.data {
-                    log(&format!("  Binary message: {} bytes", data.len()));
-
-                    // Just echo it back
-                    vec![WebsocketMessage {
-                        ty: MessageType::Binary,
-                        data: Some(data),
-                        text: None,
-                    }]
-                } else {
-                    vec![]
-                }
-            }
-            MessageType::Ping => {
-                // Respond to ping with pong
-                log("  Ping received");
-                vec![WebsocketMessage {
-                    ty: MessageType::Pong,
-                    data: None,
-                    text: None,
-                }]
-            }
-            _ => {
-                // Other message types
-                log("  Other message type");
-                vec![]
-            }
-        };
-
-        // Save the updated state
-        let updated_state_bytes = serde_json::to_vec(&app_state).map_err(|e| e.to_string())?;
-        let updated_state = Some(updated_state_bytes);
-
-        Ok((updated_state, (responses,)))
-    }
-
-    // WebSocket Disconnect Handler
-    fn handle_websocket_disconnect(state: State, params: (u64, u64)) -> Result<(State,), String> {
-        let (handler_id, connection_id) = params;
-        log(&format!(
-            "WebSocket disconnected - Handler: {}, Connection: {}",
-            handler_id, connection_id
-        ));
-
-        Ok((state,))
+        Ok((Some(new_state),))
     }
 }
 
-impl MessageServerClient for Actor {
+impl MessageServerClient for Component {
     fn handle_send(
         state: Option<Vec<u8>>,
-        _params: (Vec<u8>,),
+        params: (Vec<u8>,),
     ) -> Result<(Option<Vec<u8>>,), String> {
-        Ok((state,))
+        let (data,) = params;
+        log(&format!("Received message: {} bytes", data.len()));
+        
+        // Parse and update state
+        let mut actor_state: ActorState = match state {
+            Some(bytes) => serde_json::from_slice(&bytes).unwrap_or_default(),
+            None => ActorState::default(),
+        };
+        
+        // Store message (as string if possible)
+        if let Ok(msg) = String::from_utf8(data) {
+            actor_state.messages.push(msg);
+        }
+        
+        let new_state = serde_json::to_vec(&actor_state)
+            .map_err(|e| format!("Failed to serialize state: {}", e))?;
+
+        Ok((Some(new_state),))
     }
 
     fn handle_request(
         state: Option<Vec<u8>>,
-        _params: (Vec<u8>,),
-    ) -> Result<(Option<Vec<u8>>, (Vec<u8>,)), String> {
-        Ok((state, (vec![],)))
+        params: (String, Vec<u8>),
+    ) -> Result<(Option<Vec<u8>>, (Option<Vec<u8>>,)), String> {
+        let (request_id, data) = params;
+        log(&format!("Received request {}: {} bytes", request_id, data.len()));
+        
+        // Echo the data back as response
+        Ok((state, (Some(data),)))
     }
 
     fn handle_channel_open(
-        state: Option<bindings::exports::ntwk::theater::message_server_client::Json>,
-        params: (bindings::exports::ntwk::theater::message_server_client::Json,),
-    ) -> Result<
-        (
-            Option<bindings::exports::ntwk::theater::message_server_client::Json>,
-            (bindings::exports::ntwk::theater::message_server_client::ChannelAccept,),
-        ),
-        String,
-    > {
+        state: Option<Vec<u8>>,
+        params: (String, Vec<u8>),
+    ) -> Result<(Option<Vec<u8>>, (ChannelAccept,)), String> {
+        let (channel_id, _data) = params;
+        log(&format!("Channel open request: {}", channel_id));
+        
+        // Accept all channel requests
         Ok((
             state,
-            (
-                bindings::exports::ntwk::theater::message_server_client::ChannelAccept {
-                    accepted: true,
-                    message: None,
-                },
-            ),
+            (ChannelAccept {
+                accepted: true,
+                message: Some(b"Welcome to the channel!".to_vec()),
+            },),
         ))
     }
 
     fn handle_channel_close(
-        state: Option<bindings::exports::ntwk::theater::message_server_client::Json>,
-        params: (String,),
-    ) -> Result<(Option<bindings::exports::ntwk::theater::message_server_client::Json>,), String>
-    {
+        state: Option<Vec<u8>>,
+        params: (ChannelId,),
+    ) -> Result<(Option<Vec<u8>>,), String> {
+        let (channel_id,) = params;
+        log(&format!("Channel closed: {}", channel_id));
         Ok((state,))
     }
 
     fn handle_channel_message(
-        state: Option<bindings::exports::ntwk::theater::message_server_client::Json>,
-        params: (
-            String,
-            bindings::exports::ntwk::theater::message_server_client::Json,
-        ),
-    ) -> Result<(Option<bindings::exports::ntwk::theater::message_server_client::Json>,), String>
-    {
-        log("runtime-content-fs: Received channel message");
+        state: Option<Vec<u8>>,
+        params: (ChannelId, Vec<u8>),
+    ) -> Result<(Option<Vec<u8>>,), String> {
+        let (channel_id, data) = params;
+        log(&format!("Channel {} message: {} bytes", channel_id, data.len()));
         Ok((state,))
     }
 }
 
-bindings::export!(Actor with_types_in bindings);
+bindings::export!(Component with_types_in bindings);
 "#);
 
-    // Add README.md
+    // README.md
     files.insert("README.md", r#"# {{project_name}}
 
-An HTTP server Theater actor created from the template.
+A Theater actor with message server capabilities.
 
 ## Building
 
-To build the actor:
-
 ```bash
-cargo build --target wasm32-unknown-unknown --release
+cargo component build --release
 ```
 
 ## Running
-
-To run the actor with Theater:
 
 ```bash
 theater start manifest.toml
@@ -753,54 +386,262 @@ theater start manifest.toml
 
 ## Features
 
-This HTTP actor provides:
+This actor implements:
 
-- RESTful API endpoints
-- WebSocket support
-- Middleware for authentication
-- State management
-- Message handling
+- Basic actor lifecycle
+- Message server client interface
+- Channel management
+- State persistence
 
-## API Endpoints
+## API
 
-The actor exposes the following HTTP endpoints:
+The actor can handle:
 
-- `GET /api/count` - Get the current count
-- `POST /api/count` - Increment the count
-- `GET /api/messages` - Get all stored messages
-- `POST /api/messages` - Add a new message
-
-## WebSocket
-
-The actor also supports WebSocket connections at `/ws`. The WebSocket interface:
-
-- Echoes back text messages
-- Returns the current count
-- Stores new messages in the actor state
-
-## Authentication
-
-API endpoints under `/api/*` are protected with a simple API key middleware.
-Include the header `X-API-Key: theater-demo-key` in your requests.
+- Direct messages via `handle_send`
+- Request/response via `handle_request`
+- Channel operations (open, close, message)
 
 ## Example Usage
 
 ```bash
-# Get the current count
-curl -H "X-API-Key: theater-demo-key" http://localhost:8080/api/count
+# Send a message to the actor
+theater message {{project_name}} "Hello, World!"
 
-# Add a new message
-curl -X POST -H "Content-Type: application/json" \
-     -H "X-API-Key: theater-demo-key" \
-     -d '{"message":"Hello, Theater!"}' \
-     http://localhost:8080/api/messages
+# Open a channel to the actor
+theater channel open {{project_name}} --data "Channel request"
 ```
+"#);
 
-For WebSocket testing, you can use a tool like websocat:
+    // wkg.toml for dependency management
+    files.insert("wkg.toml", r#"[metadata]
+name = "{{project_name}}"
+version = "0.1.0"
+
+[dependencies]
+"theater:simple" = "*"
+"#);
+
+    files
+}
+
+/// Supervisor actor template files
+fn supervisor_template_files() -> HashMap<&'static str, &'static str> {
+    let mut files = HashMap::new();
+
+    // Cargo.toml
+    files.insert("Cargo.toml", r#"[package]
+name = "{{project_name}}"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+wit-bindgen-rt = { version = "0.43.0", features = ["bitflags"] }
+
+[package.metadata.component]
+package = "component:{{project_name}}"
+
+[package.metadata.component.target.dependencies]
+"theater:simple" = { path = "./wit/deps/theater-simple" }
+
+[package.metadata.component.bindings]
+derives = ["serde::Serialize", "serde::Deserialize", "PartialEq"]
+generate_unused_types = true
+"#);
+
+    // manifest.toml
+    files.insert("manifest.toml", r#"name = "{{project_name}}"
+version = "0.1.0"
+component = "./target/wasm32-unknown-unknown/release/{{project_name_snake}}.wasm"
+description = "A Theater supervisor actor"
+save_chain = true
+
+[[handlers]]
+type = "runtime"
+
+[handlers.config]
+"#);
+
+    // wit/world.wit
+    files.insert("wit/world.wit", r#"package component:{{project_name}};
+
+world default {
+    import theater:simple/runtime;
+    import theater:simple/supervisor;
+    export theater:simple/actor;
+    export theater:simple/supervisor-handlers;
+}
+"#);
+
+    // src/lib.rs
+    files.insert("src/lib.rs", r#"#[allow(warnings)]
+mod bindings;
+
+use bindings::exports::theater::simple::actor::Guest;
+use bindings::exports::theater::simple::supervisor_handlers::Guest as SupervisorHandlers;
+use bindings::theater::simple::runtime::log;
+use bindings::theater::simple::supervisor;
+use bindings::theater::simple::types::WitActorError;
+use serde::{Deserialize, Serialize};
+
+#[derive(Serialize, Deserialize, Debug, Default)]
+struct SupervisorState {
+    children: Vec<String>,
+    restart_count: u32,
+}
+
+struct Component;
+
+impl Guest for Component {
+    fn init(
+        state: Option<Vec<u8>>,
+        params: (String,),
+    ) -> Result<(Option<Vec<u8>>,), String> {
+        log("Initializing {{project_name}} supervisor actor");
+        let (self_id,) = params;
+        log(&format!("Supervisor ID: {}", &self_id));
+
+        // Parse existing state or create new
+        let supervisor_state = match state {
+            Some(bytes) => {
+                serde_json::from_slice::<SupervisorState>(&bytes)
+                    .unwrap_or_else(|_| SupervisorState::default())
+            }
+            None => SupervisorState::default(),
+        };
+
+        // Serialize state back
+        let new_state = serde_json::to_vec(&supervisor_state)
+            .map_err(|e| format!("Failed to serialize state: {}", e))?;
+
+        Ok((Some(new_state),))
+    }
+}
+
+impl SupervisorHandlers for Component {
+    fn handle_child_error(
+        state: Option<Vec<u8>>,
+        params: (String, WitActorError),
+    ) -> Result<(Option<Vec<u8>>,), String> {
+        let (child_id, error) = params;
+        log(&format!("Child actor {} error: {:?}", child_id, error));
+        
+        // Parse state
+        let mut supervisor_state: SupervisorState = match state {
+            Some(bytes) => serde_json::from_slice(&bytes).unwrap_or_default(),
+            None => SupervisorState::default(),
+        };
+        
+        // Implement restart strategy
+        supervisor_state.restart_count += 1;
+        log(&format!("Restarting child {} (attempt {})", child_id, supervisor_state.restart_count));
+        
+        // TODO: Implement actual restart logic using supervisor interface
+        
+        let new_state = serde_json::to_vec(&supervisor_state)
+            .map_err(|e| format!("Failed to serialize state: {}", e))?;
+        
+        Ok((Some(new_state),))
+    }
+
+    fn handle_child_exit(
+        state: Option<Vec<u8>>,
+        params: (String, Option<Vec<u8>>),
+    ) -> Result<(Option<Vec<u8>>,), String> {
+        let (child_id, _exit_data) = params;
+        log(&format!("Child actor exited: {}", child_id));
+        
+        // Parse state
+        let mut supervisor_state: SupervisorState = match state {
+            Some(bytes) => serde_json::from_slice(&bytes).unwrap_or_default(),
+            None => SupervisorState::default(),
+        };
+        
+        // Remove child from tracking
+        supervisor_state.children.retain(|id| id != &child_id);
+        
+        let new_state = serde_json::to_vec(&supervisor_state)
+            .map_err(|e| format!("Failed to serialize state: {}", e))?;
+        
+        Ok((Some(new_state),))
+    }
+
+    fn handle_child_external_stop(
+        state: Option<Vec<u8>>,
+        params: (String,),
+    ) -> Result<(Option<Vec<u8>>,), String> {
+        let (child_id,) = params;
+        log(&format!("Child actor externally stopped: {}", child_id));
+        
+        // Parse state
+        let mut supervisor_state: SupervisorState = match state {
+            Some(bytes) => serde_json::from_slice(&bytes).unwrap_or_default(),
+            None => SupervisorState::default(),
+        };
+        
+        // Remove child from tracking
+        supervisor_state.children.retain(|id| id != &child_id);
+        
+        let new_state = serde_json::to_vec(&supervisor_state)
+            .map_err(|e| format!("Failed to serialize state: {}", e))?;
+        
+        Ok((Some(new_state),))
+    }
+}
+
+bindings::export!(Component with_types_in bindings);
+"#);
+
+    // README.md
+    files.insert("README.md", r#"# {{project_name}}
+
+A Theater supervisor actor for managing child actors.
+
+## Building
 
 ```bash
-websocat ws://localhost:8080/ws
+cargo component build --release
 ```
+
+## Running
+
+```bash
+theater start manifest.toml
+```
+
+## Features
+
+This supervisor actor implements:
+
+- Child actor lifecycle management
+- Error handling and restart strategies
+- State tracking for supervised actors
+- Supervisor hierarchy integration
+
+## Supervision Strategy
+
+The supervisor implements a simple restart strategy:
+
+- Child errors trigger restart attempts
+- Exit events remove children from tracking
+- External stops are handled gracefully
+
+## Usage
+
+This actor is designed to supervise other actors in a Theater system. It can be used as a building block for more complex supervision trees.
+"#);
+
+    // wkg.toml for dependency management
+    files.insert("wkg.toml", r#"[metadata]
+name = "{{project_name}}"
+version = "0.1.0"
+
+[dependencies]
+"theater:simple" = "*"
 "#);
 
     files
@@ -839,11 +680,9 @@ pub fn create_project(
         }
 
         // Replace template variables
-        let processed_content = content.replace("{{project_name}}", project_name);
-        
-        // Also handle snake_case version for file paths
-        let project_name_snake = project_name.replace('-', "_");
-        let processed_content = processed_content.replace("{{project_name_snake}}", &project_name_snake);
+        let processed_content = content
+            .replace("{{project_name}}", project_name)
+            .replace("{{project_name_snake}}", &project_name.replace('-', "_"));
 
         debug!(
             "Creating file: {} ({} bytes)",
@@ -855,7 +694,11 @@ pub fn create_project(
         fs::write(&file_path, processed_content)?;
     }
 
+    // Note: We don't automatically create the wit/deps/theater-simple directory
+    // as this should be managed by wkg or similar package manager
     info!("Project '{}' created successfully!", project_name);
+    info!("Note: You may need to run 'wkg deps' or similar to fetch WIT dependencies");
+    
     Ok(())
 }
 

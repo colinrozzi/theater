@@ -1,7 +1,8 @@
 use anyhow::Result;
 use clap::Parser;
 use std::path::PathBuf;
-use tracing::debug;
+use std::process::Command;
+use tracing::{debug, info, warn};
 
 use crate::{error::CliError, output::formatters::ProjectCreated, templates, CommandContext};
 
@@ -18,22 +19,20 @@ pub struct CreateArgs {
     /// Output directory to create the project in
     #[arg(short, long)]
     pub output_dir: Option<PathBuf>,
+
+    /// Skip automatic dependency fetching
+    #[arg(long)]
+    pub skip_deps: bool,
+
+    /// Skip automatic cargo component check
+    #[arg(long)]
+    pub skip_component_check: bool,
 }
 
 /// Execute the create command asynchronously (modernized)
 pub async fn execute_async(args: &CreateArgs, ctx: &CommandContext) -> Result<(), CliError> {
     debug!("Creating new actor project: {}", args.name);
     debug!("Using template: {}", args.template);
-
-    return Err(CliError::not_implemented(
-        "create",
-        "Theater CLI \n\
-        The create command is not implemented yet \n\
-        Please create a new component with cargo component new <name> --lib \n\
-        Then, import theater:simple from wa.dev and add the necessary dependencies in your Cargo.toml \n\
-        I do apologize for this, working on documenting / implementing this command soon! \n\
-        In the meantime, please feel free to reach out to me at colinrozzi@gmail.com and I will absolutely walk you through how I create actors!"
-    ));
 
     // Check if the name is valid
     if !is_valid_project_name(&args.name) {
@@ -67,27 +66,164 @@ pub async fn execute_async(args: &CreateArgs, ctx: &CommandContext) -> Result<()
 
     // Create the project
     let project_path = output_dir.join(&args.name);
-    templates::create_project(&args.template, &args.name, &output_dir).map_err(|e| {
+    
+    // Check if directory already exists
+    if project_path.exists() {
+        return Err(CliError::file_operation_failed(
+            "create project",
+            project_path.display().to_string(),
+            std::io::Error::new(
+                std::io::ErrorKind::AlreadyExists, 
+                "Directory already exists"
+            ),
+        ));
+    }
+
+    // Step 1: Create project from template
+    info!("Creating project from template...");
+    templates::create_project(&args.template, &args.name, &project_path).map_err(|e| {
         CliError::file_operation_failed(
             "create project",
             project_path.display().to_string(),
-            std::io::Error::new(std::io::ErrorKind::Other, e),
+            e,
         )
     })?;
 
+    // Step 2: Check for required tools
+    if !args.skip_component_check {
+        check_cargo_component()?;
+    }
+
+    // Step 3: Fetch WIT dependencies
+    if !args.skip_deps {
+        fetch_wit_dependencies(&project_path)?;
+    }
+
+    // Step 4: Try to build the project to validate everything works
+    if !args.skip_deps && !args.skip_component_check {
+        info!("Validating project by building...");
+        match build_project(&project_path) {
+            Ok(_) => info!("✅ Project builds successfully!"),
+            Err(e) => {
+                warn!("⚠️  Project created but initial build failed: {}", e);
+                warn!("You may need to run 'cargo component build' manually");
+            }
+        }
+    }
+
     // Create success result and output
+    let mut build_instructions = vec![
+        format!("cd {}", args.name),
+    ];
+
+    if args.skip_deps {
+        build_instructions.push("wkg wit fetch".to_string());
+    }
+    
+    build_instructions.extend(vec![
+        "cargo component build --release".to_string(),
+        "theater start manifest.toml".to_string(),
+    ]);
+
     let result = ProjectCreated {
         name: args.name.clone(),
         template: args.template.clone(),
         path: project_path,
-        build_instructions: vec![
-            format!("cd {}", args.name),
-            "cargo build --target wasm32-unknown-unknown --release".to_string(),
-            "theater start manifest.toml".to_string(),
-        ],
+        build_instructions,
     };
 
     ctx.output.output(&result, None)?;
+    Ok(())
+}
+
+/// Check if cargo component is installed
+fn check_cargo_component() -> Result<(), CliError> {
+    debug!("Checking for cargo component...");
+    
+    let output = Command::new("cargo")
+        .args(&["component", "--version"])
+        .output()
+        .map_err(|e| {
+            CliError::MissingTool {
+                tool: "cargo component".to_string(),
+                install_command: "cargo install cargo-component".to_string(),
+            }
+        })?;
+
+    if !output.status.success() {
+        return Err(CliError::MissingTool {
+            tool: "cargo component".to_string(),
+            install_command: "cargo install cargo-component".to_string(),
+        });
+    }
+
+    let version = String::from_utf8_lossy(&output.stdout);
+    info!("✅ cargo component found: {}", version.trim());
+    Ok(())
+}
+
+/// Fetch WIT dependencies using wkg
+fn fetch_wit_dependencies(project_path: &PathBuf) -> Result<(), CliError> {
+    info!("Fetching WIT dependencies...");
+    
+    // First try wkg wit fetch
+    let output = Command::new("wkg")
+        .args(&["wit", "fetch"])
+        .current_dir(project_path)
+        .output();
+
+    match output {
+        Ok(output) if output.status.success() => {
+            info!("✅ WIT dependencies fetched successfully");
+            Ok(())
+        }
+        Ok(output) => {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            warn!("wkg wit fetch failed: {}", stderr);
+            
+            // Try alternative: check if wasm-tools is available for wit dependencies
+            try_wasm_tools_fetch(project_path)
+        }
+        Err(_) => {
+            warn!("wkg not found, trying alternative methods...");
+            try_wasm_tools_fetch(project_path)
+        }
+    }
+}
+
+/// Try using wasm-tools or other methods to fetch dependencies
+fn try_wasm_tools_fetch(project_path: &PathBuf) -> Result<(), CliError> {
+    // For now, just warn the user and provide instructions
+    warn!("⚠️  Could not automatically fetch WIT dependencies");
+    warn!("Please run one of the following manually:");
+    warn!("  - wkg wit fetch  (if you have wkg installed)");
+    warn!("  - Or manually download theater:simple WIT files to wit/deps/theater-simple/");
+    
+    // Don't fail the creation, just warn
+    Ok(())
+}
+
+/// Build the project to validate it works
+fn build_project(project_path: &PathBuf) -> Result<(), CliError> {
+    debug!("Building project at {}", project_path.display());
+    
+    let output = Command::new("cargo")
+        .args(&["component", "build"])
+        .current_dir(project_path)
+        .output()
+        .map_err(|e| {
+            CliError::BuildFailed {
+                output: format!("Failed to execute cargo component build: {}", e),
+            }
+        })?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(CliError::BuildFailed {
+            output: stderr.to_string(),
+        });
+    }
+
     Ok(())
 }
 
