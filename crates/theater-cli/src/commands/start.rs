@@ -6,7 +6,7 @@ use tracing::debug;
 
 use crate::client::ManagementResponse;
 use crate::tui;
-use crate::utils::event_display::{display_events_header, display_single_event};
+use crate::utils::event_display::{display_structured_event, parse_event_fields};
 use crate::{error::CliError, output::formatters::ActorStarted, CommandContext};
 use theater::utils::resolve_reference;
 
@@ -32,16 +32,16 @@ pub struct StartArgs {
     #[arg(short, long, default_value_t = false)]
     pub parent: bool,
 
-    /// Output only the actor ID (useful for piping to other commands)
+    /// Show detailed startup information instead of just actor ID
     #[arg(long)]
-    pub id_only: bool,
+    pub verbose: bool,
 
-    /// Event format (pretty, compact, json)
-    #[arg(short, long, default_value = "compact")]
-    pub format: String,
+    /// Event fields to include (comma-separated: hash,parent,type,timestamp,description,data)
+    #[arg(long, default_value = "hash,parent,type,timestamp,description,data")]
+    pub event_fields: String,
 }
 
-/// Execute the start command asynchronously (modernized)
+/// Execute the start command with new Unix-friendly behavior
 pub async fn execute_async(args: &StartArgs, ctx: &CommandContext) -> Result<(), CliError> {
     debug!("Starting actor from manifest: {}", args.manifest);
 
@@ -95,20 +95,23 @@ pub async fn execute_async(args: &StartArgs, ctx: &CommandContext) -> Result<(),
         .map_err(|e| CliError::actor_not_found(format!("Failed to start actor: {}", e)))?;
     debug!("Actor start request sent successfully");
 
-    // Check if we should use TUI mode
-    let use_tui = args.subscribe && args.parent && !ctx.json && !args.id_only;
+    // Check if we should use TUI mode (only when both parent and subscribe, and not in JSON mode)
+    let use_tui = args.subscribe && args.parent && !ctx.json && !args.verbose;
 
     if use_tui {
         // Use TUI mode
         return run_with_tui(args, client).await;
-    } else if args.subscribe && !ctx.json {
-        println!("");
-        display_events_header(&args.format);
     }
 
-    let mut actor_started = false;
+    // Parse event fields for structured output
+    let event_fields = if args.subscribe {
+        parse_event_fields(&args.event_fields)
+    } else {
+        vec![]
+    };
 
-    // Add a timeout for actor startup
+    let mut actor_started = false;
+    let mut actor_result: Option<String> = None;
     let timeout_duration = tokio::time::Duration::from_secs(30);
 
     debug!("Entering response loop, waiting for actor start confirmation or events");
@@ -123,10 +126,13 @@ pub async fn execute_async(args: &StartArgs, ctx: &CommandContext) -> Result<(),
                             debug!("Management response received: Actor started with ID: {}", id);
                             actor_started = true;
 
-                            if args.id_only {
+                            // Determine output behavior based on flags
+                            if !args.subscribe && !args.parent {
+                                // Default behavior: just output actor ID
                                 println!("{}", id);
                                 break;
-                            } else {
+                            } else if args.verbose {
+                                // Verbose mode: show detailed startup info
                                 let result = ActorStarted {
                                     actor_id: id.to_string(),
                                     manifest_path: args.manifest.clone(),
@@ -134,47 +140,41 @@ pub async fn execute_async(args: &StartArgs, ctx: &CommandContext) -> Result<(),
                                     subscribing: args.subscribe,
                                     acting_as_parent: args.parent,
                                 };
-                                debug!("Outputting result: {:?}", result);
                                 ctx.output.output(&result, None)?;
-
-                                // if we are not subscribing or acting as a parent, break the loop
+                                
                                 if !args.subscribe && !args.parent {
                                     break;
                                 }
                             }
+                            // For subscribe/parent modes, continue processing events
                         }
                         ManagementResponse::ActorEvent { event } => {
                             if args.subscribe {
-                                display_single_event(&event, &args.format)
+                                // Use structured output format
+                                display_structured_event(&event, &event_fields)
                                     .map_err(|e| CliError::invalid_input("event_display", "event", e.to_string()))?;
                             }
                         }
                         ManagementResponse::ActorError { error } => {
-                            if args.subscribe {
-                                println!("-----[actor error]-----------------");
-                                println!("     {}", error);
-                                println!("-----------------------------------");
-                            }
+                            // Actor errors go to stderr and we exit with error code
+                            eprintln!("Actor error: {}", error);
+                            std::process::exit(1);
                         }
-                        ManagementResponse::ActorStopped { id } => {
-                            println!("-----[actor stopped]-----------------");
-                            println!("{}", id);
-                            println!("-------------------------------------");
+                        ManagementResponse::ActorStopped { .. } => {
+                            // Actor stopped, break the loop to output final result
                             break;
                         }
-                        ManagementResponse::ActorResult(actor_result) => {
+                        ManagementResponse::ActorResult(result) => {
                             if args.parent {
-                                println!("-----[actor result]-----------------");
-                                println!("     {}", actor_result);
-                                println!("------------------------------------");
+                                // Store the result to output at the end
+                                actor_result = Some(result.to_string());
                             }
                         }
                         ManagementResponse::Error { error } => {
                             return Err(CliError::management_error(error));
                         }
                         _ => {
-                            println!("Unknown response received");
-                            break;
+                            debug!("Unknown response received");
                         }
                     }
                 }
@@ -186,11 +186,18 @@ pub async fn execute_async(args: &StartArgs, ctx: &CommandContext) -> Result<(),
             }
             _ = tokio::signal::ctrl_c() => {
                 debug!("Received Ctrl-C, stopping");
-                if !ctx.json {
-                    println!("\n{}\n", "Interrupted by user");
+                if args.verbose {
+                    eprintln!("Interrupted by user");
                 }
                 break;
             }
+        }
+    }
+
+    // Output final actor result if we're acting as parent
+    if args.parent {
+        if let Some(result) = actor_result {
+            println!("OUTPUT\n\n{}", result);
         }
     }
 

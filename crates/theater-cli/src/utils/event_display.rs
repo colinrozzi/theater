@@ -3,6 +3,7 @@ use console::style;
 use std::collections::HashMap;
 use theater::chain::ChainEvent;
 use theater::id::TheaterId;
+use chrono;
 
 /// Structure for configuring event display options
 pub struct EventDisplayOptions {
@@ -500,4 +501,73 @@ pub fn print_hex_dump(data: &[u8], bytes_per_line: usize) {
 
         offset += bytes_per_line;
     }
+}
+
+/// Display a single event in structured format for Unix scripting
+/// Format: EVENT <hash>\n<parent>\n<type>\n<timestamp>\n<description>\n\n<data>\n\n---
+pub fn display_structured_event(event: &ChainEvent, fields: &[&str]) -> Result<()> {
+    // Start with EVENT and hash (always included)
+    let hash_str = format!("0x{}", hex::encode(&event.hash));
+    println!("EVENT {}", hash_str);
+    
+    // Helper to check if field should be included
+    let should_include = |field: &str| fields.contains(&field);
+    
+    // Parent hash (if requested and exists)
+    if should_include("parent") {
+        match &event.parent_hash {
+            Some(parent) => println!("0x{}", hex::encode(parent)),
+            None => println!("0x0000000000000000"),
+        }
+    }
+    
+    // Event type (if requested)
+    if should_include("type") {
+        println!("{}", event.event_type);
+    }
+    
+    // Timestamp (if requested)
+    if should_include("timestamp") {
+        // Convert u64 milliseconds to RFC3339 format
+        let timestamp_secs = event.timestamp / 1000;
+        let timestamp_nanos = (event.timestamp % 1000) * 1_000_000;
+        let datetime = chrono::DateTime::from_timestamp(timestamp_secs as i64, timestamp_nanos as u32)
+            .unwrap_or_else(|| chrono::Utc::now());
+        println!("{}", datetime.to_rfc3339());
+    }
+    
+    // Description (if requested)
+    if should_include("description") {
+        match &event.description {
+            Some(desc) => println!("{}", desc),
+            None => println!(""),
+        }
+    }
+    
+    // Empty line before data
+    println!("");
+    
+    // Data (if requested)
+    if should_include("data") {
+        if let Ok(text) = std::str::from_utf8(&event.data) {
+            print!("{}", text);
+        } else if !event.data.is_empty() {
+            // For binary data, output as hex
+            print!("{}", hex::encode(&event.data));
+        }
+    }
+    
+    // End with separator
+    println!("\n\n---\n");
+    
+    Ok(())
+}
+
+/// Parse event fields from comma-separated string
+pub fn parse_event_fields(fields_str: &str) -> Vec<&str> {
+    fields_str
+        .split(',')
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .collect()
 }
