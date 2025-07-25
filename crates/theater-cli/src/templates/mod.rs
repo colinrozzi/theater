@@ -185,12 +185,8 @@ The actor implements the `theater:simple/actor` interface and can be extended wi
 "#);
 
     // wkg.toml for dependency management
-    files.insert("wkg.toml", r#"[metadata]
-name = "{{project_name}}"
-version = "0.1.0"
-
-[dependencies]
-"theater:simple" = "*"
+    files.insert("wkg.toml", r#"[overrides]
+"theater:simple" = { version = "0.1.1" }
 "#);
 
     files
@@ -413,12 +409,8 @@ theater channel open {{project_name}} --data "Channel request"
 "#);
 
     // wkg.toml for dependency management
-    files.insert("wkg.toml", r#"[metadata]
-name = "{{project_name}}"
-version = "0.1.0"
-
-[dependencies]
-"theater:simple" = "*"
+    files.insert("wkg.toml", r#"[overrides]
+"theater:simple" = { version = "0.1.1" }
 "#);
 
     files
@@ -636,12 +628,8 @@ This actor is designed to supervise other actors in a Theater system. It can be 
 "#);
 
     // wkg.toml for dependency management
-    files.insert("wkg.toml", r#"[metadata]
-name = "{{project_name}}"
-version = "0.1.0"
-
-[dependencies]
-"theater:simple" = "*"
+    files.insert("wkg.toml", r#"[overrides]
+"theater:simple" = { version = "0.1.1" }
 "#);
 
     files
