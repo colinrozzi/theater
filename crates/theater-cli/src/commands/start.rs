@@ -25,11 +25,11 @@ pub struct StartArgs {
     pub initial_state: Option<String>,
 
     /// Subscribe to actor events
-    #[arg(short, long)]
+    #[arg(short, long, default_value_t = false)]
     pub subscribe: bool,
 
     /// Act as the actor's parent
-    #[arg(short, long)]
+    #[arg(short, long, default_value_t = false)]
     pub parent: bool,
 
     /// Output only the actor ID (useful for piping to other commands)
