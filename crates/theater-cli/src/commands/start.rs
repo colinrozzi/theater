@@ -105,7 +105,7 @@ pub async fn execute_async(args: &StartArgs, ctx: &CommandContext) -> Result<(),
     };
 
     let mut actor_started = false;
-    let mut actor_result: Option<String> = None;
+    let mut actor_result: Option<Vec<u8>> = None;
     let timeout_duration = tokio::time::Duration::from_secs(30);
 
     debug!("Entering response loop, waiting for actor start confirmation or events");
@@ -166,7 +166,11 @@ pub async fn execute_async(args: &StartArgs, ctx: &CommandContext) -> Result<(),
                                         std::process::exit(0);
                                     }
                                     (ActorResult::Error(actor_error), false) => {
-                                        let _ = io::stderr().write_all(&actor_error.error);
+                                        let error_message = format!(
+                                            "{}",
+                                            actor_error.error
+                                        );
+                                        let _ = io::stderr().write_all(&error_message.as_bytes());
                                         let _ = io::stderr().flush();
                                         std::process::exit(1);
                                     }
@@ -175,21 +179,24 @@ pub async fn execute_async(args: &StartArgs, ctx: &CommandContext) -> Result<(),
                                         let _ = io::stderr().flush();
                                         std::process::exit(1);
                                     }
-                                    (ActorResult::Success(actor_result), true) => {
+                                    (ActorResult::Success(actor_res), true) => {
                                         // Store the result for later output
-                                        actor_result = Some(String::from_utf8_lossy(&actor_result.result.unwrap_or_default()).to_string());
+                                        actor_result = actor_res.result;
                                     }
                                     (ActorResult::Error(actor_error), true) => {
-                                        return Err(CliError::actor_error(format!(
-                                            "Actor error: {}",
-                                            String::from_utf8_lossy(&actor_error.error)
-                                        )));
+                                        return Err(CliError::ActorError{
+                                            actor_id: actor_error.actor_id.to_string(),
+                                            reason: format!(
+                                                "Actor error: {}",
+                                                &actor_error.error
+                                            ),
+                                        });
                                     }
                                     (ActorResult::ExternalStop(actor_stop), true) => {
-                                        return Err(CliError::actor_error(format!(
-                                            "Actor stopped externally: {}",
-                                            String::from_utf8_lossy(&actor_stop.reason)
-                                        )));
+                                        return Err(CliError::ActorError{
+                                            actor_id: actor_stop.actor_id.to_string(),
+                                            reason: "Actor stopped externally".to_string(),
+                                        });
                                     }
                                 };
                             };
@@ -219,9 +226,25 @@ pub async fn execute_async(args: &StartArgs, ctx: &CommandContext) -> Result<(),
     }
 
     // Output final actor result if we're acting as parent
-    if args.parent {
+    if args.parent && args.subscribe {
+        // Write out header:
+        //
+        // OUTPUT
+        //
+        //
+        println!("OUTPUT");
         if let Some(result) = actor_result {
-            println!("OUTPUT\n\n{}", result);
+            if !result.is_empty() {
+                // Write the result to stdout
+                let _ = io::stdout().write_all(&result);
+                let _ = io::stdout().flush();
+            } else {
+                // If no result, just exit with success
+                std::process::exit(0);
+            }
+        } else {
+            // If no result was received, exit with success
+            std::process::exit(0);
         }
     }
 
