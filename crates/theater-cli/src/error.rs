@@ -29,6 +29,12 @@ pub enum CliError {
     #[error("Actor '{actor_id}' is not running")]
     ActorNotRunning { actor_id: String },
 
+    #[error("Actor '{actor_id}' had an error: {reason}")]
+    ActorError { actor_id: String, reason: String },
+
+    #[error("Actor '{actor_id}' was stopped externally: {reason}")]
+    ActorStopped { actor_id: String, reason: String },
+
     /// Project and build errors
     #[error("Invalid project directory: {path}")]
     InvalidProjectDirectory { path: String },
