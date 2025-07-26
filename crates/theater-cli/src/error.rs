@@ -332,7 +332,9 @@ impl CliError {
             | Self::ConnectionTimeout { .. } => "connection",
             Self::ActorNotFound { .. }
             | Self::ActorStartFailed { .. }
-            | Self::ActorNotRunning { .. } => "actor",
+            | Self::ActorNotRunning { .. }
+            | Self::ActorError { .. }
+            | Self::ActorStopped { .. } => "actor",
             Self::InvalidProjectDirectory { .. }
             | Self::BuildFailed { .. }
             | Self::MissingTool { .. } => "build",
