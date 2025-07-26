@@ -242,22 +242,7 @@ pub async fn execute_async(args: &SubscribeArgs, ctx: &CommandContext) -> Result
                     break;
                 }
             }
-            ManagementResponse::ActorError { error } => {
-                if ctx.json {
-                    let output = serde_json::json!({
-                        "actor_id": actor_id.to_string(),
-                        "error": error,
-                    });
-                    println!(
-                        "{}",
-                        serde_json::to_string_pretty(&output).map_err(|e| {
-                            CliError::invalid_input("json_output", "error", e.to_string())
-                        })?
-                    );
-                } else {
-                    println!("{} Actor error: {}", style("ERROR").bold().red(), error);
-                }
-            }
+            // Note: ActorError removed - all errors now go through event chain
             ManagementResponse::Error { error } => {
                 return Err(CliError::actor_not_found(format!(
                     "Server error: {:?}",
