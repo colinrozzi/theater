@@ -174,7 +174,7 @@ pub async fn execute_async(args: &StartArgs, ctx: &CommandContext) -> Result<(),
                                         let _ = io::stderr().flush();
                                         std::process::exit(1);
                                     }
-                                    (ActorResult::ExternalStop(actor_stop), false)  => {
+                                    (ActorResult::ExternalStop(_actor_stop), false)  => {
                                         let _ = io::stderr().write_all(&"actor stopped externally".as_bytes());
                                         let _ = io::stderr().flush();
                                         std::process::exit(1);
@@ -182,21 +182,27 @@ pub async fn execute_async(args: &StartArgs, ctx: &CommandContext) -> Result<(),
                                     (ActorResult::Success(actor_res), true) => {
                                         // Store the result for later output
                                         actor_result = actor_res.result;
+                                        break;
                                     }
                                     (ActorResult::Error(actor_error), true) => {
-                                        return Err(CliError::ActorError{
-                                            actor_id: actor_error.actor_id.to_string(),
-                                            reason: format!(
-                                                "Actor error: {}",
-                                                &actor_error.error
-                                            ),
-                                        });
+                                        // Output "OUTPUT" header first
+                                        println!("OUTPUT");
+                                        // Write error to stderr and exit
+                                        let error_message = format!(
+                                            "Actor error: {}",
+                                            &actor_error.error
+                                        );
+                                        let _ = io::stderr().write_all(&error_message.as_bytes());
+                                        let _ = io::stderr().flush();
+                                        std::process::exit(1);
                                     }
-                                    (ActorResult::ExternalStop(actor_stop), true) => {
-                                        return Err(CliError::ActorError{
-                                            actor_id: actor_stop.actor_id.to_string(),
-                                            reason: "Actor stopped externally".to_string(),
-                                        });
+                                    (ActorResult::ExternalStop(_actor_stop), true) => {
+                                        // Output "OUTPUT" header first
+                                        println!("OUTPUT");
+                                        // Write error to stderr and exit
+                                        let _ = io::stderr().write_all(&"actor stopped externally".as_bytes());
+                                        let _ = io::stderr().flush();
+                                        std::process::exit(1);
                                     }
                                 };
                             };
