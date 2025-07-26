@@ -1,11 +1,13 @@
 use anyhow::Result;
 use clap::Parser;
+use std::io::{self, Write};
 use std::net::SocketAddr;
 use tracing::debug;
 
 use crate::client::ManagementResponse;
 use crate::utils::event_display::{display_structured_event, parse_event_fields};
 use crate::{error::CliError, output::formatters::ActorStarted, CommandContext};
+use theater::messages::ActorResult;
 use theater::utils::resolve_reference;
 
 #[derive(Debug, Parser)]
@@ -149,17 +151,48 @@ pub async fn execute_async(args: &StartArgs, ctx: &CommandContext) -> Result<(),
                                     .map_err(|e| CliError::invalid_input("event_display", "event", e.to_string()))?;
                             }
                         }
-                        // Note: ActorError removed - all errors now go through event chain
-                        ManagementResponse::ActorStopped { .. } => {
-                            // Actor stopped, break the loop to output final result
-                            debug!("Actor stopped, breaking the loop");
-                            break;
-                        }
                         ManagementResponse::ActorResult(result) => {
                             if args.parent {
-                                // Store the result to output at the end
-                                actor_result = Some(result.to_string());
-                            }
+                                match (result, args.subscribe) {
+                                    (ActorResult::Success(actor_result), false) => {
+                                        match actor_result.result {
+                                            Some(output) => {
+                                                use std::io::{self, Write};
+                                                let _ = io::stdout().write_all(&output);
+                                                let _ = io::stdout().flush();
+                                            }
+                                            None => {}
+                                        };
+                                        std::process::exit(0);
+                                    }
+                                    (ActorResult::Error(actor_error), false) => {
+                                        let _ = io::stderr().write_all(&actor_error.error);
+                                        let _ = io::stderr().flush();
+                                        std::process::exit(1);
+                                    }
+                                    (ActorResult::ExternalStop(actor_stop), false)  => {
+                                        let _ = io::stderr().write_all(&"actor stopped externally".as_bytes());
+                                        let _ = io::stderr().flush();
+                                        std::process::exit(1);
+                                    }
+                                    (ActorResult::Success(actor_result), true) => {
+                                        // Store the result for later output
+                                        actor_result = Some(String::from_utf8_lossy(&actor_result.result.unwrap_or_default()).to_string());
+                                    }
+                                    (ActorResult::Error(actor_error), true) => {
+                                        return Err(CliError::actor_error(format!(
+                                            "Actor error: {}",
+                                            String::from_utf8_lossy(&actor_error.error)
+                                        )));
+                                    }
+                                    (ActorResult::ExternalStop(actor_stop), true) => {
+                                        return Err(CliError::actor_error(format!(
+                                            "Actor stopped externally: {}",
+                                            String::from_utf8_lossy(&actor_stop.reason)
+                                        )));
+                                    }
+                                };
+                            };
                         }
                         ManagementResponse::Error { error } => {
                             return Err(CliError::management_error(error));
