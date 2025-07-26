@@ -120,7 +120,12 @@ pub async fn execute_async(args: &StartArgs, ctx: &CommandContext) -> Result<(),
 
                             // Determine output behavior based on flags
                             // Default behavior: just output actor ID
-                            println!("{}", id);
+                            // The only case where we do not output ID is when we are only
+                            // subscribing and are expecting the result of the actor on stdout/stderr
+                            if !(args.subscribe || args.parent) {
+                                println!("{}", id);
+                            }
+
                             if args.verbose {
                                 // Verbose mode: show detailed startup info
                                 let result = ActorStarted {
@@ -131,12 +136,11 @@ pub async fn execute_async(args: &StartArgs, ctx: &CommandContext) -> Result<(),
                                     acting_as_parent: args.parent,
                                 };
                                 ctx.output.output(&result, None)?;
-
-                                if !args.subscribe && !args.parent {
-                                    break;
-                                }
                             }
-                            // For subscribe/parent modes, continue processing events
+
+                            if !args.subscribe || !args.parent {
+                                break;
+                            }
                         }
                         ManagementResponse::ActorEvent { event } => {
                             if args.subscribe {
@@ -145,11 +149,7 @@ pub async fn execute_async(args: &StartArgs, ctx: &CommandContext) -> Result<(),
                                     .map_err(|e| CliError::invalid_input("event_display", "event", e.to_string()))?;
                             }
                         }
-                        ManagementResponse::ActorError { error } => {
-                            // Actor errors go to stderr and we exit with error code
-                            eprintln!("Actor error: {}", error);
-                            //std::process::exit(1);
-                        }
+                        // Note: ActorError removed - all errors now go through event chain
                         ManagementResponse::ActorStopped { .. } => {
                             // Actor stopped, break the loop to output final result
                             debug!("Actor stopped, breaking the loop");
