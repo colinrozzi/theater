@@ -9,7 +9,7 @@ use theater::messages::{
     ActorMessage, ActorRequest, ActorResult, ActorSend, ActorStatus, ChannelEvent,
     ChannelParticipant,
 };
-use theater::{ActorError, ChainEvent, ManifestConfig};
+use theater::{ChainEvent, ManifestConfig};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{mpsc, Mutex};
 use tokio_util::codec::Framed;
@@ -114,9 +114,6 @@ pub enum ManagementResponse {
         event: ChainEvent,
     },
     ActorResult(ActorResult),
-    ActorError {
-        error: ActorError,
-    },
     Error {
         error: ManagementError,
     },
@@ -537,7 +534,12 @@ impl TheaterServer {
                                 debug!("Received event for subscription");
                                 let response = match event {
                                     Ok(event) => ManagementResponse::ActorEvent { event },
-                                    Err(e) => ManagementResponse::ActorError { error: e },
+                                    Err(_e) => {
+                                        // Actor errors are already captured in the event chain
+                                        // No need to send duplicate error responses
+                                        debug!("Actor error received, but already in event chain");
+                                        continue;
+                                    }
                                 };
                                 if let Err(e) = cmd_client_tx.send(response).await {
                                     debug!("Failed to forward event to client: {}", e);
@@ -712,7 +714,12 @@ impl TheaterServer {
                             debug!("Received event for subscription {}", subscription_id);
                             let response = match event {
                                 Ok(event) => ManagementResponse::ActorEvent { event },
-                                Err(e) => ManagementResponse::ActorError { error: e },
+                                Err(_e) => {
+                                    // Actor errors are already captured in the event chain
+                                    // No need to send duplicate error responses
+                                    debug!("Actor error received, but already in event chain");
+                                    continue;
+                                }
                             };
                             if let Err(e) = client_tx_clone.send(response).await {
                                 debug!("Failed to forward event to client: {}", e);
