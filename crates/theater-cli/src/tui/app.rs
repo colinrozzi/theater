@@ -46,7 +46,6 @@ pub struct LifecycleEvent {
 pub enum LifecycleEventType {
     ActorStarted,
     ActorStopped,
-    ActorError,
     ActorResult,
     StatusUpdate,
 }
@@ -110,10 +109,7 @@ impl TuiApp {
             LifecycleEventType::ActorStopped => {
                 self.current_status = ActorStatus::Stopped;
             }
-            LifecycleEventType::ActorError => {
-                self.current_status = ActorStatus::Error;
-                self.error_count += 1;
-            }
+            // Note: ActorError removed - errors now handled through event chain
             _ => {}
         }
 
@@ -141,14 +137,7 @@ impl TuiApp {
                 let display_event = self.chain_event_to_display_event(event, timestamp);
                 self.add_event(display_event);
             }
-            ManagementResponse::ActorError { error } => {
-                let lifecycle_event = LifecycleEvent {
-                    timestamp,
-                    event_type: LifecycleEventType::ActorError,
-                    message: format!("Actor error: {}", error),
-                };
-                self.add_lifecycle_event(lifecycle_event);
-            }
+            // Note: ActorError removed - all errors now go through event chain
             ManagementResponse::ActorStopped { id } => {
                 let lifecycle_event = LifecycleEvent {
                     timestamp,
