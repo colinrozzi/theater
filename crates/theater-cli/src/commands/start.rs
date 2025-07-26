@@ -119,11 +119,9 @@ pub async fn execute_async(args: &StartArgs, ctx: &CommandContext) -> Result<(),
                             actor_started = true;
 
                             // Determine output behavior based on flags
-                            if !args.subscribe && !args.parent {
-                                // Default behavior: just output actor ID
-                                println!("{}", id);
-                                break;
-                            } else if args.verbose {
+                            // Default behavior: just output actor ID
+                            println!("{}", id);
+                            if args.verbose {
                                 // Verbose mode: show detailed startup info
                                 let result = ActorStarted {
                                     actor_id: id.to_string(),
@@ -133,7 +131,7 @@ pub async fn execute_async(args: &StartArgs, ctx: &CommandContext) -> Result<(),
                                     acting_as_parent: args.parent,
                                 };
                                 ctx.output.output(&result, None)?;
-                                
+
                                 if !args.subscribe && !args.parent {
                                     break;
                                 }
@@ -150,10 +148,11 @@ pub async fn execute_async(args: &StartArgs, ctx: &CommandContext) -> Result<(),
                         ManagementResponse::ActorError { error } => {
                             // Actor errors go to stderr and we exit with error code
                             eprintln!("Actor error: {}", error);
-                            std::process::exit(1);
+                            //std::process::exit(1);
                         }
                         ManagementResponse::ActorStopped { .. } => {
                             // Actor stopped, break the loop to output final result
+                            debug!("Actor stopped, breaking the loop");
                             break;
                         }
                         ManagementResponse::ActorResult(result) => {
@@ -195,5 +194,3 @@ pub async fn execute_async(args: &StartArgs, ctx: &CommandContext) -> Result<(),
 
     Ok(())
 }
-
-
