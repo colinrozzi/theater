@@ -175,7 +175,6 @@ fn render_recent_lifecycle_events(f: &mut Frame, app: &TuiApp, area: Rect) {
         let symbol = match event.event_type {
             LifecycleEventType::ActorStarted => "✅",
             LifecycleEventType::ActorStopped => "⏹️",
-            LifecycleEventType::ActorError => "❌",
             LifecycleEventType::ActorResult => "📤",
             LifecycleEventType::StatusUpdate => "🔄",
         };
