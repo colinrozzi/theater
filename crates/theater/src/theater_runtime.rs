@@ -1039,45 +1039,37 @@ impl TheaterRuntime {
                     actor_id: actor_id.clone(),
                     error: error.clone(),
                 });
-                if let Err(e) = supervisor_tx.send(error_message).await {
-                    error!("Failed to send error message to supervisor: {}", e);
-                }
-            }
-        }
-
-        // pause the actor's children
-        if let Some(proc) = self.actors.get(&actor_id) {
-            for child_id in &proc.children.clone() {
-                if let Some(child_proc) = self.actors.get_mut(&child_id.clone()) {
-                    let child_id = child_proc.actor_id.clone();
-                    let control_tx = child_proc.control_tx.clone();
-                    tokio::spawn(async move {
-                        debug!("Pausing child actor: {:?}", child_id);
-                        let (response_tx, response_rx) = oneshot::channel();
-                        if let Err(e) = control_tx.send(ActorControl::Pause { response_tx }).await {
-                            error!("Failed to send error message to child actor: {}", e);
-                        }
-                        if let Ok(result) = response_rx.await {
-                            match result {
-                                Ok(_) => debug!("Child actor {:?} paused successfully", child_id),
-                                Err(e) => error!("Failed to pause child actor: {}", e),
-                            }
-                        } else {
-                            error!("Failed to receive response for pause operation");
-                        }
-                    });
-                }
+                // Send error and immediately shutdown - don't wait for response
+                let supervisor_tx_clone = supervisor_tx.clone();
+                tokio::spawn(async move {
+                    if let Err(e) = supervisor_tx_clone.send(error_message).await {
+                        error!("Failed to send error message to supervisor: {}", e);
+                    }
+                });
             }
         }
 
         // notify any actor subscribers
         if let Some(subscribers) = self.subscriptions.get(&actor_id) {
-            for subscriber in subscribers {
-                if let Err(e) = subscriber.send(Err(error.clone())).await {
-                    error!("Failed to send error event to subscriber: {}", e);
+            let subscribers_clone = subscribers.clone();
+            let error_clone = error.clone();
+            tokio::spawn(async move {
+                for subscriber in subscribers_clone {
+                    if let Err(e) = subscriber.send(Err(error_clone.clone())).await {
+                        error!("Failed to send error event to subscriber: {}", e);
+                    }
                 }
-            }
+            });
         }
+
+        // Immediately shutdown the actor due to error
+        debug!("Shutting down actor {:?} due to error", actor_id);
+        self.stop_actor(actor_id, ShutdownType::Graceful)
+            .await
+            .map_err(|e| {
+                error!("Failed to stop actor after error: {}", e);
+                e
+            })?;
 
         Ok(())
     }
