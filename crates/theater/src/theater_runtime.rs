@@ -4,7 +4,7 @@
 //! actor system. It manages actor lifecycle, message passing, and event handling across
 //! the entire system.
 
-use crate::actor::runtime::{ActorRuntime, StartActorResult};
+use crate::actor::runtime::ActorRuntime;
 use crate::actor::types::{ActorControl, ActorError, ActorInfo, ActorOperation};
 use crate::chain::ChainEvent;
 use crate::config::permissions::HandlerPermission;
@@ -363,7 +363,10 @@ impl TheaterRuntime {
                     response_tx,
                 } => {
                     debug!("Stopping actor: {:?}", actor_id);
-                    match self.stop_actor(actor_id, ShutdownType::Graceful).await {
+                    match self
+                        .stop_actor_external(actor_id, ShutdownType::Graceful)
+                        .await
+                    {
                         Ok(_) => {
                             info!("Actor stopped successfully");
                             let _ = response_tx.send(Ok(()));
@@ -1191,18 +1194,6 @@ impl TheaterRuntime {
             debug!("Successfully stopped child {:?}", child_id);
         }
 
-        // notify the actors parents
-        if let Some(proc) = self.actors.get(&actor_id) {
-            if let Some(supervisor_tx) = &proc.supervisor_tx {
-                let error_message = ActorResult::ExternalStop(ChildExternalStop {
-                    actor_id: actor_id.clone(),
-                });
-                if let Err(e) = supervisor_tx.send(error_message).await {
-                    error!("Failed to send error message to supervisor: {}", e);
-                }
-            }
-        }
-
         // Signal this specific actor to shutdown - we need to get the actor again since
         // we may have changed the actors map when stopping children
         let proc = self.actors.remove(&actor_id);
@@ -1263,6 +1254,33 @@ impl TheaterRuntime {
 
         self.stop_actor(actor_id, ShutdownType::Graceful).await?;
 
+        Ok(())
+    }
+
+    /// Actor is shut down externally
+    /// note: external might not be the right word here. External to the actor, not external to the
+    /// system, so if a parent actor stops it, it still shows up as an external stop. What this
+    /// means is that the actor did not error out or shut itself down
+    async fn stop_actor_external(
+        &mut self,
+        actor_id: TheaterId,
+        shutdown_type: ShutdownType,
+    ) -> Result<()> {
+        debug!("Stopping actor externally: {:?}", actor_id);
+
+        // notify the actors parents
+        if let Some(proc) = self.actors.get(&actor_id) {
+            if let Some(supervisor_tx) = &proc.supervisor_tx {
+                let error_message = ActorResult::ExternalStop(ChildExternalStop {
+                    actor_id: actor_id.clone(),
+                });
+                if let Err(e) = supervisor_tx.send(error_message).await {
+                    error!("Failed to send error message to supervisor: {}", e);
+                }
+            }
+        }
+
+        self.stop_actor(actor_id, shutdown_type).await?;
         Ok(())
     }
 
