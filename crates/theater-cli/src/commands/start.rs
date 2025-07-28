@@ -2,6 +2,7 @@ use anyhow::Result;
 use clap::Parser;
 use std::io::{self, Write};
 use std::net::SocketAddr;
+use theater::ActorError;
 use tracing::debug;
 
 use crate::client::ManagementResponse;
@@ -105,7 +106,7 @@ pub async fn execute_async(args: &StartArgs, ctx: &CommandContext) -> Result<(),
     };
 
     let mut actor_started = false;
-    let mut actor_result: Option<Vec<u8>> = None;
+    let mut actor_result: Option<ActorResult> = None;
     let timeout_duration = tokio::time::Duration::from_secs(30);
 
     debug!("Entering response loop, waiting for actor start confirmation or events");
@@ -140,7 +141,11 @@ pub async fn execute_async(args: &StartArgs, ctx: &CommandContext) -> Result<(),
                                 ctx.output.output(&result, None)?;
                             }
 
-                            if !args.subscribe || !args.parent {
+                            // If either subscribe or parent is true, we continue to listen for
+                            // events
+                            if !(args.subscribe || args.parent) {
+                                debug!("Actor started, but not subscribing or acting as parent, exiting loop");
+                                // If not subscribing or parent, we can exit after startup
                                 break;
                             }
                         }
@@ -149,62 +154,24 @@ pub async fn execute_async(args: &StartArgs, ctx: &CommandContext) -> Result<(),
                                 // Use structured output format
                                 display_structured_event(&event, &event_fields)
                                     .map_err(|e| CliError::invalid_input("event_display", "event", e.to_string()))?;
+                                if event.event_type == "shutdown" {
+                                    debug!("Actor shutdown event received, exiting loop");
+                                    break;
+                                }
                             }
                         }
                         ManagementResponse::ActorResult(result) => {
                             if args.parent {
-                                match (result, args.subscribe) {
-                                    (ActorResult::Success(actor_result), false) => {
-                                        match actor_result.result {
-                                            Some(output) => {
-                                                use std::io::{self, Write};
-                                                let _ = io::stdout().write_all(&output);
-                                                let _ = io::stdout().flush();
-                                            }
-                                            None => {}
-                                        };
-                                        std::process::exit(0);
+                                match args.subscribe {
+                                    true => {
+                                        // If we're subscribing, we store the result for later output
+                                        actor_result = Some(result);
                                     }
-                                    (ActorResult::Error(actor_error), false) => {
-                                        let error_message = format!(
-                                            "{}",
-                                            actor_error.error
-                                        );
-                                        let _ = io::stderr().write_all(&error_message.as_bytes());
-                                        let _ = io::stderr().flush();
-                                        std::process::exit(1);
+                                    false => {
+                                        // If not subscribing, we output the result directly
+                                        write_actor_result(result);
                                     }
-                                    (ActorResult::ExternalStop(_actor_stop), false)  => {
-                                        let _ = io::stderr().write_all(&"actor stopped externally".as_bytes());
-                                        let _ = io::stderr().flush();
-                                        std::process::exit(1);
-                                    }
-                                    (ActorResult::Success(actor_res), true) => {
-                                        // Store the result for later output
-                                        actor_result = actor_res.result;
-                                        break;
-                                    }
-                                    (ActorResult::Error(actor_error), true) => {
-                                        // Output "OUTPUT" header first
-                                        println!("OUTPUT");
-                                        // Write error to stderr and exit
-                                        let error_message = format!(
-                                            "Actor error: {}",
-                                            &actor_error.error
-                                        );
-                                        let _ = io::stderr().write_all(&error_message.as_bytes());
-                                        let _ = io::stderr().flush();
-                                        std::process::exit(1);
-                                    }
-                                    (ActorResult::ExternalStop(_actor_stop), true) => {
-                                        // Output "OUTPUT" header first
-                                        println!("OUTPUT");
-                                        // Write error to stderr and exit
-                                        let _ = io::stderr().write_all(&"actor stopped externally".as_bytes());
-                                        let _ = io::stderr().flush();
-                                        std::process::exit(1);
-                                    }
-                                };
+                                }
                             };
                         }
                         ManagementResponse::Error { error } => {
@@ -233,26 +200,44 @@ pub async fn execute_async(args: &StartArgs, ctx: &CommandContext) -> Result<(),
 
     // Output final actor result if we're acting as parent
     if args.parent && args.subscribe {
-        // Write out header:
-        //
-        // OUTPUT
-        //
-        //
-        println!("OUTPUT");
-        if let Some(result) = actor_result {
-            if !result.is_empty() {
-                // Write the result to stdout
-                let _ = io::stdout().write_all(&result);
-                let _ = io::stdout().flush();
-            } else {
-                // If no result, just exit with success
-                std::process::exit(0);
+        match actor_result {
+            Some(result) => {
+                debug!("Actor result received, writing output");
+                println!("OUTPUT");
+                write_actor_result(result);
             }
-        } else {
-            // If no result was received, exit with success
-            std::process::exit(0);
+            None => {
+                eprintln!("No actor result received, exiting with error");
+                std::process::exit(1);
+            }
         }
     }
 
     Ok(())
+}
+
+fn write_actor_result(actor_result: ActorResult) {
+    use std::io::{self, Write};
+
+    match actor_result {
+        ActorResult::Success(result) => {
+            if let Some(output) = result.result {
+                let _ = io::stdout().write_all(&output);
+                let _ = io::stdout().flush();
+                std::process::exit(0);
+            }
+        }
+        ActorResult::Error(error) => {
+            let error_message = format!("Error: {}", error.error);
+            let _ = io::stderr().write_all(error_message.as_bytes());
+            let _ = io::stderr().flush();
+            std::process::exit(1);
+        }
+        ActorResult::ExternalStop(_) => {
+            let _ = io::stderr().write_all(b"Actor stopped externally");
+            let _ = io::stderr().flush();
+            std::process::exit(1);
+        }
+        _ => {}
+    }
 }
