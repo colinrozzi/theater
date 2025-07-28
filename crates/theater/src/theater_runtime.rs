@@ -8,6 +8,8 @@ use crate::actor::runtime::{ActorRuntime, StartActorResult};
 use crate::actor::types::{ActorControl, ActorError, ActorInfo, ActorOperation};
 use crate::chain::ChainEvent;
 use crate::config::permissions::HandlerPermission;
+use crate::events::runtime::RuntimeEventData;
+use crate::events::EventData;
 use crate::id::TheaterId;
 use crate::messages::{
     ActorChannelClose, ActorChannelMessage, ActorChannelOpen, ActorResult, ChannelId,
@@ -17,12 +19,13 @@ use crate::messages::{ActorMessage, ActorStatus, TheaterCommand};
 use crate::metrics::ActorMetrics;
 use crate::shutdown::{ShutdownController, ShutdownType};
 use crate::utils::{self, resolve_reference};
-use crate::ManifestConfig;
 use crate::Result;
 use crate::TheaterRuntimeError;
+use crate::{ManifestConfig, StateChain};
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::path::PathBuf;
+use std::sync::{Arc, RwLock};
 use tokio::sync::mpsc::Receiver;
 use tokio::sync::mpsc::Sender;
 use tokio::sync::{mpsc, oneshot};
@@ -87,6 +90,8 @@ use tracing::{debug, error, info, warn};
 pub struct TheaterRuntime {
     /// Map of active actors indexed by their ID
     actors: HashMap<TheaterId, ActorProcess>,
+    /// Map of chains index by actor ID
+    chains: HashMap<TheaterId, Arc<RwLock<StateChain>>>,
     /// Sender for commands to the runtime
     pub theater_tx: Sender<TheaterCommand>,
     /// Receiver for commands to the runtime
@@ -186,6 +191,7 @@ impl TheaterRuntime {
             theater_tx,
             theater_rx,
             actors: HashMap::new(),
+            chains: HashMap::new(),
             subscriptions: HashMap::new(),
             channels: HashMap::new(),
             channel_events_tx,
@@ -887,6 +893,13 @@ impl TheaterRuntime {
                 .expect("Failed to subscribe to actor");
         }
 
+        let chain = Arc::new(RwLock::new(StateChain::new(
+            actor_id.clone(),
+            self.theater_tx.clone(),
+        )));
+
+        self.chains.insert(actor_id.clone(), chain.clone());
+
         // Start the actor in a detached task
         let actor_id_for_task = actor_id.clone();
         let actor_name = manifest.name.clone();
@@ -911,6 +924,7 @@ impl TheaterRuntime {
                 shutdown_receiver_clone,
                 engine,
                 permissions,
+                chain,
             )
             .await;
 
@@ -1092,31 +1106,64 @@ impl TheaterRuntime {
             return Ok(());
         }
 
-        // If the actor's manifest says we should save the chain, save it
-        if let Some(proc) = self.actors.get(&actor_id) {
-            if proc.manifest.save_chain() {
-                let (tx, rx): (
-                    oneshot::Sender<Result<(), ActorError>>,
-                    oneshot::Receiver<Result<(), ActorError>>,
-                ) = oneshot::channel();
-                match proc
-                    .info_tx
-                    .send(ActorInfo::SaveChain { response_tx: tx })
-                    .await
-                    .map_err(|e| anyhow::anyhow!("Failed to send save chain request: {}", e))
-                {
-                    Ok(_) => debug!("Save chain request sent successfully"),
-                    Err(e) => {
-                        error!("Failed to send save chain request: {}", e);
-                    }
-                };
+        let proc = match self.actors.get(&actor_id) {
+            Some(proc) => proc,
+            None => {
+                error!("Actor {:?} not found in registry", actor_id);
+                return Ok(());
+            }
+        };
 
-                match rx.await {
-                    Ok(result) => result?,
-                    Err(e) => error!("Failed to receive save chain result: {}", e),
+        debug!("Actor {:?} found, proceeding with shutdown", actor_id);
+
+        'chain_block: {
+            // Get the actor's chain
+            let chain = match self.chains.get(&actor_id) {
+                Some(chain) => chain,
+                None => {
+                    error!("Actor {:?} has no associated chain", actor_id);
+                    break 'chain_block;
                 }
+            };
+
+            // Add the final event to the chain
+            let mut writable_chain = match chain.write() {
+                Ok(chain) => chain,
+                Err(e) => {
+                    error!(
+                        "Failed to acquire write lock on chain for actor {:?}: {}, will not add final event or save chain, continuing with shutdown",
+                        actor_id, e
+                    );
+                    break 'chain_block;
+                }
+            };
+
+            debug!("Adding final event to chain for actor {:?}", actor_id);
+            writable_chain
+                .add_typed_event(crate::events::ChainEventData {
+                    event_type: "shutdown".to_string(),
+                    data: EventData::Runtime(RuntimeEventData::ShuttingDown {}),
+                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                    description: Some("shutting down".to_string()),
+                })
+                .expect("Failed to record event");
+            debug!("Final event added to chain for actor {:?}", actor_id);
+
+            if proc.manifest.save_chain() {
+                debug!("Actor {:?} manifest requires chain saving", actor_id);
+                writable_chain.save_chain().map_err(|e| {
+                    error!("Failed to save chain for actor {:?}: {}", actor_id, e);
+                    e
+                })?;
+            } else {
+                debug!(
+                    "Actor {:?} manifest does not require chain saving",
+                    actor_id
+                );
             }
         }
+
+        self.chains.remove(&actor_id);
 
         // Find the actor's children to stop them first
         let children = if let Some(proc) = self.actors.get(&actor_id) {

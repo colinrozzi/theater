@@ -59,11 +59,12 @@ impl ActorStore {
         id: TheaterId,
         theater_tx: Sender<TheaterCommand>,
         actor_handle: ActorHandle,
+        chain: Arc<RwLock<StateChain>>,
     ) -> anyhow::Result<Self> {
         Ok(Self {
             id: id.clone(),
             theater_tx: theater_tx.clone(),
-            chain: Arc::new(RwLock::new(StateChain::new(id, theater_tx))),
+            chain,
             state: Some(vec![]),
             actor_handle,
         })
@@ -223,7 +224,8 @@ impl ActorStore {
     /// A Vec<ChainEvent> containing only events of the specified type.
     pub fn get_events_by_type(&self, event_type: &str) -> Vec<ChainEvent> {
         let chain = self.chain.read().unwrap();
-        chain.get_events()
+        chain
+            .get_events()
             .iter()
             .filter(|e| e.event_type == event_type)
             .cloned()
@@ -245,11 +247,7 @@ impl ActorStore {
     pub fn get_recent_events(&self, count: usize) -> Vec<ChainEvent> {
         let chain = self.chain.read().unwrap();
         let events = chain.get_events();
-        events.iter()
-            .rev()
-            .take(count)
-            .cloned()
-            .collect()
+        events.iter().rev().take(count).cloned().collect()
     }
 
     /// # Get events since timestamp
@@ -266,7 +264,8 @@ impl ActorStore {
     /// A Vec<ChainEvent> containing events after the timestamp.
     pub fn get_events_since(&self, since: u64) -> Vec<ChainEvent> {
         let chain = self.chain.read().unwrap();
-        chain.get_events()
+        chain
+            .get_events()
             .iter()
             .filter(|e| e.timestamp > since)
             .cloned()
@@ -287,7 +286,8 @@ impl ActorStore {
     /// true if at least one event of this type exists, false otherwise.
     pub fn has_event_type(&self, event_type: &str) -> bool {
         let chain = self.chain.read().unwrap();
-        chain.get_events()
+        chain
+            .get_events()
             .iter()
             .any(|e| e.event_type == event_type)
     }

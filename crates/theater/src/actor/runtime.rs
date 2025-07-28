@@ -35,7 +35,9 @@ use crate::HandlerConfig;
 use crate::ManifestConfig;
 
 use crate::Result;
+use crate::StateChain;
 use std::sync::Arc;
+use std::sync::RwLock as SyncRwLock;
 use tokio::sync::mpsc::{self, Receiver, Sender};
 use tokio::sync::oneshot;
 use tokio::sync::RwLock;
@@ -101,6 +103,7 @@ impl ActorRuntime {
         mut parent_shutdown_receiver: ShutdownReceiver,
         engine: wasmtime::Engine,
         parent_permissions: HandlerPermission,
+        chain: Arc<SyncRwLock<StateChain>>,
     ) {
         info!("Actor runtime starting communication loops");
         let paused = Arc::new(RwLock::new(false));
@@ -121,6 +124,7 @@ impl ActorRuntime {
             engine,
             parent_permissions,
             status_tx,
+            chain,
         )));
 
         // These will be set once setup completes
@@ -557,6 +561,7 @@ impl ActorRuntime {
         engine: wasmtime::Engine,
         parent_permissions: HandlerPermission,
         status_tx: Sender<String>,
+        chain: Arc<SyncRwLock<StateChain>>,
     ) -> Result<(ActorInstance, Vec<Handler>, MetricsCollector), ActorError> {
         let actor_handle = ActorHandle::new(operation_tx, info_tx, control_tx);
 
@@ -568,6 +573,7 @@ impl ActorRuntime {
             theater_tx.clone(),
             actor_handle.clone(),
             &config,
+            chain,
         )
         .await
         .map_err(|e| ActorError::UnexpectedError(format!("Failed to setup actor store: {}", e)))?;
@@ -737,10 +743,11 @@ impl ActorRuntime {
         theater_tx: Sender<TheaterCommand>,
         actor_handle: ActorHandle,
         config: &ManifestConfig,
+        chain: Arc<SyncRwLock<StateChain>>,
     ) -> Result<(ActorStore, String)> {
         // Create actor store
         let actor_store =
-            match ActorStore::new(id.clone(), theater_tx.clone(), actor_handle.clone()) {
+            match ActorStore::new(id.clone(), theater_tx.clone(), actor_handle.clone(), chain) {
                 Ok(store) => store,
                 Err(e) => {
                     let error_message = format!("Failed to create actor store: {}", e);

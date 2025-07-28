@@ -24,6 +24,7 @@ pub enum RuntimeEventData {
     ShutdownRequested {
         success: bool,
     },
+    ShuttingDown {},
 
     // State change events
     StateChangeCall {
