@@ -122,7 +122,7 @@ impl TheaterClient {
         }).await
     }
 
-    /// Stop a running actor
+    /// Stop a running actor (graceful shutdown)
     pub async fn stop_actor(&self, actor_id: &str) -> CliResult<()> {
         self.with_cancellation(|| async {
             let mut conn = self.connection.lock().await;
@@ -136,6 +136,37 @@ impl TheaterClient {
             match response {
                 ManagementResponse::ActorStopped { id: _ } => {
                     info!("Actor {} stopped successfully", actor_id);
+                    Ok(())
+                }
+                ManagementResponse::Error { error } => {
+                    let error_str = format!("{:?}", error);
+                    if error_str.contains("not found") {
+                        Err(CliError::actor_not_found(actor_id))
+                    } else {
+                        Err(CliError::ServerError { message: error_str })
+                    }
+                }
+                _ => Err(CliError::UnexpectedResponse {
+                    response: format!("{:?}", response),
+                }),
+            }
+        }).await
+    }
+
+    /// Terminate an actor immediately (forceful shutdown)
+    pub async fn terminate_actor(&self, actor_id: &str) -> CliResult<()> {
+        self.with_cancellation(|| async {
+            let mut conn = self.connection.lock().await;
+            let theater_id = actor_id
+                .parse()
+                .map_err(|_| CliError::invalid_actor_id(actor_id))?;
+            let response = conn
+                .send_and_receive(ManagementCommand::TerminateActor { id: theater_id })
+                .await?;
+
+            match response {
+                ManagementResponse::ActorStopped { id: _ } => {
+                    info!("Actor {} terminated successfully", actor_id);
                     Ok(())
                 }
                 ManagementResponse::Error { error } => {
