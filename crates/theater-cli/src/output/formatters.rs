@@ -1220,6 +1220,7 @@ pub struct ActorStarted {
     pub address: String,
     pub subscribing: bool,
     pub acting_as_parent: bool,
+    pub unix_signals: bool,
 }
 
 impl OutputFormat for ActorStarted {
@@ -1277,6 +1278,7 @@ impl OutputFormat for ActorStarted {
                 "Acting as Parent".to_string(),
                 self.acting_as_parent.to_string(),
             ],
+            vec!["Unix Signals".to_string(), self.unix_signals.to_string()],
         ];
         output.table(&headers, &rows)?;
         Ok(())

@@ -1,8 +1,8 @@
 use anyhow::Result;
 use clap::Parser;
-use std::io::{self, Write};
+use std::io;
 use std::net::SocketAddr;
-use theater::ActorError;
+
 use tracing::debug;
 
 use crate::client::ManagementResponse;
@@ -32,6 +32,10 @@ pub struct StartArgs {
     /// Act as the actor's parent
     #[arg(short, long, default_value_t = false)]
     pub parent: bool,
+
+    /// Enable Unix-style signal handling (SIGINT/SIGKILL)
+    #[arg(short, long, default_value_t = false)]
+    pub unix_signals: bool,
 
     /// Show detailed startup information instead of just actor ID
     #[arg(long)]
@@ -110,6 +114,14 @@ pub async fn execute_async(args: &StartArgs, ctx: &CommandContext) -> Result<(),
     let timeout_duration = tokio::time::Duration::from_secs(30);
 
     debug!("Entering response loop, waiting for actor start confirmation or events");
+
+    // Handle Unix signals when enabled
+    if args.unix_signals {
+        debug!("Unix signal handling enabled");
+    }
+
+    let mut signal_task = None;
+
     loop {
         tokio::select! {
             data = client.next_response() => {
@@ -120,38 +132,73 @@ pub async fn execute_async(args: &StartArgs, ctx: &CommandContext) -> Result<(),
                         ManagementResponse::ActorStarted { id } => {
                             debug!("Management response received: Actor started with ID: {}", id);
                             actor_started = true;
+                            let actor_id = id.clone();
 
                             // Determine output behavior based on flags
-                            // Default behavior: just output actor ID
-                            // The only case where we do not output ID is when we are only
-                            // subscribing and are expecting the result of the actor on stdout/stderr
                             if !(args.subscribe || args.parent) {
                                 println!("{}", id);
                             }
 
                             if args.verbose {
-                                // Verbose mode: show detailed startup info
                                 let result = ActorStarted {
                                     actor_id: id.to_string(),
                                     manifest_path: args.manifest.clone(),
                                     address: address.to_string(),
                                     subscribing: args.subscribe,
                                     acting_as_parent: args.parent,
+                                    unix_signals: args.unix_signals,
                                 };
                                 ctx.output.output(&result, None)?;
                             }
 
-                            // If either subscribe or parent is true, we continue to listen for
-                            // events
+                            // If not subscribing or parent, exit after startup
                             if !(args.subscribe || args.parent) {
-                                debug!("Actor started, but not subscribing or acting as parent, exiting loop");
-                                // If not subscribing or parent, we can exit after startup
+                                debug!("Actor started successfully, exiting");
                                 break;
+                            }
+
+                            // Set up signal handling for running actor
+                            if args.unix_signals {
+                                let mut client_clone = client.clone();
+                                let actor_id = actor_id.clone();
+                                let shutdown_token = ctx.shutdown_token.clone();
+
+                                signal_task = Some(tokio::spawn(async move {
+                                    #[cfg(unix)]
+                                    {
+                                        use tokio::signal::unix::{signal, SignalKind};
+                                        
+                                        let mut sigterm = match signal(SignalKind::terminate()) {
+                                            Ok(s) => s,
+                                            Err(_) => return,
+                                        };
+
+                                        tokio::select! {
+                                            _ = tokio::signal::ctrl_c() => {
+                                                debug!("SIGINT received, gracefully stopping actor {}", actor_id);
+                                                eprintln!("\nReceived SIGINT, gracefully stopping actor...");
+                                                let _ = client_clone.stop_actor(&actor_id.to_string()).await;
+                                            },
+                                            _ = sigterm.recv() => {
+                                                debug!("SIGTERM received, terminating actor {}", actor_id);
+                                                eprintln!("\nReceived SIGTERM, terminating actor...");
+                                                let _ = client_clone.terminate_actor(&actor_id.to_string()).await;
+                                            },
+                                            _ = shutdown_token.cancelled() => {},
+                                        }
+                                    }
+                                    
+                                    #[cfg(not(unix))]
+                                    {
+                                        let _ = tokio::signal::ctrl_c().await;
+                                        debug!("Ctrl+C received, gracefully stopping actor {}", actor_id);
+                                        let _ = client_clone.stop_actor(&actor_id).await;
+                                    }
+                                }));
                             }
                         }
                         ManagementResponse::ActorEvent { event } => {
                             if args.subscribe {
-                                // Use structured output format
                                 display_structured_event(&event, &event_fields)
                                     .map_err(|e| CliError::invalid_input("event_display", "event", e.to_string()))?;
                                 if event.event_type == "shutdown" {
@@ -164,15 +211,13 @@ pub async fn execute_async(args: &StartArgs, ctx: &CommandContext) -> Result<(),
                             if args.parent {
                                 match args.subscribe {
                                     true => {
-                                        // If we're subscribing, we store the result for later output
                                         actor_result = Some(result);
                                     }
                                     false => {
-                                        // If not subscribing, we output the result directly
                                         write_actor_result(result);
                                     }
                                 }
-                            };
+                            }
                         }
                         ManagementResponse::Error { error } => {
                             return Err(CliError::management_error(error));
@@ -193,6 +238,31 @@ pub async fn execute_async(args: &StartArgs, ctx: &CommandContext) -> Result<(),
                 if args.verbose {
                     eprintln!("Interrupted by user");
                 }
+                break;
+            }
+            signal = async {  
+                if args.unix_signals && !actor_started {
+                    #[cfg(unix)]
+                    {
+                        use tokio::signal::unix::{signal, SignalKind};
+                        let mut sigterm = match signal(SignalKind::terminate()) {
+                            Ok(s) => s,
+                            Err(_) => return None,
+                        };
+                        tokio::select! {
+                            _ = sigterm.recv() => Some("SIGTERM"),
+                            _ = ctx.shutdown_token.cancelled() => None,
+                        }
+                    }
+                    #[cfg(not(unix))]
+                    {
+                        None
+                    }
+                } else {
+                    futures::future::pending().await
+                }
+            }, if args.unix_signals && !actor_started => {
+                debug!("SIGTERM received while waiting for actor startup");
                 break;
             }
         }
@@ -229,15 +299,14 @@ fn write_actor_result(actor_result: ActorResult) {
         }
         ActorResult::Error(error) => {
             let error_message = format!("Error: {}", error.error);
-            let _ = io::stderr().write_all(error_message.as_bytes());
-            let _ = io::stderr().flush();
+            let _ = io::stdout().write_all(error_message.as_bytes());
+            let _ = io::stdout().flush();
             std::process::exit(1);
         }
         ActorResult::ExternalStop(_) => {
-            let _ = io::stderr().write_all(b"Actor stopped externally");
-            let _ = io::stderr().flush();
+            let _ = io::stdout().write_all(b"Actor stopped externally");
+            let _ = io::stdout().flush();
             std::process::exit(1);
         }
-        _ => {}
     }
 }
