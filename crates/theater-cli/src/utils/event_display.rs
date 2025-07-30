@@ -504,7 +504,7 @@ pub fn print_hex_dump(data: &[u8], bytes_per_line: usize) {
 }
 
 /// Display a single event in structured format for Unix scripting
-/// Format: EVENT <hash>\n<parent>\n<type>\n<timestamp>\n<description>\n\n<data>\n\n---
+/// Format: EVENT <hash>\n<parent>\n<type>\n<timestamp>\n<description>\n<data_size>\n\n<data>\n\n
 pub fn display_structured_event(event: &ChainEvent, fields: &[&str]) -> Result<()> {
     // Start with EVENT and hash (always included)
     let hash_str = format!("0x{}", hex::encode(&event.hash));
@@ -543,6 +543,11 @@ pub fn display_structured_event(event: &ChainEvent, fields: &[&str]) -> Result<(
             Some(desc) => println!("{}", desc),
             None => println!(""),
         }
+    }
+
+    // Data size (if requested)
+    if should_include("data_size") {
+        println!("{}", event.data.len());
     }
 
     // Empty line before data

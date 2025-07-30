@@ -37,8 +37,8 @@ pub struct StartArgs {
     #[arg(long)]
     pub verbose: bool,
 
-    /// Event fields to include (comma-separated: hash,parent,type,timestamp,description,data)
-    #[arg(long, default_value = "hash,parent,type,timestamp,description,data")]
+    /// Event fields to include (comma-separated: hash,parent,type,timestamp,description,data,data_size)
+    #[arg(long, default_value = "hash,parent,type,timestamp,description,data_size,data")]
     pub event_fields: String,
 }
 
