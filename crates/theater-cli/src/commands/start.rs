@@ -1,6 +1,5 @@
 use anyhow::Result;
 use clap::Parser;
-use std::io;
 use std::net::SocketAddr;
 
 use tracing::debug;
@@ -46,7 +45,7 @@ pub struct StartArgs {
     pub event_fields: String,
 }
 
-/// Execute the start command with new Unix-friendly behavior
+/// Execute the start command with single-select-branch signal handling
 pub async fn execute_async(args: &StartArgs, ctx: &CommandContext) -> Result<(), CliError> {
     debug!("Starting actor from manifest: {}", args.manifest);
 
@@ -69,14 +68,12 @@ pub async fn execute_async(args: &StartArgs, ctx: &CommandContext) -> Result<(),
 
     // Handle the initial state parameter
     let initial_state = if let Some(state_str) = &args.initial_state {
-        // Try to resolve as reference first (file path, URL, or store path)
         match resolve_reference(state_str).await {
             Ok(bytes) => {
                 debug!("Resolved initial state from reference: {}", state_str);
                 Some(bytes)
             }
             Err(_) => {
-                // If resolution fails, assume it's a JSON string
                 debug!("Using provided string as JSON initial state");
                 Some(state_str.as_bytes().to_vec())
             }
@@ -92,17 +89,13 @@ pub async fn execute_async(args: &StartArgs, ctx: &CommandContext) -> Result<(),
         .await
         .map_err(|e| CliError::connection_failed(address, e))?;
 
-    // Start the actor with initial state
-    debug!("Calling start actor on client");
+    // Start the actor
     client
         .start_actor(manifest_content, initial_state, args.parent, args.subscribe)
         .await
         .map_err(|e| CliError::actor_not_found(format!("Failed to start actor: {}", e)))?;
-    debug!("Actor start request sent successfully");
 
-    // TUI mode removed - always use structured output
-
-    // Parse event fields for structured output
+    // Parse event fields
     let event_fields = if args.subscribe {
         parse_event_fields(&args.event_fields)
     } else {
@@ -112,36 +105,29 @@ pub async fn execute_async(args: &StartArgs, ctx: &CommandContext) -> Result<(),
     let mut actor_started = false;
     let mut actor_result: Option<ActorResult> = None;
     let timeout_duration = tokio::time::Duration::from_secs(30);
+    let mut actor_id: Option<String> = None;
 
-    debug!("Entering response loop, waiting for actor start confirmation or events");
-
-    // Handle Unix signals when enabled
-    if args.unix_signals {
-        debug!("Unix signal handling enabled");
-    }
-
-    let mut signal_task = None;
+    debug!("Entering response loop");
 
     loop {
         tokio::select! {
             data = client.next_response() => {
-                debug!("Received response from client");
-                debug!("Response data: {:?}", data);
+                debug!("Received response: {:?}", data);
                 if let Ok(data) = data {
                     match data {
                         ManagementResponse::ActorStarted { id } => {
-                            debug!("Management response received: Actor started with ID: {}", id);
+                            debug!("Actor started: {}", id);
                             actor_started = true;
-                            let actor_id = id.clone();
+                            let id_str = id.to_string();
+                            actor_id = Some(id_str.clone());
 
-                            // Determine output behavior based on flags
                             if !(args.subscribe || args.parent) {
                                 println!("{}", id);
                             }
 
                             if args.verbose {
                                 let result = ActorStarted {
-                                    actor_id: id.to_string(),
+                                    actor_id: id_str.clone(),
                                     manifest_path: args.manifest.clone(),
                                     address: address.to_string(),
                                     subscribing: args.subscribe,
@@ -151,50 +137,9 @@ pub async fn execute_async(args: &StartArgs, ctx: &CommandContext) -> Result<(),
                                 ctx.output.output(&result, None)?;
                             }
 
-                            // If not subscribing or parent, exit after startup
                             if !(args.subscribe || args.parent) {
-                                debug!("Actor started successfully, exiting");
+                                debug!("Exiting after startup");
                                 break;
-                            }
-
-                            // Set up signal handling for running actor
-                            if args.unix_signals {
-                                let mut client_clone = client.clone();
-                                let actor_id = actor_id.clone();
-                                let shutdown_token = ctx.shutdown_token.clone();
-
-                                signal_task = Some(tokio::spawn(async move {
-                                    #[cfg(unix)]
-                                    {
-                                        use tokio::signal::unix::{signal, SignalKind};
-                                        
-                                        let mut sigterm = match signal(SignalKind::terminate()) {
-                                            Ok(s) => s,
-                                            Err(_) => return,
-                                        };
-
-                                        tokio::select! {
-                                            _ = tokio::signal::ctrl_c() => {
-                                                debug!("SIGINT received, gracefully stopping actor {}", actor_id);
-                                                eprintln!("\nReceived SIGINT, gracefully stopping actor...");
-                                                let _ = client_clone.stop_actor(&actor_id.to_string()).await;
-                                            },
-                                            _ = sigterm.recv() => {
-                                                debug!("SIGTERM received, terminating actor {}", actor_id);
-                                                eprintln!("\nReceived SIGTERM, terminating actor...");
-                                                let _ = client_clone.terminate_actor(&actor_id.to_string()).await;
-                                            },
-                                            _ = shutdown_token.cancelled() => {},
-                                        }
-                                    }
-                                    
-                                    #[cfg(not(unix))]
-                                    {
-                                        let _ = tokio::signal::ctrl_c().await;
-                                        debug!("Ctrl+C received, gracefully stopping actor {}", actor_id);
-                                        let _ = client_clone.stop_actor(&actor_id).await;
-                                    }
-                                }));
                             }
                         }
                         ManagementResponse::ActorEvent { event } => {
@@ -202,7 +147,6 @@ pub async fn execute_async(args: &StartArgs, ctx: &CommandContext) -> Result<(),
                                 display_structured_event(&event, &event_fields)
                                     .map_err(|e| CliError::invalid_input("event_display", "event", e.to_string()))?;
                                 if event.event_type == "shutdown" {
-                                    debug!("Actor shutdown event received, exiting loop");
                                     break;
                                 }
                             }
@@ -210,27 +154,81 @@ pub async fn execute_async(args: &StartArgs, ctx: &CommandContext) -> Result<(),
                         ManagementResponse::ActorResult(result) => {
                             if args.parent {
                                 match args.subscribe {
-                                    true => {
-                                        actor_result = Some(result);
-                                    }
-                                    false => {
-                                        write_actor_result(result);
-                                    }
+                                    true => actor_result = Some(result),
+                                    false => write_actor_result(result),
                                 }
                             }
                         }
                         ManagementResponse::Error { error } => {
                             return Err(CliError::management_error(error));
                         }
-                        _ => {
-                            debug!("Unknown response received");
-                        }
+                        _ => {}
                     }
                 }
             }
             _ = tokio::time::sleep(timeout_duration) => {
                 if !actor_started {
                     return Err(CliError::operation_timeout("Actor startup", timeout_duration.as_secs()));
+                }
+            }
+            
+            // Unix signal handling - conditional signal handling
+            signal = async {
+                #[cfg(unix)]
+                {
+                    use tokio::signal::unix::{SignalKind, signal};
+                    
+                    // Initialize signals once
+                    static mut SIGINT_HANDLE: Option<tokio::signal::unix::Signal> = None;
+                    static mut SIGTERM_HANDLE: Option<tokio::signal::unix::Signal> = None;
+                    static INIT: std::sync::Once = std::sync::Once::new();
+                    
+                    INIT.call_once(|| {
+                        if let Ok(sig) = signal(SignalKind::interrupt()) {
+                            unsafe { SIGINT_HANDLE = Some(sig) };
+                        }
+                        if let Ok(sig) = signal(SignalKind::terminate()) {
+                            unsafe { SIGTERM_HANDLE = Some(sig) };
+                        }
+                    });
+                    
+                    unsafe {
+                        let mut sigint = SIGINT_HANDLE.take();
+                        let mut sigterm = SIGTERM_HANDLE.take();
+                        
+                        let sigint_recv = sigint.as_mut().map(|s| s.recv()).unwrap_or(futures::future::pending());
+                        let sigterm_recv = sigterm.as_mut().map(|s| s.recv()).unwrap_or(futures::future::pending());
+                        
+                        tokio::select! {
+                            _ = sigint_recv => "SIGINT",
+                            _ = sigterm_recv => "SIGTERM",
+                            _ = tokio::signal::ctrl_c() => "SIGINT",
+                        }
+                    }
+                }
+                #[cfg(not(unix))]
+                {
+                    "SIGINT"
+                }
+            } => {
+                match signal {
+                    "SIGINT" | "SIGTERM" => {
+                        let sig_type = if signal == "SIGINT" { "SIGINT" } else { "SIGTERM" };
+                        if let Some(actor_id) = &actor_id {
+                            debug!("{} received, {} actor {}", sig_type, 
+                                  if sig_type == "SIGINT" { "gracefully stopping" } else { "terminating" }, actor_id);
+                            eprintln!("\nReceived {}, {} actor...", sig_type, 
+                                    if sig_type == "SIGINT" { "gracefully stopping" } else { "terminating" });
+                            
+                            if sig_type == "SIGINT" {
+                                let _ = client.stop_actor(actor_id).await;
+                            } else {
+                                let _ = client.terminate_actor(actor_id).await;
+                            }
+                        }
+                        break;
+                    }
+                    _ => break,
                 }
             }
             _ = tokio::signal::ctrl_c() => {
@@ -240,44 +238,21 @@ pub async fn execute_async(args: &StartArgs, ctx: &CommandContext) -> Result<(),
                 }
                 break;
             }
-            signal = async {  
-                if args.unix_signals && !actor_started {
-                    #[cfg(unix)]
-                    {
-                        use tokio::signal::unix::{signal, SignalKind};
-                        let mut sigterm = match signal(SignalKind::terminate()) {
-                            Ok(s) => s,
-                            Err(_) => return None,
-                        };
-                        tokio::select! {
-                            _ = sigterm.recv() => Some("SIGTERM"),
-                            _ = ctx.shutdown_token.cancelled() => None,
-                        }
-                    }
-                    #[cfg(not(unix))]
-                    {
-                        None
-                    }
-                } else {
-                    futures::future::pending().await
-                }
-            }, if args.unix_signals && !actor_started => {
-                debug!("SIGTERM received while waiting for actor startup");
+            _ = ctx.shutdown_token.cancelled() => {
                 break;
             }
         }
     }
 
-    // Output final actor result if we're acting as parent
     if args.parent && args.subscribe {
         match actor_result {
             Some(result) => {
-                debug!("Actor result received, writing output");
+                debug!("Actor result received");
                 println!("OUTPUT");
                 write_actor_result(result);
             }
             None => {
-                eprintln!("No actor result received, exiting with error");
+                eprintln!("No actor result received");
                 std::process::exit(1);
             }
         }
