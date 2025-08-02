@@ -99,5 +99,7 @@ pub fn is_valid_method(method: &str) -> bool {
     matches!(
         method,
         "GET" | "POST" | "PUT" | "DELETE" | "PATCH" | "HEAD" | "OPTIONS" | "TRACE" | "CONNECT"
+        // WebDAV methods for git-http-push and WebDAV protocol support
+        | "LOCK" | "UNLOCK" | "MKCOL" | "COPY" | "MOVE" | "PROPFIND" | "PROPPATCH"
     )
 }

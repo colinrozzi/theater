@@ -64,7 +64,9 @@ fn is_valid_host(host: &str) -> bool {
 fn is_valid_method(method: &str) -> bool {
     match method {
         "GET" | "POST" | "PUT" | "DELETE" | "PATCH" | "HEAD" | "OPTIONS" | "CONNECT" | "TRACE"
-        | "*" => true,
+        | "*"
+        // WebDAV methods for git-http-push and WebDAV protocol support
+        | "LOCK" | "UNLOCK" | "MKCOL" | "COPY" | "MOVE" | "PROPFIND" | "PROPPATCH" => true,
         _ => false,
     }
 }
