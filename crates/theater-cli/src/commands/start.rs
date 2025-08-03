@@ -196,8 +196,20 @@ pub async fn execute_async(args: &StartArgs, ctx: &CommandContext) -> Result<(),
                         let mut sigint = SIGINT_HANDLE.take();
                         let mut sigterm = SIGTERM_HANDLE.take();
                         
-                        let sigint_recv = sigint.as_mut().map(|s| s.recv()).unwrap_or(futures::future::pending());
-                        let sigterm_recv = sigterm.as_mut().map(|s| s.recv()).unwrap_or(futures::future::pending());
+                        let sigint_recv = async {
+                            if let Some(s) = sigint.as_mut() {
+                                s.recv().await
+                            } else {
+                                futures::future::pending::<Option<()>>().await
+                            }
+                        };
+                        let sigterm_recv = async {
+                            if let Some(s) = sigterm.as_mut() {
+                                s.recv().await
+                            } else {
+                                futures::future::pending::<Option<()>>().await
+                            }
+                        };
                         
                         tokio::select! {
                             _ = sigint_recv => "SIGINT",
