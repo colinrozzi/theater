@@ -1,8 +1,10 @@
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use tracing::debug;
+use serde_json::Value;
 
 use crate::utils::resolve_reference;
+use crate::utils::template::substitute_variables;
 
 use super::inheritance::{HandlerPermissionPolicy, is_default_permission_policy};
 use super::permissions::HandlerPermission;
@@ -307,6 +309,130 @@ impl ManifestConfig {
         let content = std::fs::read_to_string(path)?;
         let config: ManifestConfig = toml::from_str(&content)?;
         Ok(config)
+    }
+
+    /// Loads a manifest from a file path with variable substitution support.
+    ///
+    /// This method reads the manifest file, resolves the initial state if specified,
+    /// and performs variable substitution before parsing the final configuration.
+    ///
+    /// ## Arguments
+    ///
+    /// * `path` - Path to the manifest file
+    /// * `override_state` - Optional override state to merge with init_state
+    ///
+    /// ## Returns
+    ///
+    /// * `Ok(ManifestConfig)` - The successfully parsed configuration with variables substituted
+    /// * `Err(anyhow::Error)` - If the file cannot be read, initial state cannot be resolved,
+    ///   variable substitution fails, or the resulting TOML cannot be parsed
+    pub async fn from_file_with_substitution<P: AsRef<std::path::Path>>(
+        path: P,
+        override_state: Option<&Value>,
+    ) -> anyhow::Result<Self> {
+        let content = std::fs::read_to_string(path)?;
+        Self::from_str_with_substitution(&content, override_state).await
+    }
+
+    /// Loads a manifest from a string with variable substitution support.
+    ///
+    /// This is the core method that implements the two-stage loading process:
+    /// 1. Extract and resolve the init_state field
+    /// 2. Merge with any override state
+    /// 3. Perform variable substitution on the raw TOML
+    /// 4. Parse the substituted TOML into ManifestConfig
+    ///
+    /// ## Arguments
+    ///
+    /// * `content` - Raw TOML content as string
+    /// * `override_state` - Optional override state to merge with init_state
+    ///
+    /// ## Returns
+    ///
+    /// * `Ok(ManifestConfig)` - The successfully parsed configuration with variables substituted
+    /// * `Err(anyhow::Error)` - If initial state cannot be resolved, variable substitution fails,
+    ///   or the resulting TOML cannot be parsed
+    pub async fn from_str_with_substitution(
+        content: &str,
+        override_state: Option<&Value>,
+    ) -> anyhow::Result<Self> {
+        debug!("Loading manifest with variable substitution");
+
+        // Step 1: Extract init_state field from raw TOML
+        let init_state_ref = Self::extract_init_state_reference(content)?;
+        
+        // Step 2: Resolve init_state if present
+        let resolved_init_state = if let Some(reference) = init_state_ref {
+            debug!("Resolving init_state reference: {}", reference);
+            let data = resolve_reference(&reference).await?;
+            let json_value: Value = serde_json::from_slice(&data)?;
+            Some(json_value)
+        } else {
+            None
+        };
+
+        // Step 3: Merge resolved init_state with override_state
+        let final_state = Self::merge_states(resolved_init_state, override_state)?;
+
+        // Step 4: Perform variable substitution if we have state
+        let substituted_content = if let Some(state) = &final_state {
+            debug!("Performing variable substitution");
+            substitute_variables(content, state)
+                .map_err(|e| anyhow::anyhow!("Variable substitution failed: {}", e))?
+        } else {
+            debug!("No state available, skipping variable substitution");
+            content.to_string()
+        };
+
+        // Step 5: Parse the substituted TOML
+        debug!("Parsing substituted manifest TOML");
+        let config: ManifestConfig = toml::from_str(&substituted_content)
+            .map_err(|e| anyhow::anyhow!("Failed to parse manifest TOML after substitution: {}", e))?;
+
+        Ok(config)
+    }
+
+    /// Extract the init_state field value from raw TOML without full parsing.
+    fn extract_init_state_reference(content: &str) -> anyhow::Result<Option<String>> {
+        // Parse as a generic TOML value first
+        let value: toml::Value = toml::from_str(content)?;
+        
+        // Extract init_state if present
+        if let Some(init_state_value) = value.get("init_state") {
+            if let Some(reference) = init_state_value.as_str() {
+                Ok(Some(reference.to_string()))
+            } else {
+                Err(anyhow::anyhow!("init_state field must be a string"))
+            }
+        } else {
+            Ok(None)
+        }
+    }
+
+    /// Merge resolved init_state with override state.
+    fn merge_states(
+        init_state: Option<Value>,
+        override_state: Option<&Value>,
+    ) -> anyhow::Result<Option<Value>> {
+        match (init_state, override_state) {
+            (None, None) => Ok(None),
+            (Some(state), None) => Ok(Some(state)),
+            (None, Some(&ref state)) => Ok(Some(state.clone())),
+            (Some(mut init), Some(&ref override_val)) => {
+                if let (Value::Object(ref mut init_map), Value::Object(override_map)) = 
+                    (&mut init, override_val) {
+                    // Merge override values into init state
+                    for (key, value) in override_map {
+                        init_map.insert(key.clone(), value.clone());
+                    }
+                    Ok(Some(init))
+                } else {
+                    // If either isn't an object, just use the override
+                    debug!("Either init_state or override_state is not an object, using override");
+                    Ok(Some(override_val.clone()))
+                }
+            }
+        }
     }
 
     /// Loads a manifest configuration from a TOML string.

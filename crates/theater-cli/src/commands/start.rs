@@ -1,6 +1,7 @@
 use anyhow::Result;
 use clap::Parser;
 use std::net::SocketAddr;
+use serde_json::Value;
 
 use tracing::debug;
 
@@ -9,6 +10,7 @@ use crate::utils::event_display::{display_structured_event, parse_event_fields};
 use crate::{error::CliError, output::formatters::ActorStarted, CommandContext};
 use theater::messages::ActorResult;
 use theater::utils::resolve_reference;
+use theater::config::actor_manifest::ManifestConfig;
 
 #[derive(Debug, Parser)]
 pub struct StartArgs {
@@ -45,7 +47,7 @@ pub struct StartArgs {
     pub event_fields: String,
 }
 
-/// Execute the start command with single-select-branch signal handling
+/// Execute the start command with variable substitution support
 pub async fn execute_async(args: &StartArgs, ctx: &CommandContext) -> Result<(), CliError> {
     debug!("Starting actor from manifest: {}", args.manifest);
 
@@ -67,17 +69,73 @@ pub async fn execute_async(args: &StartArgs, ctx: &CommandContext) -> Result<(),
     })?;
 
     // Handle the initial state parameter
-    let initial_state = if let Some(state_str) = &args.initial_state {
+    let override_state = if let Some(state_str) = &args.initial_state {
         match resolve_reference(state_str).await {
             Ok(bytes) => {
                 debug!("Resolved initial state from reference: {}", state_str);
-                Some(bytes)
+                // Parse as JSON for variable substitution
+                let json_value: Value = serde_json::from_slice(&bytes)
+                    .map_err(|e| CliError::invalid_manifest(format!(
+                        "Initial state is not valid JSON: {}", e
+                    )))?;
+                Some(json_value)
             }
             Err(_) => {
                 debug!("Using provided string as JSON initial state");
-                Some(state_str.as_bytes().to_vec())
+                // Try to parse the string directly as JSON
+                let json_value: Value = serde_json::from_str(state_str)
+                    .map_err(|e| CliError::invalid_manifest(format!(
+                        "Initial state string is not valid JSON: {}", e
+                    )))?;
+                Some(json_value)
             }
         }
+    } else {
+        None
+    };
+
+    // Check if manifest has variables
+    let has_vars = has_variables(&manifest_content);
+    
+    // Process the manifest with variable substitution
+    let processed_manifest = match has_vars {
+        true => {
+            debug!("Manifest contains variables, performing substitution");
+            
+            // Use the new substitution-aware loading
+            let manifest_config = ManifestConfig::from_str_with_substitution(
+                &manifest_content,
+                override_state.as_ref()
+            ).await.map_err(|e| {
+                CliError::invalid_manifest(format!(
+                    "Failed to process manifest with variable substitution: {}", e
+                ))
+            })?;
+
+            // Convert back to TOML for the server
+            toml::to_string(&manifest_config).map_err(|e| {
+                CliError::invalid_manifest(format!(
+                    "Failed to serialize processed manifest: {}", e
+                ))
+            })?
+        }
+        false => {
+            debug!("No variables detected, using manifest as-is");
+            manifest_content
+        }
+    };
+
+    // Convert override_state back to bytes if present (for non-variable case)
+    let override_state_bytes = if override_state.is_some() && !has_vars {
+        // Only pass override state to server if we didn't do substitution
+        args.initial_state.as_ref().and_then(|state_str| {
+            match tokio::task::block_in_place(|| {
+                tokio::runtime::Handle::current().block_on(resolve_reference(state_str))
+            }) {
+                Ok(bytes) => Some(bytes),
+                Err(_) => Some(state_str.as_bytes().to_vec()),
+            }
+        })
     } else {
         None
     };
@@ -89,9 +147,9 @@ pub async fn execute_async(args: &StartArgs, ctx: &CommandContext) -> Result<(),
         .await
         .map_err(|e| CliError::connection_failed(address, e))?;
 
-    // Start the actor
+    // Start the actor with the processed manifest
     client
-        .start_actor(manifest_content, initial_state, args.parent, args.subscribe)
+        .start_actor(processed_manifest, override_state_bytes, args.parent, args.subscribe)
         .await
         .map_err(|e| CliError::actor_not_found(format!("Failed to start actor: {}", e)))?;
 
@@ -273,6 +331,12 @@ pub async fn execute_async(args: &StartArgs, ctx: &CommandContext) -> Result<(),
     Ok(())
 }
 
+/// Check if the manifest content contains variable references
+fn has_variables(content: &str) -> bool {
+    content.contains("{{") && content.contains("}}") 
+}
+
+/// Write actor result to stdout
 fn write_actor_result(actor_result: ActorResult) {
     use std::io::{self, Write};
 
