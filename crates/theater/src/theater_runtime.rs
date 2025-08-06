@@ -22,6 +22,7 @@ use crate::utils::{self, resolve_reference};
 use crate::Result;
 use crate::TheaterRuntimeError;
 use crate::{ManifestConfig, StateChain};
+use serde_json::Value;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -856,7 +857,7 @@ impl TheaterRuntime {
         );
 
         // check if the manifest is a valid path OR starts with store:
-        let manifest: ManifestConfig;
+        let manifest_str: String;
 
         if manifest_path.starts_with("store:")
             || manifest_path.starts_with("https:")
@@ -865,12 +866,32 @@ impl TheaterRuntime {
             debug!("Manifest path is a valid store reference or URL");
             // Resolve the store reference
             let manifest_bytes = resolve_reference(&manifest_path).await?;
-            manifest = ManifestConfig::from_vec(manifest_bytes)?;
+            // Save as a string
+            manifest_str = String::from_utf8(manifest_bytes.clone())
+                .map_err(|e| TheaterRuntimeError::ActorInitializationError(e.to_string()))?;
         } else {
             debug!("Manifest is a string");
-            // Load the manifest from the file system
-            manifest = ManifestConfig::from_str(&manifest_path.clone())?;
+            manifest_str = manifest_path.clone();
         }
+
+        let init_value = if let Some(bytes) = init_bytes {
+            Some(
+                serde_json::from_slice::<Value>(&bytes)
+                    .map_err(|e| TheaterRuntimeError::ActorInitializationError(e.to_string()))?,
+            )
+        } else {
+            None
+        };
+
+        let (manifest, init_value) =
+            ManifestConfig::resolve_starting_info(&manifest_str, init_value)
+                .await
+                .map_err(|e| {
+                    TheaterRuntimeError::ActorInitializationError(format!(
+                        "Failed to resolve manifest: {}",
+                        e
+                    ))
+                })?;
 
         // Create a shutdown controller for this specific actor
         let mut shutdown_controller = ShutdownController::new();
@@ -913,7 +934,7 @@ impl TheaterRuntime {
             ActorRuntime::start(
                 actor_id_for_task.clone(),
                 &manifest_clone,
-                init_bytes,
+                init_value,
                 theater_tx,
                 actor_sender,
                 mailbox_rx,
