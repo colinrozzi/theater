@@ -202,6 +202,9 @@ pub enum ManagementError {
 
     // Serialization/deserialization errors
     SerializationError(String),
+
+    // Actor initialization errors
+    ActorInitializationError(String),
 }
 
 // Allow converting from TheaterRuntimeError to ManagementError
@@ -222,6 +225,9 @@ impl From<TheaterRuntimeError> for ManagementError {
                 ManagementError::SerializationError(msg)
             }
             TheaterRuntimeError::InternalError(msg) => ManagementError::InternalError(msg),
+            TheaterRuntimeError::ActorInitializationError(msg) => {
+                ManagementError::ActorInitializationError(msg)
+            }
         }
     }
 }
@@ -244,6 +250,9 @@ impl std::fmt::Display for ManagementError {
             ManagementError::RuntimeError(msg) => write!(f, "Runtime error: {}", msg),
             ManagementError::InternalError(msg) => write!(f, "Internal error: {}", msg),
             ManagementError::SerializationError(msg) => write!(f, "Serialization error: {}", msg),
+            ManagementError::ActorInitializationError(msg) => {
+                write!(f, "Actor initialization error: {}", msg)
+            }
         }
     }
 }
