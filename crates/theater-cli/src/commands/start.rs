@@ -1,16 +1,16 @@
 use anyhow::Result;
 use clap::Parser;
-use std::net::SocketAddr;
 use serde_json::Value;
+use std::net::SocketAddr;
 
 use tracing::debug;
 
 use crate::client::ManagementResponse;
 use crate::utils::event_display::{display_structured_event, parse_event_fields};
 use crate::{error::CliError, output::formatters::ActorStarted, CommandContext};
+use theater::config::actor_manifest::ManifestConfig;
 use theater::messages::ActorResult;
 use theater::utils::resolve_reference;
-use theater::config::actor_manifest::ManifestConfig;
 
 #[derive(Debug, Parser)]
 pub struct StartArgs {
@@ -43,7 +43,10 @@ pub struct StartArgs {
     pub verbose: bool,
 
     /// Event fields to include (comma-separated: hash,parent,type,timestamp,description,data,data_size)
-    #[arg(long, default_value = "hash,parent,type,timestamp,description,data_size,data")]
+    #[arg(
+        long,
+        default_value = "hash,parent,type,timestamp,description,data_size,data"
+    )]
     pub event_fields: String,
 }
 
@@ -69,73 +72,11 @@ pub async fn execute_async(args: &StartArgs, ctx: &CommandContext) -> Result<(),
     })?;
 
     // Handle the initial state parameter
-    let override_state = if let Some(state_str) = &args.initial_state {
+    let initial_state = if let Some(state_str) = &args.initial_state {
         match resolve_reference(state_str).await {
-            Ok(bytes) => {
-                debug!("Resolved initial state from reference: {}", state_str);
-                // Parse as JSON for variable substitution
-                let json_value: Value = serde_json::from_slice(&bytes)
-                    .map_err(|e| CliError::invalid_manifest(format!(
-                        "Initial state is not valid JSON: {}", e
-                    )))?;
-                Some(json_value)
-            }
-            Err(_) => {
-                debug!("Using provided string as JSON initial state");
-                // Try to parse the string directly as JSON
-                let json_value: Value = serde_json::from_str(state_str)
-                    .map_err(|e| CliError::invalid_manifest(format!(
-                        "Initial state string is not valid JSON: {}", e
-                    )))?;
-                Some(json_value)
-            }
+            Ok(bytes) => Some(bytes),
+            Err(_) => Some(state_str.as_bytes().to_vec()),
         }
-    } else {
-        None
-    };
-
-    // Check if manifest has variables
-    let has_vars = has_variables(&manifest_content);
-    
-    // Process the manifest with variable substitution
-    let processed_manifest = match has_vars {
-        true => {
-            debug!("Manifest contains variables, performing substitution");
-            
-            // Use the new substitution-aware loading
-            let manifest_config = ManifestConfig::from_str_with_substitution(
-                &manifest_content,
-                override_state.as_ref()
-            ).await.map_err(|e| {
-                CliError::invalid_manifest(format!(
-                    "Failed to process manifest with variable substitution: {}", e
-                ))
-            })?;
-
-            // Convert back to TOML for the server
-            toml::to_string(&manifest_config).map_err(|e| {
-                CliError::invalid_manifest(format!(
-                    "Failed to serialize processed manifest: {}", e
-                ))
-            })?
-        }
-        false => {
-            debug!("No variables detected, using manifest as-is");
-            manifest_content
-        }
-    };
-
-    // Convert override_state back to bytes if present (for non-variable case)
-    let override_state_bytes = if override_state.is_some() && !has_vars {
-        // Only pass override state to server if we didn't do substitution
-        args.initial_state.as_ref().and_then(|state_str| {
-            match tokio::task::block_in_place(|| {
-                tokio::runtime::Handle::current().block_on(resolve_reference(state_str))
-            }) {
-                Ok(bytes) => Some(bytes),
-                Err(_) => Some(state_str.as_bytes().to_vec()),
-            }
-        })
     } else {
         None
     };
@@ -149,7 +90,7 @@ pub async fn execute_async(args: &StartArgs, ctx: &CommandContext) -> Result<(),
 
     // Start the actor with the processed manifest
     client
-        .start_actor(processed_manifest, override_state_bytes, args.parent, args.subscribe)
+        .start_actor(manifest_content, initial_state, args.parent, args.subscribe)
         .await
         .map_err(|e| CliError::actor_not_found(format!("Failed to start actor: {}", e)))?;
 
@@ -229,18 +170,18 @@ pub async fn execute_async(args: &StartArgs, ctx: &CommandContext) -> Result<(),
                     return Err(CliError::operation_timeout("Actor startup", timeout_duration.as_secs()));
                 }
             }
-            
+
             // Unix signal handling - conditional signal handling
             signal = async {
                 #[cfg(unix)]
                 {
                     use tokio::signal::unix::{SignalKind, signal};
-                    
+
                     // Initialize signals once
                     static mut SIGINT_HANDLE: Option<tokio::signal::unix::Signal> = None;
                     static mut SIGTERM_HANDLE: Option<tokio::signal::unix::Signal> = None;
                     static INIT: std::sync::Once = std::sync::Once::new();
-                    
+
                     INIT.call_once(|| {
                         if let Ok(sig) = signal(SignalKind::interrupt()) {
                             unsafe { SIGINT_HANDLE = Some(sig) };
@@ -249,11 +190,11 @@ pub async fn execute_async(args: &StartArgs, ctx: &CommandContext) -> Result<(),
                             unsafe { SIGTERM_HANDLE = Some(sig) };
                         }
                     });
-                    
+
                     unsafe {
                         let mut sigint = SIGINT_HANDLE.take();
                         let mut sigterm = SIGTERM_HANDLE.take();
-                        
+
                         let sigint_recv = async {
                             if let Some(s) = sigint.as_mut() {
                                 s.recv().await
@@ -268,7 +209,7 @@ pub async fn execute_async(args: &StartArgs, ctx: &CommandContext) -> Result<(),
                                 futures::future::pending::<Option<()>>().await
                             }
                         };
-                        
+
                         tokio::select! {
                             _ = sigint_recv => "SIGINT",
                             _ = sigterm_recv => "SIGTERM",
@@ -285,11 +226,11 @@ pub async fn execute_async(args: &StartArgs, ctx: &CommandContext) -> Result<(),
                     "SIGINT" | "SIGTERM" => {
                         let sig_type = if signal == "SIGINT" { "SIGINT" } else { "SIGTERM" };
                         if let Some(actor_id) = &actor_id {
-                            debug!("{} received, {} actor {}", sig_type, 
+                            debug!("{} received, {} actor {}", sig_type,
                                   if sig_type == "SIGINT" { "gracefully stopping" } else { "terminating" }, actor_id);
-                            eprintln!("\nReceived {}, {} actor...", sig_type, 
+                            eprintln!("\nReceived {}, {} actor...", sig_type,
                                     if sig_type == "SIGINT" { "gracefully stopping" } else { "terminating" });
-                            
+
                             if sig_type == "SIGINT" {
                                 let _ = client.stop_actor(actor_id).await;
                             } else {
@@ -333,7 +274,7 @@ pub async fn execute_async(args: &StartArgs, ctx: &CommandContext) -> Result<(),
 
 /// Check if the manifest content contains variable references
 fn has_variables(content: &str) -> bool {
-    content.contains("{{") && content.contains("}}") 
+    content.contains("{{") && content.contains("}}")
 }
 
 /// Write actor result to stdout
