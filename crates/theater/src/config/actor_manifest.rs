@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::fmt::Display;
 use std::path::PathBuf;
 use tracing::debug;
 
@@ -29,6 +30,24 @@ pub struct ManifestConfig {
     pub init_state: Option<String>,
     #[serde(default, rename = "handler")]
     pub handlers: Vec<HandlerConfig>,
+}
+
+impl Display for ManifestConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "ManifestConfig(name: {}, version: {}, component: {}, description: {:?}, long_description: {:?}, save_chain: {:?}, permission_policy: {:?}, init_state: {:?}, handlers: {:?})",
+            self.name,
+            self.version,
+            self.component,
+            self.description,
+            self.long_description,
+            self.save_chain,
+            self.permission_policy,
+            self.init_state,
+            self.handlers
+        )
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -334,6 +353,8 @@ impl ManifestConfig {
         override_state: Option<Value>,
     ) -> anyhow::Result<(Self, Option<Value>)> {
         debug!("Loading manifest with variable substitution");
+        debug!("Raw manifest content: {}", content);
+        debug!("Override state: {:?}", override_state);
 
         // Step 1: Extract init_state field from raw TOML
         let init_state_ref = Self::extract_init_state_reference(content)
@@ -382,6 +403,9 @@ impl ManifestConfig {
             anyhow::anyhow!("Failed to parse manifest TOML after substitution: {}", e)
         })?;
 
+        debug!("Successfully parsed manifest configuration");
+        debug!("Manifest: {}", config);
+        debug!("Final state after merging: {:?}", final_state);
         Ok((config, final_state))
     }
 
