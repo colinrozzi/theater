@@ -1,10 +1,13 @@
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use std::fmt::Display;
 use std::path::PathBuf;
 use tracing::debug;
 
 use crate::utils::resolve_reference;
+use crate::utils::template::substitute_variables;
 
-use super::inheritance::{HandlerPermissionPolicy, is_default_permission_policy};
+use super::inheritance::{is_default_permission_policy, HandlerPermissionPolicy};
 use super::permissions::HandlerPermission;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -27,6 +30,24 @@ pub struct ManifestConfig {
     pub init_state: Option<String>,
     #[serde(default, rename = "handler")]
     pub handlers: Vec<HandlerConfig>,
+}
+
+impl Display for ManifestConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "ManifestConfig(name: {}, version: {}, component: {}, description: {:?}, long_description: {:?}, save_chain: {:?}, permission_policy: {:?}, init_state: {:?}, handlers: {:?})",
+            self.name,
+            self.version,
+            self.component,
+            self.description,
+            self.long_description,
+            self.save_chain,
+            self.permission_policy,
+            self.init_state,
+            self.handlers
+        )
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -309,6 +330,129 @@ impl ManifestConfig {
         Ok(config)
     }
 
+    /// Loads a manifest from a string with variable substitution support.
+    ///
+    /// This is the core method that implements the two-stage loading process:
+    /// 1. Extract and resolve the init_state field
+    /// 2. Merge with any override state
+    /// 3. Perform variable substitution on the raw TOML
+    /// 4. Parse the substituted TOML into ManifestConfig
+    ///
+    /// ## Arguments
+    ///
+    /// * `content` - Raw TOML content as string
+    /// * `override_state` - Optional override state to merge with init_state
+    ///
+    /// ## Returns
+    ///
+    /// * `Ok(ManifestConfig)` - The successfully parsed configuration with variables substituted
+    /// * `Err(anyhow::Error)` - If initial state cannot be resolved, variable substitution fails,
+    ///   or the resulting TOML cannot be parsed
+    pub async fn resolve_starting_info(
+        content: &str,
+        override_state: Option<Value>,
+    ) -> anyhow::Result<(Self, Option<Value>)> {
+        debug!("Loading manifest with variable substitution");
+        debug!("Raw manifest content: {}", content);
+        debug!("Override state: {:?}", override_state);
+
+        // Step 1: Extract init_state field from raw TOML
+        let init_state_ref = Self::extract_init_state_reference(content)
+            .map_err(|e| anyhow::anyhow!("Failed to extract init_state reference: {}", e))?;
+
+        // Step 2: Resolve init_state if present
+        let resolved_init_state = if let Some(reference) = init_state_ref {
+            debug!("Resolving init_state reference: {}", reference);
+            let data = resolve_reference(&reference).await.map_err(|e| {
+                anyhow::anyhow!(
+                    "Failed to resolve init_state reference '{}': {}",
+                    reference,
+                    e
+                )
+            })?;
+            let json_value: Value = serde_json::from_slice(&data).map_err(|e| {
+                anyhow::anyhow!(
+                    "Failed to parse init_state JSON from reference '{}': {}",
+                    reference,
+                    e
+                )
+            })?;
+            Some(json_value)
+        } else {
+            None
+        };
+
+        // Step 3: Merge resolved init_state with override_state
+        let final_state = Self::merge_states(resolved_init_state, override_state).map_err(|e| {
+            anyhow::anyhow!("Failed to merge init_state with override_state: {}", e)
+        })?;
+
+        // Step 4: Perform variable substitution if we have state
+        let substituted_content = if let Some(state) = &final_state {
+            debug!("Performing variable substitution");
+            substitute_variables(content, state)
+                .map_err(|e| anyhow::anyhow!("Variable substitution failed: {}", e))?
+        } else {
+            debug!("No state available, skipping variable substitution");
+            content.to_string()
+        };
+
+        // Step 5: Parse the substituted TOML
+        debug!("Parsing substituted manifest TOML");
+        let config: ManifestConfig = toml::from_str(&substituted_content).map_err(|e| {
+            anyhow::anyhow!("Failed to parse manifest TOML after substitution: {}", e)
+        })?;
+
+        debug!("Successfully parsed manifest configuration");
+        debug!("Manifest: {}", config);
+        debug!("Final state after merging: {:?}", final_state);
+        Ok((config, final_state))
+    }
+
+    /// Extract the init_state field value from raw TOML without full parsing.
+    fn extract_init_state_reference(content: &str) -> anyhow::Result<Option<String>> {
+        // Parse as a generic TOML value first
+        let value: toml::Value = toml::from_str(content)?;
+
+        // Extract init_state if present
+        if let Some(init_state_value) = value.get("init_state") {
+            if let Some(reference) = init_state_value.as_str() {
+                Ok(Some(reference.to_string()))
+            } else {
+                Err(anyhow::anyhow!("init_state field must be a string"))
+            }
+        } else {
+            Ok(None)
+        }
+    }
+
+    /// Merge resolved init_state with override state.
+    fn merge_states(
+        init_state: Option<Value>,
+        override_state: Option<Value>,
+    ) -> anyhow::Result<Option<Value>> {
+        match (init_state, override_state) {
+            (None, None) => Ok(None),
+            (Some(state), None) => Ok(Some(state)),
+            (None, Some(ref state)) => Ok(Some(state.clone())),
+            (Some(mut init), Some(ref override_val)) => {
+                if let (Value::Object(ref mut init_map), Value::Object(override_map)) =
+                    (&mut init, override_val)
+                {
+                    // Merge override values into init state
+                    for (key, value) in override_map {
+                        init_map.insert(key.clone(), value.clone());
+                    }
+                    Ok(Some(init))
+                } else {
+                    // If either isn't an object, just use the override
+                    debug!("Either init_state or override_state is not an object, using override");
+                    Ok(Some(override_val.clone()))
+                }
+            }
+        }
+    }
+
     /// Loads a manifest configuration from a TOML string.
     ///
     /// ## Purpose
@@ -344,7 +488,7 @@ impl ManifestConfig {
     /// ```
     pub fn from_str(content: &str) -> anyhow::Result<Self> {
         tracing::info!("Parsing manifest TOML content: {}", content);
-        
+
         let config: ManifestConfig = match toml::from_str(content) {
             Ok(config) => {
                 tracing::info!("Successfully parsed manifest TOML");
@@ -355,11 +499,17 @@ impl ManifestConfig {
                 return Err(e.into());
             }
         };
-        
+
         // Debug logging to trace permission parsing
-        tracing::info!("Parsed manifest permission_policy: {:?}", config.permission_policy);
-        tracing::info!("Parsed manifest file_system inheritance: {:?}", config.permission_policy.file_system);
-        
+        tracing::info!(
+            "Parsed manifest permission_policy: {:?}",
+            config.permission_policy
+        );
+        tracing::info!(
+            "Parsed manifest file_system inheritance: {:?}",
+            config.permission_policy.file_system
+        );
+
         Ok(config)
     }
 
@@ -502,14 +652,21 @@ impl ManifestConfig {
         &self,
         parent_permissions: &HandlerPermission,
     ) -> HandlerPermission {
-        tracing::info!("Calculating effective permissions from parent: {:?}", parent_permissions);
+        tracing::info!(
+            "Calculating effective permissions from parent: {:?}",
+            parent_permissions
+        );
         tracing::info!("Using permission policy: {:?}", self.permission_policy);
-        
-        let effective = HandlerPermission::calculate_effective(parent_permissions, &self.permission_policy);
-        
+
+        let effective =
+            HandlerPermission::calculate_effective(parent_permissions, &self.permission_policy);
+
         tracing::info!("Calculated effective permissions: {:?}", effective);
-        tracing::info!("Effective filesystem permissions: {:?}", effective.file_system);
-        
+        tracing::info!(
+            "Effective filesystem permissions: {:?}",
+            effective.file_system
+        );
+
         effective
     }
 }
@@ -518,7 +675,7 @@ impl ManifestConfig {
 mod tests {
     use super::*;
     use crate::config::permissions::*;
-    
+
     #[test]
     fn test_manifest_permission_policy_parsing() {
         // Test the correct permission_policy structure
@@ -535,9 +692,9 @@ mod tests {
             execute = false
             allowed_paths = ["/tmp/test"]
         "#;
-        
+
         let manifest = ManifestConfig::from_str(toml_content).unwrap();
-        
+
         // Check that the permission policy was parsed correctly
         match &manifest.permission_policy.file_system {
             crate::config::inheritance::HandlerInheritance::Restrict(perms) => {
@@ -549,7 +706,7 @@ mod tests {
             _ => panic!("Expected Restrict variant with FileSystemPermissions"),
         }
     }
-    
+
     #[test]
     fn test_manifest_wrong_permissions_structure() {
         // Test what happens with your original structure
@@ -564,9 +721,9 @@ mod tests {
             execute = false
             allowed_paths = ["/tmp/test"]
         "#;
-        
+
         let manifest = ManifestConfig::from_str(toml_content).unwrap();
-        
+
         // This should result in default (Inherit) since the structure is wrong
         match &manifest.permission_policy.file_system {
             crate::config::inheritance::HandlerInheritance::Inherit => {

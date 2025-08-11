@@ -36,6 +36,7 @@ use crate::ManifestConfig;
 
 use crate::Result;
 use crate::StateChain;
+use serde_json::Value;
 use std::sync::Arc;
 use std::sync::RwLock as SyncRwLock;
 use tokio::sync::mpsc::{self, Receiver, Sender};
@@ -89,7 +90,7 @@ impl ActorRuntime {
     pub async fn start(
         id: TheaterId,
         config: &ManifestConfig,
-        state_bytes: Option<Vec<u8>>,
+        initial_state: Option<Value>,
         theater_tx: Sender<TheaterCommand>,
         actor_sender: Sender<ActorMessage>,
         actor_mailbox: Receiver<ActorMessage>,
@@ -113,7 +114,7 @@ impl ActorRuntime {
         let mut setup_task = Some(tokio::spawn(Self::build_actor_resources(
             id.clone(),
             config.clone(),
-            state_bytes,
+            initial_state,
             theater_tx.clone(),
             actor_sender,
             actor_mailbox,
@@ -550,7 +551,7 @@ impl ActorRuntime {
     async fn build_actor_resources(
         id: TheaterId,
         config: ManifestConfig,
-        state_bytes: Option<Vec<u8>>,
+        initial_state: Option<Value>,
         theater_tx: Sender<TheaterCommand>,
         actor_sender: Sender<ActorMessage>,
         actor_mailbox: Receiver<ActorMessage>,
@@ -719,11 +720,12 @@ impl ActorRuntime {
 
         // Initialize state if needed
         let init_state = if init {
-            Self::initialize_state(&config, state_bytes, id.clone())
-                .await
-                .map_err(|e| {
-                    ActorError::UnexpectedError(format!("State initialization failed: {}", e))
-                })?
+            match initial_state {
+                Some(state) => Some(serde_json::to_vec(&state).map_err(|e| {
+                    ActorError::UnexpectedError(format!("Failed to serialize initial state: {}", e))
+                })?),
+                None => None,
+            }
         } else {
             None
         };
@@ -1055,34 +1057,6 @@ impl ActorRuntime {
             }
         }
         Ok(())
-    }
-
-    /// Initializes and merges actor state
-    async fn initialize_state(
-        config: &ManifestConfig,
-        state_bytes: Option<Vec<u8>>,
-        id: TheaterId,
-    ) -> Result<Option<Vec<u8>>> {
-        info!("Loading init state for actor: {:?}", id);
-
-        // Get state from config if available
-        let config_state = config
-            .load_init_state()
-            .await
-            .expect("Failed to load init state");
-
-        // Merge with provided state
-        match crate::utils::merge_initial_states(config_state, state_bytes) {
-            Ok(state) => {
-                info!("Final init state ready: {:?}", state);
-                Ok(state)
-            }
-            Err(e) => {
-                let error_message = format!("Failed to merge initial states: {}", e);
-                error!("{}", error_message);
-                Err(e.into())
-            }
-        }
     }
 
     ///

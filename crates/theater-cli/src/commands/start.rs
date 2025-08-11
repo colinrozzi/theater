@@ -1,5 +1,6 @@
 use anyhow::Result;
 use clap::Parser;
+use serde_json::Value;
 use std::net::SocketAddr;
 
 use tracing::debug;
@@ -7,6 +8,7 @@ use tracing::debug;
 use crate::client::ManagementResponse;
 use crate::utils::event_display::{display_structured_event, parse_event_fields};
 use crate::{error::CliError, output::formatters::ActorStarted, CommandContext};
+use theater::config::actor_manifest::ManifestConfig;
 use theater::messages::ActorResult;
 use theater::utils::resolve_reference;
 
@@ -41,11 +43,14 @@ pub struct StartArgs {
     pub verbose: bool,
 
     /// Event fields to include (comma-separated: hash,parent,type,timestamp,description,data,data_size)
-    #[arg(long, default_value = "hash,parent,type,timestamp,description,data_size,data")]
+    #[arg(
+        long,
+        default_value = "hash,parent,type,timestamp,description,data_size,data"
+    )]
     pub event_fields: String,
 }
 
-/// Execute the start command with single-select-branch signal handling
+/// Execute the start command with variable substitution support
 pub async fn execute_async(args: &StartArgs, ctx: &CommandContext) -> Result<(), CliError> {
     debug!("Starting actor from manifest: {}", args.manifest);
 
@@ -69,14 +74,8 @@ pub async fn execute_async(args: &StartArgs, ctx: &CommandContext) -> Result<(),
     // Handle the initial state parameter
     let initial_state = if let Some(state_str) = &args.initial_state {
         match resolve_reference(state_str).await {
-            Ok(bytes) => {
-                debug!("Resolved initial state from reference: {}", state_str);
-                Some(bytes)
-            }
-            Err(_) => {
-                debug!("Using provided string as JSON initial state");
-                Some(state_str.as_bytes().to_vec())
-            }
+            Ok(bytes) => Some(bytes),
+            Err(_) => Some(state_str.as_bytes().to_vec()),
         }
     } else {
         None
@@ -89,7 +88,7 @@ pub async fn execute_async(args: &StartArgs, ctx: &CommandContext) -> Result<(),
         .await
         .map_err(|e| CliError::connection_failed(address, e))?;
 
-    // Start the actor
+    // Start the actor with the processed manifest
     client
         .start_actor(manifest_content, initial_state, args.parent, args.subscribe)
         .await
@@ -171,18 +170,18 @@ pub async fn execute_async(args: &StartArgs, ctx: &CommandContext) -> Result<(),
                     return Err(CliError::operation_timeout("Actor startup", timeout_duration.as_secs()));
                 }
             }
-            
+
             // Unix signal handling - conditional signal handling
             signal = async {
                 #[cfg(unix)]
                 {
                     use tokio::signal::unix::{SignalKind, signal};
-                    
+
                     // Initialize signals once
                     static mut SIGINT_HANDLE: Option<tokio::signal::unix::Signal> = None;
                     static mut SIGTERM_HANDLE: Option<tokio::signal::unix::Signal> = None;
                     static INIT: std::sync::Once = std::sync::Once::new();
-                    
+
                     INIT.call_once(|| {
                         if let Ok(sig) = signal(SignalKind::interrupt()) {
                             unsafe { SIGINT_HANDLE = Some(sig) };
@@ -191,14 +190,26 @@ pub async fn execute_async(args: &StartArgs, ctx: &CommandContext) -> Result<(),
                             unsafe { SIGTERM_HANDLE = Some(sig) };
                         }
                     });
-                    
+
                     unsafe {
                         let mut sigint = SIGINT_HANDLE.take();
                         let mut sigterm = SIGTERM_HANDLE.take();
-                        
-                        let sigint_recv = sigint.as_mut().map(|s| s.recv()).unwrap_or(futures::future::pending());
-                        let sigterm_recv = sigterm.as_mut().map(|s| s.recv()).unwrap_or(futures::future::pending());
-                        
+
+                        let sigint_recv = async {
+                            if let Some(s) = sigint.as_mut() {
+                                s.recv().await
+                            } else {
+                                futures::future::pending::<Option<()>>().await
+                            }
+                        };
+                        let sigterm_recv = async {
+                            if let Some(s) = sigterm.as_mut() {
+                                s.recv().await
+                            } else {
+                                futures::future::pending::<Option<()>>().await
+                            }
+                        };
+
                         tokio::select! {
                             _ = sigint_recv => "SIGINT",
                             _ = sigterm_recv => "SIGTERM",
@@ -215,11 +226,11 @@ pub async fn execute_async(args: &StartArgs, ctx: &CommandContext) -> Result<(),
                     "SIGINT" | "SIGTERM" => {
                         let sig_type = if signal == "SIGINT" { "SIGINT" } else { "SIGTERM" };
                         if let Some(actor_id) = &actor_id {
-                            debug!("{} received, {} actor {}", sig_type, 
+                            debug!("{} received, {} actor {}", sig_type,
                                   if sig_type == "SIGINT" { "gracefully stopping" } else { "terminating" }, actor_id);
-                            eprintln!("\nReceived {}, {} actor...", sig_type, 
+                            eprintln!("\nReceived {}, {} actor...", sig_type,
                                     if sig_type == "SIGINT" { "gracefully stopping" } else { "terminating" });
-                            
+
                             if sig_type == "SIGINT" {
                                 let _ = client.stop_actor(actor_id).await;
                             } else {
@@ -261,6 +272,12 @@ pub async fn execute_async(args: &StartArgs, ctx: &CommandContext) -> Result<(),
     Ok(())
 }
 
+/// Check if the manifest content contains variable references
+fn has_variables(content: &str) -> bool {
+    content.contains("{{") && content.contains("}}")
+}
+
+/// Write actor result to stdout
 fn write_actor_result(actor_result: ActorResult) {
     use std::io::{self, Write};
 

@@ -13,79 +13,34 @@ pub struct ActorList {
 }
 
 impl OutputFormat for ActorList {
-    fn format_compact(&self, output: &OutputManager) -> CliResult<()> {
-        if self.actors.is_empty() {
-            output.info("No actors are currently running")?;
-        } else {
-            output.info(&format!("Running actors: {}", self.actors.len()))?;
-            for (id, name) in &self.actors {
-                println!(
-                    "  {} {}",
-                    output.theme().accent().apply_to(id),
-                    output.theme().muted().apply_to(name)
-                );
-            }
+    fn format_compact(&self, _output: &OutputManager) -> CliResult<()> {
+        // Script-friendly output: just actor_id name, one per line
+        for (id, name) in &self.actors {
+            println!("{} {}", id, name);
         }
         Ok(())
     }
 
-    fn format_pretty(&self, output: &OutputManager) -> CliResult<()> {
-        if self.actors.is_empty() {
-            output.info("No actors are currently running")?;
-        } else {
-            println!("{}", output.theme().highlight().apply_to("Running Actors"));
-            println!("{}", "─".repeat(40));
-
-            for (i, (id, name)) in self.actors.iter().enumerate() {
-                println!(
-                    "{}. {} {}",
-                    i + 1,
-                    output.theme().accent().apply_to(id),
-                    output.theme().muted().apply_to(&format!("({})", name))
-                );
-            }
-            println!();
-            output.info(&format!("Total: {} actors", self.actors.len()))?;
+    fn format_pretty(&self, _output: &OutputManager) -> CliResult<()> {
+        // Use same script-friendly output for consistency
+        for (id, name) in &self.actors {
+            println!("{} {}", id, name);
         }
         Ok(())
     }
 
-    fn format_table(&self, output: &OutputManager) -> CliResult<()> {
-        if self.actors.is_empty() {
-            output.info("No actors are currently running")?;
-            return Ok(());
+    fn format_table(&self, _output: &OutputManager) -> CliResult<()> {
+        // Use same script-friendly output for consistency
+        for (id, name) in &self.actors {
+            println!("{} {}", id, name);
         }
-
-        let headers = vec!["ID", "Name"];
-        let rows: Vec<Vec<String>> = self
-            .actors
-            .iter()
-            .map(|(id, name)| vec![id.clone(), name.clone()])
-            .collect();
-
-        output.table(&headers, &rows)?;
         Ok(())
     }
 
-    fn format_detailed(&self, output: &OutputManager) -> CliResult<()> {
-        if self.actors.is_empty() {
-            output.info("No actors are currently running")?;
-            return Ok(());
-        }
-
-        println!(
-            "{}",
-            output.theme().highlight().apply_to("Detailed Actor List")
-        );
-        println!("{}", "─".repeat(40));
-
-        for (i, (id, name)) in self.actors.iter().enumerate() {
-            println!(
-                "{}. {} - {}",
-                i + 1,
-                output.theme().accent().apply_to(id),
-                output.theme().muted().apply_to(name)
-            );
+    fn format_detailed(&self, _output: &OutputManager) -> CliResult<()> {
+        // Use same script-friendly output for consistency
+        for (id, name) in &self.actors {
+            println!("{} {}", id, name);
         }
         Ok(())
     }

@@ -41,6 +41,9 @@ sha1 = "0.10"
 hex = "0.4.3"
 md5 = "0.7.0"
 
+# Variable substitution
+handlebars = "6.0"
+
 # Dependencies that are currently used by core but should be moved
 axum = { version = "0.8.1", features = ["ws"] }
 reqwest = { version = "0.11", features = ["json"] }

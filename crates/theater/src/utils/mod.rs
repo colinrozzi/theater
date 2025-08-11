@@ -6,6 +6,9 @@ use crate::store::{ContentRef, ContentStore, Label};
 use crate::{ChainEvent, TheaterId};
 use anyhow::{anyhow, Result};
 
+// Add the template module
+pub mod template;
+
 #[derive(Error, Debug)]
 pub enum ReferenceError {
     #[error("Failed to resolve reference: {0}")]

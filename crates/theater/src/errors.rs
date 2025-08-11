@@ -36,6 +36,9 @@ pub enum TheaterRuntimeError {
     /// Error with serialization/deserialization
     SerializationError(String),
 
+    /// Error during actor initialization
+    ActorInitializationError(String),
+
     /// Internal runtime error
     InternalError(String),
 }
@@ -53,6 +56,7 @@ impl fmt::Display for TheaterRuntimeError {
             Self::ChannelRejected => write!(f, "Channel rejected by target"),
             Self::SerializationError(msg) => write!(f, "Serialization error: {}", msg),
             Self::InternalError(msg) => write!(f, "Internal error: {}", msg),
+            Self::ActorInitializationError(msg) => write!(f, "Actor initialization error: {}", msg),
         }
     }
 }
