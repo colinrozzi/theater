@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"mod":["event_detail","event_list","help_modal"]};

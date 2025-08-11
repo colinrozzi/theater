@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["get_actor_state","list_actors","stop_actor"],"struct":["CliTheaterClient"]};

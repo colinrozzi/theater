@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["build_project","check_cargo_component","execute_async","fetch_wit_dependencies","is_valid_project_name","try_wasm_tools_fetch"],"struct":["CreateArgs"]};
