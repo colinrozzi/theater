@@ -753,6 +753,6 @@ mod tests {
         let fs = root.file_system.unwrap();
         assert!(fs.read && fs.write && fs.execute);
         assert_eq!(fs.allowed_commands, None);
-        assert_eq!(fs.allowed_paths, None);
+        assert_eq!(fs.allowed_paths, Some(vec!["/".to_string()]));
     }
 }
