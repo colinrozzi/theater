@@ -53,7 +53,13 @@ pub async fn execute_async(args: &CreateArgs, ctx: &CommandContext) -> Result<()
     debug!("Output directory: {}", output_dir.display());
 
     // Get available templates
-    let templates_list = templates::available_templates();
+    let templates_list = templates::available_templates().map_err(|e| {
+        CliError::file_operation_failed(
+            "load templates",
+            "templates directory",
+            e,
+        )
+    })?;
 
     // Check if the template exists
     if !templates_list.contains_key(&args.template) {
