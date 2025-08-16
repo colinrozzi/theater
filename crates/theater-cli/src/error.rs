@@ -63,7 +63,7 @@ pub enum CliError {
     TemplateError { reason: String },
 
     /// I/O and filesystem errors
-    #[error("File operation failed: {operation} on {path}")]
+    #[error("File operation failed: {operation} on {path}: {source}")]
     FileOperationFailed {
         operation: String,
         path: String,
