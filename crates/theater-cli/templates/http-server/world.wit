@@ -1,0 +1,11 @@
+package component:{{project_name}};
+
+world default {
+    import theater:simple/runtime;
+    import theater:simple/http-framework;
+    import theater:simple/http-types;
+    import theater:simple/websocket-types;
+
+    export theater:simple/actor;
+    export theater:simple/http-handlers;
+}

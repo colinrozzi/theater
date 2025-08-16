@@ -1,0 +1,11 @@
+[template]
+name = "http-server"
+description = "A basic HTTP server with routing and WebSocket support"
+
+[files]
+"Cargo.toml" = "Cargo.toml"
+"manifest.toml" = "manifest.toml"
+"wit/world.wit" = "world.wit"
+"src/lib.rs" = "lib.rs"
+"README.md" = "README.md"
+"wkg.toml" = "wkg.toml"
