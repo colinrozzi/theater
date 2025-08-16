@@ -34,7 +34,7 @@ fn set_server_state(state: &ServerState) -> Vec<u8> {
 impl Guest for Component {
     fn init(_data: Option<Vec<u8>>, params: (String,)) -> Result<(Option<Vec<u8>>,), String> {
         let (actor_id,) = params;
-        runtime::log(&format!("{{{{project_name}}}} HTTP server actor {} initializing", actor_id));
+        runtime::log(&format!("{{project_name}} HTTP server actor {} initializing", actor_id));
 
         // Create HTTP server configuration
         let config = ServerConfig {
@@ -58,7 +58,7 @@ impl Guest for Component {
         // Start the server
         http_framework::start_server(server_id).map_err(|e| e.to_string())?;
         
-        runtime::log("{{{{project_name}}}} HTTP server started on port 8080");
+        runtime::log("{{project_name}} HTTP server started on port 8080");
         runtime::log("Available endpoints:");
         runtime::log("  GET / - Welcome message");
         runtime::log("  GET /health - Health check");
@@ -103,7 +103,7 @@ impl HttpHandlersGuest for Component {
         let (_, request) = params;
         
         // Simple middleware - just log and proceed
-        runtime::log(&format!("{{{{project_name}}}} request: {} {}", request.method, request.uri));
+        runtime::log(&format!("{{project_name}} request: {} {}", request.method, request.uri));
         
         let middleware_result = bindings::theater::simple::http_types::MiddlewareResult {
             proceed: true,
