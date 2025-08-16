@@ -1,2 +1,2 @@
-[dependencies]
-"theater:simple" = "*"
+[overrides]
+"theater:simple" = { version = "0.1.1" }
