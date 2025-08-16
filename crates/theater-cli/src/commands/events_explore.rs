@@ -242,6 +242,7 @@ mod tests {
             output,
             verbose: false,
             json: false,
+            shutdown_token: tokio_util::sync::CancellationToken::new(),
         };
 
         let result = execute_async(&args, &ctx).await;
