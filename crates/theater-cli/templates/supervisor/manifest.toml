@@ -1,0 +1,11 @@
+name = "{{project_name}}"
+version = "0.1.0"
+component = "./target/wasm32-unknown-unknown/release/{{project_name_snake}}.wasm"
+description = "A Theater supervisor actor"
+save_chain = true
+
+[[handler]]
+type = "supervisor"
+
+[[handler]]
+type = "runtime"

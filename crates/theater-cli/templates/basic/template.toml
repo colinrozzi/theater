@@ -1,0 +1,11 @@
+[template]
+name = "basic"
+description = "A simple Theater actor with basic functionality"
+
+[files]
+"Cargo.toml" = "Cargo.toml"
+"manifest.toml" = "manifest.toml"
+"wit/world.wit" = "world.wit"
+"src/lib.rs" = "lib.rs"
+"README.md" = "README.md"
+"wkg.toml" = "wkg.toml"

@@ -1,0 +1,8 @@
+package component:{{project_name}};
+
+world default {
+    import theater:simple/runtime;
+    import theater:simple/supervisor;
+    export theater:simple/actor;
+    export theater:simple/supervisor-handlers;
+}
