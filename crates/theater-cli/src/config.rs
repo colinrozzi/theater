@@ -227,9 +227,9 @@ mod tests {
         let config_content = r#"
 [server]
 default_address = "192.168.1.100:8080"
-timeout = "60s"
+timeout = { secs = 60, nanos = 0 }
 retry_attempts = 5
-retry_delay = "2s"
+retry_delay = { secs = 2, nanos = 0 }
 
 [output]
 default_format = "json"
@@ -239,6 +239,10 @@ timestamps = false
 [logging]
 level = "debug"
 structured = true
+
+[templates]
+directories = []
+auto_update = true
 "#;
 
         std::fs::write(&config_file, config_content).unwrap();
