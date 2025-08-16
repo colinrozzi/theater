@@ -1,638 +1,100 @@
 use std::collections::HashMap;
 use std::fs;
 use std::io;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use tracing::{debug, info};
+use handlebars::Handlebars;
+use serde::{Deserialize, Serialize};
 
-/// Template metadata
-#[derive(Debug, Clone)]
-#[allow(dead_code)]
-pub struct Template {
+/// Template metadata loaded from template.toml
+#[derive(Debug, Clone, Deserialize)]
+pub struct TemplateMetadata {
+    pub template: TemplateInfo,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct TemplateInfo {
     pub name: String,
     pub description: String,
-    pub files: HashMap<&'static str, &'static str>,
+    pub files: HashMap<String, String>,
+}
+
+/// Template data for rendering
+#[derive(Debug, Clone, Serialize)]
+pub struct TemplateData {
+    pub project_name: String,
+    pub project_name_snake: String,
+}
+
+/// Get the path to the templates directory
+fn templates_dir() -> PathBuf {
+    // Get the path relative to the CLI crate root
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    PathBuf::from(manifest_dir).join("templates")
 }
 
 /// Available templates for creating new actors
-pub fn available_templates() -> HashMap<String, Template> {
+pub fn available_templates() -> Result<HashMap<String, TemplateInfo>, io::Error> {
     let mut templates = HashMap::new();
-
-    // Basic actor template
-    templates.insert(
-        "basic".to_string(),
-        Template {
-            name: "basic".to_string(),
-            description: "A simple Theater actor with basic functionality".to_string(),
-            files: basic_template_files(),
-        },
-    );
-
-    // Message server actor template
-    templates.insert(
-        "message-server".to_string(),
-        Template {
-            name: "message-server".to_string(),
-            description: "A Theater actor with message server capabilities".to_string(),
-            files: message_server_template_files(),
-        },
-    );
-
-    // Supervisor actor template
-    templates.insert(
-        "supervisor".to_string(),
-        Template {
-            name: "supervisor".to_string(),
-            description: "A Theater actor with supervisor capabilities for managing child actors".to_string(),
-            files: supervisor_template_files(),
-        },
-    );
-
-    templates
-}
-
-/// Basic actor template files (like hello-world)
-fn basic_template_files() -> HashMap<&'static str, &'static str> {
-    let mut files = HashMap::new();
-
-    // Cargo.toml
-    files.insert("Cargo.toml", r#"[package]
-name = "{{project_name}}"
-version = "0.1.0"
-edition = "2021"
-
-[lib]
-crate-type = ["cdylib"]
-
-[dependencies]
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
-wit-bindgen-rt = { version = "0.43.0", features = ["bitflags"] }
-
-[package.metadata.component]
-package = "component:{{project_name}}"
-
-[package.metadata.component.target.dependencies]
-"theater:simple" = { path = "./wit/deps/theater-simple" }
-
-[package.metadata.component.bindings]
-derives = ["serde::Serialize", "serde::Deserialize", "PartialEq"]
-generate_unused_types = true
-"#);
-
-    // manifest.toml
-    files.insert("manifest.toml", r#"name = "{{project_name}}"
-version = "0.1.0"
-component = "./target/wasm32-unknown-unknown/release/{{project_name_snake}}.wasm"
-description = "A basic Theater actor"
-save_chain = true
-
-[[handler]]
-type = "runtime"
-"#);
-
-    // wit/world.wit
-    files.insert("wit/world.wit", r#"package component:{{project_name}};
-
-world default {
-    import theater:simple/runtime;
-    export theater:simple/actor;
-}
-"#);
-
-    // src/lib.rs
-    files.insert("src/lib.rs", r#"#[allow(warnings)]
-mod bindings;
-
-use bindings::exports::theater::simple::actor::Guest;
-use bindings::theater::simple::runtime::{log, shutdown};
-use serde::{Deserialize, Serialize};
-
-#[derive(Serialize, Deserialize, Debug, Default)]
-struct ActorState {
-    counter: u32,
-    messages: Vec<String>,
-}
-
-struct Component;
-
-impl Guest for Component {
-    fn init(
-        state: Option<Vec<u8>>,
-        params: (String,),
-    ) -> Result<(Option<Vec<u8>>,), String> {
-        log("Initializing {{project_name}} actor");
-        let (self_id,) = params;
-        log(&format!("Actor ID: {}", &self_id));
-        log("Hello from {{project_name}} actor!");
-
-        // Parse existing state or create new
-        let actor_state = match state {
-            Some(bytes) => {
-                serde_json::from_slice::<ActorState>(&bytes)
-                    .unwrap_or_else(|_| ActorState::default())
-            }
-            None => ActorState::default(),
-        };
-
-        // Serialize state back
-        let new_state = serde_json::to_vec(&actor_state)
-            .map_err(|e| format!("Failed to serialize state: {}", e))?;
-
-        // For demo, we'll shutdown after init - remove this for persistent actors
-        shutdown(None);
-
-        Ok((Some(new_state),))
+    let templates_path = templates_dir();
+    
+    if !templates_path.exists() {
+        return Err(io::Error::new(
+            io::ErrorKind::NotFound,
+            format!("Templates directory not found: {}", templates_path.display())
+        ));
     }
-}
 
-bindings::export!(Component with_types_in bindings);
-"#);
-
-    // README.md
-    files.insert("README.md", r#"# {{project_name}}
-
-A basic Theater actor created from the template.
-
-## Building
-
-To build the actor:
-
-```bash
-cargo component build --release
-```
-
-## Running
-
-To run the actor with Theater:
-
-```bash
-theater start manifest.toml
-```
-
-## Features
-
-This basic actor supports:
-
-- State management with serialization
-- Initialization logging
-- Runtime integration
-
-## Development
-
-The actor implements the `theater:simple/actor` interface and can be extended with additional capabilities.
-"#);
-
-    // wkg.toml for dependency management
-    files.insert("wkg.toml", r#"[overrides]
-"theater:simple" = { version = "0.1.1" }
-"#);
-
-    files
-}
-
-/// Message server actor template files
-fn message_server_template_files() -> HashMap<&'static str, &'static str> {
-    let mut files = HashMap::new();
-
-    // Cargo.toml
-    files.insert("Cargo.toml", r#"[package]
-name = "{{project_name}}"
-version = "0.1.0"
-edition = "2021"
-
-[lib]
-crate-type = ["cdylib"]
-
-[dependencies]
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
-wit-bindgen-rt = { version = "0.43.0", features = ["bitflags"] }
-
-[package.metadata.component]
-package = "component:{{project_name}}"
-
-[package.metadata.component.target.dependencies]
-"theater:simple" = { path = "./wit/deps/theater-simple" }
-
-[package.metadata.component.bindings]
-derives = ["serde::Serialize", "serde::Deserialize", "PartialEq"]
-generate_unused_types = true
-"#);
-
-    // manifest.toml
-    files.insert("manifest.toml", r#"name = "{{project_name}}"
-version = "0.1.0"
-component = "./target/wasm32-unknown-unknown/release/{{project_name_snake}}.wasm"
-description = "A Theater actor with message server capabilities"
-save_chain = true
-
-[[handler]]
-type = "message-server"
-
-[[handler]]
-type = "runtime"
-"#);
-
-    // wit/world.wit
-    files.insert("wit/world.wit", r#"package component:{{project_name}};
-
-world default {
-    import theater:simple/runtime;
-    export theater:simple/actor;
-    export theater:simple/message-server-client;
-}
-"#);
-
-    // src/lib.rs
-    files.insert("src/lib.rs", r#"#[allow(warnings)]
-mod bindings;
-
-use bindings::exports::theater::simple::actor::Guest;
-use bindings::exports::theater::simple::message_server_client::Guest as MessageServerClient;
-use bindings::theater::simple::runtime::log;
-use bindings::theater::simple::types::{ChannelAccept, ChannelId};
-use serde::{Deserialize, Serialize};
-
-#[derive(Serialize, Deserialize, Debug, Default)]
-struct ActorState {
-    messages: Vec<String>,
-    channels: Vec<String>,
-}
-
-struct Component;
-
-impl Guest for Component {
-    fn init(
-        state: Option<Vec<u8>>,
-        params: (String,),
-    ) -> Result<(Option<Vec<u8>>,), String> {
-        log("Initializing {{project_name}} message server actor");
-        let (self_id,) = params;
-        log(&format!("Actor ID: {}", &self_id));
-
-        // Parse existing state or create new
-        let actor_state = match state {
-            Some(bytes) => {
-                serde_json::from_slice::<ActorState>(&bytes)
-                    .unwrap_or_else(|_| ActorState::default())
+    // Read all template directories
+    for entry in fs::read_dir(&templates_path)? {
+        let entry = entry?;
+        let path = entry.path();
+        
+        if path.is_dir() {
+            let template_name = path.file_name()
+                .and_then(|n| n.to_str())
+                .ok_or_else(|| io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "Invalid template directory name"
+                ))?;
+            
+            // Load template.toml
+            let metadata_path = path.join("template.toml");
+            if metadata_path.exists() {
+                match load_template_metadata(&metadata_path) {
+                    Ok(metadata) => {
+                        debug!("Loaded template: {} - {}", template_name, metadata.template.description);
+                        templates.insert(template_name.to_string(), metadata.template);
+                    }
+                    Err(e) => {
+                        debug!("Failed to load template {}: {}", template_name, e);
+                    }
+                }
+            } else {
+                debug!("Template {} missing template.toml, skipping", template_name);
             }
-            None => ActorState::default(),
-        };
-
-        // Serialize state back
-        let new_state = serde_json::to_vec(&actor_state)
-            .map_err(|e| format!("Failed to serialize state: {}", e))?;
-
-        Ok((Some(new_state),))
-    }
-}
-
-impl MessageServerClient for Component {
-    fn handle_send(
-        state: Option<Vec<u8>>,
-        params: (Vec<u8>,),
-    ) -> Result<(Option<Vec<u8>>,), String> {
-        let (data,) = params;
-        log(&format!("Received message: {} bytes", data.len()));
-        
-        // Parse and update state
-        let mut actor_state: ActorState = match state {
-            Some(bytes) => serde_json::from_slice(&bytes).unwrap_or_default(),
-            None => ActorState::default(),
-        };
-        
-        // Store message (as string if possible)
-        if let Ok(msg) = String::from_utf8(data) {
-            actor_state.messages.push(msg);
         }
-        
-        let new_state = serde_json::to_vec(&actor_state)
-            .map_err(|e| format!("Failed to serialize state: {}", e))?;
-
-        Ok((Some(new_state),))
     }
 
-    fn handle_request(
-        state: Option<Vec<u8>>,
-        params: (String, Vec<u8>),
-    ) -> Result<(Option<Vec<u8>>, (Option<Vec<u8>>,)), String> {
-        let (request_id, data) = params;
-        log(&format!("Received request {}: {} bytes", request_id, data.len()));
-        
-        // Echo the data back as response
-        Ok((state, (Some(data),)))
+    if templates.is_empty() {
+        return Err(io::Error::new(
+            io::ErrorKind::NotFound,
+            "No valid templates found"
+        ));
     }
 
-    fn handle_channel_open(
-        state: Option<Vec<u8>>,
-        params: (String, Vec<u8>),
-    ) -> Result<(Option<Vec<u8>>, (ChannelAccept,)), String> {
-        let (channel_id, _data) = params;
-        log(&format!("Channel open request: {}", channel_id));
-        
-        // Accept all channel requests
-        Ok((
-            state,
-            (ChannelAccept {
-                accepted: true,
-                message: Some(b"Welcome to the channel!".to_vec()),
-            },),
-        ))
-    }
-
-    fn handle_channel_close(
-        state: Option<Vec<u8>>,
-        params: (ChannelId,),
-    ) -> Result<(Option<Vec<u8>>,), String> {
-        let (channel_id,) = params;
-        log(&format!("Channel closed: {}", channel_id));
-        Ok((state,))
-    }
-
-    fn handle_channel_message(
-        state: Option<Vec<u8>>,
-        params: (ChannelId, Vec<u8>),
-    ) -> Result<(Option<Vec<u8>>,), String> {
-        let (channel_id, data) = params;
-        log(&format!("Channel {} message: {} bytes", channel_id, data.len()));
-        Ok((state,))
-    }
+    Ok(templates)
 }
 
-bindings::export!(Component with_types_in bindings);
-"#);
-
-    // README.md
-    files.insert("README.md", r#"# {{project_name}}
-
-A Theater actor with message server capabilities.
-
-## Building
-
-```bash
-cargo component build --release
-```
-
-## Running
-
-```bash
-theater start manifest.toml
-```
-
-## Features
-
-This actor implements:
-
-- Basic actor lifecycle
-- Message server client interface
-- Channel management
-- State persistence
-
-## API
-
-The actor can handle:
-
-- Direct messages via `handle_send`
-- Request/response via `handle_request`
-- Channel operations (open, close, message)
-
-## Example Usage
-
-```bash
-# Send a message to the actor
-theater message {{project_name}} "Hello, World!"
-
-# Open a channel to the actor
-theater channel open {{project_name}} --data "Channel request"
-```
-"#);
-
-    // wkg.toml for dependency management
-    files.insert("wkg.toml", r#"[overrides]
-"theater:simple" = { version = "0.1.1" }
-"#);
-
-    files
-}
-
-/// Supervisor actor template files
-fn supervisor_template_files() -> HashMap<&'static str, &'static str> {
-    let mut files = HashMap::new();
-
-    // Cargo.toml
-    files.insert("Cargo.toml", r#"[package]
-name = "{{project_name}}"
-version = "0.1.0"
-edition = "2021"
-
-[lib]
-crate-type = ["cdylib"]
-
-[dependencies]
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
-wit-bindgen-rt = { version = "0.43.0", features = ["bitflags"] }
-
-[package.metadata.component]
-package = "component:{{project_name}}"
-
-[package.metadata.component.target.dependencies]
-"theater:simple" = { path = "./wit/deps/theater-simple" }
-
-[package.metadata.component.bindings]
-derives = ["serde::Serialize", "serde::Deserialize", "PartialEq"]
-generate_unused_types = true
-"#);
-
-    // manifest.toml
-    files.insert("manifest.toml", r#"name = "{{project_name}}"
-version = "0.1.0"
-component = "./target/wasm32-unknown-unknown/release/{{project_name_snake}}.wasm"
-description = "A Theater supervisor actor"
-save_chain = true
-
-[[handler]]
-type = "supervisor"
-
-[[handler]]
-type = "runtime"
-"#);
-
-    // wit/world.wit
-    files.insert("wit/world.wit", r#"package component:{{project_name}};
-
-world default {
-    import theater:simple/runtime;
-    import theater:simple/supervisor;
-    export theater:simple/actor;
-    export theater:simple/supervisor-handlers;
-}
-"#);
-
-    // src/lib.rs
-    files.insert("src/lib.rs", r#"#[allow(warnings)]
-mod bindings;
-
-use bindings::exports::theater::simple::actor::Guest;
-use bindings::exports::theater::simple::supervisor_handlers::Guest as SupervisorHandlers;
-use bindings::theater::simple::runtime::log;
-use bindings::theater::simple::supervisor;
-use bindings::theater::simple::types::WitActorError;
-use serde::{Deserialize, Serialize};
-
-#[derive(Serialize, Deserialize, Debug, Default)]
-struct SupervisorState {
-    children: Vec<String>,
-    restart_count: u32,
-}
-
-struct Component;
-
-impl Guest for Component {
-    fn init(
-        state: Option<Vec<u8>>,
-        params: (String,),
-    ) -> Result<(Option<Vec<u8>>,), String> {
-        log("Initializing {{project_name}} supervisor actor");
-        let (self_id,) = params;
-        log(&format!("Supervisor ID: {}", &self_id));
-
-        // Parse existing state or create new
-        let supervisor_state = match state {
-            Some(bytes) => {
-                serde_json::from_slice::<SupervisorState>(&bytes)
-                    .unwrap_or_else(|_| SupervisorState::default())
-            }
-            None => SupervisorState::default(),
-        };
-
-        // Serialize state back
-        let new_state = serde_json::to_vec(&supervisor_state)
-            .map_err(|e| format!("Failed to serialize state: {}", e))?;
-
-        Ok((Some(new_state),))
-    }
-}
-
-impl SupervisorHandlers for Component {
-    fn handle_child_error(
-        state: Option<Vec<u8>>,
-        params: (String, WitActorError),
-    ) -> Result<(Option<Vec<u8>>,), String> {
-        let (child_id, error) = params;
-        log(&format!("Child actor {} error: {:?}", child_id, error));
-        
-        // Parse state
-        let mut supervisor_state: SupervisorState = match state {
-            Some(bytes) => serde_json::from_slice(&bytes).unwrap_or_default(),
-            None => SupervisorState::default(),
-        };
-        
-        // Implement restart strategy
-        supervisor_state.restart_count += 1;
-        log(&format!("Restarting child {} (attempt {})", child_id, supervisor_state.restart_count));
-        
-        // TODO: Implement actual restart logic using supervisor interface
-        
-        let new_state = serde_json::to_vec(&supervisor_state)
-            .map_err(|e| format!("Failed to serialize state: {}", e))?;
-        
-        Ok((Some(new_state),))
-    }
-
-    fn handle_child_exit(
-        state: Option<Vec<u8>>,
-        params: (String, Option<Vec<u8>>),
-    ) -> Result<(Option<Vec<u8>>,), String> {
-        let (child_id, _exit_data) = params;
-        log(&format!("Child actor exited: {}", child_id));
-        
-        // Parse state
-        let mut supervisor_state: SupervisorState = match state {
-            Some(bytes) => serde_json::from_slice(&bytes).unwrap_or_default(),
-            None => SupervisorState::default(),
-        };
-        
-        // Remove child from tracking
-        supervisor_state.children.retain(|id| id != &child_id);
-        
-        let new_state = serde_json::to_vec(&supervisor_state)
-            .map_err(|e| format!("Failed to serialize state: {}", e))?;
-        
-        Ok((Some(new_state),))
-    }
-
-    fn handle_child_external_stop(
-        state: Option<Vec<u8>>,
-        params: (String,),
-    ) -> Result<(Option<Vec<u8>>,), String> {
-        let (child_id,) = params;
-        log(&format!("Child actor externally stopped: {}", child_id));
-        
-        // Parse state
-        let mut supervisor_state: SupervisorState = match state {
-            Some(bytes) => serde_json::from_slice(&bytes).unwrap_or_default(),
-            None => SupervisorState::default(),
-        };
-        
-        // Remove child from tracking
-        supervisor_state.children.retain(|id| id != &child_id);
-        
-        let new_state = serde_json::to_vec(&supervisor_state)
-            .map_err(|e| format!("Failed to serialize state: {}", e))?;
-        
-        Ok((Some(new_state),))
-    }
-}
-
-bindings::export!(Component with_types_in bindings);
-"#);
-
-    // README.md
-    files.insert("README.md", r#"# {{project_name}}
-
-A Theater supervisor actor for managing child actors.
-
-## Building
-
-```bash
-cargo component build --release
-```
-
-## Running
-
-```bash
-theater start manifest.toml
-```
-
-## Features
-
-This supervisor actor implements:
-
-- Child actor lifecycle management
-- Error handling and restart strategies
-- State tracking for supervised actors
-- Supervisor hierarchy integration
-
-## Supervision Strategy
-
-The supervisor implements a simple restart strategy:
-
-- Child errors trigger restart attempts
-- Exit events remove children from tracking
-- External stops are handled gracefully
-
-## Usage
-
-This actor is designed to supervise other actors in a Theater system. It can be used as a building block for more complex supervision trees.
-"#);
-
-    // wkg.toml for dependency management
-    files.insert("wkg.toml", r#"[overrides]
-"theater:simple" = { version = "0.1.1" }
-"#);
-
-    files
+/// Load template metadata from template.toml
+fn load_template_metadata(path: &Path) -> Result<TemplateMetadata, io::Error> {
+    let content = fs::read_to_string(path)?;
+    toml::from_str(&content).map_err(|e| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("Invalid template.toml: {}", e)
+        )
+    })
 }
 
 /// Create a new actor project from a template
@@ -641,7 +103,7 @@ pub fn create_project(
     project_name: &str,
     target_dir: &Path,
 ) -> Result<(), io::Error> {
-    let templates = available_templates();
+    let templates = available_templates()?;
     let template = templates
         .get(template_name)
         .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "Template not found"))?;
@@ -656,46 +118,85 @@ pub fn create_project(
     // Create the target directory
     fs::create_dir_all(target_dir)?;
 
+    // Setup Handlebars renderer
+    let mut handlebars = Handlebars::new();
+    handlebars.set_strict_mode(true);
+    
+    // Register default helper (this should match what's used in the main theater crate)
+    handlebars.register_helper("default", Box::new(|h: &handlebars::Helper, _: &Handlebars, _: &handlebars::Context, _: &mut handlebars::RenderContext, out: &mut dyn handlebars::Output| -> handlebars::HelperResult {
+        let value = h.param(0).and_then(|v| v.value().as_str());
+        let default = h.param(1).and_then(|v| v.value().as_str()).unwrap_or("");
+        
+        let result = if let Some(val) = value {
+            if val.is_empty() { default } else { val }
+        } else {
+            default
+        };
+        
+        out.write(result)?;
+        Ok(())
+    }));
+
+    // Prepare template data
+    let template_data = TemplateData {
+        project_name: project_name.to_string(),
+        project_name_snake: project_name.replace('-', "_"),
+    };
+
+    // Get template directory
+    let template_dir = templates_dir().join(template_name);
+    
     // Create all template files
-    for (relative_path, content) in &template.files {
-        let file_path = target_dir.join(relative_path);
+    for (target_path, template_file) in &template.files {
+        let source_file_path = template_dir.join(template_file);
+        let target_file_path = target_dir.join(target_path);
 
         // Create parent directories if they don't exist
-        if let Some(parent) = file_path.parent() {
+        if let Some(parent) = target_file_path.parent() {
             if !parent.exists() {
                 fs::create_dir_all(parent)?;
             }
         }
 
-        // Replace template variables
-        let processed_content = content
-            .replace("{{project_name}}", project_name)
-            .replace("{{project_name_snake}}", &project_name.replace('-', "_"));
+        // Read template content
+        let template_content = fs::read_to_string(&source_file_path)
+            .map_err(|e| io::Error::new(
+                io::ErrorKind::NotFound,
+                format!("Template file not found: {} ({})", source_file_path.display(), e)
+            ))?;
+
+        // Render template with Handlebars
+        let rendered_content = handlebars
+            .render_template(&template_content, &template_data)
+            .map_err(|e| io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("Template rendering failed for {}: {}", template_file, e)
+            ))?;
 
         debug!(
             "Creating file: {} ({} bytes)",
-            file_path.display(),
-            processed_content.len()
+            target_file_path.display(),
+            rendered_content.len()
         );
 
-        // Write the file
-        fs::write(&file_path, processed_content)?;
+        // Write the rendered file
+        fs::write(&target_file_path, rendered_content)?;
     }
 
-    // Note: We don't automatically create the wit/deps/theater-simple directory
-    // as this should be managed by wkg or similar package manager
     info!("Project '{}' created successfully!", project_name);
-    info!("Note: You may need to run 'wkg deps' or similar to fetch WIT dependencies");
+    info!("Note: You may need to run 'wkg wit fetch' to fetch WIT dependencies");
     
     Ok(())
 }
 
 /// List all available templates
-pub fn list_templates() {
-    let templates = available_templates();
+pub fn list_templates() -> Result<(), io::Error> {
+    let templates = available_templates()?;
     
     println!("Available templates:");
     for (name, template) in templates {
         println!("  {}: {}", name, template.description);
     }
+    
+    Ok(())
 }
