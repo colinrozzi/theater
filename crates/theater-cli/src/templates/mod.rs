@@ -10,10 +10,18 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Deserialize)]
 pub struct TemplateMetadata {
     pub template: TemplateInfo,
+    pub files: HashMap<String, String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct TemplateInfo {
+    pub name: String,
+    pub description: String,
+}
+
+/// Combined template info with files for internal use
+#[derive(Debug, Clone)]
+pub struct Template {
     pub name: String,
     pub description: String,
     pub files: HashMap<String, String>,
@@ -27,16 +35,56 @@ pub struct TemplateData {
 }
 
 /// Get the path to the templates directory
-fn templates_dir() -> PathBuf {
-    // Get the path relative to the CLI crate root
+fn templates_dir() -> Result<PathBuf, io::Error> {
+    // Try multiple possible locations for templates
+    
+    // 1. First try relative to the current executable (for installed binaries)
+    if let Ok(exe_path) = std::env::current_exe() {
+        if let Some(exe_dir) = exe_path.parent() {
+            let templates_path = exe_dir.join("templates");
+            debug!("Trying executable dir: {}", templates_path.display());
+            if templates_path.exists() {
+                debug!("Found templates at: {}", templates_path.display());
+                return Ok(templates_path);
+            }
+        }
+    }
+    
+    // 2. Try relative to current working directory (for development)
+    let cwd_templates = std::env::current_dir()?.join("templates");
+    debug!("Trying current working dir: {}", cwd_templates.display());
+    if cwd_templates.exists() {
+        debug!("Found templates at: {}", cwd_templates.display());
+        return Ok(cwd_templates);
+    }
+    
+    // 3. Try in the CLI crate directory (for development from project root)
+    let cli_crate_templates = std::env::current_dir()?.join("crates").join("theater-cli").join("templates");
+    debug!("Trying CLI crate dir: {}", cli_crate_templates.display());
+    if cli_crate_templates.exists() {
+        debug!("Found templates at: {}", cli_crate_templates.display());
+        return Ok(cli_crate_templates);
+    }
+    
+    // 4. Fallback to compile-time path (for development)
     let manifest_dir = env!("CARGO_MANIFEST_DIR");
-    PathBuf::from(manifest_dir).join("templates")
+    let compile_time_templates = PathBuf::from(manifest_dir).join("templates");
+    debug!("Trying compile-time dir: {}", compile_time_templates.display());
+    if compile_time_templates.exists() {
+        debug!("Found templates at: {}", compile_time_templates.display());
+        return Ok(compile_time_templates);
+    }
+    
+    Err(io::Error::new(
+        io::ErrorKind::NotFound,
+        "Templates directory not found in any expected location"
+    ))
 }
 
 /// Available templates for creating new actors
-pub fn available_templates() -> Result<HashMap<String, TemplateInfo>, io::Error> {
+pub fn available_templates() -> Result<HashMap<String, Template>, io::Error> {
     let mut templates = HashMap::new();
-    let templates_path = templates_dir();
+    let templates_path = templates_dir()?;
     
     if !templates_path.exists() {
         return Err(io::Error::new(
@@ -64,7 +112,12 @@ pub fn available_templates() -> Result<HashMap<String, TemplateInfo>, io::Error>
                 match load_template_metadata(&metadata_path) {
                     Ok(metadata) => {
                         debug!("Loaded template: {} - {}", template_name, metadata.template.description);
-                        templates.insert(template_name.to_string(), metadata.template);
+                        let template = Template {
+                            name: metadata.template.name,
+                            description: metadata.template.description,
+                            files: metadata.files,
+                        };
+                        templates.insert(template_name.to_string(), template);
                     }
                     Err(e) => {
                         debug!("Failed to load template {}: {}", template_name, e);
@@ -144,7 +197,7 @@ pub fn create_project(
     };
 
     // Get template directory
-    let template_dir = templates_dir().join(template_name);
+    let template_dir = templates_dir()?.join(template_name);
     
     // Create all template files
     for (target_path, template_file) in &template.files {
