@@ -221,7 +221,7 @@ fn build_project(project_path: &PathBuf) -> Result<(), CliError> {
     debug!("Building project at {}", project_path.display());
     
     let mut child = Command::new("cargo")
-        .args(&["component", "build"])
+        .args(&["component", "build", "--target", "wasm32-unknown-unknown", "--release"])
         .current_dir(project_path)
         .spawn()
         .map_err(|e| {
