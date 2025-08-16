@@ -109,6 +109,7 @@ mod tests {
             output,
             verbose: false,
             json: false,
+            shutdown_token: tokio_util::sync::CancellationToken::new(),
         };
 
         // Should not error, just return empty list
