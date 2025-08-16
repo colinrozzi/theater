@@ -86,7 +86,7 @@ pub async fn execute_async(args: &CreateArgs, ctx: &CommandContext) -> Result<()
     }
 
     // Step 1: Create project from template
-    info!("Creating project from template...");
+    println!("Creating project structure...");
     templates::create_project(&args.template, &args.name, &project_path).map_err(|e| {
         CliError::file_operation_failed(
             "create project",
@@ -94,6 +94,7 @@ pub async fn execute_async(args: &CreateArgs, ctx: &CommandContext) -> Result<()
             e,
         )
     })?;
+    println!("✅ Project created from '{}' template", args.template);
 
     // Step 2: Check for required tools
     if !args.skip_component_check {
@@ -102,20 +103,24 @@ pub async fn execute_async(args: &CreateArgs, ctx: &CommandContext) -> Result<()
 
     // Step 3: Fetch WIT dependencies
     if !args.skip_deps {
+        println!("\nFetching WIT dependencies...");
         fetch_wit_dependencies(&project_path)?;
     }
 
     // Step 4: Try to build the project to validate everything works
     if !args.skip_deps && !args.skip_component_check {
-        info!("Validating project by building...");
+        println!("\nBuilding project...");
         match build_project(&project_path) {
-            Ok(_) => info!("✅ Project builds successfully!"),
+            Ok(_) => println!("✅ Build successful"),
             Err(e) => {
                 warn!("⚠️  Project created but initial build failed: {}", e);
                 warn!("You may need to run 'cargo component build' manually");
             }
         }
     }
+
+    // Add conclusion message
+    println!("\nProject '{}' created successfully!", args.name);
 
     // Create success result and output
     let mut build_instructions = vec![
@@ -170,25 +175,27 @@ fn check_cargo_component() -> Result<(), CliError> {
 
 /// Fetch WIT dependencies using wkg
 fn fetch_wit_dependencies(project_path: &PathBuf) -> Result<(), CliError> {
-    info!("Fetching WIT dependencies...");
-    
-    // First try wkg wit fetch
-    let output = Command::new("wkg")
+    // First try wkg wit fetch with streaming output
+    let child = Command::new("wkg")
         .args(&["wit", "fetch"])
         .current_dir(project_path)
-        .output();
+        .spawn();
 
-    match output {
-        Ok(output) if output.status.success() => {
-            info!("✅ WIT dependencies fetched successfully");
-            Ok(())
-        }
-        Ok(output) => {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            warn!("wkg wit fetch failed: {}", stderr);
-            
-            // Try alternative: check if wasm-tools is available for wit dependencies
-            try_wasm_tools_fetch(project_path)
+    match child {
+        Ok(mut child) => {
+            let status = child.wait().map_err(|e| {
+                CliError::BuildFailed {
+                    output: format!("Failed to wait for wkg wit fetch: {}", e),
+                }
+            })?;
+
+            if status.success() {
+                println!("✅ Dependencies fetched");
+                Ok(())
+            } else {
+                warn!("wkg wit fetch failed, trying alternative methods...");
+                try_wasm_tools_fetch(project_path)
+            }
         }
         Err(_) => {
             warn!("wkg not found, trying alternative methods...");
@@ -213,20 +220,25 @@ fn try_wasm_tools_fetch(project_path: &PathBuf) -> Result<(), CliError> {
 fn build_project(project_path: &PathBuf) -> Result<(), CliError> {
     debug!("Building project at {}", project_path.display());
     
-    let output = Command::new("cargo")
+    let mut child = Command::new("cargo")
         .args(&["component", "build"])
         .current_dir(project_path)
-        .output()
+        .spawn()
         .map_err(|e| {
             CliError::BuildFailed {
                 output: format!("Failed to execute cargo component build: {}", e),
             }
         })?;
 
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
+    let status = child.wait().map_err(|e| {
+        CliError::BuildFailed {
+            output: format!("Failed to wait for cargo component build: {}", e),
+        }
+    })?;
+
+    if !status.success() {
         return Err(CliError::BuildFailed {
-            output: stderr.to_string(),
+            output: "Build failed - see output above for details".to_string(),
         });
     }
 
