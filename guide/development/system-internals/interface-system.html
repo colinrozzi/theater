@@ -1,0 +1,669 @@
+<!DOCTYPE HTML>
+<html lang="en" class="light sidebar-visible" dir="ltr">
+    <head>
+        <!-- Book generated using mdBook -->
+        <meta charset="UTF-8">
+        <title>Interface System - Theater Docs</title>
+
+
+        <!-- Custom HTML head -->
+
+        <meta name="description" content="">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="theme-color" content="#ffffff">
+
+        <link rel="icon" href="../../favicon.svg">
+        <link rel="shortcut icon" href="../../favicon.png">
+        <link rel="stylesheet" href="../../css/variables.css">
+        <link rel="stylesheet" href="../../css/general.css">
+        <link rel="stylesheet" href="../../css/chrome.css">
+        <link rel="stylesheet" href="../../css/print.css" media="print">
+
+        <!-- Fonts -->
+        <link rel="stylesheet" href="../../FontAwesome/css/font-awesome.css">
+        <link rel="stylesheet" href="../../fonts/fonts.css">
+
+        <!-- Highlight.js Stylesheets -->
+        <link rel="stylesheet" id="highlight-css" href="../../highlight.css">
+        <link rel="stylesheet" id="tomorrow-night-css" href="../../tomorrow-night.css">
+        <link rel="stylesheet" id="ayu-highlight-css" href="../../ayu-highlight.css">
+
+        <!-- Custom theme stylesheets -->
+        <link rel="stylesheet" href="../../css/custom.css">
+
+
+        <!-- Provide site root and default themes to javascript -->
+        <script>
+            const path_to_root = "../../";
+            const default_light_theme = "light";
+            const default_dark_theme = "navy";
+            window.path_to_searchindex_js = "../../searchindex.js";
+        </script>
+        <!-- Start loading toc.js asap -->
+        <script src="../../toc.js"></script>
+    </head>
+    <body>
+    <div id="mdbook-help-container">
+        <div id="mdbook-help-popup">
+            <h2 class="mdbook-help-title">Keyboard shortcuts</h2>
+            <div>
+                <p>Press <kbd>←</kbd> or <kbd>→</kbd> to navigate between chapters</p>
+                <p>Press <kbd>S</kbd> or <kbd>/</kbd> to search in the book</p>
+                <p>Press <kbd>?</kbd> to show this help</p>
+                <p>Press <kbd>Esc</kbd> to hide this help</p>
+            </div>
+        </div>
+    </div>
+    <div id="body-container">
+        <!-- Work around some values being stored in localStorage wrapped in quotes -->
+        <script>
+            try {
+                let theme = localStorage.getItem('mdbook-theme');
+                let sidebar = localStorage.getItem('mdbook-sidebar');
+
+                if (theme.startsWith('"') && theme.endsWith('"')) {
+                    localStorage.setItem('mdbook-theme', theme.slice(1, theme.length - 1));
+                }
+
+                if (sidebar.startsWith('"') && sidebar.endsWith('"')) {
+                    localStorage.setItem('mdbook-sidebar', sidebar.slice(1, sidebar.length - 1));
+                }
+            } catch (e) { }
+        </script>
+
+        <!-- Set the theme before any content is loaded, prevents flash -->
+        <script>
+            const default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? default_dark_theme : default_light_theme;
+            let theme;
+            try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
+            if (theme === null || theme === undefined) { theme = default_theme; }
+            const html = document.documentElement;
+            html.classList.remove('light')
+            html.classList.add(theme);
+            html.classList.add("js");
+        </script>
+
+        <input type="checkbox" id="sidebar-toggle-anchor" class="hidden">
+
+        <!-- Hide / unhide sidebar before it is displayed -->
+        <script>
+            let sidebar = null;
+            const sidebar_toggle = document.getElementById("sidebar-toggle-anchor");
+            if (document.body.clientWidth >= 1080) {
+                try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
+                sidebar = sidebar || 'visible';
+            } else {
+                sidebar = 'hidden';
+                sidebar_toggle.checked = false;
+            }
+            if (sidebar === 'visible') {
+                sidebar_toggle.checked = true;
+            } else {
+                html.classList.remove('sidebar-visible');
+            }
+        </script>
+
+        <nav id="sidebar" class="sidebar" aria-label="Table of contents">
+            <!-- populated by js -->
+            <mdbook-sidebar-scrollbox class="sidebar-scrollbox"></mdbook-sidebar-scrollbox>
+            <noscript>
+                <iframe class="sidebar-iframe-outer" src="../../toc.html"></iframe>
+            </noscript>
+            <div id="sidebar-resize-handle" class="sidebar-resize-handle">
+                <div class="sidebar-resize-indicator"></div>
+            </div>
+        </nav>
+
+        <div id="page-wrapper" class="page-wrapper">
+
+            <div class="page">
+                <div id="menu-bar-hover-placeholder"></div>
+                <div id="menu-bar" class="menu-bar sticky">
+                    <div class="left-buttons">
+                        <label id="sidebar-toggle" class="icon-button" for="sidebar-toggle-anchor" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="sidebar">
+                            <i class="fa fa-bars"></i>
+                        </label>
+                        <button id="theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="theme-list">
+                            <i class="fa fa-paint-brush"></i>
+                        </button>
+                        <ul id="theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                            <li role="none"><button role="menuitem" class="theme" id="default_theme">Auto</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="light">Light</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="rust">Rust</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="coal">Coal</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="navy">Navy</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="ayu">Ayu</button></li>
+                        </ul>
+                        <button id="search-toggle" class="icon-button" type="button" title="Search (`/`)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="/ s" aria-controls="searchbar">
+                            <i class="fa fa-search"></i>
+                        </button>
+                    </div>
+
+                    <h1 class="menu-title">Theater Docs</h1>
+
+                    <div class="right-buttons">
+                        <a href="../../print.html" title="Print this book" aria-label="Print this book">
+                            <i id="print-button" class="fa fa-print"></i>
+                        </a>
+                        <a href="https://github.com/colinrozzi/theater" title="Git repository" aria-label="Git repository">
+                            <i id="git-repository-button" class="fa fa-github"></i>
+                        </a>
+                        <a href="https://github.com/colinrozzi/theater/edit/main/book/src/development/system-internals/interface-system.md" title="Suggest an edit" aria-label="Suggest an edit" rel="edit">
+                            <i id="git-edit-button" class="fa fa-edit"></i>
+                        </a>
+
+                    </div>
+                </div>
+
+                <div id="search-wrapper" class="hidden">
+                    <form id="searchbar-outer" class="searchbar-outer">
+                        <div class="search-wrapper">
+                            <input type="search" id="searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="searchresults-outer" aria-describedby="searchresults-header">
+                            <div class="spinner-wrapper">
+                                <i class="fa fa-spinner fa-spin"></i>
+                            </div>
+                        </div>
+                    </form>
+                    <div id="searchresults-outer" class="searchresults-outer hidden">
+                        <div id="searchresults-header" class="searchresults-header"></div>
+                        <ul id="searchresults">
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Apply ARIA attributes after the sidebar and the sidebar toggle button are added to the DOM -->
+                <script>
+                    document.getElementById('sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
+                    document.getElementById('sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
+                    Array.from(document.querySelectorAll('#sidebar a')).forEach(function(link) {
+                        link.setAttribute('tabIndex', sidebar === 'visible' ? 0 : -1);
+                    });
+                </script>
+
+                <div id="content" class="content">
+                    <main>
+                        <h1 id="interface-system"><a class="header" href="#interface-system">Interface System</a></h1>
+<p>Theater's interface system is built on the WebAssembly Component Model and WebAssembly Interface Types (WIT), providing a type-safe and flexible way for actors to expose and consume functionality while maintaining verifiable state transitions.</p>
+<h2 id="webassembly-interface-types-wit"><a class="header" href="#webassembly-interface-types-wit">WebAssembly Interface Types (WIT)</a></h2>
+<p>Theater defines its interfaces using WIT, providing a language-agnostic way to describe component interfaces. The core WIT files are located in the <code>wit/</code> directory:</p>
+<h3 id="core-interfaces"><a class="header" href="#core-interfaces">Core Interfaces</a></h3>
+<ol>
+<li><strong>actor.wit</strong> - Basic actor interface:</li>
+</ol>
+<pre><code class="language-wit">interface actor {
+    use types.{state};
+    
+    init: func(state: state, params: tuple&lt;string&gt;) -&gt; result&lt;tuple&lt;state&gt;, string&gt;;
+}
+</code></pre>
+<ol start="2">
+<li><strong>message-server.wit</strong> - Message handling interface:</li>
+</ol>
+<pre><code class="language-wit">interface message-server-client {
+    use types.{json, event};
+
+    handle-send: func(state: option&lt;json&gt;, params: tuple&lt;json&gt;) -&gt; result&lt;tuple&lt;option&lt;json&gt;&gt;, string&gt;;
+    handle-request: func(state: option&lt;json&gt;, params: tuple&lt;json&gt;) -&gt; result&lt;tuple&lt;option&lt;json&gt;, tuple&lt;json&gt;&gt;, string&gt;;
+}
+
+interface message-server-host {
+    use types.{json, actor-id};
+
+    send: func(actor-id: actor-id, msg: json) -&gt; result&lt;_, string&gt;;
+    request: func(actor-id: actor-id, msg: json) -&gt; result&lt;json, string&gt;;
+}
+</code></pre>
+<ol start="3">
+<li><strong>http.wit</strong> - HTTP server and client interfaces:</li>
+</ol>
+<pre><code class="language-wit">interface http-server {
+    use types.{state};
+    use http-types.{http-request, http-response};
+
+    handle-request: func(state: state, params: tuple&lt;http-request&gt;) -&gt; result&lt;tuple&lt;state, tuple&lt;http-response&gt;&gt;, string&gt;;
+}
+
+interface http-client {
+    use types.{json};
+    use http-types.{http-request, http-response};
+
+    send-http: func(req: http-request) -&gt; result&lt;http-response, string&gt;;
+}
+</code></pre>
+<ol start="4">
+<li><strong>supervisor.wit</strong> - Parent-child supervision:</li>
+</ol>
+<pre><code class="language-wit">interface supervisor {
+    spawn: func(manifest: string) -&gt; result&lt;string, string&gt;;
+    list-children: func() -&gt; list&lt;string&gt;;
+    stop-child: func(child-id: string) -&gt; result&lt;_, string&gt;;
+    restart-child: func(child-id: string) -&gt; result&lt;_, string&gt;;
+    get-child-state: func(child-id: string) -&gt; result&lt;list&lt;u8&gt;, string&gt;;
+    get-child-events: func(child-id: string) -&gt; result&lt;list&lt;chain-event&gt;, string&gt;;
+    // ...
+}
+</code></pre>
+<ol start="5">
+<li><strong>types.wit</strong> - Common data types:</li>
+</ol>
+<pre><code class="language-wit">interface types {
+    type json = list&lt;u8&gt;;
+    type state = option&lt;list&lt;u8&gt;&gt;;
+    type actor-id = string;
+    // ...
+}
+</code></pre>
+<h2 id="handler-system"><a class="header" href="#handler-system">Handler System</a></h2>
+<p>Theater uses a handler system to connect actor interfaces with their implementations:</p>
+<h3 id="handler-types"><a class="header" href="#handler-types">Handler Types</a></h3>
+<p>The current implementation includes several handler types:</p>
+<ol>
+<li>
+<p><strong>Message Server Handler</strong>:</p>
+<ul>
+<li>Handles direct actor-to-actor messaging</li>
+<li>Supports both request/response and one-way sends</li>
+<li>Serializes messages as JSON bytes</li>
+</ul>
+</li>
+<li>
+<p><strong>HTTP Server Handler</strong>:</p>
+<ul>
+<li>Exposes actor functionality via HTTP endpoints</li>
+<li>Converts HTTP requests to actor messages</li>
+<li>Transforms responses back to HTTP</li>
+</ul>
+</li>
+<li>
+<p><strong>Supervisor Handler</strong>:</p>
+<ul>
+<li>Enables parent-child supervision</li>
+<li>Provides lifecycle management functions</li>
+<li>Access to child state and events</li>
+</ul>
+</li>
+</ol>
+<h3 id="handler-configuration"><a class="header" href="#handler-configuration">Handler Configuration</a></h3>
+<p>Handlers are configured in actor manifests:</p>
+<pre><code class="language-toml">name = "my-actor"
+component_path = "my_actor.wasm"
+
+# Message server handler
+[[handlers]]
+type = "message-server"
+config = { port = 8080 }
+interface = "theater:simple/message-server-client"
+
+# HTTP server handler
+[[handlers]]
+type = "http-server"
+config = { port = 8081 }
+
+# Supervisor handler
+[[handlers]]
+type = "supervisor"
+config = {}
+</code></pre>
+<h2 id="message-flow"><a class="header" href="#message-flow">Message Flow</a></h2>
+<h3 id="actor-to-actor-messaging"><a class="header" href="#actor-to-actor-messaging">Actor-to-Actor Messaging</a></h3>
+<ol>
+<li>
+<p><strong>Send Message</strong> (one-way):</p>
+<ul>
+<li>Sender actor calls <code>message-server-host::send</code></li>
+<li>Message is routed through TheaterRuntime</li>
+<li>Recipient actor's <code>handle-send</code> is called</li>
+<li>State is updated and recorded in hash chain</li>
+<li>No response is returned to sender</li>
+</ul>
+</li>
+<li>
+<p><strong>Request Message</strong> (request/response):</p>
+<ul>
+<li>Sender actor calls <code>message-server-host::request</code></li>
+<li>Message is routed through TheaterRuntime</li>
+<li>Recipient actor's <code>handle-request</code> is called</li>
+<li>State is updated and recorded in hash chain</li>
+<li>Response is returned to sender</li>
+</ul>
+</li>
+</ol>
+<h3 id="http-integration"><a class="header" href="#http-integration">HTTP Integration</a></h3>
+<ol>
+<li>
+<p><strong>Incoming HTTP Request</strong>:</p>
+<ul>
+<li>HTTP request arrives at server</li>
+<li>Request is converted to <code>http-request</code> struct</li>
+<li>Actor's <code>handle-request</code> function is called</li>
+<li>Response is converted back to HTTP and returned</li>
+</ul>
+</li>
+<li>
+<p><strong>Outgoing HTTP Request</strong>:</p>
+<ul>
+<li>Actor calls <code>http-client::send-http</code></li>
+<li>Request is made to external service</li>
+<li>Response is returned to actor</li>
+<li>Interaction is recorded in hash chain</li>
+</ul>
+</li>
+</ol>
+<h2 id="interface-implementation"><a class="header" href="#interface-implementation">Interface Implementation</a></h2>
+<p>Actors implement interfaces through WebAssembly components:</p>
+<h3 id="required-component-structure"><a class="header" href="#required-component-structure">Required Component Structure</a></h3>
+<p>A Theater actor component must:</p>
+<ol>
+<li>Implement required interfaces (based on handlers)</li>
+<li>Export interface functions with correct signatures</li>
+<li>Handle state consistently</li>
+<li>Process messages according to interface specifications</li>
+</ol>
+<h3 id="example-actor-implementation"><a class="header" href="#example-actor-implementation">Example Actor Implementation</a></h3>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use theater_sdk::{actor, message_server};
+
+struct CounterActor;
+
+#[actor::export]
+impl actor::Actor for CounterActor {
+    fn init(state: Option&lt;Vec&lt;u8&gt;&gt;, params: (String,)) -&gt; Result&lt;(Option&lt;Vec&lt;u8&gt;&gt;,), String&gt; {
+        // Initialize with either existing state or new state
+        let state = state.unwrap_or_else(|| {
+            let initial_state = serde_json::json!({ "count": 0 });
+            serde_json::to_vec(&amp;initial_state).unwrap()
+        });
+        
+        Ok((Some(state),))
+    }
+}
+
+#[message_server::export]
+impl message_server::MessageServerClient for CounterActor {
+    fn handle_send(
+        state: Option&lt;Vec&lt;u8&gt;&gt;,
+        params: (Vec&lt;u8&gt;,)
+    ) -&gt; Result&lt;(Option&lt;Vec&lt;u8&gt;&gt;,), String&gt; {
+        // Process one-way message
+        // ...
+        Ok((new_state,))
+    }
+    
+    fn handle_request(
+        state: Option&lt;Vec&lt;u8&gt;&gt;,
+        params: (Vec&lt;u8&gt;,)
+    ) -&gt; Result&lt;(Option&lt;Vec&lt;u8&gt;&gt;, (Vec&lt;u8&gt;,)), String&gt; {
+        // Process request/response message
+        // ...
+        Ok((new_state, (response,)))
+    }
+}
+<span class="boring">}</span></code></pre></pre>
+<h2 id="working-with-state"><a class="header" href="#working-with-state">Working with State</a></h2>
+<p>The interface system consistently handles state:</p>
+<ol>
+<li>
+<p><strong>State Representation</strong>:</p>
+<ul>
+<li>State is represented as <code>Option&lt;Vec&lt;u8&gt;&gt;</code> (optional bytes)</li>
+<li>Typically contains serialized JSON or other format</li>
+<li>State is passed to and from interface functions</li>
+</ul>
+</li>
+<li>
+<p><strong>State Updates</strong>:</p>
+<ul>
+<li>Functions return new state</li>
+<li>Changes are recorded in hash chain</li>
+<li>State is available for inspection and verification</li>
+</ul>
+</li>
+<li>
+<p><strong>State Access</strong>:</p>
+<ul>
+<li>Current state is provided to interface functions</li>
+<li>Functions can modify state by returning new version</li>
+<li>Parent actors can access child state via supervision</li>
+</ul>
+</li>
+</ol>
+<h2 id="actor-manifest"><a class="header" href="#actor-manifest">Actor Manifest</a></h2>
+<p>The manifest connects interfaces to implementations:</p>
+<pre><code class="language-toml">name = "counter-actor"
+component_path = "counter.wasm"
+
+# Interfaces implemented by this actor
+[interface]
+implements = [
+    "theater:simple/actor",
+    "theater:simple/message-server-client",
+    "theater:simple/http-server"
+]
+
+# Interfaces required by this actor
+requires = [
+    "theater:simple/message-server-host"
+]
+
+# Message server handler
+[[handlers]]
+type = "message-server"
+config = {}
+
+# HTTP server handler
+[[handlers]]
+type = "http-server"
+config = { port = 8080 }
+</code></pre>
+<h2 id="interface-composition"><a class="header" href="#interface-composition">Interface Composition</a></h2>
+<p>Theater's interface system is designed for composition, allowing actors to:</p>
+<ol>
+<li>
+<p><strong>Implement Multiple Interfaces</strong>:</p>
+<ul>
+<li>Core actor functionality</li>
+<li>Message handling</li>
+<li>HTTP serving</li>
+<li>Custom functionality</li>
+</ul>
+</li>
+<li>
+<p><strong>Depend on Host Interfaces</strong>:</p>
+<ul>
+<li>Message sending</li>
+<li>HTTP client</li>
+<li>Supervision</li>
+<li>File system access</li>
+</ul>
+</li>
+<li>
+<p><strong>Combine Interface Types</strong>:</p>
+<ul>
+<li>One interface can extend another</li>
+<li>Interfaces can share common types</li>
+<li>Versioning through interface namespaces</li>
+</ul>
+</li>
+</ol>
+<p>Each interface maintains state chain integrity while providing a specific capability.</p>
+<h2 id="message-structure"><a class="header" href="#message-structure">Message Structure</a></h2>
+<p>While the interface system is flexible, messages typically follow a standard structure:</p>
+<pre><code class="language-json">{
+  "type": "request_type",
+  "action": "specific_operation",
+  "payload": {
+    "param1": "value1",
+    "param2": 42
+  },
+  "metadata": {
+    "timestamp": "2025-02-26T12:34:56Z",
+    "request_id": "req-123456"
+  }
+}
+</code></pre>
+<p>Responses typically include:</p>
+<pre><code class="language-json">{
+  "type": "response",
+  "status": "success",
+  "payload": {
+    "result": "value"
+  },
+  "metadata": {
+    "timestamp": "2025-02-26T12:34:57Z",
+    "request_id": "req-123456"
+  }
+}
+</code></pre>
+<h2 id="debugging-interfaces"><a class="header" href="#debugging-interfaces">Debugging Interfaces</a></h2>
+<p>Theater provides several mechanisms for debugging interfaces:</p>
+<ol>
+<li>
+<p><strong>Tracing</strong>:</p>
+<ul>
+<li>All interface calls are logged</li>
+<li>State transitions are recorded</li>
+<li>Message flow can be traced end-to-end</li>
+</ul>
+</li>
+<li>
+<p><strong>Interface Inspection</strong>:</p>
+<ul>
+<li>WIT interfaces can be introspected</li>
+<li>Available functions can be listed</li>
+<li>Type checking for message formats</li>
+</ul>
+</li>
+<li>
+<p><strong>State Verification</strong>:</p>
+<ul>
+<li>Hash chain can be verified at any point</li>
+<li>State history can be examined</li>
+<li>State transitions can be replayed</li>
+</ul>
+</li>
+</ol>
+<h2 id="custom-interface-development"><a class="header" href="#custom-interface-development">Custom Interface Development</a></h2>
+<p>Creating new interfaces requires:</p>
+<ol>
+<li>
+<p><strong>WIT Definition</strong>:</p>
+<ul>
+<li>Define interface functions and types</li>
+<li>Document expected behavior</li>
+<li>Specify state handling patterns</li>
+</ul>
+</li>
+<li>
+<p><strong>Handler Implementation</strong>:</p>
+<ul>
+<li>Create handler in Theater runtime</li>
+<li>Connect WIT interface to actor</li>
+<li>Handle message routing correctly</li>
+</ul>
+</li>
+<li>
+<p><strong>Actor Implementation</strong>:</p>
+<ul>
+<li>Implement interface functions</li>
+<li>Handle state properly</li>
+<li>Process messages according to spec</li>
+</ul>
+</li>
+</ol>
+<h2 id="best-practices"><a class="header" href="#best-practices">Best Practices</a></h2>
+<ol>
+<li>
+<p><strong>Interface Design</strong></p>
+<ul>
+<li>Keep interfaces focused on single responsibility</li>
+<li>Use clear, descriptive function names</li>
+<li>Document expected behavior</li>
+<li>Provide meaningful error messages</li>
+<li>Consider versioning strategy</li>
+</ul>
+</li>
+<li>
+<p><strong>Message Design</strong></p>
+<ul>
+<li>Use consistent type field for categorization</li>
+<li>Include action field for specific operations</li>
+<li>Structure payloads logically</li>
+<li>Add metadata for debugging</li>
+<li>Handle errors consistently</li>
+</ul>
+</li>
+<li>
+<p><strong>State Management</strong></p>
+<ul>
+<li>Keep state serializable</li>
+<li>Handle state transitions atomically</li>
+<li>Validate state after changes</li>
+<li>Consider state size impacts</li>
+<li>Test state rollback scenarios</li>
+</ul>
+</li>
+<li>
+<p><strong>Security Considerations</strong></p>
+<ul>
+<li>Validate all input messages</li>
+<li>Sanitize data crossing interface boundaries</li>
+<li>Control access to sensitive interfaces</li>
+<li>Verify state integrity frequently</li>
+<li>Test for message injection risks</li>
+</ul>
+</li>
+</ol>
+
+                    </main>
+
+                    <nav class="nav-wrapper" aria-label="Page navigation">
+                        <!-- Mobile navigation buttons -->
+                            <a rel="prev" href="../../development/system-internals/actor-ids.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                                <i class="fa fa-angle-left"></i>
+                            </a>
+
+                            <a rel="next prefetch" href="../../services/handlers.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                                <i class="fa fa-angle-right"></i>
+                            </a>
+
+                        <div style="clear: both"></div>
+                    </nav>
+                </div>
+            </div>
+
+            <nav class="nav-wide-wrapper" aria-label="Page navigation">
+                    <a rel="prev" href="../../development/system-internals/actor-ids.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                        <i class="fa fa-angle-left"></i>
+                    </a>
+
+                    <a rel="next prefetch" href="../../services/handlers.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                        <i class="fa fa-angle-right"></i>
+                    </a>
+            </nav>
+
+        </div>
+
+
+
+
+        <script>
+            window.playground_copyable = true;
+        </script>
+
+
+        <script src="../../elasticlunr.min.js"></script>
+        <script src="../../mark.min.js"></script>
+        <script src="../../searcher.js"></script>
+
+        <script src="../../clipboard.min.js"></script>
+        <script src="../../highlight.js"></script>
+        <script src="../../book.js"></script>
+
+        <!-- Custom JS scripts -->
+
+
+
+    </div>
+    </body>
+</html>

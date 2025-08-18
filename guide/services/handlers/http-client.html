@@ -1,0 +1,508 @@
+<!DOCTYPE HTML>
+<html lang="en" class="light sidebar-visible" dir="ltr">
+    <head>
+        <!-- Book generated using mdBook -->
+        <meta charset="UTF-8">
+        <title>HTTP Client - Theater Docs</title>
+
+
+        <!-- Custom HTML head -->
+
+        <meta name="description" content="">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="theme-color" content="#ffffff">
+
+        <link rel="icon" href="../../favicon.svg">
+        <link rel="shortcut icon" href="../../favicon.png">
+        <link rel="stylesheet" href="../../css/variables.css">
+        <link rel="stylesheet" href="../../css/general.css">
+        <link rel="stylesheet" href="../../css/chrome.css">
+        <link rel="stylesheet" href="../../css/print.css" media="print">
+
+        <!-- Fonts -->
+        <link rel="stylesheet" href="../../FontAwesome/css/font-awesome.css">
+        <link rel="stylesheet" href="../../fonts/fonts.css">
+
+        <!-- Highlight.js Stylesheets -->
+        <link rel="stylesheet" id="highlight-css" href="../../highlight.css">
+        <link rel="stylesheet" id="tomorrow-night-css" href="../../tomorrow-night.css">
+        <link rel="stylesheet" id="ayu-highlight-css" href="../../ayu-highlight.css">
+
+        <!-- Custom theme stylesheets -->
+        <link rel="stylesheet" href="../../css/custom.css">
+
+
+        <!-- Provide site root and default themes to javascript -->
+        <script>
+            const path_to_root = "../../";
+            const default_light_theme = "light";
+            const default_dark_theme = "navy";
+            window.path_to_searchindex_js = "../../searchindex.js";
+        </script>
+        <!-- Start loading toc.js asap -->
+        <script src="../../toc.js"></script>
+    </head>
+    <body>
+    <div id="mdbook-help-container">
+        <div id="mdbook-help-popup">
+            <h2 class="mdbook-help-title">Keyboard shortcuts</h2>
+            <div>
+                <p>Press <kbd>←</kbd> or <kbd>→</kbd> to navigate between chapters</p>
+                <p>Press <kbd>S</kbd> or <kbd>/</kbd> to search in the book</p>
+                <p>Press <kbd>?</kbd> to show this help</p>
+                <p>Press <kbd>Esc</kbd> to hide this help</p>
+            </div>
+        </div>
+    </div>
+    <div id="body-container">
+        <!-- Work around some values being stored in localStorage wrapped in quotes -->
+        <script>
+            try {
+                let theme = localStorage.getItem('mdbook-theme');
+                let sidebar = localStorage.getItem('mdbook-sidebar');
+
+                if (theme.startsWith('"') && theme.endsWith('"')) {
+                    localStorage.setItem('mdbook-theme', theme.slice(1, theme.length - 1));
+                }
+
+                if (sidebar.startsWith('"') && sidebar.endsWith('"')) {
+                    localStorage.setItem('mdbook-sidebar', sidebar.slice(1, sidebar.length - 1));
+                }
+            } catch (e) { }
+        </script>
+
+        <!-- Set the theme before any content is loaded, prevents flash -->
+        <script>
+            const default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? default_dark_theme : default_light_theme;
+            let theme;
+            try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
+            if (theme === null || theme === undefined) { theme = default_theme; }
+            const html = document.documentElement;
+            html.classList.remove('light')
+            html.classList.add(theme);
+            html.classList.add("js");
+        </script>
+
+        <input type="checkbox" id="sidebar-toggle-anchor" class="hidden">
+
+        <!-- Hide / unhide sidebar before it is displayed -->
+        <script>
+            let sidebar = null;
+            const sidebar_toggle = document.getElementById("sidebar-toggle-anchor");
+            if (document.body.clientWidth >= 1080) {
+                try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
+                sidebar = sidebar || 'visible';
+            } else {
+                sidebar = 'hidden';
+                sidebar_toggle.checked = false;
+            }
+            if (sidebar === 'visible') {
+                sidebar_toggle.checked = true;
+            } else {
+                html.classList.remove('sidebar-visible');
+            }
+        </script>
+
+        <nav id="sidebar" class="sidebar" aria-label="Table of contents">
+            <!-- populated by js -->
+            <mdbook-sidebar-scrollbox class="sidebar-scrollbox"></mdbook-sidebar-scrollbox>
+            <noscript>
+                <iframe class="sidebar-iframe-outer" src="../../toc.html"></iframe>
+            </noscript>
+            <div id="sidebar-resize-handle" class="sidebar-resize-handle">
+                <div class="sidebar-resize-indicator"></div>
+            </div>
+        </nav>
+
+        <div id="page-wrapper" class="page-wrapper">
+
+            <div class="page">
+                <div id="menu-bar-hover-placeholder"></div>
+                <div id="menu-bar" class="menu-bar sticky">
+                    <div class="left-buttons">
+                        <label id="sidebar-toggle" class="icon-button" for="sidebar-toggle-anchor" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="sidebar">
+                            <i class="fa fa-bars"></i>
+                        </label>
+                        <button id="theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="theme-list">
+                            <i class="fa fa-paint-brush"></i>
+                        </button>
+                        <ul id="theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                            <li role="none"><button role="menuitem" class="theme" id="default_theme">Auto</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="light">Light</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="rust">Rust</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="coal">Coal</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="navy">Navy</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="ayu">Ayu</button></li>
+                        </ul>
+                        <button id="search-toggle" class="icon-button" type="button" title="Search (`/`)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="/ s" aria-controls="searchbar">
+                            <i class="fa fa-search"></i>
+                        </button>
+                    </div>
+
+                    <h1 class="menu-title">Theater Docs</h1>
+
+                    <div class="right-buttons">
+                        <a href="../../print.html" title="Print this book" aria-label="Print this book">
+                            <i id="print-button" class="fa fa-print"></i>
+                        </a>
+                        <a href="https://github.com/colinrozzi/theater" title="Git repository" aria-label="Git repository">
+                            <i id="git-repository-button" class="fa fa-github"></i>
+                        </a>
+                        <a href="https://github.com/colinrozzi/theater/edit/main/book/src/services/handlers/http-client.md" title="Suggest an edit" aria-label="Suggest an edit" rel="edit">
+                            <i id="git-edit-button" class="fa fa-edit"></i>
+                        </a>
+
+                    </div>
+                </div>
+
+                <div id="search-wrapper" class="hidden">
+                    <form id="searchbar-outer" class="searchbar-outer">
+                        <div class="search-wrapper">
+                            <input type="search" id="searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="searchresults-outer" aria-describedby="searchresults-header">
+                            <div class="spinner-wrapper">
+                                <i class="fa fa-spinner fa-spin"></i>
+                            </div>
+                        </div>
+                    </form>
+                    <div id="searchresults-outer" class="searchresults-outer hidden">
+                        <div id="searchresults-header" class="searchresults-header"></div>
+                        <ul id="searchresults">
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Apply ARIA attributes after the sidebar and the sidebar toggle button are added to the DOM -->
+                <script>
+                    document.getElementById('sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
+                    document.getElementById('sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
+                    Array.from(document.querySelectorAll('#sidebar a')).forEach(function(link) {
+                        link.setAttribute('tabIndex', sidebar === 'visible' ? 0 : -1);
+                    });
+                </script>
+
+                <div id="content" class="content">
+                    <main>
+                        <h1 id="http-client-handler"><a class="header" href="#http-client-handler">HTTP Client Handler</a></h1>
+<p>The HTTP Client Handler enables actors to make HTTP requests to external services while maintaining Theater's state verification and security principles. This handler allows actors to interact with external APIs, fetch resources, and communicate with web services.</p>
+<h2 id="overview"><a class="header" href="#overview">Overview</a></h2>
+<p>The HTTP Client Handler implements the <code>theater:simple/http-client</code> interface, providing a way for actors to:</p>
+<ol>
+<li>Send HTTP requests to external services</li>
+<li>Process HTTP responses</li>
+<li>Record all HTTP interactions in the state chain</li>
+<li>Handle errors in a consistent way</li>
+</ol>
+<h2 id="configuration"><a class="header" href="#configuration">Configuration</a></h2>
+<p>To use the HTTP Client Handler, add it to your actor's manifest:</p>
+<pre><code class="language-toml">[[handlers]]
+type = "http-client"
+config = {}
+</code></pre>
+<p>Currently, the HTTP Client Handler doesn't require any specific configuration parameters.</p>
+<h2 id="interface"><a class="header" href="#interface">Interface</a></h2>
+<p>The HTTP Client Handler is defined using the following WIT interface:</p>
+<pre><code class="language-wit">interface http-client {
+    use types.{json};
+    use http-types.{http-request, http-response};
+
+    send-http: func(req: http-request) -&gt; result&lt;http-response, string&gt;;
+}
+</code></pre>
+<h3 id="http-request-structure"><a class="header" href="#http-request-structure">HTTP Request Structure</a></h3>
+<p>The <code>HttpRequest</code> type has the following structure:</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>struct HttpRequest {
+    method: String,
+    uri: String,
+    headers: Vec&lt;(String, String)&gt;,
+    body: Option&lt;Vec&lt;u8&gt;&gt;,
+}
+<span class="boring">}</span></code></pre></pre>
+<ul>
+<li><code>method</code>: The HTTP method (GET, POST, PUT, DELETE, etc.)</li>
+<li><code>uri</code>: The target URL</li>
+<li><code>headers</code>: A list of HTTP headers as key-value pairs</li>
+<li><code>body</code>: Optional request body as bytes</li>
+</ul>
+<h3 id="http-response-structure"><a class="header" href="#http-response-structure">HTTP Response Structure</a></h3>
+<p>The <code>HttpResponse</code> type has the following structure:</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>struct HttpResponse {
+    status: u16,
+    headers: Vec&lt;(String, String)&gt;,
+    body: Option&lt;Vec&lt;u8&gt;&gt;,
+}
+<span class="boring">}</span></code></pre></pre>
+<ul>
+<li><code>status</code>: The HTTP status code</li>
+<li><code>headers</code>: A list of response headers as key-value pairs</li>
+<li><code>body</code>: Optional response body as bytes</li>
+</ul>
+<h2 id="making-http-requests"><a class="header" href="#making-http-requests">Making HTTP Requests</a></h2>
+<p>To make an HTTP request, actors call the <code>send-http</code> function with an <code>HttpRequest</code> object:</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>let request = HttpRequest {
+    method: "GET".to_string(),
+    uri: "https://api.example.com/data".to_string(),
+    headers: vec![
+        ("Content-Type".to_string(), "application/json".to_string()),
+        ("Authorization".to_string(), "Bearer token123".to_string()),
+    ],
+    body: None,
+};
+
+match http_client::send_http(request) {
+    Ok(response) =&gt; {
+        // Process response
+        println!("Status: {}", response.status);
+        if let Some(body) = response.body {
+            // Handle response body
+        }
+    },
+    Err(error) =&gt; {
+        // Handle error
+        println!("Request failed: {}", error);
+    }
+}
+<span class="boring">}</span></code></pre></pre>
+<h2 id="state-chain-integration"><a class="header" href="#state-chain-integration">State Chain Integration</a></h2>
+<p>Every HTTP request and response is recorded in the actor's state chain, creating a verifiable history of all external interactions. The chain events include:</p>
+<ol>
+<li>
+<p><strong>HttpClientRequestCall</strong>: Records when a request is made, including:</p>
+<ul>
+<li>HTTP method</li>
+<li>Target URL</li>
+<li>Headers count</li>
+<li>Body size</li>
+</ul>
+</li>
+<li>
+<p><strong>HttpClientRequestResult</strong>: Records the result of a request, including:</p>
+<ul>
+<li>Status code</li>
+<li>Headers count</li>
+<li>Body size</li>
+<li>Success indicator</li>
+</ul>
+</li>
+<li>
+<p><strong>Error</strong>: Records any errors that occur during the request, including:</p>
+<ul>
+<li>Operation type</li>
+<li>URL path</li>
+<li>Error message</li>
+</ul>
+</li>
+</ol>
+<p>This state chain integration ensures that all external interactions are:</p>
+<ul>
+<li>Traceable</li>
+<li>Verifiable</li>
+<li>Reproducible</li>
+<li>Auditable</li>
+</ul>
+<h2 id="error-handling"><a class="header" href="#error-handling">Error Handling</a></h2>
+<p>The HTTP Client Handler provides detailed error information for various failure scenarios:</p>
+<ol>
+<li><strong>Invalid Method</strong>: When an invalid HTTP method is specified</li>
+<li><strong>Network Errors</strong>: When network issues prevent the request from completing</li>
+<li><strong>Timeout Errors</strong>: When the request times out</li>
+<li><strong>Parser Errors</strong>: When response parsing fails</li>
+</ol>
+<p>All errors are returned as strings and are also recorded in the state chain.</p>
+<h2 id="security-considerations"><a class="header" href="#security-considerations">Security Considerations</a></h2>
+<p>When using the HTTP Client Handler, consider the following security aspects:</p>
+<ol>
+<li><strong>URL Validation</strong>: Validate URLs before making requests to prevent SSRF attacks</li>
+<li><strong>Sensitive Data</strong>: Be careful with sensitive data in requests, as they are recorded in the state chain</li>
+<li><strong>Authentication</strong>: Use secure methods for authentication in external APIs</li>
+<li><strong>TLS Verification</strong>: The handler performs TLS verification by default</li>
+<li><strong>Timeouts</strong>: Set appropriate timeouts for requests to prevent resource exhaustion</li>
+</ol>
+<h2 id="implementation-details"><a class="header" href="#implementation-details">Implementation Details</a></h2>
+<p>Under the hood, the HTTP Client Handler:</p>
+<ol>
+<li>Converts the <code>HttpRequest</code> into a reqwest client request</li>
+<li>Sets up headers, body, and method</li>
+<li>Executes the request asynchronously</li>
+<li>Processes the response into an <code>HttpResponse</code></li>
+<li>Records all operations in the state chain</li>
+<li>Returns the response or error to the actor</li>
+</ol>
+<p>The handler uses the reqwest crate for HTTP functionality, providing a robust and well-tested HTTP client implementation.</p>
+<h2 id="limitations"><a class="header" href="#limitations">Limitations</a></h2>
+<p>The current HTTP Client Handler implementation has some limitations:</p>
+<ol>
+<li><strong>No Direct Streaming</strong>: Large responses are loaded fully into memory</li>
+<li><strong>No WebSocket Support</strong>: For WebSocket connections, use a dedicated WebSocket client</li>
+<li><strong>No Client Certificate Authentication</strong>: TLS client certificates are not currently supported</li>
+<li><strong>No Direct Proxy Configuration</strong>: Proxy settings cannot be configured per-request</li>
+</ol>
+<h2 id="best-practices"><a class="header" href="#best-practices">Best Practices</a></h2>
+<ol>
+<li><strong>Error Handling</strong>: Always handle errors from HTTP requests properly</li>
+<li><strong>Response Size</strong>: Be mindful of response sizes to avoid memory issues</li>
+<li><strong>Request Rate</strong>: Implement rate limiting for external API calls</li>
+<li><strong>Timeout Handling</strong>: Set appropriate timeouts for your use case</li>
+<li><strong>Idempotency</strong>: Design requests to be idempotent when possible</li>
+<li><strong>Retries</strong>: Implement retry logic for transient failures</li>
+</ol>
+<h2 id="examples"><a class="header" href="#examples">Examples</a></h2>
+<h3 id="example-1-simple-get-request"><a class="header" href="#example-1-simple-get-request">Example 1: Simple GET Request</a></h3>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>pub fn fetch_json_data() -&gt; Result&lt;serde_json::Value, String&gt; {
+    let request = HttpRequest {
+        method: "GET".to_string(),
+        uri: "https://api.example.com/data.json".to_string(),
+        headers: vec![("Accept".to_string(), "application/json".to_string())],
+        body: None,
+    };
+    
+    let response = http_client::send_http(request)?;
+    
+    if response.status != 200 {
+        return Err(format!("API returned status code: {}", response.status));
+    }
+    
+    if let Some(body) = response.body {
+        let json = serde_json::from_slice(&amp;body)
+            .map_err(|e| format!("Failed to parse JSON: {}", e))?;
+        Ok(json)
+    } else {
+        Err("Response body was empty".to_string())
+    }
+}
+<span class="boring">}</span></code></pre></pre>
+<h3 id="example-2-post-request-with-json-body"><a class="header" href="#example-2-post-request-with-json-body">Example 2: POST Request with JSON Body</a></h3>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>pub fn create_resource(data: &amp;CreateResourceRequest) -&gt; Result&lt;ResourceResponse, String&gt; {
+    let json_body = serde_json::to_vec(data)
+        .map_err(|e| format!("Failed to serialize request: {}", e))?;
+    
+    let request = HttpRequest {
+        method: "POST".to_string(),
+        uri: "https://api.example.com/resources".to_string(),
+        headers: vec![
+            ("Content-Type".to_string(), "application/json".to_string()),
+            ("Authorization".to_string(), format!("Bearer {}", get_token())),
+        ],
+        body: Some(json_body),
+    };
+    
+    let response = http_client::send_http(request)?;
+    
+    match response.status {
+        201 =&gt; {
+            // Resource created successfully
+            if let Some(body) = response.body {
+                let resource: ResourceResponse = serde_json::from_slice(&amp;body)
+                    .map_err(|e| format!("Failed to parse response: {}", e))?;
+                Ok(resource)
+            } else {
+                Err("Response body was empty".to_string())
+            }
+        },
+        400..=499 =&gt; {
+            // Client error
+            Err(format!("Client error: {}", response.status))
+        },
+        500..=599 =&gt; {
+            // Server error
+            Err(format!("Server error: {}", response.status))
+        },
+        _ =&gt; {
+            // Unexpected status code
+            Err(format!("Unexpected status code: {}", response.status))
+        }
+    }
+}
+<span class="boring">}</span></code></pre></pre>
+<h3 id="example-3-file-download"><a class="header" href="#example-3-file-download">Example 3: File Download</a></h3>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>pub fn download_file(url: &amp;str) -&gt; Result&lt;Vec&lt;u8&gt;, String&gt; {
+    let request = HttpRequest {
+        method: "GET".to_string(),
+        uri: url.to_string(),
+        headers: vec![],
+        body: None,
+    };
+    
+    let response = http_client::send_http(request)?;
+    
+    if response.status != 200 {
+        return Err(format!("Download failed with status: {}", response.status));
+    }
+    
+    if let Some(body) = response.body {
+        Ok(body)
+    } else {
+        Err("Download resulted in empty file".to_string())
+    }
+}
+<span class="boring">}</span></code></pre></pre>
+<h2 id="related-topics"><a class="header" href="#related-topics">Related Topics</a></h2>
+<ul>
+<li><a href="http-framework.html">HTTP Framework Handler</a> - For creating HTTP servers</li>
+<li><a href="store.html">Store Handler</a> - For storing downloaded content</li>
+<li><a href="message-server.html">Message Server Handler</a> - For actor-to-actor communication</li>
+</ul>
+
+                    </main>
+
+                    <nav class="nav-wrapper" aria-label="Page navigation">
+                        <!-- Mobile navigation buttons -->
+                            <a rel="prev" href="../../services/handlers/message-server.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                                <i class="fa fa-angle-left"></i>
+                            </a>
+
+                            <a rel="next prefetch" href="../../services/handlers/http-framework.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                                <i class="fa fa-angle-right"></i>
+                            </a>
+
+                        <div style="clear: both"></div>
+                    </nav>
+                </div>
+            </div>
+
+            <nav class="nav-wide-wrapper" aria-label="Page navigation">
+                    <a rel="prev" href="../../services/handlers/message-server.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                        <i class="fa fa-angle-left"></i>
+                    </a>
+
+                    <a rel="next prefetch" href="../../services/handlers/http-framework.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                        <i class="fa fa-angle-right"></i>
+                    </a>
+            </nav>
+
+        </div>
+
+
+
+
+        <script>
+            window.playground_copyable = true;
+        </script>
+
+
+        <script src="../../elasticlunr.min.js"></script>
+        <script src="../../mark.min.js"></script>
+        <script src="../../searcher.js"></script>
+
+        <script src="../../clipboard.min.js"></script>
+        <script src="../../highlight.js"></script>
+        <script src="../../book.js"></script>
+
+        <!-- Custom JS scripts -->
+
+
+
+    </div>
+    </body>
+</html>
