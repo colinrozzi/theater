@@ -13,6 +13,11 @@ pub enum HttpEventData {
         server_id: u64,
         port: u16,
     },
+    ServerStartHttps {
+        server_id: u64,
+        port: u16,
+        cert_path: String,
+    },
     ServerStop {
         server_id: u64,
     },
@@ -109,6 +114,32 @@ pub enum HttpEventData {
         headers_count: usize,
         success: bool,
         body: Option<String>,
+    },
+
+    // TLS-specific events
+    TlsValidationStart {
+        server_id: u64,
+        cert_path: String,
+        key_path: String,
+    },
+    TlsValidationSuccess {
+        server_id: u64,
+    },
+    TlsCertificateLoad {
+        server_id: u64,
+        cert_path: String,
+        cert_count: usize,
+    },
+    TlsPrivateKeyLoad {
+        server_id: u64,
+        key_path: String,
+    },
+    TlsConfigCreated {
+        server_id: u64,
+    },
+    TlsHandshakeError {
+        server_id: u64,
+        error: String,
     },
 
     // Error events

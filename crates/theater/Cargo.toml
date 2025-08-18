@@ -46,6 +46,12 @@ handlebars = "6.0"
 
 # Dependencies that are currently used by core but should be moved
 axum = { version = "0.8.1", features = ["ws"] }
+axum-server = { version = "0.7", features = ["tls-rustls"] }
+
+# TLS support
+tokio-rustls = "0.26"
+rustls = "0.23"
+rustls-pemfile = "2.0"
 reqwest = { version = "0.11", features = ["json"] }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 console = "0.15.7"

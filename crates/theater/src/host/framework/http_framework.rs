@@ -257,18 +257,31 @@ impl HttpFramework {
                     if let Some(server) = servers.get_mut(&server_id) {
                         match server.start(actor_handle.clone()).await {
                             Ok(port) => {
-                                // Record event
-                                ctx.data_mut().record_event(ChainEventData {
-                                    event_type: "http-framework/start-server".to_string(),
-                                    data: EventData::Http(HttpEventData::ServerStart {
+                                // Record appropriate event based on server type
+                                let event_data = if server.is_https() {
+                                    EventData::Http(HttpEventData::ServerStartHttps {
                                         server_id,
                                         port,
-                                    }),
+                                        cert_path: server.get_tls_cert_path().unwrap_or("unknown").to_string(),
+                                    })
+                                } else {
+                                    EventData::Http(HttpEventData::ServerStart {
+                                        server_id,
+                                        port,
+                                    })
+                                };
+                                
+                                let description = if server.is_https() {
+                                    format!("Started HTTPS server {} on port {}", server_id, port)
+                                } else {
+                                    format!("Started HTTP server {} on port {}", server_id, port)
+                                };
+
+                                ctx.data_mut().record_event(ChainEventData {
+                                    event_type: "http-framework/start-server".to_string(),
+                                    data: event_data,
                                     timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                                    description: Some(format!(
-                                        "Started HTTP server {} on port {}",
-                                        server_id, port
-                                    )),
+                                    description: Some(description),
                                 });
 
                                 // Create server handle for tracking

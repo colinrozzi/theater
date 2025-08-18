@@ -17,6 +17,7 @@ use tracing::{debug, error, info, warn};
 use anyhow::Result;
 
 use super::types::*;
+use super::tls::{create_tls_config, validate_tls_config};
 
 // Route configuration
 #[derive(Clone)]
@@ -125,6 +126,14 @@ impl ServerInstance {
             middleware_count: self.middlewares.len() as u32,
             websocket_enabled: !self.websockets.is_empty(),
         }
+    }
+
+    pub fn is_https(&self) -> bool {
+        self.config.tls_config.is_some()
+    }
+
+    pub fn get_tls_cert_path(&self) -> Option<&str> {
+        self.config.tls_config.as_ref().map(|tls| tls.cert_path.as_str())
     }
 
     // Existing route/middleware/websocket management methods remain the same
@@ -500,6 +509,15 @@ impl ServerInstance {
             return Err(anyhow::anyhow!("Server is already running"));
         }
 
+        // Check if TLS is configured
+        if let Some(tls_config) = self.config.tls_config.clone() {
+            self.start_https(actor_handle, &tls_config).await
+        } else {
+            self.start_http(actor_handle).await
+        }
+    }
+
+    async fn start_http(&mut self, actor_handle: ActorHandle) -> Result<u16> {
         let router = self.build_router_safe(actor_handle).map_err(|e| anyhow::anyhow!(e))?;
         let host = self.config.host.clone().unwrap_or_else(|| "0.0.0.0".to_string());
         
@@ -531,6 +549,62 @@ impl ServerInstance {
         self.running = true;
 
         info!("HTTP server {} started on {}:{}", self.id, host, self.port);
+        Ok(self.port)
+    }
+
+    async fn start_https(&mut self, actor_handle: ActorHandle, tls_config: &TlsConfig) -> Result<u16> {
+        // Validate TLS configuration early
+        debug!("Validating TLS configuration for server {}", self.id);
+        validate_tls_config(&tls_config.cert_path, &tls_config.key_path)
+            .map_err(|e| anyhow::anyhow!("TLS validation failed: {}", e))?;
+
+        // Build router
+        let router = self.build_router_safe(actor_handle).map_err(|e| anyhow::anyhow!(e))?;
+        let host = self.config.host.clone().unwrap_or_else(|| "0.0.0.0".to_string());
+        
+        let addr = if self.port == 0 {
+            format!("{}:0", host)
+        } else {
+            format!("{}:{}", host, self.port)
+        };
+
+        // Create TLS configuration
+        debug!("Loading TLS certificates for server {}", self.id);
+        let rustls_config = create_tls_config(&tls_config.cert_path, &tls_config.key_path)
+            .map_err(|e| anyhow::anyhow!("Failed to create TLS config: {}", e))?;
+
+        // Bind to address
+        let listener = tokio::net::TcpListener::bind(&addr).await?;
+        let actual_addr = listener.local_addr()?;
+        self.port = actual_addr.port();
+
+        let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
+        self.shutdown_tx = Some(shutdown_tx);
+
+        // Convert to std::net::TcpListener for axum-server
+        let std_listener = listener.into_std()?;
+        
+        // Start HTTPS server using axum-server
+        let server_handle = tokio::spawn(async move {
+            let server = axum_server::from_tcp_rustls(std_listener, rustls_config)
+                .serve(router.into_make_service());
+                
+            tokio::select! {
+                result = server => {
+                    if let Err(e) = result {
+                        error!("HTTPS server error: {}", e);
+                    }
+                }
+                _ = shutdown_rx => {
+                    debug!("HTTPS server received shutdown signal");
+                }
+            }
+        });
+
+        self.server_handle = Some(server_handle);
+        self.running = true;
+
+        info!("HTTPS server {} started on {}:{}", self.id, host, self.port);
         Ok(self.port)
     }
 
