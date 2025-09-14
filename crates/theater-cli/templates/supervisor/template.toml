@@ -9,3 +9,4 @@ description = "A Theater actor with supervisor capabilities for managing child a
 "src/lib.rs" = "lib.rs"
 "README.md" = "README.md"
 "wkg.toml" = "wkg.toml"
+".gitignore" = ".gitignore"
