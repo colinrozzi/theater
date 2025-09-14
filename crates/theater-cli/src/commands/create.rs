@@ -27,6 +27,14 @@ pub struct CreateArgs {
     /// Skip automatic cargo component check
     #[arg(long)]
     pub skip_component_check: bool,
+
+    /// Initialize a git repository and make the first commit
+    #[arg(long)]
+    pub git: bool,
+
+    /// Skip git repository initialization (opposite of --git)
+    #[arg(long, conflicts_with = "git")]
+    pub no_git: bool,
 }
 
 /// Execute the create command asynchronously (modernized)
@@ -119,6 +127,18 @@ pub async fn execute_async(args: &CreateArgs, ctx: &CommandContext) -> Result<()
         }
     }
 
+    // Step 5: Initialize git repository if requested
+    if args.git || (!args.no_git && should_init_git()) {
+        println!("\nInitializing git repository...");
+        match init_git_repo(&project_path, &args.name) {
+            Ok(_) => println!("✅ Git repository initialized with initial commit"),
+            Err(e) => {
+                warn!("⚠️  Failed to initialize git repository: {}", e);
+                warn!("You can run 'git init' manually if needed");
+            }
+        }
+    }
+
     // Add conclusion message
     println!("\nProject '{}' created successfully!", args.name);
 
@@ -135,6 +155,13 @@ pub async fn execute_async(args: &CreateArgs, ctx: &CommandContext) -> Result<()
         "cargo component build --release".to_string(),
         "theater start manifest.toml".to_string(),
     ]);
+
+    // Add git instructions if git was not initialized
+    if !args.git && (args.no_git || !should_init_git()) {
+        build_instructions.insert(1, "git init".to_string());
+        build_instructions.insert(2, "git add .".to_string());
+        build_instructions.insert(3, "git commit -m 'Initial commit'".to_string());
+    }
 
     let result = ProjectCreated {
         name: args.name.clone(),
@@ -251,4 +278,92 @@ fn is_valid_project_name(name: &str) -> bool {
         && name
             .chars()
             .all(|c| c.is_alphanumeric() || c == '-' || c == '_')
+}
+
+/// Determine if we should initialize git by default (when git is available)
+fn should_init_git() -> bool {
+    // Check if git is available
+    Command::new("git")
+        .args(&["--version"])
+        .output()
+        .map(|output| output.status.success())
+        .unwrap_or(false)
+}
+
+/// Initialize a git repository and make the first commit
+fn init_git_repo(project_path: &PathBuf, project_name: &str) -> Result<(), CliError> {
+    debug!("Initializing git repository at {}", project_path.display());
+    
+    // Initialize git repository
+    let init_output = Command::new("git")
+        .args(&["init"])
+        .current_dir(project_path)
+        .output()
+        .map_err(|e| {
+            CliError::MissingTool {
+                tool: "git".to_string(),
+                install_command: "Install git from https://git-scm.com/".to_string(),
+            }
+        })?;
+
+    if !init_output.status.success() {
+        return Err(CliError::BuildFailed {
+            output: format!(
+                "Failed to initialize git repository: {}", 
+                String::from_utf8_lossy(&init_output.stderr)
+            ),
+        });
+    }
+
+    // Add all files
+    let add_output = Command::new("git")
+        .args(&["add", "."])
+        .current_dir(project_path)
+        .output()
+        .map_err(|e| {
+            CliError::BuildFailed {
+                output: format!("Failed to add files to git: {}", e),
+            }
+        })?;
+
+    if !add_output.status.success() {
+        return Err(CliError::BuildFailed {
+            output: format!(
+                "Failed to add files to git: {}", 
+                String::from_utf8_lossy(&add_output.stderr)
+            ),
+        });
+    }
+
+    // Make initial commit
+    let commit_message = format!("Initial commit: Theater actor project '{}'", project_name);
+    let commit_output = Command::new("git")
+        .args(&["commit", "-m", &commit_message])
+        .current_dir(project_path)
+        .output()
+        .map_err(|e| {
+            CliError::BuildFailed {
+                output: format!("Failed to make initial commit: {}", e),
+            }
+        })?;
+
+    if !commit_output.status.success() {
+        // Check if the failure is due to missing git config
+        let stderr = String::from_utf8_lossy(&commit_output.stderr);
+        if stderr.contains("user.email") || stderr.contains("user.name") {
+            return Err(CliError::BuildFailed {
+                output: "Git commit failed: Please configure git with 'git config --global user.name \"Your Name\"' and 'git config --global user.email \"your.email@example.com\"'".to_string(),
+            });
+        } else {
+            return Err(CliError::BuildFailed {
+                output: format!(
+                    "Failed to make initial commit: {}", 
+                    stderr
+                ),
+            });
+        }
+    }
+
+    info!("Git repository initialized with initial commit");
+    Ok(())
 }
