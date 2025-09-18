@@ -1,0 +1,622 @@
+<!DOCTYPE HTML>
+<html lang="en" class="light sidebar-visible" dir="ltr">
+    <head>
+        <!-- Book generated using mdBook -->
+        <meta charset="UTF-8">
+        <title>Timing - Theater Docs</title>
+
+
+        <!-- Custom HTML head -->
+
+        <meta name="description" content="">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="theme-color" content="#ffffff">
+
+        <link rel="icon" href="../../favicon.svg">
+        <link rel="shortcut icon" href="../../favicon.png">
+        <link rel="stylesheet" href="../../css/variables.css">
+        <link rel="stylesheet" href="../../css/general.css">
+        <link rel="stylesheet" href="../../css/chrome.css">
+        <link rel="stylesheet" href="../../css/print.css" media="print">
+
+        <!-- Fonts -->
+        <link rel="stylesheet" href="../../FontAwesome/css/font-awesome.css">
+        <link rel="stylesheet" href="../../fonts/fonts.css">
+
+        <!-- Highlight.js Stylesheets -->
+        <link rel="stylesheet" id="highlight-css" href="../../highlight.css">
+        <link rel="stylesheet" id="tomorrow-night-css" href="../../tomorrow-night.css">
+        <link rel="stylesheet" id="ayu-highlight-css" href="../../ayu-highlight.css">
+
+        <!-- Custom theme stylesheets -->
+        <link rel="stylesheet" href="../../css/custom.css">
+
+
+        <!-- Provide site root and default themes to javascript -->
+        <script>
+            const path_to_root = "../../";
+            const default_light_theme = "light";
+            const default_dark_theme = "navy";
+            window.path_to_searchindex_js = "../../searchindex.js";
+        </script>
+        <!-- Start loading toc.js asap -->
+        <script src="../../toc.js"></script>
+    </head>
+    <body>
+    <div id="mdbook-help-container">
+        <div id="mdbook-help-popup">
+            <h2 class="mdbook-help-title">Keyboard shortcuts</h2>
+            <div>
+                <p>Press <kbd>←</kbd> or <kbd>→</kbd> to navigate between chapters</p>
+                <p>Press <kbd>S</kbd> or <kbd>/</kbd> to search in the book</p>
+                <p>Press <kbd>?</kbd> to show this help</p>
+                <p>Press <kbd>Esc</kbd> to hide this help</p>
+            </div>
+        </div>
+    </div>
+    <div id="body-container">
+        <!-- Work around some values being stored in localStorage wrapped in quotes -->
+        <script>
+            try {
+                let theme = localStorage.getItem('mdbook-theme');
+                let sidebar = localStorage.getItem('mdbook-sidebar');
+
+                if (theme.startsWith('"') && theme.endsWith('"')) {
+                    localStorage.setItem('mdbook-theme', theme.slice(1, theme.length - 1));
+                }
+
+                if (sidebar.startsWith('"') && sidebar.endsWith('"')) {
+                    localStorage.setItem('mdbook-sidebar', sidebar.slice(1, sidebar.length - 1));
+                }
+            } catch (e) { }
+        </script>
+
+        <!-- Set the theme before any content is loaded, prevents flash -->
+        <script>
+            const default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? default_dark_theme : default_light_theme;
+            let theme;
+            try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
+            if (theme === null || theme === undefined) { theme = default_theme; }
+            const html = document.documentElement;
+            html.classList.remove('light')
+            html.classList.add(theme);
+            html.classList.add("js");
+        </script>
+
+        <input type="checkbox" id="sidebar-toggle-anchor" class="hidden">
+
+        <!-- Hide / unhide sidebar before it is displayed -->
+        <script>
+            let sidebar = null;
+            const sidebar_toggle = document.getElementById("sidebar-toggle-anchor");
+            if (document.body.clientWidth >= 1080) {
+                try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
+                sidebar = sidebar || 'visible';
+            } else {
+                sidebar = 'hidden';
+                sidebar_toggle.checked = false;
+            }
+            if (sidebar === 'visible') {
+                sidebar_toggle.checked = true;
+            } else {
+                html.classList.remove('sidebar-visible');
+            }
+        </script>
+
+        <nav id="sidebar" class="sidebar" aria-label="Table of contents">
+            <!-- populated by js -->
+            <mdbook-sidebar-scrollbox class="sidebar-scrollbox"></mdbook-sidebar-scrollbox>
+            <noscript>
+                <iframe class="sidebar-iframe-outer" src="../../toc.html"></iframe>
+            </noscript>
+            <div id="sidebar-resize-handle" class="sidebar-resize-handle">
+                <div class="sidebar-resize-indicator"></div>
+            </div>
+        </nav>
+
+        <div id="page-wrapper" class="page-wrapper">
+
+            <div class="page">
+                <div id="menu-bar-hover-placeholder"></div>
+                <div id="menu-bar" class="menu-bar sticky">
+                    <div class="left-buttons">
+                        <label id="sidebar-toggle" class="icon-button" for="sidebar-toggle-anchor" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="sidebar">
+                            <i class="fa fa-bars"></i>
+                        </label>
+                        <button id="theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="theme-list">
+                            <i class="fa fa-paint-brush"></i>
+                        </button>
+                        <ul id="theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                            <li role="none"><button role="menuitem" class="theme" id="default_theme">Auto</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="light">Light</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="rust">Rust</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="coal">Coal</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="navy">Navy</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="ayu">Ayu</button></li>
+                        </ul>
+                        <button id="search-toggle" class="icon-button" type="button" title="Search (`/`)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="/ s" aria-controls="searchbar">
+                            <i class="fa fa-search"></i>
+                        </button>
+                    </div>
+
+                    <h1 class="menu-title">Theater Docs</h1>
+
+                    <div class="right-buttons">
+                        <a href="../../print.html" title="Print this book" aria-label="Print this book">
+                            <i id="print-button" class="fa fa-print"></i>
+                        </a>
+                        <a href="https://github.com/colinrozzi/theater" title="Git repository" aria-label="Git repository">
+                            <i id="git-repository-button" class="fa fa-github"></i>
+                        </a>
+                        <a href="https://github.com/colinrozzi/theater/edit/main/book/src/services/handlers/timing.md" title="Suggest an edit" aria-label="Suggest an edit" rel="edit">
+                            <i id="git-edit-button" class="fa fa-edit"></i>
+                        </a>
+
+                    </div>
+                </div>
+
+                <div id="search-wrapper" class="hidden">
+                    <form id="searchbar-outer" class="searchbar-outer">
+                        <div class="search-wrapper">
+                            <input type="search" id="searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="searchresults-outer" aria-describedby="searchresults-header">
+                            <div class="spinner-wrapper">
+                                <i class="fa fa-spinner fa-spin"></i>
+                            </div>
+                        </div>
+                    </form>
+                    <div id="searchresults-outer" class="searchresults-outer hidden">
+                        <div id="searchresults-header" class="searchresults-header"></div>
+                        <ul id="searchresults">
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Apply ARIA attributes after the sidebar and the sidebar toggle button are added to the DOM -->
+                <script>
+                    document.getElementById('sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
+                    document.getElementById('sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
+                    Array.from(document.querySelectorAll('#sidebar a')).forEach(function(link) {
+                        link.setAttribute('tabIndex', sidebar === 'visible' ? 0 : -1);
+                    });
+                </script>
+
+                <div id="content" class="content">
+                    <main>
+                        <h1 id="timing-handler"><a class="header" href="#timing-handler">Timing Handler</a></h1>
+<p>The Timing Handler provides actors with time-related capabilities, including delays, periodic scheduling, and timeout management. It enables actors to control the timing of their operations while maintaining Theater's state verification model.</p>
+<h2 id="overview"><a class="header" href="#overview">Overview</a></h2>
+<p>The Timing Handler implements the <code>theater:simple/timing</code> interface, enabling actors to:</p>
+<ol>
+<li>Introduce controlled delays in their execution</li>
+<li>Implement timeout patterns for operations</li>
+<li>Enforce rate limits and throttling</li>
+<li>Create periodic tasks and scheduled operations</li>
+</ol>
+<h2 id="configuration"><a class="header" href="#configuration">Configuration</a></h2>
+<p>To use the Timing Handler, add it to your actor's manifest:</p>
+<pre><code class="language-toml">[[handlers]]
+type = "timing"
+config = { 
+    max_sleep_duration = 3600000,  # Maximum sleep duration in milliseconds (1 hour)
+    min_sleep_duration = 1         # Minimum sleep duration in milliseconds
+}
+</code></pre>
+<p>Configuration options:</p>
+<ul>
+<li><code>max_sleep_duration</code>: (Optional) Maximum allowed sleep duration in milliseconds, defaults to 3600000 (1 hour)</li>
+<li><code>min_sleep_duration</code>: (Optional) Minimum allowed sleep duration in milliseconds, defaults to 1</li>
+</ul>
+<h2 id="interface"><a class="header" href="#interface">Interface</a></h2>
+<p>The Timing Handler is defined using the following WIT interface:</p>
+<pre><code class="language-wit">interface timing {
+    // Sleep for the specified duration (in milliseconds)
+    sleep: func(duration-ms: u64) -&gt; result&lt;_, string&gt;;
+    
+    // Get current timestamp (milliseconds since epoch)
+    now: func() -&gt; u64;
+    
+    // Get high-resolution time for performance measurement (in nanoseconds)
+    performance-now: func() -&gt; u64;
+}
+</code></pre>
+<h2 id="basic-timing-operations"><a class="header" href="#basic-timing-operations">Basic Timing Operations</a></h2>
+<h3 id="sleep"><a class="header" href="#sleep">Sleep</a></h3>
+<p>The <code>sleep</code> function pauses actor execution for a specified duration:</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>// Sleep for 1 second
+match timing::sleep(1000) {
+    Ok(_) =&gt; {
+        println!("Resumed after 1 second");
+    },
+    Err(error) =&gt; {
+        println!("Sleep operation failed: {}", error);
+    }
+}
+<span class="boring">}</span></code></pre></pre>
+<p>Note that the sleep duration must fall within the configured <code>min_sleep_duration</code> and <code>max_sleep_duration</code> range. Attempting to sleep for longer than the maximum or shorter than the minimum will result in an error.</p>
+<h3 id="current-time"><a class="header" href="#current-time">Current Time</a></h3>
+<p>The <code>now</code> function returns the current time in milliseconds since the Unix epoch:</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>let current_time = timing::now();
+println!("Current time: {} ms", current_time);
+<span class="boring">}</span></code></pre></pre>
+<h3 id="performance-timing"><a class="header" href="#performance-timing">Performance Timing</a></h3>
+<p>The <code>performance-now</code> function provides high-resolution timing for performance measurement:</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>// Measure operation duration
+let start = timing::performance_now();
+
+// Perform operation
+perform_expensive_operation();
+
+let end = timing::performance_now();
+let duration_ns = end - start;
+let duration_ms = duration_ns / 1_000_000;
+
+println!("Operation took {} ms", duration_ms);
+<span class="boring">}</span></code></pre></pre>
+<h2 id="common-patterns"><a class="header" href="#common-patterns">Common Patterns</a></h2>
+<h3 id="implementing-timeouts"><a class="header" href="#implementing-timeouts">Implementing Timeouts</a></h3>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>// Perform an operation with a timeout
+fn perform_with_timeout&lt;F, T&gt;(operation: F, timeout_ms: u64) -&gt; Result&lt;T, String&gt;
+where
+    F: FnOnce() -&gt; Result&lt;T, String&gt;,
+{
+    // Create a oneshot channel for the result
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    
+    // Spawn a task to perform the operation
+    tokio::spawn(async move {
+        match operation() {
+            Ok(result) =&gt; {
+                let _ = tx.send(Ok(result));
+            },
+            Err(err) =&gt; {
+                let _ = tx.send(Err(err));
+            }
+        }
+    });
+    
+    // Wait for the result or timeout
+    match tokio::time::timeout(std::time::Duration::from_millis(timeout_ms), rx).await {
+        Ok(result) =&gt; result.unwrap(),
+        Err(_) =&gt; Err("Operation timed out".to_string()),
+    }
+}
+
+// Usage
+let result = perform_with_timeout(|| {
+    // Perform potentially long-running operation
+    perform_api_call()
+}, 5000); // 5 second timeout
+<span class="boring">}</span></code></pre></pre>
+<h3 id="rate-limiting"><a class="header" href="#rate-limiting">Rate Limiting</a></h3>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>// Simple rate limiter
+struct RateLimiter {
+    last_operation: u64,
+    min_interval_ms: u64,
+}
+
+impl RateLimiter {
+    fn new(min_interval_ms: u64) -&gt; Self {
+        Self {
+            last_operation: 0,
+            min_interval_ms,
+        }
+    }
+    
+    fn check_and_update(&amp;mut self) -&gt; Result&lt;(), String&gt; {
+        let now = timing::now();
+        let elapsed = now - self.last_operation;
+        
+        if self.last_operation == 0 || elapsed &gt;= self.min_interval_ms {
+            self.last_operation = now;
+            Ok(())
+        } else {
+            let wait_time = self.min_interval_ms - elapsed;
+            timing::sleep(wait_time)?;
+            self.last_operation = timing::now();
+            Ok(())
+        }
+    }
+}
+
+// Usage
+let mut rate_limiter = RateLimiter::new(100); // 100ms between operations
+
+for item in items {
+    // Ensure we don't exceed rate limit
+    rate_limiter.check_and_update()?;
+    
+    // Process item
+    process_item(item)?;
+}
+<span class="boring">}</span></code></pre></pre>
+<h3 id="periodic-tasks"><a class="header" href="#periodic-tasks">Periodic Tasks</a></h3>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>// Run a task periodically
+fn run_periodically&lt;F&gt;(task: F, interval_ms: u64, max_iterations: Option&lt;usize&gt;) -&gt; Result&lt;(), String&gt;
+where
+    F: Fn() -&gt; Result&lt;(), String&gt;,
+{
+    let mut iterations = 0;
+    
+    loop {
+        // Run the task
+        task()?;
+        
+        // Check if we've reached the maximum iterations
+        if let Some(max) = max_iterations {
+            iterations += 1;
+            if iterations &gt;= max {
+                break;
+            }
+        }
+        
+        // Sleep until the next interval
+        timing::sleep(interval_ms)?;
+    }
+    
+    Ok(())
+}
+
+// Usage
+run_periodically(|| {
+    // Periodic task logic
+    collect_metrics()
+}, 5000, Some(10))?; // Run every 5 seconds, 10 times
+<span class="boring">}</span></code></pre></pre>
+<h2 id="state-chain-integration"><a class="header" href="#state-chain-integration">State Chain Integration</a></h2>
+<p>All timing operations are recorded in the actor's state chain, creating a verifiable history. The chain events include:</p>
+<ol>
+<li>
+<p><strong>TimingOperation</strong>: Records details of timing operations:</p>
+<ul>
+<li>Operation type (sleep, now, performance-now)</li>
+<li>Duration (for sleep operations)</li>
+<li>Timestamp</li>
+</ul>
+</li>
+<li>
+<p><strong>Error</strong>: Records any errors that occur:</p>
+<ul>
+<li>Operation type</li>
+<li>Error message</li>
+</ul>
+</li>
+</ol>
+<p>This integration ensures that all timing activities are:</p>
+<ul>
+<li>Traceable</li>
+<li>Verifiable</li>
+<li>Reproducible</li>
+<li>Auditable</li>
+</ul>
+<h2 id="error-handling"><a class="header" href="#error-handling">Error Handling</a></h2>
+<p>The Timing Handler provides error information for various failure scenarios:</p>
+<ol>
+<li><strong>Duration Errors</strong>: When sleep duration is outside allowed range</li>
+<li><strong>Operation Errors</strong>: When timing operations fail</li>
+<li><strong>Resource Errors</strong>: When system resources are unavailable</li>
+</ol>
+<h2 id="security-considerations"><a class="header" href="#security-considerations">Security Considerations</a></h2>
+<p>When using the Timing Handler, consider the following security aspects:</p>
+<ol>
+<li><strong>Sleep Limits</strong>: The configuration enforces limits on sleep durations</li>
+<li><strong>Resource Consumption</strong>: Long or frequent sleeps may impact system resources</li>
+<li><strong>Timing Attacks</strong>: Be aware of potential timing side-channel attacks</li>
+</ol>
+<h2 id="implementation-details"><a class="header" href="#implementation-details">Implementation Details</a></h2>
+<p>Under the hood, the Timing Handler:</p>
+<ol>
+<li>Uses the Tokio runtime for asynchronous sleep operations</li>
+<li>Enforces configurable minimum and maximum sleep durations</li>
+<li>Records all operations in the state chain</li>
+<li>Provides consistent time sources across the actor system</li>
+</ol>
+<h2 id="performance-considerations"><a class="header" href="#performance-considerations">Performance Considerations</a></h2>
+<ol>
+<li><strong>Sleep Overhead</strong>: There is a small overhead for each sleep operation</li>
+<li><strong>Time Resolution</strong>: Time functions have platform-dependent resolution</li>
+<li><strong>Resource Usage</strong>: Excessive sleep operations may impact system performance</li>
+</ol>
+<h2 id="best-practices"><a class="header" href="#best-practices">Best Practices</a></h2>
+<ol>
+<li><strong>Error Handling</strong>: Always handle errors from timing functions</li>
+<li><strong>Sleep Duration</strong>: Use reasonable sleep durations</li>
+<li><strong>Batch Processing</strong>: Consider batching operations instead of sleeping between each</li>
+<li><strong>Timeouts</strong>: Implement timeouts for operations that may not complete</li>
+<li><strong>Rate Limiting</strong>: Use rate limiting for external API calls</li>
+</ol>
+<h2 id="examples"><a class="header" href="#examples">Examples</a></h2>
+<h3 id="retry-logic"><a class="header" href="#retry-logic">Retry Logic</a></h3>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>// Retry an operation with exponential backoff
+fn retry_with_backoff&lt;F, T&gt;(
+    operation: F,
+    initial_backoff_ms: u64,
+    max_backoff_ms: u64,
+    max_retries: usize
+) -&gt; Result&lt;T, String&gt;
+where
+    F: Fn() -&gt; Result&lt;T, String&gt;,
+{
+    let mut backoff = initial_backoff_ms;
+    let mut attempts = 0;
+    
+    loop {
+        match operation() {
+            Ok(result) =&gt; return Ok(result),
+            Err(error) =&gt; {
+                attempts += 1;
+                
+                if attempts &gt;= max_retries {
+                    return Err(format!("Operation failed after {} attempts: {}", attempts, error));
+                }
+                
+                // Log the failure and retry plan
+                println!("Attempt {} failed: {}. Retrying in {} ms", attempts, error, backoff);
+                
+                // Wait before next attempt
+                timing::sleep(backoff)?;
+                
+                // Exponential backoff with jitter
+                let jitter = (backoff as f64 * 0.1 * rand::random::&lt;f64&gt;()) as u64;
+                backoff = std::cmp::min(backoff * 2 + jitter, max_backoff_ms);
+            }
+        }
+    }
+}
+
+// Usage
+let result = retry_with_backoff(
+    || external_api_call("https://api.example.com/data"),
+    100,    // Initial backoff of 100ms
+    30000,  // Maximum backoff of 30 seconds
+    5       // Maximum 5 retry attempts
+)?;
+<span class="boring">}</span></code></pre></pre>
+<h3 id="debouncing"><a class="header" href="#debouncing">Debouncing</a></h3>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>// Debounce a function call
+struct Debouncer {
+    last_call: u64,
+    timeout_ms: u64,
+}
+
+impl Debouncer {
+    fn new(timeout_ms: u64) -&gt; Self {
+        Self {
+            last_call: 0,
+            timeout_ms,
+        }
+    }
+    
+    fn should_call(&amp;mut self) -&gt; bool {
+        let now = timing::now();
+        
+        if now - self.last_call &gt;= self.timeout_ms {
+            self.last_call = now;
+            true
+        } else {
+            false
+        }
+    }
+}
+
+// Usage
+let mut input_debouncer = Debouncer::new(500); // 500ms debounce
+
+fn process_input(input: &amp;str) {
+    if input_debouncer.should_call() {
+        // Process the input
+        println!("Processing input: {}", input);
+    } else {
+        // Skip processing this input
+        println!("Debounced input: {}", input);
+    }
+}
+<span class="boring">}</span></code></pre></pre>
+<h3 id="measuring-request-latency"><a class="header" href="#measuring-request-latency">Measuring Request Latency</a></h3>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>// Measure and log request latency
+fn measure_request_latency&lt;F, T&gt;(operation_name: &amp;str, operation: F) -&gt; Result&lt;T, String&gt;
+where
+    F: FnOnce() -&gt; Result&lt;T, String&gt;,
+{
+    // Get start time in high resolution
+    let start = timing::performance_now();
+    
+    // Perform the operation
+    let result = operation()?;
+    
+    // Calculate duration
+    let end = timing::performance_now();
+    let duration_ns = end - start;
+    let duration_ms = duration_ns / 1_000_000;
+    
+    // Log the latency
+    println!("{} took {} ms", operation_name, duration_ms);
+    
+    // Record metric
+    runtime::record_metric(&amp;format!("{}_latency_ms", operation_name), duration_ms as f64)?;
+    
+    // Return the result
+    Ok(result)
+}
+
+// Usage
+let user_data = measure_request_latency("fetch_user_data", || {
+    api_client::get_user_data(user_id)
+})?;
+<span class="boring">}</span></code></pre></pre>
+<h2 id="related-topics"><a class="header" href="#related-topics">Related Topics</a></h2>
+<ul>
+<li><a href="runtime.html">Runtime Handler</a> - For runtime information and operations</li>
+<li><a href="message-server.html">Message Server Handler</a> - For actor-to-actor communication</li>
+<li><a href="../core-concepts/state-management.html">State Management</a> - For state chain integration</li>
+</ul>
+
+                    </main>
+
+                    <nav class="nav-wrapper" aria-label="Page navigation">
+                        <!-- Mobile navigation buttons -->
+                            <a rel="prev" href="../../services/handlers/runtime.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                                <i class="fa fa-angle-left"></i>
+                            </a>
+
+                            <a rel="next prefetch" href="../../api-reference/api.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                                <i class="fa fa-angle-right"></i>
+                            </a>
+
+                        <div style="clear: both"></div>
+                    </nav>
+                </div>
+            </div>
+
+            <nav class="nav-wide-wrapper" aria-label="Page navigation">
+                    <a rel="prev" href="../../services/handlers/runtime.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                        <i class="fa fa-angle-left"></i>
+                    </a>
+
+                    <a rel="next prefetch" href="../../api-reference/api.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                        <i class="fa fa-angle-right"></i>
+                    </a>
+            </nav>
+
+        </div>
+
+
+
+
+        <script>
+            window.playground_copyable = true;
+        </script>
+
+
+        <script src="../../elasticlunr.min.js"></script>
+        <script src="../../mark.min.js"></script>
+        <script src="../../searcher.js"></script>
+
+        <script src="../../clipboard.min.js"></script>
+        <script src="../../highlight.js"></script>
+        <script src="../../book.js"></script>
+
+        <!-- Custom JS scripts -->
+
+
+
+    </div>
+    </body>
+</html>

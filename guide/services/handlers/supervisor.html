@@ -1,0 +1,603 @@
+<!DOCTYPE HTML>
+<html lang="en" class="light sidebar-visible" dir="ltr">
+    <head>
+        <!-- Book generated using mdBook -->
+        <meta charset="UTF-8">
+        <title>Supervisor - Theater Docs</title>
+
+
+        <!-- Custom HTML head -->
+
+        <meta name="description" content="">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="theme-color" content="#ffffff">
+
+        <link rel="icon" href="../../favicon.svg">
+        <link rel="shortcut icon" href="../../favicon.png">
+        <link rel="stylesheet" href="../../css/variables.css">
+        <link rel="stylesheet" href="../../css/general.css">
+        <link rel="stylesheet" href="../../css/chrome.css">
+        <link rel="stylesheet" href="../../css/print.css" media="print">
+
+        <!-- Fonts -->
+        <link rel="stylesheet" href="../../FontAwesome/css/font-awesome.css">
+        <link rel="stylesheet" href="../../fonts/fonts.css">
+
+        <!-- Highlight.js Stylesheets -->
+        <link rel="stylesheet" id="highlight-css" href="../../highlight.css">
+        <link rel="stylesheet" id="tomorrow-night-css" href="../../tomorrow-night.css">
+        <link rel="stylesheet" id="ayu-highlight-css" href="../../ayu-highlight.css">
+
+        <!-- Custom theme stylesheets -->
+        <link rel="stylesheet" href="../../css/custom.css">
+
+
+        <!-- Provide site root and default themes to javascript -->
+        <script>
+            const path_to_root = "../../";
+            const default_light_theme = "light";
+            const default_dark_theme = "navy";
+            window.path_to_searchindex_js = "../../searchindex.js";
+        </script>
+        <!-- Start loading toc.js asap -->
+        <script src="../../toc.js"></script>
+    </head>
+    <body>
+    <div id="mdbook-help-container">
+        <div id="mdbook-help-popup">
+            <h2 class="mdbook-help-title">Keyboard shortcuts</h2>
+            <div>
+                <p>Press <kbd>←</kbd> or <kbd>→</kbd> to navigate between chapters</p>
+                <p>Press <kbd>S</kbd> or <kbd>/</kbd> to search in the book</p>
+                <p>Press <kbd>?</kbd> to show this help</p>
+                <p>Press <kbd>Esc</kbd> to hide this help</p>
+            </div>
+        </div>
+    </div>
+    <div id="body-container">
+        <!-- Work around some values being stored in localStorage wrapped in quotes -->
+        <script>
+            try {
+                let theme = localStorage.getItem('mdbook-theme');
+                let sidebar = localStorage.getItem('mdbook-sidebar');
+
+                if (theme.startsWith('"') && theme.endsWith('"')) {
+                    localStorage.setItem('mdbook-theme', theme.slice(1, theme.length - 1));
+                }
+
+                if (sidebar.startsWith('"') && sidebar.endsWith('"')) {
+                    localStorage.setItem('mdbook-sidebar', sidebar.slice(1, sidebar.length - 1));
+                }
+            } catch (e) { }
+        </script>
+
+        <!-- Set the theme before any content is loaded, prevents flash -->
+        <script>
+            const default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? default_dark_theme : default_light_theme;
+            let theme;
+            try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
+            if (theme === null || theme === undefined) { theme = default_theme; }
+            const html = document.documentElement;
+            html.classList.remove('light')
+            html.classList.add(theme);
+            html.classList.add("js");
+        </script>
+
+        <input type="checkbox" id="sidebar-toggle-anchor" class="hidden">
+
+        <!-- Hide / unhide sidebar before it is displayed -->
+        <script>
+            let sidebar = null;
+            const sidebar_toggle = document.getElementById("sidebar-toggle-anchor");
+            if (document.body.clientWidth >= 1080) {
+                try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
+                sidebar = sidebar || 'visible';
+            } else {
+                sidebar = 'hidden';
+                sidebar_toggle.checked = false;
+            }
+            if (sidebar === 'visible') {
+                sidebar_toggle.checked = true;
+            } else {
+                html.classList.remove('sidebar-visible');
+            }
+        </script>
+
+        <nav id="sidebar" class="sidebar" aria-label="Table of contents">
+            <!-- populated by js -->
+            <mdbook-sidebar-scrollbox class="sidebar-scrollbox"></mdbook-sidebar-scrollbox>
+            <noscript>
+                <iframe class="sidebar-iframe-outer" src="../../toc.html"></iframe>
+            </noscript>
+            <div id="sidebar-resize-handle" class="sidebar-resize-handle">
+                <div class="sidebar-resize-indicator"></div>
+            </div>
+        </nav>
+
+        <div id="page-wrapper" class="page-wrapper">
+
+            <div class="page">
+                <div id="menu-bar-hover-placeholder"></div>
+                <div id="menu-bar" class="menu-bar sticky">
+                    <div class="left-buttons">
+                        <label id="sidebar-toggle" class="icon-button" for="sidebar-toggle-anchor" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="sidebar">
+                            <i class="fa fa-bars"></i>
+                        </label>
+                        <button id="theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="theme-list">
+                            <i class="fa fa-paint-brush"></i>
+                        </button>
+                        <ul id="theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                            <li role="none"><button role="menuitem" class="theme" id="default_theme">Auto</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="light">Light</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="rust">Rust</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="coal">Coal</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="navy">Navy</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="ayu">Ayu</button></li>
+                        </ul>
+                        <button id="search-toggle" class="icon-button" type="button" title="Search (`/`)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="/ s" aria-controls="searchbar">
+                            <i class="fa fa-search"></i>
+                        </button>
+                    </div>
+
+                    <h1 class="menu-title">Theater Docs</h1>
+
+                    <div class="right-buttons">
+                        <a href="../../print.html" title="Print this book" aria-label="Print this book">
+                            <i id="print-button" class="fa fa-print"></i>
+                        </a>
+                        <a href="https://github.com/colinrozzi/theater" title="Git repository" aria-label="Git repository">
+                            <i id="git-repository-button" class="fa fa-github"></i>
+                        </a>
+                        <a href="https://github.com/colinrozzi/theater/edit/main/book/src/services/handlers/supervisor.md" title="Suggest an edit" aria-label="Suggest an edit" rel="edit">
+                            <i id="git-edit-button" class="fa fa-edit"></i>
+                        </a>
+
+                    </div>
+                </div>
+
+                <div id="search-wrapper" class="hidden">
+                    <form id="searchbar-outer" class="searchbar-outer">
+                        <div class="search-wrapper">
+                            <input type="search" id="searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="searchresults-outer" aria-describedby="searchresults-header">
+                            <div class="spinner-wrapper">
+                                <i class="fa fa-spinner fa-spin"></i>
+                            </div>
+                        </div>
+                    </form>
+                    <div id="searchresults-outer" class="searchresults-outer hidden">
+                        <div id="searchresults-header" class="searchresults-header"></div>
+                        <ul id="searchresults">
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Apply ARIA attributes after the sidebar and the sidebar toggle button are added to the DOM -->
+                <script>
+                    document.getElementById('sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
+                    document.getElementById('sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
+                    Array.from(document.querySelectorAll('#sidebar a')).forEach(function(link) {
+                        link.setAttribute('tabIndex', sidebar === 'visible' ? 0 : -1);
+                    });
+                </script>
+
+                <div id="content" class="content">
+                    <main>
+                        <h1 id="supervisor-handler"><a class="header" href="#supervisor-handler">Supervisor Handler</a></h1>
+<p>The Supervisor Handler enables parent-child relationships between actors in Theater. It provides the foundation for actor supervision hierarchies, allowing parent actors to spawn, monitor, and control child actors while maintaining the Theater security and verification model.</p>
+<h2 id="overview"><a class="header" href="#overview">Overview</a></h2>
+<p>The Supervisor Handler implements the <code>theater:simple/supervisor</code> interface, enabling actors to:</p>
+<ol>
+<li>Spawn new child actors</li>
+<li>Monitor child actor lifecycle events</li>
+<li>Access child actor state and events</li>
+<li>Stop and restart child actors</li>
+<li>Implement supervision strategies for fault tolerance</li>
+</ol>
+<h2 id="configuration"><a class="header" href="#configuration">Configuration</a></h2>
+<p>To use the Supervisor Handler, add it to your actor's manifest:</p>
+<pre><code class="language-toml">[[handlers]]
+type = "supervisor"
+config = {}
+</code></pre>
+<p>The Supervisor Handler doesn't currently require any specific configuration parameters.</p>
+<h2 id="interface"><a class="header" href="#interface">Interface</a></h2>
+<p>The Supervisor Handler is defined using the following WIT interface:</p>
+<pre><code class="language-wit">interface supervisor {
+    // Spawn a new child actor from a manifest
+    spawn: func(manifest: string) -&gt; result&lt;string, string&gt;;
+    
+    // List all child actor IDs
+    list-children: func() -&gt; list&lt;string&gt;;
+    
+    // Stop a specific child actor
+    stop-child: func(child-id: string) -&gt; result&lt;_, string&gt;;
+    
+    // Restart a specific child actor
+    restart-child: func(child-id: string) -&gt; result&lt;_, string&gt;;
+    
+    // Get the current state of a child actor
+    get-child-state: func(child-id: string) -&gt; result&lt;list&lt;u8&gt;, string&gt;;
+    
+    // Get the event history of a child actor
+    get-child-events: func(child-id: string) -&gt; result&lt;list&lt;chain-event&gt;, string&gt;;
+    
+    // Record structure for chain events
+    record chain-event {
+        hash: list&lt;u8&gt;,
+        parent-hash: option&lt;list&lt;u8&gt;&gt;,
+        event-type: string,
+        data: list&lt;u8&gt;,
+        timestamp: u64
+    }
+}
+</code></pre>
+<h2 id="spawning-child-actors"><a class="header" href="#spawning-child-actors">Spawning Child Actors</a></h2>
+<p>The most fundamental operation in the supervision system is spawning child actors. This is done using the <code>spawn</code> function:</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>// Manifest can be a path to a TOML file or the TOML content as a string
+let manifest = r#"
+name = "child-actor"
+component_path = "child_actor.wasm"
+
+[[handlers]]
+type = "message-server"
+config = {}
+"#;
+
+match supervisor::spawn(manifest) {
+    Ok(child_id) =&gt; {
+        println!("Spawned child actor with ID: {}", child_id);
+        // Store the child ID for future reference
+    },
+    Err(error) =&gt; {
+        println!("Failed to spawn child actor: {}", error);
+    }
+}
+<span class="boring">}</span></code></pre></pre>
+<h2 id="managing-child-actors"><a class="header" href="#managing-child-actors">Managing Child Actors</a></h2>
+<h3 id="listing-children"><a class="header" href="#listing-children">Listing Children</a></h3>
+<p>To get a list of all child actors:</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>let children = supervisor::list_children();
+println!("Child actors: {:?}", children);
+<span class="boring">}</span></code></pre></pre>
+<h3 id="stopping-a-child"><a class="header" href="#stopping-a-child">Stopping a Child</a></h3>
+<p>To gracefully stop a child actor:</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>match supervisor::stop_child(child_id) {
+    Ok(_) =&gt; {
+        println!("Child actor stopped successfully");
+    },
+    Err(error) =&gt; {
+        println!("Failed to stop child actor: {}", error);
+    }
+}
+<span class="boring">}</span></code></pre></pre>
+<h3 id="restarting-a-child"><a class="header" href="#restarting-a-child">Restarting a Child</a></h3>
+<p>To restart a child actor (useful after failures):</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>match supervisor::restart_child(child_id) {
+    Ok(_) =&gt; {
+        println!("Child actor restarted successfully");
+    },
+    Err(error) =&gt; {
+        println!("Failed to restart child actor: {}", error);
+    }
+}
+<span class="boring">}</span></code></pre></pre>
+<h2 id="accessing-child-state-and-events"><a class="header" href="#accessing-child-state-and-events">Accessing Child State and Events</a></h2>
+<p>One of the powerful features of the supervision system is the ability to access child actor state and event history.</p>
+<h3 id="getting-child-state"><a class="header" href="#getting-child-state">Getting Child State</a></h3>
+<p>To get the current state of a child actor:</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>match supervisor::get_child_state(child_id) {
+    Ok(state_bytes) =&gt; {
+        // Process the child state
+        if let Some(bytes) = state_bytes {
+            let state: ChildState = serde_json::from_slice(&amp;bytes)
+                .expect("Failed to deserialize child state");
+            println!("Child state: {:?}", state);
+        } else {
+            println!("Child has no state");
+        }
+    },
+    Err(error) =&gt; {
+        println!("Failed to get child state: {}", error);
+    }
+}
+<span class="boring">}</span></code></pre></pre>
+<h3 id="getting-child-events"><a class="header" href="#getting-child-events">Getting Child Events</a></h3>
+<p>To get the event history of a child actor:</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>match supervisor::get_child_events(child_id) {
+    Ok(events) =&gt; {
+        println!("Child has {} events", events.len());
+        
+        for event in events {
+            println!("Event type: {}", event.event_type);
+            println!("Timestamp: {}", event.timestamp);
+            
+            // Process event data based on type
+            // ...
+        }
+    },
+    Err(error) =&gt; {
+        println!("Failed to get child events: {}", error);
+    }
+}
+<span class="boring">}</span></code></pre></pre>
+<h2 id="supervision-strategies"><a class="header" href="#supervision-strategies">Supervision Strategies</a></h2>
+<p>The Supervisor Handler enables the implementation of different supervision strategies inspired by the Erlang/OTP model:</p>
+<h3 id="one-for-one-strategy"><a class="header" href="#one-for-one-strategy">One-for-One Strategy</a></h3>
+<p>Restart only the failed child:</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>fn handle_child_failure(child_id: &amp;str) -&gt; Result&lt;(), String&gt; {
+    // Attempt to restart the failed child
+    supervisor::restart_child(child_id)
+}
+<span class="boring">}</span></code></pre></pre>
+<h3 id="all-for-one-strategy"><a class="header" href="#all-for-one-strategy">All-for-One Strategy</a></h3>
+<p>Restart all children when one fails:</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>fn handle_child_failure(failed_child_id: &amp;str) -&gt; Result&lt;(), String&gt; {
+    // Get all children
+    let children = supervisor::list_children();
+    
+    // Restart all children
+    for child_id in children {
+        supervisor::restart_child(&amp;child_id)?;
+    }
+    
+    Ok(())
+}
+<span class="boring">}</span></code></pre></pre>
+<h3 id="rest-for-one-strategy"><a class="header" href="#rest-for-one-strategy">Rest-for-One Strategy</a></h3>
+<p>Restart the failed child and all children that depend on it:</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>fn handle_child_failure(failed_child_id: &amp;str) -&gt; Result&lt;(), String&gt; {
+    // Get dependency tree (implementation specific)
+    let dependent_children = get_dependent_children(failed_child_id);
+    
+    // Restart the failed child first
+    supervisor::restart_child(failed_child_id)?;
+    
+    // Then restart dependent children
+    for child_id in dependent_children {
+        supervisor::restart_child(&amp;child_id)?;
+    }
+    
+    Ok(())
+}
+<span class="boring">}</span></code></pre></pre>
+<h2 id="state-chain-integration"><a class="header" href="#state-chain-integration">State Chain Integration</a></h2>
+<p>All supervision operations are recorded in the parent actor's state chain, creating a verifiable history. The chain events include:</p>
+<ol>
+<li>
+<p><strong>SupervisorOperation</strong>: Records details of supervision operations:</p>
+<ul>
+<li>Operation type (spawn, stop, restart, etc.)</li>
+<li>Child actor ID</li>
+<li>Result (success/failure)</li>
+</ul>
+</li>
+<li>
+<p><strong>ChildLifecycleEvent</strong>: Records child lifecycle events:</p>
+<ul>
+<li>Child actor ID</li>
+<li>Event type (started, stopped, crashed, etc.)</li>
+<li>Timestamp</li>
+</ul>
+</li>
+</ol>
+<p>This integration ensures that all supervision activities are:</p>
+<ul>
+<li>Traceable</li>
+<li>Verifiable</li>
+<li>Reproducible</li>
+<li>Auditable</li>
+</ul>
+<h2 id="error-handling"><a class="header" href="#error-handling">Error Handling</a></h2>
+<p>The Supervisor Handler provides detailed error information for various failure scenarios:</p>
+<ol>
+<li><strong>Spawn Errors</strong>: When child actor creation fails</li>
+<li><strong>Stop Errors</strong>: When child actor termination fails</li>
+<li><strong>Restart Errors</strong>: When child actor restart fails</li>
+<li><strong>Not Found Errors</strong>: When the specified child actor doesn't exist</li>
+<li><strong>Access Errors</strong>: When accessing child state or events fails</li>
+</ol>
+<h2 id="security-considerations"><a class="header" href="#security-considerations">Security Considerations</a></h2>
+<p>When using the Supervisor Handler, consider the following security aspects:</p>
+<ol>
+<li><strong>Child Isolation</strong>: Child actors run in separate WebAssembly sandboxes</li>
+<li><strong>State Access Controls</strong>: Only direct parent actors can access child state</li>
+<li><strong>Manifest Validation</strong>: Validate manifests before spawning actors</li>
+<li><strong>Resource Limits</strong>: Consider setting limits on child actor resource usage</li>
+<li><strong>Privilege Separation</strong>: Design actor hierarchies with security in mind</li>
+</ol>
+<h2 id="implementation-details"><a class="header" href="#implementation-details">Implementation Details</a></h2>
+<p>Under the hood, the Supervisor Handler:</p>
+<ol>
+<li>Communicates with the Theater runtime to manage child actors</li>
+<li>Tracks parent-child relationships in the actor system</li>
+<li>Routes supervision commands to the appropriate actors</li>
+<li>Manages actor processes and mailboxes</li>
+<li>Handles actor lifecycle events</li>
+<li>Records all supervision activities in the state chain</li>
+</ol>
+<h2 id="building-supervision-trees"><a class="header" href="#building-supervision-trees">Building Supervision Trees</a></h2>
+<p>Supervision trees are a powerful pattern for structuring actor systems. Here's how to build a basic supervision tree:</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>// Spawn root supervisor actor
+fn init() -&gt; Result&lt;(), String&gt; {
+    // Spawn worker actors
+    let worker1_id = spawn_worker("worker1")?;
+    let worker2_id = spawn_worker("worker2")?;
+    
+    // Spawn supervisor for a group of related workers
+    let group_supervisor_id = spawn_group_supervisor()?;
+    
+    // Store child IDs for future reference
+    let mut state = get_current_state();
+    state.children = vec![worker1_id, worker2_id, group_supervisor_id];
+    update_state(state);
+    
+    Ok(())
+}
+
+// Function to spawn a worker actor
+fn spawn_worker(name: &amp;str) -&gt; Result&lt;String, String&gt; {
+    let manifest = format!(r#"
+        name = "{}"
+        component_path = "worker.wasm"
+
+        [[handlers]]
+        type = "message-server"
+        config = {{}}
+    "#, name);
+    
+    supervisor::spawn(&amp;manifest)
+}
+
+// Function to spawn a group supervisor
+fn spawn_group_supervisor() -&gt; Result&lt;String, String&gt; {
+    let manifest = r#"
+        name = "group-supervisor"
+        component_path = "supervisor.wasm"
+
+        [[handlers]]
+        type = "supervisor"
+        config = {}
+
+        [[handlers]]
+        type = "message-server"
+        config = {}
+    "#;
+    
+    let supervisor_id = supervisor::spawn(manifest)?;
+    
+    // Send message to initialize the group supervisor
+    // This will cause it to spawn its own child workers
+    message_server::request(supervisor_id, init_message())?;
+    
+    Ok(supervisor_id)
+}
+<span class="boring">}</span></code></pre></pre>
+<h2 id="best-practices"><a class="header" href="#best-practices">Best Practices</a></h2>
+<ol>
+<li><strong>Hierarchical Design</strong>: Design clear supervision hierarchies</li>
+<li><strong>Failure Domains</strong>: Group related actors under the same supervisor</li>
+<li><strong>Restart Strategies</strong>: Choose appropriate restart strategies for different components</li>
+<li><strong>State Recovery</strong>: Design child actors to recover gracefully from restarts</li>
+<li><strong>Error Handling</strong>: Handle supervision errors properly</li>
+<li><strong>Monitoring</strong>: Implement monitoring for supervisor decisions</li>
+<li><strong>Testing</strong>: Test supervisor behavior with fault injection</li>
+</ol>
+<h2 id="dynamic-supervision"><a class="header" href="#dynamic-supervision">Dynamic Supervision</a></h2>
+<p>You can implement dynamic supervision patterns where actors are spawned and managed at runtime:</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>// Handle a request to create a new worker
+fn handle_create_worker_request(params: CreateWorkerParams) -&gt; Result&lt;WorkerCreatedResponse, String&gt; {
+    // Create a manifest dynamically based on parameters
+    let manifest = format!(r#"
+        name = "{}"
+        component_path = "{}"
+
+        [[handlers]]
+        type = "message-server"
+        config = {{}}
+        
+<span class="boring">        Additional handlers based on parameters
+</span>        {}
+    "#, params.name, params.component_path, generate_handler_config(&amp;params));
+    
+    // Spawn the worker
+    let worker_id = supervisor::spawn(&amp;manifest)?;
+    
+    // Update supervisor state with new worker
+    let mut current_state = get_current_state();
+    current_state.workers.push(WorkerInfo {
+        id: worker_id.clone(),
+        name: params.name.clone(),
+        created_at: get_current_time(),
+    });
+    update_state(current_state);
+    
+    // Return worker ID to requester
+    Ok(WorkerCreatedResponse {
+        worker_id,
+        status: "created".to_string(),
+    })
+}
+<span class="boring">}</span></code></pre></pre>
+<h2 id="related-topics"><a class="header" href="#related-topics">Related Topics</a></h2>
+<ul>
+<li><a href="message-server.html">Message Server Handler</a> - For actor-to-actor communication</li>
+<li><a href="runtime.html">Runtime Handler</a> - For accessing runtime information and operations</li>
+<li><a href="store.html">Store Handler</a> - For content-addressable storage</li>
+<li><a href="../core-concepts/state-management.html">State Management</a> - For understanding state chain integration</li>
+<li><a href="../core-concepts/supervision.html">Supervision</a> - For deeper supervision concepts</li>
+</ul>
+
+                    </main>
+
+                    <nav class="nav-wrapper" aria-label="Page navigation">
+                        <!-- Mobile navigation buttons -->
+                            <a rel="prev" href="../../services/handlers/filesystem.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                                <i class="fa fa-angle-left"></i>
+                            </a>
+
+                            <a rel="next prefetch" href="../../services/handlers/store.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                                <i class="fa fa-angle-right"></i>
+                            </a>
+
+                        <div style="clear: both"></div>
+                    </nav>
+                </div>
+            </div>
+
+            <nav class="nav-wide-wrapper" aria-label="Page navigation">
+                    <a rel="prev" href="../../services/handlers/filesystem.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                        <i class="fa fa-angle-left"></i>
+                    </a>
+
+                    <a rel="next prefetch" href="../../services/handlers/store.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                        <i class="fa fa-angle-right"></i>
+                    </a>
+            </nav>
+
+        </div>
+
+
+
+
+        <script>
+            window.playground_copyable = true;
+        </script>
+
+
+        <script src="../../elasticlunr.min.js"></script>
+        <script src="../../mark.min.js"></script>
+        <script src="../../searcher.js"></script>
+
+        <script src="../../clipboard.min.js"></script>
+        <script src="../../highlight.js"></script>
+        <script src="../../book.js"></script>
+
+        <!-- Custom JS scripts -->
+
+
+
+    </div>
+    </body>
+</html>

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["render_explorer_ui","render_status_bar","render_title_bar"]};

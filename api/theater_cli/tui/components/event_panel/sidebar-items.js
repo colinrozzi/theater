@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["create_event_list_item","render_event_panel"]};
