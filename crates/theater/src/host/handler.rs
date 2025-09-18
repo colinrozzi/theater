@@ -1,5 +1,18 @@
 use crate::actor::handle::ActorHandle;
 use crate::config::permissions::*;
+use crate::events::{
+    environment::EnvironmentEventData,
+    filesystem::FilesystemEventData,
+    http::HttpEventData,
+    message::MessageEventData,
+    process::ProcessEventData,
+    random::RandomEventData,
+    runtime::RuntimeEventData,
+    store::StoreEventData,
+    supervisor::SupervisorEventData,
+    timing::TimingEventData,
+    ChainEventData, EventData,
+};
 use crate::host::environment::EnvironmentHost;
 use crate::host::filesystem::FileSystemHost;
 use crate::host::framework::HttpFramework;
@@ -137,50 +150,204 @@ impl Handler {
 
     pub async fn add_export_functions(&self, actor_instance: &mut ActorInstance) -> Result<()> {
         match self {
-            Handler::MessageServer(handler, _) => Ok(handler
-                .add_export_functions(actor_instance)
-                .await
-                .expect("Error adding functions to message server")),
-            Handler::Environment(handler, _) => Ok(handler
-                .add_export_functions(actor_instance)
-                .await
-                .expect("Error adding functions to environment handler")),
-            Handler::FileSystem(handler, _) => Ok(handler
-                .add_export_functions(actor_instance)
-                .await
-                .expect("Error adding functions to filesystem")),
-            Handler::HttpClient(handler, _) => Ok(handler
-                .add_export_functions(actor_instance)
-                .await
-                .expect("Error adding functions to http client")),
-            Handler::HttpFramework(handler, _) => Ok(handler
-                .add_export_functions(actor_instance)
-                .await
-                .expect("Error adding functions to http framework")),
-            Handler::Process(handler, _) => Ok(handler
-                .add_export_functions(actor_instance)
-                .await
-                .expect("Error adding functions to process handler")),
-            Handler::Runtime(handler, _) => Ok(handler
-                .add_export_functions(actor_instance)
-                .await
-                .expect("Error adding functions to runtime")),
-            Handler::Supervisor(handler, _) => Ok(handler
-                .add_export_functions(actor_instance)
-                .await
-                .expect("Error adding functions to supervisor")),
-            Handler::Store(handler, _) => Ok(handler
-                .add_export_functions(actor_instance)
-                .await
-                .expect("Error adding functions to store")),
-            Handler::Timing(handler, _) => Ok(handler
-                .add_export_functions(actor_instance)
-                .await
-                .expect("Error adding functions to timing")),
-            Handler::Random(handler, _) => Ok(handler
-                .add_export_functions(actor_instance)
-                .await
-                .expect("Error adding functions to random")),
+            Handler::MessageServer(handler, _) => {
+                match handler.add_export_functions(actor_instance).await {
+                    Ok(_) => Ok(()),
+                    Err(e) => {
+                        let error_msg = format!("Error adding functions to message server: {}", e);
+                        actor_instance.actor_component.actor_store.record_event(ChainEventData {
+                            event_type: "message-server-export-setup".to_string(),
+                            data: EventData::Message(MessageEventData::HandlerSetupError {
+                                error: error_msg.clone(),
+                                step: "add_export_functions".to_string(),
+                            }),
+                            timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                            description: Some(error_msg),
+                        });
+                        Err(e)
+                    }
+                }
+            }
+            Handler::Environment(handler, _) => {
+                match handler.add_export_functions(actor_instance).await {
+                    Ok(_) => Ok(()),
+                    Err(e) => {
+                        let error_msg = format!("Error adding functions to environment handler: {}", e);
+                        actor_instance.actor_component.actor_store.record_event(ChainEventData {
+                            event_type: "environment-export-setup".to_string(),
+                            data: EventData::Environment(EnvironmentEventData::HandlerSetupError {
+                                error: error_msg.clone(),
+                                step: "add_export_functions".to_string(),
+                            }),
+                            timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                            description: Some(error_msg),
+                        });
+                        Err(e)
+                    }
+                }
+            }
+            Handler::FileSystem(handler, _) => {
+                match handler.add_export_functions(actor_instance).await {
+                    Ok(_) => Ok(()),
+                    Err(e) => {
+                        let error_msg = format!("Error adding functions to filesystem: {}", e);
+                        actor_instance.actor_component.actor_store.record_event(ChainEventData {
+                            event_type: "filesystem-export-setup".to_string(),
+                            data: EventData::Filesystem(FilesystemEventData::HandlerSetupError {
+                                error: error_msg.clone(),
+                                step: "add_export_functions".to_string(),
+                            }),
+                            timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                            description: Some(error_msg),
+                        });
+                        Err(e)
+                    }
+                }
+            }
+            Handler::HttpClient(handler, _) => {
+                match handler.add_export_functions(actor_instance).await {
+                    Ok(_) => Ok(()),
+                    Err(e) => {
+                        let error_msg = format!("Error adding functions to http client: {}", e);
+                        actor_instance.actor_component.actor_store.record_event(ChainEventData {
+                            event_type: "http-client-export-setup".to_string(),
+                            data: EventData::Http(HttpEventData::HandlerSetupError {
+                                error: error_msg.clone(),
+                                step: "add_export_functions".to_string(),
+                            }),
+                            timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                            description: Some(error_msg),
+                        });
+                        Err(e)
+                    }
+                }
+            }
+            Handler::HttpFramework(handler, _) => {
+                match handler.add_export_functions(actor_instance).await {
+                    Ok(_) => Ok(()),
+                    Err(e) => {
+                        let error_msg = format!("Error adding functions to http framework: {}", e);
+                        actor_instance.actor_component.actor_store.record_event(ChainEventData {
+                            event_type: "http-framework-export-setup".to_string(),
+                            data: EventData::Http(HttpEventData::HandlerSetupError {
+                                error: error_msg.clone(),
+                                step: "add_export_functions".to_string(),
+                            }),
+                            timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                            description: Some(error_msg),
+                        });
+                        Err(e)
+                    }
+                }
+            }
+            Handler::Process(handler, _) => {
+                match handler.add_export_functions(actor_instance).await {
+                    Ok(_) => Ok(()),
+                    Err(e) => {
+                        let error_msg = format!("Error adding functions to process handler: {}", e);
+                        actor_instance.actor_component.actor_store.record_event(ChainEventData {
+                            event_type: "process-export-setup".to_string(),
+                            data: EventData::Process(ProcessEventData::HandlerSetupError {
+                                error: error_msg.clone(),
+                                step: "add_export_functions".to_string(),
+                            }),
+                            timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                            description: Some(error_msg),
+                        });
+                        Err(e)
+                    }
+                }
+            }
+            Handler::Runtime(handler, _) => {
+                match handler.add_export_functions(actor_instance).await {
+                    Ok(_) => Ok(()),
+                    Err(e) => {
+                        let error_msg = format!("Error adding functions to runtime: {}", e);
+                        actor_instance.actor_component.actor_store.record_event(ChainEventData {
+                            event_type: "runtime-export-setup".to_string(),
+                            data: EventData::Runtime(RuntimeEventData::HandlerSetupError {
+                                error: error_msg.clone(),
+                                step: "add_export_functions".to_string(),
+                            }),
+                            timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                            description: Some(error_msg),
+                        });
+                        Err(e)
+                    }
+                }
+            }
+            Handler::Supervisor(handler, _) => {
+                match handler.add_export_functions(actor_instance).await {
+                    Ok(_) => Ok(()),
+                    Err(e) => {
+                        let error_msg = format!("Error adding functions to supervisor: {}", e);
+                        actor_instance.actor_component.actor_store.record_event(ChainEventData {
+                            event_type: "supervisor-export-setup".to_string(),
+                            data: EventData::Supervisor(SupervisorEventData::HandlerSetupError {
+                                error: error_msg.clone(),
+                                step: "add_export_functions".to_string(),
+                            }),
+                            timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                            description: Some(error_msg),
+                        });
+                        Err(e)
+                    }
+                }
+            }
+            Handler::Store(handler, _) => {
+                match handler.add_export_functions(actor_instance).await {
+                    Ok(_) => Ok(()),
+                    Err(e) => {
+                        let error_msg = format!("Error adding functions to store: {}", e);
+                        actor_instance.actor_component.actor_store.record_event(ChainEventData {
+                            event_type: "store-export-setup".to_string(),
+                            data: EventData::Store(StoreEventData::HandlerSetupError {
+                                error: error_msg.clone(),
+                                step: "add_export_functions".to_string(),
+                            }),
+                            timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                            description: Some(error_msg),
+                        });
+                        Err(e)
+                    }
+                }
+            }
+            Handler::Timing(handler, _) => {
+                match handler.add_export_functions(actor_instance).await {
+                    Ok(_) => Ok(()),
+                    Err(e) => {
+                        let error_msg = format!("Error adding functions to timing: {}", e);
+                        actor_instance.actor_component.actor_store.record_event(ChainEventData {
+                            event_type: "timing-export-setup".to_string(),
+                            data: EventData::Timing(TimingEventData::HandlerSetupError {
+                                error: error_msg.clone(),
+                                step: "add_export_functions".to_string(),
+                            }),
+                            timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                            description: Some(error_msg),
+                        });
+                        Err(e)
+                    }
+                }
+            }
+            Handler::Random(handler, _) => {
+                match handler.add_export_functions(actor_instance).await {
+                    Ok(_) => Ok(()),
+                    Err(e) => {
+                        let error_msg = format!("Error adding functions to random: {}", e);
+                        actor_instance.actor_component.actor_store.record_event(ChainEventData {
+                            event_type: "random-export-setup".to_string(),
+                            data: EventData::Random(RandomEventData::HandlerSetupError {
+                                error: error_msg.clone(),
+                                step: "add_export_functions".to_string(),
+                            }),
+                            timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                            description: Some(error_msg),
+                        });
+                        Err(e)
+                    }
+                }
+            }
         }
     }
 
