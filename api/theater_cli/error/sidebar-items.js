@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["CliError"],"trait":["IntoCliError"],"type":["CliResult"]};
