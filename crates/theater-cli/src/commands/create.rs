@@ -12,7 +12,7 @@ pub struct CreateArgs {
     #[arg(required = true)]
     pub name: String,
 
-    /// Template to use for the new actor
+    /// Template to use for the new actor (available: basic, http-server, message-server, supervisor)
     #[arg(short, long, default_value = "basic")]
     pub template: String,
 
