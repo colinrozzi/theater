@@ -111,7 +111,8 @@ interface types {
         parent-hash: option<list<u8>>,
         event-type: string,
         data: list<u8>,
-        timestamp: u64
+        timestamp: u64,
+        description: option<string>,
     }
 
     record wit-actor-error {

@@ -93,7 +93,11 @@ impl SupervisorHost {
         };
 
         let supervisor_tx = self.channel_tx.clone();
+        
+        info!("DEBUG: About to start function registrations");
+        
         // spawn-child implementation
+        info!("DEBUG: Registering spawn function");
         let _ = interface
             .func_wrap_async(
                 "spawn",
@@ -198,9 +202,11 @@ impl SupervisorHost {
                 },
             )
             .expect("Failed to wrap spawn function");
+        info!("DEBUG: Successfully registered spawn function");
 
         let supervisor_tx = self.channel_tx.clone();
-        // spawn-child implementation
+        // resume implementation
+        info!("DEBUG: Registering resume function");
         let _ = interface
             .func_wrap_async(
                 "resume",
@@ -306,8 +312,10 @@ impl SupervisorHost {
                 },
             )
             .expect("Failed to wrap resume function");
+        info!("DEBUG: Successfully registered resume function");
 
         // list-children implementation
+        info!("DEBUG: Registering list-children function");
         let _ = interface
             .func_wrap_async(
                 "list-children",
@@ -406,8 +414,10 @@ impl SupervisorHost {
                 },
             )
             .expect("Failed to wrap list-children function");
+        info!("DEBUG: Successfully registered list-children function");
 
         // restart-child implementation
+        info!("DEBUG: Registering restart-child function");
         let _ = interface
             .func_wrap_async(
                 "restart-child",
@@ -520,8 +530,10 @@ impl SupervisorHost {
                 },
             )
             .expect("Failed to wrap restart-child function");
+        info!("DEBUG: Successfully registered restart-child function");
 
         // stop-child implementation
+        info!("DEBUG: Registering stop-child function");
         let _ = interface
             .func_wrap_async(
                 "stop-child",
@@ -634,8 +646,10 @@ impl SupervisorHost {
                 },
             )
             .expect("Failed to wrap stop-child function");
+        info!("DEBUG: Successfully registered stop-child function");
 
         // get-child-state implementation
+        info!("DEBUG: Registering get-child-state function");
         let _ = interface
             .func_wrap_async(
                 "get-child-state",
@@ -776,8 +790,10 @@ impl SupervisorHost {
                 },
             )
             .expect("Failed to wrap get-child-state function");
+        info!("DEBUG: Successfully registered get-child-state function");
 
         // get-child-events implementation
+        info!("DEBUG: Registering get-child-events function");
         let _ = interface
             .func_wrap_async(
                 "get-child-events",
@@ -919,6 +935,8 @@ impl SupervisorHost {
                 },
             )
             .expect("Failed to wrap get-child-events function");
+        info!("DEBUG: Successfully registered get-child-events function");
+        info!("DEBUG: All function registrations completed!");
 
         // Record overall setup completion
         actor_component.actor_store.record_event(ChainEventData {
@@ -928,6 +946,7 @@ impl SupervisorHost {
             description: Some("Supervisor host functions setup completed successfully".to_string()),
         });
 
+        info!("DEBUG: About to complete supervisor setup");
         info!("Supervisor host functions added");
 
         Ok(())
