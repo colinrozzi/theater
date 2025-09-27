@@ -13,7 +13,7 @@ use theater::utils::resolve_reference;
 #[derive(Debug, Parser)]
 pub struct ProcessArgs {
     /// Path or URL to the actor manifest file
-    #[arg(required = true)]
+    #[arg(default_value = "manifest.toml")]
     pub manifest: String,
 
     /// Address of the theater server
