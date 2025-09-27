@@ -41,6 +41,10 @@ pub enum Commands {
     #[command(name = "start")]
     Start(commands::start::StartArgs),
 
+    /// Run an actor as a supervised process with real-time monitoring
+    #[command(name = "process")]
+    Process(commands::process::ProcessArgs),
+
     /// Subscribe to real-time events from an actor
     #[command(name = "subscribe")]
     Subscribe(commands::subscribe::SubscribeArgs),
@@ -136,6 +140,9 @@ pub async fn run(
                 .await
                 .map_err(|e| anyhow::Error::from(e)),
             Commands::Start(args) => commands::start::execute_async(args, &ctx)
+                .await
+                .map_err(|e| anyhow::Error::from(e)),
+            Commands::Process(args) => commands::process::execute_async(args, &ctx)
                 .await
                 .map_err(|e| anyhow::Error::from(e)),
             Commands::Stop(args) => commands::stop::execute_async(args, &ctx)
