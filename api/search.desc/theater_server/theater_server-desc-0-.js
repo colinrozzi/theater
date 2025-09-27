@@ -1,0 +1,1 @@
+searchState.loadedDescShard("theater_server", 0, "Theater Server CLI - Start and manage a Theater …\nAddress to bind the theater server to\nReturns the argument unchanged.\nCalls <code>U::from(self)</code>.\nLog directory\nAdvanced logging filter (e.g. “…\nLogging level (simple version, e.g. ‘info’, ‘debug’…\nLog to stdout")

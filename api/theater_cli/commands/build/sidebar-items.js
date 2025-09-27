@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["execute_async","get_package_name","is_cargo_component_installed","run_command_with_output"],"struct":["BuildArgs"]};

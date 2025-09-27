@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"mod":["formatters","progress","theme"],"struct":["OutputManager","ProgressBar","Theme"],"trait":["OutputFormat"]};

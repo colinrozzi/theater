@@ -1,0 +1,390 @@
+<!DOCTYPE HTML>
+<html lang="en" class="light sidebar-visible" dir="ltr">
+    <head>
+        <!-- Book generated using mdBook -->
+        <meta charset="UTF-8">
+        <title>Running AI-Generated Code - Theater Docs</title>
+
+
+        <!-- Custom HTML head -->
+
+        <meta name="description" content="">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="theme-color" content="#ffffff">
+
+        <link rel="icon" href="../favicon.svg">
+        <link rel="shortcut icon" href="../favicon.png">
+        <link rel="stylesheet" href="../css/variables.css">
+        <link rel="stylesheet" href="../css/general.css">
+        <link rel="stylesheet" href="../css/chrome.css">
+        <link rel="stylesheet" href="../css/print.css" media="print">
+
+        <!-- Fonts -->
+        <link rel="stylesheet" href="../FontAwesome/css/font-awesome.css">
+        <link rel="stylesheet" href="../fonts/fonts.css">
+
+        <!-- Highlight.js Stylesheets -->
+        <link rel="stylesheet" id="highlight-css" href="../highlight.css">
+        <link rel="stylesheet" id="tomorrow-night-css" href="../tomorrow-night.css">
+        <link rel="stylesheet" id="ayu-highlight-css" href="../ayu-highlight.css">
+
+        <!-- Custom theme stylesheets -->
+        <link rel="stylesheet" href="../css/custom.css">
+
+
+        <!-- Provide site root and default themes to javascript -->
+        <script>
+            const path_to_root = "../";
+            const default_light_theme = "light";
+            const default_dark_theme = "navy";
+            window.path_to_searchindex_js = "../searchindex.js";
+        </script>
+        <!-- Start loading toc.js asap -->
+        <script src="../toc.js"></script>
+    </head>
+    <body>
+    <div id="mdbook-help-container">
+        <div id="mdbook-help-popup">
+            <h2 class="mdbook-help-title">Keyboard shortcuts</h2>
+            <div>
+                <p>Press <kbd>←</kbd> or <kbd>→</kbd> to navigate between chapters</p>
+                <p>Press <kbd>S</kbd> or <kbd>/</kbd> to search in the book</p>
+                <p>Press <kbd>?</kbd> to show this help</p>
+                <p>Press <kbd>Esc</kbd> to hide this help</p>
+            </div>
+        </div>
+    </div>
+    <div id="body-container">
+        <!-- Work around some values being stored in localStorage wrapped in quotes -->
+        <script>
+            try {
+                let theme = localStorage.getItem('mdbook-theme');
+                let sidebar = localStorage.getItem('mdbook-sidebar');
+
+                if (theme.startsWith('"') && theme.endsWith('"')) {
+                    localStorage.setItem('mdbook-theme', theme.slice(1, theme.length - 1));
+                }
+
+                if (sidebar.startsWith('"') && sidebar.endsWith('"')) {
+                    localStorage.setItem('mdbook-sidebar', sidebar.slice(1, sidebar.length - 1));
+                }
+            } catch (e) { }
+        </script>
+
+        <!-- Set the theme before any content is loaded, prevents flash -->
+        <script>
+            const default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? default_dark_theme : default_light_theme;
+            let theme;
+            try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
+            if (theme === null || theme === undefined) { theme = default_theme; }
+            const html = document.documentElement;
+            html.classList.remove('light')
+            html.classList.add(theme);
+            html.classList.add("js");
+        </script>
+
+        <input type="checkbox" id="sidebar-toggle-anchor" class="hidden">
+
+        <!-- Hide / unhide sidebar before it is displayed -->
+        <script>
+            let sidebar = null;
+            const sidebar_toggle = document.getElementById("sidebar-toggle-anchor");
+            if (document.body.clientWidth >= 1080) {
+                try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
+                sidebar = sidebar || 'visible';
+            } else {
+                sidebar = 'hidden';
+                sidebar_toggle.checked = false;
+            }
+            if (sidebar === 'visible') {
+                sidebar_toggle.checked = true;
+            } else {
+                html.classList.remove('sidebar-visible');
+            }
+        </script>
+
+        <nav id="sidebar" class="sidebar" aria-label="Table of contents">
+            <!-- populated by js -->
+            <mdbook-sidebar-scrollbox class="sidebar-scrollbox"></mdbook-sidebar-scrollbox>
+            <noscript>
+                <iframe class="sidebar-iframe-outer" src="../toc.html"></iframe>
+            </noscript>
+            <div id="sidebar-resize-handle" class="sidebar-resize-handle">
+                <div class="sidebar-resize-indicator"></div>
+            </div>
+        </nav>
+
+        <div id="page-wrapper" class="page-wrapper">
+
+            <div class="page">
+                <div id="menu-bar-hover-placeholder"></div>
+                <div id="menu-bar" class="menu-bar sticky">
+                    <div class="left-buttons">
+                        <label id="sidebar-toggle" class="icon-button" for="sidebar-toggle-anchor" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="sidebar">
+                            <i class="fa fa-bars"></i>
+                        </label>
+                        <button id="theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="theme-list">
+                            <i class="fa fa-paint-brush"></i>
+                        </button>
+                        <ul id="theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                            <li role="none"><button role="menuitem" class="theme" id="default_theme">Auto</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="light">Light</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="rust">Rust</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="coal">Coal</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="navy">Navy</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="ayu">Ayu</button></li>
+                        </ul>
+                        <button id="search-toggle" class="icon-button" type="button" title="Search (`/`)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="/ s" aria-controls="searchbar">
+                            <i class="fa fa-search"></i>
+                        </button>
+                    </div>
+
+                    <h1 class="menu-title">Theater Docs</h1>
+
+                    <div class="right-buttons">
+                        <a href="../print.html" title="Print this book" aria-label="Print this book">
+                            <i id="print-button" class="fa fa-print"></i>
+                        </a>
+                        <a href="https://github.com/colinrozzi/theater" title="Git repository" aria-label="Git repository">
+                            <i id="git-repository-button" class="fa fa-github"></i>
+                        </a>
+                        <a href="https://github.com/colinrozzi/theater/edit/main/book/src/use-cases/ai-generated-code.md" title="Suggest an edit" aria-label="Suggest an edit" rel="edit">
+                            <i id="git-edit-button" class="fa fa-edit"></i>
+                        </a>
+
+                    </div>
+                </div>
+
+                <div id="search-wrapper" class="hidden">
+                    <form id="searchbar-outer" class="searchbar-outer">
+                        <div class="search-wrapper">
+                            <input type="search" id="searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="searchresults-outer" aria-describedby="searchresults-header">
+                            <div class="spinner-wrapper">
+                                <i class="fa fa-spinner fa-spin"></i>
+                            </div>
+                        </div>
+                    </form>
+                    <div id="searchresults-outer" class="searchresults-outer hidden">
+                        <div id="searchresults-header" class="searchresults-header"></div>
+                        <ul id="searchresults">
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Apply ARIA attributes after the sidebar and the sidebar toggle button are added to the DOM -->
+                <script>
+                    document.getElementById('sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
+                    document.getElementById('sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
+                    Array.from(document.querySelectorAll('#sidebar a')).forEach(function(link) {
+                        link.setAttribute('tabIndex', sidebar === 'visible' ? 0 : -1);
+                    });
+                </script>
+
+                <div id="content" class="content">
+                    <main>
+                        <h1 id="running-ai-generated-code-safely"><a class="header" href="#running-ai-generated-code-safely">Running AI-Generated Code Safely</a></h1>
+<p>AI code generation has become increasingly powerful and prevalent. Models like GPT-4, Claude, and specialized coding assistants can now write complex functions, entire modules, and even complete applications with minimal human guidance. This capability offers tremendous productivity benefits, but also introduces new challenges in terms of code quality, reliability, and security.</p>
+<p>Theater was designed with these challenges in mind, providing a robust framework for running AI-generated code safely and effectively.</p>
+<h2 id="the-ai-code-generation-landscape"><a class="header" href="#the-ai-code-generation-landscape">The AI Code Generation Landscape</a></h2>
+<p>Before diving into how Theater helps, let's understand the current landscape of AI code generation:</p>
+<h3 id="strengths-of-ai-generated-code"><a class="header" href="#strengths-of-ai-generated-code">Strengths of AI-Generated Code</a></h3>
+<ul>
+<li><strong>Speed and Volume</strong>: AI can generate large amounts of code quickly</li>
+<li><strong>Breadth of Knowledge</strong>: Modern LLMs have been trained on vast repositories of code across languages and frameworks</li>
+<li><strong>Pattern Replication</strong>: AI excels at implementing standard patterns and boilerplate code</li>
+<li><strong>Adaptation</strong>: AI can often adapt code to new contexts or requirements with minimal guidance</li>
+</ul>
+<h3 id="challenges-with-ai-generated-code"><a class="header" href="#challenges-with-ai-generated-code">Challenges with AI-Generated Code</a></h3>
+<ul>
+<li><strong>Correctness Validation</strong>: Verifying that large volumes of AI-generated code work correctly</li>
+<li><strong>Subtle Bugs</strong>: AI can introduce subtle logical errors that pass syntax checks but cause runtime issues</li>
+<li><strong>Security Vulnerabilities</strong>: AI might inadvertently replicate insecure patterns from its training data</li>
+<li><strong>Debugging Complexity</strong>: Understanding and fixing issues in code you didn't write</li>
+<li><strong>Integration Problems</strong>: Ensuring AI-generated components work properly with the rest of your system</li>
+</ul>
+<h2 id="how-theater-addresses-these-challenges"><a class="header" href="#how-theater-addresses-these-challenges">How Theater Addresses These Challenges</a></h2>
+<p>Theater provides a comprehensive solution for running AI-generated code safely:</p>
+<h3 id="1-containment-through-webassembly-sandboxing"><a class="header" href="#1-containment-through-webassembly-sandboxing">1. Containment through WebAssembly Sandboxing</a></h3>
+<p>AI-generated code in Theater runs within WebAssembly sandboxes, which:</p>
+<ul>
+<li>Prevent direct access to the host system or other components</li>
+<li>Limit resource consumption through configurable limits</li>
+<li>Create clear boundaries around what the code can and cannot do</li>
+<li>Enable the safe execution of code that hasn't been thoroughly reviewed</li>
+</ul>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>// Example of compiling AI-generated code to WebAssembly
+fn compile_ai_code(source: &amp;str) -&gt; Result&lt;Vec&lt;u8&gt;, CompileError&gt; {
+    // Compile the AI-generated code to WebAssembly
+    let wasm_binary = your_compiler.compile(source)?;
+    
+    // Return the WebAssembly binary
+    Ok(wasm_binary)
+}
+
+// Load the WebAssembly component into Theater
+let actor_id = theater.load_component(&amp;wasm_binary, &amp;manifest)?;
+<span class="boring">}</span></code></pre></pre>
+<h3 id="2-fault-isolation-through-actor-supervision"><a class="header" href="#2-fault-isolation-through-actor-supervision">2. Fault Isolation through Actor Supervision</a></h3>
+<p>Theater's supervision system ensures that failures in AI-generated code don't cascade through your entire application:</p>
+<ul>
+<li>Parent actors can monitor child actors (which might be AI-generated)</li>
+<li>If a child actor fails, the parent can restart it or take other recovery actions</li>
+<li>Failures are contained to the specific actor that encountered the issue</li>
+<li>The system as a whole remains stable even if individual components fail</li>
+</ul>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>// Example of a supervision strategy for AI-generated actors
+use theater::supervisor::*;
+
+fn handle_child_failure(child_id: &amp;ActorId, error: &amp;Error) -&gt; SupervisorAction {
+    match error {
+        // For temporary errors, restart the actor
+        Error::Temporary(_) =&gt; SupervisorAction::Restart,
+        
+        // For more serious errors, stop the actor and notify the admin
+        Error::Critical(_) =&gt; {
+            notify_admin(child_id, error);
+            SupervisorAction::Stop
+        }
+    }
+}
+<span class="boring">}</span></code></pre></pre>
+<h3 id="3-traceability-for-debugging-and-improvement"><a class="header" href="#3-traceability-for-debugging-and-improvement">3. Traceability for Debugging and Improvement</a></h3>
+<p>One of the biggest challenges with AI-generated code is understanding what went wrong when issues occur. Theater's traceability features address this directly:</p>
+<ul>
+<li>Every state change is recorded in a verifiable chain</li>
+<li>All inputs and outputs are captured for later analysis</li>
+<li>Developers can trace the exact sequence of events that led to a failure</li>
+<li>This information can be used to improve the AI code generation process</li>
+</ul>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>// Example of reviewing state history for an AI-generated actor
+let history = theater.get_state_history(actor_id)?;
+
+// Analyze the history to find the cause of the issue
+for state in history {
+    println!("State at {}: {:?}", state.timestamp, state.data);
+    
+    // Look for the state change that caused the problem
+    if let Some(problem) = identify_problem(&amp;state) {
+        println!("Found potential issue: {}", problem);
+        
+        // Use this information to improve the prompt for the AI
+        let improved_prompt = generate_improved_prompt(problem);
+        println!("Suggested prompt improvement: {}", improved_prompt);
+    }
+}
+<span class="boring">}</span></code></pre></pre>
+<h2 id="practical-patterns-for-ai-generated-actors"><a class="header" href="#practical-patterns-for-ai-generated-actors">Practical Patterns for AI-Generated Actors</a></h2>
+<p>When working with AI-generated code in Theater, consider these patterns:</p>
+<h3 id="1-incremental-responsibility"><a class="header" href="#1-incremental-responsibility">1. Incremental Responsibility</a></h3>
+<p>Start by giving AI-generated actors small, well-defined responsibilities, then gradually increase their scope as you gain confidence:</p>
+<ol>
+<li>Begin with simple data transformation actors</li>
+<li>Progress to actors that maintain internal state</li>
+<li>Eventually allow AI-generated actors to spawn and supervise other actors</li>
+</ol>
+<h3 id="2-clear-interface-boundaries"><a class="header" href="#2-clear-interface-boundaries">2. Clear Interface Boundaries</a></h3>
+<p>Define clear interfaces for your AI-generated actors:</p>
+<pre><code class="language-toml"># Example manifest for an AI-generated actor
+name = "ai-generated-processor"
+component_path = "ai_processor.wasm"
+
+[interface]
+implements = "ntwk:data-processing/processor"
+requires = []
+
+[[handlers]]
+type = "message-server"
+config = {}
+</code></pre>
+<p>By strictly defining the interfaces, you constrain what the AI-generated code needs to do and limit the potential impact of issues.</p>
+<h3 id="3-supervision-hierarchies"><a class="header" href="#3-supervision-hierarchies">3. Supervision Hierarchies</a></h3>
+<p>Design your supervision hierarchies to properly manage AI-generated components:</p>
+<ul>
+<li>Human-written supervisor actors at the top levels</li>
+<li>AI-generated actors in the middle or leaf positions</li>
+<li>Critical systems supervised by human-written code</li>
+<li>Non-critical systems can be supervised by other AI-generated actors</li>
+</ul>
+<h3 id="4-continuous-verification"><a class="header" href="#4-continuous-verification">4. Continuous Verification</a></h3>
+<p>Use Theater's traceability features to continuously verify the behavior of AI-generated actors:</p>
+<ul>
+<li>Set up automated tests that verify state transitions</li>
+<li>Monitor for unexpected patterns in actor behavior</li>
+<li>Use the collected data to improve future iterations of the AI-generated code</li>
+</ul>
+<h2 id="case-study-ai-generated-microservices"><a class="header" href="#case-study-ai-generated-microservices">Case Study: AI-Generated Microservices</a></h2>
+<p>A compelling use case for Theater is running a network of AI-generated microservices. In this scenario:</p>
+<ol>
+<li>Each microservice is implemented as a Theater actor</li>
+<li>The services communicate through well-defined message interfaces</li>
+<li>A supervision hierarchy ensures system stability</li>
+<li>Complete traceability provides visibility into the entire system</li>
+</ol>
+<p>This approach allows organizations to rapidly develop and deploy new services, leveraging AI for code generation while maintaining system reliability and security.</p>
+<h2 id="future-directions"><a class="header" href="#future-directions">Future Directions</a></h2>
+<p>The integration of AI code generation with Theater is still evolving. Some exciting future directions include:</p>
+<ul>
+<li><strong>Feedback Loops</strong>: Automatically using state history and failure data to improve AI prompts</li>
+<li><strong>Self-Healing Systems</strong>: AI-powered supervisors that learn from past failures to improve recovery strategies</li>
+<li><strong>Hybrid Development</strong>: Tools that seamlessly blend human and AI-written components within the Theater framework</li>
+</ul>
+<p>By providing a structured, safe environment for running AI-generated code, Theater enables developers to confidently embrace the productivity benefits of AI while mitigating the associated risks.</p>
+
+                    </main>
+
+                    <nav class="nav-wrapper" aria-label="Page navigation">
+                        <!-- Mobile navigation buttons -->
+                            <a rel="prev" href="../use-cases/ai-agents.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                                <i class="fa fa-angle-left"></i>
+                            </a>
+
+                            <a rel="next prefetch" href="../development/building-actors.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                                <i class="fa fa-angle-right"></i>
+                            </a>
+
+                        <div style="clear: both"></div>
+                    </nav>
+                </div>
+            </div>
+
+            <nav class="nav-wide-wrapper" aria-label="Page navigation">
+                    <a rel="prev" href="../use-cases/ai-agents.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                        <i class="fa fa-angle-left"></i>
+                    </a>
+
+                    <a rel="next prefetch" href="../development/building-actors.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                        <i class="fa fa-angle-right"></i>
+                    </a>
+            </nav>
+
+        </div>
+
+
+
+
+        <script>
+            window.playground_copyable = true;
+        </script>
+
+
+        <script src="../elasticlunr.min.js"></script>
+        <script src="../mark.min.js"></script>
+        <script src="../searcher.js"></script>
+
+        <script src="../clipboard.min.js"></script>
+        <script src="../highlight.js"></script>
+        <script src="../book.js"></script>
+
+        <!-- Custom JS scripts -->
+
+
+
+    </div>
+    </body>
+</html>

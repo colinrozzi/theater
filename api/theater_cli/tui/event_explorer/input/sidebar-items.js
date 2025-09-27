@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["HELP_TEXT"],"enum":["ExplorerAction"],"fn":["handle_input"]};

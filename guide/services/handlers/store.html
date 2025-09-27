@@ -1,0 +1,765 @@
+<!DOCTYPE HTML>
+<html lang="en" class="light sidebar-visible" dir="ltr">
+    <head>
+        <!-- Book generated using mdBook -->
+        <meta charset="UTF-8">
+        <title>Store - Theater Docs</title>
+
+
+        <!-- Custom HTML head -->
+
+        <meta name="description" content="">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="theme-color" content="#ffffff">
+
+        <link rel="icon" href="../../favicon.svg">
+        <link rel="shortcut icon" href="../../favicon.png">
+        <link rel="stylesheet" href="../../css/variables.css">
+        <link rel="stylesheet" href="../../css/general.css">
+        <link rel="stylesheet" href="../../css/chrome.css">
+        <link rel="stylesheet" href="../../css/print.css" media="print">
+
+        <!-- Fonts -->
+        <link rel="stylesheet" href="../../FontAwesome/css/font-awesome.css">
+        <link rel="stylesheet" href="../../fonts/fonts.css">
+
+        <!-- Highlight.js Stylesheets -->
+        <link rel="stylesheet" id="highlight-css" href="../../highlight.css">
+        <link rel="stylesheet" id="tomorrow-night-css" href="../../tomorrow-night.css">
+        <link rel="stylesheet" id="ayu-highlight-css" href="../../ayu-highlight.css">
+
+        <!-- Custom theme stylesheets -->
+        <link rel="stylesheet" href="../../css/custom.css">
+
+
+        <!-- Provide site root and default themes to javascript -->
+        <script>
+            const path_to_root = "../../";
+            const default_light_theme = "light";
+            const default_dark_theme = "navy";
+            window.path_to_searchindex_js = "../../searchindex.js";
+        </script>
+        <!-- Start loading toc.js asap -->
+        <script src="../../toc.js"></script>
+    </head>
+    <body>
+    <div id="mdbook-help-container">
+        <div id="mdbook-help-popup">
+            <h2 class="mdbook-help-title">Keyboard shortcuts</h2>
+            <div>
+                <p>Press <kbd>←</kbd> or <kbd>→</kbd> to navigate between chapters</p>
+                <p>Press <kbd>S</kbd> or <kbd>/</kbd> to search in the book</p>
+                <p>Press <kbd>?</kbd> to show this help</p>
+                <p>Press <kbd>Esc</kbd> to hide this help</p>
+            </div>
+        </div>
+    </div>
+    <div id="body-container">
+        <!-- Work around some values being stored in localStorage wrapped in quotes -->
+        <script>
+            try {
+                let theme = localStorage.getItem('mdbook-theme');
+                let sidebar = localStorage.getItem('mdbook-sidebar');
+
+                if (theme.startsWith('"') && theme.endsWith('"')) {
+                    localStorage.setItem('mdbook-theme', theme.slice(1, theme.length - 1));
+                }
+
+                if (sidebar.startsWith('"') && sidebar.endsWith('"')) {
+                    localStorage.setItem('mdbook-sidebar', sidebar.slice(1, sidebar.length - 1));
+                }
+            } catch (e) { }
+        </script>
+
+        <!-- Set the theme before any content is loaded, prevents flash -->
+        <script>
+            const default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? default_dark_theme : default_light_theme;
+            let theme;
+            try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
+            if (theme === null || theme === undefined) { theme = default_theme; }
+            const html = document.documentElement;
+            html.classList.remove('light')
+            html.classList.add(theme);
+            html.classList.add("js");
+        </script>
+
+        <input type="checkbox" id="sidebar-toggle-anchor" class="hidden">
+
+        <!-- Hide / unhide sidebar before it is displayed -->
+        <script>
+            let sidebar = null;
+            const sidebar_toggle = document.getElementById("sidebar-toggle-anchor");
+            if (document.body.clientWidth >= 1080) {
+                try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
+                sidebar = sidebar || 'visible';
+            } else {
+                sidebar = 'hidden';
+                sidebar_toggle.checked = false;
+            }
+            if (sidebar === 'visible') {
+                sidebar_toggle.checked = true;
+            } else {
+                html.classList.remove('sidebar-visible');
+            }
+        </script>
+
+        <nav id="sidebar" class="sidebar" aria-label="Table of contents">
+            <!-- populated by js -->
+            <mdbook-sidebar-scrollbox class="sidebar-scrollbox"></mdbook-sidebar-scrollbox>
+            <noscript>
+                <iframe class="sidebar-iframe-outer" src="../../toc.html"></iframe>
+            </noscript>
+            <div id="sidebar-resize-handle" class="sidebar-resize-handle">
+                <div class="sidebar-resize-indicator"></div>
+            </div>
+        </nav>
+
+        <div id="page-wrapper" class="page-wrapper">
+
+            <div class="page">
+                <div id="menu-bar-hover-placeholder"></div>
+                <div id="menu-bar" class="menu-bar sticky">
+                    <div class="left-buttons">
+                        <label id="sidebar-toggle" class="icon-button" for="sidebar-toggle-anchor" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="sidebar">
+                            <i class="fa fa-bars"></i>
+                        </label>
+                        <button id="theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="theme-list">
+                            <i class="fa fa-paint-brush"></i>
+                        </button>
+                        <ul id="theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                            <li role="none"><button role="menuitem" class="theme" id="default_theme">Auto</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="light">Light</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="rust">Rust</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="coal">Coal</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="navy">Navy</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="ayu">Ayu</button></li>
+                        </ul>
+                        <button id="search-toggle" class="icon-button" type="button" title="Search (`/`)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="/ s" aria-controls="searchbar">
+                            <i class="fa fa-search"></i>
+                        </button>
+                    </div>
+
+                    <h1 class="menu-title">Theater Docs</h1>
+
+                    <div class="right-buttons">
+                        <a href="../../print.html" title="Print this book" aria-label="Print this book">
+                            <i id="print-button" class="fa fa-print"></i>
+                        </a>
+                        <a href="https://github.com/colinrozzi/theater" title="Git repository" aria-label="Git repository">
+                            <i id="git-repository-button" class="fa fa-github"></i>
+                        </a>
+                        <a href="https://github.com/colinrozzi/theater/edit/main/book/src/services/handlers/store.md" title="Suggest an edit" aria-label="Suggest an edit" rel="edit">
+                            <i id="git-edit-button" class="fa fa-edit"></i>
+                        </a>
+
+                    </div>
+                </div>
+
+                <div id="search-wrapper" class="hidden">
+                    <form id="searchbar-outer" class="searchbar-outer">
+                        <div class="search-wrapper">
+                            <input type="search" id="searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="searchresults-outer" aria-describedby="searchresults-header">
+                            <div class="spinner-wrapper">
+                                <i class="fa fa-spinner fa-spin"></i>
+                            </div>
+                        </div>
+                    </form>
+                    <div id="searchresults-outer" class="searchresults-outer hidden">
+                        <div id="searchresults-header" class="searchresults-header"></div>
+                        <ul id="searchresults">
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Apply ARIA attributes after the sidebar and the sidebar toggle button are added to the DOM -->
+                <script>
+                    document.getElementById('sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
+                    document.getElementById('sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
+                    Array.from(document.querySelectorAll('#sidebar a')).forEach(function(link) {
+                        link.setAttribute('tabIndex', sidebar === 'visible' ? 0 : -1);
+                    });
+                </script>
+
+                <div id="content" class="content">
+                    <main>
+                        <h1 id="store-handler"><a class="header" href="#store-handler">Store Handler</a></h1>
+<p>The Store Handler provides actors with access to Theater's content-addressable storage system. It enables actors to store and retrieve data using content hashes, create and manage labels for easier reference, and maintain persistent data across actor restarts.</p>
+<h2 id="overview"><a class="header" href="#overview">Overview</a></h2>
+<p>The Store Handler implements the <code>theater:simple/store</code> interface, enabling actors to:</p>
+<ol>
+<li>Create and manage store instances</li>
+<li>Store and retrieve data using content-addressable storage</li>
+<li>Create and manage labels for easy content reference</li>
+<li>Check for content existence and calculate storage size</li>
+<li>Efficiently deduplicate content</li>
+<li>Persistently store data across actor restarts and system reboots</li>
+</ol>
+<h2 id="configuration"><a class="header" href="#configuration">Configuration</a></h2>
+<p>To use the Store Handler, add it to your actor's manifest:</p>
+<pre><code class="language-toml">[[handlers]]
+type = "store"
+config = {}
+</code></pre>
+<p>The Store Handler doesn't currently require any specific configuration parameters.</p>
+<h2 id="interface"><a class="header" href="#interface">Interface</a></h2>
+<p>The Store Handler is defined using the following WIT interface:</p>
+<pre><code class="language-wit">interface store {
+    /// A reference to content in the store
+    record content-ref {
+        hash: string,
+    }
+
+    /// Create a new store
+    new: func() -&gt; result&lt;string, string&gt;;
+
+    /// Store content and return a reference
+    store: func(store-id: string, content: list&lt;u8&gt;) -&gt; result&lt;content-ref, string&gt;;
+
+    /// Retrieve content by reference
+    get: func(store-id: string, content-ref: content-ref) -&gt; result&lt;list&lt;u8&gt;, string&gt;;
+
+    /// Check if content exists
+    exists: func(store-id: string, content-ref: content-ref) -&gt; result&lt;bool, string&gt;;
+
+    /// Label content with a string identifier
+    label: func(store-id: string, label: string, content-ref: content-ref) -&gt; result&lt;_, string&gt;;
+
+    /// Get content reference by label (returns None if label doesn't exist)
+    get-by-label: func(store-id: string, label: string) -&gt; result&lt;option&lt;content-ref&gt;, string&gt;;
+
+    /// Store content and label it in one operation
+    store-at-label: func(store-id: string, label: string, content: list&lt;u8&gt;) -&gt; result&lt;content-ref, string&gt;;
+
+    /// Replace content at a label
+    replace-content-at-label: func(store-id: string, label: string, content: list&lt;u8&gt;) -&gt; result&lt;content-ref, string&gt;;
+
+    /// Replace a content reference at a label
+    replace-at-label: func(store-id: string, label: string, content-ref: content-ref) -&gt; result&lt;_, string&gt;;
+
+    /// Remove a label
+    remove-label: func(store-id: string, label: string) -&gt; result&lt;_, string&gt;;
+
+    /// List all labels in the store
+    list-labels: func(store-id: string) -&gt; result&lt;list&lt;string&gt;, string&gt;;
+
+    /// List all content in the store
+    list-all-content: func(store-id: string) -&gt; result&lt;list&lt;content-ref&gt;, string&gt;;
+
+    /// Calculate total size of all content in the store
+    calculate-total-size: func(store-id: string) -&gt; result&lt;u64, string&gt;;
+}
+</code></pre>
+<h2 id="store-management-operations"><a class="header" href="#store-management-operations">Store Management Operations</a></h2>
+<h3 id="creating-a-store"><a class="header" href="#creating-a-store">Creating a Store</a></h3>
+<p>To create a new store instance:</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>match store::new() {
+    Ok(store_id) =&gt; {
+        println!("Created new store with ID: {}", store_id);
+        // Save the store ID for future operations
+    },
+    Err(error) =&gt; {
+        println!("Failed to create store: {}", error);
+    }
+}
+<span class="boring">}</span></code></pre></pre>
+<h2 id="content-storage-operations"><a class="header" href="#content-storage-operations">Content Storage Operations</a></h2>
+<h3 id="storing-content"><a class="header" href="#storing-content">Storing Content</a></h3>
+<p>To store content in the store:</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>let data = b"Important data".to_vec();
+
+match store::store(store_id.clone(), data) {
+    Ok(content_ref) =&gt; {
+        println!("Content stored with hash: {}", content_ref.hash);
+        // Save the content reference for future use
+    },
+    Err(error) =&gt; {
+        println!("Failed to store content: {}", error);
+    }
+}
+<span class="boring">}</span></code></pre></pre>
+<h3 id="retrieving-content"><a class="header" href="#retrieving-content">Retrieving Content</a></h3>
+<p>To retrieve content using a content reference:</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>match store::get(store_id.clone(), content_ref) {
+    Ok(content) =&gt; {
+        // Process the retrieved content
+        let text = String::from_utf8(content).expect("Not valid UTF-8");
+        println!("Retrieved content: {}", text);
+    },
+    Err(error) =&gt; {
+        println!("Failed to retrieve content: {}", error);
+    }
+}
+<span class="boring">}</span></code></pre></pre>
+<h3 id="checking-content-existence"><a class="header" href="#checking-content-existence">Checking Content Existence</a></h3>
+<p>To check if content exists in the store:</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>match store::exists(store_id.clone(), content_ref) {
+    Ok(exists) =&gt; {
+        if exists {
+            println!("Content exists in the store");
+        } else {
+            println!("Content does not exist in the store");
+        }
+    },
+    Err(error) =&gt; {
+        println!("Failed to check content existence: {}", error);
+    }
+}
+<span class="boring">}</span></code></pre></pre>
+<h2 id="label-operations"><a class="header" href="#label-operations">Label Operations</a></h2>
+<p>Labels provide a way to assign human-readable names to content references, making it easier to retrieve them later.</p>
+<h3 id="creating-labels"><a class="header" href="#creating-labels">Creating Labels</a></h3>
+<p>To create a label for content:</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>match store::label(store_id.clone(), "important-data", content_ref) {
+    Ok(_) =&gt; {
+        println!("Label 'important-data' created successfully");
+    },
+    Err(error) =&gt; {
+        println!("Failed to create label: {}", error);
+    }
+}
+<span class="boring">}</span></code></pre></pre>
+<h3 id="getting-content-by-label"><a class="header" href="#getting-content-by-label">Getting Content by Label</a></h3>
+<p>To retrieve content reference using a label:</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>match store::get_by_label(store_id.clone(), "important-data") {
+    Ok(content_ref_opt) =&gt; {
+        if let Some(content_ref) = content_ref_opt {
+            // Use the content reference to get the actual content
+            let content = store::get(store_id.clone(), content_ref)?;
+            println!("Retrieved content for label 'important-data'");
+        } else {
+            println!("Label 'important-data' does not exist");
+        }
+    },
+    Err(error) =&gt; {
+        println!("Failed to get content by label: {}", error);
+    }
+}
+<span class="boring">}</span></code></pre></pre>
+<h3 id="storing-and-labeling-in-one-operation"><a class="header" href="#storing-and-labeling-in-one-operation">Storing and Labeling in One Operation</a></h3>
+<p>To store content and create a label in one operation:</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>let data = b"New data".to_vec();
+
+match store::store_at_label(store_id.clone(), "new-data", data) {
+    Ok(content_ref) =&gt; {
+        println!("Content stored and labeled as 'new-data'");
+    },
+    Err(error) =&gt; {
+        println!("Failed to store and label content: {}", error);
+    }
+}
+<span class="boring">}</span></code></pre></pre>
+<h3 id="replacing-content-at-a-label"><a class="header" href="#replacing-content-at-a-label">Replacing Content at a Label</a></h3>
+<p>To replace the content referenced by a label:</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>let updated_data = b"Updated data".to_vec();
+
+match store::replace_content_at_label(store_id.clone(), "new-data", updated_data) {
+    Ok(content_ref) =&gt; {
+        println!("Content at label 'new-data' updated successfully");
+    },
+    Err(error) =&gt; {
+        println!("Failed to update content: {}", error);
+    }
+}
+<span class="boring">}</span></code></pre></pre>
+<h3 id="replacing-a-content-reference-at-a-label"><a class="header" href="#replacing-a-content-reference-at-a-label">Replacing a Content Reference at a Label</a></h3>
+<p>To replace the content reference at a label with another existing reference:</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>match store::replace_at_label(store_id.clone(), "new-data", existing_content_ref) {
+    Ok(_) =&gt; {
+        println!("Content reference at label 'new-data' replaced successfully");
+    },
+    Err(error) =&gt; {
+        println!("Failed to replace content reference: {}", error);
+    }
+}
+<span class="boring">}</span></code></pre></pre>
+<h3 id="listing-labels"><a class="header" href="#listing-labels">Listing Labels</a></h3>
+<p>To get a list of all labels:</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>match store::list_labels(store_id.clone()) {
+    Ok(labels) =&gt; {
+        println!("Available labels:");
+        for label in labels {
+            println!("- {}", label);
+        }
+    },
+    Err(error) =&gt; {
+        println!("Failed to list labels: {}", error);
+    }
+}
+<span class="boring">}</span></code></pre></pre>
+<h3 id="removing-labels"><a class="header" href="#removing-labels">Removing Labels</a></h3>
+<p>To remove a label:</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>match store::remove_label(store_id.clone(), "temporary-data") {
+    Ok(_) =&gt; {
+        println!("Label 'temporary-data' removed successfully");
+    },
+    Err(error) =&gt; {
+        println!("Failed to remove label: {}", error);
+    }
+}
+<span class="boring">}</span></code></pre></pre>
+<h2 id="store-management"><a class="header" href="#store-management">Store Management</a></h2>
+<h3 id="calculating-total-size"><a class="header" href="#calculating-total-size">Calculating Total Size</a></h3>
+<p>To calculate the total size of all stored content:</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>match store::calculate_total_size(store_id.clone()) {
+    Ok(size) =&gt; {
+        println!("Total storage size: {} bytes", size);
+    },
+    Err(error) =&gt; {
+        println!("Failed to calculate storage size: {}", error);
+    }
+}
+<span class="boring">}</span></code></pre></pre>
+<h3 id="listing-all-content"><a class="header" href="#listing-all-content">Listing All Content</a></h3>
+<p>To list all content references in the store:</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>match store::list_all_content(store_id.clone()) {
+    Ok(refs) =&gt; {
+        println!("Total content items: {}", refs.len());
+        for content_ref in refs {
+            println!("- {}", content_ref.hash);
+        }
+    },
+    Err(error) =&gt; {
+        println!("Failed to list content: {}", error);
+    }
+}
+<span class="boring">}</span></code></pre></pre>
+<h2 id="label-naming-conventions"><a class="header" href="#label-naming-conventions">Label Naming Conventions</a></h2>
+<p>While you can use any string as a label, it's good practice to follow certain conventions:</p>
+<ol>
+<li>
+<p><strong>Actor-Specific Labels</strong>: Prefix labels with the actor ID or name</p>
+<pre><code>actor:12345:config
+</code></pre>
+</li>
+<li>
+<p><strong>Versioned Labels</strong>: Include version information in labels</p>
+<pre><code>config:v1.0
+</code></pre>
+</li>
+<li>
+<p><strong>Type Labels</strong>: Include content type in the label</p>
+<pre><code>image:logo
+</code></pre>
+</li>
+<li>
+<p><strong>Namespaced Labels</strong>: Use namespaces for organization</p>
+<pre><code>app:settings:theme
+</code></pre>
+</li>
+</ol>
+<h2 id="state-chain-integration"><a class="header" href="#state-chain-integration">State Chain Integration</a></h2>
+<p>Store operations are recorded in the actor's state chain, ensuring a verifiable history of all storage interactions. The chain events include:</p>
+<h3 id="call-events"><a class="header" href="#call-events">Call Events</a></h3>
+<ul>
+<li><code>NewStoreCall</code></li>
+<li><code>StoreCall</code></li>
+<li><code>GetCall</code></li>
+<li><code>ExistsCall</code></li>
+<li><code>LabelCall</code></li>
+<li><code>GetByLabelCall</code></li>
+<li><code>StoreAtLabelCall</code></li>
+<li><code>ReplaceContentAtLabelCall</code></li>
+<li><code>ReplaceAtLabelCall</code></li>
+<li><code>RemoveLabelCall</code></li>
+<li><code>ListLabelsCall</code></li>
+<li><code>ListAllContentCall</code></li>
+<li><code>CalculateTotalSizeCall</code></li>
+</ul>
+<h3 id="result-events"><a class="header" href="#result-events">Result Events</a></h3>
+<ul>
+<li><code>NewStoreResult</code></li>
+<li><code>StoreResult</code></li>
+<li><code>GetResult</code></li>
+<li><code>ExistsResult</code></li>
+<li><code>LabelResult</code></li>
+<li><code>GetByLabelResult</code></li>
+<li><code>StoreAtLabelResult</code></li>
+<li><code>ReplaceContentAtLabelResult</code></li>
+<li><code>ReplaceAtLabelResult</code></li>
+<li><code>RemoveLabelResult</code></li>
+<li><code>ListLabelsResult</code></li>
+<li><code>ListAllContentResult</code></li>
+<li><code>CalculateTotalSizeResult</code></li>
+</ul>
+<h3 id="error-events"><a class="header" href="#error-events">Error Events</a></h3>
+<ul>
+<li><code>Error</code> (includes operation type and error message)</li>
+</ul>
+<p>Each event includes detailed information such as store ID, content references, labels, and success/failure status.</p>
+<h2 id="error-handling"><a class="header" href="#error-handling">Error Handling</a></h2>
+<p>The Store Handler provides detailed error information for various failure scenarios:</p>
+<ol>
+<li><strong>Storage Errors</strong>: When content storage fails</li>
+<li><strong>Retrieval Errors</strong>: When content retrieval fails</li>
+<li><strong>Label Errors</strong>: When label operations fail</li>
+<li><strong>Not Found Errors</strong>: When content or labels don't exist</li>
+<li><strong>IO Errors</strong>: When disk operations fail</li>
+</ol>
+<h2 id="security-considerations"><a class="header" href="#security-considerations">Security Considerations</a></h2>
+<p>When using the Store Handler, consider the following security aspects:</p>
+<ol>
+<li><strong>Content Validation</strong>: Validate data before storing it</li>
+<li><strong>Label Namespaces</strong>: Use namespaced labels to avoid conflicts</li>
+<li><strong>Size Limits</strong>: Be mindful of storage size and implement limits</li>
+<li><strong>Sensitive Data</strong>: Consider encrypting sensitive data before storage</li>
+<li><strong>Cleanup</strong>: Implement policies for removing unused content</li>
+</ol>
+<h2 id="implementation-details"><a class="header" href="#implementation-details">Implementation Details</a></h2>
+<p>Under the hood, the Store Handler:</p>
+<ol>
+<li>Uses SHA-1 hashing to create unique content identifiers</li>
+<li>Stores content in a directory structure organized by store ID</li>
+<li>Maintains separate directories for content and label mappings</li>
+<li>Records detailed events for all operations</li>
+<li>Ensures data integrity through content verification</li>
+</ol>
+<h2 id="storage-structure"><a class="header" href="#storage-structure">Storage Structure</a></h2>
+<p>The physical storage is organized as follows:</p>
+<pre><code>store/
+├── &lt;store-uuid1&gt;/         # Store instance 1
+│   ├── data/             # Content files stored by hash
+│   │   ├── &lt;hash1&gt;
+│   │   ├── &lt;hash2&gt;
+│   │   └── ...
+│   └── labels/           # Labels pointing to content hashes
+│       ├── &lt;label1&gt;
+│       ├── &lt;label2&gt;
+│       └── ...
+├── &lt;store-uuid2&gt;/         # Store instance 2
+...
+└── manifest/             # System metadata
+</code></pre>
+<h2 id="best-practices"><a class="header" href="#best-practices">Best Practices</a></h2>
+<ol>
+<li><strong>Store Management</strong>: Create separate stores for different use cases</li>
+<li><strong>Content Size</strong>: The store is optimized for small to medium content sizes (&lt; 10MB)</li>
+<li><strong>Reference Tracking</strong>: Keep track of content references for important data</li>
+<li><strong>Label Schemes</strong>: Develop consistent label naming schemes</li>
+<li><strong>Cleanup</strong>: Implement periodic cleanup for unused content</li>
+<li><strong>Error Handling</strong>: Always handle store operation errors appropriately</li>
+<li><strong>Caching</strong>: Consider implementing local caching for frequently accessed content</li>
+</ol>
+<h2 id="common-use-cases"><a class="header" href="#common-use-cases">Common Use Cases</a></h2>
+<h3 id="configuration-storage"><a class="header" href="#configuration-storage">Configuration Storage</a></h3>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>// Store configuration
+fn save_config(store_id: &amp;str, config: &amp;Config) -&gt; Result&lt;(), String&gt; {
+    let config_bytes = serde_json::to_vec(config)
+        .map_err(|e| format!("Failed to serialize config: {}", e))?;
+    
+    store::store_at_label(store_id.to_string(), "app:config", config_bytes)
+        .map(|_| ())
+        .map_err(|e| format!("Failed to store config: {}", e))
+}
+
+// Load configuration
+fn load_config(store_id: &amp;str) -&gt; Result&lt;Config, String&gt; {
+    let content_ref_opt = store::get_by_label(store_id.to_string(), "app:config")
+        .map_err(|e| format!("Failed to get config reference: {}", e))?;
+    
+    if let Some(content_ref) = content_ref_opt {
+        let config_bytes = store::get(store_id.to_string(), content_ref)
+            .map_err(|e| format!("Failed to retrieve config: {}", e))?;
+        
+        let config: Config = serde_json::from_slice(&amp;config_bytes)
+            .map_err(|e| format!("Failed to deserialize config: {}", e))?;
+        
+        Ok(config)
+    } else {
+        Err("Configuration not found".to_string())
+    }
+}
+<span class="boring">}</span></code></pre></pre>
+<h3 id="content-deduplication"><a class="header" href="#content-deduplication">Content Deduplication</a></h3>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>fn store_with_deduplication(store_id: &amp;str, data: Vec&lt;u8&gt;) -&gt; Result&lt;ContentRef, String&gt; {
+    // Generate a hash to check if the content already exists
+    use sha1::{Sha1, Digest};
+    let mut hasher = Sha1::new();
+    hasher.update(&amp;data);
+    let hash = format!("{:x}", hasher.finalize());
+    
+    // Create a content reference to check existence
+    let content_ref = ContentRef { hash };
+    
+    // Check if the content already exists
+    if store::exists(store_id.to_string(), content_ref.clone())? {
+        println!("Content already exists in store, reusing existing reference");
+        return Ok(content_ref);
+    }
+    
+    // Content doesn't exist, store it
+    store::store(store_id.to_string(), data)
+}
+<span class="boring">}</span></code></pre></pre>
+<h3 id="versioned-content"><a class="header" href="#versioned-content">Versioned Content</a></h3>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>fn store_versioned_content(store_id: &amp;str, name: &amp;str, version: &amp;str, data: Vec&lt;u8&gt;) -&gt; Result&lt;(), String&gt; {
+    // Store the content
+    let content_ref = store::store(store_id.to_string(), data)?;
+    
+    // Create a versioned label
+    let versioned_label = format!("{}:v{}", name, version);
+    store::label(store_id.to_string(), versioned_label, content_ref.clone())?;
+    
+    // Always update the 'latest' label
+    let latest_label = format!("{}:latest", name);
+    store::label(store_id.to_string(), latest_label, content_ref)?;
+    
+    Ok(())
+}
+
+fn get_content_version(store_id: &amp;str, name: &amp;str, version: &amp;str) -&gt; Result&lt;Vec&lt;u8&gt;, String&gt; {
+    let label = format!("{}:v{}", name, version);
+    let content_ref_opt = store::get_by_label(store_id.to_string(), label)?;
+    
+    if let Some(content_ref) = content_ref_opt {
+        store::get(store_id.to_string(), content_ref)
+    } else {
+        Err(format!("Version {} not found", version))
+    }
+}
+
+fn get_latest_content(store_id: &amp;str, name: &amp;str) -&gt; Result&lt;Vec&lt;u8&gt;, String&gt; {
+    let label = format!("{}:latest", name);
+    let content_ref_opt = store::get_by_label(store_id.to_string(), label)?;
+    
+    if let Some(content_ref) = content_ref_opt {
+        store::get(store_id.to_string(), content_ref)
+    } else {
+        Err(format!("No versions available for {}", name))
+    }
+}
+<span class="boring">}</span></code></pre></pre>
+<h2 id="related-topics"><a class="header" href="#related-topics">Related Topics</a></h2>
+<ul>
+<li><a href="filesystem.html">Filesystem Handler</a> - Alternative file access mechanism</li>
+<li><a href="../core-concepts/state-management.html">State Management</a> - For understanding state chain integration</li>
+<li><a href="../core-concepts/store/README.html">Store System</a> - For deeper store concepts</li>
+<li><a href="../core-concepts/store/actor-api.html">Store API for Actors</a> - For actor-specific store usage</li>
+<li><a href="../core-concepts/store/usage-patterns.html">Store Usage Patterns</a> - For common usage patterns and examples</li>
+</ul>
+<h2 id="event-types-reference"><a class="header" href="#event-types-reference">Event Types Reference</a></h2>
+<p>The Store Handler tracks detailed events for all operations. Here's a complete reference of the event types:</p>
+<h3 id="call-events-1"><a class="header" href="#call-events-1">Call Events</a></h3>
+<div class="table-wrapper"><table><thead><tr><th>Event Type</th><th>Description</th><th>Parameters</th></tr></thead><tbody>
+<tr><td><code>NewStoreCall</code></td><td>Called when creating a new store</td><td>None</td></tr>
+<tr><td><code>StoreCall</code></td><td>Called when storing content</td><td><code>store_id</code>, <code>content</code></td></tr>
+<tr><td><code>GetCall</code></td><td>Called when retrieving content</td><td><code>store_id</code>, <code>content_ref</code></td></tr>
+<tr><td><code>ExistsCall</code></td><td>Called when checking if content exists</td><td><code>store_id</code>, <code>content_ref</code></td></tr>
+<tr><td><code>LabelCall</code></td><td>Called when labeling content</td><td><code>store_id</code>, <code>label</code>, <code>content_ref</code></td></tr>
+<tr><td><code>GetByLabelCall</code></td><td>Called when getting content by label</td><td><code>store_id</code>, <code>label</code></td></tr>
+<tr><td><code>StoreAtLabelCall</code></td><td>Called when storing and labeling content</td><td><code>store_id</code>, <code>label</code>, <code>content</code></td></tr>
+<tr><td><code>ReplaceContentAtLabelCall</code></td><td>Called when replacing content at a label</td><td><code>store_id</code>, <code>label</code>, <code>content</code></td></tr>
+<tr><td><code>ReplaceAtLabelCall</code></td><td>Called when replacing a reference at a label</td><td><code>store_id</code>, <code>label</code>, <code>content_ref</code></td></tr>
+<tr><td><code>RemoveLabelCall</code></td><td>Called when removing a label</td><td><code>store_id</code>, <code>label</code></td></tr>
+<tr><td><code>ListLabelsCall</code></td><td>Called when listing all labels</td><td><code>store_id</code></td></tr>
+<tr><td><code>ListAllContentCall</code></td><td>Called when listing all content</td><td><code>store_id</code></td></tr>
+<tr><td><code>CalculateTotalSizeCall</code></td><td>Called when calculating total size</td><td><code>store_id</code></td></tr>
+</tbody></table>
+</div>
+<h3 id="result-events-1"><a class="header" href="#result-events-1">Result Events</a></h3>
+<div class="table-wrapper"><table><thead><tr><th>Event Type</th><th>Description</th><th>Parameters</th></tr></thead><tbody>
+<tr><td><code>NewStoreResult</code></td><td>Result of creating a new store</td><td><code>store_id</code>, <code>success</code></td></tr>
+<tr><td><code>StoreResult</code></td><td>Result of storing content</td><td><code>store_id</code>, <code>content_ref</code>, <code>success</code></td></tr>
+<tr><td><code>GetResult</code></td><td>Result of retrieving content</td><td><code>store_id</code>, <code>content_ref</code>, <code>content</code>, <code>success</code></td></tr>
+<tr><td><code>ExistsResult</code></td><td>Result of checking if content exists</td><td><code>store_id</code>, <code>content_ref</code>, <code>exists</code>, <code>success</code></td></tr>
+<tr><td><code>LabelResult</code></td><td>Result of labeling content</td><td><code>store_id</code>, <code>label</code>, <code>content_ref</code>, <code>success</code></td></tr>
+<tr><td><code>GetByLabelResult</code></td><td>Result of getting content by label</td><td><code>store_id</code>, <code>label</code>, <code>content_ref</code>, <code>success</code></td></tr>
+<tr><td><code>StoreAtLabelResult</code></td><td>Result of storing and labeling content</td><td><code>store_id</code>, <code>label</code>, <code>content_ref</code>, <code>success</code></td></tr>
+<tr><td><code>ReplaceContentAtLabelResult</code></td><td>Result of replacing content at a label</td><td><code>store_id</code>, <code>label</code>, <code>content_ref</code>, <code>success</code></td></tr>
+<tr><td><code>ReplaceAtLabelResult</code></td><td>Result of replacing a reference at a label</td><td><code>store_id</code>, <code>label</code>, <code>content_ref</code>, <code>success</code></td></tr>
+<tr><td><code>RemoveLabelResult</code></td><td>Result of removing a label</td><td><code>store_id</code>, <code>label</code>, <code>success</code></td></tr>
+<tr><td><code>ListLabelsResult</code></td><td>Result of listing all labels</td><td><code>store_id</code>, <code>labels</code>, <code>success</code></td></tr>
+<tr><td><code>ListAllContentResult</code></td><td>Result of listing all content</td><td><code>store_id</code>, <code>content_refs</code>, <code>success</code></td></tr>
+<tr><td><code>CalculateTotalSizeResult</code></td><td>Result of calculating total size</td><td><code>store_id</code>, <code>size</code>, <code>success</code></td></tr>
+</tbody></table>
+</div>
+<h3 id="error-events-1"><a class="header" href="#error-events-1">Error Events</a></h3>
+<div class="table-wrapper"><table><thead><tr><th>Event Type</th><th>Description</th><th>Parameters</th></tr></thead><tbody>
+<tr><td><code>Error</code></td><td>Records an error with any operation</td><td><code>operation</code>, <code>message</code></td></tr>
+</tbody></table>
+</div>
+<p>Each event includes a timestamp and optional description field in addition to the operation-specific parameters.</p>
+
+                    </main>
+
+                    <nav class="nav-wrapper" aria-label="Page navigation">
+                        <!-- Mobile navigation buttons -->
+                            <a rel="prev" href="../../services/handlers/supervisor.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                                <i class="fa fa-angle-left"></i>
+                            </a>
+
+                            <a rel="next prefetch" href="../../services/handlers/runtime.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                                <i class="fa fa-angle-right"></i>
+                            </a>
+
+                        <div style="clear: both"></div>
+                    </nav>
+                </div>
+            </div>
+
+            <nav class="nav-wide-wrapper" aria-label="Page navigation">
+                    <a rel="prev" href="../../services/handlers/supervisor.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                        <i class="fa fa-angle-left"></i>
+                    </a>
+
+                    <a rel="next prefetch" href="../../services/handlers/runtime.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                        <i class="fa fa-angle-right"></i>
+                    </a>
+            </nav>
+
+        </div>
+
+
+
+
+        <script>
+            window.playground_copyable = true;
+        </script>
+
+
+        <script src="../../elasticlunr.min.js"></script>
+        <script src="../../mark.min.js"></script>
+        <script src="../../searcher.js"></script>
+
+        <script src="../../clipboard.min.js"></script>
+        <script src="../../highlight.js"></script>
+        <script src="../../book.js"></script>
+
+        <!-- Custom JS scripts -->
+
+
+
+    </div>
+    </body>
+</html>

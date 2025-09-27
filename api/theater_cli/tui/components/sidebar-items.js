@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"mod":["event_panel","status_panel"]};
