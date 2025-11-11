@@ -1,11 +1,11 @@
-// use sha1::Digest;
 use serde::{Deserialize, Serialize};
+use sha1::{Digest, Sha1};
 use std::fmt::{Debug, Display, Formatter, Result};
 use std::hash::Hash;
 use wasmtime::component::{ComponentType, Lift, Lower};
 
-pub trait ChainEventData:
-    Display + Debug + Send + Sync + ComponentType + Lift + Lower + Hash + Eq
+pub trait EventData:
+    Display + Debug + Send + Sync + ComponentType + Lift + Lower + Hash + Eq + Clone
 {
     fn event_type(&self) -> String;
     fn len(&self) -> usize;
@@ -13,37 +13,59 @@ pub trait ChainEventData:
 
 #[derive(Debug, Clone, Serialize, Deserialize, ComponentType, Lift, Lower, Hash, Eq)]
 #[component(record)]
-pub struct Event<D: ChainEventData> {
-    /// Cryptographic hash of this event's content, used as its identifier.
-    /// This is calculated based on all other fields except the hash itself.
+pub struct Event<D: EventData> {
     pub hash: Vec<u8>,
-    /// Hash of the parent event, or None if this is the first event in the chain.
-    /// This creates the cryptographic linking between events.
     #[component(name = "parent-hash")]
     pub parent_hash: Option<Vec<u8>>,
-    /// The actual payload of the event, typically serialized structured data.
     pub data: D,
 }
 
-impl<D: ChainEventData> Display for Event<D> {
-    fn fmt(&self, f: &mut Formatter<'_>) -> Result {
-        println!("EVENT {}", hex::encode(&self.hash));
-        match &self.parent_hash {
-            Some(parent) => println!("{}", hex::encode(parent)),
-            None => println!("0000000000000000"),
+impl<D: EventData> Event<D> {
+    pub fn new(parent_hash: Option<Vec<u8>>, data: D) -> Self {
+        // Serialize the event data to compute its hash
+        let mut hasher = Sha1::new();
+        if let Some(ref parent) = parent_hash {
+            hasher.update(parent);
         }
-        println!("{}", self.data.event_type());
-        println!("{}", self.data.len());
-        println!("");
-        println!("{}", self.data);
-        println!("\n\n");
+        hasher.update(data.to_string().as_bytes());
+        let hash = hasher.finalize().to_vec();
 
+        Self {
+            hash,
+            parent_hash,
+            data,
+        }
+    }
+
+    pub fn verify(&self) -> bool {
+        let mut hasher = Sha1::new();
+        if let Some(ref parent) = self.parent_hash {
+            hasher.update(parent);
+        }
+        hasher.update(self.data.to_string().as_bytes());
+        let computed_hash = hasher.finalize().to_vec();
+        self.hash == computed_hash
+    }
+}
+
+impl<D: EventData> Display for Event<D> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result {
+        writeln!(f, "EVENT {}", hex::encode(&self.hash))?;
+        match &self.parent_hash {
+            Some(parent) => writeln!(f, "{}", hex::encode(parent))?,
+            None => writeln!(f, "0000000000000000")?,
+        }
+        writeln!(f, "{}", self.data.event_type())?;
+        writeln!(f, "{}", self.data.len())?;
+        writeln!(f)?;
+        writeln!(f, "{}", self.data)?;
+        writeln!(f)?;
         Ok(())
     }
 }
 
 // implement Eq for ChainEvent
-impl<D: ChainEventData> PartialEq for Event<D> {
+impl<D: EventData> PartialEq for Event<D> {
     fn eq(&self, other: &Self) -> bool {
         self.hash == other.hash
     }

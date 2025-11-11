@@ -3393,6 +3393,7 @@ dependencies = [
  "sha1",
  "tempfile",
  "test-log",
+ "theater-chain",
  "thiserror 1.0.69",
  "tokio",
  "tokio-rustls 0.26.2",
@@ -3401,6 +3402,30 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "uuid",
+ "wasmtime",
+ "wit-bindgen",
+]
+
+[[package]]
+name = "theater-chain"
+version = "0.2.1"
+dependencies = [
+ "base64 0.21.7",
+ "bytes",
+ "chrono",
+ "futures",
+ "hex",
+ "lazy_static",
+ "md5",
+ "pin-utils",
+ "rand 0.8.5",
+ "rand_chacha 0.3.1",
+ "serde",
+ "sha1",
+ "thiserror 1.0.69",
+ "tokio-util",
+ "toml",
+ "tracing",
  "wasmtime",
  "wit-bindgen",
 ]

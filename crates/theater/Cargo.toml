@@ -21,6 +21,8 @@ serde_json.workspace = true
 tracing.workspace = true
 uuid.workspace = true
 
+theater-chain = { path = "../theater-chain" }
+
 # WebAssembly runtime
 wasmtime = { version = "31.0", features = ["component-model", "async"] }
 wit-bindgen = "0.36.0"
