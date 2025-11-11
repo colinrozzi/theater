@@ -1,14 +1,13 @@
 use crate::event::Event;
-use crate::event::EventData;
-use sha1::{Digest, Sha1};
-use tracing::{debug, error};
+use crate::event::EventType;
+use tracing::error;
 
-pub struct Chain<D: EventData> {
+pub struct Chain<D: EventType> {
     events: Vec<Event<D>>,
     current_hash: Option<Vec<u8>>,
 }
 
-impl<D: EventData> Chain<D> {
+impl<D: EventType> Chain<D> {
     pub fn new() -> Self {
         Self {
             events: Vec::new(),

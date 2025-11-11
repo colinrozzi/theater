@@ -28,7 +28,7 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
-use theater_chain::event::Event;
+use theater_chain::event::EventType;
 use tokio::sync::mpsc::Receiver;
 use tokio::sync::mpsc::Sender;
 use tokio::sync::{mpsc, oneshot};
@@ -90,7 +90,7 @@ use tracing::{debug, error, info, warn};
 /// The runtime uses a command-based architecture where all operations are sent as messages
 /// through channels. This allows for asynchronous processing and helps maintain isolation
 /// between components.
-pub struct TheaterRuntime<H: Handler, E: Event> {
+pub struct TheaterRuntime<H: Handler, E: EventType> {
     /// Map of active actors indexed by their ID
     actors: HashMap<TheaterId, ActorProcess>,
     /// Map of chains index by actor ID

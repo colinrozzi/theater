@@ -4,7 +4,7 @@ use std::fmt::{Debug, Display, Formatter, Result};
 use std::hash::Hash;
 use wasmtime::component::{ComponentType, Lift, Lower};
 
-pub trait EventData:
+pub trait EventType:
     Display + Debug + Send + Sync + ComponentType + Lift + Lower + Hash + Eq + Clone
 {
     fn event_type(&self) -> String;
@@ -13,14 +13,14 @@ pub trait EventData:
 
 #[derive(Debug, Clone, Serialize, Deserialize, ComponentType, Lift, Lower, Hash, Eq)]
 #[component(record)]
-pub struct Event<D: EventData> {
+pub struct Event<D: EventType> {
     pub hash: Vec<u8>,
     #[component(name = "parent-hash")]
     pub parent_hash: Option<Vec<u8>>,
     pub data: D,
 }
 
-impl<D: EventData> Event<D> {
+impl<D: EventType> Event<D> {
     pub fn new(parent_hash: Option<Vec<u8>>, data: D) -> Self {
         // Serialize the event data to compute its hash
         let mut hasher = Sha1::new();
@@ -48,7 +48,7 @@ impl<D: EventData> Event<D> {
     }
 }
 
-impl<D: EventData> Display for Event<D> {
+impl<D: EventType> Display for Event<D> {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result {
         writeln!(f, "EVENT {}", hex::encode(&self.hash))?;
         match &self.parent_hash {
@@ -65,7 +65,7 @@ impl<D: EventData> Display for Event<D> {
 }
 
 // implement Eq for ChainEvent
-impl<D: EventData> PartialEq for Event<D> {
+impl<D: EventType> PartialEq for Event<D> {
     fn eq(&self, other: &Self) -> bool {
         self.hash == other.hash
     }

@@ -6,6 +6,7 @@ use crate::events::{
     runtime::RuntimeEventData, store::StoreEventData, supervisor::SupervisorEventData,
     timing::TimingEventData, ChainEventData, EventData,
 };
+use crate::handler::Handler;
 use crate::host::environment::EnvironmentHost;
 use crate::host::filesystem::FileSystemHost;
 use crate::host::framework::HttpFramework;
@@ -20,37 +21,8 @@ use crate::host::timing::TimingHost;
 use crate::shutdown::ShutdownReceiver;
 use crate::wasm::{ActorComponent, ActorInstance};
 use anyhow::Result;
-use std::future::Future;
-use std::pin::Pin;
 
-/// Type alias used by handler lifecycle trait methods.
-pub type HandlerFuture<'a> = Pin<Box<dyn Future<Output = Result<()>> + Send + 'a>>;
-
-/// Trait describing the lifecycle hooks every handler must implement.
-///
-/// External handler crates can implement this trait and register their handlers
-/// with the Theater runtime without depending on the concrete `Handler` enum.
-pub trait HandlerLifecycle: Send + 'static {
-    fn start<'a>(
-        &'a mut self,
-        actor_handle: ActorHandle,
-        shutdown_receiver: ShutdownReceiver,
-    ) -> HandlerFuture<'a>;
-
-    fn setup_host_functions<'a>(
-        &'a mut self,
-        actor_component: &'a mut ActorComponent,
-    ) -> HandlerFuture<'a>;
-
-    fn add_export_functions<'a>(
-        &'a self,
-        actor_instance: &'a mut ActorInstance,
-    ) -> HandlerFuture<'a>;
-
-    fn name(&self) -> &str;
-}
-
-pub enum Handler {
+pub enum SimpleHandler {
     MessageServer(MessageServerHost, Option<MessageServerPermissions>),
     Environment(EnvironmentHost, Option<EnvironmentPermissions>),
     FileSystem(FileSystemHost, Option<FileSystemPermissions>),
@@ -64,54 +36,82 @@ pub enum Handler {
     Random(RandomHost, Option<RandomPermissions>),
 }
 
-impl Handler {
+impl Handler for SimpleHandler {
+    fn start(
+        &mut self,
+        actor_handle: ActorHandle,
+        shutdown_receiver: ShutdownReceiver,
+    ) -> impl std::future::Future<Output = Result<()>> + Send {
+        Box::pin(self.start(actor_handle, shutdown_receiver))
+    }
+
+    fn setup_host_functions(
+        &mut self,
+        actor_component: &mut ActorComponent,
+    ) -> impl std::future::Future<Output = Result<()>> + Send {
+        Box::pin(self.setup_host_functions(actor_component))
+    }
+
+    fn add_export_functions(
+        &self,
+        actor_instance: &mut ActorInstance,
+    ) -> impl std::future::Future<Output = Result<()>> + Send {
+        Box::pin(self.add_export_functions(actor_instance))
+    }
+
+    fn name(&self) -> &str {
+        self.name()
+    }
+}
+
+impl SimpleHandler {
     pub async fn start(
         &mut self,
         actor_handle: ActorHandle,
         shutdown_receiver: ShutdownReceiver,
     ) -> Result<()> {
         match self {
-            Handler::MessageServer(h, _) => Ok(h
+            SimpleHandler::MessageServer(h, _) => Ok(h
                 .start(actor_handle, shutdown_receiver)
                 .await
                 .expect("Error starting message server")),
-            Handler::Environment(h, _) => Ok(h
+            SimpleHandler::Environment(h, _) => Ok(h
                 .start(actor_handle, shutdown_receiver)
                 .await
                 .expect("Error starting environment handler")),
-            Handler::FileSystem(h, _) => Ok(h
+            SimpleHandler::FileSystem(h, _) => Ok(h
                 .start(actor_handle, shutdown_receiver)
                 .await
                 .expect("Error starting filesystem")),
-            Handler::HttpClient(h, _) => Ok(h
+            SimpleHandler::HttpClient(h, _) => Ok(h
                 .start(actor_handle, shutdown_receiver)
                 .await
                 .expect("Error starting http client")),
-            Handler::HttpFramework(h, _) => Ok(h
+            SimpleHandler::HttpFramework(h, _) => Ok(h
                 .start(actor_handle, shutdown_receiver)
                 .await
                 .expect("Error starting http framework")),
-            Handler::Process(h, _) => Ok(h
+            SimpleHandler::Process(h, _) => Ok(h
                 .start(actor_handle, shutdown_receiver)
                 .await
                 .expect("Error starting process handler")),
-            Handler::Runtime(h, _) => Ok(h
+            SimpleHandler::Runtime(h, _) => Ok(h
                 .start(actor_handle, shutdown_receiver)
                 .await
                 .expect("Error starting runtime")),
-            Handler::Supervisor(h, _) => Ok(h
+            SimpleHandler::Supervisor(h, _) => Ok(h
                 .start(actor_handle, shutdown_receiver)
                 .await
                 .expect("Error starting supervisor")),
-            Handler::Store(h, _) => Ok(h
+            SimpleHandler::Store(h, _) => Ok(h
                 .start(actor_handle, shutdown_receiver)
                 .await
                 .expect("Error starting store")),
-            Handler::Timing(h, _) => Ok(h
+            SimpleHandler::Timing(h, _) => Ok(h
                 .start(actor_handle, shutdown_receiver)
                 .await
                 .expect("Error starting timing")),
-            Handler::Random(h, _) => Ok(h
+            SimpleHandler::Random(h, _) => Ok(h
                 .start(actor_handle, shutdown_receiver)
                 .await
                 .expect("Error starting random")),
@@ -123,47 +123,47 @@ impl Handler {
         actor_component: &mut ActorComponent,
     ) -> Result<()> {
         match self {
-            Handler::MessageServer(h, _) => Ok(h
+            SimpleHandler::MessageServer(h, _) => Ok(h
                 .setup_host_functions(actor_component)
                 .await
                 .expect("Error setting up message server host functions")),
-            Handler::Environment(h, _) => Ok(h
+            SimpleHandler::Environment(h, _) => Ok(h
                 .setup_host_functions(actor_component)
                 .await
                 .expect("Error setting up environment host functions")),
-            Handler::FileSystem(h, _) => Ok(h
+            SimpleHandler::FileSystem(h, _) => Ok(h
                 .setup_host_functions(actor_component)
                 .await
                 .expect("Error setting up filesystem host functions")),
-            Handler::HttpClient(h, _) => Ok(h
+            SimpleHandler::HttpClient(h, _) => Ok(h
                 .setup_host_functions(actor_component)
                 .await
                 .expect("Error setting up http client host functions")),
-            Handler::HttpFramework(h, _) => Ok(h
+            SimpleHandler::HttpFramework(h, _) => Ok(h
                 .setup_host_functions(actor_component)
                 .await
                 .expect("Error setting up http framework host functions")),
-            Handler::Process(h, _) => Ok(h
+            SimpleHandler::Process(h, _) => Ok(h
                 .setup_host_functions(actor_component)
                 .await
                 .expect("Error setting up process host functions")),
-            Handler::Runtime(h, _) => Ok(h
+            SimpleHandler::Runtime(h, _) => Ok(h
                 .setup_host_functions(actor_component)
                 .await
                 .expect("Error setting up runtime host functions")),
-            Handler::Supervisor(h, _) => Ok(h
+            SimpleHandler::Supervisor(h, _) => Ok(h
                 .setup_host_functions(actor_component)
                 .await
                 .expect("Error setting up supervisor host functions")),
-            Handler::Store(h, _) => Ok(h
+            SimpleHandler::Store(h, _) => Ok(h
                 .setup_host_functions(actor_component)
                 .await
                 .expect("Error setting up store host functions")),
-            Handler::Timing(h, _) => Ok(h
+            SimpleHandler::Timing(h, _) => Ok(h
                 .setup_host_functions(actor_component)
                 .await
                 .expect("Error setting up timing host functions")),
-            Handler::Random(h, _) => Ok(h
+            SimpleHandler::Random(h, _) => Ok(h
                 .setup_host_functions(actor_component)
                 .await
                 .expect("Error setting up random host functions")),
@@ -172,7 +172,7 @@ impl Handler {
 
     pub async fn add_export_functions(&self, actor_instance: &mut ActorInstance) -> Result<()> {
         match self {
-            Handler::MessageServer(handler, _) => {
+            SimpleHandler::MessageServer(handler, _) => {
                 match handler.add_export_functions(actor_instance).await {
                     Ok(_) => Ok(()),
                     Err(e) => {
@@ -182,10 +182,12 @@ impl Handler {
                             .actor_store
                             .record_event(ChainEventData {
                                 event_type: "message-server-export-setup".to_string(),
-                                data: EventData::Message(MessageEventData::HandlerSetupError {
-                                    error: error_msg.clone(),
-                                    step: "add_export_functions".to_string(),
-                                }),
+                                data: EventData::Message(
+                                    MessageEventData::SimpleHandlerSetupError {
+                                        error: error_msg.clone(),
+                                        step: "add_export_functions".to_string(),
+                                    },
+                                ),
                                 timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                 description: Some(error_msg),
                             });
@@ -193,7 +195,7 @@ impl Handler {
                     }
                 }
             }
-            Handler::Environment(handler, _) => {
+            SimpleHandler::Environment(handler, _) => {
                 match handler.add_export_functions(actor_instance).await {
                     Ok(_) => Ok(()),
                     Err(e) => {
@@ -205,7 +207,7 @@ impl Handler {
                             .record_event(ChainEventData {
                                 event_type: "environment-export-setup".to_string(),
                                 data: EventData::Environment(
-                                    EnvironmentEventData::HandlerSetupError {
+                                    EnvironmentEventData::SimpleHandlerSetupError {
                                         error: error_msg.clone(),
                                         step: "add_export_functions".to_string(),
                                     },
@@ -217,7 +219,7 @@ impl Handler {
                     }
                 }
             }
-            Handler::FileSystem(handler, _) => {
+            SimpleHandler::FileSystem(handler, _) => {
                 match handler.add_export_functions(actor_instance).await {
                     Ok(_) => Ok(()),
                     Err(e) => {
@@ -228,7 +230,7 @@ impl Handler {
                             .record_event(ChainEventData {
                                 event_type: "filesystem-export-setup".to_string(),
                                 data: EventData::Filesystem(
-                                    FilesystemEventData::HandlerSetupError {
+                                    FilesystemEventData::SimpleHandlerSetupError {
                                         error: error_msg.clone(),
                                         step: "add_export_functions".to_string(),
                                     },
@@ -240,7 +242,7 @@ impl Handler {
                     }
                 }
             }
-            Handler::HttpClient(handler, _) => {
+            SimpleHandler::HttpClient(handler, _) => {
                 match handler.add_export_functions(actor_instance).await {
                     Ok(_) => Ok(()),
                     Err(e) => {
@@ -250,7 +252,7 @@ impl Handler {
                             .actor_store
                             .record_event(ChainEventData {
                                 event_type: "http-client-export-setup".to_string(),
-                                data: EventData::Http(HttpEventData::HandlerSetupError {
+                                data: EventData::Http(HttpEventData::SimpleHandlerSetupError {
                                     error: error_msg.clone(),
                                     step: "add_export_functions".to_string(),
                                 }),
@@ -261,7 +263,7 @@ impl Handler {
                     }
                 }
             }
-            Handler::HttpFramework(handler, _) => {
+            SimpleHandler::HttpFramework(handler, _) => {
                 match handler.add_export_functions(actor_instance).await {
                     Ok(_) => Ok(()),
                     Err(e) => {
@@ -271,7 +273,7 @@ impl Handler {
                             .actor_store
                             .record_event(ChainEventData {
                                 event_type: "http-framework-export-setup".to_string(),
-                                data: EventData::Http(HttpEventData::HandlerSetupError {
+                                data: EventData::Http(HttpEventData::SimpleHandlerSetupError {
                                     error: error_msg.clone(),
                                     step: "add_export_functions".to_string(),
                                 }),
@@ -282,7 +284,7 @@ impl Handler {
                     }
                 }
             }
-            Handler::Process(handler, _) => {
+            SimpleHandler::Process(handler, _) => {
                 match handler.add_export_functions(actor_instance).await {
                     Ok(_) => Ok(()),
                     Err(e) => {
@@ -292,10 +294,12 @@ impl Handler {
                             .actor_store
                             .record_event(ChainEventData {
                                 event_type: "process-export-setup".to_string(),
-                                data: EventData::Process(ProcessEventData::HandlerSetupError {
-                                    error: error_msg.clone(),
-                                    step: "add_export_functions".to_string(),
-                                }),
+                                data: EventData::Process(
+                                    ProcessEventData::SimpleHandlerSetupError {
+                                        error: error_msg.clone(),
+                                        step: "add_export_functions".to_string(),
+                                    },
+                                ),
                                 timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                 description: Some(error_msg),
                             });
@@ -303,7 +307,7 @@ impl Handler {
                     }
                 }
             }
-            Handler::Runtime(handler, _) => {
+            SimpleHandler::Runtime(handler, _) => {
                 match handler.add_export_functions(actor_instance).await {
                     Ok(_) => Ok(()),
                     Err(e) => {
@@ -313,10 +317,12 @@ impl Handler {
                             .actor_store
                             .record_event(ChainEventData {
                                 event_type: "runtime-export-setup".to_string(),
-                                data: EventData::Runtime(RuntimeEventData::HandlerSetupError {
-                                    error: error_msg.clone(),
-                                    step: "add_export_functions".to_string(),
-                                }),
+                                data: EventData::Runtime(
+                                    RuntimeEventData::SimpleHandlerSetupError {
+                                        error: error_msg.clone(),
+                                        step: "add_export_functions".to_string(),
+                                    },
+                                ),
                                 timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                 description: Some(error_msg),
                             });
@@ -324,7 +330,7 @@ impl Handler {
                     }
                 }
             }
-            Handler::Supervisor(handler, _) => {
+            SimpleHandler::Supervisor(handler, _) => {
                 match handler.add_export_functions(actor_instance).await {
                     Ok(_) => Ok(()),
                     Err(e) => {
@@ -335,7 +341,7 @@ impl Handler {
                             .record_event(ChainEventData {
                                 event_type: "supervisor-export-setup".to_string(),
                                 data: EventData::Supervisor(
-                                    SupervisorEventData::HandlerSetupError {
+                                    SupervisorEventData::SimpleHandlerSetupError {
                                         error: error_msg.clone(),
                                         step: "add_export_functions".to_string(),
                                     },
@@ -347,7 +353,7 @@ impl Handler {
                     }
                 }
             }
-            Handler::Store(handler, _) => {
+            SimpleHandler::Store(handler, _) => {
                 match handler.add_export_functions(actor_instance).await {
                     Ok(_) => Ok(()),
                     Err(e) => {
@@ -357,7 +363,7 @@ impl Handler {
                             .actor_store
                             .record_event(ChainEventData {
                                 event_type: "store-export-setup".to_string(),
-                                data: EventData::Store(StoreEventData::HandlerSetupError {
+                                data: EventData::Store(StoreEventData::SimpleHandlerSetupError {
                                     error: error_msg.clone(),
                                     step: "add_export_functions".to_string(),
                                 }),
@@ -368,7 +374,7 @@ impl Handler {
                     }
                 }
             }
-            Handler::Timing(handler, _) => {
+            SimpleHandler::Timing(handler, _) => {
                 match handler.add_export_functions(actor_instance).await {
                     Ok(_) => Ok(()),
                     Err(e) => {
@@ -378,7 +384,7 @@ impl Handler {
                             .actor_store
                             .record_event(ChainEventData {
                                 event_type: "timing-export-setup".to_string(),
-                                data: EventData::Timing(TimingEventData::HandlerSetupError {
+                                data: EventData::Timing(TimingEventData::SimpleHandlerSetupError {
                                     error: error_msg.clone(),
                                     step: "add_export_functions".to_string(),
                                 }),
@@ -389,7 +395,7 @@ impl Handler {
                     }
                 }
             }
-            Handler::Random(handler, _) => {
+            SimpleHandler::Random(handler, _) => {
                 match handler.add_export_functions(actor_instance).await {
                     Ok(_) => Ok(()),
                     Err(e) => {
@@ -399,7 +405,7 @@ impl Handler {
                             .actor_store
                             .record_event(ChainEventData {
                                 event_type: "random-export-setup".to_string(),
-                                data: EventData::Random(RandomEventData::HandlerSetupError {
+                                data: EventData::Random(RandomEventData::SimpleHandlerSetupError {
                                     error: error_msg.clone(),
                                     step: "add_export_functions".to_string(),
                                 }),
@@ -415,45 +421,17 @@ impl Handler {
 
     pub fn name(&self) -> &str {
         match self {
-            Handler::MessageServer(_, _) => "message-server",
-            Handler::Environment(_, _) => "environment",
-            Handler::FileSystem(_, _) => "filesystem",
-            Handler::HttpClient(_, _) => "http-client",
-            Handler::HttpFramework(_, _) => "http-framework",
-            Handler::Process(_, _) => "process",
-            Handler::Runtime(_, _) => "runtime",
-            Handler::Supervisor(_, _) => "supervisor",
-            Handler::Store(_, _) => "store",
-            Handler::Timing(_, _) => "timing",
-            Handler::Random(_, _) => "random",
+            SimpleHandler::MessageServer(_, _) => "message-server",
+            SimpleHandler::Environment(_, _) => "environment",
+            SimpleHandler::FileSystem(_, _) => "filesystem",
+            SimpleHandler::HttpClient(_, _) => "http-client",
+            SimpleHandler::HttpFramework(_, _) => "http-framework",
+            SimpleHandler::Process(_, _) => "process",
+            SimpleHandler::Runtime(_, _) => "runtime",
+            SimpleHandler::Supervisor(_, _) => "supervisor",
+            SimpleHandler::Store(_, _) => "store",
+            SimpleHandler::Timing(_, _) => "timing",
+            SimpleHandler::Random(_, _) => "random",
         }
-    }
-}
-
-impl HandlerLifecycle for Handler {
-    fn start<'a>(
-        &'a mut self,
-        actor_handle: ActorHandle,
-        shutdown_receiver: ShutdownReceiver,
-    ) -> HandlerFuture<'a> {
-        Box::pin(async move { Handler::start(self, actor_handle, shutdown_receiver).await })
-    }
-
-    fn setup_host_functions<'a>(
-        &'a mut self,
-        actor_component: &'a mut ActorComponent,
-    ) -> HandlerFuture<'a> {
-        Box::pin(async move { Handler::setup_host_functions(self, actor_component).await })
-    }
-
-    fn add_export_functions<'a>(
-        &'a self,
-        actor_instance: &'a mut ActorInstance,
-    ) -> HandlerFuture<'a> {
-        Box::pin(async move { Handler::add_export_functions(self, actor_instance).await })
-    }
-
-    fn name(&self) -> &str {
-        Handler::name(self)
     }
 }

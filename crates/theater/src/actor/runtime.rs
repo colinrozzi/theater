@@ -12,10 +12,11 @@ use crate::config::permissions::HandlerPermission;
 use crate::events::theater_runtime::TheaterRuntimeEventData;
 use crate::events::wasm::WasmEventData;
 use crate::events::{ChainEventData, EventData};
+use crate::handler::Handler;
 use crate::host::environment::EnvironmentHost;
 use crate::host::filesystem::FileSystemHost;
 use crate::host::framework::HttpFramework;
-use crate::host::handler::Handler;
+use crate::host::handler::SimpleHandler;
 use crate::host::http_client::HttpClientHost;
 use crate::host::message_server::MessageServerHost;
 use crate::host::process::ProcessHost;
@@ -60,7 +61,7 @@ const SHUTDOWN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 /// `ActorRuntime` manages the various components that make up an actor's execution environment,
 /// including handlers and communication channels. It's responsible for starting the actor,
 /// setting up its capabilities via handlers, executing operations, and ensuring proper shutdown.
-pub struct ActorRuntime {
+pub struct ActorRuntime<H: Handler> {
     /// Unique identifier for this actor
     pub actor_id: TheaterId,
     /// Handles to the running handler tasks
@@ -86,7 +87,7 @@ pub enum StartActorResult {
     Error(String),
 }
 
-impl ActorRuntime {
+impl<H: Handler> ActorRuntime<H> {
     pub async fn start(
         id: TheaterId,
         config: &ManifestConfig,
@@ -563,7 +564,7 @@ impl ActorRuntime {
         parent_permissions: HandlerPermission,
         status_tx: Sender<String>,
         chain: Arc<SyncRwLock<StateChain>>,
-    ) -> Result<(ActorInstance, Vec<Handler>, MetricsCollector), ActorError> {
+    ) -> Result<(ActorInstance, Vec<H>, MetricsCollector), ActorError> {
         let actor_handle = ActorHandle::new(operation_tx, info_tx, control_tx);
 
         let _ = status_tx.send("Setting up actor store".to_string()).await;
@@ -799,7 +800,7 @@ impl ActorRuntime {
         config: &ManifestConfig,
         actor_handle: ActorHandle,
         effective_permissions: &crate::config::permissions::HandlerPermission,
-    ) -> Result<Vec<Handler>, String> {
+    ) -> Result<Vec<H>, String> {
         let mut handlers = Vec::new();
 
         // Check if message server is permitted and requested
@@ -814,7 +815,7 @@ impl ActorRuntime {
                         .to_string(),
                 );
             }
-            handlers.push(Handler::MessageServer(
+            handlers.push(SimpleHandler::MessageServer(
                 MessageServerHost::new(
                     actor_sender,
                     actor_mailbox,
@@ -836,7 +837,7 @@ impl ActorRuntime {
                     if effective_permissions.environment.is_none() {
                         return Err("Environment handler requested but not permitted by effective permissions".to_string());
                     }
-                    Some(Handler::Environment(
+                    Some(SimpleHandler::Environment(
                         EnvironmentHost::new(
                             config.clone(),
                             effective_permissions.environment.clone(),
@@ -849,7 +850,7 @@ impl ActorRuntime {
                     if effective_permissions.file_system.is_none() {
                         return Err("FileSystem handler requested but not permitted by effective permissions".to_string());
                     }
-                    Some(Handler::FileSystem(
+                    Some(SimpleHandler::FileSystem(
                         FileSystemHost::new(
                             config.clone(),
                             effective_permissions.file_system.clone(),
@@ -862,7 +863,7 @@ impl ActorRuntime {
                     if effective_permissions.http_client.is_none() {
                         return Err("HttpClient handler requested but not permitted by effective permissions".to_string());
                     }
-                    Some(Handler::HttpClient(
+                    Some(SimpleHandler::HttpClient(
                         HttpClientHost::new(
                             config.clone(),
                             effective_permissions.http_client.clone(),
@@ -875,7 +876,7 @@ impl ActorRuntime {
                     if effective_permissions.http_framework.is_none() {
                         return Err("HttpFramework handler requested but not permitted by effective permissions".to_string());
                     }
-                    Some(Handler::HttpFramework(
+                    Some(SimpleHandler::HttpFramework(
                         HttpFramework::new(effective_permissions.http_framework.clone()),
                         effective_permissions.http_framework.clone(),
                     ))
@@ -888,7 +889,7 @@ impl ActorRuntime {
                                 .to_string(),
                         );
                     }
-                    Some(Handler::Runtime(
+                    Some(SimpleHandler::Runtime(
                         RuntimeHost::new(
                             config.clone(),
                             theater_tx.clone(),
@@ -902,7 +903,7 @@ impl ActorRuntime {
                     if effective_permissions.supervisor.is_none() {
                         return Err("Supervisor handler requested but not permitted by effective permissions".to_string());
                     }
-                    Some(Handler::Supervisor(
+                    Some(SimpleHandler::Supervisor(
                         SupervisorHost::new(
                             config.clone(),
                             effective_permissions.supervisor.clone(),
@@ -918,7 +919,7 @@ impl ActorRuntime {
                                 .to_string(),
                         );
                     }
-                    Some(Handler::Process(
+                    Some(SimpleHandler::Process(
                         ProcessHost::new(
                             config.clone(),
                             actor_handle.clone(),
@@ -935,7 +936,7 @@ impl ActorRuntime {
                                 .to_string(),
                         );
                     }
-                    Some(Handler::Store(
+                    Some(SimpleHandler::Store(
                         StoreHost::new(config.clone(), effective_permissions.store.clone()),
                         effective_permissions.store.clone(),
                     ))
@@ -948,7 +949,7 @@ impl ActorRuntime {
                                 .to_string(),
                         );
                     }
-                    Some(Handler::Timing(
+                    Some(SimpleHandler::Timing(
                         TimingHost::new(config.clone(), effective_permissions.timing.clone()),
                         effective_permissions.timing.clone(),
                     ))
@@ -961,7 +962,7 @@ impl ActorRuntime {
                                 .to_string(),
                         );
                     }
-                    Some(Handler::Random(
+                    Some(SimpleHandler::Random(
                         RandomHost::new(config.clone(), effective_permissions.random.clone()),
                         effective_permissions.random.clone(),
                     ))
@@ -1004,8 +1005,8 @@ impl ActorRuntime {
     /// Sets up host functions for all handlers
     async fn setup_host_functions(
         actor_component: &mut ActorComponent,
-        mut handlers: Vec<Handler>,
-    ) -> Result<Vec<Handler>> {
+        mut handlers: Vec<H>,
+    ) -> Result<Vec<H>> {
         for handler in &mut handlers {
             info!(
                 "Setting up host functions for handler: {:?}",
@@ -1042,7 +1043,7 @@ impl ActorRuntime {
     /// Sets up export functions for all handlers
     async fn setup_export_functions(
         actor_instance: &mut ActorInstance,
-        handlers: &[Handler],
+        handlers: &[H],
     ) -> Result<()> {
         for handler in handlers {
             info!("Creating functions for handler: {:?}", handler.name());
@@ -1159,173 +1160,6 @@ impl ActorRuntime {
         metrics.record_operation(duration, true).await;
 
         Ok(results)
-    }
-
-    /// Updates the WebAssembly component of an actor instance.
-    ///
-    /// This method implements hot-swapping of the WebAssembly component while preserving
-    /// the actor's state and reusing the existing setup logic.
-    ///
-    /// ## Parameters
-    ///
-    /// * `actor_instance` - Mutable reference to the actor instance to update
-    /// * `component_address` - The address of the new component to load
-    /// * `handlers` - The existing handlers
-    ///
-    /// ## Returns
-    ///
-    /// * `Ok(())` - If the component was successfully updated
-    /// * `Err(ActorError)` - If the update failed
-    #[allow(dead_code)]
-    async fn update_component(
-        actor_instance: &mut ActorInstance,
-        component_address: &str,
-        config: &ManifestConfig,
-        engine: wasmtime::Engine,
-    ) -> Result<(), ActorError> {
-        let actor_id = actor_instance.id();
-        info!(
-            "Updating component for actor {} to: {}",
-            actor_id, component_address
-        );
-
-        let mut new_config = config.clone();
-
-        // Get current state before updating
-        let current_state = actor_instance.store.data().get_state();
-
-        // Record update started event
-        actor_instance
-            .store
-            .data_mut()
-            .record_event(ChainEventData {
-                event_type: "theater-runtime".to_string(),
-                data: EventData::TheaterRuntime(TheaterRuntimeEventData::ActorUpdateStart {
-                    new_component_address: component_address.to_string(),
-                }),
-                timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                description: format!("Starting update to component [{}]", component_address).into(),
-            });
-
-        // Create a temporary config for the new component
-        new_config.component = component_address.to_string();
-
-        // Set up actor store - reuse the existing one without creating a new one
-        let actor_store = actor_instance.actor_component.actor_store.clone();
-
-        let (actor_sender_spoof, actor_mailbox_spoof) = mpsc::channel::<ActorMessage>(1);
-        let (theater_tx_spoof, _) = mpsc::channel::<TheaterCommand>(1);
-
-        // Calculate effective permissions for update (use root permissions for now)
-        let parent_permissions = crate::config::permissions::HandlerPermission::root();
-        let effective_permissions = new_config.calculate_effective_permissions(&parent_permissions);
-
-        let handlers = match Self::create_handlers(
-            actor_sender_spoof,
-            actor_mailbox_spoof,
-            theater_tx_spoof,
-            &new_config,
-            actor_instance
-                .actor_component
-                .actor_store
-                .get_actor_handle(),
-            &effective_permissions,
-        ) {
-            Ok(handlers) => handlers,
-            Err(e) => {
-                error!("Handler creation failed during update: {}", e);
-                todo!();
-                //return Err(ActorError::UpdateError(format!("Handler creation failed: {}", e)));
-            }
-        };
-
-        // Create new component - reusing existing method
-        let mut new_actor_component =
-            match Self::create_actor_component(&new_config, actor_store, engine).await {
-                Ok(component) => component,
-                Err(e) => {
-                    let error_message = format!("Failed to create actor component: {}", e);
-                    Self::record_update_error(actor_instance, component_address, &error_message);
-                    return Err(ActorError::UpdateComponentError(error_message));
-                }
-            };
-
-        // Setup host functions - reusing existing method
-        let handlers = match Self::setup_host_functions(&mut new_actor_component, handlers).await {
-            Ok(handlers) => handlers,
-            Err(e) => {
-                let error_message = format!("Failed to setup host functions: {}", e);
-                Self::record_update_error(actor_instance, component_address, &error_message);
-                return Err(ActorError::UpdateComponentError(error_message));
-            }
-        };
-
-        // Instantiate component - reusing existing method
-        let mut new_instance =
-            match Self::instantiate_component(new_actor_component, actor_id.clone()).await {
-                Ok(instance) => instance,
-                Err(e) => {
-                    let error_message = format!("Failed to instantiate component: {}", e);
-                    Self::record_update_error(actor_instance, component_address, &error_message);
-                    return Err(ActorError::UpdateComponentError(error_message));
-                }
-            };
-
-        // Setup export functions - reusing existing method
-        if let Err(e) = Self::setup_export_functions(&mut new_instance, &handlers).await {
-            let error_message = format!("Failed to setup export functions: {}", e);
-            Self::record_update_error(actor_instance, component_address, &error_message);
-            return Err(ActorError::UpdateComponentError(error_message));
-        }
-
-        // Swap the instance
-        std::mem::swap(actor_instance, &mut new_instance);
-
-        // Restore state
-        actor_instance.store.data_mut().set_state(current_state);
-
-        // Record update success
-        actor_instance
-            .store
-            .data_mut()
-            .record_event(ChainEventData {
-                event_type: "theater-runtime".to_string(),
-                data: EventData::TheaterRuntime(TheaterRuntimeEventData::ActorUpdateComplete {
-                    new_component_address: component_address.to_string(),
-                }),
-                timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                description: format!("Successfully updated to component [{}]", component_address)
-                    .into(),
-            });
-
-        info!("Component updated successfully for actor {}", actor_id);
-        Ok(())
-    }
-
-    /// Helper method to record update errors in the actor's chain
-    #[allow(dead_code)]
-    fn record_update_error(
-        actor_instance: &mut ActorInstance,
-        component_address: &str,
-        error_message: &str,
-    ) {
-        error!("{}", error_message);
-        actor_instance
-            .store
-            .data_mut()
-            .record_event(ChainEventData {
-                event_type: "theater-runtime".to_string(),
-                data: EventData::TheaterRuntime(TheaterRuntimeEventData::ActorUpdateError {
-                    new_component_address: component_address.to_string(),
-                    error: error_message.to_string(),
-                }),
-                timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                description: format!(
-                    "Failed to update to component [{}]: {}",
-                    component_address, error_message
-                )
-                .into(),
-            });
     }
 
     /// # Perform final cleanup when shutting down
