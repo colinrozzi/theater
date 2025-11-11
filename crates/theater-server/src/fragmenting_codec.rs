@@ -5,15 +5,15 @@ use bytes::{Bytes, BytesMut};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::io;
-use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tokio_util::codec::{Decoder, Encoder, LengthDelimitedCodec};
 use tracing::{debug, warn};
 
 /// Maximum size for a single fragment data (12MB)
 /// This leaves room for JSON serialization overhead while staying well under the 32MB frame limit
-const MAX_FRAGMENT_DATA_SIZE: usize = 8 * 1024 * 1024;  // Reduced to 8MB to account for base64 + JSON overhead
+const MAX_FRAGMENT_DATA_SIZE: usize = 8 * 1024 * 1024; // Reduced to 8MB to account for base64 + JSON overhead
 
 /// How long to keep partial messages before timing out (30 seconds)
 const FRAGMENT_TIMEOUT: Duration = Duration::from_secs(30);
@@ -133,7 +133,7 @@ impl SharedState {
 
         let mut partial_messages = self.partial_messages.lock().unwrap();
         let before_count = partial_messages.len();
-        
+
         partial_messages.retain(|message_id, partial| {
             if partial.is_expired() {
                 warn!("Cleaning up expired partial message {}", message_id);
@@ -225,7 +225,7 @@ impl Clone for FragmentingCodec {
     fn clone(&self) -> Self {
         let mut inner = LengthDelimitedCodec::new();
         inner.set_max_frame_length(32 * 1024 * 1024); // 32MB max frame - CRITICAL!
-        
+
         Self {
             inner,
             shared_state: Arc::clone(&self.shared_state),
@@ -339,7 +339,7 @@ impl Decoder for FragmentingCodec {
                         // Remove from partial messages and reassemble
                         let partial = partial_messages.remove(&message_id).unwrap();
                         drop(partial_messages); // Release the lock
-                        
+
                         let complete_data = partial.reassemble()?;
                         Ok(Some(Bytes::from(complete_data)))
                     } else {

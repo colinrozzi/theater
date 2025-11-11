@@ -82,10 +82,7 @@ impl RuntimeHost {
     pub async fn setup_host_functions(&self, actor_component: &mut ActorComponent) -> Result<()> {
         info!("Setting up runtime host functions");
         let name = actor_component.name.clone();
-        let mut interface = match actor_component
-            .linker
-            .instance("theater:simple/runtime")
-        {
+        let mut interface = match actor_component.linker.instance("theater:simple/runtime") {
             Ok(interface) => {
                 // Record successful linker instance creation
                 actor_component.actor_store.record_event(ChainEventData {
@@ -107,7 +104,10 @@ impl RuntimeHost {
                     timestamp: chrono::Utc::now().timestamp_millis() as u64,
                     description: Some(format!("Failed to create linker instance: {}", e)),
                 });
-                return Err(anyhow::anyhow!("Could not instantiate theater:simple/runtime: {}", e));
+                return Err(anyhow::anyhow!(
+                    "Could not instantiate theater:simple/runtime: {}",
+                    e
+                ));
             }
         };
 

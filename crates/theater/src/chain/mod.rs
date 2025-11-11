@@ -32,12 +32,13 @@ use console::style;
 use serde::{Deserialize, Serialize};
 // use sha1::Digest;
 use std::fmt;
+use std::marker::PhantomData;
 use std::path::Path;
 use tokio::sync::mpsc::Sender;
 use tracing::debug;
 use wasmtime::component::{ComponentType, Lift, Lower};
 
-use crate::events::ChainEventData;
+use crate::events::{ChainEventData, EventData, EventPayload};
 use crate::messages::TheaterCommand;
 use crate::store::ContentRef;
 use crate::TheaterId;
@@ -247,7 +248,10 @@ impl PartialEq for ChainEvent {
 /// all actors in the system. The state chain can also be persisted to disk for
 /// long-term storage or debugging.
 #[derive(Debug, Clone, Serialize)]
-pub struct StateChain {
+pub struct StateChain<E = EventData>
+where
+    E: EventPayload,
+{
     /// The ordered sequence of events in this chain, from oldest to newest.
     events: Vec<ChainEvent>,
     /// Hash of the most recent event in the chain, or None if the chain is empty.
@@ -260,9 +264,14 @@ pub struct StateChain {
     /// This is excluded from serialization as it's determined by context.
     #[serde(skip)]
     actor_id: TheaterId,
+    #[serde(skip)]
+    marker: PhantomData<E>,
 }
 
-impl StateChain {
+impl<E> StateChain<E>
+where
+    E: EventPayload,
+{
     /// Creates a new empty state chain for an actor.
     ///
     /// ## Purpose
@@ -301,6 +310,7 @@ impl StateChain {
             current_hash: None,
             theater_tx,
             actor_id,
+            marker: PhantomData,
         }
     }
 
@@ -365,7 +375,7 @@ impl StateChain {
     /// the notification to be delivered.
     pub fn add_typed_event(
         &mut self,
-        event_data: ChainEventData,
+        event_data: ChainEventData<E>,
     ) -> Result<ChainEvent, serde_json::Error> {
         // Create initial event structure without hash
         let mut event = event_data.to_chain_event(self.current_hash.clone());

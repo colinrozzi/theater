@@ -12,14 +12,14 @@ pub enum EnvironmentEventData {
         value_found: bool,
         timestamp: DateTime<Utc>,
     },
-    
+
     #[serde(rename = "permission_denied")]
     PermissionDenied {
         operation: String,
         variable_name: String,
         reason: String,
     },
-    
+
     #[serde(rename = "error")]
     Error {
         operation: String,

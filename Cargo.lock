@@ -3463,6 +3463,50 @@ dependencies = [
 ]
 
 [[package]]
+name = "theater-handler-environment"
+version = "0.2.1"
+
+[[package]]
+name = "theater-handler-filesystem"
+version = "0.2.1"
+
+[[package]]
+name = "theater-handler-http-client"
+version = "0.2.1"
+
+[[package]]
+name = "theater-handler-http-framework"
+version = "0.2.1"
+
+[[package]]
+name = "theater-handler-message-server"
+version = "0.2.1"
+
+[[package]]
+name = "theater-handler-process"
+version = "0.2.1"
+
+[[package]]
+name = "theater-handler-random"
+version = "0.2.1"
+
+[[package]]
+name = "theater-handler-runtime"
+version = "0.2.1"
+
+[[package]]
+name = "theater-handler-store"
+version = "0.2.1"
+
+[[package]]
+name = "theater-handler-supervisor"
+version = "0.2.1"
+
+[[package]]
+name = "theater-handler-timing"
+version = "0.2.1"
+
+[[package]]
 name = "theater-server"
 version = "0.2.1"
 dependencies = [

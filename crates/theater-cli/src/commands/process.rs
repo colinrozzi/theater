@@ -101,7 +101,8 @@ pub async fn execute_async(args: &ProcessArgs, ctx: &CommandContext) -> Result<(
             args,
             ctx,
             address,
-        ).await;
+        )
+        .await;
 
         match result {
             Ok(()) => {
@@ -142,7 +143,12 @@ async fn run_actor_process(
 
     // Start the actor
     client
-        .start_actor(manifest_content.to_string(), initial_state, parent, subscribe)
+        .start_actor(
+            manifest_content.to_string(),
+            initial_state,
+            parent,
+            subscribe,
+        )
         .await
         .map_err(|e| CliError::actor_not_found(format!("Failed to start actor: {}", e)))?;
 

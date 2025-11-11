@@ -1,6 +1,8 @@
-use theater::config::actor_manifest::{HandlerConfig, ManifestConfig, FileSystemHandlerConfig, EnvironmentHandlerConfig};
+use theater::config::actor_manifest::{
+    EnvironmentHandlerConfig, FileSystemHandlerConfig, HandlerConfig, ManifestConfig,
+};
 use theater::config::permissions::{
-    HandlerPermission, FileSystemPermissions, EnvironmentPermissions,
+    EnvironmentPermissions, FileSystemPermissions, HandlerPermission,
 };
 
 /// Test that handler creation validation works correctly
@@ -25,27 +27,27 @@ async fn test_handler_creation_permission_validation() {
         }),
         ..Default::default()
     };
-    
+
     // Create a manifest that requests these handlers
     let _manifest = ManifestConfig {
         name: "test-actor".to_string(),
         component: "test.wasm".to_string(),
         handlers: vec![
-            HandlerConfig::FileSystem { 
+            HandlerConfig::FileSystem {
                 config: FileSystemHandlerConfig {
                     path: Some("/tmp/test".into()),
                     new_dir: Some(false),
                     allowed_commands: None,
-                }
+                },
             },
-            HandlerConfig::Environment { 
+            HandlerConfig::Environment {
                 config: EnvironmentHandlerConfig {
                     allowed_vars: None,
                     denied_vars: None,
                     allow_list_all: false,
                     allowed_prefixes: None,
-                }
-            }
+                },
+            },
         ],
         version: "1.0.0".to_string(),
         description: None,
@@ -54,7 +56,7 @@ async fn test_handler_creation_permission_validation() {
         permission_policy: Default::default(),
         init_state: None,
     };
-    
+
     // Test case 2: Missing permissions should be detected
     let _invalid_permissions = HandlerPermission {
         // Missing file_system permissions
@@ -67,9 +69,9 @@ async fn test_handler_creation_permission_validation() {
         }),
         ..Default::default()
     };
-    
+
     println!("✅ Permission validation logic tested");
-    
+
     // The actual validation would happen in create_handlers() function
     // which we've already implemented to check permissions before creating handlers
 }
@@ -95,7 +97,7 @@ async fn test_permission_inheritance() {
         }),
         ..Default::default()
     };
-    
+
     // Test child permissions (more restrictive)
     let _child_permissions = HandlerPermission {
         file_system: Some(FileSystemPermissions {
@@ -114,10 +116,10 @@ async fn test_permission_inheritance() {
         }),
         ..Default::default()
     };
-    
+
     // In a real implementation, effective permissions would be the intersection
     // of parent and child permissions (child permissions cannot exceed parent)
-    
+
     println!("✅ Permission inheritance logic structure verified");
 }
 
@@ -126,7 +128,7 @@ async fn test_permission_inheritance() {
 #[tokio::test]
 async fn test_permission_checker_integration() {
     use theater::config::enforcement::PermissionChecker;
-    
+
     // Test filesystem permissions
     let fs_permissions = Some(FileSystemPermissions {
         read: true,
@@ -136,31 +138,34 @@ async fn test_permission_checker_integration() {
         new_dir: Some(false),
         allowed_paths: Some(vec!["/tmp/allowed".to_string()]),
     });
-    
+
     // Should allow read in allowed path
     assert!(PermissionChecker::check_filesystem_operation(
         &fs_permissions,
         "read",
         Some("/tmp/allowed/file.txt"),
         None,
-    ).is_ok());
-    
+    )
+    .is_ok());
+
     // Should deny write (not in allowed operations)
     assert!(PermissionChecker::check_filesystem_operation(
         &fs_permissions,
         "write",
         Some("/tmp/allowed/file.txt"),
         None,
-    ).is_err());
-    
+    )
+    .is_err());
+
     // Should deny read in disallowed path
     assert!(PermissionChecker::check_filesystem_operation(
         &fs_permissions,
         "read",
         Some("/tmp/forbidden/file.txt"),
         None,
-    ).is_err());
-    
+    )
+    .is_err());
+
     println!("✅ Permission checker integration working correctly");
 }
 
@@ -172,21 +177,21 @@ async fn test_permission_denial_events() {
     // 1. The operation is blocked
     // 2. A PermissionDenied event is logged to the chain
     // 3. An appropriate error is returned
-    
+
     // We can test this by verifying the event data structure
     use theater::events::filesystem::FilesystemEventData;
-    
+
     let denial_event = FilesystemEventData::PermissionDenied {
         operation: "write".to_string(),
         path: "/tmp/forbidden/file.txt".to_string(),
         reason: "Write operation not permitted".to_string(),
     };
-    
+
     // Verify the event can be serialized (important for the event chain)
     let serialized = serde_json::to_string(&denial_event).expect("Failed to serialize event");
     assert!(serialized.contains("PermissionDenied"));
     assert!(serialized.contains("write"));
     assert!(serialized.contains("/tmp/forbidden/file.txt"));
-    
+
     println!("✅ Permission denial event structure verified");
 }

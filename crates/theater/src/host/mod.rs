@@ -11,7 +11,7 @@ pub mod store;
 pub mod supervisor;
 pub mod timing;
 pub use framework::HttpFramework;
-pub use handler::Handler;
+pub use handler::{Handler, HandlerFuture, HandlerLifecycle};
 pub use process::ProcessHost;
 pub use random::RandomHost;
 pub use timing::TimingHost;

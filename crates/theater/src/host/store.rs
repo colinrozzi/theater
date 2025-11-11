@@ -32,7 +32,10 @@ pub struct StoreHost {
 }
 
 impl StoreHost {
-    pub fn new(_config: StoreHandlerConfig, permissions: Option<crate::config::permissions::StorePermissions>) -> Self {
+    pub fn new(
+        _config: StoreHandlerConfig,
+        permissions: Option<crate::config::permissions::StorePermissions>,
+    ) -> Self {
         Self { permissions }
     }
 
@@ -47,10 +50,7 @@ impl StoreHost {
 
         info!("Setting up store host functions");
 
-        let mut interface = match actor_component
-            .linker
-            .instance("theater:simple/store")
-        {
+        let mut interface = match actor_component.linker.instance("theater:simple/store") {
             Ok(interface) => {
                 // Record successful linker instance creation
                 actor_component.actor_store.record_event(ChainEventData {
@@ -72,7 +72,10 @@ impl StoreHost {
                     timestamp: chrono::Utc::now().timestamp_millis() as u64,
                     description: Some(format!("Failed to create linker instance: {}", e)),
                 });
-                return Err(anyhow::anyhow!("Could not instantiate theater:simple/store: {}", e));
+                return Err(anyhow::anyhow!(
+                    "Could not instantiate theater:simple/store: {}",
+                    e
+                ));
             }
         };
 

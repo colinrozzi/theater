@@ -6,7 +6,7 @@
 
 use crate::actor::handle::ActorHandle;
 use crate::chain::{ChainEvent, StateChain};
-use crate::events::ChainEventData;
+use crate::events::{ChainEventData, EventData, EventPayload};
 use crate::id::TheaterId;
 use crate::messages::TheaterCommand;
 use std::sync::{Arc, RwLock};
@@ -24,7 +24,10 @@ use tokio::sync::mpsc::Sender;
 /// - The actor's current state data
 /// - A handle to interact with the actor
 #[derive(Clone)]
-pub struct ActorStore {
+pub struct ActorStore<E = EventData>
+where
+    E: EventPayload,
+{
     /// Unique identifier for the actor
     pub id: TheaterId,
 
@@ -32,7 +35,7 @@ pub struct ActorStore {
     pub theater_tx: Sender<TheaterCommand>,
 
     /// The event chain that records all actor operations for verification and audit
-    pub chain: Arc<RwLock<StateChain>>,
+    pub chain: Arc<RwLock<StateChain<E>>>,
 
     /// The current state of the actor, stored as a binary blob
     pub state: Option<Vec<u8>>,
@@ -41,7 +44,10 @@ pub struct ActorStore {
     pub actor_handle: ActorHandle,
 }
 
-impl ActorStore {
+impl<E> ActorStore<E>
+where
+    E: EventPayload,
+{
     /// # Create a new ActorStore
     ///
     /// Creates a new instance of the ActorStore with the given parameters.
@@ -59,7 +65,7 @@ impl ActorStore {
         id: TheaterId,
         theater_tx: Sender<TheaterCommand>,
         actor_handle: ActorHandle,
-        chain: Arc<RwLock<StateChain>>,
+        chain: Arc<RwLock<StateChain<E>>>,
     ) -> anyhow::Result<Self> {
         Ok(Self {
             id: id.clone(),
@@ -129,7 +135,7 @@ impl ActorStore {
     /// ## Returns
     ///
     /// The ChainEvent that was created and added to the chain.
-    pub fn record_event(&self, event_data: ChainEventData) -> ChainEvent {
+    pub fn record_event(&self, event_data: ChainEventData<E>) -> ChainEvent {
         let mut chain = self.chain.write().unwrap();
         chain
             .add_typed_event(event_data)
