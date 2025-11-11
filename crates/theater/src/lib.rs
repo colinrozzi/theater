@@ -37,6 +37,7 @@ pub mod chain;
 pub mod config;
 pub mod errors;
 pub mod events;
+pub mod handler;
 
 pub mod host;
 pub mod id;
