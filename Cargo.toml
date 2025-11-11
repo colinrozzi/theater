@@ -1,10 +1,21 @@
 [workspace]
 members = [
     "crates/theater",
-    "crates/theater-cli", 
+    "crates/theater-cli",
     "crates/theater-server",
     "crates/theater-server-cli",
-    "crates/theater-client"
+    "crates/theater-client",
+    "crates/theater-handler-environment",
+    "crates/theater-handler-filesystem",
+    "crates/theater-handler-http-client",
+    "crates/theater-handler-http-framework",
+    "crates/theater-handler-message-server",
+    "crates/theater-handler-process",
+    "crates/theater-handler-random",
+    "crates/theater-handler-runtime",
+    "crates/theater-handler-store",
+    "crates/theater-handler-supervisor",
+    "crates/theater-handler-timing",
 ]
 resolver = "2"
 
