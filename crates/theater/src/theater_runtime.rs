@@ -10,6 +10,7 @@ use crate::chain::ChainEvent;
 use crate::config::permissions::HandlerPermission;
 use crate::events::runtime::RuntimeEventData;
 use crate::events::EventData;
+use crate::handler::Handler;
 use crate::id::TheaterId;
 use crate::messages::{
     ActorChannelClose, ActorChannelMessage, ActorChannelOpen, ActorResult, ChannelId,
@@ -88,7 +89,7 @@ use tracing::{debug, error, info, warn};
 /// The runtime uses a command-based architecture where all operations are sent as messages
 /// through channels. This allows for asynchronous processing and helps maintain isolation
 /// between components.
-pub struct TheaterRuntime {
+pub struct TheaterRuntime<H: Handler, E: Event> {
     /// Map of active actors indexed by their ID
     actors: HashMap<TheaterId, ActorProcess>,
     /// Map of chains index by actor ID

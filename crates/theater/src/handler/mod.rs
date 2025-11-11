@@ -2,21 +2,28 @@ use crate::actor::handle::ActorHandle;
 use crate::shutdown::ShutdownReceiver;
 use crate::wasm::{ActorComponent, ActorInstance};
 use anyhow::Result;
+use std::future::Future;
 
 /// Trait describing the lifecycle hooks every handler must implement.
 ///
 /// External handler crates can implement this trait and register their handlers
 /// with the Theater runtime without depending on the concrete `Handler` enum.
 pub trait Handler: Send + Sync + 'static {
-    async fn start(
+    fn start(
         &mut self,
         actor_handle: ActorHandle,
         shutdown_receiver: ShutdownReceiver,
-    ) -> Result<()>;
+    ) -> impl Future<Output = Result<()>> + Send;
 
-    async fn setup_host_functions(&mut self, actor_component: &mut ActorComponent) -> Result<()>;
+    fn setup_host_functions(
+        &mut self,
+        actor_component: &mut ActorComponent,
+    ) -> impl Future<Output = Result<()>> + Send;
 
-    async fn add_export_functions(&self, actor_instance: &mut ActorInstance) -> Result<()>;
+    fn add_export_functions(
+        &self,
+        actor_instance: &mut ActorInstance,
+    ) -> impl Future<Output = Result<()>> + Send;
 
     fn name(&self) -> &str;
 }
