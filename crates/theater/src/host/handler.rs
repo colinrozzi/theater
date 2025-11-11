@@ -182,12 +182,10 @@ impl SimpleHandler {
                             .actor_store
                             .record_event(ChainEventData {
                                 event_type: "message-server-export-setup".to_string(),
-                                data: EventData::Message(
-                                    MessageEventData::SimpleHandlerSetupError {
-                                        error: error_msg.clone(),
-                                        step: "add_export_functions".to_string(),
-                                    },
-                                ),
+                                data: EventData::Message(MessageEventData::HandlerSetupError {
+                                    error: error_msg.clone(),
+                                    step: "add_export_functions".to_string(),
+                                }),
                                 timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                 description: Some(error_msg),
                             });
@@ -207,7 +205,7 @@ impl SimpleHandler {
                             .record_event(ChainEventData {
                                 event_type: "environment-export-setup".to_string(),
                                 data: EventData::Environment(
-                                    EnvironmentEventData::SimpleHandlerSetupError {
+                                    EnvironmentEventData::HandlerSetupError {
                                         error: error_msg.clone(),
                                         step: "add_export_functions".to_string(),
                                     },
@@ -230,7 +228,7 @@ impl SimpleHandler {
                             .record_event(ChainEventData {
                                 event_type: "filesystem-export-setup".to_string(),
                                 data: EventData::Filesystem(
-                                    FilesystemEventData::SimpleHandlerSetupError {
+                                    FilesystemEventData::HandlerSetupError {
                                         error: error_msg.clone(),
                                         step: "add_export_functions".to_string(),
                                     },
@@ -252,7 +250,7 @@ impl SimpleHandler {
                             .actor_store
                             .record_event(ChainEventData {
                                 event_type: "http-client-export-setup".to_string(),
-                                data: EventData::Http(HttpEventData::SimpleHandlerSetupError {
+                                data: EventData::Http(HttpEventData::HandlerSetupError {
                                     error: error_msg.clone(),
                                     step: "add_export_functions".to_string(),
                                 }),
@@ -273,7 +271,7 @@ impl SimpleHandler {
                             .actor_store
                             .record_event(ChainEventData {
                                 event_type: "http-framework-export-setup".to_string(),
-                                data: EventData::Http(HttpEventData::SimpleHandlerSetupError {
+                                data: EventData::Http(HttpEventData::HandlerSetupError {
                                     error: error_msg.clone(),
                                     step: "add_export_functions".to_string(),
                                 }),
@@ -294,12 +292,10 @@ impl SimpleHandler {
                             .actor_store
                             .record_event(ChainEventData {
                                 event_type: "process-export-setup".to_string(),
-                                data: EventData::Process(
-                                    ProcessEventData::SimpleHandlerSetupError {
-                                        error: error_msg.clone(),
-                                        step: "add_export_functions".to_string(),
-                                    },
-                                ),
+                                data: EventData::Process(ProcessEventData::HandlerSetupError {
+                                    error: error_msg.clone(),
+                                    step: "add_export_functions".to_string(),
+                                }),
                                 timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                 description: Some(error_msg),
                             });
@@ -317,12 +313,10 @@ impl SimpleHandler {
                             .actor_store
                             .record_event(ChainEventData {
                                 event_type: "runtime-export-setup".to_string(),
-                                data: EventData::Runtime(
-                                    RuntimeEventData::SimpleHandlerSetupError {
-                                        error: error_msg.clone(),
-                                        step: "add_export_functions".to_string(),
-                                    },
-                                ),
+                                data: EventData::Runtime(RuntimeEventData::HandlerSetupError {
+                                    error: error_msg.clone(),
+                                    step: "add_export_functions".to_string(),
+                                }),
                                 timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                 description: Some(error_msg),
                             });
@@ -341,7 +335,7 @@ impl SimpleHandler {
                             .record_event(ChainEventData {
                                 event_type: "supervisor-export-setup".to_string(),
                                 data: EventData::Supervisor(
-                                    SupervisorEventData::SimpleHandlerSetupError {
+                                    SupervisorEventData::HandlerSetupError {
                                         error: error_msg.clone(),
                                         step: "add_export_functions".to_string(),
                                     },
@@ -363,7 +357,7 @@ impl SimpleHandler {
                             .actor_store
                             .record_event(ChainEventData {
                                 event_type: "store-export-setup".to_string(),
-                                data: EventData::Store(StoreEventData::SimpleHandlerSetupError {
+                                data: EventData::Store(StoreEventData::HandlerSetupError {
                                     error: error_msg.clone(),
                                     step: "add_export_functions".to_string(),
                                 }),
@@ -384,7 +378,7 @@ impl SimpleHandler {
                             .actor_store
                             .record_event(ChainEventData {
                                 event_type: "timing-export-setup".to_string(),
-                                data: EventData::Timing(TimingEventData::SimpleHandlerSetupError {
+                                data: EventData::Timing(TimingEventData::HandlerSetupError {
                                     error: error_msg.clone(),
                                     step: "add_export_functions".to_string(),
                                 }),
@@ -405,7 +399,7 @@ impl SimpleHandler {
                             .actor_store
                             .record_event(ChainEventData {
                                 event_type: "random-export-setup".to_string(),
-                                data: EventData::Random(RandomEventData::SimpleHandlerSetupError {
+                                data: EventData::Random(RandomEventData::HandlerSetupError {
                                     error: error_msg.clone(),
                                     step: "add_export_functions".to_string(),
                                 }),

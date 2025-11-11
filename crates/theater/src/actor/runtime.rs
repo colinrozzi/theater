@@ -38,6 +38,7 @@ use crate::ManifestConfig;
 use crate::Result;
 use crate::StateChain;
 use serde_json::Value;
+use std::marker::PhantomData;
 use std::sync::Arc;
 use std::sync::RwLock as SyncRwLock;
 use tokio::sync::mpsc::{self, Receiver, Sender};
@@ -45,7 +46,7 @@ use tokio::sync::oneshot;
 use tokio::sync::RwLock;
 use tokio::task::JoinHandle;
 use tokio::time::Instant;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info};
 
 use super::types::ActorControl;
 use super::types::ActorInfo;
@@ -68,6 +69,7 @@ pub struct ActorRuntime<H: Handler> {
     pub handler_tasks: Vec<JoinHandle<()>>,
     /// Controller for graceful shutdown of all components
     pub shutdown_controller: ShutdownController,
+    pub(crate) marker: PhantomData<H>,
 }
 
 /// # Result of starting an actor
@@ -87,7 +89,10 @@ pub enum StartActorResult {
     Error(String),
 }
 
-impl<H: Handler> ActorRuntime<H> {
+impl<H> ActorRuntime<H>
+where
+    H: Handler + From<SimpleHandler>,
+{
     pub async fn start(
         id: TheaterId,
         config: &ManifestConfig,
@@ -158,7 +163,7 @@ impl<H: Handler> ActorRuntime<H> {
                             current_status = "Running".to_string();
                             let actor_handle = ActorHandle::new(operation_tx.clone(), info_tx.clone(), control_tx.clone());
 
-                            let (init_tx, mut init_rx) = tokio::sync::broadcast::channel(1);
+                            let (init_tx, _init_rx) = tokio::sync::broadcast::channel(1);
 
                             // Call init function if needed
                             if init {
@@ -801,7 +806,7 @@ impl<H: Handler> ActorRuntime<H> {
         actor_handle: ActorHandle,
         effective_permissions: &crate::config::permissions::HandlerPermission,
     ) -> Result<Vec<H>, String> {
-        let mut handlers = Vec::new();
+        let mut handlers: Vec<H> = Vec::new();
 
         // Check if message server is permitted and requested
         if config
@@ -815,15 +820,18 @@ impl<H: Handler> ActorRuntime<H> {
                         .to_string(),
                 );
             }
-            handlers.push(SimpleHandler::MessageServer(
-                MessageServerHost::new(
-                    actor_sender,
-                    actor_mailbox,
-                    theater_tx.clone(),
+            handlers.push(
+                SimpleHandler::MessageServer(
+                    MessageServerHost::new(
+                        actor_sender,
+                        actor_mailbox,
+                        theater_tx.clone(),
+                        effective_permissions.message_server.clone(),
+                    ),
                     effective_permissions.message_server.clone(),
-                ),
-                effective_permissions.message_server.clone(),
-            ));
+                )
+                .into(),
+            );
         }
 
         for handler_config in &config.handlers {
@@ -837,49 +845,61 @@ impl<H: Handler> ActorRuntime<H> {
                     if effective_permissions.environment.is_none() {
                         return Err("Environment handler requested but not permitted by effective permissions".to_string());
                     }
-                    Some(SimpleHandler::Environment(
-                        EnvironmentHost::new(
-                            config.clone(),
+                    Some(
+                        SimpleHandler::Environment(
+                            EnvironmentHost::new(
+                                config.clone(),
+                                effective_permissions.environment.clone(),
+                            ),
                             effective_permissions.environment.clone(),
-                        ),
-                        effective_permissions.environment.clone(),
-                    ))
+                        )
+                        .into(),
+                    )
                 }
                 HandlerConfig::FileSystem { config } => {
                     // Check permission before creating handler
                     if effective_permissions.file_system.is_none() {
                         return Err("FileSystem handler requested but not permitted by effective permissions".to_string());
                     }
-                    Some(SimpleHandler::FileSystem(
-                        FileSystemHost::new(
-                            config.clone(),
+                    Some(
+                        SimpleHandler::FileSystem(
+                            FileSystemHost::new(
+                                config.clone(),
+                                effective_permissions.file_system.clone(),
+                            ),
                             effective_permissions.file_system.clone(),
-                        ),
-                        effective_permissions.file_system.clone(),
-                    ))
+                        )
+                        .into(),
+                    )
                 }
                 HandlerConfig::HttpClient { config } => {
                     // Check permission before creating handler
                     if effective_permissions.http_client.is_none() {
                         return Err("HttpClient handler requested but not permitted by effective permissions".to_string());
                     }
-                    Some(SimpleHandler::HttpClient(
-                        HttpClientHost::new(
-                            config.clone(),
+                    Some(
+                        SimpleHandler::HttpClient(
+                            HttpClientHost::new(
+                                config.clone(),
+                                effective_permissions.http_client.clone(),
+                            ),
                             effective_permissions.http_client.clone(),
-                        ),
-                        effective_permissions.http_client.clone(),
-                    ))
+                        )
+                        .into(),
+                    )
                 }
                 HandlerConfig::HttpFramework { .. } => {
                     // Check permission before creating handler
                     if effective_permissions.http_framework.is_none() {
                         return Err("HttpFramework handler requested but not permitted by effective permissions".to_string());
                     }
-                    Some(SimpleHandler::HttpFramework(
-                        HttpFramework::new(effective_permissions.http_framework.clone()),
-                        effective_permissions.http_framework.clone(),
-                    ))
+                    Some(
+                        SimpleHandler::HttpFramework(
+                            HttpFramework::new(effective_permissions.http_framework.clone()),
+                            effective_permissions.http_framework.clone(),
+                        )
+                        .into(),
+                    )
                 }
                 HandlerConfig::Runtime { config } => {
                     // Check permission before creating handler
@@ -889,27 +909,33 @@ impl<H: Handler> ActorRuntime<H> {
                                 .to_string(),
                         );
                     }
-                    Some(SimpleHandler::Runtime(
-                        RuntimeHost::new(
-                            config.clone(),
-                            theater_tx.clone(),
+                    Some(
+                        SimpleHandler::Runtime(
+                            RuntimeHost::new(
+                                config.clone(),
+                                theater_tx.clone(),
+                                effective_permissions.runtime.clone(),
+                            ),
                             effective_permissions.runtime.clone(),
-                        ),
-                        effective_permissions.runtime.clone(),
-                    ))
+                        )
+                        .into(),
+                    )
                 }
                 HandlerConfig::Supervisor { config } => {
                     // Check permission before creating handler
                     if effective_permissions.supervisor.is_none() {
                         return Err("Supervisor handler requested but not permitted by effective permissions".to_string());
                     }
-                    Some(SimpleHandler::Supervisor(
-                        SupervisorHost::new(
-                            config.clone(),
+                    Some(
+                        SimpleHandler::Supervisor(
+                            SupervisorHost::new(
+                                config.clone(),
+                                effective_permissions.supervisor.clone(),
+                            ),
                             effective_permissions.supervisor.clone(),
-                        ),
-                        effective_permissions.supervisor.clone(),
-                    ))
+                        )
+                        .into(),
+                    )
                 }
                 HandlerConfig::Process { config } => {
                     // Check permission before creating handler
@@ -919,14 +945,17 @@ impl<H: Handler> ActorRuntime<H> {
                                 .to_string(),
                         );
                     }
-                    Some(SimpleHandler::Process(
-                        ProcessHost::new(
-                            config.clone(),
-                            actor_handle.clone(),
+                    Some(
+                        SimpleHandler::Process(
+                            ProcessHost::new(
+                                config.clone(),
+                                actor_handle.clone(),
+                                effective_permissions.process.clone(),
+                            ),
                             effective_permissions.process.clone(),
-                        ),
-                        effective_permissions.process.clone(),
-                    ))
+                        )
+                        .into(),
+                    )
                 }
                 HandlerConfig::Store { config } => {
                     // Check permission before creating handler
@@ -936,10 +965,13 @@ impl<H: Handler> ActorRuntime<H> {
                                 .to_string(),
                         );
                     }
-                    Some(SimpleHandler::Store(
-                        StoreHost::new(config.clone(), effective_permissions.store.clone()),
-                        effective_permissions.store.clone(),
-                    ))
+                    Some(
+                        SimpleHandler::Store(
+                            StoreHost::new(config.clone(), effective_permissions.store.clone()),
+                            effective_permissions.store.clone(),
+                        )
+                        .into(),
+                    )
                 }
                 HandlerConfig::Timing { config } => {
                     // Check permission before creating handler
@@ -949,10 +981,13 @@ impl<H: Handler> ActorRuntime<H> {
                                 .to_string(),
                         );
                     }
-                    Some(SimpleHandler::Timing(
-                        TimingHost::new(config.clone(), effective_permissions.timing.clone()),
-                        effective_permissions.timing.clone(),
-                    ))
+                    Some(
+                        SimpleHandler::Timing(
+                            TimingHost::new(config.clone(), effective_permissions.timing.clone()),
+                            effective_permissions.timing.clone(),
+                        )
+                        .into(),
+                    )
                 }
                 HandlerConfig::Random { config } => {
                     // Check permission before creating handler
@@ -962,10 +997,13 @@ impl<H: Handler> ActorRuntime<H> {
                                 .to_string(),
                         );
                     }
-                    Some(SimpleHandler::Random(
-                        RandomHost::new(config.clone(), effective_permissions.random.clone()),
-                        effective_permissions.random.clone(),
-                    ))
+                    Some(
+                        SimpleHandler::Random(
+                            RandomHost::new(config.clone(), effective_permissions.random.clone()),
+                            effective_permissions.random.clone(),
+                        )
+                        .into(),
+                    )
                 }
             };
             if let Some(handler) = handler {

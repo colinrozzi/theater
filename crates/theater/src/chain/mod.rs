@@ -42,6 +42,7 @@ use crate::events::{ChainEventData, EventData, EventPayload};
 use crate::messages::TheaterCommand;
 use crate::store::ContentRef;
 use crate::TheaterId;
+use theater_chain::event::EventType;
 
 /// # Chain Event
 ///
@@ -185,6 +186,16 @@ impl fmt::Display for ChainEvent {
             style(&self.event_type).cyan(),
             content
         )
+    }
+}
+
+impl EventType for ChainEvent {
+    fn event_type(&self) -> String {
+        self.event_type.clone()
+    }
+
+    fn len(&self) -> usize {
+        self.data.len()
     }
 }
 

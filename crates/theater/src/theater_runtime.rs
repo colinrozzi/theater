@@ -11,6 +11,7 @@ use crate::config::permissions::HandlerPermission;
 use crate::events::runtime::RuntimeEventData;
 use crate::events::EventData;
 use crate::handler::Handler;
+use crate::host::handler::SimpleHandler;
 use crate::id::TheaterId;
 use crate::messages::{
     ActorChannelClose, ActorChannelMessage, ActorChannelOpen, ActorResult, ChannelId,
@@ -26,6 +27,7 @@ use crate::{ManifestConfig, StateChain};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::marker::PhantomData;
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 use theater_chain::event::EventType;
@@ -90,9 +92,9 @@ use tracing::{debug, error, info, warn};
 /// The runtime uses a command-based architecture where all operations are sent as messages
 /// through channels. This allows for asynchronous processing and helps maintain isolation
 /// between components.
-pub struct TheaterRuntime<H: Handler, E: EventType> {
+pub struct TheaterRuntime<H: Handler = SimpleHandler, E: EventType = ChainEvent> {
     /// Map of active actors indexed by their ID
-    actors: HashMap<TheaterId, ActorProcess>,
+    actors: HashMap<TheaterId, ActorProcess<H>>,
     /// Map of chains index by actor ID
     chains: HashMap<TheaterId, Arc<RwLock<StateChain>>>,
     /// Sender for commands to the runtime
@@ -109,6 +111,7 @@ pub struct TheaterRuntime<H: Handler, E: EventType> {
     wasm_engine: wasmtime::Engine,
     /// Runtime permissions
     permissions: HandlerPermission,
+    marker: PhantomData<E>,
 }
 
 /// # ActorProcess
@@ -125,13 +128,13 @@ pub struct TheaterRuntime<H: Handler, E: EventType> {
 /// The ActorProcess is maintained by the TheaterRuntime and typically not accessed directly
 /// by users of the library. It contains internal channels used to communicate with the actor's
 /// execution environment.
-pub struct ActorProcess {
+pub struct ActorProcess<H: Handler = SimpleHandler> {
     /// Unique identifier for the actor
     pub actor_id: TheaterId,
     /// Actor Name
     pub name: String,
     /// Task handle for the running actor
-    pub process: JoinHandle<ActorRuntime>,
+    pub process: JoinHandle<ActorRuntime<H>>,
     /// Channel for sending messages to the actor
     pub mailbox_tx: mpsc::Sender<ActorMessage>,
     /// Channel for sending operations to the actor
@@ -154,7 +157,11 @@ pub struct ActorProcess {
     pub supervisor_tx: Option<Sender<ActorResult>>,
 }
 
-impl TheaterRuntime {
+impl<H, E> TheaterRuntime<H, E>
+where
+    H: Handler + From<SimpleHandler>,
+    E: EventType,
+{
     /// Creates a new TheaterRuntime with the given communication channels.
     ///
     /// ## Parameters
@@ -200,6 +207,7 @@ impl TheaterRuntime {
             channel_events_tx,
             wasm_engine: engine,
             permissions,
+            marker: PhantomData,
         })
     }
 
@@ -933,7 +941,7 @@ impl TheaterRuntime {
         let engine = self.wasm_engine.clone();
         let permissions = self.permissions.clone();
         let actor_runtime_process = tokio::spawn(async move {
-            ActorRuntime::start(
+            ActorRuntime::<H>::start(
                 actor_id_for_task.clone(),
                 &manifest_clone,
                 init_value,
@@ -959,6 +967,7 @@ impl TheaterRuntime {
                 actor_id: actor_id_for_task,
                 handler_tasks: Vec::new(),
                 shutdown_controller: ShutdownController::new(),
+                marker: PhantomData,
             }
         });
 
@@ -1017,8 +1026,8 @@ impl TheaterRuntime {
         let should_remove = if let std::collections::hash_map::Entry::Occupied(mut entry) =
             self.subscriptions.entry(actor_id.clone())
         {
-            let subscribers = entry.get_mut();
-            let mut to_remove = Vec::new();
+            let subscribers: &mut Vec<Sender<Result<ChainEvent, ActorError>>> = entry.get_mut();
+            let mut to_remove: Vec<usize> = Vec::new();
 
             // Send events and track failures
             for (index, subscriber) in subscribers.iter().enumerate() {

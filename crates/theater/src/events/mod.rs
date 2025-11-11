@@ -53,12 +53,10 @@ impl<T> EventPayload for T where
 /// converted to a `ChainEvent` for inclusion in an actor's event chain using
 /// the `to_chain_event` method.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(
-    bound(
-        serialize = "E: Serialize",
-        deserialize = "E: serde::de::DeserializeOwned"
-    )
-)]
+#[serde(bound(
+    serialize = "E: Serialize",
+    deserialize = "E: serde::de::DeserializeOwned"
+))]
 pub struct ChainEventData<E = EventData>
 where
     E: EventPayload,
