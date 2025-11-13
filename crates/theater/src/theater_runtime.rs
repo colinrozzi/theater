@@ -92,7 +92,7 @@ use tracing::{debug, error, info, warn};
 /// The runtime uses a command-based architecture where all operations are sent as messages
 /// through channels. This allows for asynchronous processing and helps maintain isolation
 /// between components.
-pub struct TheaterRuntime<H: Handler = SimpleHandler, E: EventType = ChainEvent> {
+pub struct TheaterRuntime<H: Handler, E: EventType> {
     /// Map of active actors indexed by their ID
     actors: HashMap<TheaterId, ActorProcess<H>>,
     /// Map of chains index by actor ID

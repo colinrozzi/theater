@@ -1,12 +1,14 @@
 use anyhow::Result;
+use theater::chain::ChainEvent;
 use theater::config::permissions::HandlerPermission;
+use theater::host::SimpleHandler;
 use theater::messages::TheaterCommand;
 use theater::theater_runtime::TheaterRuntime;
 use theater::ChannelEvent;
 use tokio::sync::mpsc::{Receiver, Sender};
 
 pub struct SimpleTheater {
-    runtime: TheaterRuntime,
+    runtime: TheaterRuntime<SimpleHandler, ChainEvent>,
 }
 
 impl SimpleTheater {
