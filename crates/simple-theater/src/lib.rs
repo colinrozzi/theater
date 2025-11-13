@@ -1,14 +1,24 @@
-pub fn add(left: u64, right: u64) -> u64 {
-    left + right
+use anyhow::Result;
+use theater::config::permissions::HandlerPermission;
+use theater::messages::TheaterCommand;
+use theater::theater_runtime::TheaterRuntime;
+use theater::ChannelEvent;
+use tokio::sync::mpsc::{Receiver, Sender};
+
+pub struct SimpleTheater {
+    runtime: TheaterRuntime,
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+impl SimpleTheater {
+    pub async fn new(
+        theater_tx: Sender<TheaterCommand>,
+        theater_rx: Receiver<TheaterCommand>,
+        channel_events_tx: Option<Sender<ChannelEvent>>,
+        permissions: HandlerPermission,
+    ) -> Result<Self> {
+        let runtime =
+            TheaterRuntime::new(theater_tx, theater_rx, channel_events_tx, permissions).await?;
 
-    #[test]
-    fn it_works() {
-        let result = add(2, 2);
-        assert_eq!(result, 4);
+        Ok(Self { runtime })
     }
 }

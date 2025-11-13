@@ -3126,6 +3126,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "simple-theater"
+version = "0.2.1"
+dependencies = [
+ "anyhow",
+ "serde",
+ "serde_json",
+ "theater",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "slab"
 version = "0.4.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
