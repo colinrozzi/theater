@@ -11,7 +11,6 @@ use crate::config::permissions::HandlerPermission;
 use crate::events::runtime::RuntimeEventData;
 use crate::events::EventData;
 use crate::handler::Handler;
-use crate::host::handler::SimpleHandler;
 use crate::id::TheaterId;
 use crate::messages::{
     ActorChannelClose, ActorChannelMessage, ActorChannelOpen, ActorResult, ChannelId,
@@ -128,7 +127,7 @@ pub struct TheaterRuntime<H: Handler, E: EventType> {
 /// The ActorProcess is maintained by the TheaterRuntime and typically not accessed directly
 /// by users of the library. It contains internal channels used to communicate with the actor's
 /// execution environment.
-pub struct ActorProcess<H: Handler = SimpleHandler> {
+pub struct ActorProcess<H: Handler> {
     /// Unique identifier for the actor
     pub actor_id: TheaterId,
     /// Actor Name
@@ -159,7 +158,7 @@ pub struct ActorProcess<H: Handler = SimpleHandler> {
 
 impl<H, E> TheaterRuntime<H, E>
 where
-    H: Handler + From<SimpleHandler>,
+    H: Handler,
     E: EventType,
 {
     /// Creates a new TheaterRuntime with the given communication channels.

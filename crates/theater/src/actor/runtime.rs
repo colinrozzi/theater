@@ -91,7 +91,7 @@ pub enum StartActorResult {
 
 impl<H> ActorRuntime<H>
 where
-    H: Handler + From<SimpleHandler>,
+    H: Handler,
 {
     pub async fn start(
         id: TheaterId,
