@@ -10,7 +10,7 @@ use crate::chain::ChainEvent;
 use crate::config::permissions::HandlerPermission;
 use crate::events::runtime::RuntimeEventData;
 use crate::events::EventData;
-use crate::handler::Handler;
+use crate::handler::HostHandler;
 use crate::id::TheaterId;
 use crate::messages::{
     ActorChannelClose, ActorChannelMessage, ActorChannelOpen, ActorResult, ChannelId,
@@ -91,7 +91,7 @@ use tracing::{debug, error, info, warn};
 /// The runtime uses a command-based architecture where all operations are sent as messages
 /// through channels. This allows for asynchronous processing and helps maintain isolation
 /// between components.
-pub struct TheaterRuntime<H: Handler, E: EventType> {
+pub struct TheaterRuntime<H: HostHandler, E: EventType> {
     /// Map of active actors indexed by their ID
     actors: HashMap<TheaterId, ActorProcess<H>>,
     /// Map of chains index by actor ID
@@ -110,6 +110,8 @@ pub struct TheaterRuntime<H: Handler, E: EventType> {
     wasm_engine: wasmtime::Engine,
     /// Runtime permissions
     permissions: HandlerPermission,
+    /// Host handlers
+    host_handler: H,
     marker: PhantomData<E>,
 }
 
@@ -127,7 +129,7 @@ pub struct TheaterRuntime<H: Handler, E: EventType> {
 /// The ActorProcess is maintained by the TheaterRuntime and typically not accessed directly
 /// by users of the library. It contains internal channels used to communicate with the actor's
 /// execution environment.
-pub struct ActorProcess<H: Handler> {
+pub struct ActorProcess<H: HostHandler> {
     /// Unique identifier for the actor
     pub actor_id: TheaterId,
     /// Actor Name
@@ -158,7 +160,7 @@ pub struct ActorProcess<H: Handler> {
 
 impl<H, E> TheaterRuntime<H, E>
 where
-    H: Handler,
+    H: HostHandler,
     E: EventType,
 {
     /// Creates a new TheaterRuntime with the given communication channels.
@@ -192,6 +194,7 @@ where
         theater_rx: Receiver<TheaterCommand>,
         channel_events_tx: Option<Sender<crate::messages::ChannelEvent>>,
         permissions: HandlerPermission,
+        host_handler: H,
     ) -> Result<Self> {
         info!("Theater runtime initializing");
         let engine = wasmtime::Engine::new(wasmtime::Config::new().async_support(true))?;
@@ -206,6 +209,7 @@ where
             channel_events_tx,
             wasm_engine: engine,
             permissions,
+            host_handler,
             marker: PhantomData,
         })
     }
@@ -958,6 +962,7 @@ where
                 engine,
                 permissions,
                 chain,
+                self.host_handler,
             )
             .await;
 

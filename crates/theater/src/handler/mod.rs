@@ -27,3 +27,18 @@ pub trait Handler: Send + Sync + 'static {
 
     fn name(&self) -> &str;
 }
+
+pub trait HostHandler: Send + Sync + 'static + Sized {
+    fn start(
+        &mut self,
+        actor_handle: ActorHandle,
+        shutdown_receiver: ShutdownReceiver,
+    ) -> impl Future<Output = Result<()>> + Send;
+
+    fn name(&self) -> &str;
+
+    fn setup_handlers(
+        &self,
+        actor_component: &mut ActorComponent,
+    ) -> impl Future<Output = Result<Vec<Self>>> + Send;
+}

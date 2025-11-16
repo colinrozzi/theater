@@ -12,19 +12,7 @@ use crate::config::permissions::HandlerPermission;
 use crate::events::theater_runtime::TheaterRuntimeEventData;
 use crate::events::wasm::WasmEventData;
 use crate::events::{ChainEventData, EventData};
-use crate::handler::Handler;
-use crate::host::environment::EnvironmentHost;
-use crate::host::filesystem::FileSystemHost;
-use crate::host::framework::HttpFramework;
-use crate::host::handler::SimpleHandler;
-use crate::host::http_client::HttpClientHost;
-use crate::host::message_server::MessageServerHost;
-use crate::host::process::ProcessHost;
-use crate::host::random::RandomHost;
-use crate::host::runtime::RuntimeHost;
-use crate::host::store::StoreHost;
-use crate::host::supervisor::SupervisorHost;
-use crate::host::timing::TimingHost;
+use crate::handler::HostHandler;
 use crate::id::TheaterId;
 use crate::messages::{ActorMessage, TheaterCommand};
 use crate::metrics::MetricsCollector;
@@ -32,7 +20,6 @@ use crate::shutdown::ShutdownType;
 use crate::shutdown::{ShutdownController, ShutdownReceiver};
 use crate::store::ContentStore;
 use crate::wasm::{ActorComponent, ActorInstance};
-use crate::HandlerConfig;
 use crate::ManifestConfig;
 
 use crate::Result;
@@ -62,13 +49,15 @@ const SHUTDOWN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 /// `ActorRuntime` manages the various components that make up an actor's execution environment,
 /// including handlers and communication channels. It's responsible for starting the actor,
 /// setting up its capabilities via handlers, executing operations, and ensuring proper shutdown.
-pub struct ActorRuntime<H: Handler> {
+pub struct ActorRuntime<H: HostHandler> {
     /// Unique identifier for this actor
     pub actor_id: TheaterId,
     /// Handles to the running handler tasks
     pub handler_tasks: Vec<JoinHandle<()>>,
     /// Controller for graceful shutdown of all components
     pub shutdown_controller: ShutdownController,
+    /// Handlers
+    pub host_handler: H,
     pub(crate) marker: PhantomData<H>,
 }
 
@@ -91,7 +80,7 @@ pub enum StartActorResult {
 
 impl<H> ActorRuntime<H>
 where
-    H: Handler,
+    H: HostHandler,
 {
     pub async fn start(
         id: TheaterId,
@@ -111,6 +100,7 @@ where
         engine: wasmtime::Engine,
         parent_permissions: HandlerPermission,
         chain: Arc<SyncRwLock<StateChain>>,
+        host_handler: H,
     ) {
         info!("Actor runtime starting communication loops");
         let paused = Arc::new(RwLock::new(false));
@@ -132,6 +122,7 @@ where
             parent_permissions,
             status_tx,
             chain,
+            host_handler,
         )));
 
         // These will be set once setup completes
@@ -569,6 +560,7 @@ where
         parent_permissions: HandlerPermission,
         status_tx: Sender<String>,
         chain: Arc<SyncRwLock<StateChain>>,
+        host_handler: H,
     ) -> Result<(ActorInstance, Vec<H>, MetricsCollector), ActorError> {
         let actor_handle = ActorHandle::new(operation_tx, info_tx, control_tx);
 
@@ -585,46 +577,6 @@ where
         .await
         .map_err(|e| ActorError::UnexpectedError(format!("Failed to setup actor store: {}", e)))?;
 
-        let _ = status_tx.send("Validating permissions".to_string()).await;
-
-        // Calculate effective permissions
-        let effective_permissions = config.calculate_effective_permissions(&parent_permissions);
-
-        actor_store.record_event(ChainEventData {
-            event_type: "theater-runtime".to_string(),
-            data: EventData::TheaterRuntime(TheaterRuntimeEventData::ValidatingPermissions {
-                permissions: effective_permissions.clone(),
-            }),
-            timestamp: chrono::Utc::now().timestamp_millis() as u64,
-            description: format!("Actor [{}] loaded successfully", id).into(),
-        });
-
-        // Validate that the manifest doesn't exceed effective permissions
-        match crate::config::enforcement::validate_manifest_permissions(
-            &config,
-            &effective_permissions,
-        ) {
-            Ok(_) => {}
-            Err(e) => {
-                actor_store.record_event(ChainEventData {
-                    event_type: "theater-runtime".to_string(),
-                    data: EventData::TheaterRuntime(TheaterRuntimeEventData::ActorSetupError {
-                        error: e.to_string(),
-                    }),
-                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                    description: format!(
-                        "Loading actor [{}] from manifest failed validation: {}",
-                        id, e
-                    )
-                    .into(),
-                });
-                return Err(ActorError::UnexpectedError(format!(
-                    "Permission validation failed: {}",
-                    e
-                )));
-            }
-        }
-
         let _ = status_tx.send("Creating handlers".to_string()).await;
 
         actor_store.record_event(ChainEventData {
@@ -633,34 +585,6 @@ where
             timestamp: chrono::Utc::now().timestamp_millis() as u64,
             description: format!("Creating handlers for actor [{}]", id).into(),
         });
-
-        // Create handlers with effective permissions and validation
-        let handlers = match Self::create_handlers(
-            actor_sender,
-            actor_mailbox,
-            theater_tx.clone(),
-            &config,
-            actor_handle.clone(),
-            &effective_permissions,
-        ) {
-            Ok(handlers) => handlers,
-            Err(e) => {
-                error!("Failed to create handlers: {}", e);
-                actor_store.record_event(ChainEventData {
-                    event_type: "theater-runtime".to_string(),
-                    data: EventData::TheaterRuntime(TheaterRuntimeEventData::ActorSetupError {
-                        error: e.clone(),
-                    }),
-                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                    description: format!("Creating handlers for actor [{}] failed: {}", id, e)
-                        .into(),
-                });
-                return Err(ActorError::UnexpectedError(format!(
-                    "Handler creation failed: {}",
-                    e
-                )));
-            }
-        };
 
         let _ = status_tx.send("Creating component".to_string()).await;
 
@@ -695,8 +619,8 @@ where
             description: format!("Setting up host functions for actor [{}]", id).into(),
         });
 
-        // Setup host functions
-        let handlers = Self::setup_host_functions(&mut actor_component, handlers)
+        let handlers = host_handler
+            .setup_handlers(&mut actor_component)
             .await
             .map_err(|e| {
                 ActorError::UnexpectedError(format!("Host function setup failed: {}", e))
@@ -709,17 +633,6 @@ where
             .await
             .map_err(|e| {
                 ActorError::UnexpectedError(format!("Component instantiation failed: {}", e))
-            })?;
-
-        let _ = status_tx
-            .send("Setting up export functions".to_string())
-            .await;
-
-        // Setup export functions
-        Self::setup_export_functions(&mut actor_instance, &handlers)
-            .await
-            .map_err(|e| {
-                ActorError::UnexpectedError(format!("Export function setup failed: {}", e))
             })?;
 
         let _ = status_tx.send("Initializing state".to_string()).await;
@@ -797,223 +710,6 @@ where
         Ok((actor_store, manifest_id.to_string()))
     }
 
-    /// Creates all the handlers needed by the actor with permission validation
-    fn create_handlers(
-        actor_sender: Sender<ActorMessage>,
-        actor_mailbox: Receiver<ActorMessage>,
-        theater_tx: Sender<TheaterCommand>,
-        config: &ManifestConfig,
-        actor_handle: ActorHandle,
-        effective_permissions: &crate::config::permissions::HandlerPermission,
-    ) -> Result<Vec<H>, String> {
-        let mut handlers: Vec<H> = Vec::new();
-
-        // Check if message server is permitted and requested
-        if config
-            .handlers
-            .iter()
-            .any(|h| matches!(h, HandlerConfig::MessageServer { .. }))
-        {
-            if effective_permissions.message_server.is_none() {
-                return Err(
-                    "MessageServer handler requested but not permitted by effective permissions"
-                        .to_string(),
-                );
-            }
-            handlers.push(
-                SimpleHandler::MessageServer(
-                    MessageServerHost::new(
-                        actor_sender,
-                        actor_mailbox,
-                        theater_tx.clone(),
-                        effective_permissions.message_server.clone(),
-                    ),
-                    effective_permissions.message_server.clone(),
-                )
-                .into(),
-            );
-        }
-
-        for handler_config in &config.handlers {
-            let handler = match handler_config {
-                HandlerConfig::MessageServer { .. } => {
-                    debug!("MessageServer handler already created");
-                    None
-                }
-                HandlerConfig::Environment { config } => {
-                    // Check permission before creating handler
-                    if effective_permissions.environment.is_none() {
-                        return Err("Environment handler requested but not permitted by effective permissions".to_string());
-                    }
-                    Some(
-                        SimpleHandler::Environment(
-                            EnvironmentHost::new(
-                                config.clone(),
-                                effective_permissions.environment.clone(),
-                            ),
-                            effective_permissions.environment.clone(),
-                        )
-                        .into(),
-                    )
-                }
-                HandlerConfig::FileSystem { config } => {
-                    // Check permission before creating handler
-                    if effective_permissions.file_system.is_none() {
-                        return Err("FileSystem handler requested but not permitted by effective permissions".to_string());
-                    }
-                    Some(
-                        SimpleHandler::FileSystem(
-                            FileSystemHost::new(
-                                config.clone(),
-                                effective_permissions.file_system.clone(),
-                            ),
-                            effective_permissions.file_system.clone(),
-                        )
-                        .into(),
-                    )
-                }
-                HandlerConfig::HttpClient { config } => {
-                    // Check permission before creating handler
-                    if effective_permissions.http_client.is_none() {
-                        return Err("HttpClient handler requested but not permitted by effective permissions".to_string());
-                    }
-                    Some(
-                        SimpleHandler::HttpClient(
-                            HttpClientHost::new(
-                                config.clone(),
-                                effective_permissions.http_client.clone(),
-                            ),
-                            effective_permissions.http_client.clone(),
-                        )
-                        .into(),
-                    )
-                }
-                HandlerConfig::HttpFramework { .. } => {
-                    // Check permission before creating handler
-                    if effective_permissions.http_framework.is_none() {
-                        return Err("HttpFramework handler requested but not permitted by effective permissions".to_string());
-                    }
-                    Some(
-                        SimpleHandler::HttpFramework(
-                            HttpFramework::new(effective_permissions.http_framework.clone()),
-                            effective_permissions.http_framework.clone(),
-                        )
-                        .into(),
-                    )
-                }
-                HandlerConfig::Runtime { config } => {
-                    // Check permission before creating handler
-                    if effective_permissions.runtime.is_none() {
-                        return Err(
-                            "Runtime handler requested but not permitted by effective permissions"
-                                .to_string(),
-                        );
-                    }
-                    Some(
-                        SimpleHandler::Runtime(
-                            RuntimeHost::new(
-                                config.clone(),
-                                theater_tx.clone(),
-                                effective_permissions.runtime.clone(),
-                            ),
-                            effective_permissions.runtime.clone(),
-                        )
-                        .into(),
-                    )
-                }
-                HandlerConfig::Supervisor { config } => {
-                    // Check permission before creating handler
-                    if effective_permissions.supervisor.is_none() {
-                        return Err("Supervisor handler requested but not permitted by effective permissions".to_string());
-                    }
-                    Some(
-                        SimpleHandler::Supervisor(
-                            SupervisorHost::new(
-                                config.clone(),
-                                effective_permissions.supervisor.clone(),
-                            ),
-                            effective_permissions.supervisor.clone(),
-                        )
-                        .into(),
-                    )
-                }
-                HandlerConfig::Process { config } => {
-                    // Check permission before creating handler
-                    if effective_permissions.process.is_none() {
-                        return Err(
-                            "Process handler requested but not permitted by effective permissions"
-                                .to_string(),
-                        );
-                    }
-                    Some(
-                        SimpleHandler::Process(
-                            ProcessHost::new(
-                                config.clone(),
-                                actor_handle.clone(),
-                                effective_permissions.process.clone(),
-                            ),
-                            effective_permissions.process.clone(),
-                        )
-                        .into(),
-                    )
-                }
-                HandlerConfig::Store { config } => {
-                    // Check permission before creating handler
-                    if effective_permissions.store.is_none() {
-                        return Err(
-                            "Store handler requested but not permitted by effective permissions"
-                                .to_string(),
-                        );
-                    }
-                    Some(
-                        SimpleHandler::Store(
-                            StoreHost::new(config.clone(), effective_permissions.store.clone()),
-                            effective_permissions.store.clone(),
-                        )
-                        .into(),
-                    )
-                }
-                HandlerConfig::Timing { config } => {
-                    // Check permission before creating handler
-                    if effective_permissions.timing.is_none() {
-                        return Err(
-                            "Timing handler requested but not permitted by effective permissions"
-                                .to_string(),
-                        );
-                    }
-                    Some(
-                        SimpleHandler::Timing(
-                            TimingHost::new(config.clone(), effective_permissions.timing.clone()),
-                            effective_permissions.timing.clone(),
-                        )
-                        .into(),
-                    )
-                }
-                HandlerConfig::Random { config } => {
-                    // Check permission before creating handler
-                    if effective_permissions.random.is_none() {
-                        return Err(
-                            "Random handler requested but not permitted by effective permissions"
-                                .to_string(),
-                        );
-                    }
-                    Some(
-                        SimpleHandler::Random(
-                            RandomHost::new(config.clone(), effective_permissions.random.clone()),
-                            effective_permissions.random.clone(),
-                        )
-                        .into(),
-                    )
-                }
-            };
-            if let Some(handler) = handler {
-                handlers.push(handler);
-            }
-        }
-
-        Ok(handlers)
-    }
-
     /// Creates and initializes the actor component
     async fn create_actor_component(
         config: &ManifestConfig,
@@ -1040,29 +736,6 @@ where
         }
     }
 
-    /// Sets up host functions for all handlers
-    async fn setup_host_functions(
-        actor_component: &mut ActorComponent,
-        mut handlers: Vec<H>,
-    ) -> Result<Vec<H>> {
-        for handler in &mut handlers {
-            info!(
-                "Setting up host functions for handler: {:?}",
-                handler.name()
-            );
-            if let Err(e) = handler.setup_host_functions(actor_component).await {
-                let error_message = format!(
-                    "Failed to set up host functions for handler {}: {}",
-                    handler.name(),
-                    e
-                );
-                error!("{}", error_message);
-                return Err(e.into());
-            }
-        }
-        Ok(handlers)
-    }
-
     /// Instantiates the actor component
     async fn instantiate_component(
         actor_component: ActorComponent,
@@ -1076,26 +749,6 @@ where
                 Err(e.into())
             }
         }
-    }
-
-    /// Sets up export functions for all handlers
-    async fn setup_export_functions(
-        actor_instance: &mut ActorInstance,
-        handlers: &[H],
-    ) -> Result<()> {
-        for handler in handlers {
-            info!("Creating functions for handler: {:?}", handler.name());
-            if let Err(e) = handler.add_export_functions(actor_instance).await {
-                let error_message = format!(
-                    "Failed to create export functions for handler {}: {}",
-                    handler.name(),
-                    e
-                );
-                error!("{}", error_message);
-                return Err(e.into());
-            }
-        }
-        Ok(())
     }
 
     ///

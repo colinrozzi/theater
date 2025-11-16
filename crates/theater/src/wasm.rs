@@ -214,6 +214,8 @@ pub struct ActorComponent {
     pub actor_store: ActorStore,
     pub linker: Linker<ActorStore>,
     pub engine: Engine,
+    pub import_types: Vec<(&str, ComponentItem)>,
+    pub export_types: Vec<(&str, ComponentItem)>,
     pub exports: HashMap<String, ComponentExportIndex>,
 }
 
@@ -333,6 +335,17 @@ impl ActorComponent {
         };
         let linker = Linker::new(&engine);
 
+        let component_type = component.component_type();
+        let import_types = Vec::new();
+        for import in component_type.imports(&engine) {
+            import_types.push(import)
+        }
+
+        let export_types = Vec::new();
+        for export in component_type.exports(&engine) {
+            export_types.push(export)
+        }
+
         Ok(ActorComponent {
             name,
             component,
@@ -340,6 +353,8 @@ impl ActorComponent {
             linker,
             engine,
             exports: HashMap::new(),
+            import_types,
+            export_types,
         })
     }
 
