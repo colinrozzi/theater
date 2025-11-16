@@ -33,34 +33,42 @@ impl HostHandler for SimpleHandlerWrapper {
         actor_handle: theater::actor::handle::ActorHandle,
         shutdown_receiver: theater::shutdown::ShutdownReceiver,
     ) -> impl Future<Output = Result<()>> + Send {
-        match self {
-            SimpleHandlerWrapper::MessageServer(handler) => {
-                handler.start(actor_handle, shutdown_receiver)
+        async move {
+            match self {
+                SimpleHandlerWrapper::MessageServer(handler) => {
+                    handler.start(actor_handle, shutdown_receiver).await
+                }
+                SimpleHandlerWrapper::Environment(handler) => {
+                    handler.start(actor_handle, shutdown_receiver).await
+                }
+                SimpleHandlerWrapper::FileSystem(handler) => {
+                    handler.start(actor_handle, shutdown_receiver).await
+                }
+                SimpleHandlerWrapper::HttpClient(handler) => {
+                    handler.start(actor_handle, shutdown_receiver).await
+                }
+                SimpleHandlerWrapper::HttpFramework(handler) => {
+                    handler.start(actor_handle, shutdown_receiver).await
+                }
+                SimpleHandlerWrapper::Process(handler) => {
+                    handler.start(actor_handle, shutdown_receiver).await
+                }
+                SimpleHandlerWrapper::Runtime(handler) => {
+                    handler.start(actor_handle, shutdown_receiver).await
+                }
+                SimpleHandlerWrapper::Supervisor(handler) => {
+                    handler.start(actor_handle, shutdown_receiver).await
+                }
+                SimpleHandlerWrapper::Store(handler) => {
+                    handler.start(actor_handle, shutdown_receiver).await
+                }
+                SimpleHandlerWrapper::Timing(handler) => {
+                    handler.start(actor_handle, shutdown_receiver).await
+                }
+                SimpleHandlerWrapper::Random(handler) => {
+                    handler.start(actor_handle, shutdown_receiver).await
+                }
             }
-            SimpleHandlerWrapper::Environment(handler) => {
-                handler.start(actor_handle, shutdown_receiver)
-            }
-            SimpleHandlerWrapper::FileSystem(handler) => {
-                handler.start(actor_handle, shutdown_receiver)
-            }
-            SimpleHandlerWrapper::HttpClient(handler) => {
-                handler.start(actor_handle, shutdown_receiver)
-            }
-            SimpleHandlerWrapper::HttpFramework(handler) => {
-                handler.start(actor_handle, shutdown_receiver)
-            }
-            SimpleHandlerWrapper::Process(handler) => {
-                handler.start(actor_handle, shutdown_receiver)
-            }
-            SimpleHandlerWrapper::Runtime(handler) => {
-                handler.start(actor_handle, shutdown_receiver)
-            }
-            SimpleHandlerWrapper::Supervisor(handler) => {
-                handler.start(actor_handle, shutdown_receiver)
-            }
-            SimpleHandlerWrapper::Store(handler) => handler.start(actor_handle, shutdown_receiver),
-            SimpleHandlerWrapper::Timing(handler) => handler.start(actor_handle, shutdown_receiver),
-            SimpleHandlerWrapper::Random(handler) => handler.start(actor_handle, shutdown_receiver),
         }
     }
 
