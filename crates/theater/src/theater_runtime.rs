@@ -943,6 +943,7 @@ where
         let manifest_clone = manifest.clone();
         let engine = self.wasm_engine.clone();
         let permissions = self.permissions.clone();
+        let host_handler = self.host_handler.clone();
         let actor_runtime_process = tokio::spawn(async move {
             ActorRuntime::<H>::start(
                 actor_id_for_task.clone(),
@@ -962,7 +963,7 @@ where
                 engine,
                 permissions,
                 chain,
-                self.host_handler,
+                host_handler,
             )
             .await;
 

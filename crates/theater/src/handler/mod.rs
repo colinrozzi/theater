@@ -28,7 +28,7 @@ pub trait Handler: Send + Sync + 'static {
     fn name(&self) -> &str;
 }
 
-pub trait HostHandler: Send + Sync + 'static + Sized {
+pub trait HostHandler: Send + Sync + 'static + Sized + Clone {
     fn start(
         &mut self,
         actor_handle: ActorHandle,

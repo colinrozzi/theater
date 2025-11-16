@@ -56,8 +56,6 @@ pub struct ActorRuntime<H: HostHandler> {
     pub handler_tasks: Vec<JoinHandle<()>>,
     /// Controller for graceful shutdown of all components
     pub shutdown_controller: ShutdownController,
-    /// Handlers
-    pub host_handler: H,
     pub(crate) marker: PhantomData<H>,
 }
 

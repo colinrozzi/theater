@@ -7,6 +7,8 @@ use theater::theater_runtime::TheaterRuntime;
 use theater::ChannelEvent;
 use tokio::sync::mpsc::{Receiver, Sender};
 
+mod simple_handler_wrapper;
+
 pub struct SimpleTheater {
     runtime: TheaterRuntime<SimpleHandler, ChainEvent>,
 }
