@@ -40,5 +40,5 @@ pub trait HostHandler: Send + Sync + 'static + Sized + Clone {
     fn setup_handlers(
         &self,
         actor_component: &mut ActorComponent,
-    ) -> impl Future<Output = Result<Vec<Self>>> + Send;
+    ) -> impl Future<Output = Result<()>> + Send;
 }

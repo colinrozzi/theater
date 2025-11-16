@@ -73,14 +73,74 @@ impl HostHandler for SimpleHandlerWrapper {
     }
 
     fn name(&self) -> &str {
-        SimpleHandler::name(self)
+        match self {
+            SimpleHandlerWrapper::MessageServer(_handler) => "message_server",
+            SimpleHandlerWrapper::Environment(_handler) => "environment",
+            SimpleHandlerWrapper::FileSystem(_handler) => "filesystem",
+            SimpleHandlerWrapper::HttpClient(_handler) => "http_client",
+            SimpleHandlerWrapper::HttpFramework(_handler) => "http_framework",
+            SimpleHandlerWrapper::Process(_handler) => "process",
+            SimpleHandlerWrapper::Runtime(_handler) => "runtime",
+            SimpleHandlerWrapper::Supervisor(_handler) => "supervisor",
+            SimpleHandlerWrapper::Store(_handler) => "store",
+            SimpleHandlerWrapper::Timing(_handler) => "timing",
+            SimpleHandlerWrapper::Random(_handler) => "random",
+        }
+    }
+
+    fn get_handlers(
+        &self,
+        actor_component: &mut theater::wasm::ActorComponent,
+    ) -> Vec<HostHandler> {
+        let mut handlers = Vec::new();
+        for handler in self {
+            if handler.is_required(actor_component) {
+                handlers.push(handler.clone());
+            }
+        }
+        handlers
     }
 
     fn setup_handlers(
         &self,
         actor_component: &mut theater::wasm::ActorComponent,
-    ) -> impl std::future::Future<Output = anyhow::Result<Vec<Self>>> + Send {
-        SimpleHandler::setup_host_functions(self, actor_component)
-            .map(|res| res.map(|_| vec![Self]))
+    ) -> impl std::future::Future<Output = anyhow::Result<()>> + Send {
+        let fut = async move {
+            match self {
+                SimpleHandlerWrapper::MessageServer(handler) => {
+                    handler.setup_host_functions(actor_component).await
+                }
+                SimpleHandlerWrapper::Environment(handler) => {
+                    handler.setup_host_functions(actor_component).await
+                }
+                SimpleHandlerWrapper::FileSystem(handler) => {
+                    handler.setup_host_functions(actor_component).await
+                }
+                SimpleHandlerWrapper::HttpClient(handler) => {
+                    handler.setup_host_functions(actor_component).await
+                }
+                SimpleHandlerWrapper::HttpFramework(handler) => {
+                    handler.setup_host_functions(actor_component).await
+                }
+                SimpleHandlerWrapper::Process(handler) => {
+                    handler.setup_host_functions(actor_component).await
+                }
+                SimpleHandlerWrapper::Runtime(handler) => {
+                    handler.setup_host_functions(actor_component).await
+                }
+                SimpleHandlerWrapper::Supervisor(handler) => {
+                    handler.setup_host_functions(actor_component).await
+                }
+                SimpleHandlerWrapper::Store(handler) => {
+                    handler.setup_host_functions(actor_component).await
+                }
+                SimpleHandlerWrapper::Timing(handler) => {
+                    handler.setup_host_functions(actor_component).await
+                }
+                SimpleHandlerWrapper::Random(handler) => {
+                    handler.setup_host_functions(actor_component).await
+                }
+            }
+        };
     }
 }

@@ -20,8 +20,15 @@ impl SimpleTheater {
         channel_events_tx: Option<Sender<ChannelEvent>>,
         permissions: HandlerPermission,
     ) -> Result<Self> {
-        let runtime =
-            TheaterRuntime::new(theater_tx, theater_rx, channel_events_tx, permissions).await?;
+        let simple_handler_wrapper = SimpleHandlerWrapper::new();
+        let runtime = TheaterRuntime::new(
+            theater_tx,
+            theater_rx,
+            channel_events_tx,
+            permissions,
+            simple_handler_wrapper,
+        )
+        .await?;
 
         Ok(Self { runtime })
     }
