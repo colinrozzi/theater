@@ -62,6 +62,38 @@ impl Handler for SimpleHandler {
     fn name(&self) -> &str {
         self.name()
     }
+
+    fn provide_imports(&self) -> Option<String> {
+        match self {
+            SimpleHandler::MessageServer(h, _) => h.provide_imports(),
+            SimpleHandler::Environment(h, _) => h.provide_imports(),
+            SimpleHandler::FileSystem(h, _) => h.provide_imports(),
+            SimpleHandler::HttpClient(h, _) => h.provide_imports(),
+            SimpleHandler::HttpFramework(h, _) => h.provide_imports(),
+            SimpleHandler::Process(h, _) => h.provide_imports(),
+            SimpleHandler::Runtime(h, _) => h.provide_imports(),
+            SimpleHandler::Supervisor(h, _) => h.provide_imports(),
+            SimpleHandler::Store(h, _) => h.provide_imports(),
+            SimpleHandler::Timing(h, _) => h.provide_imports(),
+            SimpleHandler::Random(h, _) => h.provide_imports(),
+        }
+    }
+
+    fn provide_exports(&self) -> Option<String> {
+        match self {
+            SimpleHandler::MessageServer(h, _) => h.provide_exports(),
+            SimpleHandler::Environment(h, _) => h.provide_exports(),
+            SimpleHandler::FileSystem(h, _) => h.provide_exports(),
+            SimpleHandler::HttpClient(h, _) => h.provide_exports(),
+            SimpleHandler::HttpFramework(h, _) => h.provide_exports(),
+            SimpleHandler::Process(h, _) => h.provide_exports(),
+            SimpleHandler::Runtime(h, _) => h.provide_exports(),
+            SimpleHandler::Supervisor(h, _) => h.provide_exports(),
+            SimpleHandler::Store(h, _) => h.provide_exports(),
+            SimpleHandler::Timing(h, _) => h.provide_exports(),
+            SimpleHandler::Random(h, _) => h.provide_exports(),
+        }
+    }
 }
 
 impl SimpleHandler {

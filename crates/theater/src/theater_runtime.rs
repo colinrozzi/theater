@@ -7,10 +7,9 @@
 use crate::actor::runtime::ActorRuntime;
 use crate::actor::types::{ActorControl, ActorError, ActorInfo, ActorOperation};
 use crate::chain::ChainEvent;
-use crate::config::permissions::HandlerPermission;
 use crate::events::runtime::RuntimeEventData;
 use crate::events::EventData;
-use crate::handler::HostHandler;
+use crate::handler::{Handler, HandlerRegistry};
 use crate::id::TheaterId;
 use crate::messages::{
     ActorChannelClose, ActorChannelMessage, ActorChannelOpen, ActorResult, ChannelId,
@@ -91,9 +90,9 @@ use tracing::{debug, error, info, warn};
 /// The runtime uses a command-based architecture where all operations are sent as messages
 /// through channels. This allows for asynchronous processing and helps maintain isolation
 /// between components.
-pub struct TheaterRuntime<H: HostHandler, E: EventType> {
+pub struct TheaterRuntime<E: EventType> {
     /// Map of active actors indexed by their ID
-    actors: HashMap<TheaterId, ActorProcess<H>>,
+    actors: HashMap<TheaterId, ActorProcess>,
     /// Map of chains index by actor ID
     chains: HashMap<TheaterId, Arc<RwLock<StateChain>>>,
     /// Sender for commands to the runtime
@@ -108,10 +107,8 @@ pub struct TheaterRuntime<H: HostHandler, E: EventType> {
     channel_events_tx: Option<Sender<crate::messages::ChannelEvent>>,
     /// wasm engine
     wasm_engine: wasmtime::Engine,
-    /// Runtime permissions
-    permissions: HandlerPermission,
-    /// Host handlers
-    host_handler: H,
+    /// Handler registry
+    pub handler_registry: HandlerRegistry,
     marker: PhantomData<E>,
 }
 
@@ -129,13 +126,13 @@ pub struct TheaterRuntime<H: HostHandler, E: EventType> {
 /// The ActorProcess is maintained by the TheaterRuntime and typically not accessed directly
 /// by users of the library. It contains internal channels used to communicate with the actor's
 /// execution environment.
-pub struct ActorProcess<H: HostHandler> {
+pub struct ActorProcess {
     /// Unique identifier for the actor
     pub actor_id: TheaterId,
     /// Actor Name
     pub name: String,
     /// Task handle for the running actor
-    pub process: JoinHandle<ActorRuntime<H>>,
+    pub process: JoinHandle<ActorRuntime>,
     /// Channel for sending messages to the actor
     pub mailbox_tx: mpsc::Sender<ActorMessage>,
     /// Channel for sending operations to the actor
@@ -158,9 +155,8 @@ pub struct ActorProcess<H: HostHandler> {
     pub supervisor_tx: Option<Sender<ActorResult>>,
 }
 
-impl<H, E> TheaterRuntime<H, E>
+impl<E> TheaterRuntime<E>
 where
-    H: HostHandler,
     E: EventType,
 {
     /// Creates a new TheaterRuntime with the given communication channels.
@@ -193,8 +189,7 @@ where
         theater_tx: Sender<TheaterCommand>,
         theater_rx: Receiver<TheaterCommand>,
         channel_events_tx: Option<Sender<crate::messages::ChannelEvent>>,
-        permissions: HandlerPermission,
-        host_handler: H,
+        handler_registry: HandlerRegistry,
     ) -> Result<Self> {
         info!("Theater runtime initializing");
         let engine = wasmtime::Engine::new(wasmtime::Config::new().async_support(true))?;
@@ -208,8 +203,7 @@ where
             channels: HashMap::new(),
             channel_events_tx,
             wasm_engine: engine,
-            permissions,
-            host_handler,
+            handler_registry,
             marker: PhantomData,
         })
     }
@@ -942,8 +936,6 @@ where
         let actor_name = manifest.name.clone();
         let manifest_clone = manifest.clone();
         let engine = self.wasm_engine.clone();
-        let permissions = self.permissions.clone();
-        let host_handler = self.host_handler.clone();
         let actor_runtime_process = tokio::spawn(async move {
             ActorRuntime::<H>::start(
                 actor_id_for_task.clone(),

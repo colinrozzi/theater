@@ -12,7 +12,7 @@ use crate::config::permissions::HandlerPermission;
 use crate::events::theater_runtime::TheaterRuntimeEventData;
 use crate::events::wasm::WasmEventData;
 use crate::events::{ChainEventData, EventData};
-use crate::handler::{Handler, HostHandler};
+use crate::handler::Handler;
 use crate::id::TheaterId;
 use crate::messages::{ActorMessage, TheaterCommand};
 use crate::metrics::MetricsCollector;
@@ -49,14 +49,13 @@ const SHUTDOWN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 /// `ActorRuntime` manages the various components that make up an actor's execution environment,
 /// including handlers and communication channels. It's responsible for starting the actor,
 /// setting up its capabilities via handlers, executing operations, and ensuring proper shutdown.
-pub struct ActorRuntime<H: HostHandler> {
+pub struct ActorRuntime {
     /// Unique identifier for this actor
     pub actor_id: TheaterId,
     /// Handles to the running handler tasks
     pub handler_tasks: Vec<JoinHandle<()>>,
     /// Controller for graceful shutdown of all components
     pub shutdown_controller: ShutdownController,
-    pub(crate) marker: PhantomData<H>,
 }
 
 /// # Result of starting an actor
@@ -76,10 +75,7 @@ pub enum StartActorResult {
     Error(String),
 }
 
-impl<H> ActorRuntime<H>
-where
-    H: HostHandler,
-{
+impl ActorRuntime {
     pub async fn start(
         id: TheaterId,
         config: &ManifestConfig,
@@ -558,8 +554,7 @@ where
         parent_permissions: HandlerPermission,
         status_tx: Sender<String>,
         chain: Arc<SyncRwLock<StateChain>>,
-        host_handler: H,
-    ) -> Result<(ActorInstance, Vec<H::Handler>, MetricsCollector), ActorError> {
+    ) -> Result<(ActorInstance, Vec<Handler>, MetricsCollector), ActorError> {
         let actor_handle = ActorHandle::new(operation_tx, info_tx, control_tx);
 
         let _ = status_tx.send("Setting up actor store".to_string()).await;

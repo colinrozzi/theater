@@ -3,6 +3,11 @@ use crate::shutdown::ShutdownReceiver;
 use crate::wasm::{ActorComponent, ActorInstance};
 use anyhow::Result;
 use std::future::Future;
+use std::pin::Pin;
+
+pub struct HandlerRegistry {
+    handlers: Vec<Box<dyn Handler>>,
+}
 
 /// Trait describing the lifecycle hooks every handler must implement.
 ///
@@ -13,34 +18,21 @@ pub trait Handler: Send + Sync + 'static {
         &mut self,
         actor_handle: ActorHandle,
         shutdown_receiver: ShutdownReceiver,
-    ) -> impl Future<Output = Result<()>> + Send;
+    ) -> Pin<Box<dyn Future<Output = Result<()>> + Send>>;
 
     fn setup_host_functions(
         &mut self,
         actor_component: &mut ActorComponent,
-    ) -> impl Future<Output = Result<()>> + Send;
+    ) -> Pin<Box<dyn Future<Output = Result<()>> + Send>>;
 
     fn add_export_functions(
         &self,
         actor_instance: &mut ActorInstance,
-    ) -> impl Future<Output = Result<()>> + Send;
-
-    fn name(&self) -> &str;
-}
-
-pub trait HostHandler: Send + Sync + 'static + Sized + Clone {
-    type Handler: Handler;
-
-    fn start(
-        &mut self,
-        actor_handle: ActorHandle,
-        shutdown_receiver: ShutdownReceiver,
-    ) -> impl Future<Output = Result<()>> + Send;
+    ) -> Pin<Box<dyn Future<Output = Result<()>> + Send>>;
 
     fn name(&self) -> &str;
 
-    fn setup_handlers(
-        &self,
-        actor_component: &mut ActorComponent,
-    ) -> impl Future<Output = Result<Vec<Self::Handler>>> + Send;
+    fn imports(&self) -> Option<String>;
+
+    fn exports(&self) -> Option<String>;
 }
