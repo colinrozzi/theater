@@ -12,7 +12,7 @@ use crate::config::permissions::HandlerPermission;
 use crate::events::theater_runtime::TheaterRuntimeEventData;
 use crate::events::wasm::WasmEventData;
 use crate::events::{ChainEventData, EventData};
-use crate::handler::HostHandler;
+use crate::handler::{Handler, HostHandler};
 use crate::id::TheaterId;
 use crate::messages::{ActorMessage, TheaterCommand};
 use crate::metrics::MetricsCollector;
@@ -559,7 +559,7 @@ where
         status_tx: Sender<String>,
         chain: Arc<SyncRwLock<StateChain>>,
         host_handler: H,
-    ) -> Result<(ActorInstance, Vec<H>, MetricsCollector), ActorError> {
+    ) -> Result<(ActorInstance, Vec<H::Handler>, MetricsCollector), ActorError> {
         let actor_handle = ActorHandle::new(operation_tx, info_tx, control_tx);
 
         let _ = status_tx.send("Setting up actor store".to_string()).await;

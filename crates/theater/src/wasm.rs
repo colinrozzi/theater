@@ -50,7 +50,7 @@ use crate::events::{ChainEventData, EventData};
 // use crate::config::ManifestConfig;
 use crate::id::TheaterId;
 use crate::utils::resolve_reference;
-use crate::{store, ChainEvent};
+use crate::store;
 use tracing::{debug, error, info};
 use wasmtime::component::types::ComponentItem;
 

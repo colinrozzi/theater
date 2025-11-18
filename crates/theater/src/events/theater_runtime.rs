@@ -1,4 +1,4 @@
-use crate::{config::permissions::HandlerPermission, store::ContentRef, ManifestConfig};
+use crate::{config::permissions::HandlerPermission, ManifestConfig};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
