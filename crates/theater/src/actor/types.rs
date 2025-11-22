@@ -174,13 +174,6 @@ pub enum ActorOperation {
         /// Channel to send the result back to the caller
         response_tx: oneshot::Sender<Result<Vec<u8>, ActorError>>,
     },
-    /// Update a WebAssembly component in the actor
-    UpdateComponent {
-        /// Address of the component to update
-        component_address: String,
-        /// Channel to send the result back to the caller
-        response_tx: oneshot::Sender<Result<(), ActorError>>,
-    },
 }
 
 #[derive(Debug)]

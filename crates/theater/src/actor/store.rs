@@ -66,14 +66,14 @@ where
         theater_tx: Sender<TheaterCommand>,
         actor_handle: ActorHandle,
         chain: Arc<RwLock<StateChain<E>>>,
-    ) -> anyhow::Result<Self> {
-        Ok(Self {
+    ) -> Self {
+        Self {
             id: id.clone(),
             theater_tx: theater_tx.clone(),
             chain,
             state: Some(vec![]),
             actor_handle,
-        })
+        }
     }
 
     /// # Get the actor's ID

@@ -9,6 +9,25 @@ pub struct HandlerRegistry {
     handlers: Vec<Box<dyn Handler>>,
 }
 
+impl HandlerRegistry {
+    pub fn new() -> Self {
+        Self {
+            handlers: Vec::new(),
+        }
+    }
+
+    pub fn register<H: Handler>(&mut self, handler: H) {
+        self.handlers.push(Box::new(handler));
+    }
+
+    pub fn setup_handlers(
+        &mut self,
+        actor_component: &mut ActorComponent,
+    ) -> Vec<Box<dyn Handler>> {
+        unimplemented!()
+    }
+}
+
 /// Trait describing the lifecycle hooks every handler must implement.
 ///
 /// External handler crates can implement this trait and register their handlers

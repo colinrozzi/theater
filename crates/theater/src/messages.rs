@@ -184,32 +184,6 @@ pub enum TheaterCommand {
         data: Option<Vec<u8>>,
     },
 
-    /// # Update an actor's component
-    ///
-    /// ## Parameters
-    ///
-    /// * `actor_id` - ID of the actor to update
-    /// * `component` - The new component address
-    /// * `response_tx` - Channel to receive the result (success or error)
-    UpdateActorComponent {
-        actor_id: TheaterId,
-        component: String,
-        response_tx: oneshot::Sender<Result<()>>,
-    },
-
-    /// # Send a message to an actor
-    ///
-    /// Sends a message to a specific actor for processing.
-    ///
-    /// ## Parameters
-    ///
-    /// * `actor_id` - ID of the actor to send the message to
-    /// * `actor_message` - The message to send
-    SendMessage {
-        actor_id: TheaterId,
-        actor_message: ActorMessage,
-    },
-
     /// # Record a new event
     ///
     /// Records an event in an actor's event chain.
@@ -364,100 +338,6 @@ pub enum TheaterCommand {
         event_tx: Sender<Result<ChainEvent, ActorError>>,
     },
 
-    /// # Open a communication channel
-    ///
-    /// Opens a bidirectional communication channel between two participants.
-    ///
-    /// ## Parameters
-    ///
-    /// * `initiator_id` - The participant initiating the channel
-    /// * `target_id` - The target participant for the channel
-    /// * `channel_id` - The unique ID for this channel
-    /// * `initial_message` - The first message to send on the channel
-    /// * `response_tx` - Channel to receive the result (success or error)
-    ChannelOpen {
-        initiator_id: ChannelParticipant,
-        target_id: ChannelParticipant,
-        channel_id: ChannelId,
-        initial_message: Vec<u8>,
-        response_tx: oneshot::Sender<Result<bool>>,
-    },
-
-    /// # Send a message on a channel
-    ///
-    /// Sends data through an established channel.
-    ///
-    /// ## Parameters
-    ///
-    /// * `channel_id` - The ID of the channel to send on
-    /// * `sender_id` - The participant sending the message
-    /// * `message` - The message data to send
-    ChannelMessage {
-        channel_id: ChannelId,
-        sender_id: ChannelParticipant,
-        message: Vec<u8>,
-    },
-
-    /// # Close a channel
-    ///
-    /// Closes an open communication channel.
-    ///
-    /// ## Parameters
-    ///
-    /// * `channel_id` - The ID of the channel to close
-    ChannelClose { channel_id: ChannelId },
-
-    /// # List active channels
-    ///
-    /// Retrieves a list of all active communication channels.
-    ///
-    /// ## Parameters
-    ///
-    /// * `response_tx` - Channel to receive the result (list of channel IDs and participants)
-    ///
-    /// ## Security
-    ///
-    /// This operation is only available to the system or to actors with
-    /// appropriate monitoring permissions.
-    ListChannels {
-        response_tx: oneshot::Sender<Result<Vec<(ChannelId, Vec<ChannelParticipant>)>>>,
-    },
-
-    /// # Get channel status
-    ///
-    /// Retrieves information about a specific channel.
-    ///
-    /// ## Parameters
-    ///
-    /// * `channel_id` - The ID of the channel to query
-    /// * `response_tx` - Channel to receive the result (channel participant info)
-    ///
-    /// ## Security
-    ///
-    /// This operation is only available to participants in the channel,
-    /// the system, or actors with appropriate monitoring permissions.
-    GetChannelStatus {
-        channel_id: ChannelId,
-        response_tx: oneshot::Sender<Result<Option<Vec<ChannelParticipant>>>>,
-    },
-
-    /// # Register a new channel
-    ///
-    /// Registers a new channel in the system (internal use).
-    ///
-    /// ## Parameters
-    ///
-    /// * `channel_id` - The ID of the channel to register
-    /// * `participants` - The participants in the channel
-    ///
-    /// ## Security
-    ///
-    /// This operation is only available to the system itself.
-    RegisterChannel {
-        channel_id: ChannelId,
-        participants: Vec<ChannelParticipant>,
-    },
-
     /// # Create a new content store
     ///
     /// Creates a new content-addressable storage instance.
@@ -486,13 +366,6 @@ impl TheaterCommand {
             TheaterCommand::ResumeActor { manifest_path, .. } => {
                 format!("ResumeActor: {}", manifest_path)
             }
-            TheaterCommand::UpdateActorComponent {
-                actor_id,
-                component,
-                ..
-            } => {
-                format!("UpdateActorComponent: {} -> {}", actor_id, component)
-            }
             TheaterCommand::StopActor { actor_id, .. } => {
                 format!("StopActor: {:?}", actor_id)
             }
@@ -505,9 +378,6 @@ impl TheaterCommand {
                     actor_id,
                     data.as_ref().map(|d| String::from_utf8_lossy(d))
                 )
-            }
-            TheaterCommand::SendMessage { actor_id, .. } => {
-                format!("SendMessage: {:?}", actor_id)
             }
             TheaterCommand::NewEvent { actor_id, .. } => {
                 format!("NewEvent: {:?}", actor_id)
@@ -539,37 +409,6 @@ impl TheaterCommand {
             }
             TheaterCommand::SubscribeToActor { actor_id, .. } => {
                 format!("SubscribeToActor: {:?}", actor_id)
-            }
-            TheaterCommand::ChannelOpen {
-                initiator_id,
-                target_id,
-                channel_id,
-                ..
-            } => {
-                format!(
-                    "ChannelOpen: {} -> {} (channel: {})",
-                    initiator_id, target_id, channel_id
-                )
-            }
-            TheaterCommand::ChannelMessage { channel_id, .. } => {
-                format!("ChannelMessage: {}", channel_id)
-            }
-            TheaterCommand::ChannelClose { channel_id } => {
-                format!("ChannelClose: {}", channel_id)
-            }
-            TheaterCommand::ListChannels { .. } => "ListChannels".to_string(),
-            TheaterCommand::GetChannelStatus { channel_id, .. } => {
-                format!("GetChannelStatus: {}", channel_id)
-            }
-            TheaterCommand::RegisterChannel {
-                channel_id,
-                participants,
-            } => {
-                format!(
-                    "RegisterChannel: {} with {} participants",
-                    channel_id,
-                    participants.len()
-                )
             }
             TheaterCommand::NewStore { .. } => "NewStore".to_string(),
         }
