@@ -267,7 +267,7 @@ impl ContentStore {
     }
 
     /// Store content and return its ContentRef
-    pub async fn store(&self, content: Vec<u8>) -> Result<ContentRef> {
+    pub async fn store(&self, content: Vec<u8>) -> ContentRef {
         let content_ref = ContentRef::from_content(&content);
         content_ref.store_content(&self.base_path(), &content).await;
         content_ref

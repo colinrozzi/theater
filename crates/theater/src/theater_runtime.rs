@@ -95,7 +95,7 @@ pub struct TheaterRuntime<E: EventType> {
     /// Map of chains index by actor ID
     chains: HashMap<TheaterId, Arc<RwLock<StateChain>>>,
     /// Sender for commands to the runtime
-    pub theater_tx: Sender<TheaterCommand>,
+    theater_tx: Sender<TheaterCommand>,
     /// Receiver for commands to the runtime
     theater_rx: Receiver<TheaterCommand>,
     /// Map of event subscriptions for actors

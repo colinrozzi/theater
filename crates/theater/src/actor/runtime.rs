@@ -214,7 +214,7 @@ impl ActorRuntime {
         control_tx: Sender<ActorControl>,
         actor_phase_manager: ActorPhaseManager,
     ) -> Result<(ActorInstance, ShutdownController, Vec<JoinHandle<()>>), ActorRuntimeError> {
-        // ---------------- Checkpoint 1: Setup Initial ----------------
+        // ---------------- Checkpoint Setup Initial ----------------
 
         debug!("Setting up actor store");
 
@@ -223,7 +223,7 @@ impl ActorRuntime {
             return Err(ActorRuntimeError::ActorPhaseError {
                 expected: ActorPhase::Starting,
                 found: curr_phase,
-                message: "phase error found at setup task Checkpoint 1".into(),
+                message: "phase error found at setup task Checkpoint Setup Initial".into(),
             });
         }
 
@@ -241,7 +241,7 @@ impl ActorRuntime {
             description: format!("Initial values set up for [{}]", id).into(),
         });
 
-        // ----------------- Checkpoint 2: Store Manifest ----------------
+        // ----------------- Checkpoint Store Manifest ----------------
 
         debug!("Storing manifest for actor: {}", id);
 
@@ -251,7 +251,7 @@ impl ActorRuntime {
             return Err(ActorRuntimeError::ActorPhaseError {
                 expected: ActorPhase::Starting,
                 found: curr_phase,
-                message: "phase error found at setup task Checkpoint 2".into(),
+                message: "phase error found at setup task Checkpoint Store Manifest".into(),
             });
         }
 
@@ -259,22 +259,14 @@ impl ActorRuntime {
         let manifest_store = ContentStore::from_id("manifest");
         debug!("Storing manifest for actor: {}", id);
         debug!("Manifest store: {:?}", manifest_store);
-        let manifest_id = match manifest_store
+        let manifest_id = manifest_store
             .store(
                 config
                     .clone()
                     .into_fixed_bytes()
                     .expect("Failed to serialize manifest"),
             )
-            .await
-        {
-            Ok(id) => id,
-            Err(e) => {
-                let error_message = format!("Failed to store manifest: {}", e);
-                error!("{}", error_message);
-                return Err(e.into());
-            }
-        };
+            .await;
 
         actor_store.record_event(ChainEventData {
             event_type: "theater-runtime".to_string(),
@@ -285,14 +277,14 @@ impl ActorRuntime {
             description: format!("Manifest for actor [{}] stored at [{}]", id, manifest_id).into(),
         });
 
-        // ----------------- Checkpoint 3: Create Handlers -----------------
+        // ----------------- Checkpoint Create Handlers -----------------
 
         if actor_phase_manager.is_phase(ActorPhase::Starting).await {
             let curr_phase = actor_phase_manager.get_phase().await;
             return Err(ActorRuntimeError::ActorPhaseError {
                 expected: ActorPhase::Starting,
                 found: curr_phase,
-                message: "phase error found at setup task Checkpoint 3".into(),
+                message: "phase error found at setup task Checkpoint Create Handlers".into(),
             });
         }
 
@@ -321,7 +313,7 @@ impl ActorRuntime {
             description: format!("Created handlers for actor [{}]", id).into(),
         });
 
-        // ----------------- Checkpoint 4: Setup Handlers -----------------
+        // ----------------- Checkpoint Setup Handlers -----------------
 
         debug!("Setting up handlers");
 
@@ -330,11 +322,11 @@ impl ActorRuntime {
             return Err(ActorRuntimeError::ActorPhaseError {
                 expected: ActorPhase::Starting,
                 found: curr_phase,
-                message: "phase error found at setup task Checkpoint 4".into(),
+                message: "phase error found at setup task Checkpoint Setup Handlers".into(),
             });
         }
 
-        let handlers = handler_registry.setup_handlers(&mut actor_component);
+        let mut handlers = handler_registry.setup_handlers(&mut actor_component);
 
         actor_component.actor_store.record_event(ChainEventData {
             event_type: "theater-runtime".to_string(),
@@ -343,7 +335,31 @@ impl ActorRuntime {
             description: format!("Set up handlers for actor [{}]", id).into(),
         });
 
-        // ----------------- Checkpoint 5: Instantiate Actor -----------------
+        // ----------------- Checkpoint Setup Host Functions -----------------
+
+        debug!("Setting up host functions");
+
+        if actor_phase_manager.is_phase(ActorPhase::Starting).await {
+            let curr_phase = actor_phase_manager.get_phase().await;
+            return Err(ActorRuntimeError::ActorPhaseError {
+                expected: ActorPhase::Starting,
+                found: curr_phase,
+                message: "phase error found at setup task Checkpoint Setup Host Functions".into(),
+            });
+        }
+
+        handlers.iter_mut().for_each(|handler| {
+            handler.setup_host_functions(&mut actor_component);
+        });
+
+        actor_component.actor_store.record_event(ChainEventData {
+            event_type: "theater-runtime".to_string(),
+            data: EventData::TheaterRuntime(TheaterRuntimeEventData::CreatingHandlers),
+            timestamp: chrono::Utc::now().timestamp_millis() as u64,
+            description: format!("Set up host functions for actor [{}]", id).into(),
+        });
+
+        // ----------------- Checkpoint Instantiate Actor -----------------
 
         debug!("Instantiating component");
 
@@ -352,7 +368,7 @@ impl ActorRuntime {
             return Err(ActorRuntimeError::ActorPhaseError {
                 expected: ActorPhase::Starting,
                 found: curr_phase,
-                message: "phase error found at setup task Checkpoint 5".into(),
+                message: "phase error found at setup task Checkpoint Instantiate Actor".into(),
             });
         }
 
@@ -374,7 +390,34 @@ impl ActorRuntime {
                 description: format!("Instantiated actor [{}]", id).into(),
             });
 
-        // ----------------- Checkpoint 6: Initialize State -----------------
+        // ----------------- Checkpoint Add Export Functions -----------------
+
+        debug!("Adding export functions");
+
+        if actor_phase_manager.is_phase(ActorPhase::Starting).await {
+            let curr_phase = actor_phase_manager.get_phase().await;
+            return Err(ActorRuntimeError::ActorPhaseError {
+                expected: ActorPhase::Starting,
+                found: curr_phase,
+                message: "phase error found at setup task Checkpoint Add Export Functions".into(),
+            });
+        }
+
+        handlers.iter_mut().for_each(|handler| {
+            handler.add_export_functions(&mut actor_instance);
+        });
+
+        actor_instance
+            .actor_component
+            .actor_store
+            .record_event(ChainEventData {
+                event_type: "theater-runtime".to_string(),
+                data: EventData::TheaterRuntime(TheaterRuntimeEventData::CreatingHandlers),
+                timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                description: format!("Added export functions for actor [{}]", id).into(),
+            });
+
+        // ----------------- Checkpoint Initialize State -----------------
 
         debug!("Initializing state");
 
@@ -383,7 +426,7 @@ impl ActorRuntime {
             return Err(ActorRuntimeError::ActorPhaseError {
                 expected: ActorPhase::Starting,
                 found: curr_phase,
-                message: "phase error found at setup task Checkpoint 6".into(),
+                message: "phase error found at setup task Checkpoint Initialize State".into(),
             });
         }
 
@@ -407,7 +450,7 @@ impl ActorRuntime {
                 description: format!("Initialized state for actor [{}]", id).into(),
             });
 
-        // ----------------- Checkpoint 7: Finalize Setup -----------------
+        // ----------------- Checkpoint Finalize Setup -----------------
 
         debug!("Ready");
 
@@ -416,7 +459,7 @@ impl ActorRuntime {
             return Err(ActorRuntimeError::ActorPhaseError {
                 expected: ActorPhase::Starting,
                 found: curr_phase,
-                message: "phase error found at setup task Checkpoint 7".into(),
+                message: "phase error found at setup task Checkpoint Finalize Setup".into(),
             });
         }
 

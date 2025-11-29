@@ -49,8 +49,8 @@ use crate::events::wasm::WasmEventData;
 use crate::events::{ChainEventData, EventData};
 // use crate::config::ManifestConfig;
 use crate::id::TheaterId;
-use crate::utils::resolve_reference;
 use crate::store;
+use crate::utils::resolve_reference;
 use tracing::{debug, error, info};
 use wasmtime::component::types::ComponentItem;
 
@@ -411,12 +411,7 @@ impl ActorComponent {
                         })?;
                 info!("Component bytes loaded from path: {}", component_path);
                 // Store the component bytes in the content store for future use
-                let bytes_ref = component_store.store(bytes.clone()).await.map_err(|e| {
-                    WasmError::WasmError {
-                        context: "storing component bytes",
-                        message: e.to_string(),
-                    }
-                })?;
+                let bytes_ref = component_store.store(bytes.clone()).await;
 
                 // Label the stored bytes for future retrieval
                 component_store
