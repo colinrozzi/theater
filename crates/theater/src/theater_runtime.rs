@@ -9,13 +9,12 @@ use crate::actor::types::{ActorControl, ActorError, ActorInfo, ActorOperation};
 use crate::chain::ChainEvent;
 use crate::events::runtime::RuntimeEventData;
 use crate::events::EventData;
-use crate::handler::{Handler, HandlerRegistry};
+use crate::handler::HandlerRegistry;
 use crate::id::TheaterId;
-use crate::messages::{
-    ActorChannelClose, ActorChannelMessage, ActorChannelOpen, ActorResult, ChannelId,
-    ChannelParticipant, ChildError, ChildExternalStop, ChildResult,
-};
 use crate::messages::{ActorMessage, ActorStatus, TheaterCommand};
+use crate::messages::{
+    ActorResult, ChannelId, ChannelParticipant, ChildError, ChildExternalStop, ChildResult,
+};
 use crate::metrics::ActorMetrics;
 use crate::shutdown::{ShutdownController, ShutdownType};
 use crate::utils::{self, resolve_reference};
@@ -607,36 +606,58 @@ where
         let actor_name = manifest.name.clone();
         let manifest_clone = manifest.clone();
         let engine = self.wasm_engine.clone();
-        let actor_runtime_process = tokio::spawn(async move {
-            ActorRuntime::start(
+        let handler_registry = self.handler_registry.clone();
+        let actor_startup_process = tokio::spawn(async move {
+            ActorRuntime::new(
                 actor_id_for_task.clone(),
                 &manifest_clone,
                 init_value,
+                engine,
+                chain,
+                handler_registry,
                 theater_tx,
-                actor_sender,
-                mailbox_rx,
                 operation_rx,
                 actor_operation_tx,
                 info_rx,
                 actor_info_tx,
                 control_rx,
                 actor_control_tx,
-                init,
-                shutdown_receiver_clone,
-                engine,
-                permissions,
-                chain,
-                host_handler,
             )
-            .await;
+        });
+        let actor_runtime_process = tokio::spawn(async move {
+            let actor_runtime = ActorRuntime::new(
+                actor_id_for_task.clone(),
+                &manifest_clone,
+                init_value,
+                engine,
+                chain,
+                handler_registry,
+                theater_tx,
+                operation_rx,
+                actor_operation_tx,
+                info_rx,
+                actor_info_tx,
+                control_rx,
+                actor_control_tx,
+            )
+            .await
+            .map_err(|e| {
+                TheaterRuntimeError::ActorInitializationError(format!(
+                    "Failed to initialize actor runtime: {}",
+                    e
+                ))
+            })?;
+
+            actor_runtime.start().await;
 
             // Return a dummy struct to maintain API compatibility
-            ActorRuntime {
-                actor_id: actor_id_for_task,
-                handler_tasks: Vec::new(),
-                shutdown_controller: ShutdownController::new(),
-                marker: PhantomData,
-            }
+            // ActorRuntime {
+            //     actor_id: actor_id_for_task,
+            //     handler_tasks: Vec::new(),
+            //     shutdown_controller: ShutdownController::new(),
+            //     marker: PhantomData,
+            // }
+            actor_runtime
         });
 
         let process = ActorProcess {
