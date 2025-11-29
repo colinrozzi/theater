@@ -131,7 +131,7 @@ pub struct ActorProcess {
     /// Actor Name
     pub name: String,
     /// Task handle for the running actor
-    pub process: JoinHandle<ActorRuntime>,
+    pub process: JoinHandle<()>,
     /// Channel for sending messages to the actor
     pub mailbox_tx: mpsc::Sender<ActorMessage>,
     /// Channel for sending operations to the actor
@@ -425,6 +425,9 @@ where
                         error!("Failed to handle actor error event: {}", e);
                     }
                 }
+                TheaterCommand::ActorRuntimeError { error } => {
+                    error!("Theater runtime error: {}", error);
+                }
                 TheaterCommand::GetActors { response_tx } => {
                     debug!("Getting list of actors");
                     let actor_info: Vec<_> = self
@@ -607,25 +610,8 @@ where
         let manifest_clone = manifest.clone();
         let engine = self.wasm_engine.clone();
         let handler_registry = self.handler_registry.clone();
-        let actor_startup_process = tokio::spawn(async move {
-            ActorRuntime::new(
-                actor_id_for_task.clone(),
-                &manifest_clone,
-                init_value,
-                engine,
-                chain,
-                handler_registry,
-                theater_tx,
-                operation_rx,
-                actor_operation_tx,
-                info_rx,
-                actor_info_tx,
-                control_rx,
-                actor_control_tx,
-            )
-        });
         let actor_runtime_process = tokio::spawn(async move {
-            let actor_runtime = ActorRuntime::new(
+            let actor_runtime = ActorRuntime::start(
                 actor_id_for_task.clone(),
                 &manifest_clone,
                 init_value,
@@ -640,24 +626,7 @@ where
                 control_rx,
                 actor_control_tx,
             )
-            .await
-            .map_err(|e| {
-                TheaterRuntimeError::ActorInitializationError(format!(
-                    "Failed to initialize actor runtime: {}",
-                    e
-                ))
-            })?;
-
-            actor_runtime.start().await;
-
-            // Return a dummy struct to maintain API compatibility
-            // ActorRuntime {
-            //     actor_id: actor_id_for_task,
-            //     handler_tasks: Vec::new(),
-            //     shutdown_controller: ShutdownController::new(),
-            //     marker: PhantomData,
-            // }
-            actor_runtime
+            .await;
         });
 
         let process = ActorProcess {
@@ -994,37 +963,6 @@ where
         }
 
         self.stop_actor(actor_id, shutdown_type).await?;
-        Ok(())
-    }
-
-    async fn update_actor_component(
-        &mut self,
-        actor_id: TheaterId,
-        component: String,
-    ) -> Result<()> {
-        debug!("Updating actor component for: {:?}", actor_id);
-
-        if let Some(proc) = self.actors.get(&actor_id) {
-            // Send a message to update the actor's component
-            let (tx, rx): (
-                oneshot::Sender<Result<(), ActorError>>,
-                oneshot::Receiver<Result<(), ActorError>>,
-            ) = oneshot::channel();
-            proc.operation_tx
-                .send(ActorOperation::UpdateComponent {
-                    component_address: component,
-                    response_tx: tx,
-                })
-                .await?;
-
-            match rx.await {
-                Ok(result) => result?,
-                Err(e) => return Err(anyhow::anyhow!("Failed to receive update result: {}", e)),
-            }
-        } else {
-            return Err(anyhow::anyhow!("Actor not found"));
-        }
-
         Ok(())
     }
 

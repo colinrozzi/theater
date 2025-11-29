@@ -21,6 +21,8 @@ use crate::wasm::{ActorComponent, ActorInstance};
 use crate::ManifestConfig;
 
 use crate::Result;
+use crate::ShutdownController;
+use crate::ShutdownType;
 use crate::StateChain;
 use serde_json::Value;
 use std::sync::Arc;
@@ -29,7 +31,7 @@ use tokio::sync::mpsc::{self, Receiver, Sender};
 use tokio::sync::RwLock;
 use tokio::task::JoinHandle;
 use tokio::time::Instant;
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
 use wasmtime::Engine;
 
 use super::types::ActorControl;
@@ -79,7 +81,17 @@ pub enum StartActorResult {
 
 #[derive(Debug)]
 pub enum ActorRuntimeError {
-    SetupError { message: String },
+    SetupError {
+        message: String,
+    },
+    ActorInstanceNotFound {
+        message: String,
+    },
+    ActorPhaseError {
+        expected: ActorPhase,
+        found: ActorPhase,
+        message: String,
+    },
     ActorError(ActorError),
     UnknownError(anyhow::Error),
 }
@@ -100,6 +112,18 @@ impl std::fmt::Display for ActorRuntimeError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             ActorRuntimeError::SetupError { message } => write!(f, "Setup Error: {}", message),
+            ActorRuntimeError::ActorInstanceNotFound { message } => {
+                write!(f, "Actor Instance Not Found: {}", message)
+            }
+            ActorRuntimeError::ActorPhaseError {
+                expected,
+                found,
+                message,
+            } => write!(
+                f,
+                "Actor Phase Error: expected {:?}, found {:?}. {}",
+                expected, found, message
+            ),
             ActorRuntimeError::ActorError(err) => write!(f, "Actor Error: {}", err),
             ActorRuntimeError::UnknownError(err) => write!(f, "Unknown Error: {}", err),
         }
@@ -177,7 +201,7 @@ impl ActorPhaseManager {
 }
 
 impl ActorRuntime {
-    pub async fn new(
+    pub async fn build_actor_resources(
         id: TheaterId,
         config: &ManifestConfig,
         initial_state: Option<Value>,
@@ -185,21 +209,51 @@ impl ActorRuntime {
         chain: Arc<SyncRwLock<StateChain>>,
         mut handler_registry: HandlerRegistry,
         theater_tx: Sender<TheaterCommand>,
-        operation_rx: Receiver<ActorOperation>,
         operation_tx: Sender<ActorOperation>,
-        info_rx: Receiver<ActorInfo>,
         info_tx: Sender<ActorInfo>,
-        control_rx: Receiver<ActorControl>,
         control_tx: Sender<ActorControl>,
-    ) -> Result<Self, ActorRuntimeError> {
-        let actor_phase_manager = ActorPhaseManager::new();
-        let actor_handle = ActorHandle::new(operation_tx, info_tx, control_tx);
+        actor_phase_manager: ActorPhaseManager,
+    ) -> Result<(ActorInstance, ShutdownController, Vec<JoinHandle<()>>), ActorRuntimeError> {
+        // ---------------- Checkpoint 1: Setup Initial ----------------
 
         debug!("Setting up actor store");
 
-        // Create actor store
+        if actor_phase_manager.is_phase(ActorPhase::Starting).await {
+            let curr_phase = actor_phase_manager.get_phase().await;
+            return Err(ActorRuntimeError::ActorPhaseError {
+                expected: ActorPhase::Starting,
+                found: curr_phase,
+                message: "phase error found at setup task Checkpoint 1".into(),
+            });
+        }
+
+        let handle_operation_tx = operation_tx.clone();
+        let actor_handle = ActorHandle::new(handle_operation_tx, info_tx, control_tx);
         let actor_store =
             ActorStore::new(id.clone(), theater_tx.clone(), actor_handle.clone(), chain);
+
+        actor_store.record_event(ChainEventData {
+            event_type: "theater-runtime".to_string(),
+            data: EventData::TheaterRuntime(TheaterRuntimeEventData::ActorLoadCall {
+                manifest: config.clone(),
+            }),
+            timestamp: chrono::Utc::now().timestamp_millis() as u64,
+            description: format!("Initial values set up for [{}]", id).into(),
+        });
+
+        // ----------------- Checkpoint 2: Store Manifest ----------------
+
+        debug!("Storing manifest for actor: {}", id);
+
+        // Checkpoint 1: After manifest storage
+        if actor_phase_manager.is_phase(ActorPhase::Starting).await {
+            let curr_phase = actor_phase_manager.get_phase().await;
+            return Err(ActorRuntimeError::ActorPhaseError {
+                expected: ActorPhase::Starting,
+                found: curr_phase,
+                message: "phase error found at setup task Checkpoint 2".into(),
+            });
+        }
 
         // Store manifest
         let manifest_store = ContentStore::from_id("manifest");
@@ -228,19 +282,21 @@ impl ActorRuntime {
                 manifest: config.clone(),
             }),
             timestamp: chrono::Utc::now().timestamp_millis() as u64,
-            description: format!("Loading actor [{}] from manifest [{}] ", id, manifest_id).into(),
+            description: format!("Manifest for actor [{}] stored at [{}]", id, manifest_id).into(),
         });
+
+        // ----------------- Checkpoint 3: Create Handlers -----------------
+
+        if actor_phase_manager.is_phase(ActorPhase::Starting).await {
+            let curr_phase = actor_phase_manager.get_phase().await;
+            return Err(ActorRuntimeError::ActorPhaseError {
+                expected: ActorPhase::Starting,
+                found: curr_phase,
+                message: "phase error found at setup task Checkpoint 3".into(),
+            });
+        }
 
         debug!("Creating handlers");
-
-        actor_store.record_event(ChainEventData {
-            event_type: "theater-runtime".to_string(),
-            data: EventData::TheaterRuntime(TheaterRuntimeEventData::CreatingHandlers),
-            timestamp: chrono::Utc::now().timestamp_millis() as u64,
-            description: format!("Creating handlers for actor [{}]", id).into(),
-        });
-
-        debug!("Creating component");
 
         let mut actor_component = ActorComponent::new(
             config.name.clone(),
@@ -258,18 +314,47 @@ impl ActorRuntime {
             <anyhow::Error as Into<ActorRuntimeError>>::into(e)
         })?;
 
-        debug!("Setting up host functions");
+        actor_component.actor_store.record_event(ChainEventData {
+            event_type: "theater-runtime".to_string(),
+            data: EventData::TheaterRuntime(TheaterRuntimeEventData::CreatingHandlers),
+            timestamp: chrono::Utc::now().timestamp_millis() as u64,
+            description: format!("Created handlers for actor [{}]", id).into(),
+        });
+
+        // ----------------- Checkpoint 4: Setup Handlers -----------------
+
+        debug!("Setting up handlers");
+
+        if actor_phase_manager.is_phase(ActorPhase::Starting).await {
+            let curr_phase = actor_phase_manager.get_phase().await;
+            return Err(ActorRuntimeError::ActorPhaseError {
+                expected: ActorPhase::Starting,
+                found: curr_phase,
+                message: "phase error found at setup task Checkpoint 4".into(),
+            });
+        }
+
+        let handlers = handler_registry.setup_handlers(&mut actor_component);
 
         actor_component.actor_store.record_event(ChainEventData {
             event_type: "theater-runtime".to_string(),
             data: EventData::TheaterRuntime(TheaterRuntimeEventData::CreatingHandlers),
             timestamp: chrono::Utc::now().timestamp_millis() as u64,
-            description: format!("Setting up host functions for actor [{}]", id).into(),
+            description: format!("Set up handlers for actor [{}]", id).into(),
         });
 
-        let handlers = handler_registry.setup_handlers(&mut actor_component);
+        // ----------------- Checkpoint 5: Instantiate Actor -----------------
 
         debug!("Instantiating component");
+
+        if actor_phase_manager.is_phase(ActorPhase::Starting).await {
+            let curr_phase = actor_phase_manager.get_phase().await;
+            return Err(ActorRuntimeError::ActorPhaseError {
+                expected: ActorPhase::Starting,
+                found: curr_phase,
+                message: "phase error found at setup task Checkpoint 5".into(),
+            });
+        }
 
         let mut actor_instance = actor_component.instantiate().await.map_err(|e| {
             let error_message = format!("Failed to instantiate actor {}: {}", id, e);
@@ -279,7 +364,28 @@ impl ActorRuntime {
             }
         })?;
 
+        actor_instance
+            .actor_component
+            .actor_store
+            .record_event(ChainEventData {
+                event_type: "theater-runtime".to_string(),
+                data: EventData::TheaterRuntime(TheaterRuntimeEventData::InstantiatingActor),
+                timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                description: format!("Instantiated actor [{}]", id).into(),
+            });
+
+        // ----------------- Checkpoint 6: Initialize State -----------------
+
         debug!("Initializing state");
+
+        if actor_phase_manager.is_phase(ActorPhase::Starting).await {
+            let curr_phase = actor_phase_manager.get_phase().await;
+            return Err(ActorRuntimeError::ActorPhaseError {
+                expected: ActorPhase::Starting,
+                found: curr_phase,
+                message: "phase error found at setup task Checkpoint 6".into(),
+            });
+        }
 
         // Initialize state if needed
         let init_state = match initial_state {
@@ -291,43 +397,163 @@ impl ActorRuntime {
 
         actor_instance.store.data_mut().set_state(init_state);
 
+        actor_instance
+            .actor_component
+            .actor_store
+            .record_event(ChainEventData {
+                event_type: "theater-runtime".to_string(),
+                data: EventData::TheaterRuntime(TheaterRuntimeEventData::InitializingState),
+                timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                description: format!("Initialized state for actor [{}]", id).into(),
+            });
+
+        // ----------------- Checkpoint 7: Finalize Setup -----------------
+
         debug!("Ready");
 
-        let metrics = MetricsCollector::new();
+        if actor_phase_manager.is_phase(ActorPhase::Starting).await {
+            let curr_phase = actor_phase_manager.get_phase().await;
+            return Err(ActorRuntimeError::ActorPhaseError {
+                expected: ActorPhase::Starting,
+                found: curr_phase,
+                message: "phase error found at setup task Checkpoint 7".into(),
+            });
+        }
 
-        Ok(Self {
-            id,
-            config: config.clone(),
-            actor_instance,
-            handlers,
-            metrics,
-            operation_rx,
-            control_rx,
-            info_rx,
-            theater_tx,
-            actor_phase_manager,
-        })
+        let init_actor_handle = actor_handle.clone();
+        let init_id = id.clone();
+        tokio::spawn(async move {
+            init_actor_handle
+                .call_function::<(String,), ()>(
+                    "theater:simple/actor.init".to_string(),
+                    (init_id.to_string(),),
+                )
+                .await
+                .map_err(|e| {
+                    error!("Failed to call actor.init for actor {}: {}", id, e);
+                    e
+                })
+        });
+
+        // Start the handlers
+        let mut handler_tasks: Vec<JoinHandle<()>> = vec![];
+        let mut shutdown_controller = ShutdownController::new();
+        let handler_actor_handle = actor_handle.clone();
+        for mut handler in handlers {
+            let actor_handle = handler_actor_handle.clone();
+            let shutdown_receiver = shutdown_controller.subscribe();
+            let handler_task = tokio::spawn(async move {
+                handler
+                    .start(actor_handle, shutdown_receiver)
+                    .await
+                    .unwrap();
+            });
+            handler_tasks.push(handler_task);
+            // Store handler task for later management
+            // Note: In a real implementation, you might want to store these in a more
+            // structured way
+            // For simplicity, we just push them into a vector here
+            // You might want to use a Mutex or RwLock if you need to modify this later
+            // For now, we assume they are static after startup
+            // handler_tasks.push(handler_task);
+        }
+
+        actor_instance
+            .actor_component
+            .actor_store
+            .record_event(ChainEventData {
+                event_type: "theater-runtime".to_string(),
+                data: EventData::TheaterRuntime(TheaterRuntimeEventData::ActorReady),
+                timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                description: format!("Actor [{}] is ready", id).into(),
+            });
+
+        Ok((actor_instance, shutdown_controller, handler_tasks))
     }
 
-    pub async fn start(self: Self) -> () {
+    pub async fn start(
+        id: TheaterId,
+        config: &ManifestConfig,
+        initial_state: Option<Value>,
+        engine: Engine,
+        chain: Arc<SyncRwLock<StateChain>>,
+        handler_registry: HandlerRegistry,
+        theater_tx: Sender<TheaterCommand>,
+        operation_rx: Receiver<ActorOperation>,
+        operation_tx: Sender<ActorOperation>,
+        info_rx: Receiver<ActorInfo>,
+        info_tx: Sender<ActorInfo>,
+        control_rx: Receiver<ActorControl>,
+        control_tx: Sender<ActorControl>,
+    ) -> () {
         info!("Actor runtime starting communication loops");
-        self.actor_phase_manager
-            .set_phase(ActorPhase::Running)
-            .await;
+        let actor_phase_manager = ActorPhaseManager::new();
 
         // These will be set once setup completes
-        let actor_instance_wrapper: Arc<RwLock<ActorInstance>> =
-            Arc::new(RwLock::new(self.actor_instance));
-        let metrics: Arc<RwLock<MetricsCollector>> = Arc::new(RwLock::new(self.metrics));
-        let handler_tasks: Vec<JoinHandle<()>> = Vec::new();
-        let operation_rx = self.operation_rx;
-        let info_rx = self.info_rx;
-        let mut control_rx = self.control_rx;
+        let actor_instance_wrapper: Arc<RwLock<Option<ActorInstance>>> =
+            Arc::new(RwLock::new(None));
+        let metrics: Arc<RwLock<MetricsCollector>> = Arc::new(RwLock::new(MetricsCollector::new()));
+        let handler_tasks: Arc<RwLock<Vec<JoinHandle<()>>>> = Arc::new(RwLock::new(vec![]));
+        let handlers_shutdown_controller: Arc<RwLock<Option<ShutdownController>>> =
+            Arc::new(RwLock::new(None));
+        let operation_rx = operation_rx;
+        let info_rx = info_rx;
+        let mut control_rx = control_rx;
+
+        let setup_handle = {
+            let actor_instance_wrapper = actor_instance_wrapper.clone();
+            let actor_phase_manager = actor_phase_manager.clone();
+            let config = config.clone();
+            let theater_tx = theater_tx.clone();
+            let handler_tasks = handler_tasks.clone();
+            let handlers_shutdown_controller = handlers_shutdown_controller.clone();
+
+            tokio::spawn(async move {
+                match Self::build_actor_resources(
+                    id,
+                    &config,
+                    initial_state,
+                    engine,
+                    chain,
+                    handler_registry,
+                    theater_tx,
+                    operation_tx,
+                    info_tx,
+                    control_tx,
+                    actor_phase_manager.clone(),
+                )
+                .await
+                {
+                    Ok((actor_instance, shutdown_controller, handlers)) => {
+                        {
+                            let mut instance_guard = actor_instance_wrapper.write().await;
+                            *instance_guard = Some(actor_instance);
+                        }
+                        {
+                            let mut handler_tasks_guard = handler_tasks.write().await;
+                            *handler_tasks_guard = handlers;
+                        }
+                        {
+                            let mut shutdown_controller_guard =
+                                handlers_shutdown_controller.write().await;
+                            *shutdown_controller_guard = Some(shutdown_controller);
+                        }
+
+                        actor_phase_manager.set_phase(ActorPhase::Running).await;
+                        info!("Actor setup complete, now running");
+                    }
+                    Err(e) => {
+                        error!("Failed to set up actor runtime: {}", e);
+                        // Handle setup failure (e.g., notify theater runtime)
+                    }
+                }
+            })
+        };
 
         let info_handle = {
             let actor_instance_wrapper = actor_instance_wrapper.clone();
             let metrics = metrics.clone();
-            let actor_phase_manager = self.actor_phase_manager.clone();
+            let actor_phase_manager = actor_phase_manager.clone();
 
             tokio::spawn(Self::info_loop(
                 info_rx,
@@ -340,8 +566,8 @@ impl ActorRuntime {
         let operation_handle = {
             let actor_instance_wrapper = actor_instance_wrapper.clone();
             let metrics = metrics.clone();
-            let theater_tx = self.theater_tx.clone();
-            let actor_phase_manager = self.actor_phase_manager.clone();
+            let theater_tx = theater_tx.clone();
+            let actor_phase_manager = actor_phase_manager.clone();
 
             tokio::spawn(Self::operation_loop(
                 operation_rx,
@@ -357,12 +583,21 @@ impl ActorRuntime {
             match control {
                 ActorControl::Shutdown { response_tx } => {
                     info!("Shutdown requested");
-                    self.actor_phase_manager
+                    actor_phase_manager
                         .set_phase(ActorPhase::ShuttingDown)
                         .await;
 
                     // Wait for operation and info loops to finish gracefully
-                    let (_, _) = tokio::join!(operation_handle, info_handle);
+                    let (_, _, _) = tokio::join!(operation_handle, info_handle, setup_handle);
+
+                    match handlers_shutdown_controller.write().await.take() {
+                        Some(controller) => {
+                            controller.signal_shutdown(ShutdownType::Graceful).await;
+                        }
+                        None => {
+                            warn!("No handlers shutdown controller found");
+                        }
+                    }
 
                     if let Err(e) = response_tx.send(Ok(())) {
                         error!("Failed to send shutdown confirmation: {:?}", e);
@@ -374,25 +609,30 @@ impl ActorRuntime {
                     // Abort info and operation loops
                     operation_handle.abort();
                     info_handle.abort();
+                    setup_handle.abort();
+                    match handlers_shutdown_controller.write().await.take() {
+                        Some(controller) => {
+                            controller.signal_shutdown(ShutdownType::Force).await;
+                        }
+                        None => {
+                            warn!("No handlers shutdown controller found");
+                        }
+                    }
                     if let Err(e) = response_tx.send(Ok(())) {
                         error!("Failed to send terminate confirmation: {:?}", e);
                     }
                     break;
                 }
                 ActorControl::Pause { response_tx } => {
-                    if self
-                        .actor_phase_manager
-                        .is_phase(ActorPhase::ShuttingDown)
-                        .await
-                    {
+                    if actor_phase_manager.is_phase(ActorPhase::ShuttingDown).await {
                         let _ = response_tx.send(Err(ActorError::ShuttingDown));
                     } else {
-                        self.actor_phase_manager.set_phase(ActorPhase::Paused).await;
+                        actor_phase_manager.set_phase(ActorPhase::Paused).await;
                         let _ = response_tx.send(Ok(()));
                     }
                 }
                 ActorControl::Resume { response_tx } => {
-                    match self.actor_phase_manager.get_phase().await {
+                    match actor_phase_manager.get_phase().await {
                         ActorPhase::Starting | ActorPhase::Running => {
                             let _ = response_tx.send(Err(ActorError::NotPaused));
                         }
@@ -400,9 +640,7 @@ impl ActorRuntime {
                             let _ = response_tx.send(Err(ActorError::ShuttingDown));
                         }
                         ActorPhase::Paused => {
-                            self.actor_phase_manager
-                                .set_phase(ActorPhase::Running)
-                                .await;
+                            actor_phase_manager.set_phase(ActorPhase::Running).await;
                             let _ = response_tx.send(Ok(()));
                         }
                     }
@@ -417,10 +655,11 @@ impl ActorRuntime {
         let metrics = metrics.read().await;
 
         // If any handlers are still running, abort them
-        for task in handler_tasks {
-            if !task.is_finished() {
-                debug!("Aborting handler task that didn't shut down gracefully");
-                task.abort();
+        let handler_tasks = handler_tasks.read().await;
+        for handle in handler_tasks.iter() {
+            if !handle.is_finished() {
+                info!("Aborting handler task");
+                handle.abort();
             }
         }
 
@@ -433,7 +672,7 @@ impl ActorRuntime {
 
     async fn operation_loop(
         mut operation_rx: Receiver<ActorOperation>,
-        actor_instance_wrapper: Arc<RwLock<ActorInstance>>,
+        actor_instance_wrapper: Arc<RwLock<Option<ActorInstance>>>,
         metrics: Arc<RwLock<MetricsCollector>>,
         theater_tx: Sender<TheaterCommand>,
         actor_phase_manager: ActorPhaseManager,
@@ -467,7 +706,7 @@ impl ActorRuntime {
 
     async fn process_operation(
         op: ActorOperation,
-        actor_instance_wrapper: &Arc<RwLock<ActorInstance>>,
+        actor_instance_wrapper: &Arc<RwLock<Option<ActorInstance>>>,
         metrics: &Arc<RwLock<MetricsCollector>>,
         theater_tx: &Sender<TheaterCommand>,
         actor_phase_manager: ActorPhaseManager,
@@ -479,10 +718,32 @@ impl ActorRuntime {
                 response_tx,
             } => {
                 info!("Processing function call: {}", name);
-                let mut actor_instance = actor_instance_wrapper.write().await;
+                let mut actor_instance_guard = actor_instance_wrapper.write().await;
+                let actor_instance = match &mut *actor_instance_guard {
+                    Some(instance) => instance,
+                    None => {
+                        let err = ActorRuntimeError::ActorInstanceNotFound {
+                            message: "Actor instance not found".to_string(),
+                        };
+
+                        let _ = theater_tx
+                            .send(TheaterCommand::ActorRuntimeError { error: err })
+                            .await;
+
+                        let actor_err =
+                            ActorError::UnexpectedError("Actor instance not found".to_string());
+
+                        if let Err(e) = response_tx.send(Err(actor_err)) {
+                            error!(
+                                "Failed to send function call error response for operation '{}': {:?}",
+                                name, e
+                            );
+                        }
+                        return;
+                    }
+                };
                 let metrics = metrics.write().await;
-                match Self::execute_call(&mut actor_instance, &name, params, &theater_tx, &metrics)
-                    .await
+                match Self::execute_call(actor_instance, &name, params, &theater_tx, &metrics).await
                 {
                     Ok(result) => {
                         if let Err(e) = response_tx.send(Ok(result)) {
@@ -515,7 +776,7 @@ impl ActorRuntime {
 
     async fn info_loop(
         mut info_rx: Receiver<ActorInfo>,
-        actor_instance_wrapper: Arc<RwLock<ActorInstance>>,
+        actor_instance_wrapper: Arc<RwLock<Option<ActorInstance>>>,
         metrics: Arc<RwLock<MetricsCollector>>,
         actor_phase_manager: ActorPhaseManager,
     ) {
@@ -531,18 +792,39 @@ impl ActorRuntime {
                     }
                 }
                 ActorInfo::GetState { response_tx } => {
-                    let actor_instance = actor_instance_wrapper.read().await;
-                    let state = actor_instance.store.data().get_state();
-                    if let Err(e) = response_tx.send(Ok(state)) {
-                        error!("Failed to send state response: {:?}", e);
+                    match &*actor_instance_wrapper.read().await {
+                        Some(instance) => {
+                            let state = instance.store.data().get_state();
+                            if let Err(e) = response_tx.send(Ok(state)) {
+                                error!("Failed to send state response: {:?}", e);
+                            }
+                        }
+                        None => {
+                            let err =
+                                ActorError::UnexpectedError("Actor instance not found".to_string());
+                            if let Err(e) = response_tx.send(Err(err)) {
+                                error!("Failed to send state error response: {:?}", e);
+                            }
+                        }
                     }
                 }
                 ActorInfo::GetChain { response_tx } => {
-                    let actor_instance = actor_instance_wrapper.read().await;
-                    let chain = actor_instance.store.data().get_chain();
-                    if let Err(e) = response_tx.send(Ok(chain)) {
-                        error!("Failed to send chain response: {:?}", e);
-                    }
+                    match &*actor_instance_wrapper.read().await {
+                        None => {
+                            let err =
+                                ActorError::UnexpectedError("Actor instance not found".to_string());
+                            if let Err(e) = response_tx.send(Err(err)) {
+                                error!("Failed to send chain error response: {:?}", e);
+                            }
+                            return;
+                        }
+                        Some(instance) => {
+                            let chain = instance.store.data().get_chain();
+                            if let Err(e) = response_tx.send(Ok(chain)) {
+                                error!("Failed to send chain response: {:?}", e);
+                            }
+                        }
+                    };
                 }
                 ActorInfo::GetMetrics { response_tx } => {
                     let metrics = metrics.read().await;
@@ -552,21 +834,33 @@ impl ActorRuntime {
                     }
                 }
                 ActorInfo::SaveChain { response_tx } => {
-                    let actor_instance = actor_instance_wrapper.read().await;
-                    match actor_instance.save_chain() {
-                        Ok(_) => {
-                            if let Err(e) = response_tx.send(Ok(())) {
-                                error!("Failed to send save chain response: {:?}", e);
+                    match &mut *actor_instance_wrapper.write().await {
+                        None => {
+                            let err =
+                                ActorError::UnexpectedError("Actor instance not found".to_string());
+                            if let Err(e) = response_tx.send(Err(err)) {
+                                error!("Failed to send save chain error response: {:?}", e);
                             }
+                            return;
                         }
-                        Err(e) => {
-                            if let Err(send_err) =
-                                response_tx.send(Err(ActorError::UnexpectedError(e.to_string())))
-                            {
-                                error!("Failed to send save chain error response: {:?}", send_err);
+                        Some(instance) => match instance.save_chain() {
+                            Ok(_) => {
+                                if let Err(e) = response_tx.send(Ok(())) {
+                                    error!("Failed to send save chain response: {:?}", e);
+                                }
                             }
-                        }
-                    }
+                            Err(e) => {
+                                if let Err(send_err) = response_tx
+                                    .send(Err(ActorError::UnexpectedError(e.to_string())))
+                                {
+                                    error!(
+                                        "Failed to send save chain error response: {:?}",
+                                        send_err
+                                    );
+                                }
+                            }
+                        },
+                    };
                 }
             }
         }

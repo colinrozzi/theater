@@ -46,6 +46,10 @@ pub enum TheaterRuntimeEventData {
         /// Error message describing the failure
         error: String,
     },
+
+    InstantiatingActor,
+    InitializingState,
+    ActorReady,
 }
 
 pub struct TheaterRuntimeEvent {

@@ -9,13 +9,13 @@
 
 pub mod handle;
 pub mod runtime;
-mod runtime_refactored;
 pub mod store;
 pub mod types;
 
 // Public re-exports
 pub use handle::ActorHandle;
 pub use runtime::ActorRuntime;
+pub use runtime::ActorRuntimeError;
 pub use runtime::StartActorResult;
 pub use store::ActorStore;
 pub use types::ActorError;

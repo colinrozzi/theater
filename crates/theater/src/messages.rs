@@ -1,4 +1,5 @@
 use crate::actor::ActorError;
+use crate::actor::ActorRuntimeError;
 /// # Theater Message System
 ///
 /// Defines the message types used for communication between different components
@@ -210,6 +211,10 @@ pub enum TheaterCommand {
         error: ActorError,
     },
 
+    ActorRuntimeError {
+        error: ActorRuntimeError,
+    },
+
     /// # Get all actors
     ///
     /// Retrieves a list of all actor IDs in the system.
@@ -385,6 +390,7 @@ impl TheaterCommand {
             TheaterCommand::ActorError { actor_id, .. } => {
                 format!("ActorError: {:?}", actor_id)
             }
+            TheaterCommand::ActorRuntimeError { .. } => "ActorRuntimeError".to_string(),
             TheaterCommand::GetActors { .. } => "GetActors".to_string(),
             TheaterCommand::GetActorManifest { actor_id, .. } => {
                 format!("GetActorManifest: {:?}", actor_id)

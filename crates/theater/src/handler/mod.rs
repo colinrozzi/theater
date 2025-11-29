@@ -28,11 +28,27 @@ impl HandlerRegistry {
     }
 }
 
+impl Clone for HandlerRegistry {
+    fn clone(&self) -> Self {
+        let mut new_registry = HandlerRegistry::new();
+        for handler in &self.handlers {
+            // Note: This requires Handler to implement Clone, which may not be possible.
+            // This is just a placeholder to illustrate the idea.
+            // In practice, you might need a different approach to clone handlers.
+            // new_registry.register(handler.clone());
+            let new_handler = handler.new();
+            new_registry.register(new_handler);
+        }
+    }
+}
+
 /// Trait describing the lifecycle hooks every handler must implement.
 ///
 /// External handler crates can implement this trait and register their handlers
 /// with the Theater runtime without depending on the concrete `Handler` enum.
 pub trait Handler: Send + Sync + 'static {
+    fn new(&self) -> Handler;
+
     fn start(
         &mut self,
         actor_handle: ActorHandle,
