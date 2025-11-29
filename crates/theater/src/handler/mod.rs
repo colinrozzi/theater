@@ -72,12 +72,12 @@ pub trait Handler: Send + Sync + 'static {
     fn setup_host_functions(
         &mut self,
         actor_component: &mut ActorComponent,
-    ) -> Pin<Box<dyn Future<Output = Result<()>> + Send>>;
+    ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + '_>>;
 
     fn add_export_functions(
         &self,
         actor_instance: &mut ActorInstance,
-    ) -> Pin<Box<dyn Future<Output = Result<()>> + Send>>;
+    ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + '_>>;
 
     fn name(&self) -> &str;
 

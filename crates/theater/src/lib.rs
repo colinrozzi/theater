@@ -48,7 +48,7 @@ pub mod shutdown;
 pub mod store;
 pub mod theater_runtime;
 pub mod utils;
-mod wasm;
+pub mod wasm;
 
 pub use actor::ActorError;
 
@@ -71,4 +71,4 @@ pub use metrics::{
 pub use shutdown::{ShutdownController, ShutdownReceiver, ShutdownSignal, ShutdownType};
 pub use store::{ContentRef, ContentStore, Label};
 pub use theater_runtime::TheaterRuntime;
-pub use wasm::{MemoryStats, WasmError};
+pub use wasm::{ActorComponent, ActorInstance, MemoryStats, WasmError};

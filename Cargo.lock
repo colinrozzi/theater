@@ -3542,6 +3542,16 @@ version = "0.2.1"
 [[package]]
 name = "theater-handler-timing"
 version = "0.2.1"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "futures",
+ "theater",
+ "thiserror 1.0.69",
+ "tokio",
+ "tracing",
+ "wasmtime",
+]
 
 [[package]]
 name = "theater-server"
