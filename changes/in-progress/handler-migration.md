@@ -19,7 +19,7 @@ See the full proposal: [2025-11-30-handler-migration.md](../proposals/2025-11-30
 
 | Handler | Status | Crate | Old File | Notes |
 |---------|--------|-------|----------|-------|
-| http-client | ❌ NOT STARTED | `theater-handler-http-client` | `src/host/http_client.rs` | Waiting |
+| http-client | ✅ COMPLETE | `theater-handler-http-client` | `src/host/http_client.rs` | Migrated 2025-11-30 |
 | filesystem | ❌ NOT STARTED | `theater-handler-filesystem` | `src/host/filesystem.rs` | Large but isolated |
 
 ### ❌ Phase 3: Complex Handlers
@@ -39,9 +39,9 @@ See the full proposal: [2025-11-30-handler-migration.md](../proposals/2025-11-30
 
 ## Overall Progress
 
-- **Completed**: 3/11 (27%)
+- **Completed**: 4/11 (36%)
 - **In Progress**: 0/11 (0%)
-- **Not Started**: 8/11 (73%)
+- **Not Started**: 7/11 (64%)
 
 ## Current Sprint
 
@@ -78,6 +78,14 @@ For each completed handler migration:
   - Fixed closure signatures for func_wrap (tuples for parameters)
   - Updated tests and documentation with all config fields
   - All tests passing (2 unit tests + 1 doc test)
+  - Ready for integration
+- Skipped runtime handler (tightly coupled with Theater runtime)
+- ✅ **Completed http-client handler migration**
+  - Implemented HttpClientHandler struct with Handler trait
+  - Migrated HttpRequest and HttpResponse component types
+  - All async operations properly wrapped with func_wrap_async
+  - Permission checking preserved
+  - All tests passing (3 unit tests + 1 doc test)
   - Ready for integration
 
 ### Earlier

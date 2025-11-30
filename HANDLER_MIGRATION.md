@@ -110,3 +110,12 @@ The migrated handlers:
   - Corrected closure signatures for func_wrap
   - Updated all config fields in tests and docs
   - All tests passing
+
+### 4. HTTP Client Handler
+- **Crate**: `theater-handler-http-client`
+- **Status**: ✅ Complete (2025-11-30)
+- **Notes**:
+  - Migrated component types (HttpRequest, HttpResponse)
+  - Preserved async operations with func_wrap_async
+  - Permission checking maintained
+  - All tests passing (3 unit + 1 doc)
