@@ -12,7 +12,7 @@ See the full proposal: [2025-11-30-handler-migration.md](../proposals/2025-11-30
 |---------|--------|-------|----------|-------|
 | random | ✅ COMPLETE | `theater-handler-random` | `src/host/random.rs` | Documented example migration |
 | timing | ✅ COMPLETE | `theater-handler-timing` | `src/host/timing.rs` | Fully migrated |
-| environment | 🚧 IN PROGRESS | `theater-handler-environment` | `src/host/environment.rs` | Next to migrate |
+| environment | ✅ COMPLETE | `theater-handler-environment` | `src/host/environment.rs` | Migrated 2025-11-30 |
 | runtime | ❌ NOT STARTED | `theater-handler-runtime` | `src/host/runtime.rs` | Waiting |
 
 ### ❌ Phase 2: Medium Complexity
@@ -39,19 +39,14 @@ See the full proposal: [2025-11-30-handler-migration.md](../proposals/2025-11-30
 
 ## Overall Progress
 
-- **Completed**: 2/11 (18%)
+- **Completed**: 3/11 (27%)
 - **In Progress**: 0/11 (0%)
-- **Not Started**: 9/11 (82%)
+- **Not Started**: 8/11 (73%)
 
 ## Current Sprint
 
 ### Active Work
-- [ ] Migrate environment handler
-  - [ ] Implement EnvironmentHandler struct
-  - [ ] Implement Handler trait
-  - [ ] Add tests
-  - [ ] Update documentation
-  - [ ] Remove old implementation
+- No active work at the moment
 
 ### Blocked
 None currently
@@ -77,7 +72,13 @@ For each completed handler migration:
 - Created change tracking structure
 - Created proposal document
 - Identified that random and timing are complete
-- Ready to begin environment handler migration
+- ✅ **Completed environment handler migration**
+  - Implemented EnvironmentHandler struct with Handler trait
+  - Fixed wasmtime version from 26.0 to 31.0 to match rest of project
+  - Fixed closure signatures for func_wrap (tuples for parameters)
+  - Updated tests and documentation with all config fields
+  - All tests passing (2 unit tests + 1 doc test)
+  - Ready for integration
 
 ### Earlier
 - 2025-11-30: Random handler migration completed (documented)

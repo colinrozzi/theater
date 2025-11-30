@@ -75,7 +75,7 @@ Based on this migration, here's the pattern for migrating other handlers:
 
 Recommended order for migrating remaining handlers:
 1. ✅ `random` - DONE!
-2. `environment` - Similar simplicity
+2. ✅ `environment` - DONE!
 3. `timing` - Also straightforward
 4. `http-client` - Moderate complexity
 5. `filesystem` - Larger but well-isolated
@@ -84,8 +84,29 @@ Recommended order for migrating remaining handlers:
 
 ## Testing
 
-The migrated handler:
-- ✅ Compiles without errors
+The migrated handlers:
+- ✅ Compile without errors
 - ✅ All unit tests pass
-- ✅ Maintains backward compatibility
-- ✅ Integrates with Theater runtime via `Handler` trait
+- ✅ Maintain backward compatibility
+- ✅ Integrate with Theater runtime via `Handler` trait
+
+## Completed Migrations
+
+### 1. Random Handler
+- **Crate**: `theater-handler-random`
+- **Status**: ✅ Complete
+- **Notes**: First migration, served as the documented example
+
+### 2. Timing Handler  
+- **Crate**: `theater-handler-timing`
+- **Status**: ✅ Complete
+- **Notes**: Completed prior to environment handler
+
+### 3. Environment Handler
+- **Crate**: `theater-handler-environment`
+- **Status**: ✅ Complete (2025-11-30)
+- **Notes**: 
+  - Fixed wasmtime version (26.0 → 31.0)
+  - Corrected closure signatures for func_wrap
+  - Updated all config fields in tests and docs
+  - All tests passing

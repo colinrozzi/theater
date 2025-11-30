@@ -3502,6 +3502,14 @@ dependencies = [
 [[package]]
 name = "theater-handler-environment"
 version = "0.2.1"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "theater",
+ "thiserror 1.0.69",
+ "tracing",
+ "wasmtime",
+]
 
 [[package]]
 name = "theater-handler-filesystem"
