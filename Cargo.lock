@@ -3526,6 +3526,22 @@ version = "0.2.1"
 [[package]]
 name = "theater-handler-random"
 version = "0.2.1"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "pretty_assertions",
+ "rand 0.8.5",
+ "rand_chacha 0.3.1",
+ "serde",
+ "tempfile",
+ "test-log",
+ "theater",
+ "thiserror 1.0.69",
+ "tokio",
+ "tracing",
+ "uuid",
+ "wasmtime",
+]
 
 [[package]]
 name = "theater-handler-runtime"
