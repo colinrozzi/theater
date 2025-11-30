@@ -22,12 +22,12 @@ See the full proposal: [2025-11-30-handler-migration.md](../proposals/2025-11-30
 | http-client | ✅ COMPLETE | `theater-handler-http-client` | `src/host/http_client.rs` | Migrated 2025-11-30 |
 | filesystem | ✅ COMPLETE | `theater-handler-filesystem` | `src/host/filesystem.rs` | Migrated 2025-11-30 |
 
-### ❌ Phase 3: Complex Handlers
+### ⚙️ Phase 3: Complex Handlers
 
 | Handler | Status | Crate | Old File | Notes |
 |---------|--------|-------|----------|-------|
 | process | ❌ NOT STARTED | `theater-handler-process` | `src/host/process.rs` | Complex interactions |
-| store | ❌ NOT STARTED | `theater-handler-store` | `src/host/store.rs` | Complex state management |
+| store | ✅ COMPLETE | `theater-handler-store` | `src/host/store.rs` | Migrated 2025-12-07 |
 | supervisor | ❌ NOT STARTED | `theater-handler-supervisor` | `src/host/supervisor.rs` | Complex orchestration |
 
 ### ❌ Phase 4: Framework Handlers
@@ -39,9 +39,9 @@ See the full proposal: [2025-11-30-handler-migration.md](../proposals/2025-11-30
 
 ## Overall Progress
 
-- **Completed**: 6/11 (55%)
+- **Completed**: 7/11 (64%)
 - **In Progress**: 0/11 (0%)
-- **Not Started**: 5/11 (45%)
+- **Not Started**: 4/11 (36%)
 
 ## Current Sprint
 
@@ -100,6 +100,18 @@ For each completed handler migration:
   - All async operations properly wrapped with func_wrap_async
   - Permission checking preserved
   - All tests passing (3 unit tests + 1 doc test)
+  - Ready for integration
+
+### 2025-12-07
+- ✅ **Completed store handler migration**
+  - Implemented StoreHandler struct with Handler trait
+  - Migrated all 13 store operations (new, store, get, exists, label operations, list operations)
+  - Fixed wasmtime version from 26.0 to 31.0 to match rest of project
+  - Content-addressed storage with SHA1 hashing preserved
+  - Label management system fully functional
+  - Comprehensive event recording for all operations
+  - All tests passing (2 unit tests + 1 doc test)
+  - Complete README documentation with all operations listed
   - Ready for integration
 
 ### Earlier

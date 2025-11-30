@@ -10,4 +10,15 @@ keywords.workspace = true
 categories.workspace = true
 rust-version.workspace = true
 
+description = "Content storage handler for Theater WebAssembly runtime"
+
 [dependencies]
+theater = { workspace = true }
+anyhow.workspace = true
+tracing.workspace = true
+tokio.workspace = true
+wasmtime = "31.0"
+chrono = "0.4"
+thiserror = "2.0"
+serde = { workspace = true }
+serde_json.workspace = true
