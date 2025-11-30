@@ -13,14 +13,14 @@ See the full proposal: [2025-11-30-handler-migration.md](../proposals/2025-11-30
 | random | ✅ COMPLETE | `theater-handler-random` | `src/host/random.rs` | Documented example migration |
 | timing | ✅ COMPLETE | `theater-handler-timing` | `src/host/timing.rs` | Fully migrated |
 | environment | ✅ COMPLETE | `theater-handler-environment` | `src/host/environment.rs` | Migrated 2025-11-30 |
-| runtime | ❌ NOT STARTED | `theater-handler-runtime` | `src/host/runtime.rs` | Waiting |
+| runtime | ✅ COMPLETE | `theater-handler-runtime` | `src/host/runtime.rs` | Migrated 2025-11-30 |
 
 ### ❌ Phase 2: Medium Complexity
 
 | Handler | Status | Crate | Old File | Notes |
 |---------|--------|-------|----------|-------|
 | http-client | ✅ COMPLETE | `theater-handler-http-client` | `src/host/http_client.rs` | Migrated 2025-11-30 |
-| filesystem | ❌ NOT STARTED | `theater-handler-filesystem` | `src/host/filesystem.rs` | Large but isolated |
+| filesystem | ✅ COMPLETE | `theater-handler-filesystem` | `src/host/filesystem.rs` | Migrated 2025-11-30 |
 
 ### ❌ Phase 3: Complex Handlers
 
@@ -39,9 +39,9 @@ See the full proposal: [2025-11-30-handler-migration.md](../proposals/2025-11-30
 
 ## Overall Progress
 
-- **Completed**: 4/11 (36%)
+- **Completed**: 6/11 (55%)
 - **In Progress**: 0/11 (0%)
-- **Not Started**: 7/11 (64%)
+- **Not Started**: 5/11 (45%)
 
 ## Current Sprint
 
@@ -52,9 +52,9 @@ See the full proposal: [2025-11-30-handler-migration.md](../proposals/2025-11-30
 None currently
 
 ### Next Up
-1. Complete environment handler
-2. Migrate runtime handler
-3. Update core theater crate to use new handlers
+1. Begin Phase 3 complex handlers (process, store, supervisor)
+2. Update core theater crate to use new handlers
+3. Phase 4 framework handlers
 
 ## Cleanup Checklist
 
@@ -79,7 +79,21 @@ For each completed handler migration:
   - Updated tests and documentation with all config fields
   - All tests passing (2 unit tests + 1 doc test)
   - Ready for integration
-- Skipped runtime handler (tightly coupled with Theater runtime)
+- ✅ **Completed runtime handler migration**
+  - Implemented RuntimeHandler struct with Handler trait
+  - Migrated log, get-state, and shutdown functions
+  - Async shutdown operation with theater command channel
+  - Comprehensive event recording for chain
+  - All tests passing (1 unit test)
+  - Ready for integration
+- ✅ **Completed filesystem handler migration**
+  - Split into modular structure (lib, types, path_validation, operations)
+  - Implemented all 9 filesystem operations
+  - Comprehensive path validation with dunce canonicalization
+  - Permission system with allowed/denied paths
+  - Command execution with security restrictions
+  - All tests passing (3 unit tests)
+  - Ready for integration
 - ✅ **Completed http-client handler migration**
   - Implemented HttpClientHandler struct with Handler trait
   - Migrated HttpRequest and HttpResponse component types

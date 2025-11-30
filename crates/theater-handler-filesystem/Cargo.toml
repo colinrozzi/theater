@@ -11,3 +11,36 @@ categories.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+# Core theater dependencies
+theater = { path = "../theater" }
+
+# WebAssembly runtime
+wasmtime = { version = "31.0", features = ["component-model", "async"] }
+
+# Async runtime
+tokio = { version = "1.0", features = ["full"] }
+
+# Error handling
+anyhow = "1.0"
+thiserror = "1.0"
+
+# Logging
+tracing = "0.1"
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Path canonicalization
+dunce = "1.0"
+
+# Random number generation (for temp dir)
+rand = "0.8"
+
+# Time handling
+chrono = "0.4"
+
+[dev-dependencies]
+test-log = "0.2"
+pretty_assertions = "1.4"
+tempfile = "3.8.1"
