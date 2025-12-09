@@ -507,6 +507,37 @@ impl ChannelId {
     pub fn as_str(&self) -> &str {
         &self.0
     }
+
+    /// # Parse a channel ID from a string
+    ///
+    /// Creates a ChannelId from its string representation.
+    ///
+    /// ## Parameters
+    ///
+    /// * `s` - The string to parse (should be in the format "ch_XXXXXXXXXXXXXXXX")
+    ///
+    /// ## Returns
+    ///
+    /// * `Ok(ChannelId)` - Successfully parsed channel ID
+    /// * `Err` - Invalid format or empty string
+    ///
+    /// ## Example
+    ///
+    /// ```rust
+    /// use theater::messages::ChannelId;
+    ///
+    /// let channel_id = ChannelId::parse("ch_0123456789abcdef").unwrap();
+    /// assert_eq!(channel_id.as_str(), "ch_0123456789abcdef");
+    /// ```
+    pub fn parse(s: &str) -> Result<Self> {
+        if s.is_empty() {
+            anyhow::bail!("Channel ID cannot be empty");
+        }
+        if !s.starts_with("ch_") {
+            anyhow::bail!("Channel ID must start with 'ch_' prefix");
+        }
+        Ok(ChannelId(s.to_string()))
+    }
 }
 
 /// # Channel Participant
@@ -639,10 +670,12 @@ pub struct ActorSend {
 pub struct ActorChannelOpen {
     /// The unique ID for this channel
     pub channel_id: ChannelId,
+    /// The participant initiating the channel
+    pub initiator_id: ChannelParticipant,
     /// Channel to receive the result of the open request
     pub response_tx: oneshot::Sender<Result<bool>>,
     /// Initial message data (may contain authentication/metadata)
-    pub data: Vec<u8>,
+    pub initial_msg: Vec<u8>,
 }
 
 /// # Actor Channel Message
@@ -663,7 +696,7 @@ pub struct ActorChannelMessage {
     /// The ID of the channel to send on
     pub channel_id: ChannelId,
     /// Message data
-    pub data: Vec<u8>,
+    pub msg: Vec<u8>,
 }
 
 /// # Actor Channel Close
@@ -751,6 +784,72 @@ pub enum ActorMessage {
     ChannelClose(ActorChannelClose),
     /// Notification of a new channel
     ChannelInitiated(ActorChannelInitiated),
+}
+
+/// # Message Command
+///
+/// Commands for the message-server handler's messaging infrastructure.
+///
+/// ## Purpose
+///
+/// MessageCommand provides a separate command space from TheaterCommand specifically
+/// for actor-to-actor messaging operations. This separation allows the message-server
+/// handler to manage messaging independently from the core runtime.
+///
+/// ## Design
+///
+/// MessageCommand enables complete architectural separation:
+/// - External MessageRouter manages actor registry
+/// - Message routing is handled externally from the runtime
+/// - Handlers register themselves during setup_host_functions
+///
+/// ## Integration
+///
+/// Actor WASM host functions send MessageCommands to route messages:
+/// - send() → MessageCommand::SendMessage
+/// - request() → MessageCommand::SendMessage (with Request type)
+/// - open-channel() → MessageCommand::OpenChannel
+/// - send-on-channel() → MessageCommand::ChannelMessage
+/// - close-channel() → MessageCommand::ChannelClose
+#[derive(Debug)]
+pub enum MessageCommand {
+    /// Send a one-way message to an actor
+    ///
+    /// Delivers a message to the target actor's mailbox without waiting for a response.
+    SendMessage {
+        target_id: TheaterId,
+        message: ActorMessage,
+        response_tx: oneshot::Sender<Result<()>>,
+    },
+
+    /// Open a bidirectional channel between actors
+    ///
+    /// Initiates a channel creation between two participants. The target actor
+    /// receives a ChannelOpen message and can accept or reject the channel.
+    OpenChannel {
+        initiator_id: ChannelParticipant,
+        target_id: ChannelParticipant,
+        channel_id: ChannelId,
+        initial_message: Vec<u8>,
+        response_tx: oneshot::Sender<Result<bool>>,
+    },
+
+    /// Send a message on an established channel
+    ///
+    /// Transmits data over an existing channel to the other participant.
+    ChannelMessage {
+        channel_id: ChannelId,
+        message: Vec<u8>,
+        response_tx: oneshot::Sender<Result<()>>,
+    },
+
+    /// Close a channel
+    ///
+    /// Terminates a channel, notifying both participants.
+    ChannelClose {
+        channel_id: ChannelId,
+        response_tx: oneshot::Sender<Result<()>>,
+    },
 }
 
 /// # Actor Status

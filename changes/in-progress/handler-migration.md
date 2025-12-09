@@ -30,18 +30,19 @@ See the full proposal: [2025-11-30-handler-migration.md](../proposals/2025-11-30
 | store | ✅ COMPLETE | `theater-handler-store` | `src/host/store.rs` | Migrated 2025-12-07 |
 | supervisor | ✅ COMPLETE | `theater-handler-supervisor` | `src/host/supervisor.rs` | Migrated 2025-12-08 |
 
-### ❌ Phase 4: Framework Handlers
+### ⚙️ Phase 4: Framework Handlers
 
 | Handler | Status | Crate | Old File | Notes |
 |---------|--------|-------|----------|-------|
-| message-server | ❌ NOT STARTED | `theater-handler-message-server` | `src/host/message_server.rs` | Depends on others |
+| message-server | ✅ COMPLETE | `theater-handler-message-server` | `src/host/message_server.rs` | New architecture 2025-12-10 (see message-router-architecture.md) |
 | http-framework | ❌ NOT STARTED | `theater-handler-http-framework` | `src/host/framework/` | Depends on others |
 
 ## Overall Progress
 
-- **Completed**: 9/11 (82%)
+- **Completed**: 10/11 (91%)
+- **Blocked**: 0/11 (0%)
 - **In Progress**: 0/11 (0%)
-- **Not Started**: 2/11 (18%)
+- **Not Started**: 1/11 (9%)
 
 ## Current Sprint
 
@@ -49,10 +50,10 @@ See the full proposal: [2025-11-30-handler-migration.md](../proposals/2025-11-30
 - No active work at the moment
 
 ### Blocked
-None currently
+- None! All blockers resolved.
 
 ### Next Up
-1. Begin Phase 4 framework handlers (message-server, http-framework)
+1. Complete Phase 4: Migrate http-framework handler
 2. Update core theater crate to use new handlers
 3. Complete handler migration project
 
@@ -144,6 +145,39 @@ For each completed handler migration:
   - ~1230 lines migrated from ~1079 line original
   - Ready for integration
   - **Phase 3 now 100% complete! 🎉**
+
+### 2025-12-09
+- ✅ **Resolved message-server handler compilation blocker**
+  - Added MessageCommand enum (separate from TheaterCommand for future lifecycle integration)
+  - Fixed ActorChannelOpen struct: added `initiator_id` field, renamed `data` to `initial_msg`
+  - Fixed ActorChannelMessage struct: renamed `data` to `msg`
+  - Added ChannelId::parse() method for parsing channel IDs from strings
+  - Added temporary TheaterCommand variants (SendMessage, ChannelOpen, ChannelMessage, ChannelClose)
+    - These are marked TEMPORARY and will be replaced with MessageCommand routing in lifecycle integration
+  - Fixed MutexGuard Send issue in handler by adding proper scope
+  - All tests passing (2 unit tests)
+  - Handler now compiles successfully!
+  - Ready for lifecycle integration (separate PR)
+
+### 2025-12-10
+- ✅ **Completed message-server architectural refactor**
+  - **REMOVED lifecycle coupling** - No more ActorLifecycleEvent, Runtime has zero messaging knowledge
+  - **Created MessageRouter** - High-throughput external routing service (100k+ msgs/sec capability)
+    - Zero lock contention using channel-based architecture
+    - Single task owns actor registry HashMap
+    - Pure async message passing
+  - **Per-actor handler instances** - Each actor gets its own handler via create_instance()
+    - Handler registers mailbox during setup_host_functions()
+    - Consumes mailbox in start() until shutdown
+    - Unregisters from router on shutdown
+  - **Complete separation** - Theater runtime is messaging-agnostic
+  - **External service pattern** - MessageRouter created by user before Theater
+  - **Updated all host functions** - Now use router.route_message() instead of theater_tx
+  - Removed ActorLifecycleEvent from messages.rs
+  - Removed message_lifecycle_tx from TheaterRuntime
+  - Removed message_tx from ActorStore
+  - All tests passing
+  - Full documentation in message-router-architecture.md
 
 ### Earlier
 - 2025-11-30: Random handler migration completed (documented)

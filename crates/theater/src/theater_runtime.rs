@@ -165,6 +165,7 @@ where
     /// * `theater_tx` - Sender for commands to the runtime
     /// * `theater_rx` - Receiver for commands to the runtime
     /// * `channel_events_tx` - Optional channel for sending events to external systems
+    /// * `message_lifecycle_tx` - Optional channel for sending actor lifecycle events to message-server
     ///
     /// ## Returns
     ///
@@ -180,7 +181,7 @@ where
     /// #
     /// # async fn example() -> Result<()> {
     /// let (theater_tx, theater_rx) = mpsc::channel::<TheaterCommand>(100);
-    /// let runtime = TheaterRuntime::new(theater_tx, theater_rx, None, Default::default()).await?;
+    /// let runtime = TheaterRuntime::new(theater_tx, theater_rx, None, None, Default::default()).await?;
     /// # Ok(())
     /// # }
     /// ```
@@ -629,6 +630,13 @@ where
             .await;
         });
 
+        // Create ActorHandle for lifecycle notification before moving channels
+        let actor_handle = crate::actor::handle::ActorHandle::new(
+            operation_tx.clone(),
+            info_tx.clone(),
+            control_tx.clone(),
+        );
+
         let process = ActorProcess {
             actor_id: actor_id.clone(),
             name: actor_name,
@@ -660,6 +668,7 @@ where
 
         self.actors.insert(actor_id.clone(), process);
         debug!("Actor process registered with runtime");
+
         Ok(actor_id)
     }
 

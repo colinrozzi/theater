@@ -14,7 +14,7 @@ use theater::events::{ChainEventData, EventData};
 use theater::handler::Handler;
 use theater::messages::{
     ActorChannelClose, ActorChannelInitiated, ActorChannelMessage, ActorChannelOpen,
-    ActorMessage, ActorRequest, ActorSend, ChannelId, ChannelParticipant,
+    ActorLifecycleEvent, ActorMessage, ActorRequest, ActorSend, ChannelId, ChannelParticipant,
     MessageCommand,
 };
 use theater::shutdown::ShutdownReceiver;
@@ -262,11 +262,69 @@ impl MessageServerHandler {
         }
     }
 
-    /// Process a message for this actor
+    /// Process a message for THIS actor
+    async fn process_actor_message(
+        mut lifecycle_rx: Receiver<ActorLifecycleEvent>,
+        actor_registry: Arc<tokio::sync::RwLock<HashMap<TheaterId, ActorRegistryEntry>>>,
+    ) {
+        info!("Message-server lifecycle processor started");
+
+        while let Some(event) = lifecycle_rx.recv().await {
+            match event {
+                ActorLifecycleEvent::ActorSpawned { actor_id, actor_handle } => {
+                    info!("Registering actor: {}", actor_id);
+
+                    // Create mailbox for this actor
+                    let (mailbox_tx, mailbox_rx) = tokio::sync::mpsc::channel(100);
+
+                    // Register in our registry
+                    let entry = ActorRegistryEntry {
+                        actor_id: actor_id.clone(),
+                        mailbox_tx: mailbox_tx.clone(),
+                        actor_handle: actor_handle.clone(),
+                        channels: HashSet::new(),
+                    };
+
+                    actor_registry.write().await.insert(actor_id.clone(), entry);
+
+                    // Spawn consumer task for this actor's mailbox
+                    tokio::spawn(Self::consume_actor_mailbox(
+                        actor_id,
+                        mailbox_rx,
+                        actor_handle,
+                    ));
+                }
+                ActorLifecycleEvent::ActorStopped { actor_id } => {
+                    info!("Unregistering actor: {}", actor_id);
+                    actor_registry.write().await.remove(&actor_id);
+                }
+            }
+        }
+
+        info!("Message-server lifecycle processor stopped");
+    }
+
+    /// Consume messages from an actor's mailbox
+    async fn consume_actor_mailbox(
+        actor_id: TheaterId,
+        mut mailbox_rx: Receiver<ActorMessage>,
+        actor_handle: ActorHandle,
+    ) {
+        info!("Mailbox consumer started for: {}", actor_id);
+
+        while let Some(msg) = mailbox_rx.recv().await {
+            if let Err(e) = Self::process_actor_message(msg, &actor_handle).await {
+                error!("Error processing message for {}: {}", actor_id, e);
+            }
+        }
+
+        info!("Mailbox consumer stopped for: {}", actor_id);
+    }
+
+    /// Process a message for a specific actor
     async fn process_actor_message(
         msg: ActorMessage,
         actor_handle: &ActorHandle,
-        outstanding_requests: &Arc<Mutex<HashMap<String, tokio::sync::oneshot::Sender<Vec<u8>>>>>,
     ) -> Result<(), MessageServerError> {
         match msg {
             ActorMessage::Send(ActorSend { data }) => {
@@ -320,11 +378,112 @@ impl MessageServerHandler {
                     )
                     .await?;
             }
-            ActorMessage::ChannelInitiated(ActorChannelInitiated { .. }) => {
-                // Channel initiated from this actor - nothing to do
+            ActorMessage::ChannelInitiated(_) => {
+                // Handle channel initiation if needed
             }
         }
         Ok(())
+    }
+
+    /// Process message commands from host functions
+    async fn process_message_commands(
+        mut command_rx: Receiver<MessageCommand>,
+        actor_registry: Arc<tokio::sync::RwLock<HashMap<TheaterId, ActorRegistryEntry>>>,
+    ) {
+        info!("Message command processor started");
+
+        while let Some(command) = command_rx.recv().await {
+            match command {
+                MessageCommand::SendMessage {
+                    target_id,
+                    message,
+                    response_tx,
+                } => {
+                    let result = {
+                        let registry = actor_registry.read().await;
+                        if let Some(entry) = registry.get(&target_id) {
+                            entry
+                                .mailbox_tx
+                                .send(message)
+                                .await
+                                .map_err(|e| anyhow::anyhow!("Failed to send: {}", e))
+                        } else {
+                            Err(anyhow::anyhow!("Actor not found: {}", target_id))
+                        }
+                    };
+                    let _ = response_tx.send(result);
+                }
+                MessageCommand::OpenChannel {
+                    initiator_id,
+                    target_id,
+                    channel_id,
+                    initial_message,
+                    response_tx,
+                } => {
+                    let result = {
+                        let registry = actor_registry.read().await;
+
+                        // Find target actor
+                        let target_actor_id = match target_id {
+                            ChannelParticipant::Actor(id) => id,
+                            ChannelParticipant::External => {
+                                let _ = response_tx.send(Err(anyhow::anyhow!(
+                                    "External participants not yet supported"
+                                )));
+                                continue;
+                            }
+                        };
+
+                        if let Some(entry) = registry.get(&target_actor_id) {
+                            let (oneshot_tx, oneshot_rx) = tokio::sync::oneshot::channel();
+                            let open_msg = ActorMessage::ChannelOpen(ActorChannelOpen {
+                                channel_id,
+                                initiator_id,
+                                response_tx: oneshot_tx,
+                                initial_msg: initial_message,
+                            });
+
+                            // Send to target's mailbox
+                            if let Err(e) = entry.mailbox_tx.send(open_msg).await {
+                                Err(anyhow::anyhow!("Failed to send channel open: {}", e))
+                            } else {
+                                // Wait for response
+                                match oneshot_rx.await {
+                                    Ok(result) => result,
+                                    Err(e) => Err(anyhow::anyhow!("Channel open response error: {}", e)),
+                                }
+                            }
+                        } else {
+                            Err(anyhow::anyhow!("Target actor not found: {}", target_actor_id))
+                        }
+                    };
+                    let _ = response_tx.send(result);
+                }
+                MessageCommand::ChannelMessage {
+                    channel_id,
+                    message,
+                    response_tx,
+                } => {
+                    // TODO: Route to appropriate actor based on channel
+                    let _ = response_tx.send(Err(anyhow::anyhow!(
+                        "Channel message routing not yet implemented for channel: {}",
+                        channel_id
+                    )));
+                }
+                MessageCommand::ChannelClose {
+                    channel_id,
+                    response_tx,
+                } => {
+                    // TODO: Route to appropriate actor based on channel
+                    let _ = response_tx.send(Err(anyhow::anyhow!(
+                        "Channel close routing not yet implemented for channel: {}",
+                        channel_id
+                    )));
+                }
+            }
+        }
+
+        info!("Message command processor stopped");
     }
 }
 
@@ -347,25 +506,6 @@ impl Handler for MessageServerHandler {
 
     fn setup_host_functions(&mut self, actor_component: &mut ActorComponent) -> Result<()> {
         info!("Setting up message server host functions");
-
-        // Get this actor's ID
-        let actor_id = actor_component.actor_store.get_id();
-        info!("Registering actor {} with message router", actor_id);
-
-        // Create mailbox for THIS actor
-        let (mailbox_tx, mailbox_rx) = tokio::sync::mpsc::channel(100);
-
-        // Register with global router (blocking operation - must be in async context)
-        // Note: setup_host_functions is sync, so we need to use block_on
-        tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current().block_on(async {
-                self.router.register_actor(actor_id.clone(), mailbox_tx).await
-            })
-        })?;
-
-        // Store for start()
-        self.actor_id = Some(actor_id);
-        *self.mailbox_rx.lock().unwrap() = Some(mailbox_rx);
 
         // Record setup start
         actor_component.actor_store.record_event(ChainEventData {
@@ -417,7 +557,7 @@ impl Handler for MessageServerHandler {
             description: Some("Setting up 'send' function wrapper".to_string()),
         });
 
-        let router = self.router.clone();
+        let message_command_tx = self.message_command_tx.clone();
 
         interface
             .func_wrap_async(
@@ -466,11 +606,11 @@ impl Handler for MessageServerHandler {
                         response_tx,
                     };
 
-                    let router = router.clone();
+                    let message_command_tx = message_command_tx.clone();
                     let address_clone = address.clone();
 
                     Box::new(async move {
-                        if let Err(e) = router.route_message(command).await {
+                        if let Err(e) = message_command_tx.send(command).await {
                             let err = e.to_string();
                             ctx.data_mut().record_event(ChainEventData {
                                 event_type: "theater:simple/message-server-host/send"
@@ -581,7 +721,7 @@ impl Handler for MessageServerHandler {
             description: Some("Setting up 'request' function wrapper".to_string()),
         });
 
-        let router = self.router.clone();
+        let message_command_tx = self.message_command_tx.clone();
 
         interface
             .func_wrap_async(
@@ -600,7 +740,7 @@ impl Handler for MessageServerHandler {
                         description: Some(format!("Requesting message from {}", address)),
                     });
 
-                    let router = router.clone();
+                    let message_command_tx = message_command_tx.clone();
                     let address_clone = address.clone();
 
                     Box::new(async move {
@@ -638,7 +778,7 @@ impl Handler for MessageServerHandler {
                             response_tx: cmd_response_tx,
                         };
 
-                        if let Err(e) = router.route_message(command).await {
+                        if let Err(e) = message_command_tx.send(command).await {
                             let err = e.to_string();
                             ctx.data_mut().record_event(ChainEventData {
                                 event_type: "theater:simple/message-server-host/request"
@@ -1065,7 +1205,7 @@ impl Handler for MessageServerHandler {
         });
 
         // 6. open-channel operation
-        let router = self.router.clone();
+        let message_command_tx = self.message_command_tx.clone();
 
         actor_component.actor_store.record_event(ChainEventData {
             event_type: "message-server-setup".to_string(),
@@ -1134,11 +1274,11 @@ impl Handler for MessageServerHandler {
                         response_tx,
                     };
 
-                    let router = router.clone();
+                    let message_command_tx = message_command_tx.clone();
                     let channel_id_clone = channel_id_str.clone();
 
                     Box::new(async move {
-                        if let Err(e) = router.route_message(command).await {
+                        if let Err(e) = message_command_tx.send(command).await {
                             let err_msg = format!("Failed to send command to message-server: {}", e);
                             ctx.data_mut().record_event(ChainEventData {
                                 event_type: "theater:simple/message-server-host/open-channel"
@@ -1255,7 +1395,7 @@ impl Handler for MessageServerHandler {
         });
 
         // 7. send-on-channel operation
-        let router = self.router.clone();
+        let message_command_tx = self.message_command_tx.clone();
 
         actor_component.actor_store.record_event(ChainEventData {
             event_type: "message-server-setup".to_string(),
@@ -1315,11 +1455,11 @@ impl Handler for MessageServerHandler {
                         response_tx,
                     };
 
-                    let router = router.clone();
+                    let message_command_tx = message_command_tx.clone();
                     let channel_id_clone = channel_id_str.clone();
 
                     Box::new(async move {
-                        if let Err(e) = router.route_message(command).await {
+                        if let Err(e) = message_command_tx.send(command).await {
                             let err = e.to_string();
                             ctx.data_mut().record_event(ChainEventData {
                                 event_type: "theater:simple/message-server-host/send-on-channel"
@@ -1425,7 +1565,7 @@ impl Handler for MessageServerHandler {
         });
 
         // 8. close-channel operation
-        let router = self.router.clone();
+        let message_command_tx = self.message_command_tx.clone();
 
         actor_component.actor_store.record_event(ChainEventData {
             event_type: "message-server-setup".to_string(),
@@ -1479,11 +1619,11 @@ impl Handler for MessageServerHandler {
                         response_tx,
                     };
 
-                    let router = router.clone();
+                    let message_command_tx = message_command_tx.clone();
                     let channel_id_clone = channel_id_str.clone();
 
                     Box::new(async move {
-                        if let Err(e) = router.route_message(command).await {
+                        if let Err(e) = message_command_tx.send(command).await {
                             let err = e.to_string();
                             ctx.data_mut().record_event(ChainEventData {
                                 event_type: "theater:simple/message-server-host/close-channel"
@@ -1656,57 +1796,51 @@ impl Handler for MessageServerHandler {
 
     fn start(
         &mut self,
-        actor_handle: ActorHandle,
+        _actor_handle: ActorHandle,
         mut shutdown_receiver: ShutdownReceiver,
     ) -> Pin<Box<dyn Future<Output = Result<()>> + Send>> {
-        info!("Starting message server handler for actor");
+        info!("Starting message server handler");
 
-        // Take the mailbox receiver
-        let mailbox_rx_opt = self.mailbox_rx.lock().unwrap().take();
+        // Take the receivers out of the Options
+        let lifecycle_rx_opt = self.lifecycle_rx.lock().unwrap().take();
+        let message_command_rx_opt = self.message_command_rx.lock().unwrap().take();
 
-        // Clone what we need for the async block
-        let actor_id = self.actor_id.clone();
-        let router = self.router.clone();
-        let outstanding_requests = self.outstanding_requests.clone();
+        // Clone state for the async tasks
+        let actor_registry = self.actor_registry.clone();
 
         Box::pin(async move {
-            // If we don't have a receiver (cloned instance), just return
-            let Some(mut mailbox_rx) = mailbox_rx_opt else {
-                info!("Message server has no mailbox receiver (cloned instance), not starting");
+            // If we don't have receivers (cloned instance), just return
+            let Some(lifecycle_rx) = lifecycle_rx_opt else {
+                info!("Message server has no lifecycle receiver (cloned instance), not starting");
                 return Ok(());
             };
 
-            let Some(actor_id) = actor_id else {
-                error!("Message server handler has no actor_id - setup_host_functions not called?");
+            let Some(message_command_rx) = message_command_rx_opt else {
+                info!("Message server has no command receiver (cloned instance), not starting");
                 return Ok(());
             };
 
-            info!("Message server handler consuming mailbox for actor {}", actor_id);
+            // Spawn lifecycle processor task
+            let lifecycle_handle = tokio::spawn(Self::process_lifecycle_events(
+                lifecycle_rx,
+                actor_registry.clone(),
+            ));
 
-            // Consume mailbox until shutdown
-            loop {
-                tokio::select! {
-                    _ = &mut shutdown_receiver.receiver => {
-                        info!("Actor {} received shutdown signal", actor_id);
-                        break;
-                    }
-                    Some(msg) = mailbox_rx.recv() => {
-                        if let Err(e) = Self::process_actor_message(msg, &actor_handle, &outstanding_requests).await {
-                            error!("Actor {}: Error processing message: {}", actor_id, e);
-                        }
-                    }
-                    else => {
-                        info!("Actor {} mailbox closed", actor_id);
-                        break;
-                    }
-                }
-            }
+            // Spawn command processor task
+            let command_handle = tokio::spawn(Self::process_message_commands(
+                message_command_rx,
+                actor_registry.clone(),
+            ));
 
-            // Unregister from router on shutdown
-            info!("Unregistering actor {} from message router", actor_id);
-            router.unregister_actor(actor_id.clone()).await;
+            // Wait for shutdown signal
+            shutdown_receiver.receiver.await.ok();
+            info!("Message server handler received shutdown signal");
 
-            info!("Message server handler shutdown complete for actor {}", actor_id);
+            // Tasks will complete when channels are dropped
+            lifecycle_handle.abort();
+            command_handle.abort();
+
+            info!("Message server handler shutdown complete");
             Ok(())
         })
     }
@@ -1718,8 +1852,7 @@ mod tests {
 
     #[test]
     fn test_message_server_handler_creation() {
-        let router = MessageRouter::new();
-        let handler = MessageServerHandler::new(None, router);
+        let (handler, _lifecycle_tx, _message_command_tx) = MessageServerHandler::new(None);
 
         assert_eq!(handler.name(), "message-server");
         assert_eq!(
@@ -1734,8 +1867,7 @@ mod tests {
 
     #[test]
     fn test_message_server_handler_clone() {
-        let router = MessageRouter::new();
-        let handler = MessageServerHandler::new(None, router);
+        let (handler, _lifecycle_tx, _message_command_tx) = MessageServerHandler::new(None);
 
         let cloned = handler.create_instance();
         assert_eq!(cloned.name(), "message-server");

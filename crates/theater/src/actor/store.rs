@@ -56,6 +56,7 @@ where
     ///
     /// * `id` - Unique identifier for the actor
     /// * `theater_tx` - Channel for sending commands to the Theater runtime
+    /// * `message_tx` - Optional channel for sending message commands to the message-server handler
     /// * `actor_handle` - Handle for interacting with the actor
     ///
     /// ## Returns
