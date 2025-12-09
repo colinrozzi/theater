@@ -3673,6 +3673,17 @@ version = "0.2.1"
 [[package]]
 name = "theater-handler-process"
 version = "0.2.1"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "serde",
+ "serde_json",
+ "theater",
+ "thiserror 2.0.12",
+ "tokio",
+ "tracing",
+ "wasmtime",
+]
 
 [[package]]
 name = "theater-handler-random"

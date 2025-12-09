@@ -26,7 +26,7 @@ See the full proposal: [2025-11-30-handler-migration.md](../proposals/2025-11-30
 
 | Handler | Status | Crate | Old File | Notes |
 |---------|--------|-------|----------|-------|
-| process | ❌ NOT STARTED | `theater-handler-process` | `src/host/process.rs` | Complex interactions |
+| process | ✅ COMPLETE | `theater-handler-process` | `src/host/process.rs` | Migrated 2025-12-07 |
 | store | ✅ COMPLETE | `theater-handler-store` | `src/host/store.rs` | Migrated 2025-12-07 |
 | supervisor | ❌ NOT STARTED | `theater-handler-supervisor` | `src/host/supervisor.rs` | Complex orchestration |
 
@@ -39,9 +39,9 @@ See the full proposal: [2025-11-30-handler-migration.md](../proposals/2025-11-30
 
 ## Overall Progress
 
-- **Completed**: 7/11 (64%)
+- **Completed**: 8/11 (73%)
 - **In Progress**: 0/11 (0%)
-- **Not Started**: 4/11 (36%)
+- **Not Started**: 3/11 (27%)
 
 ## Current Sprint
 
@@ -102,7 +102,24 @@ For each completed handler migration:
   - All tests passing (3 unit tests + 1 doc test)
   - Ready for integration
 
-### 2025-12-07
+### 2025-12-07 (Continued)
+- ✅ **Completed process handler migration** (most complex handler yet!)
+  - Implemented ProcessHandler struct with Handler trait
+  - Migrated all 5 operations (os-spawn, os-write-stdin, os-status, os-kill, os-signal)
+  - Added 3 export functions for callbacks (handle-stdout, handle-stderr, handle-exit)
+  - Complex process lifecycle management with ManagedProcess struct
+  - Async I/O handling for stdin/stdout/stderr with 4 output modes (raw, line-by-line, JSON, chunked)
+  - Process timeout monitoring with automatic kill
+  - Comprehensive permission checking
+  - Fixed multiple Send/lifetime issues with careful lock management
+  - Fixed event data structure mismatches (ProcessSpawn, StdinWrite, Error, etc.)
+  - Fixed wasmtime version to 31.0
+  - All tests passing (3 unit tests + 1 doc test)
+  - Complete README with architecture and usage documentation
+  - ~990 lines migrated from ~1408 line original
+  - Ready for integration
+
+### 2025-12-07 (Morning)
 - ✅ **Completed store handler migration**
   - Implemented StoreHandler struct with Handler trait
   - Migrated all 13 store operations (new, store, get, exists, label operations, list operations)
