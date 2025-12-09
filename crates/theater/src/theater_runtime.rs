@@ -11,7 +11,7 @@ use crate::events::runtime::RuntimeEventData;
 use crate::events::EventData;
 use crate::handler::HandlerRegistry;
 use crate::id::TheaterId;
-use crate::messages::{ActorMessage, ActorStatus, TheaterCommand};
+use crate::messages::{ActorLifecycleEvent, ActorMessage, ActorStatus, TheaterCommand};
 use crate::messages::{
     ActorResult, ChannelId, ChannelParticipant, ChildError, ChildExternalStop, ChildResult,
 };
@@ -108,6 +108,8 @@ pub struct TheaterRuntime<E: EventType> {
     wasm_engine: wasmtime::Engine,
     /// Handler registry
     pub handler_registry: HandlerRegistry,
+    /// Optional channel for sending actor lifecycle events to message-server handler
+    message_lifecycle_tx: Option<Sender<ActorLifecycleEvent>>,
     marker: PhantomData<E>,
 }
 
@@ -165,6 +167,7 @@ where
     /// * `theater_tx` - Sender for commands to the runtime
     /// * `theater_rx` - Receiver for commands to the runtime
     /// * `channel_events_tx` - Optional channel for sending events to external systems
+    /// * `message_lifecycle_tx` - Optional channel for sending actor lifecycle events to message-server
     ///
     /// ## Returns
     ///
@@ -180,7 +183,7 @@ where
     /// #
     /// # async fn example() -> Result<()> {
     /// let (theater_tx, theater_rx) = mpsc::channel::<TheaterCommand>(100);
-    /// let runtime = TheaterRuntime::new(theater_tx, theater_rx, None, Default::default()).await?;
+    /// let runtime = TheaterRuntime::new(theater_tx, theater_rx, None, None, Default::default()).await?;
     /// # Ok(())
     /// # }
     /// ```
@@ -188,6 +191,7 @@ where
         theater_tx: Sender<TheaterCommand>,
         theater_rx: Receiver<TheaterCommand>,
         channel_events_tx: Option<Sender<crate::messages::ChannelEvent>>,
+        message_lifecycle_tx: Option<Sender<ActorLifecycleEvent>>,
         handler_registry: HandlerRegistry,
     ) -> Result<Self> {
         info!("Theater runtime initializing");
@@ -203,6 +207,7 @@ where
             channel_events_tx,
             wasm_engine: engine,
             handler_registry,
+            message_lifecycle_tx,
             marker: PhantomData,
         })
     }
@@ -660,6 +665,18 @@ where
 
         self.actors.insert(actor_id.clone(), process);
         debug!("Actor process registered with runtime");
+
+        // Notify message-server about new actor
+        if let Some(lifecycle_tx) = &self.message_lifecycle_tx {
+            let event = ActorLifecycleEvent::ActorSpawned {
+                actor_id: actor_id.clone(),
+                actor_handle: handler_actor_handle.clone(),
+            };
+            if let Err(e) = lifecycle_tx.send(event).await {
+                warn!("Failed to send ActorSpawned event to message-server: {}", e);
+            }
+        }
+
         Ok(actor_id)
     }
 
@@ -874,6 +891,16 @@ where
             );
             Box::pin(self.stop_actor(child_id.clone(), shutdown_type)).await?;
             debug!("Successfully stopped child {:?}", child_id);
+        }
+
+        // Notify message-server that actor is stopping
+        if let Some(lifecycle_tx) = &self.message_lifecycle_tx {
+            let event = ActorLifecycleEvent::ActorStopped {
+                actor_id: actor_id.clone(),
+            };
+            if let Err(e) = lifecycle_tx.send(event).await {
+                warn!("Failed to send ActorStopped event to message-server: {}", e);
+            }
         }
 
         // Signal this specific actor to shutdown - we need to get the actor again since

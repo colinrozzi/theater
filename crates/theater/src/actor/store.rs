@@ -8,7 +8,7 @@ use crate::actor::handle::ActorHandle;
 use crate::chain::{ChainEvent, StateChain};
 use crate::events::{ChainEventData, EventData, EventPayload};
 use crate::id::TheaterId;
-use crate::messages::TheaterCommand;
+use crate::messages::{MessageCommand, TheaterCommand};
 use std::sync::{Arc, RwLock};
 use tokio::sync::mpsc::Sender;
 
@@ -34,6 +34,10 @@ where
     /// Channel for sending commands to the Theater runtime
     pub theater_tx: Sender<TheaterCommand>,
 
+    /// Optional channel for sending message commands to the message-server handler
+    /// This is only available when the message-server handler is loaded
+    pub message_tx: Option<Sender<MessageCommand>>,
+
     /// The event chain that records all actor operations for verification and audit
     pub chain: Arc<RwLock<StateChain<E>>>,
 
@@ -56,6 +60,7 @@ where
     ///
     /// * `id` - Unique identifier for the actor
     /// * `theater_tx` - Channel for sending commands to the Theater runtime
+    /// * `message_tx` - Optional channel for sending message commands to the message-server handler
     /// * `actor_handle` - Handle for interacting with the actor
     ///
     /// ## Returns
@@ -64,12 +69,14 @@ where
     pub fn new(
         id: TheaterId,
         theater_tx: Sender<TheaterCommand>,
+        message_tx: Option<Sender<MessageCommand>>,
         actor_handle: ActorHandle,
         chain: Arc<RwLock<StateChain<E>>>,
     ) -> Self {
         Self {
             id: id.clone(),
             theater_tx: theater_tx.clone(),
+            message_tx,
             chain,
             state: Some(vec![]),
             actor_handle,
