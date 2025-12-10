@@ -3665,6 +3665,24 @@ dependencies = [
 [[package]]
 name = "theater-handler-http-framework"
 version = "0.2.1"
+dependencies = [
+ "anyhow",
+ "axum",
+ "axum-server",
+ "chrono",
+ "futures",
+ "rand 0.8.5",
+ "rustls 0.23.31",
+ "rustls-pemfile 2.2.0",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "theater",
+ "thiserror 1.0.69",
+ "tokio",
+ "tracing",
+ "wasmtime",
+]
 
 [[package]]
 name = "theater-handler-message-server"
