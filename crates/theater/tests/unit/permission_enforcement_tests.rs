@@ -118,7 +118,7 @@ fn test_filesystem_fail_closed_no_allowed_paths() {
         execute: false,
         allowed_commands: None,
         new_dir: Some(false),
-        allowed_paths: None,  // No paths configured - should deny all
+        allowed_paths: None, // No paths configured - should deny all
     });
 
     // Should deny all path operations when no allowed_paths is configured
@@ -143,7 +143,7 @@ fn test_filesystem_fail_closed_no_allowed_paths() {
     assert!(PermissionChecker::check_filesystem_operation(
         &permissions_no_paths,
         "read",
-        None,  // No path specified
+        None, // No path specified
         None,
     )
     .is_ok());
@@ -159,36 +159,28 @@ fn test_http_permission_checking() {
     });
 
     // Should allow GET request to allowed host
-    assert!(PermissionChecker::check_http_operation(
-        &http_permissions,
-        "GET",
-        "api.example.com",
-    )
-    .is_ok());
+    assert!(
+        PermissionChecker::check_http_operation(&http_permissions, "GET", "api.example.com",)
+            .is_ok()
+    );
 
     // Should allow POST request to allowed host
-    assert!(PermissionChecker::check_http_operation(
-        &http_permissions,
-        "POST",
-        "api.example.com",
-    )
-    .is_ok());
+    assert!(
+        PermissionChecker::check_http_operation(&http_permissions, "POST", "api.example.com",)
+            .is_ok()
+    );
 
     // Should deny PUT request (not in allowed methods)
-    assert!(PermissionChecker::check_http_operation(
-        &http_permissions,
-        "PUT",
-        "api.example.com",
-    )
-    .is_err());
+    assert!(
+        PermissionChecker::check_http_operation(&http_permissions, "PUT", "api.example.com",)
+            .is_err()
+    );
 
     // Should deny request to forbidden host
-    assert!(PermissionChecker::check_http_operation(
-        &http_permissions,
-        "GET",
-        "forbidden.com",
-    )
-    .is_err());
+    assert!(
+        PermissionChecker::check_http_operation(&http_permissions, "GET", "forbidden.com",)
+            .is_err()
+    );
 }
 
 #[test]
@@ -201,24 +193,12 @@ fn test_environment_permission_checking() {
     });
 
     // Should allow reading allowed environment variables
-    assert!(PermissionChecker::check_env_var_access(
-        &env_permissions,
-        "HOME",
-    )
-    .is_ok());
+    assert!(PermissionChecker::check_env_var_access(&env_permissions, "HOME",).is_ok());
 
-    assert!(PermissionChecker::check_env_var_access(
-        &env_permissions,
-        "PATH",
-    )
-    .is_ok());
+    assert!(PermissionChecker::check_env_var_access(&env_permissions, "PATH",).is_ok());
 
     // Should deny reading forbidden environment variables
-    assert!(PermissionChecker::check_env_var_access(
-        &env_permissions,
-        "SECRET_KEY",
-    )
-    .is_err());
+    assert!(PermissionChecker::check_env_var_access(&env_permissions, "SECRET_KEY",).is_err());
 }
 
 #[test]
@@ -231,17 +211,13 @@ fn test_environment_wildcard_permissions() {
     });
 
     // Should allow access to any environment variable with allow_list_all
-    assert!(PermissionChecker::check_env_var_access(
-        &wildcard_permissions,
-        "ANY_VARIABLE",
-    )
-    .is_ok());
+    assert!(
+        PermissionChecker::check_env_var_access(&wildcard_permissions, "ANY_VARIABLE",).is_ok()
+    );
 
-    assert!(PermissionChecker::check_env_var_access(
-        &wildcard_permissions,
-        "ANOTHER_VARIABLE",
-    )
-    .is_ok());
+    assert!(
+        PermissionChecker::check_env_var_access(&wildcard_permissions, "ANOTHER_VARIABLE",).is_ok()
+    );
 }
 
 #[test]
@@ -336,18 +312,10 @@ fn test_timing_permission_checking() {
     });
 
     // Should allow sleep within limits
-    assert!(PermissionChecker::check_timing_operation(
-        &timing_permissions,
-        "sleep",
-        3000,
-    )
-    .is_ok());
+    assert!(PermissionChecker::check_timing_operation(&timing_permissions, "sleep", 3000,).is_ok());
 
     // Should deny sleep exceeding limits
-    assert!(PermissionChecker::check_timing_operation(
-        &timing_permissions,
-        "sleep",
-        10000,
-    )
-    .is_err());
+    assert!(
+        PermissionChecker::check_timing_operation(&timing_permissions, "sleep", 10000,).is_err()
+    );
 }

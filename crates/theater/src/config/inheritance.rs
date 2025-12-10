@@ -19,9 +19,9 @@ impl<T> Default for HandlerInheritance<T> {
     }
 }
 
-impl<T> PartialEq for HandlerInheritance<T> 
-where 
-    T: PartialEq 
+impl<T> PartialEq for HandlerInheritance<T>
+where
+    T: PartialEq,
 {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
@@ -34,47 +34,69 @@ where
 }
 
 // Helper functions for skip_serializing_if
-fn is_inherit_message_server(val: &HandlerInheritance<crate::config::permissions::MessageServerPermissions>) -> bool {
+fn is_inherit_message_server(
+    val: &HandlerInheritance<crate::config::permissions::MessageServerPermissions>,
+) -> bool {
     matches!(val, HandlerInheritance::Inherit)
 }
 
-fn is_inherit_file_system(val: &HandlerInheritance<crate::config::permissions::FileSystemPermissions>) -> bool {
+fn is_inherit_file_system(
+    val: &HandlerInheritance<crate::config::permissions::FileSystemPermissions>,
+) -> bool {
     matches!(val, HandlerInheritance::Inherit)
 }
 
-fn is_inherit_http_client(val: &HandlerInheritance<crate::config::permissions::HttpClientPermissions>) -> bool {
+fn is_inherit_http_client(
+    val: &HandlerInheritance<crate::config::permissions::HttpClientPermissions>,
+) -> bool {
     matches!(val, HandlerInheritance::Inherit)
 }
 
-fn is_inherit_http_framework(val: &HandlerInheritance<crate::config::permissions::HttpFrameworkPermissions>) -> bool {
+fn is_inherit_http_framework(
+    val: &HandlerInheritance<crate::config::permissions::HttpFrameworkPermissions>,
+) -> bool {
     matches!(val, HandlerInheritance::Inherit)
 }
 
-fn is_inherit_runtime(val: &HandlerInheritance<crate::config::permissions::RuntimePermissions>) -> bool {
+fn is_inherit_runtime(
+    val: &HandlerInheritance<crate::config::permissions::RuntimePermissions>,
+) -> bool {
     matches!(val, HandlerInheritance::Inherit)
 }
 
-fn is_inherit_supervisor(val: &HandlerInheritance<crate::config::permissions::SupervisorPermissions>) -> bool {
+fn is_inherit_supervisor(
+    val: &HandlerInheritance<crate::config::permissions::SupervisorPermissions>,
+) -> bool {
     matches!(val, HandlerInheritance::Inherit)
 }
 
-fn is_inherit_store(val: &HandlerInheritance<crate::config::permissions::StorePermissions>) -> bool {
+fn is_inherit_store(
+    val: &HandlerInheritance<crate::config::permissions::StorePermissions>,
+) -> bool {
     matches!(val, HandlerInheritance::Inherit)
 }
 
-fn is_inherit_timing(val: &HandlerInheritance<crate::config::permissions::TimingPermissions>) -> bool {
+fn is_inherit_timing(
+    val: &HandlerInheritance<crate::config::permissions::TimingPermissions>,
+) -> bool {
     matches!(val, HandlerInheritance::Inherit)
 }
 
-fn is_inherit_process(val: &HandlerInheritance<crate::config::permissions::ProcessPermissions>) -> bool {
+fn is_inherit_process(
+    val: &HandlerInheritance<crate::config::permissions::ProcessPermissions>,
+) -> bool {
     matches!(val, HandlerInheritance::Inherit)
 }
 
-fn is_inherit_environment(val: &HandlerInheritance<crate::config::permissions::EnvironmentPermissions>) -> bool {
+fn is_inherit_environment(
+    val: &HandlerInheritance<crate::config::permissions::EnvironmentPermissions>,
+) -> bool {
     matches!(val, HandlerInheritance::Inherit)
 }
 
-fn is_inherit_random(val: &HandlerInheritance<crate::config::permissions::RandomPermissions>) -> bool {
+fn is_inherit_random(
+    val: &HandlerInheritance<crate::config::permissions::RandomPermissions>,
+) -> bool {
     matches!(val, HandlerInheritance::Inherit)
 }
 

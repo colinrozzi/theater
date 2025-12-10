@@ -1,31 +1,28 @@
 // Variable substitution using Handlebars
 
+use handlebars::{Context, Handlebars, Helper, HelperResult, Output, RenderContext, RenderError};
 use serde_json::Value;
 use thiserror::Error;
-use handlebars::{Handlebars, Context, RenderContext, Helper, HelperResult, Output, RenderError};
 
 #[derive(Error, Debug)]
 pub enum TemplateError {
     #[error("Template rendering failed: {0}")]
     RenderError(#[from] RenderError),
-    
+
     #[error("Template compilation failed: {0}")]
     CompilationError(String),
 }
 
 /// Substitute variables in TOML content using Handlebars templating
-pub fn substitute_variables(
-    toml_content: &str,
-    state: &Value,
-) -> Result<String, TemplateError> {
+pub fn substitute_variables(toml_content: &str, state: &Value) -> Result<String, TemplateError> {
     let mut handlebars = Handlebars::new();
-    
+
     // Register a helper for default values: {{default server.port "8080"}}
     handlebars.register_helper("default", Box::new(default_helper));
-    
+
     // Compile and render the template
     let result = handlebars.render_template(toml_content, state)?;
-    
+
     Ok(result)
 }
 
@@ -40,12 +37,10 @@ fn default_helper(
 ) -> HelperResult {
     // Get the first parameter (the variable we're trying to access)
     let value = h.param(0);
-    
-    // Get the default value (second parameter)  
-    let default = h.param(1)
-        .and_then(|v| v.value().as_str())
-        .unwrap_or("");
-    
+
+    // Get the default value (second parameter)
+    let default = h.param(1).and_then(|v| v.value().as_str()).unwrap_or("");
+
     match value {
         Some(param) => {
             // If the value exists and isn't null/empty, use it
@@ -60,7 +55,7 @@ fn default_helper(
             out.write(default)?;
         }
     }
-    
+
     Ok(())
 }
 
@@ -77,7 +72,7 @@ mod tests {
                 "name": "test-app"
             }
         });
-        
+
         let result = substitute_variables(toml, &state).unwrap();
         assert_eq!(result, r#"name = "test-app""#);
     }
@@ -92,7 +87,7 @@ mod tests {
                 }
             }
         });
-        
+
         let result = substitute_variables(toml, &state).unwrap();
         assert_eq!(result, r#"path = "/var/data""#);
     }
@@ -106,7 +101,7 @@ mod tests {
                 {"hostname": "server2.example.com"}
             ]
         });
-        
+
         let result = substitute_variables(toml, &state).unwrap();
         assert_eq!(result, r#"host = "server1.example.com""#);
     }
@@ -121,7 +116,7 @@ count = {{config.max_items}}
             "feature": {"enabled": true},
             "config": {"max_items": 42}
         });
-        
+
         let result = substitute_variables(toml, &state).unwrap();
         assert!(result.contains("enabled = true"));
         assert!(result.contains("count = 42"));
@@ -131,7 +126,7 @@ count = {{config.max_items}}
     fn test_default_helper() {
         let toml = r#"port = {{default server.port "8080"}}"#;
         let state = json!({});
-        
+
         let result = substitute_variables(toml, &state).unwrap();
         assert_eq!(result, r#"port = 8080"#);
     }
@@ -144,7 +139,7 @@ count = {{config.max_items}}
                 "port": 9000
             }
         });
-        
+
         let result = substitute_variables(toml, &state).unwrap();
         assert_eq!(result, r#"port = 9000"#);
     }
@@ -154,10 +149,10 @@ count = {{config.max_items}}
         let toml = r#"url = "{{protocol}}://{{host}}:{{port}}""#;
         let state = json!({
             "protocol": "https",
-            "host": "api.example.com", 
+            "host": "api.example.com",
             "port": 443
         });
-        
+
         let result = substitute_variables(toml, &state).unwrap();
         assert_eq!(result, r#"url = "https://api.example.com:443""#);
     }
@@ -181,7 +176,7 @@ type = "http-client"
 base_url = "{{default api.endpoint "https://api.default.com"}}"
 timeout = {{default api.timeout_ms "5000"}}
 "#;
-        
+
         let state = json!({
             "app": {
                 "name": "dynamic-processor",
@@ -205,11 +200,11 @@ timeout = {{default api.timeout_ms "5000"}}
                 "create_dirs": true
             }
         });
-        
+
         let result = substitute_variables(toml, &state).unwrap();
-        
+
         println!("Rendered result:\n{}", result);
-        
+
         // Verify key substitutions
         assert!(result.contains(r#"name = "dynamic-processor""#));
         assert!(result.contains(r#"version = "0.1.0""#));
@@ -226,7 +221,7 @@ timeout = {{default api.timeout_ms "5000"}}
     fn test_missing_variable_renders_empty() {
         let toml = r#"value = "{{missing.variable}}""#;
         let state = json!({});
-        
+
         let result = substitute_variables(toml, &state).unwrap();
         // Handlebars renders missing variables as empty strings
         assert_eq!(result, r#"value = """#);

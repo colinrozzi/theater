@@ -1,10 +1,10 @@
+use handlebars::Handlebars;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 use tracing::{debug, info};
-use handlebars::Handlebars;
-use serde::{Deserialize, Serialize};
 
 /// Template metadata loaded from template.toml
 #[derive(Debug, Clone, Deserialize)]
@@ -37,7 +37,7 @@ pub struct TemplateData {
 /// Get the path to the templates directory
 fn templates_dir() -> Result<PathBuf, io::Error> {
     // Try multiple possible locations for templates
-    
+
     // 1. First try relative to the current executable (for installed binaries)
     if let Ok(exe_path) = std::env::current_exe() {
         if let Some(exe_dir) = exe_path.parent() {
@@ -49,7 +49,7 @@ fn templates_dir() -> Result<PathBuf, io::Error> {
             }
         }
     }
-    
+
     // 2. Try relative to current working directory (for development)
     let cwd_templates = std::env::current_dir()?.join("templates");
     debug!("Trying current working dir: {}", cwd_templates.display());
@@ -57,27 +57,33 @@ fn templates_dir() -> Result<PathBuf, io::Error> {
         debug!("Found templates at: {}", cwd_templates.display());
         return Ok(cwd_templates);
     }
-    
+
     // 3. Try in the CLI crate directory (for development from project root)
-    let cli_crate_templates = std::env::current_dir()?.join("crates").join("theater-cli").join("templates");
+    let cli_crate_templates = std::env::current_dir()?
+        .join("crates")
+        .join("theater-cli")
+        .join("templates");
     debug!("Trying CLI crate dir: {}", cli_crate_templates.display());
     if cli_crate_templates.exists() {
         debug!("Found templates at: {}", cli_crate_templates.display());
         return Ok(cli_crate_templates);
     }
-    
+
     // 4. Fallback to compile-time path (for development)
     let manifest_dir = env!("CARGO_MANIFEST_DIR");
     let compile_time_templates = PathBuf::from(manifest_dir).join("templates");
-    debug!("Trying compile-time dir: {}", compile_time_templates.display());
+    debug!(
+        "Trying compile-time dir: {}",
+        compile_time_templates.display()
+    );
     if compile_time_templates.exists() {
         debug!("Found templates at: {}", compile_time_templates.display());
         return Ok(compile_time_templates);
     }
-    
+
     Err(io::Error::new(
         io::ErrorKind::NotFound,
-        "Templates directory not found in any expected location"
+        "Templates directory not found in any expected location",
     ))
 }
 
@@ -85,11 +91,14 @@ fn templates_dir() -> Result<PathBuf, io::Error> {
 pub fn available_templates() -> Result<HashMap<String, Template>, io::Error> {
     let mut templates = HashMap::new();
     let templates_path = templates_dir()?;
-    
+
     if !templates_path.exists() {
         return Err(io::Error::new(
             io::ErrorKind::NotFound,
-            format!("Templates directory not found: {}", templates_path.display())
+            format!(
+                "Templates directory not found: {}",
+                templates_path.display()
+            ),
         ));
     }
 
@@ -97,21 +106,24 @@ pub fn available_templates() -> Result<HashMap<String, Template>, io::Error> {
     for entry in fs::read_dir(&templates_path)? {
         let entry = entry?;
         let path = entry.path();
-        
+
         if path.is_dir() {
-            let template_name = path.file_name()
-                .and_then(|n| n.to_str())
-                .ok_or_else(|| io::Error::new(
+            let template_name = path.file_name().and_then(|n| n.to_str()).ok_or_else(|| {
+                io::Error::new(
                     io::ErrorKind::InvalidData,
-                    "Invalid template directory name"
-                ))?;
-            
+                    "Invalid template directory name",
+                )
+            })?;
+
             // Load template.toml
             let metadata_path = path.join("template.toml");
             if metadata_path.exists() {
                 match load_template_metadata(&metadata_path) {
                     Ok(metadata) => {
-                        debug!("Loaded template: {} - {}", template_name, metadata.template.description);
+                        debug!(
+                            "Loaded template: {} - {}",
+                            template_name, metadata.template.description
+                        );
                         let template = Template {
                             name: metadata.template.name,
                             description: metadata.template.description,
@@ -132,7 +144,7 @@ pub fn available_templates() -> Result<HashMap<String, Template>, io::Error> {
     if templates.is_empty() {
         return Err(io::Error::new(
             io::ErrorKind::NotFound,
-            "No valid templates found"
+            "No valid templates found",
         ));
     }
 
@@ -145,7 +157,7 @@ fn load_template_metadata(path: &Path) -> Result<TemplateMetadata, io::Error> {
     toml::from_str(&content).map_err(|e| {
         io::Error::new(
             io::ErrorKind::InvalidData,
-            format!("Invalid template.toml: {}", e)
+            format!("Invalid template.toml: {}", e),
         )
     })
 }
@@ -174,21 +186,35 @@ pub fn create_project(
     // Setup Handlebars renderer
     let mut handlebars = Handlebars::new();
     handlebars.set_strict_mode(true);
-    
+
     // Register default helper (this should match what's used in the main theater crate)
-    handlebars.register_helper("default", Box::new(|h: &handlebars::Helper, _: &Handlebars, _: &handlebars::Context, _: &mut handlebars::RenderContext, out: &mut dyn handlebars::Output| -> handlebars::HelperResult {
-        let value = h.param(0).and_then(|v| v.value().as_str());
-        let default = h.param(1).and_then(|v| v.value().as_str()).unwrap_or("");
-        
-        let result = if let Some(val) = value {
-            if val.is_empty() { default } else { val }
-        } else {
-            default
-        };
-        
-        out.write(result)?;
-        Ok(())
-    }));
+    handlebars.register_helper(
+        "default",
+        Box::new(
+            |h: &handlebars::Helper,
+             _: &Handlebars,
+             _: &handlebars::Context,
+             _: &mut handlebars::RenderContext,
+             out: &mut dyn handlebars::Output|
+             -> handlebars::HelperResult {
+                let value = h.param(0).and_then(|v| v.value().as_str());
+                let default = h.param(1).and_then(|v| v.value().as_str()).unwrap_or("");
+
+                let result = if let Some(val) = value {
+                    if val.is_empty() {
+                        default
+                    } else {
+                        val
+                    }
+                } else {
+                    default
+                };
+
+                out.write(result)?;
+                Ok(())
+            },
+        ),
+    );
 
     // Prepare template data
     let template_data = TemplateData {
@@ -198,7 +224,7 @@ pub fn create_project(
 
     // Get template directory
     let template_dir = templates_dir()?.join(template_name);
-    
+
     // Create all template files
     for (target_path, template_file) in &template.files {
         let source_file_path = template_dir.join(template_file);
@@ -212,19 +238,26 @@ pub fn create_project(
         }
 
         // Read template content
-        let template_content = fs::read_to_string(&source_file_path)
-            .map_err(|e| io::Error::new(
+        let template_content = fs::read_to_string(&source_file_path).map_err(|e| {
+            io::Error::new(
                 io::ErrorKind::NotFound,
-                format!("Template file not found: {} ({})", source_file_path.display(), e)
-            ))?;
+                format!(
+                    "Template file not found: {} ({})",
+                    source_file_path.display(),
+                    e
+                ),
+            )
+        })?;
 
         // Render template with Handlebars
         let rendered_content = handlebars
             .render_template(&template_content, &template_data)
-            .map_err(|e| io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!("Template rendering failed for {}: {}", template_file, e)
-            ))?;
+            .map_err(|e| {
+                io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!("Template rendering failed for {}: {}", template_file, e),
+                )
+            })?;
 
         debug!(
             "Creating file: {} ({} bytes)",
@@ -238,18 +271,18 @@ pub fn create_project(
 
     info!("Project '{}' created successfully!", project_name);
     info!("Note: You may need to run 'wkg wit fetch' to fetch WIT dependencies");
-    
+
     Ok(())
 }
 
 /// List all available templates
 pub fn list_templates() -> Result<(), io::Error> {
     let templates = available_templates()?;
-    
+
     println!("Available templates:");
     for (name, template) in templates {
         println!("  {}: {}", name, template.description);
     }
-    
+
     Ok(())
 }

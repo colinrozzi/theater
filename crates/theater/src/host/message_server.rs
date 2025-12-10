@@ -95,7 +95,9 @@ impl MessageServerHost {
                     event_type: "message-server-setup".to_string(),
                     data: EventData::Message(MessageEventData::LinkerInstanceSuccess),
                     timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                    description: Some("Successfully created linker instance for message-server-host".to_string()),
+                    description: Some(
+                        "Successfully created linker instance for message-server-host".to_string(),
+                    ),
                 });
                 interface
             }
@@ -110,7 +112,10 @@ impl MessageServerHost {
                     timestamp: chrono::Utc::now().timestamp_millis() as u64,
                     description: Some(format!("Failed to create linker instance: {}", e)),
                 });
-                return Err(anyhow::anyhow!("Could not instantiate theater:simple/message-server-host: {}", e));
+                return Err(anyhow::anyhow!(
+                    "Could not instantiate theater:simple/message-server-host: {}",
+                    e
+                ));
             }
         };
 
@@ -373,7 +378,9 @@ impl MessageServerHost {
                 function_name: "list-outstanding-requests".to_string(),
             }),
             timestamp: chrono::Utc::now().timestamp_millis() as u64,
-            description: Some("Setting up 'list-outstanding-requests' function wrapper".to_string()),
+            description: Some(
+                "Setting up 'list-outstanding-requests' function wrapper".to_string(),
+            ),
         });
 
         // Use a thread-safe reference to the outstanding_requests field
@@ -428,9 +435,15 @@ impl MessageServerHost {
                         step: "list_outstanding_requests_function_wrap".to_string(),
                     }),
                     timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                    description: Some(format!("Failed to set up 'list-outstanding-requests' function wrapper: {}", e)),
+                    description: Some(format!(
+                        "Failed to set up 'list-outstanding-requests' function wrapper: {}",
+                        e
+                    )),
                 });
-                anyhow::anyhow!("Failed to wrap async list-outstanding-requests function: {}", e)
+                anyhow::anyhow!(
+                    "Failed to wrap async list-outstanding-requests function: {}",
+                    e
+                )
             })?;
 
         // Record successful 'list-outstanding-requests' function setup
@@ -440,7 +453,9 @@ impl MessageServerHost {
                 function_name: "list-outstanding-requests".to_string(),
             }),
             timestamp: chrono::Utc::now().timestamp_millis() as u64,
-            description: Some("Successfully set up 'list-outstanding-requests' function wrapper".to_string()),
+            description: Some(
+                "Successfully set up 'list-outstanding-requests' function wrapper".to_string(),
+            ),
         });
 
         // Use a thread-safe reference to the outstanding_requests field
@@ -548,7 +563,9 @@ impl MessageServerHost {
                 function_name: "respond-to-request".to_string(),
             }),
             timestamp: chrono::Utc::now().timestamp_millis() as u64,
-            description: Some("Successfully set up 'respond-to-request' function wrapper".to_string()),
+            description: Some(
+                "Successfully set up 'respond-to-request' function wrapper".to_string(),
+            ),
         });
 
         // Use a thread-safe reference to the outstanding_requests field
@@ -1053,7 +1070,9 @@ impl MessageServerHost {
             event_type: "message-server-setup".to_string(),
             data: EventData::Message(MessageEventData::HandlerSetupSuccess),
             timestamp: chrono::Utc::now().timestamp_millis() as u64,
-            description: Some("Message server host functions setup completed successfully".to_string()),
+            description: Some(
+                "Message server host functions setup completed successfully".to_string(),
+            ),
         });
 
         Ok(())
@@ -1079,19 +1098,25 @@ impl MessageServerHost {
                 "theater:simple/message-server-client",
                 "handle-channel-open",
             )
-            .map_err(|e| anyhow::anyhow!("Failed to register handle-channel-open function: {}", e))?;
+            .map_err(|e| {
+                anyhow::anyhow!("Failed to register handle-channel-open function: {}", e)
+            })?;
         actor_instance
             .register_function_no_result::<(String, Vec<u8>)>(
                 "theater:simple/message-server-client",
                 "handle-channel-message",
             )
-            .map_err(|e| anyhow::anyhow!("Failed to register handle-channel-message function: {}", e))?;
+            .map_err(|e| {
+                anyhow::anyhow!("Failed to register handle-channel-message function: {}", e)
+            })?;
         actor_instance
             .register_function_no_result::<(String,)>(
                 "theater:simple/message-server-client",
                 "handle-channel-close",
             )
-            .map_err(|e| anyhow::anyhow!("Failed to register handle-channel-close function: {}", e))?;
+            .map_err(|e| {
+                anyhow::anyhow!("Failed to register handle-channel-close function: {}", e)
+            })?;
 
         Ok(())
     }

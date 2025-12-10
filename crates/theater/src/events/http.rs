@@ -148,7 +148,7 @@ pub enum HttpEventData {
         path: String,
         message: String,
     },
-    
+
     // Permission events
     PermissionDenied {
         operation: String,

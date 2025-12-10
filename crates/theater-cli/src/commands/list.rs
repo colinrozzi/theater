@@ -20,7 +20,7 @@ pub async fn execute_async(args: &ListArgs, ctx: &CommandContext) -> CliResult<(
 
     // Create a client with the specified address and cancellation token
     let client = crate::client::TheaterClient::new(args.address, ctx.shutdown_token.clone());
-    
+
     // This will now properly respond to Ctrl+C during the network operation
     let actors = client.list_actors().await?;
 

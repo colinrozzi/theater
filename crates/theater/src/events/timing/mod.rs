@@ -14,15 +14,8 @@ pub enum TimingEventData {
     // Handler setup events
     HandlerSetupStart,
     HandlerSetupSuccess,
-    HandlerSetupError {
-        error: String,
-        step: String,
-    },
+    HandlerSetupError { error: String, step: String },
     LinkerInstanceSuccess,
-    FunctionSetupStart {
-        function_name: String,
-    },
-    FunctionSetupSuccess {
-        function_name: String,
-    },
+    FunctionSetupStart { function_name: String },
+    FunctionSetupSuccess { function_name: String },
 }

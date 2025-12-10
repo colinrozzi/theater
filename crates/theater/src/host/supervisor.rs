@@ -43,7 +43,10 @@ struct SupervisorEvent {
 }
 
 impl SupervisorHost {
-    pub fn new(_config: SupervisorHostConfig, permissions: Option<crate::config::permissions::SupervisorPermissions>) -> Self {
+    pub fn new(
+        _config: SupervisorHostConfig,
+        permissions: Option<crate::config::permissions::SupervisorPermissions>,
+    ) -> Self {
         let (channel_tx, channel_rx) = tokio::sync::mpsc::channel(100);
         Self {
             channel_tx,
@@ -63,10 +66,7 @@ impl SupervisorHost {
 
         info!("Setting up host functions for supervisor");
 
-        let mut interface = match actor_component
-            .linker
-            .instance("theater:simple/supervisor")
-        {
+        let mut interface = match actor_component.linker.instance("theater:simple/supervisor") {
             Ok(interface) => {
                 // Record successful linker instance creation
                 actor_component.actor_store.record_event(ChainEventData {
@@ -88,14 +88,17 @@ impl SupervisorHost {
                     timestamp: chrono::Utc::now().timestamp_millis() as u64,
                     description: Some(format!("Failed to create linker instance: {}", e)),
                 });
-                return Err(anyhow::anyhow!("Could not instantiate theater:simple/supervisor: {}", e));
+                return Err(anyhow::anyhow!(
+                    "Could not instantiate theater:simple/supervisor: {}",
+                    e
+                ));
             }
         };
 
         let supervisor_tx = self.channel_tx.clone();
-        
+
         info!("DEBUG: About to start function registrations");
-        
+
         // spawn-child implementation
         info!("DEBUG: Registering spawn function");
         let _ = interface
@@ -955,48 +958,54 @@ impl SupervisorHost {
     pub async fn add_export_functions(&self, actor_instance: &mut ActorInstance) -> Result<()> {
         info!("Adding export functions for supervisor");
 
-        match actor_instance
-            .register_function_no_result::<(String, WitActorError)>(
-                "theater:simple/supervisor-handlers",
-                "handle-child-error",
-            )
-        {
+        match actor_instance.register_function_no_result::<(String, WitActorError)>(
+            "theater:simple/supervisor-handlers",
+            "handle-child-error",
+        ) {
             Ok(_) => {
                 info!("Successfully registered handle-child-error function");
             }
             Err(e) => {
                 error!("Failed to register handle-child-error function: {}", e);
-                return Err(anyhow::anyhow!("Failed to register handle-child-error function: {}", e));
+                return Err(anyhow::anyhow!(
+                    "Failed to register handle-child-error function: {}",
+                    e
+                ));
             }
         }
 
-        match actor_instance
-            .register_function_no_result::<(String, Option<Vec<u8>>)>(
-                "theater:simple/supervisor-handlers",
-                "handle-child-exit",
-            )
-        {
+        match actor_instance.register_function_no_result::<(String, Option<Vec<u8>>)>(
+            "theater:simple/supervisor-handlers",
+            "handle-child-exit",
+        ) {
             Ok(_) => {
                 info!("Successfully registered handle-child-exit function");
             }
             Err(e) => {
                 error!("Failed to register handle-child-exit function: {}", e);
-                return Err(anyhow::anyhow!("Failed to register handle-child-exit function: {}", e));
+                return Err(anyhow::anyhow!(
+                    "Failed to register handle-child-exit function: {}",
+                    e
+                ));
             }
         }
 
-        match actor_instance
-            .register_function_no_result::<(String,)>(
-                "theater:simple/supervisor-handlers",
-                "handle-child-external-stop",
-            )
-        {
+        match actor_instance.register_function_no_result::<(String,)>(
+            "theater:simple/supervisor-handlers",
+            "handle-child-external-stop",
+        ) {
             Ok(_) => {
                 info!("Successfully registered handle-child-external-stop function");
             }
             Err(e) => {
-                error!("Failed to register handle-child-external-stop function: {}", e);
-                return Err(anyhow::anyhow!("Failed to register handle-child-external-stop function: {}", e));
+                error!(
+                    "Failed to register handle-child-external-stop function: {}",
+                    e
+                );
+                return Err(anyhow::anyhow!(
+                    "Failed to register handle-child-external-stop function: {}",
+                    e
+                ));
             }
         }
 

@@ -63,7 +63,8 @@ impl TheaterClient {
                     address: conn.address,
                     source: e,
                 })
-        }).await
+        })
+        .await
     }
 
     /// Close the connection
@@ -95,7 +96,8 @@ impl TheaterClient {
                     response: format!("{:?}", response),
                 }),
             }
-        }).await
+        })
+        .await
     }
 
     /// Start an actor from a manifest
@@ -119,7 +121,8 @@ impl TheaterClient {
                 address: conn.address,
                 source: e,
             })
-        }).await
+        })
+        .await
     }
 
     /// Stop a running actor (graceful shutdown)
@@ -150,7 +153,8 @@ impl TheaterClient {
                     response: format!("{:?}", response),
                 }),
             }
-        }).await
+        })
+        .await
     }
 
     /// Terminate an actor immediately (forceful shutdown)
@@ -181,7 +185,8 @@ impl TheaterClient {
                     response: format!("{:?}", response),
                 }),
             }
-        }).await
+        })
+        .await
     }
 
     /// Get actor state
@@ -219,7 +224,8 @@ impl TheaterClient {
                     response: format!("{:?}", response),
                 }),
             }
-        }).await
+        })
+        .await
     }
 
     /// Get actor events
@@ -250,7 +256,8 @@ impl TheaterClient {
                     response: format!("{:?}", response),
                 }),
             }
-        }).await
+        })
+        .await
     }
 
     /// Send a message to an actor (fire and forget)
@@ -281,7 +288,8 @@ impl TheaterClient {
                     response: format!("{:?}", response),
                 }),
             }
-        }).await
+        })
+        .await
     }
 
     /// Send a request to an actor and wait for response
@@ -312,7 +320,8 @@ impl TheaterClient {
                     response: format!("{:?}", response),
                 }),
             }
-        }).await
+        })
+        .await
     }
 
     /// Subscribe to events from an actor (returns a stream-like interface)
@@ -347,7 +356,8 @@ impl TheaterClient {
                     response: format!("{:?}", response),
                 }),
             }
-        }).await
+        })
+        .await
     }
 
     /// Get the next response from the connection (for streaming operations)
@@ -360,7 +370,8 @@ impl TheaterClient {
                     address: conn.address.clone(),
                     source: e,
                 })
-        }).await
+        })
+        .await
     }
 
     /// Get actor status
@@ -388,7 +399,8 @@ impl TheaterClient {
                     response: format!("{:?}", response),
                 }),
             }
-        }).await
+        })
+        .await
     }
 
     /// Restart an actor
@@ -416,7 +428,8 @@ impl TheaterClient {
                     response: format!("{:?}", response),
                 }),
             }
-        }).await
+        })
+        .await
     }
 
     /// Update actor component
@@ -447,7 +460,8 @@ impl TheaterClient {
                     response: format!("{:?}", response),
                 }),
             }
-        }).await
+        })
+        .await
     }
 
     /// Unsubscribe from actor events
@@ -477,7 +491,8 @@ impl TheaterClient {
                     response: format!("{:?}", response),
                 }),
             }
-        }).await
+        })
+        .await
     }
 
     /// Open a channel with an actor
@@ -507,7 +522,8 @@ impl TheaterClient {
                     response: format!("{:?}", response),
                 }),
             }
-        }).await
+        })
+        .await
     }
 
     /// Send a message on a channel
@@ -530,7 +546,8 @@ impl TheaterClient {
                     response: format!("{:?}", response),
                 }),
             }
-        }).await
+        })
+        .await
     }
 
     /// Close a channel
@@ -552,7 +569,8 @@ impl TheaterClient {
                     response: format!("{:?}", response),
                 }),
             }
-        }).await
+        })
+        .await
     }
 
     /// Receive channel message (for channel communication)
@@ -574,7 +592,8 @@ impl TheaterClient {
                     Box::pin(self.receive_channel_message()).await
                 }
             }
-        }).await
+        })
+        .await
     }
 }
 
@@ -588,20 +607,22 @@ pub struct EventStream {
 impl EventStream {
     /// Get the next event from the stream
     pub async fn next_event(&self) -> CliResult<Option<ChainEvent>> {
-        self.client.with_cancellation(|| async {
-            let mut conn = self.client.connection.lock().await;
-            match conn.receive().await? {
-                ManagementResponse::ActorEvent { event } => Ok(Some(event)),
-                ManagementResponse::ActorStopped { .. } => Ok(None),
-                ManagementResponse::Error { error } => Err(CliError::EventStreamError {
-                    reason: format!("{:?}", error),
-                }),
-                _ => {
-                    // Ignore other response types in event stream
-                    Box::pin(self.next_event()).await
+        self.client
+            .with_cancellation(|| async {
+                let mut conn = self.client.connection.lock().await;
+                match conn.receive().await? {
+                    ManagementResponse::ActorEvent { event } => Ok(Some(event)),
+                    ManagementResponse::ActorStopped { .. } => Ok(None),
+                    ManagementResponse::Error { error } => Err(CliError::EventStreamError {
+                        reason: format!("{:?}", error),
+                    }),
+                    _ => {
+                        // Ignore other response types in event stream
+                        Box::pin(self.next_event()).await
+                    }
                 }
-            }
-        }).await
+            })
+            .await
     }
 
     /// Get the actor ID this stream is associated with

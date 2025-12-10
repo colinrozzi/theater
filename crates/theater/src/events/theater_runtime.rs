@@ -1,4 +1,4 @@
-use crate::{config::permissions::HandlerPermission, store::ContentRef, ManifestConfig};
+use crate::{config::permissions::HandlerPermission, ManifestConfig};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -46,6 +46,10 @@ pub enum TheaterRuntimeEventData {
         /// Error message describing the failure
         error: String,
     },
+
+    InstantiatingActor,
+    InitializingState,
+    ActorReady,
 }
 
 pub struct TheaterRuntimeEvent {

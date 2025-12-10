@@ -1,4 +1,5 @@
 use crate::actor::ActorError;
+use crate::actor::ActorRuntimeError;
 /// # Theater Message System
 ///
 /// Defines the message types used for communication between different components
@@ -184,32 +185,6 @@ pub enum TheaterCommand {
         data: Option<Vec<u8>>,
     },
 
-    /// # Update an actor's component
-    ///
-    /// ## Parameters
-    ///
-    /// * `actor_id` - ID of the actor to update
-    /// * `component` - The new component address
-    /// * `response_tx` - Channel to receive the result (success or error)
-    UpdateActorComponent {
-        actor_id: TheaterId,
-        component: String,
-        response_tx: oneshot::Sender<Result<()>>,
-    },
-
-    /// # Send a message to an actor
-    ///
-    /// Sends a message to a specific actor for processing.
-    ///
-    /// ## Parameters
-    ///
-    /// * `actor_id` - ID of the actor to send the message to
-    /// * `actor_message` - The message to send
-    SendMessage {
-        actor_id: TheaterId,
-        actor_message: ActorMessage,
-    },
-
     /// # Record a new event
     ///
     /// Records an event in an actor's event chain.
@@ -234,6 +209,10 @@ pub enum TheaterCommand {
     ActorError {
         actor_id: TheaterId,
         error: ActorError,
+    },
+
+    ActorRuntimeError {
+        error: ActorRuntimeError,
     },
 
     /// # Get all actors
@@ -364,100 +343,6 @@ pub enum TheaterCommand {
         event_tx: Sender<Result<ChainEvent, ActorError>>,
     },
 
-    /// # Open a communication channel
-    ///
-    /// Opens a bidirectional communication channel between two participants.
-    ///
-    /// ## Parameters
-    ///
-    /// * `initiator_id` - The participant initiating the channel
-    /// * `target_id` - The target participant for the channel
-    /// * `channel_id` - The unique ID for this channel
-    /// * `initial_message` - The first message to send on the channel
-    /// * `response_tx` - Channel to receive the result (success or error)
-    ChannelOpen {
-        initiator_id: ChannelParticipant,
-        target_id: ChannelParticipant,
-        channel_id: ChannelId,
-        initial_message: Vec<u8>,
-        response_tx: oneshot::Sender<Result<bool>>,
-    },
-
-    /// # Send a message on a channel
-    ///
-    /// Sends data through an established channel.
-    ///
-    /// ## Parameters
-    ///
-    /// * `channel_id` - The ID of the channel to send on
-    /// * `sender_id` - The participant sending the message
-    /// * `message` - The message data to send
-    ChannelMessage {
-        channel_id: ChannelId,
-        sender_id: ChannelParticipant,
-        message: Vec<u8>,
-    },
-
-    /// # Close a channel
-    ///
-    /// Closes an open communication channel.
-    ///
-    /// ## Parameters
-    ///
-    /// * `channel_id` - The ID of the channel to close
-    ChannelClose { channel_id: ChannelId },
-
-    /// # List active channels
-    ///
-    /// Retrieves a list of all active communication channels.
-    ///
-    /// ## Parameters
-    ///
-    /// * `response_tx` - Channel to receive the result (list of channel IDs and participants)
-    ///
-    /// ## Security
-    ///
-    /// This operation is only available to the system or to actors with
-    /// appropriate monitoring permissions.
-    ListChannels {
-        response_tx: oneshot::Sender<Result<Vec<(ChannelId, Vec<ChannelParticipant>)>>>,
-    },
-
-    /// # Get channel status
-    ///
-    /// Retrieves information about a specific channel.
-    ///
-    /// ## Parameters
-    ///
-    /// * `channel_id` - The ID of the channel to query
-    /// * `response_tx` - Channel to receive the result (channel participant info)
-    ///
-    /// ## Security
-    ///
-    /// This operation is only available to participants in the channel,
-    /// the system, or actors with appropriate monitoring permissions.
-    GetChannelStatus {
-        channel_id: ChannelId,
-        response_tx: oneshot::Sender<Result<Option<Vec<ChannelParticipant>>>>,
-    },
-
-    /// # Register a new channel
-    ///
-    /// Registers a new channel in the system (internal use).
-    ///
-    /// ## Parameters
-    ///
-    /// * `channel_id` - The ID of the channel to register
-    /// * `participants` - The participants in the channel
-    ///
-    /// ## Security
-    ///
-    /// This operation is only available to the system itself.
-    RegisterChannel {
-        channel_id: ChannelId,
-        participants: Vec<ChannelParticipant>,
-    },
-
     /// # Create a new content store
     ///
     /// Creates a new content-addressable storage instance.
@@ -486,13 +371,6 @@ impl TheaterCommand {
             TheaterCommand::ResumeActor { manifest_path, .. } => {
                 format!("ResumeActor: {}", manifest_path)
             }
-            TheaterCommand::UpdateActorComponent {
-                actor_id,
-                component,
-                ..
-            } => {
-                format!("UpdateActorComponent: {} -> {}", actor_id, component)
-            }
             TheaterCommand::StopActor { actor_id, .. } => {
                 format!("StopActor: {:?}", actor_id)
             }
@@ -506,15 +384,13 @@ impl TheaterCommand {
                     data.as_ref().map(|d| String::from_utf8_lossy(d))
                 )
             }
-            TheaterCommand::SendMessage { actor_id, .. } => {
-                format!("SendMessage: {:?}", actor_id)
-            }
             TheaterCommand::NewEvent { actor_id, .. } => {
                 format!("NewEvent: {:?}", actor_id)
             }
             TheaterCommand::ActorError { actor_id, .. } => {
                 format!("ActorError: {:?}", actor_id)
             }
+            TheaterCommand::ActorRuntimeError { .. } => "ActorRuntimeError".to_string(),
             TheaterCommand::GetActors { .. } => "GetActors".to_string(),
             TheaterCommand::GetActorManifest { actor_id, .. } => {
                 format!("GetActorManifest: {:?}", actor_id)
@@ -539,37 +415,6 @@ impl TheaterCommand {
             }
             TheaterCommand::SubscribeToActor { actor_id, .. } => {
                 format!("SubscribeToActor: {:?}", actor_id)
-            }
-            TheaterCommand::ChannelOpen {
-                initiator_id,
-                target_id,
-                channel_id,
-                ..
-            } => {
-                format!(
-                    "ChannelOpen: {} -> {} (channel: {})",
-                    initiator_id, target_id, channel_id
-                )
-            }
-            TheaterCommand::ChannelMessage { channel_id, .. } => {
-                format!("ChannelMessage: {}", channel_id)
-            }
-            TheaterCommand::ChannelClose { channel_id } => {
-                format!("ChannelClose: {}", channel_id)
-            }
-            TheaterCommand::ListChannels { .. } => "ListChannels".to_string(),
-            TheaterCommand::GetChannelStatus { channel_id, .. } => {
-                format!("GetChannelStatus: {}", channel_id)
-            }
-            TheaterCommand::RegisterChannel {
-                channel_id,
-                participants,
-            } => {
-                format!(
-                    "RegisterChannel: {} with {} participants",
-                    channel_id,
-                    participants.len()
-                )
             }
             TheaterCommand::NewStore { .. } => "NewStore".to_string(),
         }
@@ -661,6 +506,37 @@ impl ChannelId {
     /// A string slice containing the channel ID
     pub fn as_str(&self) -> &str {
         &self.0
+    }
+
+    /// # Parse a channel ID from a string
+    ///
+    /// Creates a ChannelId from its string representation.
+    ///
+    /// ## Parameters
+    ///
+    /// * `s` - The string to parse (should be in the format "ch_XXXXXXXXXXXXXXXX")
+    ///
+    /// ## Returns
+    ///
+    /// * `Ok(ChannelId)` - Successfully parsed channel ID
+    /// * `Err` - Invalid format or empty string
+    ///
+    /// ## Example
+    ///
+    /// ```rust
+    /// use theater::messages::ChannelId;
+    ///
+    /// let channel_id = ChannelId::parse("ch_0123456789abcdef").unwrap();
+    /// assert_eq!(channel_id.as_str(), "ch_0123456789abcdef");
+    /// ```
+    pub fn parse(s: &str) -> Result<Self> {
+        if s.is_empty() {
+            anyhow::bail!("Channel ID cannot be empty");
+        }
+        if !s.starts_with("ch_") {
+            anyhow::bail!("Channel ID must start with 'ch_' prefix");
+        }
+        Ok(ChannelId(s.to_string()))
     }
 }
 
@@ -794,10 +670,12 @@ pub struct ActorSend {
 pub struct ActorChannelOpen {
     /// The unique ID for this channel
     pub channel_id: ChannelId,
+    /// The participant initiating the channel
+    pub initiator_id: ChannelParticipant,
     /// Channel to receive the result of the open request
     pub response_tx: oneshot::Sender<Result<bool>>,
     /// Initial message data (may contain authentication/metadata)
-    pub data: Vec<u8>,
+    pub initial_msg: Vec<u8>,
 }
 
 /// # Actor Channel Message
@@ -818,7 +696,7 @@ pub struct ActorChannelMessage {
     /// The ID of the channel to send on
     pub channel_id: ChannelId,
     /// Message data
-    pub data: Vec<u8>,
+    pub msg: Vec<u8>,
 }
 
 /// # Actor Channel Close
@@ -906,6 +784,118 @@ pub enum ActorMessage {
     ChannelClose(ActorChannelClose),
     /// Notification of a new channel
     ChannelInitiated(ActorChannelInitiated),
+}
+
+/// # Actor Lifecycle Event
+///
+/// Notifications sent from the runtime to the message-server handler about actor lifecycle changes.
+///
+/// ## Purpose
+///
+/// ActorLifecycleEvent enables the message-server handler to maintain its own actor registry
+/// independently from the runtime. When actors are spawned or stopped, the runtime sends
+/// notifications through a dedicated channel.
+///
+/// ## Architecture
+///
+/// This is the key integration point between the runtime and message-server:
+/// - Runtime creates actors and sends ActorSpawned events
+/// - Message-server creates mailboxes and registers actors
+/// - Message-server starts consuming actor mailboxes
+/// - When actors stop, runtime sends ActorStopped events
+/// - Message-server cleans up mailboxes and registry entries
+///
+/// ## Usage
+///
+/// ```rust
+/// use theater::messages::ActorLifecycleEvent;
+/// use theater::id::TheaterId;
+/// use theater::actor::handle::ActorHandle;
+///
+/// // Runtime sends this when spawning an actor
+/// let event = ActorLifecycleEvent::ActorSpawned {
+///     actor_id: TheaterId::generate(),
+///     actor_handle: actor_handle.clone(),
+/// };
+/// lifecycle_tx.send(event).await.unwrap();
+/// ```
+#[derive(Debug)]
+pub enum ActorLifecycleEvent {
+    /// An actor has been spawned and is ready to receive messages
+    ActorSpawned {
+        actor_id: TheaterId,
+        actor_handle: crate::actor::handle::ActorHandle,
+    },
+    /// An actor has been stopped and should be unregistered
+    ActorStopped {
+        actor_id: TheaterId,
+    },
+}
+
+/// # Message Command
+///
+/// Commands for the message-server handler's messaging infrastructure.
+///
+/// ## Purpose
+///
+/// MessageCommand provides a separate command space from TheaterCommand specifically
+/// for actor-to-actor messaging operations. This separation allows the message-server
+/// handler to manage messaging independently from the core runtime.
+///
+/// ## Design
+///
+/// MessageCommand enables complete architectural separation:
+/// - Message-server handler maintains its own actor registry
+/// - Message routing is handled externally from the runtime
+/// - Lifecycle integration happens through ActorLifecycleEvent
+///
+/// ## Integration
+///
+/// Actor WASM host functions send MessageCommands to route messages:
+/// - send() → MessageCommand::SendMessage
+/// - request() → MessageCommand::SendMessage (with Request type)
+/// - open-channel() → MessageCommand::OpenChannel
+/// - send-on-channel() → MessageCommand::ChannelMessage
+/// - close-channel() → MessageCommand::ChannelClose
+#[derive(Debug)]
+pub enum MessageCommand {
+    /// Send a one-way message to an actor
+    ///
+    /// Delivers a message to the target actor's mailbox without waiting for a response.
+    SendMessage {
+        target_id: TheaterId,
+        message: ActorMessage,
+        response_tx: oneshot::Sender<Result<()>>,
+    },
+
+    /// Open a bidirectional channel between actors
+    ///
+    /// Initiates a channel creation between two participants. The target actor
+    /// receives a ChannelOpen message and can accept or reject the channel.
+    OpenChannel {
+        initiator_id: ChannelParticipant,
+        target_id: ChannelParticipant,
+        channel_id: ChannelId,
+        initial_message: Vec<u8>,
+        response_tx: oneshot::Sender<Result<bool>>,
+    },
+
+    /// Send a message on an established channel
+    ///
+    /// Transmits data over an existing channel to the other participant.
+    ChannelMessage {
+        channel_id: ChannelId,
+        message: Vec<u8>,
+        response_tx: oneshot::Sender<Result<()>>,
+    },
+
+    /// Close a channel
+    ///
+    /// Terminates a channel, notifying both participants.
+    ChannelClose {
+        channel_id: ChannelId,
+        response_tx: oneshot::Sender<Result<()>>,
+    },
 }
 
 /// # Actor Status
