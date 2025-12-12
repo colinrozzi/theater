@@ -58,7 +58,7 @@ impl TimingHandler {
         }
     }
 
-    async fn setup_host_functions_impl(&mut self, actor_component: &mut ActorComponent) -> Result<()> {
+    fn setup_host_functions_impl(&mut self, actor_component: &mut ActorComponent) -> Result<()> {
         // Record setup start
         actor_component.actor_store.record_event(ChainEventData {
             event_type: "timing-setup".to_string(),
@@ -309,7 +309,7 @@ impl TimingHandler {
         Ok(())
     }
 
-    async fn add_export_functions_impl(&self, _actor_instance: &mut ActorInstance) -> Result<()> {
+    fn add_export_functions_impl(&self, _actor_instance: &mut ActorInstance) -> Result<()> {
         info!("No export functions needed for timing handler");
         Ok(())
     }
@@ -341,15 +341,15 @@ impl Handler for TimingHandler {
     fn setup_host_functions(
         &mut self,
         actor_component: &mut ActorComponent,
-    ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + '_>> {
-        Box::pin(self.setup_host_functions_impl(actor_component))
+    ) -> Result<()> {
+        self.setup_host_functions_impl(actor_component)
     }
 
     fn add_export_functions(
         &self,
         actor_instance: &mut ActorInstance,
-    ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + '_>> {
-        Box::pin(self.add_export_functions_impl(actor_instance))
+    ) -> Result<()> {
+        self.add_export_functions_impl(actor_instance)
     }
 
     fn name(&self) -> &str {

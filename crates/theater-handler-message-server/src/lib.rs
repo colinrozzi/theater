@@ -56,8 +56,10 @@ pub struct ChannelAccept {
 }
 
 /// State for a single channel
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 struct ChannelState {
+    initiator_id: ChannelParticipant,
+    target_id: ChannelParticipant,
     is_open: bool,
 }
 
@@ -130,8 +132,9 @@ impl MessageRouter {
     async fn router_task(mut command_rx: Receiver<RouterCommand>) {
         info!("MessageRouter task started");
 
-        // This HashMap is owned by this task - no Arc, no RwLock needed!
+        // These HashMaps are owned by this task - no Arc, no RwLock needed!
         let mut actors: HashMap<TheaterId, Sender<ActorMessage>> = HashMap::new();
+        let mut channels: HashMap<ChannelId, ChannelState> = HashMap::new();
 
         while let Some(cmd) = command_rx.recv().await {
             match cmd {
@@ -147,7 +150,7 @@ impl MessageRouter {
                 }
 
                 RouterCommand::RouteMessage { command } => {
-                    if let Err(e) = Self::handle_route_command(&actors, command).await {
+                    if let Err(e) = Self::handle_route_command(&actors, &mut channels, command).await {
                         error!("Router: Failed to route message: {}", e);
                     }
                 }
@@ -160,6 +163,7 @@ impl MessageRouter {
     /// Handle routing a MessageCommand to the appropriate actor
     async fn handle_route_command(
         actors: &HashMap<TheaterId, Sender<ActorMessage>>,
+        channels: &mut HashMap<ChannelId, ChannelState>,
         command: MessageCommand,
     ) -> Result<()> {
         match command {
@@ -184,27 +188,125 @@ impl MessageRouter {
                 };
 
                 if let Some(mailbox) = actors.get(actor_id) {
+                    // Create a wrapper response channel to track the channel opening
+                    let (wrapped_response_tx, wrapped_response_rx) = tokio::sync::oneshot::channel();
+
                     let msg = ActorMessage::ChannelOpen(ActorChannelOpen {
-                        channel_id,
-                        initiator_id,
-                        response_tx,
+                        channel_id: channel_id.clone(),
+                        initiator_id: initiator_id.clone(),
+                        response_tx: wrapped_response_tx,
                         initial_msg: initial_message,
                     });
+
                     mailbox.send(msg).await
                         .map_err(|e| anyhow::anyhow!("Failed to send channel open: {}", e))?;
+
+                    // Wait for actor's response and track the channel if accepted
+                    match wrapped_response_rx.await {
+                        Ok(Ok(accepted)) => {
+                            if accepted {
+                                // Track the channel
+                                info!("Router: Tracking channel {} (initiator: {:?}, target: {:?})",
+                                    channel_id, initiator_id, target_id);
+                                channels.insert(channel_id.clone(), ChannelState {
+                                    initiator_id: initiator_id.clone(),
+                                    target_id: target_id.clone(),
+                                    is_open: true,
+                                });
+                            }
+                            let _ = response_tx.send(Ok(accepted));
+                        }
+                        Ok(Err(e)) => {
+                            let _ = response_tx.send(Err(e));
+                        }
+                        Err(e) => {
+                            let _ = response_tx.send(Err(anyhow::anyhow!("Actor didn't respond to channel open: {}", e)));
+                        }
+                    }
                 } else {
                     let _ = response_tx.send(Err(anyhow::anyhow!("Actor not found: {}", target_id)));
                 }
             }
 
-            MessageCommand::ChannelMessage { channel_id, message, response_tx } => {
-                // TODO: Implement channel message routing
-                let _ = response_tx.send(Err(anyhow::anyhow!("Channel message routing not yet implemented")));
+            MessageCommand::ChannelMessage { channel_id, sender_id, message, response_tx } => {
+                // Look up channel state to find the other participant
+                if let Some(channel_state) = channels.get(&channel_id) {
+                    if !channel_state.is_open {
+                        let _ = response_tx.send(Err(anyhow::anyhow!("Channel is closed")));
+                        return Ok(());
+                    }
+
+                    // Determine the recipient (the OTHER participant)
+                    let recipient_id = if sender_id == channel_state.initiator_id {
+                        &channel_state.target_id
+                    } else if sender_id == channel_state.target_id {
+                        &channel_state.initiator_id
+                    } else {
+                        let _ = response_tx.send(Err(anyhow::anyhow!("Sender is not a participant in this channel")));
+                        return Ok(());
+                    };
+
+                    // Route the message to the recipient
+                    match recipient_id {
+                        ChannelParticipant::Actor(actor_id) => {
+                            if let Some(mailbox) = actors.get(actor_id) {
+                                let msg = ActorMessage::ChannelMessage(ActorChannelMessage {
+                                    channel_id,
+                                    msg: message,
+                                });
+                                mailbox.send(msg).await
+                                    .map_err(|e| anyhow::anyhow!("Failed to send channel message: {}", e))?;
+                                let _ = response_tx.send(Ok(()));
+                            } else {
+                                let _ = response_tx.send(Err(anyhow::anyhow!("Recipient actor not found: {}", actor_id)));
+                            }
+                        }
+                        ChannelParticipant::External => {
+                            // External participants receive messages via the channel events mechanism
+                            // The server handles this separately via channel_events_tx
+                            let _ = response_tx.send(Ok(()));
+                        }
+                    }
+                } else {
+                    let _ = response_tx.send(Err(anyhow::anyhow!("Channel not found: {}", channel_id)));
+                }
             }
 
-            MessageCommand::ChannelClose { channel_id, response_tx } => {
-                // TODO: Implement channel close routing
-                let _ = response_tx.send(Err(anyhow::anyhow!("Channel close routing not yet implemented")));
+            MessageCommand::ChannelClose { channel_id, sender_id, response_tx } => {
+                // Look up and remove channel state
+                if let Some(channel_state) = channels.remove(&channel_id) {
+                    // Verify sender is a participant
+                    if sender_id != channel_state.initiator_id && sender_id != channel_state.target_id {
+                        let _ = response_tx.send(Err(anyhow::anyhow!("Sender is not a participant in this channel")));
+                        return Ok(());
+                    }
+
+                    // Notify the other participant
+                    let other_participant = if sender_id == channel_state.initiator_id {
+                        &channel_state.target_id
+                    } else {
+                        &channel_state.initiator_id
+                    };
+
+                    match other_participant {
+                        ChannelParticipant::Actor(actor_id) => {
+                            if let Some(mailbox) = actors.get(actor_id) {
+                                let msg = ActorMessage::ChannelClose(ActorChannelClose {
+                                    channel_id: channel_id.clone(),
+                                });
+                                let _ = mailbox.send(msg).await;
+                            }
+                        }
+                        ChannelParticipant::External => {
+                            // External participants receive close notifications via channel events
+                        }
+                    }
+
+                    info!("Router: Closed channel {}", channel_id);
+                    let _ = response_tx.send(Ok(()));
+                } else {
+                    let _ = response_tx.send(Err(anyhow::anyhow!("Channel not found: {}", channel_id)));
+                }
             }
         }
 
@@ -278,31 +380,30 @@ impl MessageServerHandler {
                     .await?;
             }
             ActorMessage::Request(ActorRequest { response_tx, data }) => {
+                let request_id = Uuid::new_v4().to_string();
                 let response = actor_handle
-                    .call_function::<(Vec<u8>,), (Vec<u8>,)>(
+                    .call_function::<(String, Vec<u8>), (Option<Vec<u8>>,)>(
                         "theater:simple/message-server-client.handle-request".to_string(),
-                        (data,),
+                        (request_id, data),
                     )
                     .await?;
-                let _ = response_tx.send(response.0);
+                if let Some(response_data) = response.0 {
+                    let _ = response_tx.send(response_data);
+                }
             }
             ActorMessage::ChannelOpen(ActorChannelOpen {
                 channel_id,
-                initiator_id,
+                initiator_id: _,
                 response_tx,
                 initial_msg,
             }) => {
                 let accept = actor_handle
-                    .call_function::<(String, String, Vec<u8>), (bool,)>(
+                    .call_function::<(String, Vec<u8>), (ChannelAccept,)>(
                         "theater:simple/message-server-client.handle-channel-open".to_string(),
-                        (
-                            channel_id.to_string(),
-                            initiator_id.to_string(),
-                            initial_msg,
-                        ),
+                        (channel_id.to_string(), initial_msg),
                     )
                     .await?;
-                let _ = response_tx.send(Ok(accept.0));
+                let _ = response_tx.send(Ok(accept.0.accepted));
             }
             ActorMessage::ChannelMessage(ActorChannelMessage { channel_id, msg }) => {
                 actor_handle
@@ -1256,6 +1357,7 @@ impl Handler for MessageServerHandler {
 
         // 7. send-on-channel operation
         let router = self.router.clone();
+        let sender_actor_id = actor_id.clone();
 
         actor_component.actor_store.record_event(ChainEventData {
             event_type: "message-server-setup".to_string(),
@@ -1311,6 +1413,7 @@ impl Handler for MessageServerHandler {
                     let (response_tx, response_rx) = tokio::sync::oneshot::channel();
                     let command = MessageCommand::ChannelMessage {
                         channel_id: channel_id.clone(),
+                        sender_id: ChannelParticipant::Actor(sender_actor_id.clone()),
                         message: msg.clone(),
                         response_tx,
                     };
@@ -1426,6 +1529,7 @@ impl Handler for MessageServerHandler {
 
         // 8. close-channel operation
         let router = self.router.clone();
+        let sender_actor_id = actor_id.clone();
 
         actor_component.actor_store.record_event(ChainEventData {
             event_type: "message-server-setup".to_string(),
@@ -1476,6 +1580,7 @@ impl Handler for MessageServerHandler {
                     let (response_tx, response_rx) = tokio::sync::oneshot::channel();
                     let command = MessageCommand::ChannelClose {
                         channel_id: channel_id.clone(),
+                        sender_id: ChannelParticipant::Actor(sender_actor_id.clone()),
                         response_tx,
                     };
 

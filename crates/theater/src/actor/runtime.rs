@@ -218,7 +218,7 @@ impl ActorRuntime {
 
         debug!("Setting up actor store");
 
-        if actor_phase_manager.is_phase(ActorPhase::Starting).await {
+        if !actor_phase_manager.is_phase(ActorPhase::Starting).await {
             let curr_phase = actor_phase_manager.get_phase().await;
             return Err(ActorRuntimeError::ActorPhaseError {
                 expected: ActorPhase::Starting,
@@ -246,7 +246,7 @@ impl ActorRuntime {
         debug!("Storing manifest for actor: {}", id);
 
         // Checkpoint 1: After manifest storage
-        if actor_phase_manager.is_phase(ActorPhase::Starting).await {
+        if !actor_phase_manager.is_phase(ActorPhase::Starting).await {
             let curr_phase = actor_phase_manager.get_phase().await;
             return Err(ActorRuntimeError::ActorPhaseError {
                 expected: ActorPhase::Starting,
@@ -279,7 +279,7 @@ impl ActorRuntime {
 
         // ----------------- Checkpoint Create Handlers -----------------
 
-        if actor_phase_manager.is_phase(ActorPhase::Starting).await {
+        if !actor_phase_manager.is_phase(ActorPhase::Starting).await {
             let curr_phase = actor_phase_manager.get_phase().await;
             return Err(ActorRuntimeError::ActorPhaseError {
                 expected: ActorPhase::Starting,
@@ -317,7 +317,7 @@ impl ActorRuntime {
 
         debug!("Setting up handlers");
 
-        if actor_phase_manager.is_phase(ActorPhase::Starting).await {
+        if !actor_phase_manager.is_phase(ActorPhase::Starting).await {
             let curr_phase = actor_phase_manager.get_phase().await;
             return Err(ActorRuntimeError::ActorPhaseError {
                 expected: ActorPhase::Starting,
@@ -339,7 +339,7 @@ impl ActorRuntime {
 
         debug!("Setting up host functions");
 
-        if actor_phase_manager.is_phase(ActorPhase::Starting).await {
+        if !actor_phase_manager.is_phase(ActorPhase::Starting).await {
             let curr_phase = actor_phase_manager.get_phase().await;
             return Err(ActorRuntimeError::ActorPhaseError {
                 expected: ActorPhase::Starting,
@@ -363,7 +363,7 @@ impl ActorRuntime {
 
         debug!("Instantiating component");
 
-        if actor_phase_manager.is_phase(ActorPhase::Starting).await {
+        if !actor_phase_manager.is_phase(ActorPhase::Starting).await {
             let curr_phase = actor_phase_manager.get_phase().await;
             return Err(ActorRuntimeError::ActorPhaseError {
                 expected: ActorPhase::Starting,
@@ -394,7 +394,7 @@ impl ActorRuntime {
 
         debug!("Adding export functions");
 
-        if actor_phase_manager.is_phase(ActorPhase::Starting).await {
+        if !actor_phase_manager.is_phase(ActorPhase::Starting).await {
             let curr_phase = actor_phase_manager.get_phase().await;
             return Err(ActorRuntimeError::ActorPhaseError {
                 expected: ActorPhase::Starting,
@@ -421,7 +421,7 @@ impl ActorRuntime {
 
         debug!("Initializing state");
 
-        if actor_phase_manager.is_phase(ActorPhase::Starting).await {
+        if !actor_phase_manager.is_phase(ActorPhase::Starting).await {
             let curr_phase = actor_phase_manager.get_phase().await;
             return Err(ActorRuntimeError::ActorPhaseError {
                 expected: ActorPhase::Starting,
@@ -454,7 +454,7 @@ impl ActorRuntime {
 
         debug!("Ready");
 
-        if actor_phase_manager.is_phase(ActorPhase::Starting).await {
+        if !actor_phase_manager.is_phase(ActorPhase::Starting).await {
             let curr_phase = actor_phase_manager.get_phase().await;
             return Err(ActorRuntimeError::ActorPhaseError {
                 expected: ActorPhase::Starting,

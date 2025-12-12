@@ -74,6 +74,16 @@ impl EnvironmentHandler {
     /// * `config` - Configuration for the environment handler
     /// * `permissions` - Optional permissions controlling variable access
     pub fn new(config: EnvironmentHandlerConfig, permissions: Option<EnvironmentPermissions>) -> Self {
+        // If no permissions provided, create them from the config
+        let permissions = permissions.or_else(|| {
+            Some(EnvironmentPermissions {
+                allowed_vars: config.allowed_vars.clone(),
+                denied_vars: config.denied_vars.clone(),
+                allow_list_all: config.allow_list_all,
+                allowed_prefixes: config.allowed_prefixes.clone(),
+            })
+        });
+
         Self {
             config,
             permissions,

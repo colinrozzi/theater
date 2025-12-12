@@ -839,6 +839,7 @@ pub enum MessageCommand {
     /// Transmits data over an existing channel to the other participant.
     ChannelMessage {
         channel_id: ChannelId,
+        sender_id: ChannelParticipant,
         message: Vec<u8>,
         response_tx: oneshot::Sender<Result<()>>,
     },
@@ -848,6 +849,7 @@ pub enum MessageCommand {
     /// Terminates a channel, notifying both participants.
     ChannelClose {
         channel_id: ChannelId,
+        sender_id: ChannelParticipant,
         response_tx: oneshot::Sender<Result<()>>,
     },
 }

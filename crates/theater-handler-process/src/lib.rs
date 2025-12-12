@@ -27,7 +27,6 @@
 //! ```rust
 //! use theater_handler_process::ProcessHandler;
 //! use theater::config::actor_manifest::ProcessHostConfig;
-//! use theater::actor::handle::ActorHandle;
 //!
 //! # fn example() {
 //! let config = ProcessHostConfig {
@@ -36,11 +35,8 @@
 //!     allowed_programs: None,
 //!     allowed_paths: None,
 //! };
-//! let (operation_tx, _) = tokio::sync::mpsc::channel(100);
-//! let (info_tx, _) = tokio::sync::mpsc::channel(100);
-//! let (control_tx, _) = tokio::sync::mpsc::channel(100);
-//! let actor_handle = ActorHandle::new(operation_tx, info_tx, control_tx);
-//! let handler = ProcessHandler::new(config, actor_handle, None);
+//! // ActorHandle is provided when the handler starts via Handler::start()
+//! let handler = ProcessHandler::new(config, None);
 //! # }
 //! ```
 
@@ -198,24 +194,25 @@ pub struct ProcessHandler {
     processes: Arc<Mutex<HashMap<u64, ManagedProcess>>>,
     /// Next process ID to assign
     next_process_id: Arc<Mutex<u64>>,
-    /// Actor handle for sending events
-    actor_handle: ActorHandle,
+    /// Actor handle for sending events (set when handler starts)
+    actor_handle: Arc<std::sync::RwLock<Option<ActorHandle>>>,
     /// Permission configuration
     permissions: Option<theater::config::permissions::ProcessPermissions>,
 }
 
 impl ProcessHandler {
     /// Create a new ProcessHandler with the given configuration
+    ///
+    /// The ActorHandle will be provided when the handler starts via the Handler::start() method.
     pub fn new(
         config: ProcessHostConfig,
-        actor_handle: ActorHandle,
         permissions: Option<theater::config::permissions::ProcessPermissions>,
     ) -> Self {
         Self {
             config,
             processes: Arc::new(Mutex::new(HashMap::new())),
             next_process_id: Arc::new(Mutex::new(1)),
-            actor_handle,
+            actor_handle: Arc::new(std::sync::RwLock::new(None)),
             permissions,
         }
     }
@@ -399,10 +396,14 @@ impl Handler for ProcessHandler {
 
     fn start(
         &mut self,
-        _actor_handle: ActorHandle,
+        actor_handle: ActorHandle,
         shutdown_receiver: ShutdownReceiver,
     ) -> Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send>> {
         info!("Starting process handler");
+
+        // Store the actor handle for use in process callbacks
+        *self.actor_handle.write().unwrap() = Some(actor_handle);
+        info!("Process handler: ActorHandle stored");
 
         Box::pin(async move {
             shutdown_receiver.wait_for_shutdown().await;
@@ -563,7 +564,13 @@ impl Handler for ProcessHandler {
                             let stdout_reader = if let Some(stdout) = child.stdout.take() {
                                 let actor_id = ctx.data().id;
                                 let theater_tx = ctx.data().theater_tx.clone();
-                                let actor_handle_clone = actor_handle.clone();
+                                // Get the ActorHandle from the Option
+                                let actor_handle_clone = actor_handle
+                                    .read()
+                                    .unwrap()
+                                    .as_ref()
+                                    .expect("ActorHandle must be set before spawning processes")
+                                    .clone();
                                 Some(tokio::spawn(async move {
                                     Self::process_output(
                                         stdout,
@@ -585,7 +592,13 @@ impl Handler for ProcessHandler {
                             let stderr_reader = if let Some(stderr) = child.stderr.take() {
                                 let actor_id = ctx.data().id;
                                 let theater_tx = ctx.data().theater_tx.clone();
-                                let actor_handle_clone = actor_handle.clone();
+                                // Get the ActorHandle from the Option
+                                let actor_handle_clone = actor_handle
+                                    .read()
+                                    .unwrap()
+                                    .as_ref()
+                                    .expect("ActorHandle must be set before spawning processes")
+                                    .clone();
                                 Some(tokio::spawn(async move {
                                     Self::process_output(
                                         stderr,
@@ -638,7 +651,13 @@ impl Handler for ProcessHandler {
 
                             // Monitor process exit
                             let processes_monitor = processes.clone();
-                            let actor_handle_exit = actor_handle.clone();
+                            // Get the ActorHandle from the Option
+                            let actor_handle_exit = actor_handle
+                                .read()
+                                .unwrap()
+                                .as_ref()
+                                .expect("ActorHandle must be set before spawning processes")
+                                .clone();
                             tokio::spawn(async move {
                                 // Take the child out of the process struct
                                 let mut child_opt = {
