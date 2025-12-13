@@ -1,0 +1,24 @@
+[package]
+name = "theater-handler-store"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+rust-version.workspace = true
+
+description = "Content storage handler for Theater WebAssembly runtime"
+
+[dependencies]
+theater = { workspace = true }
+anyhow.workspace = true
+tracing.workspace = true
+tokio.workspace = true
+wasmtime = "31.0"
+chrono = "0.4"
+thiserror = "2.0"
+serde = { workspace = true }
+serde_json.workspace = true

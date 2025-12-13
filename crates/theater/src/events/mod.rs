@@ -1,5 +1,19 @@
 use crate::chain::ChainEvent;
 use serde::{Deserialize, Serialize};
+use std::fmt::Debug;
+
+/// Trait implemented by any payload type that can be recorded in the Theater
+/// event chain. External handler crates can implement this to integrate their
+/// custom event enums with the runtime.
+pub trait EventPayload:
+    Serialize + for<'de> Deserialize<'de> + Send + Sync + Debug + 'static
+{
+}
+
+impl<T> EventPayload for T where
+    T: Serialize + for<'de> Deserialize<'de> + Send + Sync + Debug + 'static
+{
+}
 
 /// # Chain Event Data
 ///
@@ -39,12 +53,19 @@ use serde::{Deserialize, Serialize};
 /// converted to a `ChainEvent` for inclusion in an actor's event chain using
 /// the `to_chain_event` method.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ChainEventData {
+#[serde(bound(
+    serialize = "E: Serialize",
+    deserialize = "E: serde::de::DeserializeOwned"
+))]
+pub struct ChainEventData<E = EventData>
+where
+    E: EventPayload,
+{
     /// The type identifier for this event, used for filtering and routing.
     /// This should be a dot-separated string like "subsystem.action".
     pub event_type: String,
     /// The specific event data payload, containing domain-specific information.
-    pub data: EventData,
+    pub data: E,
     /// Unix timestamp (in seconds) when the event was created.
     pub timestamp: u64,
     /// Optional human-readable description of the event for logging and debugging.
@@ -119,7 +140,10 @@ pub enum EventData {
     TheaterRuntime(theater_runtime::TheaterRuntimeEventData),
 }
 
-impl ChainEventData {
+impl<E> ChainEventData<E>
+where
+    E: EventPayload,
+{
     /// Gets the event type identifier string.
     ///
     /// ## Purpose
@@ -268,12 +292,12 @@ impl ChainEventData {
     ///
     /// // Later, create child events in the chain
     /// // Create a child event
-/// let child_event_data = ChainEventData {
-///     event_type: "child.event".to_string(),
-///     data: EventData::Runtime(RuntimeEventData::Log { level: "info".to_string(), message: "child event".to_string() }),
-///     timestamp: 0,
-///     description: None,
-/// };
+    /// let child_event_data = ChainEventData {
+    ///     event_type: "child.event".to_string(),
+    ///     data: EventData::Runtime(RuntimeEventData::Log { level: "info".to_string(), message: "child event".to_string() }),
+    ///     timestamp: 0,
+    ///     description: None,
+    /// };
     /// let child_chain_event = child_event_data.to_chain_event(Some(chain_event.hash.clone()));
     /// ```
     ///

@@ -149,7 +149,10 @@ impl HttpFramework {
                     timestamp: chrono::Utc::now().timestamp_millis() as u64,
                     description: Some(format!("Failed to create linker instance: {}", e)),
                 });
-                return Err(anyhow::anyhow!("Could not instantiate theater:simple/http-framework: {}", e));
+                return Err(anyhow::anyhow!(
+                    "Could not instantiate theater:simple/http-framework: {}",
+                    e
+                ));
             }
         };
 
@@ -262,15 +265,15 @@ impl HttpFramework {
                                     EventData::Http(HttpEventData::ServerStartHttps {
                                         server_id,
                                         port,
-                                        cert_path: server.get_tls_cert_path().unwrap_or("unknown").to_string(),
+                                        cert_path: server
+                                            .get_tls_cert_path()
+                                            .unwrap_or("unknown")
+                                            .to_string(),
                                     })
                                 } else {
-                                    EventData::Http(HttpEventData::ServerStart {
-                                        server_id,
-                                        port,
-                                    })
+                                    EventData::Http(HttpEventData::ServerStart { server_id, port })
                                 };
-                                
+
                                 let description = if server.is_https() {
                                     format!("Started HTTPS server {} on port {}", server_id, port)
                                 } else {
@@ -1113,7 +1116,9 @@ impl HttpFramework {
             event_type: "http-framework-setup".to_string(),
             data: EventData::Http(HttpEventData::HandlerSetupSuccess),
             timestamp: chrono::Utc::now().timestamp_millis() as u64,
-            description: Some("HTTP framework host functions setup completed successfully".to_string()),
+            description: Some(
+                "HTTP framework host functions setup completed successfully".to_string(),
+            ),
         });
 
         info!("HTTP framework host functions set up");
@@ -1124,48 +1129,54 @@ impl HttpFramework {
     pub async fn add_export_functions(&self, actor_instance: &mut ActorInstance) -> Result<()> {
         info!("Adding export functions for HTTP framework");
 
-        match actor_instance
-            .register_function::<(u64, HttpRequest), (HttpResponse,)>(
-                "theater:simple/http-handlers",
-                "handle-request",
-            )
-        {
+        match actor_instance.register_function::<(u64, HttpRequest), (HttpResponse,)>(
+            "theater:simple/http-handlers",
+            "handle-request",
+        ) {
             Ok(_) => {
                 info!("Successfully registered handle-request function");
             }
             Err(e) => {
                 error!("Failed to register handle-request function: {}", e);
-                return Err(anyhow::anyhow!("Failed to register handle-request function: {}", e));
+                return Err(anyhow::anyhow!(
+                    "Failed to register handle-request function: {}",
+                    e
+                ));
             }
         }
 
-        match actor_instance
-            .register_function::<(u64, HttpRequest), (MiddlewareResult,)>(
-                "theater:simple/http-handlers",
-                "handle-middleware",
-            )
-        {
+        match actor_instance.register_function::<(u64, HttpRequest), (MiddlewareResult,)>(
+            "theater:simple/http-handlers",
+            "handle-middleware",
+        ) {
             Ok(_) => {
                 info!("Successfully registered handle-middleware function");
             }
             Err(e) => {
                 error!("Failed to register handle-middleware function: {}", e);
-                return Err(anyhow::anyhow!("Failed to register handle-middleware function: {}", e));
+                return Err(anyhow::anyhow!(
+                    "Failed to register handle-middleware function: {}",
+                    e
+                ));
             }
         }
 
-        match actor_instance
-            .register_function_no_result::<(u64, u64, String, Option<String>)>(
-                "theater:simple/http-handlers",
-                "handle-websocket-connect",
-            )
-        {
+        match actor_instance.register_function_no_result::<(u64, u64, String, Option<String>)>(
+            "theater:simple/http-handlers",
+            "handle-websocket-connect",
+        ) {
             Ok(_) => {
                 info!("Successfully registered handle-websocket-connect function");
             }
             Err(e) => {
-                error!("Failed to register handle-websocket-connect function: {}", e);
-                return Err(anyhow::anyhow!("Failed to register handle-websocket-connect function: {}", e));
+                error!(
+                    "Failed to register handle-websocket-connect function: {}",
+                    e
+                );
+                return Err(anyhow::anyhow!(
+                    "Failed to register handle-websocket-connect function: {}",
+                    e
+                ));
             }
         }
 
@@ -1173,29 +1184,38 @@ impl HttpFramework {
             .register_function::<(u64, u64, WebSocketMessage), (Vec<WebSocketMessage>,)>(
                 "theater:simple/http-handlers",
                 "handle-websocket-message",
-            )
-        {
+            ) {
             Ok(_) => {
                 info!("Successfully registered handle-websocket-message function");
             }
             Err(e) => {
-                error!("Failed to register handle-websocket-message function: {}", e);
-                return Err(anyhow::anyhow!("Failed to register handle-websocket-message function: {}", e));
+                error!(
+                    "Failed to register handle-websocket-message function: {}",
+                    e
+                );
+                return Err(anyhow::anyhow!(
+                    "Failed to register handle-websocket-message function: {}",
+                    e
+                ));
             }
         }
 
-        match actor_instance
-            .register_function_no_result::<(u64, u64)>(
-                "theater:simple/http-handlers",
-                "handle-websocket-disconnect",
-            )
-        {
+        match actor_instance.register_function_no_result::<(u64, u64)>(
+            "theater:simple/http-handlers",
+            "handle-websocket-disconnect",
+        ) {
             Ok(_) => {
                 info!("Successfully registered handle-websocket-disconnect function");
             }
             Err(e) => {
-                error!("Failed to register handle-websocket-disconnect function: {}", e);
-                return Err(anyhow::anyhow!("Failed to register handle-websocket-disconnect function: {}", e));
+                error!(
+                    "Failed to register handle-websocket-disconnect function: {}",
+                    e
+                );
+                return Err(anyhow::anyhow!(
+                    "Failed to register handle-websocket-disconnect function: {}",
+                    e
+                ));
             }
         }
 

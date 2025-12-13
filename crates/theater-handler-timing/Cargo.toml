@@ -1,0 +1,32 @@
+[package]
+name = "theater-handler-timing"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+# Core theater dependencies
+theater = { path = "../theater" }
+
+# Async runtime
+tokio = { workspace = true }
+futures = "0.3"
+
+# Error handling
+anyhow = { workspace = true }
+thiserror = "1.0"
+
+# Time handling
+chrono = { version = "0.4", features = ["serde"] }
+
+# WASM runtime
+wasmtime = { version = "31.0", features = ["component-model", "async"] }
+
+# Logging
+tracing = { workspace = true }

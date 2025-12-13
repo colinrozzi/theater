@@ -1,11 +1,11 @@
 use chrono::Utc;
-use theater::ActorOperation;
 use theater::chain::StateChain;
-use theater::{HandlerConfig, ManifestConfig, MessageServerConfig};
 use theater::events::message::MessageEventData;
 use theater::events::{ChainEventData, EventData};
 use theater::id::TheaterId;
 use theater::messages::{ActorMessage, TheaterCommand};
+use theater::ActorOperation;
+use theater::{HandlerConfig, ManifestConfig, MessageServerConfig};
 use theater::{ShutdownController, ShutdownReceiver};
 use tokio::sync::mpsc;
 
@@ -38,9 +38,9 @@ pub fn create_test_manifest(name: &str) -> ManifestConfig {
     };
 
     // Add a message server handler
-    config
-        .handlers
-        .push(HandlerConfig::MessageServer { config: MessageServerConfig {} });
+    config.handlers.push(HandlerConfig::MessageServer {
+        config: MessageServerConfig {},
+    });
 
     config
 }

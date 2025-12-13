@@ -1,0 +1,20 @@
+[package]
+name = "theater-handler-environment"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+rust-version.workspace = true
+description = "Environment variable handler for Theater WebAssembly actors"
+
+[dependencies]
+theater = { workspace = true }
+anyhow.workspace = true
+chrono = "0.4"
+thiserror = "1.0"
+tracing.workspace = true
+wasmtime = { version = "31.0", features = ["component-model", "async"] }

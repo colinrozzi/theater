@@ -41,8 +41,14 @@ pub enum TimingError {
 }
 
 impl TimingHost {
-    pub fn new(config: TimingHostConfig, permissions: Option<crate::config::permissions::TimingPermissions>) -> Self {
-        Self { config, permissions }
+    pub fn new(
+        config: TimingHostConfig,
+        permissions: Option<crate::config::permissions::TimingPermissions>,
+    ) -> Self {
+        Self {
+            config,
+            permissions,
+        }
     }
 
     pub async fn setup_host_functions(&self, actor_component: &mut ActorComponent) -> Result<()> {
@@ -56,10 +62,7 @@ impl TimingHost {
 
         info!("Setting up timing host functions");
 
-        let mut interface = match actor_component
-            .linker
-            .instance("theater:simple/timing")
-        {
+        let mut interface = match actor_component.linker.instance("theater:simple/timing") {
             Ok(interface) => {
                 // Record successful linker instance creation
                 actor_component.actor_store.record_event(ChainEventData {
@@ -81,7 +84,10 @@ impl TimingHost {
                     timestamp: chrono::Utc::now().timestamp_millis() as u64,
                     description: Some(format!("Failed to create linker instance: {}", e)),
                 });
-                return Err(anyhow::anyhow!("Could not instantiate theater:simple/timing: {}", e));
+                return Err(anyhow::anyhow!(
+                    "Could not instantiate theater:simple/timing: {}",
+                    e
+                ));
             }
         };
 

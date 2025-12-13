@@ -42,7 +42,10 @@ pub enum RandomError {
 }
 
 impl RandomHost {
-    pub fn new(config: RandomHandlerConfig, permissions: Option<crate::config::permissions::RandomPermissions>) -> Self {
+    pub fn new(
+        config: RandomHandlerConfig,
+        permissions: Option<crate::config::permissions::RandomPermissions>,
+    ) -> Self {
         let rng = if let Some(seed) = config.seed {
             info!("Initializing random host with seed: {}", seed);
             Arc::new(Mutex::new(ChaCha20Rng::seed_from_u64(seed)))
@@ -51,7 +54,11 @@ impl RandomHost {
             Arc::new(Mutex::new(ChaCha20Rng::from_entropy()))
         };
 
-        Self { config, rng, permissions }
+        Self {
+            config,
+            rng,
+            permissions,
+        }
     }
 
     pub async fn setup_host_functions(
@@ -68,10 +75,7 @@ impl RandomHost {
 
         info!("Setting up random number generator host functions");
 
-        let mut interface = match actor_component
-            .linker
-            .instance("theater:simple/random")
-        {
+        let mut interface = match actor_component.linker.instance("theater:simple/random") {
             Ok(interface) => {
                 // Record successful linker instance creation
                 actor_component.actor_store.record_event(ChainEventData {
@@ -93,7 +97,10 @@ impl RandomHost {
                     timestamp: chrono::Utc::now().timestamp_millis() as u64,
                     description: Some(format!("Failed to create linker instance: {}", e)),
                 });
-                return Err(anyhow::anyhow!("Could not instantiate theater:simple/random: {}", e));
+                return Err(anyhow::anyhow!(
+                    "Could not instantiate theater:simple/random: {}",
+                    e
+                ));
             }
         };
 

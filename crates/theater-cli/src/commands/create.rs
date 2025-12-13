@@ -61,13 +61,8 @@ pub async fn execute_async(args: &CreateArgs, ctx: &CommandContext) -> Result<()
     debug!("Output directory: {}", output_dir.display());
 
     // Get available templates
-    let templates_list = templates::available_templates().map_err(|e| {
-        CliError::file_operation_failed(
-            "load templates",
-            "templates directory",
-            e,
-        )
-    })?;
+    let templates_list = templates::available_templates()
+        .map_err(|e| CliError::file_operation_failed("load templates", "templates directory", e))?;
 
     // Check if the template exists
     if !templates_list.contains_key(&args.template) {
@@ -80,15 +75,15 @@ pub async fn execute_async(args: &CreateArgs, ctx: &CommandContext) -> Result<()
 
     // Create the project
     let project_path = output_dir.join(&args.name);
-    
+
     // Check if directory already exists
     if project_path.exists() {
         return Err(CliError::file_operation_failed(
             "create project",
             project_path.display().to_string(),
             std::io::Error::new(
-                std::io::ErrorKind::AlreadyExists, 
-                "Directory already exists"
+                std::io::ErrorKind::AlreadyExists,
+                "Directory already exists",
             ),
         ));
     }
@@ -96,11 +91,7 @@ pub async fn execute_async(args: &CreateArgs, ctx: &CommandContext) -> Result<()
     // Step 1: Create project from template
     println!("Creating project structure...");
     templates::create_project(&args.template, &args.name, &project_path).map_err(|e| {
-        CliError::file_operation_failed(
-            "create project",
-            project_path.display().to_string(),
-            e,
-        )
+        CliError::file_operation_failed("create project", project_path.display().to_string(), e)
     })?;
     println!("✅ Project created from '{}' template", args.template);
 
@@ -143,14 +134,12 @@ pub async fn execute_async(args: &CreateArgs, ctx: &CommandContext) -> Result<()
     println!("\nProject '{}' created successfully!", args.name);
 
     // Create success result and output
-    let mut build_instructions = vec![
-        format!("cd {}", args.name),
-    ];
+    let mut build_instructions = vec![format!("cd {}", args.name)];
 
     if args.skip_deps {
         build_instructions.push("wkg wit fetch".to_string());
     }
-    
+
     build_instructions.extend(vec![
         "cargo component build --release".to_string(),
         "theater start manifest.toml".to_string(),
@@ -177,15 +166,13 @@ pub async fn execute_async(args: &CreateArgs, ctx: &CommandContext) -> Result<()
 /// Check if cargo component is installed
 fn check_cargo_component() -> Result<(), CliError> {
     debug!("Checking for cargo component...");
-    
+
     let output = Command::new("cargo")
         .args(&["component", "--version"])
         .output()
-        .map_err(|e| {
-            CliError::MissingTool {
-                tool: "cargo component".to_string(),
-                install_command: "cargo install cargo-component".to_string(),
-            }
+        .map_err(|e| CliError::MissingTool {
+            tool: "cargo component".to_string(),
+            install_command: "cargo install cargo-component".to_string(),
         })?;
 
     if !output.status.success() {
@@ -210,10 +197,8 @@ fn fetch_wit_dependencies(project_path: &PathBuf) -> Result<(), CliError> {
 
     match child {
         Ok(mut child) => {
-            let status = child.wait().map_err(|e| {
-                CliError::BuildFailed {
-                    output: format!("Failed to wait for wkg wit fetch: {}", e),
-                }
+            let status = child.wait().map_err(|e| CliError::BuildFailed {
+                output: format!("Failed to wait for wkg wit fetch: {}", e),
             })?;
 
             if status.success() {
@@ -238,7 +223,7 @@ fn try_wasm_tools_fetch(project_path: &PathBuf) -> Result<(), CliError> {
     warn!("Please run one of the following manually:");
     warn!("  - wkg wit fetch  (if you have wkg installed)");
     warn!("  - Or manually download theater:simple WIT files to wit/deps/theater-simple/");
-    
+
     // Don't fail the creation, just warn
     Ok(())
 }
@@ -246,21 +231,23 @@ fn try_wasm_tools_fetch(project_path: &PathBuf) -> Result<(), CliError> {
 /// Build the project to validate it works
 fn build_project(project_path: &PathBuf) -> Result<(), CliError> {
     debug!("Building project at {}", project_path.display());
-    
+
     let mut child = Command::new("cargo")
-        .args(&["component", "build", "--target", "wasm32-unknown-unknown", "--release"])
+        .args(&[
+            "component",
+            "build",
+            "--target",
+            "wasm32-unknown-unknown",
+            "--release",
+        ])
         .current_dir(project_path)
         .spawn()
-        .map_err(|e| {
-            CliError::BuildFailed {
-                output: format!("Failed to execute cargo component build: {}", e),
-            }
+        .map_err(|e| CliError::BuildFailed {
+            output: format!("Failed to execute cargo component build: {}", e),
         })?;
 
-    let status = child.wait().map_err(|e| {
-        CliError::BuildFailed {
-            output: format!("Failed to wait for cargo component build: {}", e),
-        }
+    let status = child.wait().map_err(|e| CliError::BuildFailed {
+        output: format!("Failed to wait for cargo component build: {}", e),
     })?;
 
     if !status.success() {
@@ -293,23 +280,21 @@ fn should_init_git() -> bool {
 /// Initialize a git repository and make the first commit
 fn init_git_repo(project_path: &PathBuf, project_name: &str) -> Result<(), CliError> {
     debug!("Initializing git repository at {}", project_path.display());
-    
+
     // Initialize git repository
     let init_output = Command::new("git")
         .args(&["init"])
         .current_dir(project_path)
         .output()
-        .map_err(|e| {
-            CliError::MissingTool {
-                tool: "git".to_string(),
-                install_command: "Install git from https://git-scm.com/".to_string(),
-            }
+        .map_err(|e| CliError::MissingTool {
+            tool: "git".to_string(),
+            install_command: "Install git from https://git-scm.com/".to_string(),
         })?;
 
     if !init_output.status.success() {
         return Err(CliError::BuildFailed {
             output: format!(
-                "Failed to initialize git repository: {}", 
+                "Failed to initialize git repository: {}",
                 String::from_utf8_lossy(&init_output.stderr)
             ),
         });
@@ -320,16 +305,14 @@ fn init_git_repo(project_path: &PathBuf, project_name: &str) -> Result<(), CliEr
         .args(&["add", "."])
         .current_dir(project_path)
         .output()
-        .map_err(|e| {
-            CliError::BuildFailed {
-                output: format!("Failed to add files to git: {}", e),
-            }
+        .map_err(|e| CliError::BuildFailed {
+            output: format!("Failed to add files to git: {}", e),
         })?;
 
     if !add_output.status.success() {
         return Err(CliError::BuildFailed {
             output: format!(
-                "Failed to add files to git: {}", 
+                "Failed to add files to git: {}",
                 String::from_utf8_lossy(&add_output.stderr)
             ),
         });
@@ -341,10 +324,8 @@ fn init_git_repo(project_path: &PathBuf, project_name: &str) -> Result<(), CliEr
         .args(&["commit", "-m", &commit_message])
         .current_dir(project_path)
         .output()
-        .map_err(|e| {
-            CliError::BuildFailed {
-                output: format!("Failed to make initial commit: {}", e),
-            }
+        .map_err(|e| CliError::BuildFailed {
+            output: format!("Failed to make initial commit: {}", e),
         })?;
 
     if !commit_output.status.success() {
@@ -356,10 +337,7 @@ fn init_git_repo(project_path: &PathBuf, project_name: &str) -> Result<(), CliEr
             });
         } else {
             return Err(CliError::BuildFailed {
-                output: format!(
-                    "Failed to make initial commit: {}", 
-                    stderr
-                ),
+                output: format!("Failed to make initial commit: {}", stderr),
             });
         }
     }

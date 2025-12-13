@@ -31,8 +31,14 @@ pub struct EnvironmentHost {
 }
 
 impl EnvironmentHost {
-    pub fn new(config: EnvironmentHandlerConfig, permissions: Option<crate::config::permissions::EnvironmentPermissions>) -> Self {
-        Self { config, permissions }
+    pub fn new(
+        config: EnvironmentHandlerConfig,
+        permissions: Option<crate::config::permissions::EnvironmentPermissions>,
+    ) -> Self {
+        Self {
+            config,
+            permissions,
+        }
     }
 
     pub async fn start(
@@ -84,7 +90,10 @@ impl EnvironmentHost {
                     timestamp: chrono::Utc::now().timestamp_millis() as u64,
                     description: Some(format!("Failed to create linker instance: {}", e)),
                 });
-                return Err(anyhow::anyhow!("Could not instantiate theater:simple/environment: {}", e));
+                return Err(anyhow::anyhow!(
+                    "Could not instantiate theater:simple/environment: {}",
+                    e
+                ));
             }
         };
 
@@ -98,12 +107,9 @@ impl EnvironmentHost {
                   (var_name,): (String,)|
                   -> Result<(Option<String>,)> {
                 let now = Utc::now().timestamp_millis() as u64;
-                
+
                 // PERMISSION CHECK BEFORE OPERATION
-                if let Err(e) = PermissionChecker::check_env_var_access(
-                    &permissions,
-                    &var_name,
-                ) {
+                if let Err(e) = PermissionChecker::check_env_var_access(&permissions, &var_name) {
                     // Record permission denied event
                     ctx.data_mut().record_event(ChainEventData {
                         event_type: "theater:simple/environment/permission-denied".to_string(),
@@ -153,12 +159,11 @@ impl EnvironmentHost {
                   (var_name,): (String,)|
                   -> Result<(bool,)> {
                 let now = Utc::now().timestamp_millis() as u64;
-                
+
                 // PERMISSION CHECK BEFORE OPERATION
-                if let Err(e) = PermissionChecker::check_env_var_access(
-                    &permissions_clone,
-                    &var_name,
-                ) {
+                if let Err(e) =
+                    PermissionChecker::check_env_var_access(&permissions_clone, &var_name)
+                {
                     // Record permission denied event
                     ctx.data_mut().record_event(ChainEventData {
                         event_type: "theater:simple/environment/permission-denied".to_string(),
@@ -260,7 +265,9 @@ impl EnvironmentHost {
             event_type: "environment-setup".to_string(),
             data: EventData::Environment(EnvironmentEventData::HandlerSetupSuccess),
             timestamp: chrono::Utc::now().timestamp_millis() as u64,
-            description: Some("Environment host functions setup completed successfully".to_string()),
+            description: Some(
+                "Environment host functions setup completed successfully".to_string(),
+            ),
         });
 
         Ok(())

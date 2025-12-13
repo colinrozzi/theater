@@ -39,7 +39,7 @@ use uuid::Uuid;
 ///
 /// Internally, TheaterId is implemented using UUIDs (Universally Unique Identifiers)
 /// to ensure uniqueness across distributed systems without requiring central coordination.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, Copy)]
 pub struct TheaterId(Uuid);
 
 impl TheaterId {

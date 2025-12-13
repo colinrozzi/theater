@@ -213,7 +213,10 @@ pub struct CommandContext {
 impl CommandContext {
     /// Create a theater client using the configured server address
     pub fn create_client(&self) -> client::TheaterClient {
-        client::TheaterClient::new(self.config.server.default_address, self.shutdown_token.clone())
+        client::TheaterClient::new(
+            self.config.server.default_address,
+            self.shutdown_token.clone(),
+        )
     }
 
     /// Get the server address from config or override

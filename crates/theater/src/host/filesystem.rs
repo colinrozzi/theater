@@ -9,6 +9,7 @@ use crate::shutdown::ShutdownReceiver;
 use crate::wasm::ActorComponent;
 use crate::wasm::ActorInstance;
 use anyhow::Result;
+use dunce;
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 use std::fs::File;
@@ -19,7 +20,6 @@ use thiserror::Error;
 use tokio::process::Command as AsyncCommand;
 use tracing::{error, info};
 use wasmtime::StoreContextMut;
-use dunce;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 enum FileSystemCommand {
@@ -103,14 +103,14 @@ impl FileSystemHost {
         let resolved_validation_path = dunce::canonicalize(path_to_validate).map_err(|e| {
             if is_creation {
                 format!(
-                    "Failed to resolve parent directory '{}' for creation operation: {}", 
-                    path_to_validate.display(), 
+                    "Failed to resolve parent directory '{}' for creation operation: {}",
+                    path_to_validate.display(),
                     e
                 )
             } else {
                 format!(
-                    "Failed to resolve path '{}': {}", 
-                    path_to_validate.display(), 
+                    "Failed to resolve path '{}': {}",
+                    path_to_validate.display(),
                     e
                 )
             }
@@ -123,12 +123,12 @@ impl FileSystemHost {
                     // Canonicalize the allowed path for comparison using dunce
                     let allowed_canonical = dunce::canonicalize(allowed_path)
                         .unwrap_or_else(|_| PathBuf::from(allowed_path));
-                    
+
                     // Check if resolved path is within the allowed directory
-                    resolved_validation_path == allowed_canonical || 
-                    resolved_validation_path.starts_with(&allowed_canonical)
+                    resolved_validation_path == allowed_canonical
+                        || resolved_validation_path.starts_with(&allowed_canonical)
                 });
-                
+
                 if !is_allowed {
                     return Err(if is_creation {
                         format!(
@@ -138,8 +138,8 @@ impl FileSystemHost {
                         )
                     } else {
                         format!(
-                            "Path '{}' not in allowed paths: {:?}", 
-                            resolved_validation_path.display(), 
+                            "Path '{}' not in allowed paths: {:?}",
+                            resolved_validation_path.display(),
                             allowed_paths
                         )
                     });
@@ -154,17 +154,20 @@ impl FileSystemHost {
             // by appending the filename/dirname to the canonicalized parent directory
             let final_component = full_path.file_name().ok_or_else(|| {
                 format!(
-                    "Cannot determine target name for {} operation on path '{}'", 
-                    operation, 
-                    requested_path
+                    "Cannot determine target name for {} operation on path '{}'",
+                    operation, requested_path
                 )
             })?;
-            
+
             Ok(resolved_validation_path.join(final_component))
         } else {
             // For read/delete, return the canonicalized path
             Ok(dunce::canonicalize(&full_path).map_err(|e| {
-                format!("Failed to resolve target path '{}': {}", full_path.display(), e)
+                format!(
+                    "Failed to resolve target path '{}': {}",
+                    full_path.display(),
+                    e
+                )
             })?)
         }
     }

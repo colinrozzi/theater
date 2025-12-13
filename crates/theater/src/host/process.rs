@@ -164,7 +164,11 @@ pub struct ProcessHost {
 
 impl ProcessHost {
     /// Create a new ProcessHost with the given configuration
-    pub fn new(config: ProcessHostConfig, actor_handle: ActorHandle, permissions: Option<crate::config::permissions::ProcessPermissions>) -> Self {
+    pub fn new(
+        config: ProcessHostConfig,
+        actor_handle: ActorHandle,
+        permissions: Option<crate::config::permissions::ProcessPermissions>,
+    ) -> Self {
         Self {
             config,
             processes: Arc::new(Mutex::new(HashMap::new())),
@@ -189,48 +193,51 @@ impl ProcessHost {
         info!("Adding export functions for process handling");
 
         // Register the process handler export functions
-        match actor_instance
-            .register_function_no_result::<(u64, Vec<u8>)>(
-                "theater:simple/process-handlers",
-                "handle-stdout",
-            )
-        {
+        match actor_instance.register_function_no_result::<(u64, Vec<u8>)>(
+            "theater:simple/process-handlers",
+            "handle-stdout",
+        ) {
             Ok(_) => {
                 info!("Successfully registered handle-stdout function");
             }
             Err(e) => {
                 error!("Failed to register handle-stdout function: {}", e);
-                return Err(anyhow::anyhow!("Failed to register handle-stdout function: {}", e));
+                return Err(anyhow::anyhow!(
+                    "Failed to register handle-stdout function: {}",
+                    e
+                ));
             }
         }
 
-        match actor_instance
-            .register_function_no_result::<(u64, Vec<u8>)>(
-                "theater:simple/process-handlers",
-                "handle-stderr",
-            )
-        {
+        match actor_instance.register_function_no_result::<(u64, Vec<u8>)>(
+            "theater:simple/process-handlers",
+            "handle-stderr",
+        ) {
             Ok(_) => {
                 info!("Successfully registered handle-stderr function");
             }
             Err(e) => {
                 error!("Failed to register handle-stderr function: {}", e);
-                return Err(anyhow::anyhow!("Failed to register handle-stderr function: {}", e));
+                return Err(anyhow::anyhow!(
+                    "Failed to register handle-stderr function: {}",
+                    e
+                ));
             }
         }
 
-        match actor_instance
-            .register_function_no_result::<(u64, i32)>(
-                "theater:simple/process-handlers",
-                "handle-exit",
-            )
-        {
+        match actor_instance.register_function_no_result::<(u64, i32)>(
+            "theater:simple/process-handlers",
+            "handle-exit",
+        ) {
             Ok(_) => {
                 info!("Successfully registered handle-exit function");
             }
             Err(e) => {
                 error!("Failed to register handle-exit function: {}", e);
-                return Err(anyhow::anyhow!("Failed to register handle-exit function: {}", e));
+                return Err(anyhow::anyhow!(
+                    "Failed to register handle-exit function: {}",
+                    e
+                ));
             }
         }
 
@@ -471,10 +478,7 @@ impl ProcessHost {
 
         info!("Setting up host functions for process handling");
 
-        let mut interface = match actor_component
-            .linker
-            .instance("theater:simple/process")
-        {
+        let mut interface = match actor_component.linker.instance("theater:simple/process") {
             Ok(interface) => {
                 // Record successful linker instance creation
                 actor_component.actor_store.record_event(ChainEventData {
@@ -496,7 +500,10 @@ impl ProcessHost {
                     timestamp: chrono::Utc::now().timestamp_millis() as u64,
                     description: Some(format!("Failed to create linker instance: {}", e)),
                 });
-                return Err(anyhow::anyhow!("Could not instantiate theater:simple/process: {}", e));
+                return Err(anyhow::anyhow!(
+                    "Could not instantiate theater:simple/process: {}",
+                    e
+                ));
             }
         };
 
@@ -1261,16 +1268,19 @@ impl ProcessHost {
         actor_id: crate::id::TheaterId,
     ) {
         const GRACE_PERIOD_SECS: u64 = 5;
-        
+
         // First, try SIGTERM
         let sigterm_result = Self::send_signal_to_process(process_id, 15, &processes).await; // SIGTERM = 15
-        
+
         if sigterm_result.is_ok() {
-            info!("Sent SIGTERM to process {}, waiting {} seconds for graceful exit", process_id, GRACE_PERIOD_SECS);
-            
+            info!(
+                "Sent SIGTERM to process {}, waiting {} seconds for graceful exit",
+                process_id, GRACE_PERIOD_SECS
+            );
+
             // Wait for grace period
             tokio::time::sleep(Duration::from_secs(GRACE_PERIOD_SECS)).await;
-            
+
             // Check if process is still running
             let still_running = {
                 let processes_lock = processes.lock().unwrap();
@@ -1280,10 +1290,13 @@ impl ProcessHost {
                     false
                 }
             };
-            
+
             if still_running {
-                info!("Process {} did not exit gracefully, sending SIGKILL", process_id);
-                
+                info!(
+                    "Process {} did not exit gracefully, sending SIGKILL",
+                    process_id
+                );
+
                 // Record escalation event
                 let escalation_event = ChainEventData {
                     event_type: "process/timeout".to_string(),
@@ -1298,25 +1311,32 @@ impl ProcessHost {
                         process_id
                     )),
                 };
-                
+
                 // Send escalation event
-                if let Err(e) = theater_tx.send(crate::messages::TheaterCommand::NewEvent {
-                    actor_id: actor_id.clone(),
-                    event: escalation_event.to_chain_event(None),
-                }).await {
+                if let Err(e) = theater_tx
+                    .send(crate::messages::TheaterCommand::NewEvent {
+                        actor_id: actor_id.clone(),
+                        event: escalation_event.to_chain_event(None),
+                    })
+                    .await
+                {
                     error!("Failed to send timeout escalation event: {}", e);
                 }
-                
+
                 // Send SIGKILL
-                let _sigkill_result = Self::send_signal_to_process(process_id, 9, &processes).await; // SIGKILL = 9
+                let _sigkill_result = Self::send_signal_to_process(process_id, 9, &processes).await;
+                // SIGKILL = 9
             }
         } else {
             // If SIGTERM failed, try direct kill
-            info!("SIGTERM failed for process {}, attempting direct kill", process_id);
+            info!(
+                "SIGTERM failed for process {}, attempting direct kill",
+                process_id
+            );
             Self::kill_process_directly(process_id, &processes).await;
         }
     }
-    
+
     /// Send signal to process (helper function)
     async fn send_signal_to_process(
         process_id: u64,
@@ -1331,7 +1351,7 @@ impl ProcessHost {
                 return Err("Process not found".to_string());
             }
         };
-        
+
         if let Some(os_pid) = os_pid {
             #[cfg(unix)]
             {
@@ -1339,11 +1359,15 @@ impl ProcessHost {
                     if libc::kill(os_pid as i32, signal) == 0 {
                         Ok(())
                     } else {
-                        Err(format!("Failed to send signal {}: {}", signal, std::io::Error::last_os_error()))
+                        Err(format!(
+                            "Failed to send signal {}: {}",
+                            signal,
+                            std::io::Error::last_os_error()
+                        ))
                     }
                 }
             }
-            
+
             #[cfg(not(unix))]
             {
                 // On non-Unix platforms, we can only kill
@@ -1358,7 +1382,7 @@ impl ProcessHost {
             Err("Process OS PID not available".to_string())
         }
     }
-    
+
     /// Kill process directly using Child::kill()
     async fn kill_process_directly(
         process_id: u64,
@@ -1372,7 +1396,7 @@ impl ProcessHost {
                 None
             }
         };
-        
+
         if let Some(mut child) = child_opt {
             if let Err(e) = child.kill().await {
                 error!("Failed to kill process {}: {}", process_id, e);

@@ -1,23 +1,23 @@
 use crate::actor::handle::ActorHandle;
-use std::panic;
 use axum::{
-    extract::{Path, State, WebSocketUpgrade, MatchedPath},
+    extract::{MatchedPath, Path, State, WebSocketUpgrade},
     http::{HeaderName, HeaderValue, Request, StatusCode},
     response::Response,
-    routing::{any, get, post, put, delete, patch, head, options},
+    routing::{any, delete, get, head, options, patch, post, put},
     Router,
 };
 use futures::{SinkExt, StreamExt};
 use std::collections::HashMap;
+use std::panic;
 
+use anyhow::Result;
 use std::sync::Arc;
 use tokio::sync::{mpsc, RwLock};
 use tokio::task::JoinHandle;
 use tracing::{debug, error, info, warn};
-use anyhow::Result;
 
-use super::types::*;
 use super::tls::{create_tls_config, validate_tls_config};
+use super::types::*;
 
 // Route configuration
 #[derive(Clone)]
@@ -62,7 +62,7 @@ pub struct RouteHandlerState {
     pub server_state: Arc<ServerState>,
 }
 
-// New: State for WebSocket handlers  
+// New: State for WebSocket handlers
 #[derive(Clone)]
 pub struct WebSocketHandlerState {
     pub config: WebSocketConfig,
@@ -133,7 +133,10 @@ impl ServerInstance {
     }
 
     pub fn get_tls_cert_path(&self) -> Option<&str> {
-        self.config.tls_config.as_ref().map(|tls| tls.cert_path.as_str())
+        self.config
+            .tls_config
+            .as_ref()
+            .map(|tls| tls.cert_path.as_str())
     }
 
     // Existing route/middleware/websocket management methods remain the same
@@ -177,7 +180,12 @@ impl ServerInstance {
         self.routes.contains_key(&route_id)
     }
 
-    pub fn add_middleware(&mut self, middleware_id: u64, path: String, handler_id: u64) -> Result<()> {
+    pub fn add_middleware(
+        &mut self,
+        middleware_id: u64,
+        path: String,
+        handler_id: u64,
+    ) -> Result<()> {
         let middleware_config = MiddlewareConfig {
             id: middleware_id,
             path,
@@ -234,7 +242,7 @@ impl ServerInstance {
     // NEW: Completely rewritten router building using Axum's native routing
     fn build_router(&self, actor_handle: ActorHandle) -> Router {
         let mut router = Router::new();
-        
+
         // Create shared base state
         let base_state = Arc::new(ServerState {
             id: self.id,
@@ -251,7 +259,10 @@ impl ServerInstance {
                 server_state: base_state.clone(),
             };
 
-            debug!("Adding route: {} {} -> handler {}", route.method, route.path, route.handler_id);
+            debug!(
+                "Adding route: {} {} -> handler {}",
+                route.method, route.path, route.handler_id
+            );
 
             // Use the appropriate HTTP method handler - Axum handles all the wildcard magic!
             let method_handler = match route.method.as_str() {
@@ -279,7 +290,7 @@ impl ServerInstance {
                 config: ws_config.clone(),
                 server_state: base_state.clone(),
             };
-            
+
             debug!("Adding WebSocket route: {}", ws_path);
             router = router.route(
                 ws_path,
@@ -287,7 +298,11 @@ impl ServerInstance {
             );
         }
 
-        info!("Built router with {} routes and {} WebSocket endpoints", self.routes.len(), self.websockets.len());
+        info!(
+            "Built router with {} routes and {} WebSocket endpoints",
+            self.routes.len(),
+            self.websockets.len()
+        );
         router
     }
 
@@ -299,19 +314,27 @@ impl ServerInstance {
         path_params: Option<Path<HashMap<String, String>>>,
         req: Request<axum::body::Body>,
     ) -> Response<axum::body::Body> {
-        
         let actual_path = req.uri().path().to_string();
         let method = req.method().as_str().to_uppercase();
-        
-        debug!("Handling {} request to {} (matched pattern: {})", method, actual_path, matched_path.as_str());
-        
+
+        debug!(
+            "Handling {} request to {} (matched pattern: {})",
+            method,
+            actual_path,
+            matched_path.as_str()
+        );
+
         // Convert request, including path parameters extracted by Axum
         let mut theater_request = convert_request_with_axum_params(req, path_params).await;
-        
+
         // Apply middlewares (using the actual requested path, not the pattern)
         let middlewares = route_state.server_state.find_middlewares(&actual_path);
         for middleware in middlewares {
-            match route_state.server_state.call_middleware(middleware.handler_id, theater_request.clone()).await {
+            match route_state
+                .server_state
+                .call_middleware(middleware.handler_id, theater_request.clone())
+                .await
+            {
                 Ok(result) => {
                     if !result.proceed {
                         debug!("Middleware {} rejected request", middleware.handler_id);
@@ -333,13 +356,22 @@ impl ServerInstance {
         }
 
         // Call the specific handler for this route
-        match route_state.server_state.call_route_handler(route_state.handler_id, theater_request).await {
+        match route_state
+            .server_state
+            .call_route_handler(route_state.handler_id, theater_request)
+            .await
+        {
             Ok(response) => {
                 debug!("Handler {} completed successfully", route_state.handler_id);
                 convert_response(response)
             }
             Err(e) => {
-                error!("Handler error for route {} ({}): {}", matched_path.as_str(), route_state.handler_id, e);
+                error!(
+                    "Handler error for route {} ({}): {}",
+                    matched_path.as_str(),
+                    route_state.handler_id,
+                    e
+                );
                 Response::builder()
                     .status(StatusCode::INTERNAL_SERVER_ERROR)
                     .body(format!("Handler error: {}", e).into())
@@ -355,7 +387,7 @@ impl ServerInstance {
         req: Request<axum::body::Body>,
     ) -> Response<axum::body::Body> {
         let path = req.uri().path().to_string();
-        
+
         ws.on_upgrade(move |socket| async move {
             Self::handle_websocket_connection(ws_state, socket, path).await;
         })
@@ -373,15 +405,20 @@ impl ServerInstance {
         // Store connection
         {
             let mut connections = ws_state.server_state.active_ws_connections.write().await;
-            connections.insert(connection_id, WebSocketConnection {
-                id: connection_id,
-                sender: tx,
-            });
+            connections.insert(
+                connection_id,
+                WebSocketConnection {
+                    id: connection_id,
+                    sender: tx,
+                },
+            );
         }
 
         // Handle connect event
         if let Some(connect_handler_id) = ws_state.config.connect_handler_id {
-            if let Err(e) = ws_state.server_state.actor_handle
+            if let Err(e) = ws_state
+                .server_state
+                .actor_handle
                 .call_function::<(u64, u64, String, Option<String>), ()>(
                     "theater:simple/http-handlers.handle-websocket-connect".to_string(),
                     (connect_handler_id, connection_id, path.clone(), None),
@@ -444,7 +481,9 @@ impl ServerInstance {
                         text: Some(text.to_string()),
                     };
 
-                    if let Err(e) = ws_state.server_state.actor_handle
+                    if let Err(e) = ws_state
+                        .server_state
+                        .actor_handle
                         .call_function::<(u64, u64, WebSocketMessage), (Vec<WebSocketMessage>,)>(
                             "theater:simple/http-handlers.handle-websocket-message".to_string(),
                             (ws_state.config.message_handler_id, connection_id, message),
@@ -461,7 +500,9 @@ impl ServerInstance {
                         text: None,
                     };
 
-                    if let Err(e) = ws_state.server_state.actor_handle
+                    if let Err(e) = ws_state
+                        .server_state
+                        .actor_handle
                         .call_function::<(u64, u64, WebSocketMessage), (Vec<WebSocketMessage>,)>(
                             "theater:simple/http-handlers.handle-websocket-message".to_string(),
                             (ws_state.config.message_handler_id, connection_id, message),
@@ -490,7 +531,9 @@ impl ServerInstance {
 
         // Handle disconnect event
         if let Some(disconnect_handler_id) = ws_state.config.disconnect_handler_id {
-            if let Err(e) = ws_state.server_state.actor_handle
+            if let Err(e) = ws_state
+                .server_state
+                .actor_handle
                 .call_function::<(u64, u64), ()>(
                     "theater:simple/http-handlers.handle-websocket-disconnect".to_string(),
                     (disconnect_handler_id, connection_id),
@@ -518,9 +561,15 @@ impl ServerInstance {
     }
 
     async fn start_http(&mut self, actor_handle: ActorHandle) -> Result<u16> {
-        let router = self.build_router_safe(actor_handle).map_err(|e| anyhow::anyhow!(e))?;
-        let host = self.config.host.clone().unwrap_or_else(|| "0.0.0.0".to_string());
-        
+        let router = self
+            .build_router_safe(actor_handle)
+            .map_err(|e| anyhow::anyhow!(e))?;
+        let host = self
+            .config
+            .host
+            .clone()
+            .unwrap_or_else(|| "0.0.0.0".to_string());
+
         let addr = if self.port == 0 {
             format!("{}:0", host)
         } else {
@@ -535,10 +584,9 @@ impl ServerInstance {
         self.shutdown_tx = Some(shutdown_tx);
 
         let server_handle = tokio::spawn(async move {
-            let graceful = axum::serve(listener, router)
-                .with_graceful_shutdown(async {
-                    shutdown_rx.await.ok();
-                });
+            let graceful = axum::serve(listener, router).with_graceful_shutdown(async {
+                shutdown_rx.await.ok();
+            });
 
             if let Err(e) = graceful.await {
                 error!("Server error: {}", e);
@@ -552,16 +600,26 @@ impl ServerInstance {
         Ok(self.port)
     }
 
-    async fn start_https(&mut self, actor_handle: ActorHandle, tls_config: &TlsConfig) -> Result<u16> {
+    async fn start_https(
+        &mut self,
+        actor_handle: ActorHandle,
+        tls_config: &TlsConfig,
+    ) -> Result<u16> {
         // Validate TLS configuration early
         debug!("Validating TLS configuration for server {}", self.id);
         validate_tls_config(&tls_config.cert_path, &tls_config.key_path)
             .map_err(|e| anyhow::anyhow!("TLS validation failed: {}", e))?;
 
         // Build router
-        let router = self.build_router_safe(actor_handle).map_err(|e| anyhow::anyhow!(e))?;
-        let host = self.config.host.clone().unwrap_or_else(|| "0.0.0.0".to_string());
-        
+        let router = self
+            .build_router_safe(actor_handle)
+            .map_err(|e| anyhow::anyhow!(e))?;
+        let host = self
+            .config
+            .host
+            .clone()
+            .unwrap_or_else(|| "0.0.0.0".to_string());
+
         let addr = if self.port == 0 {
             format!("{}:0", host)
         } else {
@@ -583,12 +641,12 @@ impl ServerInstance {
 
         // Convert to std::net::TcpListener for axum-server
         let std_listener = listener.into_std()?;
-        
+
         // Start HTTPS server using axum-server
         let server_handle = tokio::spawn(async move {
             let server = axum_server::from_tcp_rustls(std_listener, rustls_config)
                 .serve(router.into_make_service());
-                
+
             tokio::select! {
                 result = server => {
                     if let Err(e) = result {
@@ -619,7 +677,7 @@ impl ServerInstance {
 
         if let Some(handle) = self.server_handle.take() {
             handle.abort();
-            
+
             let connections_count = self.active_ws_connections.read().await.len();
             if connections_count > 0 {
                 debug!(
@@ -639,9 +697,8 @@ impl ServerInstance {
     }
 
     fn build_router_safe(&self, actor_handle: ActorHandle) -> Result<Router, String> {
-        let result = panic::catch_unwind(panic::AssertUnwindSafe(|| {
-            self.build_router(actor_handle)
-        }));
+        let result =
+            panic::catch_unwind(panic::AssertUnwindSafe(|| self.build_router(actor_handle)));
 
         match result {
             Ok(router) => Ok(router),
@@ -747,7 +804,7 @@ async fn convert_request_with_axum_params(
 ) -> HttpRequest {
     let method = req.method().as_str().to_string();
     let uri = req.uri().to_string();
-    
+
     // Extract headers
     let mut headers = Vec::new();
     for (name, value) in req.headers() {
@@ -755,7 +812,7 @@ async fn convert_request_with_axum_params(
             headers.push((name.to_string(), value_str.to_string()));
         }
     }
-    
+
     // Add path parameters as special headers so WASM handlers can access them
     if let Some(Path(params)) = path_params {
         for (key, value) in params {
@@ -763,7 +820,7 @@ async fn convert_request_with_axum_params(
             debug!("Extracted path parameter: {} = {}", key, value);
         }
     }
-    
+
     // Read body
     let body = match axum::body::to_bytes(req.into_body(), 100 * 1024 * 1024).await {
         Ok(bytes) => Some(bytes.to_vec()),
@@ -787,15 +844,16 @@ fn convert_response(response: HttpResponse) -> Response<axum::body::Body> {
 
     // Add headers
     for (name, value) in response.headers {
-        if let (Ok(header_name), Ok(header_value)) = (
-            HeaderName::try_from(name),
-            HeaderValue::try_from(value),
-        ) {
+        if let (Ok(header_name), Ok(header_value)) =
+            (HeaderName::try_from(name), HeaderValue::try_from(value))
+        {
             builder = builder.header(header_name, header_value);
         }
     }
 
     // Set body
     let body = response.body.unwrap_or_default();
-    builder.body(axum::body::Body::from(body)).unwrap_or_default()
+    builder
+        .body(axum::body::Body::from(body))
+        .unwrap_or_default()
 }
