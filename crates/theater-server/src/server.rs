@@ -16,10 +16,29 @@ use tokio_util::codec::Framed;
 use tracing::{debug, error, info};
 use uuid::Uuid;
 
+use theater::config::actor_manifest::{
+    EnvironmentHandlerConfig, FileSystemHandlerConfig, HttpClientHandlerConfig,
+    ProcessHostConfig, RandomHandlerConfig, RuntimeHostConfig, StoreHandlerConfig,
+    SupervisorHostConfig, TimingHostConfig,
+};
+use theater::handler::HandlerRegistry;
 use theater::id::TheaterId;
 use theater::messages::{ChannelId, TheaterCommand};
 use theater::theater_runtime::TheaterRuntime;
 use theater::TheaterRuntimeError;
+
+// Import all migrated handlers
+use theater_handler_environment::EnvironmentHandler;
+use theater_handler_filesystem::FilesystemHandler;
+use theater_handler_http_client::HttpClientHandler;
+use theater_handler_http_framework::HttpFrameworkHandler;
+use theater_handler_message_server::MessageServerHandler;
+use theater_handler_process::ProcessHandler;
+use theater_handler_random::RandomHandler;
+use theater_handler_runtime::RuntimeHandler;
+use theater_handler_store::StoreHandler;
+use theater_handler_supervisor::SupervisorHandler;
+use theater_handler_timing::TimingHandler;
 
 use crate::fragmenting_codec::FragmentingCodec;
 
@@ -291,8 +310,86 @@ struct ChannelSubscription {
     client_tx: mpsc::Sender<ManagementResponse>,
 }
 
+/// Creates a HandlerRegistry with all migrated handlers using root permissions.
+///
+/// This provides full, unrestricted access to all handler capabilities,
+/// suitable for a server environment.
+///
+/// Returns both the HandlerRegistry and the MessageRouter, allowing the server
+/// to use the MessageRouter for external client messaging.
+fn create_root_handler_registry(
+    theater_tx: mpsc::Sender<TheaterCommand>,
+) -> (HandlerRegistry, theater_handler_message_server::MessageRouter) {
+    let mut registry = HandlerRegistry::new();
+
+    info!("Initializing Theater server with all migrated handlers...");
+
+    // Phase 1: Simple Handlers
+    let env_config = EnvironmentHandlerConfig {
+        allowed_vars: None,              // Allow all environment variables
+        denied_vars: None,               // No denied vars (root access)
+        allow_list_all: true,            // Allow listing all vars
+        allowed_prefixes: None,          // No restrictions
+    };
+    registry.register(EnvironmentHandler::new(env_config, None));
+
+    let random_config = RandomHandlerConfig {
+        seed: None,                      // OS entropy
+        max_bytes: usize::MAX,          // No limit
+        max_int: u64::MAX,              // No limit
+        allow_crypto_secure: true,      // Allow crypto-secure random
+    };
+    registry.register(RandomHandler::new(random_config, None));
+
+    let timing_config = TimingHostConfig {
+        max_sleep_duration: u64::MAX,    // No limit
+        min_sleep_duration: 0,           // No minimum
+    };
+    registry.register(TimingHandler::new(timing_config, None));
+
+    let runtime_config = RuntimeHostConfig {};
+    registry.register(RuntimeHandler::new(runtime_config, theater_tx.clone(), None));
+
+    // Phase 2: Medium Complexity Handlers
+    let http_client_config = HttpClientHandlerConfig {};
+    registry.register(HttpClientHandler::new(http_client_config, None));
+
+    let filesystem_config = FileSystemHandlerConfig {
+        path: None,                      // No path restrictions (root access)
+        new_dir: Some(true),            // Allow creating directories
+        allowed_commands: None,          // All commands allowed
+    };
+    registry.register(FilesystemHandler::new(filesystem_config, None));
+
+    // Phase 3: Complex Handlers
+    let process_config = ProcessHostConfig {
+        max_processes: usize::MAX,       // No limit
+        max_output_buffer: usize::MAX,   // No limit
+        allowed_programs: None,          // All programs allowed
+        allowed_paths: None,             // All paths allowed
+    };
+    registry.register(ProcessHandler::new(process_config, None));
+
+    let store_config = StoreHandlerConfig {};
+    registry.register(StoreHandler::new(store_config, None));
+
+    let supervisor_config = SupervisorHostConfig {};
+    registry.register(SupervisorHandler::new(supervisor_config, None));
+
+    // Phase 4: Framework Handlers
+    // Create MessageRouter for inter-actor messaging
+    let message_router = theater_handler_message_server::MessageRouter::new();
+    registry.register(MessageServerHandler::new(None, message_router.clone()));
+
+    registry.register(HttpFrameworkHandler::new(None));
+
+    info!("✓ All 11 handlers registered successfully");
+
+    (registry, message_router)
+}
+
 pub struct TheaterServer {
-    runtime: TheaterRuntime,
+    runtime: TheaterRuntime<ChainEvent>,
     theater_tx: mpsc::Sender<TheaterCommand>,
     management_socket: TcpListener,
     subscriptions: Arc<Mutex<HashMap<TheaterId, HashSet<Subscription>>>>,
@@ -301,6 +398,8 @@ pub struct TheaterServer {
     // Channel for runtime to send channel events back to server
     #[allow(dead_code)]
     channel_events_tx: mpsc::Sender<ChannelEvent>,
+    // MessageRouter for external client messaging
+    message_router: theater_handler_message_server::MessageRouter,
 }
 
 impl TheaterServer {
@@ -361,12 +460,16 @@ impl TheaterServer {
         // Create channel for runtime to send channel events back to server
         let (channel_events_tx, channel_events_rx) = mpsc::channel(32);
 
-        // Pass channel_events_tx to runtime during initialization
+        // Create handler registry with all migrated handlers (root permissions)
+        // Also get the MessageRouter for external client messaging
+        let (handler_registry, message_router) = create_root_handler_registry(theater_tx.clone());
+
+        // Create the runtime with the handler registry
         let runtime = TheaterRuntime::new(
             theater_tx.clone(),
             theater_rx,
             Some(channel_events_tx.clone()),
-            theater::config::permissions::HandlerPermission::root(), // Root permissions for server
+            handler_registry,
         )
         .await?;
         let management_socket = TcpListener::bind(address).await?;
@@ -386,6 +489,7 @@ impl TheaterServer {
             subscriptions: Arc::new(Mutex::new(HashMap::new())),
             channel_subscriptions,
             channel_events_tx,
+            message_router,
         })
     }
 
@@ -412,6 +516,7 @@ impl TheaterServer {
             let runtime_tx = self.theater_tx.clone();
             let subscriptions = self.subscriptions.clone();
             let channel_subscriptions = self.channel_subscriptions.clone();
+            let message_router = self.message_router.clone();
 
             tokio::spawn(async move {
                 if let Err(e) = Self::handle_management_connection(
@@ -419,6 +524,7 @@ impl TheaterServer {
                     runtime_tx,
                     subscriptions,
                     channel_subscriptions,
+                    message_router,
                 )
                 .await
                 {
@@ -436,6 +542,7 @@ impl TheaterServer {
         runtime_tx: mpsc::Sender<TheaterCommand>,
         subscriptions: Arc<Mutex<HashMap<TheaterId, HashSet<Subscription>>>>,
         channel_subscriptions: Arc<Mutex<HashMap<String, ChannelSubscription>>>,
+        message_router: theater_handler_message_server::MessageRouter,
     ) -> Result<()> {
         // Create a channel for sending responses to this client
         let (client_tx, mut client_rx) = mpsc::channel::<ManagementResponse>(32);
@@ -775,32 +882,117 @@ impl TheaterServer {
                 }
                 ManagementCommand::SendActorMessage { id, data } => {
                     info!("Sending message to actor: {:?}", id);
-                    runtime_tx
-                        .send(TheaterCommand::SendMessage {
-                            actor_id: id.clone(),
-                            actor_message: ActorMessage::Send(ActorSend { data: data.clone() }),
-                        })
-                        .await?;
 
-                    ManagementResponse::SentMessage { id }
+                    // Create response channel for routing
+                    let (response_tx, response_rx) = tokio::sync::oneshot::channel();
+
+                    // Create ActorMessage
+                    let message = ActorMessage::Send(ActorSend { data });
+
+                    // Route via MessageRouter
+                    match message_router.route_message(theater::messages::MessageCommand::SendMessage {
+                        target_id: id.clone(),
+                        message,
+                        response_tx,
+                    }).await {
+                        Ok(_) => {
+                            // Wait for routing result
+                            match response_rx.await {
+                                Ok(Ok(())) => {
+                                    info!("Message sent successfully to actor: {:?}", id);
+                                    ManagementResponse::SentMessage { id }
+                                }
+                                Ok(Err(e)) => {
+                                    error!("Failed to send message to actor: {}", e);
+                                    ManagementResponse::Error {
+                                        error: ManagementError::RuntimeError(format!("Failed to send: {}", e)),
+                                    }
+                                }
+                                Err(e) => {
+                                    error!("Failed to receive routing response: {}", e);
+                                    ManagementResponse::Error {
+                                        error: ManagementError::CommunicationError(format!(
+                                            "Failed to receive routing response: {}",
+                                            e
+                                        )),
+                                    }
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            error!("Failed to route message: {}", e);
+                            ManagementResponse::Error {
+                                error: ManagementError::RuntimeError(format!("Failed to route message: {}", e)),
+                            }
+                        }
+                    }
                 }
                 ManagementCommand::RequestActorMessage { id, data } => {
                     info!("Requesting message from actor: {:?}", id);
-                    let (cmd_tx, cmd_rx) = tokio::sync::oneshot::channel();
-                    runtime_tx
-                        .send(TheaterCommand::SendMessage {
-                            actor_id: id.clone(),
-                            actor_message: ActorMessage::Request(ActorRequest {
-                                data: data.clone(),
-                                response_tx: cmd_tx,
-                            }),
-                        })
-                        .await?;
 
-                    let response = cmd_rx.await?;
-                    ManagementResponse::RequestedMessage {
-                        id,
-                        message: response,
+                    // Create channels for request-response pattern
+                    let (route_tx, route_rx) = tokio::sync::oneshot::channel();
+                    let (response_tx, response_rx) = tokio::sync::oneshot::channel();
+
+                    // Create ActorMessage with response channel embedded
+                    let message = ActorMessage::Request(ActorRequest {
+                        data,
+                        response_tx,
+                    });
+
+                    // Route via MessageRouter
+                    match message_router.route_message(theater::messages::MessageCommand::SendMessage {
+                        target_id: id.clone(),
+                        message,
+                        response_tx: route_tx,
+                    }).await {
+                        Ok(_) => {
+                            // Wait for routing to complete
+                            match route_rx.await {
+                                Ok(Ok(())) => {
+                                    // Routing succeeded, now wait for actor's response
+                                    match response_rx.await {
+                                        Ok(response_data) => {
+                                            info!("Received response from actor: {:?}", id);
+                                            ManagementResponse::RequestedMessage {
+                                                id,
+                                                message: response_data,
+                                            }
+                                        }
+                                        Err(e) => {
+                                            error!("Actor didn't respond: {}", e);
+                                            ManagementResponse::Error {
+                                                error: ManagementError::RuntimeError(format!(
+                                                    "Actor didn't respond: {}",
+                                                    e
+                                                )),
+                                            }
+                                        }
+                                    }
+                                }
+                                Ok(Err(e)) => {
+                                    error!("Failed to route request to actor: {}", e);
+                                    ManagementResponse::Error {
+                                        error: ManagementError::RuntimeError(format!("Failed to route: {}", e)),
+                                    }
+                                }
+                                Err(e) => {
+                                    error!("Failed to receive routing response: {}", e);
+                                    ManagementResponse::Error {
+                                        error: ManagementError::CommunicationError(format!(
+                                            "Failed to receive routing response: {}",
+                                            e
+                                        )),
+                                    }
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            error!("Failed to route request: {}", e);
+                            ManagementResponse::Error {
+                                error: ManagementError::RuntimeError(format!("Failed to route request: {}", e)),
+                            }
+                        }
                     }
                 }
                 ManagementCommand::GetActorManifest { id } => {
@@ -920,25 +1112,12 @@ impl TheaterServer {
                         metrics: serde_json::to_value(metrics?)?,
                     }
                 }
-                ManagementCommand::UpdateActorComponent { id, component } => {
-                    info!("Updating component for actor {:?} to {}", id, component);
-                    let (cmd_tx, cmd_rx) = tokio::sync::oneshot::channel();
-                    runtime_tx
-                        .send(TheaterCommand::UpdateActorComponent {
-                            actor_id: id.clone(),
-                            component: component.clone(),
-                            response_tx: cmd_tx,
-                        })
-                        .await?;
-
-                    match cmd_rx.await? {
-                        Ok(_) => ManagementResponse::ActorComponentUpdated { id },
-                        Err(e) => ManagementResponse::Error {
-                            error: ManagementError::RuntimeError(format!(
-                                "Failed to update actor component: {}",
-                                e
-                            )),
-                        },
+                ManagementCommand::UpdateActorComponent { id: _, component: _ } => {
+                    // TODO: Re-implement actor component updates
+                    ManagementResponse::Error {
+                        error: ManagementError::RuntimeError(
+                            "UpdateActorComponent not yet implemented".to_string()
+                        ),
                     }
                 }
                 // Handle channel management commands
@@ -956,19 +1135,18 @@ impl TheaterServer {
                     let channel_id = ChannelId::new(&client_id, &actor_id);
                     let channel_id_str = channel_id.0.clone();
 
-                    // Send the channel open command to the runtime
-                    runtime_tx
-                        .send(TheaterCommand::ChannelOpen {
-                            initiator_id: client_id.clone(),
-                            target_id: actor_id.clone(),
-                            channel_id: channel_id.clone(),
-                            initial_message,
-                            response_tx,
-                        })
-                        .await
-                        .map_err(|e| {
-                            anyhow::anyhow!("Failed to send channel open command: {}", e)
-                        })?;
+                    // Send the channel open command via MessageRouter
+                    message_router.route_message(theater::messages::MessageCommand::OpenChannel {
+                        initiator_id: client_id.clone(),
+                        target_id: actor_id.clone(),
+                        channel_id: channel_id.clone(),
+                        initial_message,
+                        response_tx,
+                    })
+                    .await
+                    .map_err(|e| {
+                        anyhow::anyhow!("Failed to send channel open command: {}", e)
+                    })?;
 
                     // Wait for the response
                     match response_rx.await {
@@ -1029,41 +1207,104 @@ impl TheaterServer {
                 } => {
                     info!("Sending message on channel: {}", channel_id);
 
+                    // Create response channel
+                    let (response_tx, response_rx) = tokio::sync::oneshot::channel();
+
                     // Parse the channel ID
                     let channel_id_parsed = ChannelId(channel_id.clone());
-                    let client_id = ChannelParticipant::External;
 
-                    // Send the message on the channel
-                    runtime_tx
-                        .send(TheaterCommand::ChannelMessage {
-                            channel_id: channel_id_parsed,
-                            message,
-                            sender_id: client_id,
-                        })
-                        .await
-                        .map_err(|e| anyhow::anyhow!("Failed to send message on channel: {}", e))?;
-
-                    ManagementResponse::MessageSent { channel_id }
+                    // Send the message on the channel via MessageRouter
+                    let sender_id = ChannelParticipant::External;
+                    match message_router.route_message(theater::messages::MessageCommand::ChannelMessage {
+                        channel_id: channel_id_parsed,
+                        sender_id,
+                        message,
+                        response_tx,
+                    }).await {
+                        Ok(_) => {
+                            // Wait for routing result
+                            match response_rx.await {
+                                Ok(Ok(())) => {
+                                    info!("Message sent successfully on channel: {}", channel_id);
+                                    ManagementResponse::MessageSent { channel_id }
+                                }
+                                Ok(Err(e)) => {
+                                    error!("Failed to send on channel: {}", e);
+                                    ManagementResponse::Error {
+                                        error: ManagementError::RuntimeError(format!("Failed to send on channel: {}", e)),
+                                    }
+                                }
+                                Err(e) => {
+                                    error!("Failed to receive channel send response: {}", e);
+                                    ManagementResponse::Error {
+                                        error: ManagementError::CommunicationError(format!(
+                                            "Failed to receive channel send response: {}",
+                                            e
+                                        )),
+                                    }
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            error!("Failed to route channel message: {}", e);
+                            ManagementResponse::Error {
+                                error: ManagementError::RuntimeError(format!("Failed to route channel message: {}", e)),
+                            }
+                        }
+                    }
                 }
                 ManagementCommand::CloseChannel { channel_id } => {
                     info!("Closing channel: {}", channel_id);
 
+                    // Create response channel
+                    let (response_tx, response_rx) = tokio::sync::oneshot::channel();
+
                     // Parse the channel ID
                     let channel_id_parsed = ChannelId(channel_id.clone());
 
-                    // Close the channel
-                    runtime_tx
-                        .send(TheaterCommand::ChannelClose {
-                            channel_id: channel_id_parsed,
-                        })
-                        .await
-                        .map_err(|e| anyhow::anyhow!("Failed to close channel: {}", e))?;
+                    // Close the channel via MessageRouter
+                    let sender_id = ChannelParticipant::External;
+                    match message_router.route_message(theater::messages::MessageCommand::ChannelClose {
+                        channel_id: channel_id_parsed,
+                        sender_id,
+                        response_tx,
+                    }).await {
+                        Ok(_) => {
+                            // Wait for routing result
+                            match response_rx.await {
+                                Ok(Ok(())) => {
+                                    info!("Channel closed successfully: {}", channel_id);
 
-                    // Remove from channel subscriptions
-                    channel_subscriptions.lock().await.remove(&channel_id);
-                    connection_channel_subscriptions.retain(|id| id != &channel_id);
+                                    // Remove from channel subscriptions
+                                    channel_subscriptions.lock().await.remove(&channel_id);
+                                    connection_channel_subscriptions.retain(|id| id != &channel_id);
 
-                    ManagementResponse::ChannelClosed { channel_id }
+                                    ManagementResponse::ChannelClosed { channel_id }
+                                }
+                                Ok(Err(e)) => {
+                                    error!("Failed to close channel: {}", e);
+                                    ManagementResponse::Error {
+                                        error: ManagementError::RuntimeError(format!("Failed to close channel: {}", e)),
+                                    }
+                                }
+                                Err(e) => {
+                                    error!("Failed to receive channel close response: {}", e);
+                                    ManagementResponse::Error {
+                                        error: ManagementError::CommunicationError(format!(
+                                            "Failed to receive channel close response: {}",
+                                            e
+                                        )),
+                                    }
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            error!("Failed to route channel close: {}", e);
+                            ManagementResponse::Error {
+                                error: ManagementError::RuntimeError(format!("Failed to route channel close: {}", e)),
+                            }
+                        }
+                    }
                 }
                 ManagementCommand::NewStore {} => {
                     info!("Creating new store");

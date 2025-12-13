@@ -1,0 +1,23 @@
+[package]
+name = "theater-handler-message-server"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+theater = { workspace = true }
+anyhow.workspace = true
+tracing.workspace = true
+tokio = { workspace = true, features = ["sync", "time"] }
+wasmtime = "31.0"
+chrono = "0.4"
+thiserror = "2.0"
+serde = { workspace = true }
+serde_json.workspace = true
+uuid = { version = "1.11", features = ["v4"] }

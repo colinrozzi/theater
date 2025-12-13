@@ -56,7 +56,10 @@ pub enum HttpClientError {
 }
 
 impl HttpClientHost {
-    pub fn new(_config: HttpClientHandlerConfig, permissions: Option<crate::config::permissions::HttpClientPermissions>) -> Self {
+    pub fn new(
+        _config: HttpClientHandlerConfig,
+        permissions: Option<crate::config::permissions::HttpClientPermissions>,
+    ) -> Self {
         Self { permissions }
     }
 
@@ -96,7 +99,10 @@ impl HttpClientHost {
                     timestamp: chrono::Utc::now().timestamp_millis() as u64,
                     description: Some(format!("Failed to create linker instance: {}", e)),
                 });
-                return Err(anyhow::anyhow!("Could not instantiate theater:simple/http-client: {}", e));
+                return Err(anyhow::anyhow!(
+                    "Could not instantiate theater:simple/http-client: {}",
+                    e
+                ));
             }
         };
 
@@ -269,7 +275,9 @@ impl HttpClientHost {
             event_type: "http-client-setup".to_string(),
             data: EventData::Http(HttpEventData::HandlerSetupSuccess),
             timestamp: chrono::Utc::now().timestamp_millis() as u64,
-            description: Some("HTTP client host functions setup completed successfully".to_string()),
+            description: Some(
+                "HTTP client host functions setup completed successfully".to_string(),
+            ),
         });
 
         info!("Host functions set up for http-client");

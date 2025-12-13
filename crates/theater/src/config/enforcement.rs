@@ -1,33 +1,52 @@
-use crate::config::permissions::*;
 use crate::config::actor_manifest::*;
+use crate::config::permissions::*;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
 pub enum PermissionError {
     #[error("Handler configuration exceeds granted permissions: {reason}")]
     ConfigExceedsPermissions { reason: String },
-    
+
     #[error("Operation denied: {operation} not permitted by {permission_type} permissions")]
-    OperationDenied { operation: String, permission_type: String },
-    
+    OperationDenied {
+        operation: String,
+        permission_type: String,
+    },
+
     #[error("Handler type '{handler_type}' not permitted by effective permissions")]
     HandlerNotPermitted { handler_type: String },
-    
+
     #[error("Path '{path}' not in allowed paths: {allowed_paths:?}")]
-    PathNotAllowed { path: String, allowed_paths: Vec<String> },
-    
+    PathNotAllowed {
+        path: String,
+        allowed_paths: Vec<String>,
+    },
+
     #[error("Command '{command}' not in allowed commands: {allowed_commands:?}")]
-    CommandNotAllowed { command: String, allowed_commands: Vec<String> },
-    
+    CommandNotAllowed {
+        command: String,
+        allowed_commands: Vec<String>,
+    },
+
     #[error("Host '{host}' not in allowed hosts: {allowed_hosts:?}")]
-    HostNotAllowed { host: String, allowed_hosts: Vec<String> },
-    
+    HostNotAllowed {
+        host: String,
+        allowed_hosts: Vec<String>,
+    },
+
     #[error("Method '{method}' not in allowed methods: {allowed_methods:?}")]
-    MethodNotAllowed { method: String, allowed_methods: Vec<String> },
-    
+    MethodNotAllowed {
+        method: String,
+        allowed_methods: Vec<String>,
+    },
+
     #[error("Resource limit exceeded: {resource} = {requested} > {limit}")]
-    ResourceLimitExceeded { resource: String, requested: usize, limit: usize },
-    
+    ResourceLimitExceeded {
+        resource: String,
+        requested: usize,
+        limit: usize,
+    },
+
     #[error("Environment variable '{var}' access denied")]
     EnvVarDenied { var: String },
 }
@@ -99,16 +118,18 @@ fn validate_filesystem_config(
     config: &FileSystemHandlerConfig,
     permissions: &Option<FileSystemPermissions>,
 ) -> PermissionResult<()> {
-    let perms = permissions.as_ref().ok_or_else(|| PermissionError::HandlerNotPermitted {
-        handler_type: "filesystem".to_string(),
-    })?;
+    let perms = permissions
+        .as_ref()
+        .ok_or_else(|| PermissionError::HandlerNotPermitted {
+            handler_type: "filesystem".to_string(),
+        })?;
 
     // Check if requested path is allowed
     if let Some(config_path) = &config.path {
         if let Some(allowed_paths) = &perms.allowed_paths {
-            let path_allowed = allowed_paths.iter().any(|allowed| {
-                config_path.starts_with(allowed)
-            });
+            let path_allowed = allowed_paths
+                .iter()
+                .any(|allowed| config_path.starts_with(allowed));
             if !path_allowed {
                 return Err(PermissionError::PathNotAllowed {
                     path: config_path.to_string_lossy().to_string(),
@@ -171,9 +192,11 @@ fn validate_process_config(
     config: &ProcessHostConfig,
     permissions: &Option<ProcessPermissions>,
 ) -> PermissionResult<()> {
-    let perms = permissions.as_ref().ok_or_else(|| PermissionError::HandlerNotPermitted {
-        handler_type: "process".to_string(),
-    })?;
+    let perms = permissions
+        .as_ref()
+        .ok_or_else(|| PermissionError::HandlerNotPermitted {
+            handler_type: "process".to_string(),
+        })?;
 
     // Check max_processes limit
     if config.max_processes > perms.max_processes {
@@ -227,9 +250,11 @@ fn validate_environment_config(
     config: &EnvironmentHandlerConfig,
     permissions: &Option<EnvironmentPermissions>,
 ) -> PermissionResult<()> {
-    let perms = permissions.as_ref().ok_or_else(|| PermissionError::HandlerNotPermitted {
-        handler_type: "environment".to_string(),
-    })?;
+    let perms = permissions
+        .as_ref()
+        .ok_or_else(|| PermissionError::HandlerNotPermitted {
+            handler_type: "environment".to_string(),
+        })?;
 
     // Check if allow_list_all is permitted
     if config.allow_list_all && !perms.allow_list_all {
@@ -243,9 +268,7 @@ fn validate_environment_config(
         if let Some(allowed_vars) = &perms.allowed_vars {
             for var in config_vars {
                 if !allowed_vars.contains(var) {
-                    return Err(PermissionError::EnvVarDenied {
-                        var: var.clone(),
-                    });
+                    return Err(PermissionError::EnvVarDenied { var: var.clone() });
                 }
             }
         }
@@ -258,9 +281,11 @@ fn validate_random_config(
     config: &RandomHandlerConfig,
     permissions: &Option<RandomPermissions>,
 ) -> PermissionResult<()> {
-    let perms = permissions.as_ref().ok_or_else(|| PermissionError::HandlerNotPermitted {
-        handler_type: "random".to_string(),
-    })?;
+    let perms = permissions
+        .as_ref()
+        .ok_or_else(|| PermissionError::HandlerNotPermitted {
+            handler_type: "random".to_string(),
+        })?;
 
     // Check max_bytes limit
     if config.max_bytes > perms.max_bytes {
@@ -294,9 +319,11 @@ fn validate_timing_config(
     config: &TimingHostConfig,
     permissions: &Option<TimingPermissions>,
 ) -> PermissionResult<()> {
-    let perms = permissions.as_ref().ok_or_else(|| PermissionError::HandlerNotPermitted {
-        handler_type: "timing".to_string(),
-    })?;
+    let perms = permissions
+        .as_ref()
+        .ok_or_else(|| PermissionError::HandlerNotPermitted {
+            handler_type: "timing".to_string(),
+        })?;
 
     // Check max_sleep_duration limit
     if config.max_sleep_duration > perms.max_sleep_duration {
@@ -331,10 +358,12 @@ impl PermissionChecker {
         path: Option<&str>,
         command: Option<&str>,
     ) -> PermissionResult<()> {
-        let perms = permissions.as_ref().ok_or_else(|| PermissionError::OperationDenied {
-            operation: operation.to_string(),
-            permission_type: "filesystem".to_string(),
-        })?;
+        let perms = permissions
+            .as_ref()
+            .ok_or_else(|| PermissionError::OperationDenied {
+                operation: operation.to_string(),
+                permission_type: "filesystem".to_string(),
+            })?;
 
         match operation {
             "read" => {
@@ -366,12 +395,18 @@ impl PermissionChecker {
 
         // Check path restrictions - FAIL CLOSED: require explicit path allowlist
         if let Some(path) = path {
-            let allowed_paths = perms.allowed_paths.as_ref().ok_or_else(|| PermissionError::PathNotAllowed {
-                path: path.to_string(),
-                allowed_paths: vec!["<none configured>".to_string()],
-            })?;
-            
-            let path_allowed = allowed_paths.iter().any(|allowed| path.starts_with(allowed));
+            let allowed_paths =
+                perms
+                    .allowed_paths
+                    .as_ref()
+                    .ok_or_else(|| PermissionError::PathNotAllowed {
+                        path: path.to_string(),
+                        allowed_paths: vec!["<none configured>".to_string()],
+                    })?;
+
+            let path_allowed = allowed_paths
+                .iter()
+                .any(|allowed| path.starts_with(allowed));
             if !path_allowed {
                 return Err(PermissionError::PathNotAllowed {
                     path: path.to_string(),
@@ -401,10 +436,12 @@ impl PermissionChecker {
         method: &str,
         host: &str,
     ) -> PermissionResult<()> {
-        let perms = permissions.as_ref().ok_or_else(|| PermissionError::OperationDenied {
-            operation: format!("{} {}", method, host),
-            permission_type: "http_client".to_string(),
-        })?;
+        let perms = permissions
+            .as_ref()
+            .ok_or_else(|| PermissionError::OperationDenied {
+                operation: format!("{} {}", method, host),
+                permission_type: "http_client".to_string(),
+            })?;
 
         // Check method
         if let Some(allowed_methods) = &perms.allowed_methods {
@@ -434,10 +471,12 @@ impl PermissionChecker {
         permissions: &Option<EnvironmentPermissions>,
         var_name: &str,
     ) -> PermissionResult<()> {
-        let perms = permissions.as_ref().ok_or_else(|| PermissionError::OperationDenied {
-            operation: format!("access env var {}", var_name),
-            permission_type: "environment".to_string(),
-        })?;
+        let perms = permissions
+            .as_ref()
+            .ok_or_else(|| PermissionError::OperationDenied {
+                operation: format!("access env var {}", var_name),
+                permission_type: "environment".to_string(),
+            })?;
 
         // Check denied list first
         if let Some(denied_vars) = &perms.denied_vars {
@@ -459,7 +498,9 @@ impl PermissionChecker {
 
         // Check prefixes
         if let Some(allowed_prefixes) = &perms.allowed_prefixes {
-            let has_allowed_prefix = allowed_prefixes.iter().any(|prefix| var_name.starts_with(prefix));
+            let has_allowed_prefix = allowed_prefixes
+                .iter()
+                .any(|prefix| var_name.starts_with(prefix));
             if !has_allowed_prefix {
                 return Err(PermissionError::EnvVarDenied {
                     var: var_name.to_string(),
@@ -476,10 +517,12 @@ impl PermissionChecker {
         program: &str,
         current_process_count: usize,
     ) -> PermissionResult<()> {
-        let perms = permissions.as_ref().ok_or_else(|| PermissionError::OperationDenied {
-            operation: format!("execute {}", program),
-            permission_type: "process".to_string(),
-        })?;
+        let perms = permissions
+            .as_ref()
+            .ok_or_else(|| PermissionError::OperationDenied {
+                operation: format!("execute {}", program),
+                permission_type: "process".to_string(),
+            })?;
 
         // Check process count limit
         if current_process_count >= perms.max_processes {
@@ -509,10 +552,12 @@ impl PermissionChecker {
         bytes_requested: Option<usize>,
         max_value: Option<u64>,
     ) -> PermissionResult<()> {
-        let perms = permissions.as_ref().ok_or_else(|| PermissionError::OperationDenied {
-            operation: operation.to_string(),
-            permission_type: "random".to_string(),
-        })?;
+        let perms = permissions
+            .as_ref()
+            .ok_or_else(|| PermissionError::OperationDenied {
+                operation: operation.to_string(),
+                permission_type: "random".to_string(),
+            })?;
 
         // Check byte limit
         if let Some(bytes) = bytes_requested {
@@ -545,10 +590,12 @@ impl PermissionChecker {
         operation: &str,
         duration_ms: u64,
     ) -> PermissionResult<()> {
-        let perms = permissions.as_ref().ok_or_else(|| PermissionError::OperationDenied {
-            operation: operation.to_string(),
-            permission_type: "timing".to_string(),
-        })?;
+        let perms = permissions
+            .as_ref()
+            .ok_or_else(|| PermissionError::OperationDenied {
+                operation: operation.to_string(),
+                permission_type: "timing".to_string(),
+            })?;
 
         // Check max duration limit
         if duration_ms > perms.max_sleep_duration {

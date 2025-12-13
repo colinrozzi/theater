@@ -25,7 +25,7 @@ use super::types::{ActorControl, ActorInfo};
 /// ActorHandle provides a high-level interface for communicating with actors, managing their
 /// lifecycle, and accessing their state and events. It encapsulates the details of message
 /// passing and synchronization between the caller and the actor's execution environment.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct ActorHandle {
     operation_tx: mpsc::Sender<ActorOperation>,
     info_tx: mpsc::Sender<ActorInfo>,

@@ -96,7 +96,7 @@ fn intersect_path_options(
                     parent_list.iter().any(|parent_path| {
                         let child_canonical = std::path::Path::new(child_path);
                         let parent_canonical = std::path::Path::new(parent_path);
-                        
+
                         // Check if child path starts with parent path
                         child_canonical.starts_with(parent_canonical)
                     })
@@ -419,9 +419,9 @@ impl HandlerPermission {
             }),
             http_client: Some(HttpClientPermissions {
                 allowed_methods: None, // None means all methods allowed
-                allowed_hosts: None, // None means all hosts allowed
-                max_redirects: None, // None means unlimited
-                timeout: None, // None means no timeout restriction
+                allowed_hosts: None,   // None means all hosts allowed
+                max_redirects: None,   // None means unlimited
+                timeout: None,         // None means no timeout restriction
             }),
             http_framework: Some(HttpFrameworkPermissions {
                 allowed_routes: None,
@@ -461,7 +461,7 @@ impl HandlerPermission {
         policy: &crate::config::inheritance::HandlerPermissionPolicy,
     ) -> HandlerPermission {
         use crate::config::inheritance::apply_inheritance_policy;
-        
+
         HandlerPermission {
             message_server: apply_inheritance_policy(
                 &parent_permissions.message_server,
@@ -479,34 +479,19 @@ impl HandlerPermission {
                 &parent_permissions.http_framework,
                 &policy.http_framework,
             ),
-            runtime: apply_inheritance_policy(
-                &parent_permissions.runtime,
-                &policy.runtime,
-            ),
+            runtime: apply_inheritance_policy(&parent_permissions.runtime, &policy.runtime),
             supervisor: apply_inheritance_policy(
                 &parent_permissions.supervisor,
                 &policy.supervisor,
             ),
-            store: apply_inheritance_policy(
-                &parent_permissions.store,
-                &policy.store,
-            ),
-            timing: apply_inheritance_policy(
-                &parent_permissions.timing,
-                &policy.timing,
-            ),
-            process: apply_inheritance_policy(
-                &parent_permissions.process,
-                &policy.process,
-            ),
+            store: apply_inheritance_policy(&parent_permissions.store, &policy.store),
+            timing: apply_inheritance_policy(&parent_permissions.timing, &policy.timing),
+            process: apply_inheritance_policy(&parent_permissions.process, &policy.process),
             environment: apply_inheritance_policy(
                 &parent_permissions.environment,
                 &policy.environment,
             ),
-            random: apply_inheritance_policy(
-                &parent_permissions.random,
-                &policy.random,
-            ),
+            random: apply_inheritance_policy(&parent_permissions.random, &policy.random),
         }
     }
 }
@@ -560,8 +545,13 @@ impl RestrictWith<FileSystemPermissions> for FileSystemPermissions {
             read: self.read && restriction.read,
             write: self.write && restriction.write,
             execute: self.execute && restriction.execute,
-            allowed_commands: intersect_options(&self.allowed_commands, &restriction.allowed_commands),
-            new_dir: self.new_dir.and_then(|p| restriction.new_dir.map(|r| p && r)),
+            allowed_commands: intersect_options(
+                &self.allowed_commands,
+                &restriction.allowed_commands,
+            ),
+            new_dir: self
+                .new_dir
+                .and_then(|p| restriction.new_dir.map(|r| p && r)),
             allowed_paths: intersect_path_options(&self.allowed_paths, &restriction.allowed_paths),
         }
     }
@@ -605,7 +595,10 @@ impl RestrictWith<ProcessPermissions> for ProcessPermissions {
         ProcessPermissions {
             max_processes: self.max_processes.min(restriction.max_processes),
             max_output_buffer: self.max_output_buffer.min(restriction.max_output_buffer),
-            allowed_programs: intersect_options(&self.allowed_programs, &restriction.allowed_programs),
+            allowed_programs: intersect_options(
+                &self.allowed_programs,
+                &restriction.allowed_programs,
+            ),
             allowed_paths: intersect_path_options(&self.allowed_paths, &restriction.allowed_paths),
         }
     }
@@ -621,13 +614,16 @@ impl RestrictWith<EnvironmentPermissions> for EnvironmentPermissions {
                     combined.extend_from_slice(restrict);
                     combined.dedup();
                     Some(combined)
-                },
+                }
                 (Some(parent), None) => Some(parent.clone()),
                 (None, Some(restrict)) => Some(restrict.clone()),
                 (None, None) => None,
             },
             allow_list_all: self.allow_list_all && restriction.allow_list_all,
-            allowed_prefixes: intersect_options(&self.allowed_prefixes, &restriction.allowed_prefixes),
+            allowed_prefixes: intersect_options(
+                &self.allowed_prefixes,
+                &restriction.allowed_prefixes,
+            ),
         }
     }
 }
@@ -679,7 +675,6 @@ impl RestrictWith<StorePermissions> for StorePermissions {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
 
     // Helper function to create a full-capability filesystem permission
     fn full_filesystem_permissions() -> FileSystemPermissions {
@@ -687,9 +682,17 @@ mod tests {
             read: true,
             write: true,
             execute: true,
-            allowed_commands: Some(vec!["ls".to_string(), "cat".to_string(), "echo".to_string()]),
+            allowed_commands: Some(vec![
+                "ls".to_string(),
+                "cat".to_string(),
+                "echo".to_string(),
+            ]),
             new_dir: Some(true),
-            allowed_paths: Some(vec!["/home".to_string(), "/tmp".to_string(), "/data".to_string()]),
+            allowed_paths: Some(vec![
+                "/home".to_string(),
+                "/tmp".to_string(),
+                "/data".to_string(),
+            ]),
         }
     }
 

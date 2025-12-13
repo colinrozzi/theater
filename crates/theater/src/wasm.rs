@@ -49,8 +49,8 @@ use crate::events::wasm::WasmEventData;
 use crate::events::{ChainEventData, EventData};
 // use crate::config::ManifestConfig;
 use crate::id::TheaterId;
+use crate::store;
 use crate::utils::resolve_reference;
-use crate::{store, ChainEvent};
 use tracing::{debug, error, info};
 use wasmtime::component::types::ComponentItem;
 
@@ -214,6 +214,8 @@ pub struct ActorComponent {
     pub actor_store: ActorStore,
     pub linker: Linker<ActorStore>,
     pub engine: Engine,
+    pub import_types: Vec<(String, ComponentItem)>,
+    pub export_types: Vec<(String, ComponentItem)>,
     pub exports: HashMap<String, ComponentExportIndex>,
 }
 
@@ -333,6 +335,17 @@ impl ActorComponent {
         };
         let linker = Linker::new(&engine);
 
+        let component_type = component.component_type();
+        let mut import_types = Vec::new();
+        for (import_name, import) in component_type.imports(&engine) {
+            import_types.push((import_name.to_string(), import))
+        }
+
+        let mut export_types = Vec::new();
+        for (export_name, export) in component_type.exports(&engine) {
+            export_types.push((export_name.to_string(), export))
+        }
+
         Ok(ActorComponent {
             name,
             component,
@@ -340,6 +353,8 @@ impl ActorComponent {
             linker,
             engine,
             exports: HashMap::new(),
+            import_types,
+            export_types,
         })
     }
 
@@ -396,12 +411,7 @@ impl ActorComponent {
                         })?;
                 info!("Component bytes loaded from path: {}", component_path);
                 // Store the component bytes in the content store for future use
-                let bytes_ref = component_store.store(bytes.clone()).await.map_err(|e| {
-                    WasmError::WasmError {
-                        context: "storing component bytes",
-                        message: e.to_string(),
-                    }
-                })?;
+                let bytes_ref = component_store.store(bytes.clone()).await;
 
                 // Label the stored bytes for future retrieval
                 component_store

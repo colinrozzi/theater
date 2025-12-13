@@ -67,21 +67,42 @@ async fn test_content_store_labeling() {
     let label2 = Label::new("test-label-2");
     */
 
-    store.label(&Label::from_str("test-label-1"), &ref1.clone()).await.unwrap();
-    store.label(&Label::from_str("test-label-2"), &ref2.clone()).await.unwrap();
+    store
+        .label(&Label::from_str("test-label-1"), &ref1.clone())
+        .await
+        .unwrap();
+    store
+        .label(&Label::from_str("test-label-2"), &ref2.clone())
+        .await
+        .unwrap();
 
     // Lookup by label
-    let found_ref1 = store.get_by_label(&Label::from_str("test-label-1")).await.unwrap().unwrap();
-    let found_ref2 = store.get_by_label(&Label::from_str("test-label-2")).await.unwrap().unwrap();
+    let found_ref1 = store
+        .get_by_label(&Label::from_str("test-label-1"))
+        .await
+        .unwrap()
+        .unwrap();
+    let found_ref2 = store
+        .get_by_label(&Label::from_str("test-label-2"))
+        .await
+        .unwrap()
+        .unwrap();
 
     assert_eq!(found_ref1, ref1);
     assert_eq!(found_ref2, ref2);
 
     // Update label
-    store.label(&Label::from_str("test-label-1"), &ref2.clone()).await.unwrap();
+    store
+        .label(&Label::from_str("test-label-1"), &ref2.clone())
+        .await
+        .unwrap();
 
     // Verify update
-    let updated_ref = store.get_by_label(&Label::from_str("test-label-1")).await.unwrap().unwrap();
+    let updated_ref = store
+        .get_by_label(&Label::from_str("test-label-1"))
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(updated_ref, ref2);
 }
 
@@ -98,23 +119,38 @@ async fn test_content_store_delete() {
     let content_ref = store.store(test_content.clone()).await.unwrap();
 
     // Create a label for this content
-    store.label(&Label::from_str(label_name), &content_ref).await.unwrap();
+    store
+        .label(&Label::from_str(label_name), &content_ref)
+        .await
+        .unwrap();
 
     // Verify content exists and label points to it
     assert!(store.exists(&content_ref).await);
-    let label_ref = store.get_by_label(&Label::from_str(label_name)).await.unwrap();
+    let label_ref = store
+        .get_by_label(&Label::from_str(label_name))
+        .await
+        .unwrap();
     assert_eq!(Some(content_ref.clone()), label_ref);
 
     // Delete the label
-    store.remove_label(&Label::from_str(label_name)).await.unwrap();
+    store
+        .remove_label(&Label::from_str(label_name))
+        .await
+        .unwrap();
 
     // The content should still exist, but the label should be gone
     assert!(store.exists(&content_ref).await); // Content still exists
-    let label_ref_after = store.get_by_label(&Label::from_str(label_name)).await.unwrap();
+    let label_ref_after = store
+        .get_by_label(&Label::from_str(label_name))
+        .await
+        .unwrap();
     assert_eq!(None, label_ref_after); // Label is gone
 
     // Getting content by label should return None
-    let result = store.get_content_by_label(&Label::from_str(label_name)).await.unwrap();
+    let result = store
+        .get_content_by_label(&Label::from_str(label_name))
+        .await
+        .unwrap();
     assert_eq!(None, result);
 }
 
