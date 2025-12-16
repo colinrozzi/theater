@@ -885,22 +885,54 @@ where
             debug!("Successfully stopped child {:?}", child_id);
         }
 
-        // Signal this specific actor to shutdown - we need to get the actor again since
-        // we may have changed the actors map when stopping children
-        let proc = self.actors.remove(&actor_id);
-
-        match proc {
-            Some(proc) => {
-                debug!("Signaling actor {:?} to shutdown", actor_id);
-                proc.shutdown_controller
-                    .signal_shutdown(shutdown_type)
-                    .await;
-            }
+        // Get the actor process - but DON'T remove it from the map yet
+        // We need to keep it in the map while shutdown is in progress
+        let proc = match self.actors.get(&actor_id) {
+            Some(proc) => proc,
             None => {
                 debug!("Actor {:?} not found during shutdown", actor_id);
                 return Ok(());
             }
+        };
+
+        // First, signal the actor runtime itself to shut down via its control channel
+        // This stops the operation/info loops from processing new requests
+        debug!("Sending shutdown signal to actor runtime for {:?}", actor_id);
+        let (response_tx, response_rx) = tokio::sync::oneshot::channel();
+        if let Err(e) = proc.control_tx.send(ActorControl::Shutdown { response_tx }).await {
+            error!("Failed to send shutdown signal to actor runtime for {:?}: {}", actor_id, e);
+            // Continue with shutdown anyway - we'll try to clean up handlers
+        } else {
+            // Wait for the actor runtime to acknowledge shutdown with a timeout
+            match tokio::time::timeout(std::time::Duration::from_secs(10), response_rx).await {
+                Ok(Ok(Ok(_))) => {
+                    debug!("Actor runtime for {:?} acknowledged shutdown", actor_id);
+                }
+                Ok(Ok(Err(e))) => {
+                    error!("Actor runtime for {:?} returned error during shutdown: {:?}", actor_id, e);
+                }
+                Ok(Err(_)) => {
+                    error!("Actor runtime for {:?} response channel closed", actor_id);
+                }
+                Err(_) => {
+                    error!("Timeout waiting for actor runtime {:?} to shut down", actor_id);
+                }
+            }
         }
+
+        // Now signal handlers to shut down
+        // The handlers will wait for their cleanup to complete before responding
+        debug!("Signaling handlers to shutdown for actor {:?}", actor_id);
+
+        // Remove from map now, after actor runtime has shut down but before waiting on handlers
+        // This ensures the actor is removed from the registry while handlers clean up
+        let proc = self.actors.remove(&actor_id).unwrap(); // Safe - we just checked it exists
+
+        proc.shutdown_controller
+            .signal_shutdown(shutdown_type)
+            .await;
+
+        debug!("Actor {:?} shutdown complete", actor_id);
 
         // Remove actor from any channel registrations
         let mut channels_to_remove = Vec::new();

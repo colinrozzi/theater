@@ -157,46 +157,36 @@ impl std::fmt::Display for ActorPhase {
 
 #[derive(Clone)]
 pub struct ActorPhaseManager {
-    current_phase: Arc<RwLock<ActorPhase>>,
-    notify: Arc<tokio::sync::Notify>,
+    phase_tx: Arc<tokio::sync::watch::Sender<ActorPhase>>,
+    phase_rx: tokio::sync::watch::Receiver<ActorPhase>,
 }
 
 impl ActorPhaseManager {
     pub fn new() -> Self {
+        let (tx, rx) = tokio::sync::watch::channel(ActorPhase::Starting);
         Self {
-            current_phase: Arc::new(RwLock::new(ActorPhase::Starting)),
-            notify: Arc::new(tokio::sync::Notify::new()),
+            phase_tx: Arc::new(tx),
+            phase_rx: rx,
         }
     }
 
-    pub async fn set_phase(&self, phase: ActorPhase) {
-        let mut current_phase = self.current_phase.write().await;
-        *current_phase = phase;
-        self.notify.notify_waiters();
+    pub fn set_phase(&self, phase: ActorPhase) {
+        let _ = self.phase_tx.send(phase);
     }
 
-    pub async fn get_phase(&self) -> ActorPhase {
-        let current_phase = self.current_phase.read().await;
-        current_phase.clone()
+    pub fn get_phase(&self) -> ActorPhase {
+        self.phase_rx.borrow().clone()
     }
 
-    pub async fn is_phase(&self, phase: ActorPhase) -> bool {
-        let current_phase = self.current_phase.read().await;
-        *current_phase == phase
+    pub fn is_phase(&self, phase: ActorPhase) -> bool {
+        *self.phase_rx.borrow() == phase
     }
 
     pub async fn wait_for_phase(&self, phase: ActorPhase) {
-        loop {
-            let notified = self.notify.notified(); // Subscribe first
-            {
-                let current_phase = self.current_phase.read().await;
-                if *current_phase == phase {
-                    break;
-                }
-            }
-
-            notified.await;
-        }
+        let mut rx = self.phase_rx.clone();
+        let _ = rx
+            .wait_for(|current_phase| *current_phase == phase)
+            .await;
     }
 }
 
@@ -218,8 +208,8 @@ impl ActorRuntime {
 
         debug!("Setting up actor store");
 
-        if !actor_phase_manager.is_phase(ActorPhase::Starting).await {
-            let curr_phase = actor_phase_manager.get_phase().await;
+        if !actor_phase_manager.is_phase(ActorPhase::Starting) {
+            let curr_phase = actor_phase_manager.get_phase();
             return Err(ActorRuntimeError::ActorPhaseError {
                 expected: ActorPhase::Starting,
                 found: curr_phase,
@@ -246,8 +236,8 @@ impl ActorRuntime {
         debug!("Storing manifest for actor: {}", id);
 
         // Checkpoint 1: After manifest storage
-        if !actor_phase_manager.is_phase(ActorPhase::Starting).await {
-            let curr_phase = actor_phase_manager.get_phase().await;
+        if !actor_phase_manager.is_phase(ActorPhase::Starting) {
+            let curr_phase = actor_phase_manager.get_phase();
             return Err(ActorRuntimeError::ActorPhaseError {
                 expected: ActorPhase::Starting,
                 found: curr_phase,
@@ -279,8 +269,8 @@ impl ActorRuntime {
 
         // ----------------- Checkpoint Create Handlers -----------------
 
-        if !actor_phase_manager.is_phase(ActorPhase::Starting).await {
-            let curr_phase = actor_phase_manager.get_phase().await;
+        if !actor_phase_manager.is_phase(ActorPhase::Starting) {
+            let curr_phase = actor_phase_manager.get_phase();
             return Err(ActorRuntimeError::ActorPhaseError {
                 expected: ActorPhase::Starting,
                 found: curr_phase,
@@ -317,8 +307,8 @@ impl ActorRuntime {
 
         debug!("Setting up handlers");
 
-        if !actor_phase_manager.is_phase(ActorPhase::Starting).await {
-            let curr_phase = actor_phase_manager.get_phase().await;
+        if !actor_phase_manager.is_phase(ActorPhase::Starting) {
+            let curr_phase = actor_phase_manager.get_phase();
             return Err(ActorRuntimeError::ActorPhaseError {
                 expected: ActorPhase::Starting,
                 found: curr_phase,
@@ -339,8 +329,8 @@ impl ActorRuntime {
 
         debug!("Setting up host functions");
 
-        if !actor_phase_manager.is_phase(ActorPhase::Starting).await {
-            let curr_phase = actor_phase_manager.get_phase().await;
+        if !actor_phase_manager.is_phase(ActorPhase::Starting) {
+            let curr_phase = actor_phase_manager.get_phase();
             return Err(ActorRuntimeError::ActorPhaseError {
                 expected: ActorPhase::Starting,
                 found: curr_phase,
@@ -363,8 +353,8 @@ impl ActorRuntime {
 
         debug!("Instantiating component");
 
-        if !actor_phase_manager.is_phase(ActorPhase::Starting).await {
-            let curr_phase = actor_phase_manager.get_phase().await;
+        if !actor_phase_manager.is_phase(ActorPhase::Starting) {
+            let curr_phase = actor_phase_manager.get_phase();
             return Err(ActorRuntimeError::ActorPhaseError {
                 expected: ActorPhase::Starting,
                 found: curr_phase,
@@ -394,8 +384,8 @@ impl ActorRuntime {
 
         debug!("Adding export functions");
 
-        if !actor_phase_manager.is_phase(ActorPhase::Starting).await {
-            let curr_phase = actor_phase_manager.get_phase().await;
+        if !actor_phase_manager.is_phase(ActorPhase::Starting) {
+            let curr_phase = actor_phase_manager.get_phase();
             return Err(ActorRuntimeError::ActorPhaseError {
                 expected: ActorPhase::Starting,
                 found: curr_phase,
@@ -421,8 +411,8 @@ impl ActorRuntime {
 
         debug!("Initializing state");
 
-        if !actor_phase_manager.is_phase(ActorPhase::Starting).await {
-            let curr_phase = actor_phase_manager.get_phase().await;
+        if !actor_phase_manager.is_phase(ActorPhase::Starting) {
+            let curr_phase = actor_phase_manager.get_phase();
             return Err(ActorRuntimeError::ActorPhaseError {
                 expected: ActorPhase::Starting,
                 found: curr_phase,
@@ -454,8 +444,8 @@ impl ActorRuntime {
 
         debug!("Ready");
 
-        if !actor_phase_manager.is_phase(ActorPhase::Starting).await {
-            let curr_phase = actor_phase_manager.get_phase().await;
+        if !actor_phase_manager.is_phase(ActorPhase::Starting) {
+            let curr_phase = actor_phase_manager.get_phase();
             return Err(ActorRuntimeError::ActorPhaseError {
                 expected: ActorPhase::Starting,
                 found: curr_phase,
@@ -582,7 +572,7 @@ impl ActorRuntime {
                             *shutdown_controller_guard = Some(shutdown_controller);
                         }
 
-                        actor_phase_manager.set_phase(ActorPhase::Running).await;
+                        actor_phase_manager.set_phase(ActorPhase::Running);
                         info!("Actor setup complete, now running");
                     }
                     Err(e) => {
@@ -627,11 +617,14 @@ impl ActorRuntime {
                 ActorControl::Shutdown { response_tx } => {
                     info!("Shutdown requested");
                     actor_phase_manager
-                        .set_phase(ActorPhase::ShuttingDown)
-                        .await;
+                        .set_phase(ActorPhase::ShuttingDown);
+
+                    debug!("Signaled shutdown to operation and info loops");
 
                     // Wait for operation and info loops to finish gracefully
                     let (_, _, _) = tokio::join!(operation_handle, info_handle, setup_handle);
+
+                    debug!("Operation and info loops have exited");
 
                     match handlers_shutdown_controller.write().await.take() {
                         Some(controller) => {
@@ -642,9 +635,13 @@ impl ActorRuntime {
                         }
                     }
 
+                    debug!("Signaled shutdown to handlers");
+
                     if let Err(e) = response_tx.send(Ok(())) {
                         error!("Failed to send shutdown confirmation: {:?}", e);
                     }
+
+                    debug!("Shutdown confirmation sent, exiting control loop");
                     break;
                 }
                 ActorControl::Terminate { response_tx } => {
@@ -667,15 +664,15 @@ impl ActorRuntime {
                     break;
                 }
                 ActorControl::Pause { response_tx } => {
-                    if actor_phase_manager.is_phase(ActorPhase::ShuttingDown).await {
+                    if actor_phase_manager.is_phase(ActorPhase::ShuttingDown) {
                         let _ = response_tx.send(Err(ActorError::ShuttingDown));
                     } else {
-                        actor_phase_manager.set_phase(ActorPhase::Paused).await;
+                        actor_phase_manager.set_phase(ActorPhase::Paused);
                         let _ = response_tx.send(Ok(()));
                     }
                 }
                 ActorControl::Resume { response_tx } => {
-                    match actor_phase_manager.get_phase().await {
+                    match actor_phase_manager.get_phase() {
                         ActorPhase::Starting | ActorPhase::Running => {
                             let _ = response_tx.send(Err(ActorError::NotPaused));
                         }
@@ -683,7 +680,7 @@ impl ActorRuntime {
                             let _ = response_tx.send(Err(ActorError::ShuttingDown));
                         }
                         ActorPhase::Paused => {
-                            actor_phase_manager.set_phase(ActorPhase::Running).await;
+                            actor_phase_manager.set_phase(ActorPhase::Running);
                             let _ = response_tx.send(Ok(()));
                         }
                     }
@@ -810,7 +807,7 @@ impl ActorRuntime {
                         }
 
                         // Pause the actor on error
-                        actor_phase_manager.set_phase(ActorPhase::Paused).await;
+                        actor_phase_manager.set_phase(ActorPhase::Paused);
                     }
                 }
             }
@@ -824,11 +821,19 @@ impl ActorRuntime {
         actor_phase_manager: ActorPhaseManager,
     ) {
         // Handle info requests
-        while let Some(info) = info_rx.recv().await {
-            info!("Received info request: {:?}", info);
-            match info {
+        loop {
+            tokio::select! {
+                biased;
+
+                _ = actor_phase_manager.wait_for_phase(ActorPhase::ShuttingDown) => {
+                    break;
+                }
+
+                Some(info) = info_rx.recv() => {
+                    info!("Received info request: {:?}", info);
+                    match info {
                 ActorInfo::GetStatus { response_tx } => {
-                    let status = actor_phase_manager.get_phase().await.to_string();
+                    let status = actor_phase_manager.get_phase().to_string();
 
                     if let Err(e) = response_tx.send(Ok(status)) {
                         error!("Failed to send status response: {:?}", e);
@@ -905,7 +910,11 @@ impl ActorRuntime {
                         },
                     };
                 }
-            }
+            }  // close match info
+        }  // close Some(info) branch
+
+                else => break,
+            }  // close select!
         }
     }
 

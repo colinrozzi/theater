@@ -671,13 +671,30 @@ impl ServerInstance {
             return Ok(());
         }
 
+        // Send shutdown signal first to allow graceful shutdown
         if let Some(shutdown_tx) = self.shutdown_tx.take() {
+            debug!("Sending shutdown signal to server {}", self.id);
             let _ = shutdown_tx.send(());
         }
 
+        // Wait for the server task to complete gracefully instead of aborting
         if let Some(handle) = self.server_handle.take() {
-            handle.abort();
+            debug!("Waiting for server {} to shut down gracefully", self.id);
 
+            // Give it a reasonable timeout in case it hangs
+            match tokio::time::timeout(std::time::Duration::from_secs(5), handle).await {
+                Ok(Ok(_)) => {
+                    debug!("Server {} shut down gracefully", self.id);
+                }
+                Ok(Err(e)) => {
+                    warn!("Server {} task panicked during shutdown: {:?}", self.id, e);
+                }
+                Err(_) => {
+                    warn!("Server {} shutdown timed out after 5s, port may not be released immediately", self.id);
+                }
+            }
+
+            // Clean up WebSocket connections after server has stopped
             let connections_count = self.active_ws_connections.read().await.len();
             if connections_count > 0 {
                 debug!(
@@ -692,7 +709,8 @@ impl ServerInstance {
         self.running = false;
         info!("HTTP server {} on port {} stopped", self.id, self.port);
 
-        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        // Longer delay to ensure OS releases the port
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
         Ok(())
     }
 
