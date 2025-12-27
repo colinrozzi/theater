@@ -1,9 +1,10 @@
 //! # Filesystem Handler
 //!
 //! Provides filesystem access capabilities to WebAssembly actors in the Theater system.
-//! This handler allows actors to read, write, list, delete files and directories with 
+//! This handler allows actors to read, write, list, delete files and directories with
 //! permission-based access control.
 
+pub mod events;
 mod path_validation;
 mod operations;
 mod command_execution;
@@ -17,10 +18,12 @@ use tracing::info;
 use theater::actor::handle::ActorHandle;
 use theater::config::actor_manifest::FileSystemHandlerConfig;
 use theater::config::permissions::FileSystemPermissions;
+use theater::events::EventPayload;
 use theater::handler::Handler;
 use theater::shutdown::ShutdownReceiver;
 use theater::wasm::{ActorComponent, ActorInstance};
 
+pub use events::FilesystemEventData;
 pub use types::FileSystemError;
 
 /// Handler for providing filesystem access to WebAssembly actors
@@ -72,8 +75,11 @@ impl FilesystemHandler {
     }
 }
 
-impl Handler for FilesystemHandler {
-    fn create_instance(&self) -> Box<dyn Handler> {
+impl<E> Handler<E> for FilesystemHandler
+where
+    E: EventPayload + Clone + From<FilesystemEventData>,
+{
+    fn create_instance(&self) -> Box<dyn Handler<E>> {
         Box::new(self.clone())
     }
 
@@ -93,14 +99,14 @@ impl Handler for FilesystemHandler {
 
     fn setup_host_functions(
         &mut self,
-        actor_component: &mut ActorComponent,
+        actor_component: &mut ActorComponent<E>,
     ) -> anyhow::Result<()> {
         operations::setup_host_functions(self, actor_component)
     }
 
     fn add_export_functions(
         &self,
-        _actor_instance: &mut ActorInstance,
+        _actor_instance: &mut ActorInstance<E>,
     ) -> anyhow::Result<()> {
         info!("No export functions needed for filesystem handler");
         Ok(())

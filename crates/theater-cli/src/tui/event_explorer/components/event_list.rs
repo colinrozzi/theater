@@ -49,7 +49,7 @@ pub fn render_event_list(f: &mut Frame, app: &EventExplorerApp, area: Rect) {
     f.render_stateful_widget(list, area, &mut app.list_state.clone());
 }
 
-fn create_event_list_item(event: &theater::chain::ChainEvent, is_selected: bool) -> ListItem {
+fn create_event_list_item(event: &theater::chain::ChainEvent, is_selected: bool) -> ListItem<'_> {
     let timestamp = format_timestamp(event.timestamp);
     let event_type = &event.event_type;
 

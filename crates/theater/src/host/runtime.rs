@@ -79,7 +79,7 @@ impl RuntimeHost {
         }
     }
 
-    pub async fn setup_host_functions(&self, actor_component: &mut ActorComponent) -> Result<()> {
+    pub async fn setup_host_functions(&self, actor_component: &mut ActorComponent<EventData>) -> Result<()> {
         info!("Setting up runtime host functions");
         let name = actor_component.name.clone();
         let mut interface = match actor_component.linker.instance("theater:simple/runtime") {
@@ -114,7 +114,7 @@ impl RuntimeHost {
         interface
             .func_wrap(
                 "log",
-                move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore>, (msg,): (String,)| {
+                move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore<EventData>>, (msg,): (String,)| {
                     let id = ctx.data().id.clone();
 
                     // Record log call event
@@ -149,7 +149,7 @@ impl RuntimeHost {
         interface
             .func_wrap(
                 "get-state",
-                move |mut ctx: StoreContextMut<'_, ActorStore>, ()| -> Result<(Vec<u8>,)> {
+                move |mut ctx: StoreContextMut<'_, ActorStore<EventData>>, ()| -> Result<(Vec<u8>,)> {
                     // Record state request call event
                     ctx.data_mut().record_event(ChainEventData {
                         event_type: "theater:simple/runtime/get-state".to_string(),
@@ -201,7 +201,7 @@ impl RuntimeHost {
         interface
             .func_wrap_async(
                 "shutdown",
-                move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore>, (data,): (Option<Vec<u8>>,)|
+                move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore<EventData>>, (data,): (Option<Vec<u8>>,)|
                       -> Box<dyn Future<Output = Result<(Result<(), String>,)>> + Send> {
                     // Record shutdown call event
                     ctx.data_mut().record_event(ChainEventData {
@@ -285,7 +285,7 @@ impl RuntimeHost {
         Ok(())
     }
 
-    pub async fn add_export_functions(&self, actor_instance: &mut ActorInstance) -> Result<()> {
+    pub async fn add_export_functions(&self, actor_instance: &mut ActorInstance<EventData>) -> Result<()> {
         actor_instance.register_function_no_result::<(String,)>("theater:simple/actor", "init")
     }
 

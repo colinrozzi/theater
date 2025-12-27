@@ -1,6 +1,5 @@
 use anyhow::Result;
 use clap::Parser;
-use serde_json::Value;
 use std::net::SocketAddr;
 
 use tracing::debug;
@@ -8,7 +7,6 @@ use tracing::debug;
 use crate::client::ManagementResponse;
 use crate::utils::event_display::{display_structured_event, parse_event_fields};
 use crate::{error::CliError, output::formatters::ActorStarted, CommandContext};
-use theater::config::actor_manifest::ManifestConfig;
 use theater::messages::ActorResult;
 use theater::utils::resolve_reference;
 
@@ -192,8 +190,8 @@ pub async fn execute_async(args: &StartArgs, ctx: &CommandContext) -> Result<(),
                     });
 
                     unsafe {
-                        let mut sigint = SIGINT_HANDLE.take();
-                        let mut sigterm = SIGTERM_HANDLE.take();
+                        let mut sigint = std::ptr::addr_of_mut!(SIGINT_HANDLE).read().take();
+                        let mut sigterm = std::ptr::addr_of_mut!(SIGTERM_HANDLE).read().take();
 
                         let sigint_recv = async {
                             if let Some(s) = sigint.as_mut() {
@@ -273,6 +271,7 @@ pub async fn execute_async(args: &StartArgs, ctx: &CommandContext) -> Result<(),
 }
 
 /// Check if the manifest content contains variable references
+#[allow(dead_code)]
 fn has_variables(content: &str) -> bool {
     content.contains("{{") && content.contains("}}")
 }

@@ -21,6 +21,10 @@
 //! let handler = HttpClientHandler::new(config, None);
 //! ```
 
+pub mod events;
+
+pub use events::HttpEventData;
+
 use anyhow::Result;
 use reqwest::Method;
 use serde::{Deserialize, Serialize};
@@ -36,8 +40,7 @@ use theater::actor::types::ActorError;
 use theater::config::actor_manifest::HttpClientHandlerConfig;
 use theater::config::enforcement::PermissionChecker;
 use theater::config::permissions::HttpClientPermissions;
-use theater::events::http::HttpEventData;
-use theater::events::{ChainEventData, EventData};
+use theater::events::EventPayload;
 use theater::handler::Handler;
 use theater::shutdown::ShutdownReceiver;
 use theater::wasm::{ActorComponent, ActorInstance};
@@ -99,10 +102,28 @@ impl HttpClientHandler {
     ) -> Self {
         Self { permissions }
     }
+
+    /// Get the handler name
+    pub fn name(&self) -> &str {
+        "http-client"
+    }
+
+    /// Get the imports
+    pub fn imports(&self) -> Option<String> {
+        Some("theater:simple/http-client".to_string())
+    }
+
+    /// Get the exports
+    pub fn exports(&self) -> Option<String> {
+        None
+    }
 }
 
-impl Handler for HttpClientHandler {
-    fn create_instance(&self) -> Box<dyn Handler> {
+impl<E> Handler<E> for HttpClientHandler
+where
+    E: EventPayload + Clone + From<HttpEventData>,
+{
+    fn create_instance(&self) -> Box<dyn Handler<E>> {
         Box::new(self.clone())
     }
 
@@ -114,14 +135,13 @@ impl Handler for HttpClientHandler {
         Box::pin(async { Ok(()) })
     }
 
-    fn setup_host_functions(&mut self, actor_component: &mut ActorComponent) -> Result<()> {
+    fn setup_host_functions(&mut self, actor_component: &mut ActorComponent<E>) -> Result<()> {
         // Record setup start
-        actor_component.actor_store.record_event(ChainEventData {
-            event_type: "http-client-setup".to_string(),
-            data: EventData::Http(HttpEventData::HandlerSetupStart),
-            timestamp: chrono::Utc::now().timestamp_millis() as u64,
-            description: Some("Starting HTTP client host function setup".to_string()),
-        });
+        actor_component.actor_store.record_handler_event(
+            "http-client-setup".to_string(),
+            HttpEventData::HandlerSetupStart,
+            Some("Starting HTTP client host function setup".to_string()),
+        );
 
         info!("Setting up http client host functions");
 
@@ -131,25 +151,23 @@ impl Handler for HttpClientHandler {
         {
             Ok(interface) => {
                 // Record successful linker instance creation
-                actor_component.actor_store.record_event(ChainEventData {
-                    event_type: "http-client-setup".to_string(),
-                    data: EventData::Http(HttpEventData::LinkerInstanceSuccess),
-                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                    description: Some("Successfully created linker instance".to_string()),
-                });
+                actor_component.actor_store.record_handler_event(
+                    "http-client-setup".to_string(),
+                    HttpEventData::LinkerInstanceSuccess,
+                    Some("Successfully created linker instance".to_string()),
+                );
                 interface
             }
             Err(e) => {
                 // Record the specific error where it happens
-                actor_component.actor_store.record_event(ChainEventData {
-                    event_type: "http-client-setup".to_string(),
-                    data: EventData::Http(HttpEventData::HandlerSetupError {
+                actor_component.actor_store.record_handler_event(
+                    "http-client-setup".to_string(),
+                    HttpEventData::HandlerSetupError {
                         error: e.to_string(),
                         step: "linker_instance".to_string(),
-                    }),
-                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                    description: Some(format!("Failed to create linker instance: {}", e)),
-                });
+                    },
+                    Some(format!("Failed to create linker instance: {}", e)),
+                );
                 return Err(anyhow::anyhow!(
                     "Could not instantiate theater:simple/http-client: {}",
                     e
@@ -160,22 +178,21 @@ impl Handler for HttpClientHandler {
         let permissions = self.permissions.clone();
         interface.func_wrap_async(
             "send-http",
-            move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore>,
+            move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore<E>>,
                   (req,): (HttpRequest,)|
                   -> Box<dyn Future<Output = Result<(Result<HttpResponse, String>,)>> + Send> {
                 
                 // Record HTTP client request call event
-                ctx.data_mut().record_event(ChainEventData {
-                    event_type: "theater:simple/http-client/send-http".to_string(),
-                    data: EventData::Http(HttpEventData::HttpClientRequestCall {
+                ctx.data_mut().record_handler_event(
+                    "theater:simple/http-client/send-http".to_string(),
+                    HttpEventData::HttpClientRequestCall {
                         method: req.method.clone(),
                         url: req.uri.clone(),
                         headers_count: req.headers.len(),
                         body: req.body.clone().map(|b| String::from_utf8_lossy(&b).to_string()),
-                    }),
-                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                    description: Some(format!("Sending {} request to {}", req.method, req.uri)),
-                });
+                    },
+                    Some(format!("Sending {} request to {}", req.method, req.uri)),
+                );
                 
                 // PERMISSION CHECK BEFORE OPERATION
                 // Extract host from URL for permission checking
@@ -191,17 +208,16 @@ impl Handler for HttpClientHandler {
                     &host,
                 ) {
                     error!("HTTP client permission denied: {}", e);
-                    ctx.data_mut().record_event(ChainEventData {
-                        event_type: "theater:simple/http-client/permission-denied".to_string(),
-                        data: EventData::Http(HttpEventData::PermissionDenied {
+                    ctx.data_mut().record_handler_event(
+                        "theater:simple/http-client/permission-denied".to_string(),
+                        HttpEventData::PermissionDenied {
                             operation: "send-http".to_string(),
                             method: req.method.clone(),
                             url: req.uri.clone(),
                             reason: e.to_string(),
-                        }),
-                        timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                        description: Some(format!("Permission denied for {} request to {}", req.method, req.uri)),
-                    });
+                        },
+                        Some(format!("Permission denied for {} request to {}", req.method, req.uri)),
+                    );
                     return Box::new(async move {
                         Ok((Err(format!("Permission denied: {}", e)),))
                     });
@@ -217,18 +233,17 @@ impl Handler for HttpClientHandler {
                         Ok(m) => m,
                         Err(e) => {
                             let err_msg = format!("Invalid HTTP method: {}", e);
-                            
+
                             // Record error event
-                            ctx.data_mut().record_event(ChainEventData {
-                                event_type: "theater:simple/http-client/send-http".to_string(),
-                                data: EventData::Http(HttpEventData::Error {
+                            ctx.data_mut().record_handler_event(
+                                "theater:simple/http-client/send-http".to_string(),
+                                HttpEventData::Error {
                                     operation: "send-http".to_string(),
                                     path: req_clone.uri.clone(),
                                     message: err_msg.clone(),
-                                }),
-                                timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                                description: Some(format!("Error sending request to {}: {}", req_clone.uri, err_msg)),
-                            });
+                                },
+                                Some(format!("Error sending request to {}: {}", req_clone.uri, err_msg)),
+                            );
                             
                             return Ok((Err(err_msg),));
                         }
@@ -263,16 +278,15 @@ impl Handler for HttpClientHandler {
                                 Ok(bytes) => Some(bytes.to_vec()),
                                 Err(e) => {
                                     // Record error reading response body
-                                    ctx.data_mut().record_event(ChainEventData {
-                                        event_type: "theater:simple/http-client/send-http".to_string(),
-                                        data: EventData::Http(HttpEventData::Error {
+                                    ctx.data_mut().record_handler_event(
+                                        "theater:simple/http-client/send-http".to_string(),
+                                        HttpEventData::Error {
                                             operation: "read-response-body".to_string(),
                                             path: req_clone.uri.clone(),
                                             message: e.to_string(),
-                                        }),
-                                        timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                                        description: Some(format!("Error reading response body from {}: {}", req_clone.uri, e)),
-                                    });
+                                        },
+                                        Some(format!("Error reading response body from {}: {}", req_clone.uri, e)),
+                                    );
                                     
                                     None
                                 }
@@ -285,34 +299,32 @@ impl Handler for HttpClientHandler {
                             };
                             
                             // Record HTTP client request result event
-                            ctx.data_mut().record_event(ChainEventData {
-                                event_type: "theater:simple/http-client/send-http".to_string(),
-                                data: EventData::Http(HttpEventData::HttpClientRequestResult {
+                            ctx.data_mut().record_handler_event(
+                                "theater:simple/http-client/send-http".to_string(),
+                                HttpEventData::HttpClientRequestResult {
                                     status,
                                     headers_count: resp.headers.len(),
                                     body: body.clone().map(|b| String::from_utf8_lossy(&b).to_string()),
                                     success: true,
-                                }),
-                                timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                                description: Some(format!("Received response from {} with status {}", req_clone.uri, status)),
-                            });
+                                },
+                                Some(format!("Received response from {} with status {}", req_clone.uri, status)),
+                            );
                             
                             Ok((Ok(resp),))
                         }
                         Err(e) => {
                             let err_msg = e.to_string();
-                            
+
                             // Record HTTP client request error event
-                            ctx.data_mut().record_event(ChainEventData {
-                                event_type: "theater:simple/http-client/send-http".to_string(),
-                                data: EventData::Http(HttpEventData::Error {
+                            ctx.data_mut().record_handler_event(
+                                "theater:simple/http-client/send-http".to_string(),
+                                HttpEventData::Error {
                                     operation: "send-http".to_string(),
                                     path: req_clone.uri.clone(),
                                     message: err_msg.clone(),
-                                }),
-                                timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                                description: Some(format!("Error sending request to {}: {}", req_clone.uri, err_msg)),
-                            });
+                                },
+                                Some(format!("Error sending request to {}: {}", req_clone.uri, err_msg)),
+                            );
                             
                             Ok((Err(err_msg),))
                         }
@@ -322,21 +334,18 @@ impl Handler for HttpClientHandler {
         )?;
 
         // Record overall setup completion
-        actor_component.actor_store.record_event(ChainEventData {
-            event_type: "http-client-setup".to_string(),
-            data: EventData::Http(HttpEventData::HandlerSetupSuccess),
-            timestamp: chrono::Utc::now().timestamp_millis() as u64,
-            description: Some(
-                "HTTP client host functions setup completed successfully".to_string(),
-            ),
-        });
+        actor_component.actor_store.record_handler_event(
+            "http-client-setup".to_string(),
+            HttpEventData::HandlerSetupSuccess,
+            Some("HTTP client host functions setup completed successfully".to_string()),
+        );
 
         info!("Host functions set up for http-client");
 
         Ok(())
     }
 
-    fn add_export_functions(&self, _actor_instance: &mut ActorInstance) -> Result<()> {
+    fn add_export_functions(&self, _actor_instance: &mut ActorInstance<E>) -> Result<()> {
         Ok(())
     }
 

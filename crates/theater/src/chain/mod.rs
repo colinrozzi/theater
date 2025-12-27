@@ -38,7 +38,9 @@ use tokio::sync::mpsc::Sender;
 use tracing::debug;
 use wasmtime::component::{ComponentType, Lift, Lower};
 
-use crate::events::{ChainEventData, EventData, EventPayload};
+use crate::events::{ChainEventData, EventPayload};
+#[allow(unused_imports)]
+use crate::events::EventData;
 use crate::messages::TheaterCommand;
 use crate::store::ContentRef;
 use crate::TheaterId;
@@ -259,7 +261,7 @@ impl PartialEq for ChainEvent {
 /// all actors in the system. The state chain can also be persisted to disk for
 /// long-term storage or debugging.
 #[derive(Debug, Clone, Serialize)]
-pub struct StateChain<E = EventData>
+pub struct StateChain<E>
 where
     E: EventPayload,
 {

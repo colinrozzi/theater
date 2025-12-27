@@ -46,7 +46,7 @@ use wasmtime::{Engine, Store};
 use crate::actor::store::ActorStore;
 use crate::events::theater_runtime::TheaterRuntimeEventData;
 use crate::events::wasm::WasmEventData;
-use crate::events::{ChainEventData, EventData};
+use crate::events::EventPayload;
 // use crate::config::ManifestConfig;
 use crate::id::TheaterId;
 use crate::store;
@@ -208,18 +208,26 @@ pub struct MemoryStats {
 /// Component loading uses the Wasmtime engine's component model support and is an
 /// asynchronous operation because it may involve fetching component bytes from remote
 /// storage or performing digest verification.
-pub struct ActorComponent {
+pub struct ActorComponent<E>
+where
+    E: EventPayload + Clone,
+{
     pub name: String,
     pub component: Component,
-    pub actor_store: ActorStore,
-    pub linker: Linker<ActorStore>,
+    pub actor_store: ActorStore<E>,
+    pub linker: Linker<ActorStore<E>>,
     pub engine: Engine,
     pub import_types: Vec<(String, ComponentItem)>,
     pub export_types: Vec<(String, ComponentItem)>,
     pub exports: HashMap<String, ComponentExportIndex>,
 }
 
-impl ActorComponent {
+impl<E> ActorComponent<E>
+where
+    E: EventPayload + Clone
+        + From<TheaterRuntimeEventData>
+        + From<WasmEventData>,
+{
     /// Creates a new `ActorComponent` from a manifest configuration and actor store.
     ///
     /// ## Purpose
@@ -266,7 +274,7 @@ impl ActorComponent {
     pub async fn new(
         name: String,
         component_path: String,
-        actor_store: ActorStore,
+        actor_store: ActorStore<E>,
         engine: Engine,
     ) -> Result<Self> {
         // Load WASM component
@@ -276,14 +284,13 @@ impl ActorComponent {
             Ok(bytes) => bytes,
             Err(e) => {
                 error!("Failed to resolve component reference: {}", e);
-                actor_store.record_event(ChainEventData {
-                    event_type: "theater-runtime".to_string(),
-                    data: EventData::TheaterRuntime(TheaterRuntimeEventData::ActorSetupError {
+                actor_store.record_theater_runtime_event(
+                    "theater-runtime".to_string(),
+                    TheaterRuntimeEventData::ActorSetupError {
                         error: e.to_string(),
-                    }),
-                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                    description: format!("Failed to resolve component [{}]: {}", name, e).into(),
-                });
+                    },
+                    format!("Failed to resolve component [{}]: {}", name, e).into(),
+                );
                 return Err(WasmError::WasmError {
                     context: "resolving component reference",
                     message: e.to_string(),
@@ -295,14 +302,13 @@ impl ActorComponent {
             Ok(bytes) => bytes,
             Err(e) => {
                 error!("Failed to load WASM component bytes: {}", e);
-                actor_store.record_event(ChainEventData {
-                    event_type: "theater-runtime".to_string(),
-                    data: EventData::TheaterRuntime(TheaterRuntimeEventData::ActorSetupError {
+                actor_store.record_theater_runtime_event(
+                    "theater-runtime".to_string(),
+                    TheaterRuntimeEventData::ActorSetupError {
                         error: e.to_string(),
-                    }),
-                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                    description: format!("Failed to load component [{}]: {}", name, e).into(),
-                });
+                    },
+                    format!("Failed to load component [{}]: {}", name, e).into(),
+                );
                 return Err(WasmError::WasmError {
                     context: "loading component",
                     message: e.to_string(),
@@ -318,14 +324,13 @@ impl ActorComponent {
             }
             Err(e) => {
                 error!("Failed to create component: {}", e);
-                actor_store.record_event(ChainEventData {
-                    event_type: "theater-runtime".to_string(),
-                    data: EventData::Wasm(WasmEventData::WasmComponentCreationError {
+                actor_store.record_wasm_event(
+                    "theater-runtime".to_string(),
+                    WasmEventData::WasmComponentCreationError {
                         error: e.to_string(),
-                    }),
-                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                    description: format!("Failed to create component [{}]: {}", name, e).into(),
-                });
+                    },
+                    format!("Failed to create component [{}]: {}", name, e).into(),
+                );
                 return Err(WasmError::WasmError {
                     context: "creating component",
                     message: e.to_string(),
@@ -597,7 +602,7 @@ impl ActorComponent {
     /// This method consumes the `ActorComponent` (takes ownership of it) since a component
     /// can only be instantiated once. The resulting `ActorInstance` contains the original
     /// component information.
-    pub async fn instantiate(self) -> Result<ActorInstance> {
+    pub async fn instantiate(self) -> Result<ActorInstance<E>> {
         let mut store = Store::new(&self.engine, self.actor_store.clone());
 
         let instance = self
@@ -668,14 +673,22 @@ impl ActorComponent {
 /// The instance maintains a registry of typed functions that have been registered,
 /// allowing for efficient lookup and invocation. Function calls are asynchronous to
 /// support non-blocking operation in the actor system.
-pub struct ActorInstance {
-    pub actor_component: ActorComponent,
+pub struct ActorInstance<E>
+where
+    E: EventPayload + Clone,
+{
+    pub actor_component: ActorComponent<E>,
     pub instance: Instance,
-    pub store: Store<ActorStore>,
-    pub functions: HashMap<String, Box<dyn TypedFunction>>,
+    pub store: Store<ActorStore<E>>,
+    pub functions: HashMap<String, Box<dyn TypedFunction<E>>>,
 }
 
-impl ActorInstance {
+impl<E> ActorInstance<E>
+where
+    E: EventPayload + Clone
+        + From<TheaterRuntimeEventData>
+        + From<WasmEventData>,
+{
     pub fn save_chain(&self) -> Result<()> {
         self.actor_component.actor_store.save_chain()
     }
@@ -893,7 +906,7 @@ impl ActorInstance {
         );
         let name = format!("{}.{}", interface, function_name);
         let func =
-            TypedComponentFunction::<P, R>::new(&mut self.store, &self.instance, export_index)
+            TypedComponentFunction::<P, R, E>::new(&mut self.store, &self.instance, export_index)
                 .expect("Failed to create typed function");
         self.functions.insert(name.to_string(), Box::new(func));
         Ok(())
@@ -921,7 +934,7 @@ impl ActorInstance {
         );
         let name = format!("{}.{}", interface, function_name);
         let func =
-            TypedComponentFunctionNoParams::<R>::new(&mut self.store, &self.instance, export_index)
+            TypedComponentFunctionNoParams::<R, E>::new(&mut self.store, &self.instance, export_index)
                 .expect("Failed to create typed function");
         self.functions.insert(name.to_string(), Box::new(func));
         Ok(())
@@ -948,7 +961,7 @@ impl ActorInstance {
             interface, function_name, export_index
         );
         let name = format!("{}.{}", interface, function_name);
-        let func = TypedComponentFunctionNoResult::<P>::new(
+        let func = TypedComponentFunctionNoResult::<P, E>::new(
             &mut self.store,
             &self.instance,
             export_index,
@@ -974,7 +987,7 @@ impl ActorInstance {
             "Found function: {}.{} with export index: {:?}",
             interface, function_name, export_index
         );
-        let func = TypedComponentFunctionNoParamsNoResult::new(
+        let func = TypedComponentFunctionNoParamsNoResult::<E>::new(
             &mut self.store,
             &self.instance,
             export_index,
@@ -984,21 +997,24 @@ impl ActorInstance {
     }
 }
 
-pub struct TypedComponentFunction<P, R>
+pub struct TypedComponentFunction<P, R, E>
 where
     P: ComponentNamedList,
     R: ComponentNamedList,
+    E: EventPayload + Clone,
 {
     func: TypedFunc<(Option<Vec<u8>>, P), (Result<(Option<Vec<u8>>, R), String>,)>,
+    _phantom: std::marker::PhantomData<E>,
 }
 
-impl<P, R> TypedComponentFunction<P, R>
+impl<P, R, E> TypedComponentFunction<P, R, E>
 where
     P: ComponentNamedList + Lower + Sync + Send + 'static,
     R: ComponentNamedList + Lift + Sync + Send + 'static,
+    E: EventPayload + Clone,
 {
     pub fn new(
-        store: &mut Store<ActorStore>,
+        store: &mut Store<ActorStore<E>>,
         instance: &Instance,
         export_index: ComponentExportIndex,
     ) -> Result<Self> {
@@ -1016,12 +1032,15 @@ where
                 error!("Failed to get typed function: {}", e);
             })?;
 
-        Ok(TypedComponentFunction { func: typed_func })
+        Ok(TypedComponentFunction {
+            func: typed_func,
+            _phantom: std::marker::PhantomData,
+        })
     }
 
     pub async fn call_func(
         &self,
-        store: &mut Store<ActorStore>,
+        store: &mut Store<ActorStore<E>>,
         state: Option<Vec<u8>>,
         params: P,
     ) -> Result<(Option<Vec<u8>>, R), String> {
@@ -1073,23 +1092,27 @@ where
 /// the conversion between Rust types and WebAssembly values in a consistent way.
 /// The `Send + Sync + 'static` bounds ensure that implementations can be safely
 /// used across thread boundaries and stored in collections.
-pub trait TypedFunction: Send + Sync + 'static {
+pub trait TypedFunction<E>: Send + Sync + 'static
+where
+    E: EventPayload + Clone,
+{
     fn call_func<'a>(
         &'a self,
-        store: &'a mut Store<ActorStore>,
+        store: &'a mut Store<ActorStore<E>>,
         state: Option<Vec<u8>>,
         params: Vec<u8>,
     ) -> Pin<Box<dyn Future<Output = Result<(Option<Vec<u8>>, Vec<u8>)>> + Send + 'a>>;
 }
 
-impl<P, R> TypedFunction for TypedComponentFunction<P, R>
+impl<P, R, E> TypedFunction<E> for TypedComponentFunction<P, R, E>
 where
     P: ComponentNamedList + Lower + Sync + Send + 'static + for<'de> Deserialize<'de>,
     R: ComponentNamedList + Lift + Sync + Send + 'static + Serialize,
+    E: EventPayload + Clone,
 {
     fn call_func<'a>(
         &'a self,
-        store: &'a mut Store<ActorStore>,
+        store: &'a mut Store<ActorStore<E>>,
         state: Option<Vec<u8>>,
         params: Vec<u8>,
     ) -> Pin<Box<dyn Future<Output = Result<(Option<Vec<u8>>, Vec<u8>)>> + Send + 'a>> {
@@ -1112,19 +1135,22 @@ where
     }
 }
 
-pub struct TypedComponentFunctionNoParams<R>
+pub struct TypedComponentFunctionNoParams<R, E>
 where
     R: ComponentNamedList,
+    E: EventPayload + Clone,
 {
     func: TypedFunc<(Option<Vec<u8>>,), (Result<((Option<Vec<u8>>, R),), String>,)>,
+    _phantom: std::marker::PhantomData<E>,
 }
 
-impl<R> TypedComponentFunctionNoParams<R>
+impl<R, E> TypedComponentFunctionNoParams<R, E>
 where
     R: ComponentNamedList + Lift + Sync + Send + 'static,
+    E: EventPayload + Clone,
 {
     pub fn new(
-        store: &mut Store<ActorStore>,
+        store: &mut Store<ActorStore<E>>,
         instance: &Instance,
         export_index: ComponentExportIndex,
     ) -> Result<Self> {
@@ -1141,12 +1167,15 @@ where
                 error!("Failed to get typed function: {}", e);
             })?;
 
-        Ok(TypedComponentFunctionNoParams { func: typed_func })
+        Ok(TypedComponentFunctionNoParams {
+            func: typed_func,
+            _phantom: std::marker::PhantomData,
+        })
     }
 
     pub async fn call_func(
         &self,
-        store: &mut Store<ActorStore>,
+        store: &mut Store<ActorStore<E>>,
         state: Option<Vec<u8>>,
     ) -> Result<((Option<Vec<u8>>, R),), String> {
         let result = match self.func.call_async(&mut *store, (state,)).await {
@@ -1169,13 +1198,14 @@ where
     }
 }
 
-impl<R> TypedFunction for TypedComponentFunctionNoParams<R>
+impl<R, E> TypedFunction<E> for TypedComponentFunctionNoParams<R, E>
 where
     R: ComponentNamedList + Lift + Sync + Send + 'static + Serialize,
+    E: EventPayload + Clone,
 {
     fn call_func<'a>(
         &'a self,
-        store: &'a mut Store<ActorStore>,
+        store: &'a mut Store<ActorStore<E>>,
         state: Option<Vec<u8>>,
         _params: Vec<u8>, // Ignore params
     ) -> Pin<Box<dyn Future<Output = Result<(Option<Vec<u8>>, Vec<u8>)>> + Send + 'a>> {
@@ -1193,19 +1223,22 @@ where
     }
 }
 
-pub struct TypedComponentFunctionNoResult<P>
+pub struct TypedComponentFunctionNoResult<P, E>
 where
     P: ComponentNamedList,
+    E: EventPayload + Clone,
 {
     func: TypedFunc<(Option<Vec<u8>>, P), (Result<(Option<Vec<u8>>,), String>,)>,
+    _phantom: std::marker::PhantomData<E>,
 }
 
-impl<P> TypedComponentFunctionNoResult<P>
+impl<P, E> TypedComponentFunctionNoResult<P, E>
 where
     P: ComponentNamedList + Lower + Sync + Send + 'static,
+    E: EventPayload + Clone,
 {
     pub fn new(
-        store: &mut Store<ActorStore>,
+        store: &mut Store<ActorStore<E>>,
         instance: &Instance,
         export_index: ComponentExportIndex,
     ) -> Result<Self> {
@@ -1222,12 +1255,15 @@ where
                 error!("Failed to get typed function: {}", e);
             })?;
 
-        Ok(TypedComponentFunctionNoResult { func: typed_func })
+        Ok(TypedComponentFunctionNoResult {
+            func: typed_func,
+            _phantom: std::marker::PhantomData,
+        })
     }
 
     pub async fn call_func(
         &self,
-        store: &mut Store<ActorStore>,
+        store: &mut Store<ActorStore<E>>,
         state: Option<Vec<u8>>,
         params: P,
     ) -> Result<(Option<Vec<u8>>,), String> {
@@ -1251,13 +1287,14 @@ where
     }
 }
 
-impl<P> TypedFunction for TypedComponentFunctionNoResult<P>
+impl<P, E> TypedFunction<E> for TypedComponentFunctionNoResult<P, E>
 where
     P: ComponentNamedList + Lower + Sync + Send + 'static + for<'de> Deserialize<'de>,
+    E: EventPayload + Clone,
 {
     fn call_func<'a>(
         &'a self,
-        store: &'a mut Store<ActorStore>,
+        store: &'a mut Store<ActorStore<E>>,
         state: Option<Vec<u8>>,
         params: Vec<u8>,
     ) -> Pin<Box<dyn Future<Output = Result<(Option<Vec<u8>>, Vec<u8>)>> + Send + 'a>> {
@@ -1276,13 +1313,20 @@ where
     }
 }
 
-pub struct TypedComponentFunctionNoParamsNoResult {
+pub struct TypedComponentFunctionNoParamsNoResult<E>
+where
+    E: EventPayload + Clone,
+{
     func: TypedFunc<(Option<Vec<u8>>,), (Result<((Option<Vec<u8>>,),), String>,)>,
+    _phantom: std::marker::PhantomData<E>,
 }
 
-impl TypedComponentFunctionNoParamsNoResult {
+impl<E> TypedComponentFunctionNoParamsNoResult<E>
+where
+    E: EventPayload + Clone,
+{
     pub fn new(
-        store: &mut Store<ActorStore>,
+        store: &mut Store<ActorStore<E>>,
         instance: &Instance,
         export_index: ComponentExportIndex,
     ) -> Result<Self> {
@@ -1299,12 +1343,15 @@ impl TypedComponentFunctionNoParamsNoResult {
                 error!("Failed to get typed function: {}", e);
             })?;
 
-        Ok(TypedComponentFunctionNoParamsNoResult { func: typed_func })
+        Ok(TypedComponentFunctionNoParamsNoResult {
+            func: typed_func,
+            _phantom: std::marker::PhantomData,
+        })
     }
 
     pub async fn call_func(
         &self,
-        store: &mut Store<ActorStore>,
+        store: &mut Store<ActorStore<E>>,
         state: Option<Vec<u8>>,
     ) -> Result<((Option<Vec<u8>>,),), String> {
         let result = match self.func.call_async(&mut *store, (state,)).await {
@@ -1329,10 +1376,13 @@ impl TypedComponentFunctionNoParamsNoResult {
     }
 }
 
-impl TypedFunction for TypedComponentFunctionNoParamsNoResult {
+impl<E> TypedFunction<E> for TypedComponentFunctionNoParamsNoResult<E>
+where
+    E: EventPayload + Clone,
+{
     fn call_func<'a>(
         &'a self,
-        store: &'a mut Store<ActorStore>,
+        store: &'a mut Store<ActorStore<E>>,
         state: Option<Vec<u8>>,
         _params: Vec<u8>, // Ignore params
     ) -> Pin<Box<dyn Future<Output = Result<(Option<Vec<u8>>, Vec<u8>)>> + Send + 'a>> {

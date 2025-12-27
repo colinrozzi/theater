@@ -111,7 +111,7 @@ impl RandomHost {
         // Generate random bytes
         interface.func_wrap_async(
             "random-bytes",
-            move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore>,
+            move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore<EventData>>,
                   (size,): (u32,)| -> Box<dyn Future<Output = Result<(Result<Vec<u8>, String>,)>> + Send> {
                 let rng = Arc::clone(&rng);
                 let _config = config.clone();
@@ -195,7 +195,7 @@ impl RandomHost {
         // Generate random integer in range
         interface.func_wrap_async(
             "random-range",
-            move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore>,
+            move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore<EventData>>,
                   (min, max): (u64, u64)|
                   -> Box<dyn Future<Output = Result<(Result<u64, String>,)>> + Send> {
                 let rng = Arc::clone(&rng);
@@ -304,7 +304,7 @@ impl RandomHost {
         // Generate random float between 0.0 and 1.0
         interface.func_wrap_async(
             "random-float",
-            move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore>,
+            move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore<EventData>>,
                   (): ()|
                   -> Box<dyn Future<Output = Result<(Result<f64, String>,)>> + Send> {
                 let rng = Arc::clone(&rng);
@@ -367,7 +367,7 @@ impl RandomHost {
         interface
             .func_wrap_async(
                 "generate-uuid",
-                move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore>,
+                move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore<EventData>>,
                       (): ()| -> Box<dyn Future<Output = Result<(Result<String, String>,)>> + Send> {
                     let rng = Arc::clone(&rng);
                     
@@ -445,7 +445,7 @@ impl RandomHost {
         Ok(())
     }
 
-    pub async fn add_export_functions(&self, _actor_instance: &mut ActorInstance) -> Result<()> {
+    pub async fn add_export_functions(&self, _actor_instance: &mut ActorInstance<EventData>) -> Result<()> {
         // Random host doesn't export functions to actors, only provides host functions
         Ok(())
     }

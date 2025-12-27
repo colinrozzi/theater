@@ -2,7 +2,7 @@ use crate::actor::handle::ActorHandle;
 use crate::actor::store::ActorStore;
 use crate::actor::types::{ActorError, WitActorError};
 use crate::config::actor_manifest::SupervisorHostConfig;
-use crate::events::supervisor::SupervisorEventData;
+// use crate::events::supervisor::SupervisorEventData;
 use crate::events::{ChainEventData, EventData};
 use crate::messages::{ActorResult, TheaterCommand};
 use crate::shutdown::ShutdownReceiver;
@@ -55,7 +55,7 @@ impl SupervisorHost {
         }
     }
 
-    pub async fn setup_host_functions(&self, actor_component: &mut ActorComponent) -> Result<()> {
+    pub async fn setup_host_functions(&self, actor_component: &mut ActorComponent<EventData>) -> Result<()> {
         // Record setup start
         actor_component.actor_store.record_event(ChainEventData {
             event_type: "supervisor-setup".to_string(),
@@ -104,7 +104,7 @@ impl SupervisorHost {
         let _ = interface
             .func_wrap_async(
                 "spawn",
-                move |mut ctx: StoreContextMut<'_, ActorStore>,
+                move |mut ctx: StoreContextMut<'_, ActorStore<EventData>>,
                       (manifest, init_bytes): (String, Option<Vec<u8>>)|
                       -> Box<dyn Future<Output = Result<(Result<String, String>,)>> + Send> {
                     // Record spawn child call event
@@ -213,7 +213,7 @@ impl SupervisorHost {
         let _ = interface
             .func_wrap_async(
                 "resume",
-                move |mut ctx: StoreContextMut<'_, ActorStore>,
+                move |mut ctx: StoreContextMut<'_, ActorStore<EventData>>,
                       (manifest, state_bytes): (String, Option<Vec<u8>>)|
                       -> Box<dyn Future<Output = Result<(Result<String, String>,)>> + Send> {
                     // Record spawn child call event
@@ -322,7 +322,7 @@ impl SupervisorHost {
         let _ = interface
             .func_wrap_async(
                 "list-children",
-                move |mut ctx: StoreContextMut<'_, ActorStore>,
+                move |mut ctx: StoreContextMut<'_, ActorStore<EventData>>,
                       ()|
                       -> Box<dyn Future<Output = Result<(Vec<String>,)>> + Send> {
                     // Record list children call event
@@ -424,7 +424,7 @@ impl SupervisorHost {
         let _ = interface
             .func_wrap_async(
                 "restart-child",
-                move |mut ctx: StoreContextMut<'_, ActorStore>,
+                move |mut ctx: StoreContextMut<'_, ActorStore<EventData>>,
                       (child_id,): (String,)|
                       -> Box<dyn Future<Output = Result<(Result<(), String>,)>> + Send> {
                     // Record restart child call event
@@ -540,7 +540,7 @@ impl SupervisorHost {
         let _ = interface
             .func_wrap_async(
                 "stop-child",
-                move |mut ctx: StoreContextMut<'_, ActorStore>,
+                move |mut ctx: StoreContextMut<'_, ActorStore<EventData>>,
                       (child_id,): (String,)|
                       -> Box<dyn Future<Output = Result<(Result<(), String>,)>> + Send> {
                     // Record stop child call event
@@ -656,7 +656,7 @@ impl SupervisorHost {
         let _ = interface
             .func_wrap_async(
                 "get-child-state",
-                move |mut ctx: StoreContextMut<'_, ActorStore>,
+                move |mut ctx: StoreContextMut<'_, ActorStore<EventData>>,
                       (child_id,): (String,)|
                       -> Box<
                     dyn Future<Output = Result<(Result<Option<Vec<u8>>, String>,)>> + Send,
@@ -800,7 +800,7 @@ impl SupervisorHost {
         let _ = interface
             .func_wrap_async(
                 "get-child-events",
-                move |mut ctx: StoreContextMut<'_, ActorStore>,
+                move |mut ctx: StoreContextMut<'_, ActorStore<EventData>>,
                       (child_id,): (String,)|
                       -> Box<
                     dyn Future<Output = Result<(Result<Vec<ChainEvent>, String>,)>> + Send,
@@ -955,7 +955,7 @@ impl SupervisorHost {
         Ok(())
     }
 
-    pub async fn add_export_functions(&self, actor_instance: &mut ActorInstance) -> Result<()> {
+    pub async fn add_export_functions(&self, actor_instance: &mut ActorInstance<EventData>) -> Result<()> {
         info!("Adding export functions for supervisor");
 
         match actor_instance.register_function_no_result::<(String, WitActorError)>(

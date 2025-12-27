@@ -3620,6 +3620,7 @@ version = "0.2.1"
 dependencies = [
  "anyhow",
  "chrono",
+ "serde",
  "theater",
  "thiserror 1.0.69",
  "tracing",
@@ -3651,7 +3652,6 @@ name = "theater-handler-http-client"
 version = "0.2.1"
 dependencies = [
  "anyhow",
- "chrono",
  "reqwest 0.12.24",
  "serde",
  "serde_json",
@@ -3788,6 +3788,7 @@ dependencies = [
  "anyhow",
  "chrono",
  "futures",
+ "serde",
  "theater",
  "thiserror 1.0.69",
  "tokio",
@@ -4214,6 +4215,20 @@ dependencies = [
  "sha1",
  "thiserror 2.0.12",
  "utf-8",
+]
+
+[[package]]
+name = "type-safe-events-example"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "serde",
+ "theater",
+ "theater-handler-environment",
+ "theater-handler-timing",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]

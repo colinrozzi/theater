@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use tokio::process::Command as AsyncCommand;
 use tracing::info;
 
-use theater::events::filesystem::{CommandError, CommandResult, CommandSuccess};
+use crate::events::{CommandError, CommandResult, CommandSuccess};
 
 /// Execute a command in a directory with the given arguments
 pub async fn execute_command(

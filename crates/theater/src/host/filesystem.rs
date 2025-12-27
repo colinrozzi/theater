@@ -3,7 +3,7 @@ use crate::actor::store::ActorStore;
 use crate::actor::types::ActorError;
 use crate::config::actor_manifest::FileSystemHandlerConfig;
 
-use crate::events::filesystem::{CommandError, CommandResult, CommandSuccess, FilesystemEventData};
+// use crate::events::filesystem::{CommandError, CommandResult, CommandSuccess, FilesystemEventData};
 use crate::events::{ChainEventData, EventData};
 use crate::shutdown::ShutdownReceiver;
 use crate::wasm::ActorComponent;
@@ -209,7 +209,7 @@ impl FileSystemHost {
         Ok(temp_dir)
     }
 
-    pub async fn setup_host_functions(&self, actor_component: &mut ActorComponent) -> Result<()> {
+    pub async fn setup_host_functions(&self, actor_component: &mut ActorComponent<EventData>) -> Result<()> {
         info!("Setting up filesystem host functions");
 
         // Record setup start
@@ -255,7 +255,7 @@ impl FileSystemHost {
         let filesystem_host = self.clone();
         let _ = interface.func_wrap(
             "read-file",
-            move |mut ctx: StoreContextMut<'_, ActorStore>,
+            move |mut ctx: StoreContextMut<'_, ActorStore<EventData>>,
                   (requested_path,): (String,)|
                   -> Result<(Result<Vec<u8>, String>,)> {
                 // RESOLVE AND VALIDATE PATH
@@ -356,7 +356,7 @@ impl FileSystemHost {
         let filesystem_host = self.clone();
         let _ = interface.func_wrap(
             "write-file",
-            move |mut ctx: StoreContextMut<'_, ActorStore>,
+            move |mut ctx: StoreContextMut<'_, ActorStore<EventData>>,
                   (requested_path, contents): (String, String)|
                   -> Result<(Result<(), String>,)> {
                 // RESOLVE AND VALIDATE PATH
@@ -469,7 +469,7 @@ impl FileSystemHost {
         let filesystem_host = self.clone();
         let _ = interface.func_wrap(
             "list-files",
-            move |mut ctx: StoreContextMut<'_, ActorStore>,
+            move |mut ctx: StoreContextMut<'_, ActorStore<EventData>>,
                   (requested_path,): (String,)|
                   -> Result<(Result<Vec<String>, String>,)> {
                 // RESOLVE AND VALIDATE PATH
@@ -564,7 +564,7 @@ impl FileSystemHost {
 
         let _ = interface.func_wrap(
             "delete-file",
-            move |mut ctx: StoreContextMut<'_, ActorStore>,
+            move |mut ctx: StoreContextMut<'_, ActorStore<EventData>>,
                   (requested_path,): (String,)|
                   -> Result<(Result<(), String>,)> {
                 // RESOLVE AND VALIDATE PATH
@@ -648,7 +648,7 @@ impl FileSystemHost {
 
         let _ = interface.func_wrap(
             "create-dir",
-            move |mut ctx: StoreContextMut<'_, ActorStore>,
+            move |mut ctx: StoreContextMut<'_, ActorStore<EventData>>,
                   (requested_path,): (String,)|
                   -> Result<(Result<(), String>,)> {
                 // RESOLVE AND VALIDATE PATH
@@ -737,7 +737,7 @@ impl FileSystemHost {
 
         let _ = interface.func_wrap(
             "delete-dir",
-            move |mut ctx: StoreContextMut<'_, ActorStore>,
+            move |mut ctx: StoreContextMut<'_, ActorStore<EventData>>,
                   (requested_path,): (String,)|
                   -> Result<(Result<(), String>,)> {
                 // RESOLVE AND VALIDATE PATH
@@ -826,7 +826,7 @@ impl FileSystemHost {
 
         let _ = interface.func_wrap(
             "path-exists",
-            move |mut ctx: StoreContextMut<'_, ActorStore>,
+            move |mut ctx: StoreContextMut<'_, ActorStore<EventData>>,
                   (requested_path,): (String,)|
                   -> Result<(Result<bool, String>,)> {
                 // RESOLVE AND VALIDATE PATH
@@ -891,7 +891,7 @@ impl FileSystemHost {
         let _ =
             interface.func_wrap_async(
                 "execute-command",
-                move |mut ctx: StoreContextMut<'_, ActorStore>,
+                move |mut ctx: StoreContextMut<'_, ActorStore<EventData>>,
                       (requested_dir, command, args): (String, String, Vec<String>)|
                       -> Box<
                     dyn Future<Output = Result<(Result<CommandResult, String>,)>> + Send,
@@ -974,7 +974,7 @@ impl FileSystemHost {
         let _ =
             interface.func_wrap_async(
                 "execute-nix-command",
-                move |mut ctx: StoreContextMut<'_, ActorStore>,
+                move |mut ctx: StoreContextMut<'_, ActorStore<EventData>>,
                       (requested_dir, command): (String, String)|
                       -> Box<
                     dyn Future<Output = Result<(Result<CommandResult, String>,)>> + Send,
@@ -1044,7 +1044,7 @@ impl FileSystemHost {
         Ok(())
     }
 
-    pub async fn add_export_functions(&self, _actor_instance: &mut ActorInstance) -> Result<()> {
+    pub async fn add_export_functions(&self, _actor_instance: &mut ActorInstance<EventData>) -> Result<()> {
         info!("No functions needed for filesystem");
         Ok(())
     }

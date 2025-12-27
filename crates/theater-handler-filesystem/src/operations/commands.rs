@@ -5,17 +5,20 @@ use wasmtime::component::LinkerInstance;
 use wasmtime::StoreContextMut;
 
 use theater::actor::store::ActorStore;
-use theater::events::filesystem::{CommandResult, FilesystemEventData};
-use theater::events::{ChainEventData, EventData};
+use theater::events::EventPayload;
 
 use crate::command_execution::{execute_command, execute_nix_command};
+use crate::events::{CommandResult, FilesystemEventData};
 use crate::path_validation::resolve_and_validate_path;
 use crate::FilesystemHandler;
 
-pub fn setup_execute_command(
+pub fn setup_execute_command<E>(
     handler: &FilesystemHandler,
-    interface: &mut LinkerInstance<ActorStore>,
-) -> anyhow::Result<()> {
+    interface: &mut LinkerInstance<ActorStore<E>>,
+) -> anyhow::Result<()>
+where
+    E: EventPayload + Clone + From<FilesystemEventData>,
+{
     let filesystem_handler = handler.clone();
     let permissions = handler.permissions.clone();
     let allowed_commands = handler.allowed_commands.clone();
@@ -23,7 +26,7 @@ pub fn setup_execute_command(
     interface
         .func_wrap_async(
             "execute-command",
-            move |mut ctx: StoreContextMut<'_, ActorStore>,
+            move |mut ctx: StoreContextMut<'_, ActorStore<E>>,
                   (requested_dir, command, args): (String, String, Vec<String>)|
                   -> Box<dyn Future<Output = anyhow::Result<(Result<CommandResult, String>,)>> + Send> {
                 // Validate command if whitelist is configured
@@ -51,19 +54,18 @@ pub fn setup_execute_command(
                 };
 
                 // Record command execution event
-                ctx.data_mut().record_event(ChainEventData {
-                    event_type: "theater:simple/filesystem/execute-command".to_string(),
-                    data: EventData::Filesystem(FilesystemEventData::CommandExecuted {
+                ctx.data_mut().record_handler_event(
+                    "theater:simple/filesystem/execute-command".to_string(),
+                    FilesystemEventData::CommandExecuted {
                         directory: requested_dir.clone(),
                         command: command.clone(),
                         args: args.clone(),
-                    }),
-                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                    description: Some(format!(
+                    },
+                    Some(format!(
                         "Executing command '{}' in directory '{}'",
                         command, requested_dir
                     )),
-                });
+                );
 
                 let args_refs: Vec<String> = args.clone();
                 let base_path = filesystem_handler.path().clone();
@@ -80,14 +82,13 @@ pub fn setup_execute_command(
                     {
                         Ok(result) => {
                             // Record successful
-                            ctx.data_mut().record_event(ChainEventData {
-                                event_type: "theater:simple/filesystem/command-result".to_string(),
-                                data: EventData::Filesystem(FilesystemEventData::CommandCompleted {
+                            ctx.data_mut().record_handler_event(
+                                "theater:simple/filesystem/command-result".to_string(),
+                                FilesystemEventData::CommandCompleted {
                                     result: result.clone(),
-                                }),
-                                timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                                description: Some("Command completed".to_string()),
-                            });
+                                },
+                                Some("Command completed".to_string()),
+                            );
                             Ok((Ok(result),))
                         }
                         Err(e) => Ok((Err(e.to_string()),)),
@@ -100,17 +101,20 @@ pub fn setup_execute_command(
     Ok(())
 }
 
-pub fn setup_execute_nix_command(
+pub fn setup_execute_nix_command<E>(
     handler: &FilesystemHandler,
-    interface: &mut LinkerInstance<ActorStore>,
-) -> anyhow::Result<()> {
+    interface: &mut LinkerInstance<ActorStore<E>>,
+) -> anyhow::Result<()>
+where
+    E: EventPayload + Clone + From<FilesystemEventData>,
+{
     let filesystem_handler = handler.clone();
     let permissions = handler.permissions.clone();
 
     interface
         .func_wrap_async(
             "execute-nix-command",
-            move |mut ctx: StoreContextMut<'_, ActorStore>,
+            move |mut ctx: StoreContextMut<'_, ActorStore<E>>,
                   (requested_dir, command): (String, String)|
                   -> Box<dyn Future<Output = anyhow::Result<(Result<CommandResult, String>,)>> + Send> {
                 // RESOLVE AND VALIDATE PATH
@@ -129,18 +133,17 @@ pub fn setup_execute_nix_command(
                 };
 
                 // Record nix command execution event
-                ctx.data_mut().record_event(ChainEventData {
-                    event_type: "theater:simple/filesystem/execute-nix-command".to_string(),
-                    data: EventData::Filesystem(FilesystemEventData::NixCommandExecuted {
+                ctx.data_mut().record_handler_event(
+                    "theater:simple/filesystem/execute-nix-command".to_string(),
+                    FilesystemEventData::NixCommandExecuted {
                         directory: requested_dir.clone(),
                         command: command.clone(),
-                    }),
-                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                    description: Some(format!(
+                    },
+                    Some(format!(
                         "Executing nix command '{}' in directory '{}'",
                         command, requested_dir
                     )),
-                });
+                );
 
                 let base_path = filesystem_handler.path().clone();
                 let command_clone = command.clone();
@@ -149,14 +152,13 @@ pub fn setup_execute_nix_command(
                     match execute_nix_command(base_path, &dir_path, &command_clone).await {
                         Ok(result) => {
                             // Record successful execution
-                            ctx.data_mut().record_event(ChainEventData {
-                                event_type: "theater:simple/filesystem/nix-command-result".to_string(),
-                                data: EventData::Filesystem(FilesystemEventData::CommandCompleted {
+                            ctx.data_mut().record_handler_event(
+                                "theater:simple/filesystem/nix-command-result".to_string(),
+                                FilesystemEventData::CommandCompleted {
                                     result: result.clone(),
-                                }),
-                                timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                                description: Some("Nix command completed".to_string()),
-                            });
+                                },
+                                Some("Nix command completed".to_string()),
+                            );
                             Ok((Ok(result),))
                         }
                         Err(e) => Ok((Err(e.to_string()),)),

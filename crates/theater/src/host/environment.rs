@@ -2,8 +2,8 @@ use crate::actor::handle::ActorHandle;
 use crate::actor::store::ActorStore;
 use crate::config::actor_manifest::EnvironmentHandlerConfig;
 use crate::config::enforcement::PermissionChecker;
-use crate::events::environment::EnvironmentEventData;
-use crate::events::{ChainEventData, EventData};
+// use crate::events::environment::EnvironmentEventData;
+use crate::events::EventData;
 use crate::shutdown::ShutdownReceiver;
 use crate::wasm::{ActorComponent, ActorInstance};
 use anyhow::Result;
@@ -54,7 +54,7 @@ impl EnvironmentHost {
         Ok(())
     }
 
-    pub async fn setup_host_functions(&self, actor_component: &mut ActorComponent) -> Result<()> {
+    pub async fn setup_host_functions(&self, actor_component: &mut ActorComponent<EventData>) -> Result<()> {
         // Record setup start
         actor_component.actor_store.record_event(ChainEventData {
             event_type: "environment-setup".to_string(),
@@ -103,7 +103,7 @@ impl EnvironmentHost {
         // get-var implementation
         interface.func_wrap(
             "get-var",
-            move |mut ctx: StoreContextMut<'_, ActorStore>,
+            move |mut ctx: StoreContextMut<'_, ActorStore<EventData>>,
                   (var_name,): (String,)|
                   -> Result<(Option<String>,)> {
                 let now = Utc::now().timestamp_millis() as u64;
@@ -273,7 +273,7 @@ impl EnvironmentHost {
         Ok(())
     }
 
-    pub async fn add_export_functions(&self, _actor_instance: &mut ActorInstance) -> Result<()> {
+    pub async fn add_export_functions(&self, _actor_instance: &mut ActorInstance<EventData>) -> Result<()> {
         // Environment handler (read-only) doesn't need export functions
         Ok(())
     }

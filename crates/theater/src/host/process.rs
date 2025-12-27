@@ -2,7 +2,7 @@ use crate::actor::handle::ActorHandle;
 use crate::actor::store::ActorStore;
 use crate::config::actor_manifest::ProcessHostConfig;
 use crate::config::enforcement::PermissionChecker;
-use crate::events::process::ProcessEventData;
+// use crate::events::process::ProcessEventData;
 use crate::events::{ChainEventData, EventData};
 use crate::shutdown::ShutdownReceiver;
 use crate::wasm::{ActorComponent, ActorInstance};
@@ -189,7 +189,7 @@ impl ProcessHost {
     }
 
     /// Add export functions to the actor instance
-    pub async fn add_export_functions(&self, actor_instance: &mut ActorInstance) -> Result<()> {
+    pub async fn add_export_functions(&self, actor_instance: &mut ActorInstance<EventData>) -> Result<()> {
         info!("Adding export functions for process handling");
 
         // Register the process handler export functions
@@ -467,7 +467,7 @@ impl ProcessHost {
     }
 
     /// Set up WebAssembly host functions for the process interface
-    pub async fn setup_host_functions(&self, actor_component: &mut ActorComponent) -> Result<()> {
+    pub async fn setup_host_functions(&self, actor_component: &mut ActorComponent<EventData>) -> Result<()> {
         // Record setup start
         actor_component.actor_store.record_event(ChainEventData {
             event_type: "process-setup".to_string(),
@@ -515,7 +515,7 @@ impl ProcessHost {
         let permissions = self.permissions.clone();
         interface.func_wrap_async(
             "os-spawn",
-            move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore>,
+            move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore<EventData>>,
                   (process_config,): (ProcessConfig,)|  // Process configuration from WebAssembly as struct
                   -> Box<dyn Future<Output = Result<(Result<u64, String>,)>> + Send> {
                 let processes = processes.clone();
@@ -916,7 +916,7 @@ impl ProcessHost {
         let processes = self.processes.clone();
         interface.func_wrap_async(
             "os-write-stdin",
-            move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore>,
+            move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore<EventData>>,
                   (pid, data): (u64, Vec<u8>)|
                   -> Box<dyn Future<Output = Result<(Result<u32, String>,)>> + Send> {
                 let processes = processes.clone();
@@ -1010,7 +1010,7 @@ impl ProcessHost {
         let processes = self.processes.clone();
         interface.func_wrap_async(
             "os-status",
-            move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore>,
+            move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore<EventData>>,
                   (pid,): (u64,)|
                   -> Box<dyn Future<Output = Result<(Result<ProcessStatus, String>,)>> + Send> {
                 let processes = processes.clone();
@@ -1061,7 +1061,7 @@ impl ProcessHost {
         let processes = self.processes.clone();
         interface.func_wrap_async(
             "os-kill",
-            move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore>,
+            move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore<EventData>>,
                   (pid,): (u64,)|
                   -> Box<dyn Future<Output = Result<(Result<(), String>,)>> + Send> {
                 let processes = processes.clone();
@@ -1141,7 +1141,7 @@ impl ProcessHost {
         let processes = self.processes.clone();
         interface.func_wrap_async(
             "os-signal",
-            move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore>,
+            move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore<EventData>>,
                   (pid, signal): (u64, u32)|
                   -> Box<dyn Future<Output = Result<(Result<(), String>,)>> + Send> {
                 let processes = processes.clone();

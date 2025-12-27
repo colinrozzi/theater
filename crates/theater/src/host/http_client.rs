@@ -3,7 +3,7 @@ use crate::actor::store::ActorStore;
 use crate::actor::types::ActorError;
 use crate::config::actor_manifest::HttpClientHandlerConfig;
 use crate::config::enforcement::PermissionChecker;
-use crate::events::http::HttpEventData;
+// use crate::events::http::HttpEventData;
 use crate::events::{ChainEventData, EventData};
 use crate::shutdown::ShutdownReceiver;
 use crate::wasm::{ActorComponent, ActorInstance};
@@ -63,7 +63,7 @@ impl HttpClientHost {
         Self { permissions }
     }
 
-    pub async fn setup_host_functions(&self, actor_component: &mut ActorComponent) -> Result<()> {
+    pub async fn setup_host_functions(&self, actor_component: &mut ActorComponent<EventData>) -> Result<()> {
         // Record setup start
         actor_component.actor_store.record_event(ChainEventData {
             event_type: "http-client-setup".to_string(),
@@ -109,7 +109,7 @@ impl HttpClientHost {
         let permissions = self.permissions.clone();
         interface.func_wrap_async(
             "send-http",
-            move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore>,
+            move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore<EventData>>,
                   (req,): (HttpRequest,)|
                   -> Box<dyn Future<Output = Result<(Result<HttpResponse, String>,)>> + Send> {
                 
@@ -285,7 +285,7 @@ impl HttpClientHost {
         Ok(())
     }
 
-    pub async fn add_export_functions(&self, _actor_instance: &mut ActorInstance) -> Result<()> {
+    pub async fn add_export_functions(&self, _actor_instance: &mut ActorInstance<EventData>) -> Result<()> {
         Ok(())
     }
 

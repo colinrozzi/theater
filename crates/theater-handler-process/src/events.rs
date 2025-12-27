@@ -1,3 +1,5 @@
+//! Process handler event types
+
 use serde::{Deserialize, Serialize};
 
 /// Event data specific to the OS Process handler

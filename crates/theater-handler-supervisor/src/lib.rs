@@ -2,13 +2,16 @@
 //!
 //! Provides supervisor capabilities for spawning and managing child actors.
 
+pub mod events;
+
+pub use events::SupervisorEventData;
+
 use theater::actor::handle::ActorHandle;
 use theater::actor::store::ActorStore;
 use theater::actor::types::{ActorError, WitActorError};
 use theater::config::actor_manifest::SupervisorHostConfig;
 use theater::config::permissions::SupervisorPermissions;
-use theater::events::supervisor::SupervisorEventData;
-use theater::events::{ChainEventData, EventData};
+use theater::events::{ChainEventData, EventPayload};
 use theater::handler::Handler;
 use theater::messages::{ActorResult, TheaterCommand};
 use theater::shutdown::ShutdownReceiver;
@@ -129,8 +132,13 @@ impl SupervisorHandler {
     }
 }
 
-impl Handler for SupervisorHandler {
-    fn create_instance(&self) -> Box<dyn Handler> {
+impl<E> Handler<E> for SupervisorHandler
+where
+    E: EventPayload + Clone + From<SupervisorEventData>
+        + From<theater::events::theater_runtime::TheaterRuntimeEventData>
+        + From<theater::events::wasm::WasmEventData>,
+{
+    fn create_instance(&self) -> Box<dyn Handler<E>> {
         Box::new(self.clone())
     }
 
@@ -146,11 +154,11 @@ impl Handler for SupervisorHandler {
         Some("theater:simple/supervisor-handlers".to_string())
     }
 
-    fn setup_host_functions(&mut self, actor_component: &mut ActorComponent) -> Result<()> {
+    fn setup_host_functions(&mut self, actor_component: &mut ActorComponent<E>) -> Result<()> {
         // Record setup start
         actor_component.actor_store.record_event(ChainEventData {
             event_type: "supervisor-setup".to_string(),
-            data: EventData::Supervisor(SupervisorEventData::HandlerSetupStart),
+            data: SupervisorEventData::HandlerSetupStart.into(),
             timestamp: chrono::Utc::now().timestamp_millis() as u64,
             description: Some("Starting supervisor host function setup".to_string()),
         });
@@ -162,7 +170,7 @@ impl Handler for SupervisorHandler {
                 // Record successful linker instance creation
                 actor_component.actor_store.record_event(ChainEventData {
                     event_type: "supervisor-setup".to_string(),
-                    data: EventData::Supervisor(SupervisorEventData::LinkerInstanceSuccess),
+                    data: SupervisorEventData::LinkerInstanceSuccess.into(),
                     timestamp: chrono::Utc::now().timestamp_millis() as u64,
                     description: Some("Successfully created linker instance".to_string()),
                 });
@@ -172,10 +180,10 @@ impl Handler for SupervisorHandler {
                 // Record the specific error where it happens
                 actor_component.actor_store.record_event(ChainEventData {
                     event_type: "supervisor-setup".to_string(),
-                    data: EventData::Supervisor(SupervisorEventData::HandlerSetupError {
+                    data: SupervisorEventData::HandlerSetupError {
                         error: e.to_string(),
                         step: "linker_instance".to_string(),
-                    }),
+                    }.into(),
                     timestamp: chrono::Utc::now().timestamp_millis() as u64,
                     description: Some(format!("Failed to create linker instance: {}", e)),
                 });
@@ -193,15 +201,15 @@ impl Handler for SupervisorHandler {
         let _ = interface
             .func_wrap_async(
                 "spawn",
-                move |mut ctx: StoreContextMut<'_, ActorStore>,
+                move |mut ctx: StoreContextMut<'_, ActorStore<E>>,
                       (manifest, init_bytes): (String, Option<Vec<u8>>)|
                       -> Box<dyn Future<Output = Result<(Result<String, String>,)>> + Send> {
                     // Record spawn child call event
                     ctx.data_mut().record_event(ChainEventData {
                         event_type: "theater:simple/supervisor/spawn".to_string(),
-                        data: EventData::Supervisor(SupervisorEventData::SpawnChildCall {
+                        data: SupervisorEventData::SpawnChildCall {
                             manifest_path: manifest.clone(),
-                        }),
+                        }.into(),
                         timestamp: chrono::Utc::now().timestamp_millis() as u64,
                         description: Some(format!("Spawning child from manifest: {}", manifest)),
                     });
@@ -231,12 +239,11 @@ impl Handler for SupervisorHandler {
                                     // Record spawn child result event
                                     ctx.data_mut().record_event(ChainEventData {
                                         event_type: "theater:simple/supervisor/spawn".to_string(),
-                                        data: EventData::Supervisor(
+                                        data: 
                                             SupervisorEventData::SpawnChildResult {
                                                 child_id: actor_id_str.clone(),
                                                 success: true,
-                                            },
-                                        ),
+                                            }.into(),
                                         timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                         description: Some(format!(
                                             "Successfully spawned child with ID: {}",
@@ -250,11 +257,11 @@ impl Handler for SupervisorHandler {
                                     // Record spawn child error event
                                     ctx.data_mut().record_event(ChainEventData {
                                         event_type: "theater:simple/supervisor/spawn".to_string(),
-                                        data: EventData::Supervisor(SupervisorEventData::Error {
+                                        data: SupervisorEventData::Error {
                                             operation: "spawn".to_string(),
                                             child_id: None,
                                             message: e.to_string(),
-                                        }),
+                                        }.into(),
                                         timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                         description: Some(format!("Failed to spawn child: {}", e)),
                                     });
@@ -265,11 +272,11 @@ impl Handler for SupervisorHandler {
                                     // Record spawn child error event
                                     ctx.data_mut().record_event(ChainEventData {
                                         event_type: "theater:simple/supervisor/spawn".to_string(),
-                                        data: EventData::Supervisor(SupervisorEventData::Error {
+                                        data: SupervisorEventData::Error {
                                             operation: "spawn".to_string(),
                                             child_id: None,
                                             message: e.to_string(),
-                                        }),
+                                        }.into(),
                                         timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                         description: Some(format!(
                                             "Failed to receive spawn response: {}",
@@ -284,11 +291,11 @@ impl Handler for SupervisorHandler {
                                 // Record spawn child error event
                                 ctx.data_mut().record_event(ChainEventData {
                                     event_type: "theater:simple/supervisor/spawn".to_string(),
-                                    data: EventData::Supervisor(SupervisorEventData::Error {
+                                    data: SupervisorEventData::Error {
                                         operation: "spawn".to_string(),
                                         child_id: None,
                                         message: e.to_string(),
-                                    }),
+                                    }.into(),
                                     timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                     description: Some(format!(
                                         "Failed to send spawn command: {}",
@@ -311,16 +318,16 @@ impl Handler for SupervisorHandler {
         let _ = interface
             .func_wrap_async(
                 "resume",
-                move |mut ctx: StoreContextMut<'_, ActorStore>,
+                move |mut ctx: StoreContextMut<'_, ActorStore<E>>,
                       (manifest, state_bytes): (String, Option<Vec<u8>>)|
                       -> Box<dyn Future<Output = Result<(Result<String, String>,)>> + Send> {
                     // Record resume child call event
                     ctx.data_mut().record_event(ChainEventData {
                         event_type: "theater:simple/supervisor/resume".to_string(),
-                        data: EventData::Supervisor(SupervisorEventData::ResumeChildCall {
+                        data: SupervisorEventData::ResumeChildCall {
                             manifest_path: manifest.clone(),
                             initial_state: state_bytes.clone(),
-                        }),
+                        }.into(),
                         timestamp: chrono::Utc::now().timestamp_millis() as u64,
                         description: Some(format!("Resuming child from manifest: {}", manifest)),
                     });
@@ -350,12 +357,11 @@ impl Handler for SupervisorHandler {
                                     // Record resume child result event
                                     ctx.data_mut().record_event(ChainEventData {
                                         event_type: "theater:simple/supervisor/resume".to_string(),
-                                        data: EventData::Supervisor(
+                                        data: 
                                             SupervisorEventData::ResumeChildResult {
                                                 child_id: actor_id_str.clone(),
                                                 success: true,
-                                            },
-                                        ),
+                                            }.into(),
                                         timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                         description: Some(format!(
                                             "Successfully resumed child with ID: {}",
@@ -369,11 +375,11 @@ impl Handler for SupervisorHandler {
                                     // Record resume child error event
                                     ctx.data_mut().record_event(ChainEventData {
                                         event_type: "theater:simple/supervisor/resume".to_string(),
-                                        data: EventData::Supervisor(SupervisorEventData::Error {
+                                        data: SupervisorEventData::Error {
                                             operation: "resume".to_string(),
                                             child_id: None,
                                             message: e.to_string(),
-                                        }),
+                                        }.into(),
                                         timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                         description: Some(format!("Failed to resume child: {}", e)),
                                     });
@@ -384,11 +390,11 @@ impl Handler for SupervisorHandler {
                                     // Record resume child error event
                                     ctx.data_mut().record_event(ChainEventData {
                                         event_type: "theater:simple/supervisor/resume".to_string(),
-                                        data: EventData::Supervisor(SupervisorEventData::Error {
+                                        data: SupervisorEventData::Error {
                                             operation: "resume".to_string(),
                                             child_id: None,
                                             message: e.to_string(),
-                                        }),
+                                        }.into(),
                                         timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                         description: Some(format!(
                                             "Failed to receive resume response: {}",
@@ -403,11 +409,11 @@ impl Handler for SupervisorHandler {
                                 // Record resume child error event
                                 ctx.data_mut().record_event(ChainEventData {
                                     event_type: "theater:simple/supervisor/resume".to_string(),
-                                    data: EventData::Supervisor(SupervisorEventData::Error {
+                                    data: SupervisorEventData::Error {
                                         operation: "resume".to_string(),
                                         child_id: None,
                                         message: e.to_string(),
-                                    }),
+                                    }.into(),
                                     timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                     description: Some(format!(
                                         "Failed to send resume command: {}",
@@ -428,13 +434,13 @@ impl Handler for SupervisorHandler {
         let _ = interface
             .func_wrap_async(
                 "list-children",
-                move |mut ctx: StoreContextMut<'_, ActorStore>,
+                move |mut ctx: StoreContextMut<'_, ActorStore<E>>,
                       ()|
                       -> Box<dyn Future<Output = Result<(Vec<String>,)>> + Send> {
                     // Record list children call event
                     ctx.data_mut().record_event(ChainEventData {
                         event_type: "theater:simple/supervisor/list-children".to_string(),
-                        data: EventData::Supervisor(SupervisorEventData::ListChildrenCall {}),
+                        data: SupervisorEventData::ListChildrenCall {}.into(),
                         timestamp: chrono::Utc::now().timestamp_millis() as u64,
                         description: Some("Listing children".to_string()),
                     });
@@ -461,12 +467,11 @@ impl Handler for SupervisorHandler {
                                     ctx.data_mut().record_event(ChainEventData {
                                         event_type: "theater:simple/supervisor/list-children"
                                             .to_string(),
-                                        data: EventData::Supervisor(
+                                        data: 
                                             SupervisorEventData::ListChildrenResult {
                                                 children_count: children_str.len(),
                                                 success: true,
-                                            },
-                                        ),
+                                            }.into(),
                                         timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                         description: Some(format!(
                                             "Found {} children",
@@ -481,11 +486,11 @@ impl Handler for SupervisorHandler {
                                     ctx.data_mut().record_event(ChainEventData {
                                         event_type: "theater:simple/supervisor/list-children"
                                             .to_string(),
-                                        data: EventData::Supervisor(SupervisorEventData::Error {
+                                        data: SupervisorEventData::Error {
                                             operation: "list-children".to_string(),
                                             child_id: None,
                                             message: e.to_string(),
-                                        }),
+                                        }.into(),
                                         timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                         description: Some(format!(
                                             "Failed to receive children list: {}",
@@ -501,11 +506,11 @@ impl Handler for SupervisorHandler {
                                 ctx.data_mut().record_event(ChainEventData {
                                     event_type: "theater:simple/supervisor/list-children"
                                         .to_string(),
-                                    data: EventData::Supervisor(SupervisorEventData::Error {
+                                    data: SupervisorEventData::Error {
                                         operation: "list-children".to_string(),
                                         child_id: None,
                                         message: e.to_string(),
-                                    }),
+                                    }.into(),
                                     timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                     description: Some(format!(
                                         "Failed to send list children command: {}",
@@ -529,15 +534,15 @@ impl Handler for SupervisorHandler {
         let _ = interface
             .func_wrap_async(
                 "restart-child",
-                move |mut ctx: StoreContextMut<'_, ActorStore>,
+                move |mut ctx: StoreContextMut<'_, ActorStore<E>>,
                       (child_id,): (String,)|
                       -> Box<dyn Future<Output = Result<(Result<(), String>,)>> + Send> {
                     // Record restart child call event
                     ctx.data_mut().record_event(ChainEventData {
                         event_type: "theater:simple/supervisor/restart-child".to_string(),
-                        data: EventData::Supervisor(SupervisorEventData::RestartChildCall {
+                        data: SupervisorEventData::RestartChildCall {
                             child_id: child_id.clone(),
-                        }),
+                        }.into(),
                         timestamp: chrono::Utc::now().timestamp_millis() as u64,
                         description: Some(format!("Restarting child: {}", child_id)),
                     });
@@ -558,13 +563,12 @@ impl Handler for SupervisorHandler {
                                             event_type:
                                                 "theater:simple/supervisor/restart-child"
                                                     .to_string(),
-                                            data: EventData::Supervisor(
+                                            data: 
                                                 SupervisorEventData::Error {
                                                     operation: "restart-child".to_string(),
                                                     child_id: Some(child_id_clone.clone()),
                                                     message: e.to_string(),
-                                                },
-                                            ),
+                                                }.into(),
                                             timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                             description: Some(format!(
                                                 "Failed to parse child ID: {}",
@@ -585,12 +589,11 @@ impl Handler for SupervisorHandler {
                                     ctx.data_mut().record_event(ChainEventData {
                                         event_type: "theater:simple/supervisor/restart-child"
                                             .to_string(),
-                                        data: EventData::Supervisor(
+                                        data: 
                                             SupervisorEventData::RestartChildResult {
                                                 child_id: child_id_clone.clone(),
                                                 success: true,
-                                            },
-                                        ),
+                                            }.into(),
                                         timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                         description: Some(format!(
                                             "Successfully restarted child: {}",
@@ -605,11 +608,11 @@ impl Handler for SupervisorHandler {
                                     ctx.data_mut().record_event(ChainEventData {
                                         event_type: "theater:simple/supervisor/restart-child"
                                             .to_string(),
-                                        data: EventData::Supervisor(SupervisorEventData::Error {
+                                        data: SupervisorEventData::Error {
                                             operation: "restart-child".to_string(),
                                             child_id: Some(child_id_clone.clone()),
                                             message: e.to_string(),
-                                        }),
+                                        }.into(),
                                         timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                         description: Some(format!(
                                             "Failed to restart child: {}",
@@ -624,11 +627,11 @@ impl Handler for SupervisorHandler {
                                     ctx.data_mut().record_event(ChainEventData {
                                         event_type: "theater:simple/supervisor/restart-child"
                                             .to_string(),
-                                        data: EventData::Supervisor(SupervisorEventData::Error {
+                                        data: SupervisorEventData::Error {
                                             operation: "restart-child".to_string(),
                                             child_id: Some(child_id_clone.clone()),
                                             message: e.to_string(),
-                                        }),
+                                        }.into(),
                                         timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                         description: Some(format!(
                                             "Failed to receive restart response: {}",
@@ -644,11 +647,11 @@ impl Handler for SupervisorHandler {
                                 ctx.data_mut().record_event(ChainEventData {
                                     event_type: "theater:simple/supervisor/restart-child"
                                         .to_string(),
-                                    data: EventData::Supervisor(SupervisorEventData::Error {
+                                    data: SupervisorEventData::Error {
                                         operation: "restart-child".to_string(),
                                         child_id: Some(child_id_clone.clone()),
                                         message: e.to_string(),
-                                    }),
+                                    }.into(),
                                     timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                     description: Some(format!(
                                         "Failed to send restart command: {}",
@@ -669,15 +672,15 @@ impl Handler for SupervisorHandler {
         let _ = interface
             .func_wrap_async(
                 "stop-child",
-                move |mut ctx: StoreContextMut<'_, ActorStore>,
+                move |mut ctx: StoreContextMut<'_, ActorStore<E>>,
                       (child_id,): (String,)|
                       -> Box<dyn Future<Output = Result<(Result<(), String>,)>> + Send> {
                     // Record stop child call event
                     ctx.data_mut().record_event(ChainEventData {
                         event_type: "theater:simple/supervisor/stop-child".to_string(),
-                        data: EventData::Supervisor(SupervisorEventData::StopChildCall {
+                        data: SupervisorEventData::StopChildCall {
                             child_id: child_id.clone(),
-                        }),
+                        }.into(),
                         timestamp: chrono::Utc::now().timestamp_millis() as u64,
                         description: Some(format!("Stopping child: {}", child_id)),
                     });
@@ -697,13 +700,12 @@ impl Handler for SupervisorHandler {
                                         ctx.data_mut().record_event(ChainEventData {
                                             event_type: "theater:simple/supervisor/stop-child"
                                                 .to_string(),
-                                            data: EventData::Supervisor(
+                                            data: 
                                                 SupervisorEventData::Error {
                                                     operation: "stop-child".to_string(),
                                                     child_id: Some(child_id_clone.clone()),
                                                     message: e.to_string(),
-                                                },
-                                            ),
+                                                }.into(),
                                             timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                             description: Some(format!(
                                                 "Failed to parse child ID: {}",
@@ -724,12 +726,11 @@ impl Handler for SupervisorHandler {
                                     ctx.data_mut().record_event(ChainEventData {
                                         event_type: "theater:simple/supervisor/stop-child"
                                             .to_string(),
-                                        data: EventData::Supervisor(
+                                        data: 
                                             SupervisorEventData::StopChildResult {
                                                 child_id: child_id_clone.clone(),
                                                 success: true,
-                                            },
-                                        ),
+                                            }.into(),
                                         timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                         description: Some(format!(
                                             "Successfully stopped child: {}",
@@ -744,11 +745,11 @@ impl Handler for SupervisorHandler {
                                     ctx.data_mut().record_event(ChainEventData {
                                         event_type: "theater:simple/supervisor/stop-child"
                                             .to_string(),
-                                        data: EventData::Supervisor(SupervisorEventData::Error {
+                                        data: SupervisorEventData::Error {
                                             operation: "stop-child".to_string(),
                                             child_id: Some(child_id_clone.clone()),
                                             message: e.to_string(),
-                                        }),
+                                        }.into(),
                                         timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                         description: Some(format!("Failed to stop child: {}", e)),
                                     });
@@ -760,11 +761,11 @@ impl Handler for SupervisorHandler {
                                     ctx.data_mut().record_event(ChainEventData {
                                         event_type: "theater:simple/supervisor/stop-child"
                                             .to_string(),
-                                        data: EventData::Supervisor(SupervisorEventData::Error {
+                                        data: SupervisorEventData::Error {
                                             operation: "stop-child".to_string(),
                                             child_id: Some(child_id_clone.clone()),
                                             message: e.to_string(),
-                                        }),
+                                        }.into(),
                                         timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                         description: Some(format!(
                                             "Failed to receive stop response: {}",
@@ -779,11 +780,11 @@ impl Handler for SupervisorHandler {
                                 // Record stop child error event
                                 ctx.data_mut().record_event(ChainEventData {
                                     event_type: "theater:simple/supervisor/stop-child".to_string(),
-                                    data: EventData::Supervisor(SupervisorEventData::Error {
+                                    data: SupervisorEventData::Error {
                                         operation: "stop-child".to_string(),
                                         child_id: Some(child_id_clone.clone()),
                                         message: e.to_string(),
-                                    }),
+                                    }.into(),
                                     timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                     description: Some(format!(
                                         "Failed to send stop command: {}",
@@ -804,7 +805,7 @@ impl Handler for SupervisorHandler {
         let _ = interface
             .func_wrap_async(
                 "get-child-state",
-                move |mut ctx: StoreContextMut<'_, ActorStore>,
+                move |mut ctx: StoreContextMut<'_, ActorStore<E>>,
                       (child_id,): (String,)|
                       -> Box<
                     dyn Future<Output = Result<(Result<Option<Vec<u8>>, String>,)>> + Send,
@@ -812,9 +813,9 @@ impl Handler for SupervisorHandler {
                     // Record get child state call event
                     ctx.data_mut().record_event(ChainEventData {
                         event_type: "theater:simple/supervisor/get-child-state".to_string(),
-                        data: EventData::Supervisor(SupervisorEventData::GetChildStateCall {
+                        data: SupervisorEventData::GetChildStateCall {
                             child_id: child_id.clone(),
-                        }),
+                        }.into(),
                         timestamp: chrono::Utc::now().timestamp_millis() as u64,
                         description: Some(format!("Getting state for child: {}", child_id)),
                     });
@@ -834,13 +835,12 @@ impl Handler for SupervisorHandler {
                                         ctx.data_mut().record_event(ChainEventData {
                                             event_type: "theater:simple/supervisor/get-child-state"
                                                 .to_string(),
-                                            data: EventData::Supervisor(
+                                            data: 
                                                 SupervisorEventData::Error {
                                                     operation: "get-child-state".to_string(),
                                                     child_id: Some(child_id_clone.clone()),
                                                     message: e.to_string(),
-                                                },
-                                            ),
+                                                }.into(),
                                             timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                             description: Some(format!(
                                                 "Failed to parse child ID: {}",
@@ -862,13 +862,12 @@ impl Handler for SupervisorHandler {
                                     ctx.data_mut().record_event(ChainEventData {
                                         event_type: "theater:simple/supervisor/get-child-state"
                                             .to_string(),
-                                        data: EventData::Supervisor(
+                                        data: 
                                             SupervisorEventData::GetChildStateResult {
                                                 child_id: child_id_clone.clone(),
                                                 state_size,
                                                 success: true,
-                                            },
-                                        ),
+                                            }.into(),
                                         timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                         description: Some(format!(
                                             "Successfully retrieved state for child {}: {} bytes",
@@ -883,11 +882,11 @@ impl Handler for SupervisorHandler {
                                     ctx.data_mut().record_event(ChainEventData {
                                         event_type: "theater:simple/supervisor/get-child-state"
                                             .to_string(),
-                                        data: EventData::Supervisor(SupervisorEventData::Error {
+                                        data: SupervisorEventData::Error {
                                             operation: "get-child-state".to_string(),
                                             child_id: Some(child_id_clone.clone()),
                                             message: e.to_string(),
-                                        }),
+                                        }.into(),
                                         timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                         description: Some(format!(
                                             "Failed to get child state: {}",
@@ -902,11 +901,11 @@ impl Handler for SupervisorHandler {
                                     ctx.data_mut().record_event(ChainEventData {
                                         event_type: "theater:simple/supervisor/get-child-state"
                                             .to_string(),
-                                        data: EventData::Supervisor(SupervisorEventData::Error {
+                                        data: SupervisorEventData::Error {
                                             operation: "get-child-state".to_string(),
                                             child_id: Some(child_id_clone.clone()),
                                             message: e.to_string(),
-                                        }),
+                                        }.into(),
                                         timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                         description: Some(format!(
                                             "Failed to receive state: {}",
@@ -922,11 +921,11 @@ impl Handler for SupervisorHandler {
                                 ctx.data_mut().record_event(ChainEventData {
                                     event_type: "theater:simple/supervisor/get-child-state"
                                         .to_string(),
-                                    data: EventData::Supervisor(SupervisorEventData::Error {
+                                    data: SupervisorEventData::Error {
                                         operation: "get-child-state".to_string(),
                                         child_id: Some(child_id_clone.clone()),
                                         message: e.to_string(),
-                                    }),
+                                    }.into(),
                                     timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                     description: Some(format!(
                                         "Failed to send state request: {}",
@@ -947,7 +946,7 @@ impl Handler for SupervisorHandler {
         let _ = interface
             .func_wrap_async(
                 "get-child-events",
-                move |mut ctx: StoreContextMut<'_, ActorStore>,
+                move |mut ctx: StoreContextMut<'_, ActorStore<E>>,
                       (child_id,): (String,)|
                       -> Box<
                     dyn Future<Output = Result<(Result<Vec<ChainEvent>, String>,)>> + Send,
@@ -955,9 +954,9 @@ impl Handler for SupervisorHandler {
                     // Record get child events call event
                     ctx.data_mut().record_event(ChainEventData {
                         event_type: "theater:simple/supervisor/get-child-events".to_string(),
-                        data: EventData::Supervisor(SupervisorEventData::GetChildEventsCall {
+                        data: SupervisorEventData::GetChildEventsCall {
                             child_id: child_id.clone(),
-                        }),
+                        }.into(),
                         timestamp: chrono::Utc::now().timestamp_millis() as u64,
                         description: Some(format!("Getting events for child: {}", child_id)),
                     });
@@ -978,13 +977,12 @@ impl Handler for SupervisorHandler {
                                             event_type:
                                                 "theater:simple/supervisor/get-child-events"
                                                     .to_string(),
-                                            data: EventData::Supervisor(
+                                            data: 
                                                 SupervisorEventData::Error {
                                                     operation: "get-child-events".to_string(),
                                                     child_id: Some(child_id_clone.clone()),
                                                     message: e.to_string(),
-                                                },
-                                            ),
+                                                }.into(),
                                             timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                             description: Some(format!(
                                                 "Failed to parse child ID: {}",
@@ -1005,13 +1003,12 @@ impl Handler for SupervisorHandler {
                                     ctx.data_mut().record_event(ChainEventData {
                                         event_type: "theater:simple/supervisor/get-child-events"
                                             .to_string(),
-                                        data: EventData::Supervisor(
+                                        data: 
                                             SupervisorEventData::GetChildEventsResult {
                                                 child_id: child_id_clone.clone(),
                                                 events_count: events.len(),
                                                 success: true,
-                                            },
-                                        ),
+                                            }.into(),
                                         timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                         description: Some(format!(
                                             "Successfully retrieved {} events for child {}",
@@ -1027,11 +1024,11 @@ impl Handler for SupervisorHandler {
                                     ctx.data_mut().record_event(ChainEventData {
                                         event_type: "theater:simple/supervisor/get-child-events"
                                             .to_string(),
-                                        data: EventData::Supervisor(SupervisorEventData::Error {
+                                        data: SupervisorEventData::Error {
                                             operation: "get-child-events".to_string(),
                                             child_id: Some(child_id_clone.clone()),
                                             message: e.to_string(),
-                                        }),
+                                        }.into(),
                                         timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                         description: Some(format!(
                                             "Failed to get child events: {}",
@@ -1046,11 +1043,11 @@ impl Handler for SupervisorHandler {
                                     ctx.data_mut().record_event(ChainEventData {
                                         event_type: "theater:simple/supervisor/get-child-events"
                                             .to_string(),
-                                        data: EventData::Supervisor(SupervisorEventData::Error {
+                                        data: SupervisorEventData::Error {
                                             operation: "get-child-events".to_string(),
                                             child_id: Some(child_id_clone.clone()),
                                             message: e.to_string(),
-                                        }),
+                                        }.into(),
                                         timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                         description: Some(format!(
                                             "Failed to receive events: {}",
@@ -1066,11 +1063,11 @@ impl Handler for SupervisorHandler {
                                 ctx.data_mut().record_event(ChainEventData {
                                     event_type: "theater:simple/supervisor/get-child-events"
                                         .to_string(),
-                                    data: EventData::Supervisor(SupervisorEventData::Error {
+                                    data: SupervisorEventData::Error {
                                         operation: "get-child-events".to_string(),
                                         child_id: Some(child_id_clone.clone()),
                                         message: e.to_string(),
-                                    }),
+                                    }.into(),
                                     timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                     description: Some(format!(
                                         "Failed to send events request: {}",
@@ -1089,7 +1086,7 @@ impl Handler for SupervisorHandler {
         // Record overall setup completion
         actor_component.actor_store.record_event(ChainEventData {
             event_type: "supervisor-setup".to_string(),
-            data: EventData::Supervisor(SupervisorEventData::HandlerSetupSuccess),
+            data: SupervisorEventData::HandlerSetupSuccess.into(),
             timestamp: chrono::Utc::now().timestamp_millis() as u64,
             description: Some("Supervisor host functions setup completed successfully".to_string()),
         });
@@ -1099,7 +1096,7 @@ impl Handler for SupervisorHandler {
         Ok(())
     }
 
-    fn add_export_functions(&self, actor_instance: &mut ActorInstance) -> Result<()> {
+    fn add_export_functions(&self, actor_instance: &mut ActorInstance<E>) -> Result<()> {
         info!("Adding export functions for supervisor");
 
         // Register handle-child-error callback

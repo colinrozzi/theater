@@ -1,3 +1,5 @@
+//! Filesystem handler event types
+
 use serde::{Deserialize, Serialize};
 use wasmtime::component::{ComponentType, Lift, Lower};
 

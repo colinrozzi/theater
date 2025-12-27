@@ -1,5 +1,9 @@
-use crate::store::ContentRef;
+//! Store handler event types
+
 use serde::{Deserialize, Serialize};
+
+// Re-export ContentRef from theater since store events depend on it
+pub use theater::store::ContentRef;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum StoreEventData {

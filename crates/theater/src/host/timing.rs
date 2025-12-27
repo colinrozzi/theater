@@ -3,7 +3,7 @@ use crate::actor::store::ActorStore;
 use crate::actor::types::ActorError;
 use crate::config::actor_manifest::TimingHostConfig;
 use crate::config::enforcement::PermissionChecker;
-use crate::events::timing::TimingEventData;
+// use crate::events::timing::TimingEventData;
 use crate::events::{ChainEventData, EventData};
 use crate::shutdown::ShutdownReceiver;
 use crate::wasm::{ActorComponent, ActorInstance};
@@ -51,7 +51,7 @@ impl TimingHost {
         }
     }
 
-    pub async fn setup_host_functions(&self, actor_component: &mut ActorComponent) -> Result<()> {
+    pub async fn setup_host_functions(&self, actor_component: &mut ActorComponent<EventData>) -> Result<()> {
         // Record setup start
         actor_component.actor_store.record_event(ChainEventData {
             event_type: "timing-setup".to_string(),
@@ -97,7 +97,7 @@ impl TimingHost {
         let _ = interface
             .func_wrap(
                 "now",
-                move |mut ctx: StoreContextMut<'_, ActorStore>, ()| -> Result<(u64,)> {
+                move |mut ctx: StoreContextMut<'_, ActorStore<EventData>>, ()| -> Result<(u64,)> {
                     let now = Utc::now().timestamp_millis() as u64;
 
                     // Record now call event
@@ -138,7 +138,7 @@ impl TimingHost {
         let _ = interface
             .func_wrap_async(
                 "sleep",
-                move |mut ctx: StoreContextMut<'_, ActorStore>,
+                move |mut ctx: StoreContextMut<'_, ActorStore<EventData>>,
                       (duration,): (u64,)|
                       -> Box<dyn Future<Output = Result<(Result<(), String>,)>> + Send> {
                     let now = Utc::now().timestamp_millis() as u64;
@@ -215,7 +215,7 @@ impl TimingHost {
         let _ = interface
             .func_wrap_async(
                 "deadline",
-                move |mut ctx: StoreContextMut<'_, ActorStore>,
+                move |mut ctx: StoreContextMut<'_, ActorStore<EventData>>,
                       (timestamp,): (u64,)|
                       -> Box<dyn Future<Output = Result<(Result<(), String>,)>> + Send> {
                     let now = Utc::now().timestamp_millis() as u64;
@@ -324,7 +324,7 @@ impl TimingHost {
         Ok(())
     }
 
-    pub async fn add_export_functions(&self, _actor_instance: &mut ActorInstance) -> Result<()> {
+    pub async fn add_export_functions(&self, _actor_instance: &mut ActorInstance<EventData>) -> Result<()> {
         info!("No export functions needed for timing host");
         Ok(())
     }

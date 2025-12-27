@@ -22,6 +22,10 @@
 //! let handler = StoreHandler::new(config, None);
 //! ```
 
+pub mod events;
+
+pub use events::StoreEventData;
+
 use std::future::Future;
 use std::pin::Pin;
 use thiserror::Error;
@@ -33,8 +37,7 @@ use theater::actor::store::ActorStore;
 use theater::actor::types::ActorError;
 use theater::config::actor_manifest::StoreHandlerConfig;
 use theater::config::permissions::StorePermissions;
-use theater::events::store::StoreEventData;
-use theater::events::{ChainEventData, EventData};
+use theater::events::{ChainEventData, EventPayload};
 use theater::handler::Handler;
 use theater::shutdown::ShutdownReceiver;
 use theater::store::{ContentRef, ContentStore, Label};
@@ -70,8 +73,11 @@ impl StoreHandler {
     }
 }
 
-impl Handler for StoreHandler {
-    fn create_instance(&self) -> Box<dyn Handler> {
+impl<E> Handler<E> for StoreHandler
+where
+    E: EventPayload + Clone + From<StoreEventData>,
+{
+    fn create_instance(&self) -> Box<dyn Handler<E>> {
         Box::new(self.clone())
     }
 
@@ -91,12 +97,12 @@ impl Handler for StoreHandler {
 
     fn setup_host_functions(
         &mut self,
-        actor_component: &mut ActorComponent,
+        actor_component: &mut ActorComponent<E>,
     ) -> anyhow::Result<()> {
         // Record setup start
         actor_component.actor_store.record_event(ChainEventData {
             event_type: "store-setup".to_string(),
-            data: EventData::Store(StoreEventData::HandlerSetupStart),
+            data: StoreEventData::HandlerSetupStart.into(),
             timestamp: chrono::Utc::now().timestamp_millis() as u64,
             description: Some("Starting store host function setup".to_string()),
         });
@@ -108,7 +114,7 @@ impl Handler for StoreHandler {
                 // Record successful linker instance creation
                 actor_component.actor_store.record_event(ChainEventData {
                     event_type: "store-setup".to_string(),
-                    data: EventData::Store(StoreEventData::LinkerInstanceSuccess),
+                    data: StoreEventData::LinkerInstanceSuccess.into(),
                     timestamp: chrono::Utc::now().timestamp_millis() as u64,
                     description: Some("Successfully created linker instance".to_string()),
                 });
@@ -118,10 +124,9 @@ impl Handler for StoreHandler {
                 // Record the specific error where it happens
                 actor_component.actor_store.record_event(ChainEventData {
                     event_type: "store-setup".to_string(),
-                    data: EventData::Store(StoreEventData::HandlerSetupError {
-                        error: e.to_string(),
+                    data: StoreEventData::HandlerSetupError {                        error: e.to_string(),
                         step: "linker_instance".to_string(),
-                    }),
+                    }.into(),
                     timestamp: chrono::Utc::now().timestamp_millis() as u64,
                     description: Some(format!("Failed to create linker instance: {}", e)),
                 });
@@ -135,24 +140,18 @@ impl Handler for StoreHandler {
         // Setup: new() - Create a new content store
         interface.func_wrap(
             "new",
-            move |mut ctx: StoreContextMut<'_, ActorStore>, (): ()| -> Result<(Result<String, String>,), anyhow::Error> {
+            move |mut ctx: StoreContextMut<'_, ActorStore<E>>, (): ()| -> Result<(Result<String, String>,), anyhow::Error> {
                 // Record store call event
-                ctx.data_mut().record_event(ChainEventData {
-                    event_type: "theater:simple/store/new".to_string(),
-                    data: EventData::Store(StoreEventData::NewStoreCall {}),
-                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                    description: Some("Creating new content store".to_string()),
-                });
+                ctx.data_mut().record_handler_event("theater:simple/store/new".to_string(), StoreEventData::NewStoreCall {}, Some("Creating new content store".to_string()));
 
                 let store = ContentStore::new();
 
                 // Record store result event
                 ctx.data_mut().record_event(ChainEventData {
                     event_type: "theater:simple/store/new".to_string(),
-                    data: EventData::Store(StoreEventData::NewStoreResult {
-                        store_id: store.id().to_string(),
+                    data: StoreEventData::NewStoreResult {                        store_id: store.id().to_string(),
                         success: true,
-                    }),
+                    }.into(),
                     timestamp: chrono::Utc::now().timestamp_millis() as u64,
                     description: Some(format!("New content store created with ID: {}", store.id())),
                 });
@@ -164,15 +163,14 @@ impl Handler for StoreHandler {
         // Setup: store() - Store content
         interface.func_wrap_async(
             "store",
-            move |mut ctx: StoreContextMut<'_, ActorStore>, (store_id, content): (String, Vec<u8>)|
+            move |mut ctx: StoreContextMut<'_, ActorStore<E>>, (store_id, content): (String, Vec<u8>)|
                 -> Box<dyn Future<Output = Result<(Result<ContentRef, String>,), anyhow::Error>> + Send> {
                 // Record store call event
                 ctx.data_mut().record_event(ChainEventData {
                     event_type: "theater:simple/store/store".to_string(),
-                    data: EventData::Store(StoreEventData::StoreCall {
-                        store_id: store_id.clone(),
+                    data: StoreEventData::StoreCall {                        store_id: store_id.clone(),
                         content: content.clone(),
-                    }),
+                    }.into(),
                     timestamp: chrono::Utc::now().timestamp_millis() as u64,
                     description: Some(format!("Storing {} bytes of content", content.len())),
                 });
@@ -187,11 +185,10 @@ impl Handler for StoreHandler {
                     // Record store result event
                     ctx.data_mut().record_event(ChainEventData {
                         event_type: "theater:simple/store/store".to_string(),
-                        data: EventData::Store(StoreEventData::StoreResult {
-                            store_id: store_id.clone(),
+                        data: StoreEventData::StoreResult {                            store_id: store_id.clone(),
                             content_ref: content_ref.clone(),
                             success: true,
-                        }),
+                        }.into(),
                         timestamp: chrono::Utc::now().timestamp_millis() as u64,
                         description: Some(format!("Content stored successfully with hash: {}", content_ref.hash())),
                     });
@@ -204,15 +201,14 @@ impl Handler for StoreHandler {
         // Setup: get() - Retrieve content
         interface.func_wrap_async(
             "get",
-            move |mut ctx: StoreContextMut<'_, ActorStore>, (store_id, content_ref): (String, ContentRef)|
+            move |mut ctx: StoreContextMut<'_, ActorStore<E>>, (store_id, content_ref): (String, ContentRef)|
                 -> Box<dyn Future<Output = Result<(Result<Vec<u8>, String>,), anyhow::Error>> + Send> {
                 // Record get call event
                 ctx.data_mut().record_event(ChainEventData {
                     event_type: "theater:simple/store/get".to_string(),
-                    data: EventData::Store(StoreEventData::GetCall {
-                        store_id: store_id.clone(),
+                    data: StoreEventData::GetCall {                        store_id: store_id.clone(),
                         content_ref: content_ref.clone(),
-                    }),
+                    }.into(),
                     timestamp: chrono::Utc::now().timestamp_millis() as u64,
                     description: Some(format!("Getting content with hash: {}", content_ref.hash())),
                 });
@@ -228,12 +224,11 @@ impl Handler for StoreHandler {
                             // Record get result event
                             ctx.data_mut().record_event(ChainEventData {
                                 event_type: "theater:simple/store/get".to_string(),
-                                data: EventData::Store(StoreEventData::GetResult {
-                                    store_id: store_id.clone(),
+                                data: StoreEventData::GetResult {                                    store_id: store_id.clone(),
                                     content_ref: content_ref.clone(),
                                     content: Some(content.clone()),
                                     success: true,
-                                }),
+                                }.into(),
                                 timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                 description: Some(format!("Retrieved {} bytes of content with hash: {}", content.len(), content_ref.hash())),
                             });
@@ -246,10 +241,9 @@ impl Handler for StoreHandler {
                             // Record get error event
                             ctx.data_mut().record_event(ChainEventData {
                                 event_type: "theater:simple/store/get".to_string(),
-                                data: EventData::Store(StoreEventData::Error {
-                                    operation: "get".to_string(),
+                                data: StoreEventData::Error {                                    operation: "get".to_string(),
                                     message: e.to_string(),
-                                }),
+                                }.into(),
                                 timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                 description: Some(format!("Error retrieving content with hash {}: {}", content_ref.hash(), e)),
                             });
@@ -264,16 +258,15 @@ impl Handler for StoreHandler {
         // Setup: exists() - Check if content exists
         interface.func_wrap_async(
             "exists",
-            move |mut ctx: StoreContextMut<'_, ActorStore>,
+            move |mut ctx: StoreContextMut<'_, ActorStore<E>>,
                   (store_id, content_ref): (String, ContentRef)|
                   -> Box<dyn Future<Output = Result<(Result<bool, String>,), anyhow::Error>> + Send> {
                 // Record exists call event
                 ctx.data_mut().record_event(ChainEventData {
                     event_type: "theater:simple/store/exists".to_string(),
-                    data: EventData::Store(StoreEventData::ExistsCall {
-                        store_id: store_id.clone(),
+                    data: StoreEventData::ExistsCall {                        store_id: store_id.clone(),
                         content_ref: content_ref.clone(),
-                    }),
+                    }.into(),
                     timestamp: chrono::Utc::now().timestamp_millis() as u64,
                     description: Some(format!(
                         "Checking if content with hash {} exists",
@@ -291,12 +284,11 @@ impl Handler for StoreHandler {
                     // Record exists result event
                     ctx.data_mut().record_event(ChainEventData {
                         event_type: "theater:simple/store/exists".to_string(),
-                        data: EventData::Store(StoreEventData::ExistsResult {
-                            store_id: store_id.clone(),
+                        data: StoreEventData::ExistsResult {                            store_id: store_id.clone(),
                             content_ref: content_ref.clone(),
                             exists,
                             success: true,
-                        }),
+                        }.into(),
                         timestamp: chrono::Utc::now().timestamp_millis() as u64,
                         description: Some(format!(
                             "Content with hash {} exists: {}",
@@ -313,17 +305,16 @@ impl Handler for StoreHandler {
         // Setup: label() - Add a label to content
         interface.func_wrap_async(
             "label",
-            move |mut ctx: StoreContextMut<'_, ActorStore>,
+            move |mut ctx: StoreContextMut<'_, ActorStore<E>>,
                   (store_id, label_string, content_ref): (String, String, ContentRef)|
                   -> Box<dyn Future<Output = Result<(Result<(), String>,), anyhow::Error>> + Send> {
                 // Record label call event
                 ctx.data_mut().record_event(ChainEventData {
                     event_type: "theater:simple/store/label".to_string(),
-                    data: EventData::Store(StoreEventData::LabelCall {
-                        store_id: store_id.clone(),
+                    data: StoreEventData::LabelCall {                        store_id: store_id.clone(),
                         label: label_string.clone(),
                         content_ref: content_ref.clone(),
-                    }),
+                    }.into(),
                     timestamp: chrono::Utc::now().timestamp_millis() as u64,
                     description: Some(format!(
                         "Labeling content with hash {} as '{}'",
@@ -345,12 +336,11 @@ impl Handler for StoreHandler {
                             // Record label result event
                             ctx.data_mut().record_event(ChainEventData {
                                 event_type: "theater:simple/store/label".to_string(),
-                                data: EventData::Store(StoreEventData::LabelResult {
-                                    store_id: store_id.clone(),
+                                data: StoreEventData::LabelResult {                                    store_id: store_id.clone(),
                                     label: label_string.clone(),
                                     content_ref: content_ref.clone(),
                                     success: true,
-                                }),
+                                }.into(),
                                 timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                 description: Some(format!(
                                     "Successfully labeled content with hash {} as '{}'",
@@ -367,10 +357,9 @@ impl Handler for StoreHandler {
                             // Record label error event
                             ctx.data_mut().record_event(ChainEventData {
                                 event_type: "theater:simple/store/label".to_string(),
-                                data: EventData::Store(StoreEventData::Error {
-                                    operation: "label".to_string(),
+                                data: StoreEventData::Error {                                    operation: "label".to_string(),
                                     message: e.to_string(),
-                                }),
+                                }.into(),
                                 timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                 description: Some(format!(
                                     "Error labeling content with hash {} as '{}': {}",
@@ -390,16 +379,15 @@ impl Handler for StoreHandler {
         // Setup: get-by-label() - Get content reference by label
         interface.func_wrap_async(
             "get-by-label",
-            move |mut ctx: StoreContextMut<'_, ActorStore>,
+            move |mut ctx: StoreContextMut<'_, ActorStore<E>>,
                   (store_id, label_string): (String, String)|
                   -> Box<dyn Future<Output = Result<(Result<Option<ContentRef>, String>,), anyhow::Error>> + Send> {
                 // Record get-by-label call event
                 ctx.data_mut().record_event(ChainEventData {
                     event_type: "theater:simple/store/get-by-label".to_string(),
-                    data: EventData::Store(StoreEventData::GetByLabelCall {
-                        store_id: store_id.clone(),
+                    data: StoreEventData::GetByLabelCall {                        store_id: store_id.clone(),
                         label: label_string.clone(),
-                    }),
+                    }.into(),
                     timestamp: chrono::Utc::now().timestamp_millis() as u64,
                     description: Some(format!(
                         "Getting content reference by label: {}",
@@ -420,12 +408,11 @@ impl Handler for StoreHandler {
                             // Record get-by-label result event
                             ctx.data_mut().record_event(ChainEventData {
                                 event_type: "theater:simple/store/get-by-label".to_string(),
-                                data: EventData::Store(StoreEventData::GetByLabelResult {
-                                    store_id: store_id.clone(),
+                                data: StoreEventData::GetByLabelResult {                                    store_id: store_id.clone(),
                                     label: label_clone.name().to_string(),
                                     content_ref: content_ref_opt.clone(),
                                     success: true,
-                                }),
+                                }.into(),
                                 timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                 description: Some(format!(
                                     "Successfully retrieved content reference {:?} for label '{}'",
@@ -441,10 +428,9 @@ impl Handler for StoreHandler {
                             // Record get-by-label error event
                             ctx.data_mut().record_event(ChainEventData {
                                 event_type: "theater:simple/store/get-by-label".to_string(),
-                                data: EventData::Store(StoreEventData::Error {
-                                    operation: "get-by-label".to_string(),
+                                data: StoreEventData::Error {                                    operation: "get-by-label".to_string(),
                                     message: e.to_string(),
-                                }),
+                                }.into(),
                                 timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                 description: Some(format!(
                                     "Error retrieving content reference for label '{}': {}",
@@ -462,16 +448,15 @@ impl Handler for StoreHandler {
         // Setup: remove-label() - Remove a label
         interface.func_wrap_async(
             "remove-label",
-            move |mut ctx: StoreContextMut<'_, ActorStore>,
+            move |mut ctx: StoreContextMut<'_, ActorStore<E>>,
                   (store_id, label_string): (String, String)|
                   -> Box<dyn Future<Output = Result<(Result<(), String>,), anyhow::Error>> + Send> {
                 // Record remove-label call event
                 ctx.data_mut().record_event(ChainEventData {
                     event_type: "theater:simple/store/remove-label".to_string(),
-                    data: EventData::Store(StoreEventData::RemoveLabelCall {
-                        store_id: store_id.clone(),
+                    data: StoreEventData::RemoveLabelCall {                        store_id: store_id.clone(),
                         label: label_string.clone(),
-                    }),
+                    }.into(),
                     timestamp: chrono::Utc::now().timestamp_millis() as u64,
                     description: Some(format!("Removing label: {}", label_string)),
                 });
@@ -489,11 +474,10 @@ impl Handler for StoreHandler {
                             // Record remove-label result event
                             ctx.data_mut().record_event(ChainEventData {
                                 event_type: "theater:simple/store/remove-label".to_string(),
-                                data: EventData::Store(StoreEventData::RemoveLabelResult {
-                                    store_id: store_id.clone(),
+                                data: StoreEventData::RemoveLabelResult {                                    store_id: store_id.clone(),
                                     label: label_string.clone(),
                                     success: true,
-                                }),
+                                }.into(),
                                 timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                 description: Some(format!(
                                     "Successfully removed label '{}'",
@@ -509,10 +493,9 @@ impl Handler for StoreHandler {
                             // Record remove-label error event
                             ctx.data_mut().record_event(ChainEventData {
                                 event_type: "theater:simple/store/remove-label".to_string(),
-                                data: EventData::Store(StoreEventData::Error {
-                                    operation: "remove-label".to_string(),
+                                data: StoreEventData::Error {                                    operation: "remove-label".to_string(),
                                     message: e.to_string(),
-                                }),
+                                }.into(),
                                 timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                 description: Some(format!(
                                     "Error removing label '{}': {}",
@@ -530,19 +513,18 @@ impl Handler for StoreHandler {
         // Setup: store-at-label() - Store content and label it
         interface.func_wrap_async(
             "store-at-label",
-            move |mut ctx: StoreContextMut<'_, ActorStore>, (store_id, label_string, content): (String, String, Vec<u8>)|
+            move |mut ctx: StoreContextMut<'_, ActorStore<E>>, (store_id, label_string, content): (String, String, Vec<u8>)|
                 -> Box<dyn Future<Output = Result<(Result<ContentRef, String>,), anyhow::Error>> + Send> {
                 // Record store-at-label call event
-                ctx.data_mut().record_event(ChainEventData {
-                    event_type: "theater:simple/store/store-at-label".to_string(),
-                    data: EventData::Store(StoreEventData::StoreAtLabelCall {
+                ctx.data_mut().record_handler_event(
+                    "theater:simple/store/store-at-label".to_string(),
+                    StoreEventData::StoreAtLabelCall {
                         store_id: store_id.clone(),
                         label: label_string.clone(),
                         content: content.clone(),
-                    }),
-                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                    description: Some(format!("Storing {} bytes of content at label: {}", content.len(), label_string)),
-                });
+                    },
+                    Some(format!("Storing {} bytes of content at label: {}", content.len(), label_string)),
+                );
 
                 let store = ContentStore::from_id(&store_id);
                 let label = Label::new(label_string.clone());
@@ -558,12 +540,11 @@ impl Handler for StoreHandler {
                             // Record store-at-label result event
                             ctx.data_mut().record_event(ChainEventData {
                                 event_type: "theater:simple/store/store-at-label".to_string(),
-                                data: EventData::Store(StoreEventData::StoreAtLabelResult {
-                                    store_id: store_id.clone(),
+                                data: StoreEventData::StoreAtLabelResult {                                    store_id: store_id.clone(),
                                     label: label_string.clone(),
                                     content_ref: content_ref.clone(),
                                     success: true,
-                                }),
+                                }.into(),
                                 timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                 description: Some(format!("Successfully stored content with hash {} at label '{}'", content_ref.hash(), label_clone)),
                             });
@@ -576,10 +557,9 @@ impl Handler for StoreHandler {
                             // Record store-at-label error event
                             ctx.data_mut().record_event(ChainEventData {
                                 event_type: "theater:simple/store/store-at-label".to_string(),
-                                data: EventData::Store(StoreEventData::Error {
-                                    operation: "store-at-label".to_string(),
+                                data: StoreEventData::Error {                                    operation: "store-at-label".to_string(),
                                     message: e.to_string(),
-                                }),
+                                }.into(),
                                 timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                 description: Some(format!("Error storing content at label '{}': {}", label_clone, e)),
                             });
@@ -594,16 +574,15 @@ impl Handler for StoreHandler {
         // Setup: replace-content-at-label() - Replace content at a label
         interface.func_wrap_async(
             "replace-content-at-label",
-            move |mut ctx: StoreContextMut<'_, ActorStore>, (store_id, label_string, content): (String, String, Vec<u8>)|
+            move |mut ctx: StoreContextMut<'_, ActorStore<E>>, (store_id, label_string, content): (String, String, Vec<u8>)|
                 -> Box<dyn Future<Output = Result<(Result<ContentRef, String>,), anyhow::Error>> + Send> {
                 // Record replace-content-at-label call event
                 ctx.data_mut().record_event(ChainEventData {
                     event_type: "theater:simple/store/replace-content-at-label".to_string(),
-                    data: EventData::Store(StoreEventData::ReplaceContentAtLabelCall {
-                        store_id: store_id.clone(),
+                    data: StoreEventData::ReplaceContentAtLabelCall {                        store_id: store_id.clone(),
                         label: label_string.clone(),
                         content: content.clone(),
-                    }),
+                    }.into(),
                     timestamp: chrono::Utc::now().timestamp_millis() as u64,
                     description: Some(format!("Replacing content at label {} with {} bytes of new content", label_string, content.len())),
                 });
@@ -622,12 +601,11 @@ impl Handler for StoreHandler {
                             // Record replace-content-at-label result event
                             ctx.data_mut().record_event(ChainEventData {
                                 event_type: "theater:simple/store/replace-content-at-label".to_string(),
-                                data: EventData::Store(StoreEventData::ReplaceContentAtLabelResult {
-                                    store_id: store_id.clone(),
+                                data: StoreEventData::ReplaceContentAtLabelResult {                                    store_id: store_id.clone(),
                                     label: label_string.clone(),
                                     content_ref: content_ref.clone(),
                                     success: true,
-                                }),
+                                }.into(),
                                 timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                 description: Some(format!("Successfully replaced content at label '{}' with new content (hash: {})", label_clone, content_ref.hash())),
                             });
@@ -640,10 +618,9 @@ impl Handler for StoreHandler {
                             // Record replace-content-at-label error event
                             ctx.data_mut().record_event(ChainEventData {
                                 event_type: "theater:simple/store/replace-content-at-label".to_string(),
-                                data: EventData::Store(StoreEventData::Error {
-                                    operation: "replace-content-at-label".to_string(),
+                                data: StoreEventData::Error {                                    operation: "replace-content-at-label".to_string(),
                                     message: e.to_string(),
-                                }),
+                                }.into(),
                                 timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                 description: Some(format!("Error replacing content at label '{}': {}", label_clone, e)),
                             });
@@ -658,16 +635,15 @@ impl Handler for StoreHandler {
         // Setup: replace-at-label() - Replace content reference at a label
         interface.func_wrap_async(
             "replace-at-label",
-            move |mut ctx: StoreContextMut<'_, ActorStore>, (store_id, label_string, content_ref): (String, String, ContentRef)|
+            move |mut ctx: StoreContextMut<'_, ActorStore<E>>, (store_id, label_string, content_ref): (String, String, ContentRef)|
                 -> Box<dyn Future<Output = Result<(Result<(), String>,), anyhow::Error>> + Send> {
                 // Record replace-at-label call event
                 ctx.data_mut().record_event(ChainEventData {
                     event_type: "theater:simple/store/replace-at-label".to_string(),
-                    data: EventData::Store(StoreEventData::ReplaceAtLabelCall {
-                        store_id: store_id.clone(),
+                    data: StoreEventData::ReplaceAtLabelCall {                        store_id: store_id.clone(),
                         label: label_string.clone(),
                         content_ref: content_ref.clone(),
-                    }),
+                    }.into(),
                     timestamp: chrono::Utc::now().timestamp_millis() as u64,
                     description: Some(format!("Replacing content at label {} with content reference: {}", label_string, content_ref.hash())),
                 });
@@ -685,12 +661,11 @@ impl Handler for StoreHandler {
                             // Record replace-at-label result event
                             ctx.data_mut().record_event(ChainEventData {
                                 event_type: "theater:simple/store/replace-at-label".to_string(),
-                                data: EventData::Store(StoreEventData::ReplaceAtLabelResult {
-                                    store_id: store_id.clone(),
+                                data: StoreEventData::ReplaceAtLabelResult {                                    store_id: store_id.clone(),
                                     label: label_string.clone(),
                                     content_ref: content_ref.clone(),
                                     success: true,
-                                }),
+                                }.into(),
                                 timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                 description: Some(format!("Successfully replaced content at label '{}' with content reference (hash: {})", label_clone, content_ref.hash())),
                             });
@@ -703,10 +678,9 @@ impl Handler for StoreHandler {
                             // Record replace-at-label error event
                             ctx.data_mut().record_event(ChainEventData {
                                 event_type: "theater:simple/store/replace-at-label".to_string(),
-                                data: EventData::Store(StoreEventData::Error {
-                                    operation: "replace-at-label".to_string(),
+                                data: StoreEventData::Error {                                    operation: "replace-at-label".to_string(),
                                     message: e.to_string(),
-                                }),
+                                }.into(),
                                 timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                 description: Some(format!("Error replacing content at label '{}' with reference (hash: {}): {}", label_clone, content_ref.hash(), e)),
                             });
@@ -721,18 +695,13 @@ impl Handler for StoreHandler {
         // Setup: list-all-content() - List all content references
         interface.func_wrap_async(
             "list-all-content",
-            move |mut ctx: StoreContextMut<'_, ActorStore>,
+            move |mut ctx: StoreContextMut<'_, ActorStore<E>>,
                   (store_id,): (String,)|
                   -> Box<dyn Future<Output = Result<(Result<Vec<ContentRef>, String>,), anyhow::Error>> + Send> {
                 // Record list-all-content call event
-                ctx.data_mut().record_event(ChainEventData {
-                    event_type: "theater:simple/store/list-all-content".to_string(),
-                    data: EventData::Store(StoreEventData::ListAllContentCall {
+                ctx.data_mut().record_handler_event("theater:simple/store/list-all-content".to_string(), StoreEventData::ListAllContentCall {
                         store_id: store_id.clone(),
-                    }),
-                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                    description: Some("Listing all content references".to_string()),
-                });
+                    }, Some("Listing all content references".to_string()));
 
                 let store = ContentStore::from_id(&store_id);
 
@@ -745,11 +714,10 @@ impl Handler for StoreHandler {
                             // Record list-all-content result event
                             ctx.data_mut().record_event(ChainEventData {
                                 event_type: "theater:simple/store/list-all-content".to_string(),
-                                data: EventData::Store(StoreEventData::ListAllContentResult {
-                                    store_id: store_id.clone(),
+                                data: StoreEventData::ListAllContentResult {                                    store_id: store_id.clone(),
                                     content_refs: content_refs.clone(),
                                     success: true,
-                                }),
+                                }.into(),
                                 timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                 description: Some(format!(
                                     "Successfully listed {} content references",
@@ -765,10 +733,9 @@ impl Handler for StoreHandler {
                             // Record list-all-content error event
                             ctx.data_mut().record_event(ChainEventData {
                                 event_type: "theater:simple/store/list-all-content".to_string(),
-                                data: EventData::Store(StoreEventData::Error {
-                                    operation: "list-all-content".to_string(),
+                                data: StoreEventData::Error {                                    operation: "list-all-content".to_string(),
                                     message: e.to_string(),
-                                }),
+                                }.into(),
                                 timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                 description: Some(format!(
                                     "Error listing all content references: {}",
@@ -786,18 +753,13 @@ impl Handler for StoreHandler {
         // Setup: calculate-total-size() - Calculate total size of all content
         interface.func_wrap_async(
             "calculate-total-size",
-            move |mut ctx: StoreContextMut<'_, ActorStore>,
+            move |mut ctx: StoreContextMut<'_, ActorStore<E>>,
                   (store_id,): (String,)|
                   -> Box<dyn Future<Output = Result<(Result<u64, String>,), anyhow::Error>> + Send> {
                 // Record calculate-total-size call event
-                ctx.data_mut().record_event(ChainEventData {
-                    event_type: "theater:simple/store/calculate-total-size".to_string(),
-                    data: EventData::Store(StoreEventData::CalculateTotalSizeCall {
+                ctx.data_mut().record_handler_event("theater:simple/store/calculate-total-size".to_string(), StoreEventData::CalculateTotalSizeCall {
                         store_id: store_id.clone(),
-                    }),
-                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                    description: Some("Calculating total size of all content".to_string()),
-                });
+                    }, Some("Calculating total size of all content".to_string()));
 
                 let store = ContentStore::from_id(&store_id);
 
@@ -810,11 +772,10 @@ impl Handler for StoreHandler {
                             // Record calculate-total-size result event
                             ctx.data_mut().record_event(ChainEventData {
                                 event_type: "theater:simple/store/calculate-total-size".to_string(),
-                                data: EventData::Store(StoreEventData::CalculateTotalSizeResult {
-                                    store_id: store_id.clone(),
+                                data: StoreEventData::CalculateTotalSizeResult {                                    store_id: store_id.clone(),
                                     size: total_size,
                                     success: true,
-                                }),
+                                }.into(),
                                 timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                 description: Some(format!(
                                     "Successfully calculated total content size: {} bytes",
@@ -830,10 +791,9 @@ impl Handler for StoreHandler {
                             // Record calculate-total-size error event
                             ctx.data_mut().record_event(ChainEventData {
                                 event_type: "theater:simple/store/calculate-total-size".to_string(),
-                                data: EventData::Store(StoreEventData::Error {
-                                    operation: "calculate-total-size".to_string(),
+                                data: StoreEventData::Error {                                    operation: "calculate-total-size".to_string(),
                                     message: e.to_string(),
-                                }),
+                                }.into(),
                                 timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                 description: Some(format!(
                                     "Error calculating total content size: {}",
@@ -851,15 +811,10 @@ impl Handler for StoreHandler {
         // Setup: list-labels() - List all labels
         interface.func_wrap_async(
             "list-labels",
-            move |mut ctx: StoreContextMut<'_, ActorStore>, (store_id,): (String,)|
+            move |mut ctx: StoreContextMut<'_, ActorStore<E>>, (store_id,): (String,)|
                 -> Box<dyn Future<Output = Result<(Result<Vec<String>, String>,), anyhow::Error>> + Send> {
                 // Record list labels call event
-                ctx.data_mut().record_event(ChainEventData {
-                    event_type: "theater:simple/store/list-labels".to_string(),
-                    data: EventData::Store(StoreEventData::ListLabelsCall { store_id: store_id.clone() }),
-                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                    description: Some("Listing all labels".to_string()),
-                });
+                ctx.data_mut().record_handler_event("theater:simple/store/list-labels".to_string(), StoreEventData::ListLabelsCall { store_id: store_id.clone() }, Some("Listing all labels".to_string()));
 
                 let store = ContentStore::from_id(&store_id);
 
@@ -872,11 +827,10 @@ impl Handler for StoreHandler {
                             // Record list labels result event
                             ctx.data_mut().record_event(ChainEventData {
                                 event_type: "theater:simple/store/list-labels".to_string(),
-                                data: EventData::Store(StoreEventData::ListLabelsResult {
-                                    store_id: store_id.clone(),
+                                data: StoreEventData::ListLabelsResult {                                    store_id: store_id.clone(),
                                     labels: labels.clone(),
                                     success: true,
-                                }),
+                                }.into(),
                                 timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                 description: Some(format!("Successfully listed {} labels", labels.len())),
                             });
@@ -889,10 +843,9 @@ impl Handler for StoreHandler {
                             // Record list labels error event
                             ctx.data_mut().record_event(ChainEventData {
                                 event_type: "theater:simple/store/list-labels".to_string(),
-                                data: EventData::Store(StoreEventData::Error {
-                                    operation: "list-labels".to_string(),
+                                data: StoreEventData::Error {                                    operation: "list-labels".to_string(),
                                     message: e.to_string(),
-                                }),
+                                }.into(),
                                 timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                 description: Some(format!("Error listing labels: {}", e)),
                             });
@@ -907,7 +860,7 @@ impl Handler for StoreHandler {
         // Record overall setup completion
         actor_component.actor_store.record_event(ChainEventData {
             event_type: "store-setup".to_string(),
-            data: EventData::Store(StoreEventData::HandlerSetupSuccess),
+            data: StoreEventData::HandlerSetupSuccess.into(),
             timestamp: chrono::Utc::now().timestamp_millis() as u64,
             description: Some("Store host functions setup completed successfully".to_string()),
         });
@@ -919,7 +872,7 @@ impl Handler for StoreHandler {
 
     fn add_export_functions(
         &self,
-        _actor_instance: &mut ActorInstance,
+        _actor_instance: &mut ActorInstance<E>,
     ) -> anyhow::Result<()> {
         info!("No export functions needed for store handler");
         Ok(())

@@ -4,6 +4,10 @@
 //! This handler allows actors to generate random bytes, integers within ranges, and floating-point
 //! numbers while maintaining security boundaries and resource limits.
 
+pub mod events;
+
+pub use events::RandomEventData;
+
 use rand::prelude::*;
 use rand_chacha::ChaCha20Rng;
 use std::future::Future;
@@ -17,10 +21,12 @@ use theater::actor::store::ActorStore;
 use theater::config::actor_manifest::RandomHandlerConfig;
 use theater::config::enforcement::PermissionChecker;
 use theater::config::permissions::RandomPermissions;
-use theater::events::{random::RandomEventData, ChainEventData, EventData};
+use theater::events::EventPayload;
 use theater::handler::Handler;
 use theater::shutdown::ShutdownReceiver;
 use theater::wasm::{ActorComponent, ActorInstance};
+
+use crate::events::RandomEventData as HandlerEventData;
 
 /// Host for providing random number generation capabilities to WebAssembly actors
 pub struct RandomHandler {
@@ -63,8 +69,11 @@ impl RandomHandler {
     }
 }
 
-impl Handler for RandomHandler {
-    fn create_instance(&self) -> Box<dyn Handler> {
+impl<E> Handler<E> for RandomHandler
+where
+    E: EventPayload + Clone + From<HandlerEventData>,
+{
+    fn create_instance(&self) -> Box<dyn Handler<E>> {
         Box::new(Self::new(self.config.clone(), self.permissions.clone()))
     }
 
@@ -86,7 +95,7 @@ impl Handler for RandomHandler {
 
     fn setup_host_functions(
         &mut self,
-        actor_component: &mut ActorComponent,
+        actor_component: &mut ActorComponent<E>,
     ) -> anyhow::Result<()> {
         // Clone what we need for the closures
         let rng1 = Arc::clone(&self.rng);
@@ -98,50 +107,21 @@ impl Handler for RandomHandler {
         
         let rng3 = Arc::clone(&self.rng);
         let rng4 = Arc::clone(&self.rng);
-        
-        // Record setup start
-        actor_component.actor_store.record_event(ChainEventData {
-            event_type: "random-setup".to_string(),
-            data: EventData::Random(RandomEventData::HandlerSetupStart),
-            timestamp: chrono::Utc::now().timestamp_millis() as u64,
-            description: Some("Starting random host function setup".to_string()),
-        });
 
         info!("Setting up random number generator host functions");
 
-        let mut interface = match actor_component.linker.instance("theater:simple/random") {
-            Ok(interface) => {
-                // Record successful linker instance creation
-                actor_component.actor_store.record_event(ChainEventData {
-                    event_type: "random-setup".to_string(),
-                    data: EventData::Random(RandomEventData::LinkerInstanceSuccess),
-                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                    description: Some("Successfully created linker instance".to_string()),
-                });
-                interface
-            }
-            Err(e) => {
-                // Record the specific error where it happens
-                actor_component.actor_store.record_event(ChainEventData {
-                    event_type: "random-setup".to_string(),
-                    data: EventData::Random(RandomEventData::HandlerSetupError {
-                        error: e.to_string(),
-                        step: "linker_instance".to_string(),
-                    }),
-                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                    description: Some(format!("Failed to create linker instance: {}", e)),
-                });
-                return Err(anyhow::anyhow!(
+        let mut interface = actor_component.linker.instance("theater:simple/random")
+            .map_err(|e| {
+                anyhow::anyhow!(
                     "Could not instantiate theater:simple/random: {}",
                     e
-                ));
-            }
-        };
+                )
+            })?;
 
         // Generate random bytes
         interface.func_wrap_async(
             "random-bytes",
-            move |mut ctx: StoreContextMut<'_, ActorStore>,
+            move |mut ctx: StoreContextMut<'_, ActorStore<E>>,
                   (size,): (u32,)| -> Box<dyn Future<Output = anyhow::Result<(Result<Vec<u8>, String>,)>> + Send> {
                 let rng = Arc::clone(&rng1);
                 let _config = config1.clone();
@@ -149,16 +129,15 @@ impl Handler for RandomHandler {
                 
                 Box::new(async move {
                     let size = size as usize;
-                    
+
                     // Record the random bytes call event
-                    ctx.data_mut().record_event(ChainEventData {
-                        event_type: "theater:simple/random-host/random-bytes".to_string(),
-                        data: EventData::Random(RandomEventData::RandomBytesCall {
+                    ctx.data_mut().record_handler_event(
+                        "theater:simple/random-host/random-bytes".to_string(),
+                        HandlerEventData::RandomBytesCall {
                             requested_size: size,
-                        }),
-                        timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                        description: Some(format!("Generating {} random bytes", size)),
-                    });
+                        },
+                        Some(format!("Generating {} random bytes", size)),
+                    );
 
                     // PERMISSION CHECK BEFORE OPERATION
                     if let Err(e) = PermissionChecker::check_random_operation(
@@ -168,16 +147,15 @@ impl Handler for RandomHandler {
                         None,
                     ) {
                         // Record permission denied event
-                        ctx.data_mut().record_event(ChainEventData {
-                            event_type: "theater:simple/random-host/permission-denied".to_string(),
-                            data: EventData::Random(RandomEventData::PermissionDenied {
+                        ctx.data_mut().record_handler_event(
+                            "theater:simple/random-host/permission-denied".to_string(),
+                            HandlerEventData::PermissionDenied {
                                 operation: "random-bytes".to_string(),
                                 reason: e.to_string(),
-                            }),
-                            timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                            description: Some(format!("Permission denied for random bytes generation: {}", e)),
-                        });
-                        
+                            },
+                            Some(format!("Permission denied for random bytes generation: {}", e)),
+                        );
+
                         return Ok((Err(format!("Permission denied: {}", e)),));
                     }
 
@@ -185,33 +163,31 @@ impl Handler for RandomHandler {
                     match rng.lock() {
                         Ok(mut generator) => {
                             generator.fill_bytes(&mut bytes);
-                            
+
                             // Record successful result
-                            ctx.data_mut().record_event(ChainEventData {
-                                event_type: "theater:simple/random-host/random-bytes".to_string(),
-                                data: EventData::Random(RandomEventData::RandomBytesResult {
+                            ctx.data_mut().record_handler_event(
+                                "theater:simple/random-host/random-bytes".to_string(),
+                                HandlerEventData::RandomBytesResult {
                                     generated_size: size,
                                     success: true,
-                                }),
-                                timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                                description: Some(format!("Successfully generated {} random bytes", size)),
-                            });
-                            
+                                },
+                                Some(format!("Successfully generated {} random bytes", size)),
+                            );
+
                             Ok((Ok(bytes),))
                         }
                         Err(e) => {
                             let error_msg = format!("Failed to acquire RNG lock: {}", e);
-                            
-                            ctx.data_mut().record_event(ChainEventData {
-                                event_type: "theater:simple/random-host/random-bytes".to_string(),
-                                data: EventData::Random(RandomEventData::Error {
+
+                            ctx.data_mut().record_handler_event(
+                                "theater:simple/random-host/random-bytes".to_string(),
+                                HandlerEventData::Error {
                                     operation: "random-bytes".to_string(),
                                     message: error_msg.clone(),
-                                }),
-                                timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                                description: Some(format!("Error generating random bytes: {}", error_msg)),
-                            });
-                            
+                                },
+                                Some(format!("Error generating random bytes: {}", error_msg)),
+                            );
+
                             Ok((Err(error_msg),))
                         }
                     }
@@ -222,7 +198,7 @@ impl Handler for RandomHandler {
         // Generate random integer in range
         interface.func_wrap_async(
             "random-range",
-            move |mut ctx: StoreContextMut<'_, ActorStore>,
+            move |mut ctx: StoreContextMut<'_, ActorStore<E>>,
                   (min, max): (u64, u64)|
                   -> Box<dyn Future<Output = anyhow::Result<(Result<u64, String>,)>> + Send> {
                 let rng = Arc::clone(&rng2);
@@ -230,31 +206,29 @@ impl Handler for RandomHandler {
 
                 Box::new(async move {
                     // Record the random range call event
-                    ctx.data_mut().record_event(ChainEventData {
-                        event_type: "theater:simple/random-host/random-range".to_string(),
-                        data: EventData::Random(RandomEventData::RandomRangeCall { min, max }),
-                        timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                        description: Some(format!(
+                    ctx.data_mut().record_handler_event(
+                        "theater:simple/random-host/random-range".to_string(),
+                        HandlerEventData::RandomRangeCall { min, max },
+                        Some(format!(
                             "Generating random number in range {} to {}",
                             min, max
                         )),
-                    });
+                    );
 
                     if min >= max {
                         let error_msg = format!("Invalid range: min ({}) >= max ({})", min, max);
 
-                        ctx.data_mut().record_event(ChainEventData {
-                            event_type: "theater:simple/random-host/random-range".to_string(),
-                            data: EventData::Random(RandomEventData::Error {
+                        ctx.data_mut().record_handler_event(
+                            "theater:simple/random-host/random-range".to_string(),
+                            HandlerEventData::Error {
                                 operation: "random-range".to_string(),
                                 message: error_msg.clone(),
-                            }),
-                            timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                            description: Some(format!(
+                            },
+                            Some(format!(
                                 "Error generating random range: {}",
                                 error_msg
                             )),
-                        });
+                        );
 
                         return Ok((Err(error_msg),));
                     }
@@ -265,18 +239,17 @@ impl Handler for RandomHandler {
                             max, config.max_int
                         );
 
-                        ctx.data_mut().record_event(ChainEventData {
-                            event_type: "theater:simple/random-host/random-range".to_string(),
-                            data: EventData::Random(RandomEventData::Error {
+                        ctx.data_mut().record_handler_event(
+                            "theater:simple/random-host/random-range".to_string(),
+                            HandlerEventData::Error {
                                 operation: "random-range".to_string(),
                                 message: error_msg.clone(),
-                            }),
-                            timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                            description: Some(format!(
+                            },
+                            Some(format!(
                                 "Error generating random range: {}",
                                 error_msg
                             )),
-                        });
+                        );
 
                         return Ok((Err(error_msg),));
                     }
@@ -286,38 +259,36 @@ impl Handler for RandomHandler {
                             let value = generator.gen_range(min..max);
 
                             // Record successful result
-                            ctx.data_mut().record_event(ChainEventData {
-                                event_type: "theater:simple/random-host/random-range".to_string(),
-                                data: EventData::Random(RandomEventData::RandomRangeResult {
+                            ctx.data_mut().record_handler_event(
+                                "theater:simple/random-host/random-range".to_string(),
+                                HandlerEventData::RandomRangeResult {
                                     min,
                                     max,
                                     value,
                                     success: true,
-                                }),
-                                timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                                description: Some(format!(
+                                },
+                                Some(format!(
                                     "Successfully generated random number {} in range {} to {}",
                                     value, min, max
                                 )),
-                            });
+                            );
 
                             Ok((Ok(value),))
                         }
                         Err(e) => {
                             let error_msg = format!("Failed to acquire RNG lock: {}", e);
 
-                            ctx.data_mut().record_event(ChainEventData {
-                                event_type: "theater:simple/random-host/random-range".to_string(),
-                                data: EventData::Random(RandomEventData::Error {
+                            ctx.data_mut().record_handler_event(
+                                "theater:simple/random-host/random-range".to_string(),
+                                HandlerEventData::Error {
                                     operation: "random-range".to_string(),
                                     message: error_msg.clone(),
-                                }),
-                                timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                                description: Some(format!(
+                                },
+                                Some(format!(
                                     "Error generating random range: {}",
                                     error_msg
                                 )),
-                            });
+                            );
 
                             Ok((Err(error_msg),))
                         }
@@ -329,57 +300,52 @@ impl Handler for RandomHandler {
         // Generate random float between 0.0 and 1.0
         interface.func_wrap_async(
             "random-float",
-            move |mut ctx: StoreContextMut<'_, ActorStore>,
+            move |mut ctx: StoreContextMut<'_, ActorStore<E>>,
                   (): ()|
                   -> Box<dyn Future<Output = anyhow::Result<(Result<f64, String>,)>> + Send> {
                 let rng = Arc::clone(&rng3);
 
                 Box::new(async move {
                     // Record the random float call event
-                    ctx.data_mut().record_event(ChainEventData {
-                        event_type: "theater:simple/random-host/random-float".to_string(),
-                        data: EventData::Random(RandomEventData::RandomFloatCall),
-                        timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                        description: Some(
-                            "Generating random float between 0.0 and 1.0".to_string(),
-                        ),
-                    });
+                    ctx.data_mut().record_handler_event(
+                        "theater:simple/random-host/random-float".to_string(),
+                        HandlerEventData::RandomFloatCall,
+                        Some("Generating random float between 0.0 and 1.0".to_string()),
+                    );
 
                     match rng.lock() {
                         Ok(mut generator) => {
                             let value: f64 = generator.gen();
 
                             // Record successful result
-                            ctx.data_mut().record_event(ChainEventData {
-                                event_type: "theater:simple/random-host/random-float".to_string(),
-                                data: EventData::Random(RandomEventData::RandomFloatResult {
+                            ctx.data_mut().record_handler_event(
+                                "theater:simple/random-host/random-float".to_string(),
+                                HandlerEventData::RandomFloatResult {
                                     value,
                                     success: true,
-                                }),
-                                timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                                description: Some(format!(
+                                },
+                                Some(format!(
                                     "Successfully generated random float: {}",
                                     value
                                 )),
-                            });
+                            );
 
                             Ok((Ok(value),))
                         }
                         Err(e) => {
                             let error_msg = format!("Failed to acquire RNG lock: {}", e);
 
-                            ctx.data_mut().record_event(ChainEventData {
-                                event_type: "theater:simple/random-host/random-float".to_string(),
-                                data: EventData::Random(RandomEventData::Error {
+                            ctx.data_mut().record_handler_event(
+                                "theater:simple/random-host/random-float".to_string(),
+                                HandlerEventData::Error {
                                     operation: "random-float".to_string(),
                                     message: error_msg.clone(),
-                                }),
-                                timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                                description: Some(format!(
+                                },
+                                Some(format!(
                                     "Error generating random float: {}",
                                     error_msg
                                 )),
-                            });
+                            );
 
                             Ok((Err(error_msg),))
                         }
@@ -390,50 +356,47 @@ impl Handler for RandomHandler {
 
         interface.func_wrap_async(
             "generate-uuid",
-            move |mut ctx: StoreContextMut<'_, ActorStore>,
+            move |mut ctx: StoreContextMut<'_, ActorStore<E>>,
                   (): ()| -> Box<dyn Future<Output = anyhow::Result<(Result<String, String>,)>> + Send> {
                 let rng = Arc::clone(&rng4);
                 
                 Box::new(async move {
                     // Record the UUID generation call event
-                    ctx.data_mut().record_event(ChainEventData {
-                        event_type: "theater:simple/random-host/generate-uuid".to_string(),
-                        data: EventData::Random(RandomEventData::GenerateUuidCall),
-                        timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                        description: Some("Generating random UUID".to_string()),
-                    });
+                    ctx.data_mut().record_handler_event(
+                        "theater:simple/random-host/generate-uuid".to_string(),
+                        HandlerEventData::GenerateUuidCall,
+                        Some("Generating random UUID".to_string()),
+                    );
 
                     match rng.lock() {
                         Ok(_generator) => {
                             let uuid = uuid::Uuid::new_v4();
                             let uuid_str = uuid.to_string();
-                            
+
                             // Record successful result
-                            ctx.data_mut().record_event(ChainEventData {
-                                event_type: "theater:simple/random-host/generate-uuid".to_string(),
-                                data: EventData::Random(RandomEventData::GenerateUuidResult {
+                            ctx.data_mut().record_handler_event(
+                                "theater:simple/random-host/generate-uuid".to_string(),
+                                HandlerEventData::GenerateUuidResult {
                                     uuid: uuid_str.clone(),
                                     success: true,
-                                }),
-                                timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                                description: Some(format!("Successfully generated UUID: {}", uuid_str)),
-                            });
-                            
+                                },
+                                Some(format!("Successfully generated UUID: {}", uuid_str)),
+                            );
+
                             Ok((Ok(uuid_str),))
                         }
                         Err(e) => {
                             let error_msg = format!("Failed to acquire RNG lock: {}", e);
-                            
-                            ctx.data_mut().record_event(ChainEventData {
-                                event_type: "theater:simple/random-host/generate-uuid".to_string(),
-                                data: EventData::Random(RandomEventData::Error {
+
+                            ctx.data_mut().record_handler_event(
+                                "theater:simple/random-host/generate-uuid".to_string(),
+                                HandlerEventData::Error {
                                     operation: "generate-uuid".to_string(),
                                     message: error_msg.clone(),
-                                }),
-                                timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                                description: Some(format!("Error generating UUID: {}", error_msg)),
-                            });
-                            
+                                },
+                                Some(format!("Error generating UUID: {}", error_msg)),
+                            );
+
                             Ok((Err(error_msg),))
                         }
                     }
@@ -441,21 +404,13 @@ impl Handler for RandomHandler {
             },
         )?;
 
-        // Record overall setup completion
-        actor_component.actor_store.record_event(ChainEventData {
-            event_type: "random-setup".to_string(),
-            data: EventData::Random(RandomEventData::HandlerSetupSuccess),
-            timestamp: chrono::Utc::now().timestamp_millis() as u64,
-            description: Some("Random host functions setup completed successfully".to_string()),
-        });
-
         info!("Random number generator host functions setup complete");
         Ok(())
     }
 
     fn add_export_functions(
         &self,
-        _actor_instance: &mut ActorInstance,
+        _actor_instance: &mut ActorInstance<E>,
     ) -> anyhow::Result<()> {
         // Random handler doesn't export functions to actors, only provides host functions
         Ok(())

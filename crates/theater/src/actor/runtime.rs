@@ -10,7 +10,7 @@ use crate::actor::types::ActorError;
 use crate::actor::types::ActorOperation;
 use crate::events::theater_runtime::TheaterRuntimeEventData;
 use crate::events::wasm::WasmEventData;
-use crate::events::{ChainEventData, EventData};
+use crate::events::{ChainEventData, EventPayload};
 use crate::handler::Handler;
 use crate::handler::HandlerRegistry;
 use crate::id::TheaterId;
@@ -48,12 +48,13 @@ const SHUTDOWN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 /// `ActorRuntime` manages the various components that make up an actor's execution environment,
 /// including handlers and communication channels. It's responsible for starting the actor,
 /// setting up its capabilities via handlers, executing operations, and ensuring proper shutdown.
-pub struct ActorRuntime {
+#[allow(dead_code)]
+pub struct ActorRuntime<E: EventPayload + Clone> {
     /// Unique identifier for this actor
     pub id: TheaterId,
     config: ManifestConfig,
-    handlers: Vec<Box<dyn Handler>>,
-    actor_instance: ActorInstance,
+    handlers: Vec<Box<dyn Handler<E>>>,
+    actor_instance: ActorInstance<E>,
     metrics: MetricsCollector,
     operation_rx: Receiver<ActorOperation>,
     info_rx: Receiver<ActorInfo>,
@@ -190,20 +191,23 @@ impl ActorPhaseManager {
     }
 }
 
-impl ActorRuntime {
+impl<E: EventPayload + Clone> ActorRuntime<E> {
     pub async fn build_actor_resources(
         id: TheaterId,
         config: &ManifestConfig,
         initial_state: Option<Value>,
         engine: Engine,
-        chain: Arc<SyncRwLock<StateChain>>,
-        mut handler_registry: HandlerRegistry,
+        chain: Arc<SyncRwLock<StateChain<E>>>,
+        mut handler_registry: HandlerRegistry<E>,
         theater_tx: Sender<TheaterCommand>,
         operation_tx: Sender<ActorOperation>,
         info_tx: Sender<ActorInfo>,
         control_tx: Sender<ActorControl>,
         actor_phase_manager: ActorPhaseManager,
-    ) -> Result<(ActorInstance, ShutdownController, Vec<JoinHandle<()>>), ActorRuntimeError> {
+    ) -> Result<(ActorInstance<E>, ShutdownController, Vec<JoinHandle<()>>), ActorRuntimeError>
+    where
+        E: From<TheaterRuntimeEventData> + From<WasmEventData>,
+    {
         // ---------------- Checkpoint Setup Initial ----------------
 
         debug!("Setting up actor store");
@@ -224,9 +228,9 @@ impl ActorRuntime {
 
         actor_store.record_event(ChainEventData {
             event_type: "theater-runtime".to_string(),
-            data: EventData::TheaterRuntime(TheaterRuntimeEventData::ActorLoadCall {
+            data: TheaterRuntimeEventData::ActorLoadCall {
                 manifest: config.clone(),
-            }),
+            }.into(),
             timestamp: chrono::Utc::now().timestamp_millis() as u64,
             description: format!("Initial values set up for [{}]", id).into(),
         });
@@ -260,9 +264,9 @@ impl ActorRuntime {
 
         actor_store.record_event(ChainEventData {
             event_type: "theater-runtime".to_string(),
-            data: EventData::TheaterRuntime(TheaterRuntimeEventData::ActorLoadCall {
+            data: TheaterRuntimeEventData::ActorLoadCall {
                 manifest: config.clone(),
-            }),
+            }.into(),
             timestamp: chrono::Utc::now().timestamp_millis() as u64,
             description: format!("Manifest for actor [{}] stored at [{}]", id, manifest_id).into(),
         });
@@ -298,7 +302,7 @@ impl ActorRuntime {
 
         actor_component.actor_store.record_event(ChainEventData {
             event_type: "theater-runtime".to_string(),
-            data: EventData::TheaterRuntime(TheaterRuntimeEventData::CreatingHandlers),
+            data: TheaterRuntimeEventData::CreatingHandlers.into(),
             timestamp: chrono::Utc::now().timestamp_millis() as u64,
             description: format!("Created handlers for actor [{}]", id).into(),
         });
@@ -320,7 +324,7 @@ impl ActorRuntime {
 
         actor_component.actor_store.record_event(ChainEventData {
             event_type: "theater-runtime".to_string(),
-            data: EventData::TheaterRuntime(TheaterRuntimeEventData::CreatingHandlers),
+            data: TheaterRuntimeEventData::CreatingHandlers.into(),
             timestamp: chrono::Utc::now().timestamp_millis() as u64,
             description: format!("Set up handlers for actor [{}]", id).into(),
         });
@@ -339,12 +343,12 @@ impl ActorRuntime {
         }
 
         handlers.iter_mut().for_each(|handler| {
-            handler.setup_host_functions(&mut actor_component);
+            let _ = handler.setup_host_functions(&mut actor_component);
         });
 
         actor_component.actor_store.record_event(ChainEventData {
             event_type: "theater-runtime".to_string(),
-            data: EventData::TheaterRuntime(TheaterRuntimeEventData::CreatingHandlers),
+            data: TheaterRuntimeEventData::CreatingHandlers.into(),
             timestamp: chrono::Utc::now().timestamp_millis() as u64,
             description: format!("Set up host functions for actor [{}]", id).into(),
         });
@@ -375,7 +379,7 @@ impl ActorRuntime {
             .actor_store
             .record_event(ChainEventData {
                 event_type: "theater-runtime".to_string(),
-                data: EventData::TheaterRuntime(TheaterRuntimeEventData::InstantiatingActor),
+                data: TheaterRuntimeEventData::InstantiatingActor.into(),
                 timestamp: chrono::Utc::now().timestamp_millis() as u64,
                 description: format!("Instantiated actor [{}]", id).into(),
             });
@@ -394,7 +398,7 @@ impl ActorRuntime {
         }
 
         handlers.iter_mut().for_each(|handler| {
-            handler.add_export_functions(&mut actor_instance);
+            let _ = handler.add_export_functions(&mut actor_instance);
         });
 
         actor_instance
@@ -402,7 +406,7 @@ impl ActorRuntime {
             .actor_store
             .record_event(ChainEventData {
                 event_type: "theater-runtime".to_string(),
-                data: EventData::TheaterRuntime(TheaterRuntimeEventData::CreatingHandlers),
+                data: TheaterRuntimeEventData::CreatingHandlers.into(),
                 timestamp: chrono::Utc::now().timestamp_millis() as u64,
                 description: format!("Added export functions for actor [{}]", id).into(),
             });
@@ -435,7 +439,7 @@ impl ActorRuntime {
             .actor_store
             .record_event(ChainEventData {
                 event_type: "theater-runtime".to_string(),
-                data: EventData::TheaterRuntime(TheaterRuntimeEventData::InitializingState),
+                data: TheaterRuntimeEventData::InitializingState.into(),
                 timestamp: chrono::Utc::now().timestamp_millis() as u64,
                 description: format!("Initialized state for actor [{}]", id).into(),
             });
@@ -496,7 +500,7 @@ impl ActorRuntime {
             .actor_store
             .record_event(ChainEventData {
                 event_type: "theater-runtime".to_string(),
-                data: EventData::TheaterRuntime(TheaterRuntimeEventData::ActorReady),
+                data: TheaterRuntimeEventData::ActorReady.into(),
                 timestamp: chrono::Utc::now().timestamp_millis() as u64,
                 description: format!("Actor [{}] is ready", id).into(),
             });
@@ -509,8 +513,8 @@ impl ActorRuntime {
         config: &ManifestConfig,
         initial_state: Option<Value>,
         engine: Engine,
-        chain: Arc<SyncRwLock<StateChain>>,
-        handler_registry: HandlerRegistry,
+        chain: Arc<SyncRwLock<StateChain<E>>>,
+        handler_registry: HandlerRegistry<E>,
         theater_tx: Sender<TheaterCommand>,
         operation_rx: Receiver<ActorOperation>,
         operation_tx: Sender<ActorOperation>,
@@ -518,12 +522,15 @@ impl ActorRuntime {
         info_tx: Sender<ActorInfo>,
         control_rx: Receiver<ActorControl>,
         control_tx: Sender<ActorControl>,
-    ) -> () {
+    ) -> ()
+    where
+        E: From<TheaterRuntimeEventData> + From<WasmEventData>,
+    {
         info!("Actor runtime starting communication loops");
         let actor_phase_manager = ActorPhaseManager::new();
 
         // These will be set once setup completes
-        let actor_instance_wrapper: Arc<RwLock<Option<ActorInstance>>> =
+        let actor_instance_wrapper: Arc<RwLock<Option<ActorInstance<E>>>> =
             Arc::new(RwLock::new(None));
         let metrics: Arc<RwLock<MetricsCollector>> = Arc::new(RwLock::new(MetricsCollector::new()));
         let handler_tasks: Arc<RwLock<Vec<JoinHandle<()>>>> = Arc::new(RwLock::new(vec![]));
@@ -712,11 +719,14 @@ impl ActorRuntime {
 
     async fn operation_loop(
         mut operation_rx: Receiver<ActorOperation>,
-        actor_instance_wrapper: Arc<RwLock<Option<ActorInstance>>>,
+        actor_instance_wrapper: Arc<RwLock<Option<ActorInstance<E>>>>,
         metrics: Arc<RwLock<MetricsCollector>>,
         theater_tx: Sender<TheaterCommand>,
         actor_phase_manager: ActorPhaseManager,
-    ) {
+    )
+    where
+        E: From<TheaterRuntimeEventData> + From<WasmEventData>,
+    {
         actor_phase_manager
             .wait_for_phase(ActorPhase::Running)
             .await;
@@ -746,11 +756,14 @@ impl ActorRuntime {
 
     async fn process_operation(
         op: ActorOperation,
-        actor_instance_wrapper: &Arc<RwLock<Option<ActorInstance>>>,
+        actor_instance_wrapper: &Arc<RwLock<Option<ActorInstance<E>>>>,
         metrics: &Arc<RwLock<MetricsCollector>>,
         theater_tx: &Sender<TheaterCommand>,
         actor_phase_manager: ActorPhaseManager,
-    ) -> () {
+    ) -> ()
+    where
+        E: From<TheaterRuntimeEventData> + From<WasmEventData>,
+    {
         match op {
             ActorOperation::CallFunction {
                 name,
@@ -816,10 +829,13 @@ impl ActorRuntime {
 
     async fn info_loop(
         mut info_rx: Receiver<ActorInfo>,
-        actor_instance_wrapper: Arc<RwLock<Option<ActorInstance>>>,
+        actor_instance_wrapper: Arc<RwLock<Option<ActorInstance<E>>>>,
         metrics: Arc<RwLock<MetricsCollector>>,
         actor_phase_manager: ActorPhaseManager,
-    ) {
+    )
+    where
+        E: From<TheaterRuntimeEventData> + From<WasmEventData>,
+    {
         // Handle info requests
         loop {
             tokio::select! {
@@ -936,12 +952,15 @@ impl ActorRuntime {
     /// * `Ok(Vec<u8>)` - Serialized result of the function call
     /// * `Err(ActorError)` - Error that occurred during execution
     async fn execute_call(
-        actor_instance: &mut ActorInstance,
+        actor_instance: &mut ActorInstance<E>,
         name: &String,
         params: Vec<u8>,
         _theater_tx: &mpsc::Sender<TheaterCommand>,
         metrics: &MetricsCollector,
-    ) -> Result<Vec<u8>, ActorError> {
+    ) -> Result<Vec<u8>, ActorError>
+    where
+        E: From<TheaterRuntimeEventData> + From<WasmEventData>,
+    {
         // Validate the function exists
         if !actor_instance.has_function(&name) {
             error!("Function '{}' not found in actor", name);
@@ -964,10 +983,10 @@ impl ActorRuntime {
                 event_type: "wasm".to_string(),
                 timestamp: chrono::Utc::now().timestamp_millis() as u64,
                 description: Some(format!("Wasm call to function '{}'", name)),
-                data: EventData::Wasm(WasmEventData::WasmCall {
+                data: WasmEventData::WasmCall {
                     function_name: name.clone(),
                     params: params.clone(),
-                }),
+                }.into(),
             });
 
         // Execute the call
@@ -980,10 +999,10 @@ impl ActorRuntime {
                         event_type: "wasm".to_string(),
                         timestamp: chrono::Utc::now().timestamp_millis() as u64,
                         description: Some(format!("Wasm call to function '{}' completed", name)),
-                        data: EventData::Wasm(WasmEventData::WasmResult {
+                        data: WasmEventData::WasmResult {
                             function_name: name.clone(),
                             result: result.clone(),
-                        }),
+                        }.into(),
                     });
                 result
             }
@@ -995,10 +1014,10 @@ impl ActorRuntime {
                         event_type: "wasm".to_string(),
                         timestamp: chrono::Utc::now().timestamp_millis() as u64,
                         description: Some(format!("Wasm call to function '{}' failed", name)),
-                        data: EventData::Wasm(WasmEventData::WasmError {
+                        data: WasmEventData::WasmError {
                             function_name: name.clone(),
                             message: e.to_string(),
-                        }),
+                        }.into(),
                     });
 
                 error!("Failed to execute function '{}': {}", name, e);

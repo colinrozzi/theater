@@ -134,7 +134,7 @@ impl MessageServerHost {
         interface
             .func_wrap_async(
                 "send",
-                move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore>,
+                move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore<EventData>>,
                       (address, msg): (String, Vec<u8>)|
                       -> Box<dyn Future<Output = Result<(Result<(), String>,)>> + Send> {
                     // Record the message send call event
@@ -250,7 +250,7 @@ impl MessageServerHost {
         interface
             .func_wrap_async(
                 "request",
-                move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore>,
+                move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore<EventData>>,
                       (address, msg): (String, Vec<u8>)|
                       -> Box<dyn Future<Output = Result<(Result<Vec<u8>, String>,)>> + Send> {
                     // Record the message request call event
@@ -389,7 +389,7 @@ impl MessageServerHost {
         interface
             .func_wrap_async(
                 "list-outstanding-requests",
-                move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore>,
+                move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore<EventData>>,
                       _: ()|
                       -> Box<dyn Future<Output = Result<(Vec<String>,)>> + Send> {
                     // Record the list-outstanding-requests event
@@ -474,7 +474,7 @@ impl MessageServerHost {
         interface
             .func_wrap_async(
                 "respond-to-request",
-                move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore>,
+                move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore<EventData>>,
                       (request_id, response_data): (String, Vec<u8>)|
                       -> Box<dyn Future<Output = Result<(Result<(), String>,)>> + Send> {
                     
@@ -584,7 +584,7 @@ impl MessageServerHost {
         interface
             .func_wrap_async(
                 "cancel-request",
-                move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore>,
+                move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore<EventData>>,
                       (request_id,): (String,)|
                       -> Box<dyn Future<Output = Result<(Result<(), String>,)>> + Send> {
                     
@@ -678,7 +678,7 @@ impl MessageServerHost {
         interface
             .func_wrap_async(
                 "open-channel",
-                move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore>,
+                move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore<EventData>>,
                       (address, initial_msg): (String, Vec<u8>)|
                       -> Box<dyn Future<Output = Result<(Result<String, String>,)>> + Send> {
                     // Get the current actor ID
@@ -865,7 +865,7 @@ impl MessageServerHost {
         interface
             .func_wrap_async(
                 "send-on-channel",
-                move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore>,
+                move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore<EventData>>,
                       (channel_id, msg): (String, Vec<u8>)|
                       -> Box<dyn Future<Output = Result<(Result<(), String>,)>> + Send> {
                     let channel_id_clone = channel_id.clone();
@@ -983,7 +983,7 @@ impl MessageServerHost {
         interface
             .func_wrap_async(
                 "close-channel",
-                move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore>,
+                move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore<EventData>>,
                       (channel_id,): (String,)|
                       -> Box<dyn Future<Output = Result<(Result<(), String>,)>> + Send> {
                     let channel_id_clone = channel_id.clone();
@@ -1078,7 +1078,7 @@ impl MessageServerHost {
         Ok(())
     }
 
-    pub async fn add_export_functions(&self, actor_instance: &mut ActorInstance) -> Result<()> {
+    pub async fn add_export_functions(&self, actor_instance: &mut ActorInstance<EventData>) -> Result<()> {
         actor_instance
             .register_function_no_result::<(Vec<u8>,)>(
                 "theater:simple/message-server-client",

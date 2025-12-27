@@ -1,6 +1,6 @@
 use crate::actor::handle::ActorHandle;
 use crate::actor::store::ActorStore;
-use crate::events::http::HttpEventData;
+// use crate::events::http::HttpEventData;
 use crate::events::{ChainEventData, EventData};
 use crate::shutdown::ShutdownReceiver;
 use crate::wasm::{ActorComponent, ActorInstance};
@@ -105,7 +105,7 @@ impl HttpFramework {
         }
     }
 
-    pub async fn setup_host_functions(&self, actor_component: &mut ActorComponent) -> Result<()> {
+    pub async fn setup_host_functions(&self, actor_component: &mut ActorComponent<EventData>) -> Result<()> {
         // Record setup start
         actor_component.actor_store.record_event(ChainEventData {
             event_type: "http-framework-setup".to_string(),
@@ -159,7 +159,7 @@ impl HttpFramework {
         // Create server implementation
         interface.func_wrap(
             "create-server",
-            move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore>,
+            move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore<EventData>>,
                   (config,): (ServerConfig,)|
                   -> Result<(Result<u64, String>,)> {
                 let server_id = next_server_id.fetch_add(1, Ordering::SeqCst);
@@ -215,7 +215,7 @@ impl HttpFramework {
         let servers_clone = self.servers.clone();
         interface.func_wrap(
             "get-server-info",
-            move |_ctx: wasmtime::StoreContextMut<'_, ActorStore>,
+            move |_ctx: wasmtime::StoreContextMut<'_, ActorStore<EventData>>,
                   (server_id,): (u64,)|
                   -> Result<(Result<ServerInfo, String>,)> {
                 let servers_clone = servers_clone.clone();
@@ -247,7 +247,7 @@ impl HttpFramework {
         let server_handles_clone = self.server_handles.clone();
         interface.func_wrap_async(
             "start-server",
-            move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore>,
+            move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore<EventData>>,
                   (server_id,): (u64,)|
                   -> Box<dyn Future<Output = Result<(Result<u16, String>,)>> + Send> {
                 let servers_clone = servers_clone.clone();
@@ -338,7 +338,7 @@ impl HttpFramework {
         let server_handles_clone = self.server_handles.clone();
         interface.func_wrap_async(
             "stop-server",
-            move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore>,
+            move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore<EventData>>,
                   (server_id,): (u64,)|
                   -> Box<dyn Future<Output = Result<(Result<(), String>,)>> + Send> {
                 let servers_clone = servers_clone.clone();
@@ -404,7 +404,7 @@ impl HttpFramework {
         let server_handles_clone = self.server_handles.clone();
         interface.func_wrap_async(
             "destroy-server",
-            move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore>,
+            move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore<EventData>>,
                   (server_id,): (u64,)|
                   -> Box<dyn Future<Output = Result<(Result<(), String>,)>> + Send> {
                 let servers_clone = servers_clone.clone();
@@ -461,7 +461,7 @@ impl HttpFramework {
         let next_handler_id = self.next_handler_id.clone();
         interface.func_wrap(
             "register-handler",
-            move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore>,
+            move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore<EventData>>,
                   (handler_name,): (String,)|
                   -> Result<(Result<u64, String>,)> {
                 let handlers_clone = handlers_clone.clone();
@@ -509,7 +509,7 @@ impl HttpFramework {
         let next_route_id = self.next_route_id.clone();
         interface.func_wrap(
             "add-route",
-            move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore>,
+            move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore<EventData>>,
                   (server_id, path, method, handler_id): (u64, String, String, u64)|
                   -> Result<(Result<u64, String>,)> {
                 let servers_clone = servers_clone.clone();
@@ -602,7 +602,7 @@ impl HttpFramework {
         let servers_clone = self.servers.clone();
         interface.func_wrap(
             "remove-route",
-            move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore>,
+            move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore<EventData>>,
                   (route_id,): (u64,)|
                   -> Result<(Result<(), String>,)> {
                 let servers_clone = servers_clone.clone();
@@ -667,7 +667,7 @@ impl HttpFramework {
         let next_middleware_id = self.next_middleware_id.clone();
         interface.func_wrap(
             "add-middleware",
-            move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore>,
+            move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore<EventData>>,
                   (server_id, path, handler_id): (u64, String, u64)|
                   -> Result<(Result<u64, String>,)> {
                 let servers_clone = servers_clone.clone();
@@ -743,7 +743,7 @@ impl HttpFramework {
         let servers_clone = self.servers.clone();
         interface.func_wrap(
             "remove-middleware",
-            move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore>,
+            move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore<EventData>>,
                   (middleware_id,): (u64,)|
                   -> Result<(Result<(), String>,)> {
                 let servers_clone = servers_clone.clone();
@@ -807,7 +807,7 @@ impl HttpFramework {
         let handlers_clone = self.handlers.clone();
         interface.func_wrap(
             "enable-websocket",
-            move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore>,
+            move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore<EventData>>,
                   (
                 server_id,
                 path,
@@ -921,7 +921,7 @@ impl HttpFramework {
         let servers_clone = self.servers.clone();
         interface.func_wrap(
             "disable-websocket",
-            move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore>,
+            move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore<EventData>>,
                   (server_id, path): (u64, String)|
                   -> Result<(Result<(), String>,)> {
                 let servers_clone = servers_clone.clone();
@@ -973,7 +973,7 @@ impl HttpFramework {
         let servers_clone = self.servers.clone();
         interface.func_wrap(
             "send-websocket-message",
-            move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore>,
+            move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore<EventData>>,
                   (server_id, connection_id, message): (u64, u64, WebSocketMessage)|
                   -> Result<(Result<(), String>,)> {
                 let servers_clone = servers_clone.clone();
@@ -1049,7 +1049,7 @@ impl HttpFramework {
         let servers_clone = self.servers.clone();
         interface.func_wrap(
             "close-websocket",
-            move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore>,
+            move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore<EventData>>,
                   (server_id, connection_id): (u64, u64)|
                   -> Result<(Result<(), String>,)> {
                 let servers_clone = servers_clone.clone();
@@ -1126,7 +1126,7 @@ impl HttpFramework {
         Ok(())
     }
 
-    pub async fn add_export_functions(&self, actor_instance: &mut ActorInstance) -> Result<()> {
+    pub async fn add_export_functions(&self, actor_instance: &mut ActorInstance<EventData>) -> Result<()> {
         info!("Adding export functions for HTTP framework");
 
         match actor_instance.register_function::<(u64, HttpRequest), (HttpResponse,)>(

@@ -15,6 +15,131 @@ impl<T> EventPayload for T where
 {
 }
 
+/// # Theater Events Wrapper
+///
+/// `TheaterEvents<H>` is a wrapper enum that combines core Theater runtime events
+/// with handler-specific events. This allows applications to define only the handler
+/// events they need while ensuring core runtime events are always available.
+///
+/// ## Purpose
+///
+/// This enum provides a type-safe way to compose events from different handlers
+/// while maintaining compile-time safety. Applications define their own handler
+/// event enum `H` and the type system enforces that all handlers implement
+/// proper event conversion.
+///
+/// ## Type Parameters
+///
+/// * `H` - The application's handler event enum type, which must be serializable,
+///   cloneable, and implement Send + Sync for thread safety.
+///
+/// ## Example
+///
+/// ```rust
+/// use theater::events::TheaterEvents;
+/// use theater_handler_environment::EnvironmentEventData;
+/// use serde::{Deserialize, Serialize};
+///
+/// // Define your application's handler events
+/// #[derive(Debug, Clone, Serialize, Deserialize)]
+/// pub enum MyHandlerEvents {
+///     Environment(EnvironmentEventData),
+///     // ... other handlers you use
+/// }
+///
+/// // Your application's complete event type
+/// pub type MyAppEvents = TheaterEvents<MyHandlerEvents>;
+///
+/// // Implement From trait for type-safe event recording
+/// impl From<EnvironmentEventData> for MyAppEvents {
+///     fn from(event: EnvironmentEventData) -> Self {
+///         TheaterEvents::Handler(MyHandlerEvents::Environment(event))
+///     }
+/// }
+/// ```
+///
+/// ## Core Event Categories
+///
+/// - **Runtime**: Actor lifecycle events (init, shutdown, state changes, logs, errors)
+/// - **Wasm**: WebAssembly execution events (component creation, function calls)
+/// - **TheaterRuntime**: System-level events (actor loading, permissions, updates)
+/// - **Handler**: Application-specific handler events (defined by application)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "category")]
+#[serde(bound(
+    serialize = "H: Serialize",
+    deserialize = "H: serde::de::DeserializeOwned"
+))]
+pub enum TheaterEvents<H>
+where
+    H: Serialize + serde::de::DeserializeOwned + Clone + Send + Sync,
+{
+    /// Core actor runtime events (lifecycle, init, shutdown, state, logs)
+    Runtime(runtime::RuntimeEventData),
+
+    /// Core WASM execution events (component creation, function calls)
+    Wasm(wasm::WasmEventData),
+
+    /// Core theater system events (actor loading, permissions, updates)
+    TheaterRuntime(theater_runtime::TheaterRuntimeEventData),
+
+    /// Handler-specific events (environment, HTTP, timing, etc.)
+    Handler(H),
+}
+
+impl<H> TheaterEvents<H>
+where
+    H: Serialize + serde::de::DeserializeOwned + Clone + Send + Sync,
+{
+    /// Creates a Runtime event variant
+    pub fn runtime(event: runtime::RuntimeEventData) -> Self {
+        TheaterEvents::Runtime(event)
+    }
+
+    /// Creates a Wasm event variant
+    pub fn wasm(event: wasm::WasmEventData) -> Self {
+        TheaterEvents::Wasm(event)
+    }
+
+    /// Creates a TheaterRuntime event variant
+    pub fn theater_runtime(event: theater_runtime::TheaterRuntimeEventData) -> Self {
+        TheaterEvents::TheaterRuntime(event)
+    }
+
+    /// Creates a Handler event variant
+    pub fn handler(event: H) -> Self {
+        TheaterEvents::Handler(event)
+    }
+}
+
+// Implement From for core event types so they can be automatically converted
+impl<H> From<runtime::RuntimeEventData> for TheaterEvents<H>
+where
+    H: Serialize + serde::de::DeserializeOwned + Clone + Send + Sync,
+{
+    fn from(event: runtime::RuntimeEventData) -> Self {
+        TheaterEvents::Runtime(event)
+    }
+}
+
+impl<H> From<wasm::WasmEventData> for TheaterEvents<H>
+where
+    H: Serialize + serde::de::DeserializeOwned + Clone + Send + Sync,
+{
+    fn from(event: wasm::WasmEventData) -> Self {
+        TheaterEvents::Wasm(event)
+    }
+}
+
+impl<H> From<theater_runtime::TheaterRuntimeEventData> for TheaterEvents<H>
+where
+    H: Serialize + serde::de::DeserializeOwned + Clone + Send + Sync,
+{
+    fn from(event: theater_runtime::TheaterRuntimeEventData) -> Self {
+        TheaterEvents::TheaterRuntime(event)
+    }
+}
+
 /// # Chain Event Data
 ///
 /// `ChainEventData` is the base structure for all typed events in the Theater system.
@@ -57,7 +182,7 @@ impl<T> EventPayload for T where
     serialize = "E: Serialize",
     deserialize = "E: serde::de::DeserializeOwned"
 ))]
-pub struct ChainEventData<E = EventData>
+pub struct ChainEventData<E>
 where
     E: EventPayload,
 {
@@ -70,74 +195,6 @@ where
     pub timestamp: u64,
     /// Optional human-readable description of the event for logging and debugging.
     pub description: Option<String>,
-}
-
-/// # Event Data
-///
-/// `EventData` is an enum that represents the various types of events that can occur
-/// in the Theater system, organized by subsystem. Each variant contains a specific
-/// event data structure from the corresponding subsystem.
-///
-/// ## Purpose
-///
-/// This enum provides a type-safe way to handle events from different subsystems
-/// within a single event chain. It allows for pattern matching on event types and
-/// encapsulates the domain-specific data for each type of event.
-///
-/// ## Example
-///
-/// ```rust
-/// use theater::events::{EventData, ChainEventData};
-/// use theater::events::http::HttpEventData;
-///
-/// // Process events based on their type
-/// fn handle_event(event: &ChainEventData) {
-///     match &event.data {
-///         EventData::Http(http_event) => {
-///             println!("Handling HTTP event");
-///             // Process HTTP-specific event data
-///         },
-///         EventData::Runtime(runtime_event) => {
-///             println!("Handling Runtime event");
-///             // Process Runtime-specific event data
-///         },
-///         // Handle other event types
-///         _ => println!("Other event type: {}", event.event_type),
-///     }
-/// }
-/// ```
-///
-/// ## Implementation Notes
-///
-/// New event types should be added as variants to this enum when new subsystems
-/// are implemented. Each variant should contain a properly defined data structure
-/// that represents the specific event type.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum EventData {
-    /// Environment variable access events for reading host environment variables.
-    Environment(environment::EnvironmentEventData),
-    /// File system access events, such as reading or writing files.
-    Filesystem(filesystem::FilesystemEventData),
-    /// HTTP-related events, including requests, responses, and WebSocket interactions.
-    Http(http::HttpEventData),
-    /// Actor-to-actor messaging events for communication between actors.
-    Message(message::MessageEventData),
-    /// OS Process management events, such as spawning processes and I/O.
-    Process(process::ProcessEventData),
-    /// Random number generation events for generating random data.
-    Random(random::RandomEventData),
-    /// Runtime lifecycle events, such as initialization, state changes, and shutdown.
-    Runtime(runtime::RuntimeEventData),
-    /// Supervision events related to actor parent-child relationships.
-    Supervisor(supervisor::SupervisorEventData),
-    /// Content store access events for the key-value storage system.
-    Store(store::StoreEventData),
-    /// Timer and scheduling events for time-based operations.
-    Timing(timing::TimingEventData),
-    /// WebAssembly execution events related to the WASM VM.
-    Wasm(wasm::WasmEventData),
-    /// Theater runtime system events for the global runtime coordination.
-    TheaterRuntime(theater_runtime::TheaterRuntimeEventData),
 }
 
 impl<E> ChainEventData<E>
@@ -318,15 +375,10 @@ where
     }
 }
 
-pub mod environment;
-pub mod filesystem;
-pub mod http;
-pub mod message;
-pub mod process;
-pub mod random;
+/// Default event type for when an application doesn't define custom handler events.
+/// This type uses `()` for the handler events variant, meaning no custom handler events are used.
+pub type EventData = TheaterEvents<()>;
+
 pub mod runtime;
-pub mod store;
-pub mod supervisor;
 pub mod theater_runtime;
-pub mod timing;
 pub mod wasm;

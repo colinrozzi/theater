@@ -16,6 +16,7 @@ pub enum FileSystemError {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(dead_code)]
 pub(crate) enum FileSystemCommand {
     ReadFile { path: String },
     WriteFile { path: String, contents: String },
@@ -27,6 +28,7 @@ pub(crate) enum FileSystemCommand {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(dead_code)]
 pub(crate) enum FileSystemResponse {
     ReadFile(Result<Vec<u8>, String>),
     WriteFile(Result<(), String>),

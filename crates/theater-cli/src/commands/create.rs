@@ -170,7 +170,7 @@ fn check_cargo_component() -> Result<(), CliError> {
     let output = Command::new("cargo")
         .args(&["component", "--version"])
         .output()
-        .map_err(|e| CliError::MissingTool {
+        .map_err(|_e| CliError::MissingTool {
             tool: "cargo component".to_string(),
             install_command: "cargo install cargo-component".to_string(),
         })?;
@@ -217,7 +217,7 @@ fn fetch_wit_dependencies(project_path: &PathBuf) -> Result<(), CliError> {
 }
 
 /// Try using wasm-tools or other methods to fetch dependencies
-fn try_wasm_tools_fetch(project_path: &PathBuf) -> Result<(), CliError> {
+fn try_wasm_tools_fetch(_project_path: &PathBuf) -> Result<(), CliError> {
     // For now, just warn the user and provide instructions
     warn!("⚠️  Could not automatically fetch WIT dependencies");
     warn!("Please run one of the following manually:");
@@ -286,7 +286,7 @@ fn init_git_repo(project_path: &PathBuf, project_name: &str) -> Result<(), CliEr
         .args(&["init"])
         .current_dir(project_path)
         .output()
-        .map_err(|e| CliError::MissingTool {
+        .map_err(|_e| CliError::MissingTool {
             tool: "git".to_string(),
             install_command: "Install git from https://git-scm.com/".to_string(),
         })?;

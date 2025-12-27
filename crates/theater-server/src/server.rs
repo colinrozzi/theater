@@ -28,19 +28,118 @@ use theater::theater_runtime::TheaterRuntime;
 use theater::TheaterRuntimeError;
 
 // Import all migrated handlers
-use theater_handler_environment::EnvironmentHandler;
-use theater_handler_filesystem::FilesystemHandler;
-use theater_handler_http_client::HttpClientHandler;
-use theater_handler_http_framework::HttpFrameworkHandler;
-use theater_handler_message_server::MessageServerHandler;
-use theater_handler_process::ProcessHandler;
-use theater_handler_random::RandomHandler;
+use theater_handler_environment::{EnvironmentEventData, EnvironmentHandler};
+use theater_handler_filesystem::{FilesystemEventData, FilesystemHandler};
+use theater_handler_http_client::{HttpEventData as HttpClientEventData, HttpClientHandler};
+use theater_handler_http_framework::{HttpFrameworkEventData, HttpFrameworkHandler};
+use theater_handler_message_server::{MessageEventData, MessageServerHandler};
+use theater_handler_process::{events::ProcessEventData, ProcessHandler};
+use theater_handler_random::{RandomEventData, RandomHandler};
 use theater_handler_runtime::RuntimeHandler;
-use theater_handler_store::StoreHandler;
-use theater_handler_supervisor::SupervisorHandler;
-use theater_handler_timing::TimingHandler;
+use theater_handler_store::{StoreEventData, StoreHandler};
+use theater_handler_supervisor::{SupervisorEventData, SupervisorHandler};
+use theater_handler_timing::{TimingEventData, TimingHandler};
 
 use crate::fragmenting_codec::FragmentingCodec;
+
+// Define server's handler events - includes all handlers used by the server
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum ServerHandlerEvents {
+    Environment(EnvironmentEventData),
+    Filesystem(FilesystemEventData),
+    HttpClient(HttpClientEventData),
+    HttpFramework(HttpFrameworkEventData),
+    Message(MessageEventData),
+    Process(ProcessEventData),
+    Random(RandomEventData),
+    Store(StoreEventData),
+    Supervisor(SupervisorEventData),
+    Timing(TimingEventData),
+}
+
+// Server event type wrapping Theater's core events with our handler events
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ServerEvents(theater::events::TheaterEvents<ServerHandlerEvents>);
+
+// Implement From for core event types
+impl From<theater::events::runtime::RuntimeEventData> for ServerEvents {
+    fn from(event: theater::events::runtime::RuntimeEventData) -> Self {
+        ServerEvents(theater::events::TheaterEvents::Runtime(event))
+    }
+}
+
+impl From<theater::events::theater_runtime::TheaterRuntimeEventData> for ServerEvents {
+    fn from(event: theater::events::theater_runtime::TheaterRuntimeEventData) -> Self {
+        ServerEvents(theater::events::TheaterEvents::TheaterRuntime(event))
+    }
+}
+
+impl From<theater::events::wasm::WasmEventData> for ServerEvents {
+    fn from(event: theater::events::wasm::WasmEventData) -> Self {
+        ServerEvents(theater::events::TheaterEvents::Wasm(event))
+    }
+}
+
+// Implement From for each handler event type
+impl From<EnvironmentEventData> for ServerEvents {
+    fn from(event: EnvironmentEventData) -> Self {
+        ServerEvents(theater::events::TheaterEvents::Handler(ServerHandlerEvents::Environment(event)))
+    }
+}
+
+impl From<FilesystemEventData> for ServerEvents {
+    fn from(event: FilesystemEventData) -> Self {
+        ServerEvents(theater::events::TheaterEvents::Handler(ServerHandlerEvents::Filesystem(event)))
+    }
+}
+
+impl From<HttpClientEventData> for ServerEvents {
+    fn from(event: HttpClientEventData) -> Self {
+        ServerEvents(theater::events::TheaterEvents::Handler(ServerHandlerEvents::HttpClient(event)))
+    }
+}
+
+impl From<HttpFrameworkEventData> for ServerEvents {
+    fn from(event: HttpFrameworkEventData) -> Self {
+        ServerEvents(theater::events::TheaterEvents::Handler(ServerHandlerEvents::HttpFramework(event)))
+    }
+}
+
+impl From<MessageEventData> for ServerEvents {
+    fn from(event: MessageEventData) -> Self {
+        ServerEvents(theater::events::TheaterEvents::Handler(ServerHandlerEvents::Message(event)))
+    }
+}
+
+impl From<ProcessEventData> for ServerEvents {
+    fn from(event: ProcessEventData) -> Self {
+        ServerEvents(theater::events::TheaterEvents::Handler(ServerHandlerEvents::Process(event)))
+    }
+}
+
+impl From<RandomEventData> for ServerEvents {
+    fn from(event: RandomEventData) -> Self {
+        ServerEvents(theater::events::TheaterEvents::Handler(ServerHandlerEvents::Random(event)))
+    }
+}
+
+impl From<StoreEventData> for ServerEvents {
+    fn from(event: StoreEventData) -> Self {
+        ServerEvents(theater::events::TheaterEvents::Handler(ServerHandlerEvents::Store(event)))
+    }
+}
+
+impl From<SupervisorEventData> for ServerEvents {
+    fn from(event: SupervisorEventData) -> Self {
+        ServerEvents(theater::events::TheaterEvents::Handler(ServerHandlerEvents::Supervisor(event)))
+    }
+}
+
+impl From<TimingEventData> for ServerEvents {
+    fn from(event: TimingEventData) -> Self {
+        ServerEvents(theater::events::TheaterEvents::Handler(ServerHandlerEvents::Timing(event)))
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ManagementCommand {
@@ -319,8 +418,8 @@ struct ChannelSubscription {
 /// to use the MessageRouter for external client messaging.
 fn create_root_handler_registry(
     theater_tx: mpsc::Sender<TheaterCommand>,
-) -> (HandlerRegistry, theater_handler_message_server::MessageRouter) {
-    let mut registry = HandlerRegistry::new();
+) -> (HandlerRegistry<ServerEvents>, theater_handler_message_server::MessageRouter) {
+    let mut registry = HandlerRegistry::<ServerEvents>::new();
 
     info!("Initializing Theater server with all migrated handlers...");
 
@@ -389,7 +488,7 @@ fn create_root_handler_registry(
 }
 
 pub struct TheaterServer {
-    runtime: TheaterRuntime<ChainEvent>,
+    runtime: TheaterRuntime<ServerEvents>,
     theater_tx: mpsc::Sender<TheaterCommand>,
     management_socket: TcpListener,
     subscriptions: Arc<Mutex<HashMap<TheaterId, HashSet<Subscription>>>>,

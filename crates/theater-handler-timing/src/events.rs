@@ -1,3 +1,5 @@
+//! Timing handler event types
+
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

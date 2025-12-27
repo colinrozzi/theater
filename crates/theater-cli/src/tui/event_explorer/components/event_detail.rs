@@ -87,7 +87,7 @@ pub fn render_event_detail(f: &mut Frame, app: &EventExplorerApp, area: Rect) {
     }
 }
 
-fn render_event_overview(event: &theater::chain::ChainEvent) -> Vec<Line> {
+fn render_event_overview(event: &theater::chain::ChainEvent) -> Vec<Line<'_>> {
     let mut lines = vec![
         Line::from(""),
         Line::from(vec![
@@ -191,7 +191,7 @@ fn render_event_overview(event: &theater::chain::ChainEvent) -> Vec<Line> {
     lines
 }
 
-fn render_event_json(event: &theater::chain::ChainEvent) -> Vec<Line> {
+fn render_event_json(event: &theater::chain::ChainEvent) -> Vec<Line<'_>> {
     let mut lines = vec![
         Line::from(""),
         Line::from(vec![
@@ -250,7 +250,7 @@ fn render_event_json(event: &theater::chain::ChainEvent) -> Vec<Line> {
     lines
 }
 
-fn render_event_raw(event: &theater::chain::ChainEvent) -> Vec<Line> {
+fn render_event_raw(event: &theater::chain::ChainEvent) -> Vec<Line<'_>> {
     let mut lines = vec![
         Line::from(""),
         Line::from(vec![
@@ -454,7 +454,7 @@ fn stringify_bytes(data: &[u8]) -> String {
 }
 
 /// Render a preview of the data (first few lines)
-fn render_data_preview(data: &[u8], max_lines: usize) -> Vec<Line> {
+fn render_data_preview(data: &[u8], max_lines: usize) -> Vec<Line<'_>> {
     let mut lines = Vec::new();
 
     if data.is_empty() {

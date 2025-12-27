@@ -5,12 +5,15 @@
 //! - Request-response patterns
 //! - Bidirectional channels
 
+pub mod events;
+
+pub use events::MessageEventData;
+
 use theater::actor::handle::ActorHandle;
 use theater::actor::store::ActorStore;
-use theater::actor::types::{ActorError, WitActorError};
+use theater::actor::types::ActorError;
 use theater::config::permissions::MessageServerPermissions;
-use theater::events::message::MessageEventData;
-use theater::events::{ChainEventData, EventData};
+use theater::events::{ChainEventData, EventPayload};
 use theater::handler::Handler;
 use theater::messages::{
     ActorChannelClose, ActorChannelInitiated, ActorChannelMessage, ActorChannelOpen,
@@ -23,13 +26,13 @@ use theater::TheaterId;
 
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 use thiserror::Error;
 use tokio::sync::mpsc::{Receiver, Sender};
-use tracing::{debug, error, info, warn};
+use tracing::{error, info};
 use uuid::Uuid;
 use wasmtime::component::{ComponentType, Lift, Lower};
 use wasmtime::StoreContextMut;
@@ -368,7 +371,7 @@ impl MessageServerHandler {
     async fn process_actor_message(
         msg: ActorMessage,
         actor_handle: &ActorHandle,
-        outstanding_requests: &Arc<Mutex<HashMap<String, tokio::sync::oneshot::Sender<Vec<u8>>>>>,
+        _outstanding_requests: &Arc<Mutex<HashMap<String, tokio::sync::oneshot::Sender<Vec<u8>>>>>,
     ) -> Result<(), MessageServerError> {
         match msg {
             ActorMessage::Send(ActorSend { data }) => {
@@ -429,8 +432,13 @@ impl MessageServerHandler {
     }
 }
 
-impl Handler for MessageServerHandler {
-    fn create_instance(&self) -> Box<dyn Handler> {
+impl<E> Handler<E> for MessageServerHandler
+where
+    E: EventPayload + Clone + From<MessageEventData>
+        + From<theater::events::theater_runtime::TheaterRuntimeEventData>
+        + From<theater::events::wasm::WasmEventData>,
+{
+    fn create_instance(&self) -> Box<dyn Handler<E>> {
         Box::new(self.clone())
     }
 
@@ -446,7 +454,7 @@ impl Handler for MessageServerHandler {
         Some("theater:simple/message-server-client".to_string())
     }
 
-    fn setup_host_functions(&mut self, actor_component: &mut ActorComponent) -> Result<()> {
+    fn setup_host_functions(&mut self, actor_component: &mut ActorComponent<E>) -> Result<()> {
         info!("Setting up message server host functions");
 
         // Get this actor's ID
@@ -471,7 +479,7 @@ impl Handler for MessageServerHandler {
         // Record setup start
         actor_component.actor_store.record_event(ChainEventData {
             event_type: "message-server-setup".to_string(),
-            data: EventData::Message(MessageEventData::HandlerSetupStart),
+            data: MessageEventData::HandlerSetupStart.into(),
             timestamp: chrono::Utc::now().timestamp_millis() as u64,
             description: Some("Starting message server host function setup".to_string()),
         });
@@ -483,7 +491,7 @@ impl Handler for MessageServerHandler {
             Ok(interface) => {
                 actor_component.actor_store.record_event(ChainEventData {
                     event_type: "message-server-setup".to_string(),
-                    data: EventData::Message(MessageEventData::LinkerInstanceSuccess),
+                    data: MessageEventData::LinkerInstanceSuccess.into(),
                     timestamp: chrono::Utc::now().timestamp_millis() as u64,
                     description: Some(
                         "Successfully created linker instance for message-server-host".to_string(),
@@ -494,10 +502,10 @@ impl Handler for MessageServerHandler {
             Err(e) => {
                 actor_component.actor_store.record_event(ChainEventData {
                     event_type: "message-server-setup".to_string(),
-                    data: EventData::Message(MessageEventData::HandlerSetupError {
+                    data: MessageEventData::HandlerSetupError {
                         error: e.to_string(),
                         step: "linker_instance".to_string(),
-                    }),
+                    }.into(),
                     timestamp: chrono::Utc::now().timestamp_millis() as u64,
                     description: Some(format!("Failed to create linker instance: {}", e)),
                 });
@@ -511,9 +519,9 @@ impl Handler for MessageServerHandler {
         // 1. send operation
         actor_component.actor_store.record_event(ChainEventData {
             event_type: "message-server-setup".to_string(),
-            data: EventData::Message(MessageEventData::FunctionSetupStart {
+            data: MessageEventData::FunctionSetupStart {
                 function_name: "send".to_string(),
-            }),
+            }.into(),
             timestamp: chrono::Utc::now().timestamp_millis() as u64,
             description: Some("Setting up 'send' function wrapper".to_string()),
         });
@@ -523,16 +531,16 @@ impl Handler for MessageServerHandler {
         interface
             .func_wrap_async(
                 "send",
-                move |mut ctx: StoreContextMut<'_, ActorStore>,
+                move |mut ctx: StoreContextMut<'_, ActorStore<E>>,
                       (address, msg): (String, Vec<u8>)|
                       -> Box<dyn Future<Output = Result<(Result<(), String>,)>> + Send> {
                     ctx.data_mut().record_event(ChainEventData {
                         event_type: "theater:simple/message-server-host/send".to_string(),
-                        data: EventData::Message(MessageEventData::SendMessageCall {
+                        data: MessageEventData::SendMessageCall {
                             recipient: address.clone(),
                             message_type: "binary".to_string(),
                             data: msg.clone(),
-                        }),
+                        }.into(),
                         timestamp: chrono::Utc::now().timestamp_millis() as u64,
                         description: Some(format!("Sending message to {}", address)),
                     });
@@ -545,11 +553,11 @@ impl Handler for MessageServerHandler {
                             ctx.data_mut().record_event(ChainEventData {
                                 event_type: "theater:simple/message-server-host/send"
                                     .to_string(),
-                                data: EventData::Message(MessageEventData::Error {
+                                data: MessageEventData::Error {
                                     operation: "send".to_string(),
                                     recipient: Some(address.clone()),
                                     message: err_msg.clone(),
-                                }),
+                                }.into(),
                                 timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                 description: Some(format!(
                                     "Error sending message to {}: {}",
@@ -576,11 +584,11 @@ impl Handler for MessageServerHandler {
                             ctx.data_mut().record_event(ChainEventData {
                                 event_type: "theater:simple/message-server-host/send"
                                     .to_string(),
-                                data: EventData::Message(MessageEventData::Error {
+                                data: MessageEventData::Error {
                                     operation: "send".to_string(),
                                     recipient: Some(address_clone.clone()),
                                     message: err.clone(),
-                                }),
+                                }.into(),
                                 timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                 description: Some(format!(
                                     "Failed to send command to message-server: {}",
@@ -595,10 +603,10 @@ impl Handler for MessageServerHandler {
                                 ctx.data_mut().record_event(ChainEventData {
                                     event_type: "theater:simple/message-server-host/send"
                                         .to_string(),
-                                    data: EventData::Message(MessageEventData::SendMessageResult {
+                                    data: MessageEventData::SendMessageResult {
                                         recipient: address_clone.clone(),
                                         success: true,
-                                    }),
+                                    }.into(),
                                     timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                     description: Some(format!(
                                         "Successfully sent message to {}",
@@ -612,11 +620,11 @@ impl Handler for MessageServerHandler {
                                 ctx.data_mut().record_event(ChainEventData {
                                     event_type: "theater:simple/message-server-host/send"
                                         .to_string(),
-                                    data: EventData::Message(MessageEventData::Error {
+                                    data: MessageEventData::Error {
                                         operation: "send".to_string(),
                                         recipient: Some(address_clone.clone()),
                                         message: err.clone(),
-                                    }),
+                                    }.into(),
                                     timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                     description: Some(format!(
                                         "Failed to send message to {}: {}",
@@ -630,11 +638,11 @@ impl Handler for MessageServerHandler {
                                 ctx.data_mut().record_event(ChainEventData {
                                     event_type: "theater:simple/message-server-host/send"
                                         .to_string(),
-                                    data: EventData::Message(MessageEventData::Error {
+                                    data: MessageEventData::Error {
                                         operation: "send".to_string(),
                                         recipient: Some(address_clone.clone()),
                                         message: err.clone(),
-                                    }),
+                                    }.into(),
                                     timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                     description: Some(format!(
                                         "Failed to receive response from message-server: {}",
@@ -650,10 +658,10 @@ impl Handler for MessageServerHandler {
             .map_err(|e| {
                 actor_component.actor_store.record_event(ChainEventData {
                     event_type: "message-server-setup".to_string(),
-                    data: EventData::Message(MessageEventData::HandlerSetupError {
+                    data: MessageEventData::HandlerSetupError {
                         error: e.to_string(),
                         step: "send_function_wrap".to_string(),
-                    }),
+                    }.into(),
                     timestamp: chrono::Utc::now().timestamp_millis() as u64,
                     description: Some(format!(
                         "Failed to set up 'send' function wrapper: {}",
@@ -665,9 +673,9 @@ impl Handler for MessageServerHandler {
 
         actor_component.actor_store.record_event(ChainEventData {
             event_type: "message-server-setup".to_string(),
-            data: EventData::Message(MessageEventData::FunctionSetupSuccess {
+            data: MessageEventData::FunctionSetupSuccess {
                 function_name: "send".to_string(),
-            }),
+            }.into(),
             timestamp: chrono::Utc::now().timestamp_millis() as u64,
             description: Some("Successfully set up 'send' function wrapper".to_string()),
         });
@@ -675,9 +683,9 @@ impl Handler for MessageServerHandler {
         // 2. request operation
         actor_component.actor_store.record_event(ChainEventData {
             event_type: "message-server-setup".to_string(),
-            data: EventData::Message(MessageEventData::FunctionSetupStart {
+            data: MessageEventData::FunctionSetupStart {
                 function_name: "request".to_string(),
-            }),
+            }.into(),
             timestamp: chrono::Utc::now().timestamp_millis() as u64,
             description: Some("Setting up 'request' function wrapper".to_string()),
         });
@@ -687,16 +695,16 @@ impl Handler for MessageServerHandler {
         interface
             .func_wrap_async(
                 "request",
-                move |mut ctx: StoreContextMut<'_, ActorStore>,
+                move |mut ctx: StoreContextMut<'_, ActorStore<E>>,
                       (address, msg): (String, Vec<u8>)|
                       -> Box<dyn Future<Output = Result<(Result<Vec<u8>, String>,)>> + Send> {
                     ctx.data_mut().record_event(ChainEventData {
                         event_type: "theater:simple/message-server-host/request".to_string(),
-                        data: EventData::Message(MessageEventData::RequestMessageCall {
+                        data: MessageEventData::RequestMessageCall {
                             recipient: address.clone(),
                             message_type: "binary".to_string(),
                             data: msg.clone(),
-                        }),
+                        }.into(),
                         timestamp: chrono::Utc::now().timestamp_millis() as u64,
                         description: Some(format!("Requesting message from {}", address)),
                     });
@@ -712,11 +720,11 @@ impl Handler for MessageServerHandler {
                                 ctx.data_mut().record_event(ChainEventData {
                                     event_type: "theater:simple/message-server-host/request"
                                         .to_string(),
-                                    data: EventData::Message(MessageEventData::Error {
+                                    data: MessageEventData::Error {
                                         operation: "request".to_string(),
                                         recipient: Some(address_clone.clone()),
                                         message: err_msg.clone(),
-                                    }),
+                                    }.into(),
                                     timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                     description: Some(format!(
                                         "Error requesting message from {}: {}",
@@ -744,11 +752,11 @@ impl Handler for MessageServerHandler {
                             ctx.data_mut().record_event(ChainEventData {
                                 event_type: "theater:simple/message-server-host/request"
                                     .to_string(),
-                                data: EventData::Message(MessageEventData::Error {
+                                data: MessageEventData::Error {
                                     operation: "request".to_string(),
                                     recipient: Some(address_clone.clone()),
                                     message: err.clone(),
-                                }),
+                                }.into(),
                                 timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                 description: Some(format!(
                                     "Failed to send command to message-server: {}",
@@ -767,13 +775,12 @@ impl Handler for MessageServerHandler {
                                         ctx.data_mut().record_event(ChainEventData {
                                             event_type: "theater:simple/message-server-host/request"
                                                 .to_string(),
-                                            data: EventData::Message(
+                                            data: 
                                                 MessageEventData::RequestMessageResult {
                                                     recipient: address_clone.clone(),
                                                     data: response.clone(),
                                                     success: true,
-                                                },
-                                            ),
+                                                }.into(),
                                             timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                             description: Some(format!(
                                                 "Successfully received response from {}",
@@ -787,11 +794,11 @@ impl Handler for MessageServerHandler {
                                         ctx.data_mut().record_event(ChainEventData {
                                             event_type: "theater:simple/message-server-host/request"
                                                 .to_string(),
-                                            data: EventData::Message(MessageEventData::Error {
+                                            data: MessageEventData::Error {
                                                 operation: "request".to_string(),
                                                 recipient: Some(address_clone.clone()),
                                                 message: err.clone(),
-                                            }),
+                                            }.into(),
                                             timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                             description: Some(format!(
                                                 "Failed to receive response from {}: {}",
@@ -807,11 +814,11 @@ impl Handler for MessageServerHandler {
                                 ctx.data_mut().record_event(ChainEventData {
                                     event_type: "theater:simple/message-server-host/request"
                                         .to_string(),
-                                    data: EventData::Message(MessageEventData::Error {
+                                    data: MessageEventData::Error {
                                         operation: "request".to_string(),
                                         recipient: Some(address_clone.clone()),
                                         message: err.clone(),
-                                    }),
+                                    }.into(),
                                     timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                     description: Some(format!(
                                         "Failed to send request to {}: {}",
@@ -825,11 +832,11 @@ impl Handler for MessageServerHandler {
                                 ctx.data_mut().record_event(ChainEventData {
                                     event_type: "theater:simple/message-server-host/request"
                                         .to_string(),
-                                    data: EventData::Message(MessageEventData::Error {
+                                    data: MessageEventData::Error {
                                         operation: "request".to_string(),
                                         recipient: Some(address_clone.clone()),
                                         message: err.clone(),
-                                    }),
+                                    }.into(),
                                     timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                     description: Some(format!(
                                         "Failed to receive command response from message-server: {}",
@@ -845,10 +852,10 @@ impl Handler for MessageServerHandler {
             .map_err(|e| {
                 actor_component.actor_store.record_event(ChainEventData {
                     event_type: "message-server-setup".to_string(),
-                    data: EventData::Message(MessageEventData::HandlerSetupError {
+                    data: MessageEventData::HandlerSetupError {
                         error: e.to_string(),
                         step: "request_function_wrap".to_string(),
-                    }),
+                    }.into(),
                     timestamp: chrono::Utc::now().timestamp_millis() as u64,
                     description: Some(format!(
                         "Failed to set up 'request' function wrapper: {}",
@@ -860,9 +867,9 @@ impl Handler for MessageServerHandler {
 
         actor_component.actor_store.record_event(ChainEventData {
             event_type: "message-server-setup".to_string(),
-            data: EventData::Message(MessageEventData::FunctionSetupSuccess {
+            data: MessageEventData::FunctionSetupSuccess {
                 function_name: "request".to_string(),
-            }),
+            }.into(),
             timestamp: chrono::Utc::now().timestamp_millis() as u64,
             description: Some("Successfully set up 'request' function wrapper".to_string()),
         });
@@ -870,9 +877,9 @@ impl Handler for MessageServerHandler {
         // 3. list-outstanding-requests operation
         actor_component.actor_store.record_event(ChainEventData {
             event_type: "message-server-setup".to_string(),
-            data: EventData::Message(MessageEventData::FunctionSetupStart {
+            data: MessageEventData::FunctionSetupStart {
                 function_name: "list-outstanding-requests".to_string(),
-            }),
+            }.into(),
             timestamp: chrono::Utc::now().timestamp_millis() as u64,
             description: Some(
                 "Setting up 'list-outstanding-requests' function wrapper".to_string(),
@@ -884,13 +891,13 @@ impl Handler for MessageServerHandler {
         interface
             .func_wrap_async(
                 "list-outstanding-requests",
-                move |mut ctx: StoreContextMut<'_, ActorStore>,
+                move |mut ctx: StoreContextMut<'_, ActorStore<E>>,
                       _: ()|
                       -> Box<dyn Future<Output = Result<(Vec<String>,)>> + Send> {
                     ctx.data_mut().record_event(ChainEventData {
                         event_type: "theater:simple/message-server-host/list-outstanding-requests"
                             .to_string(),
-                        data: EventData::Message(MessageEventData::ListOutstandingRequestsCall {}),
+                        data: MessageEventData::ListOutstandingRequestsCall {}.into(),
                         timestamp: chrono::Utc::now().timestamp_millis() as u64,
                         description: Some("Listing outstanding requests".to_string()),
                     });
@@ -904,12 +911,11 @@ impl Handler for MessageServerHandler {
                             event_type:
                                 "theater:simple/message-server-host/list-outstanding-requests"
                                     .to_string(),
-                            data: EventData::Message(
+                            data: 
                                 MessageEventData::ListOutstandingRequestsResult {
                                     request_count: ids.len(),
                                     request_ids: ids.clone(),
-                                },
-                            ),
+                                }.into(),
                             timestamp: chrono::Utc::now().timestamp_millis() as u64,
                             description: Some(format!("Found {} outstanding requests", ids.len())),
                         });
@@ -921,10 +927,10 @@ impl Handler for MessageServerHandler {
             .map_err(|e| {
                 actor_component.actor_store.record_event(ChainEventData {
                     event_type: "message-server-setup".to_string(),
-                    data: EventData::Message(MessageEventData::HandlerSetupError {
+                    data: MessageEventData::HandlerSetupError {
                         error: e.to_string(),
                         step: "list_outstanding_requests_function_wrap".to_string(),
-                    }),
+                    }.into(),
                     timestamp: chrono::Utc::now().timestamp_millis() as u64,
                     description: Some(format!(
                         "Failed to set up 'list-outstanding-requests' function wrapper: {}",
@@ -939,9 +945,9 @@ impl Handler for MessageServerHandler {
 
         actor_component.actor_store.record_event(ChainEventData {
             event_type: "message-server-setup".to_string(),
-            data: EventData::Message(MessageEventData::FunctionSetupSuccess {
+            data: MessageEventData::FunctionSetupSuccess {
                 function_name: "list-outstanding-requests".to_string(),
-            }),
+            }.into(),
             timestamp: chrono::Utc::now().timestamp_millis() as u64,
             description: Some(
                 "Successfully set up 'list-outstanding-requests' function wrapper".to_string(),
@@ -953,9 +959,9 @@ impl Handler for MessageServerHandler {
 
         actor_component.actor_store.record_event(ChainEventData {
             event_type: "message-server-setup".to_string(),
-            data: EventData::Message(MessageEventData::FunctionSetupStart {
+            data: MessageEventData::FunctionSetupStart {
                 function_name: "respond-to-request".to_string(),
-            }),
+            }.into(),
             timestamp: chrono::Utc::now().timestamp_millis() as u64,
             description: Some("Setting up 'respond-to-request' function wrapper".to_string()),
         });
@@ -963,7 +969,7 @@ impl Handler for MessageServerHandler {
         interface
             .func_wrap_async(
                 "respond-to-request",
-                move |mut ctx: StoreContextMut<'_, ActorStore>,
+                move |mut ctx: StoreContextMut<'_, ActorStore<E>>,
                       (request_id, response_data): (String, Vec<u8>)|
                       -> Box<dyn Future<Output = Result<(Result<(), String>,)>> + Send> {
                     let request_id_clone = request_id.clone();
@@ -971,10 +977,10 @@ impl Handler for MessageServerHandler {
                     ctx.data_mut().record_event(ChainEventData {
                         event_type: "theater:simple/message-server-host/respond-to-request"
                             .to_string(),
-                        data: EventData::Message(MessageEventData::RespondToRequestCall {
+                        data: MessageEventData::RespondToRequestCall {
                             request_id: request_id.clone(),
                             response_size: response_data.len(),
-                        }),
+                        }.into(),
                         timestamp: chrono::Utc::now().timestamp_millis() as u64,
                         description: Some(format!("Responding to request {}", request_id)),
                     });
@@ -989,12 +995,11 @@ impl Handler for MessageServerHandler {
                                         event_type:
                                             "theater:simple/message-server-host/respond-to-request"
                                                 .to_string(),
-                                        data: EventData::Message(
+                                        data: 
                                             MessageEventData::RespondToRequestResult {
                                                 request_id: request_id_clone.clone(),
                                                 success: true,
-                                            },
-                                        ),
+                                            }.into(),
                                         timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                         description: Some(format!(
                                             "Successfully responded to request {}",
@@ -1009,11 +1014,11 @@ impl Handler for MessageServerHandler {
                                         event_type:
                                             "theater:simple/message-server-host/respond-to-request"
                                                 .to_string(),
-                                        data: EventData::Message(MessageEventData::Error {
+                                        data: MessageEventData::Error {
                                             operation: "respond-to-request".to_string(),
                                             recipient: None,
                                             message: err_msg.clone(),
-                                        }),
+                                        }.into(),
                                         timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                         description: Some(format!(
                                             "Error responding to request {}: {}",
@@ -1028,11 +1033,11 @@ impl Handler for MessageServerHandler {
                             ctx.data_mut().record_event(ChainEventData {
                                 event_type: "theater:simple/message-server-host/respond-to-request"
                                     .to_string(),
-                                data: EventData::Message(MessageEventData::Error {
+                                data: MessageEventData::Error {
                                     operation: "respond-to-request".to_string(),
                                     recipient: None,
                                     message: err_msg.clone(),
-                                }),
+                                }.into(),
                                 timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                 description: Some(format!(
                                     "Request {} not found",
@@ -1047,10 +1052,10 @@ impl Handler for MessageServerHandler {
             .map_err(|e| {
                 actor_component.actor_store.record_event(ChainEventData {
                     event_type: "message-server-setup".to_string(),
-                    data: EventData::Message(MessageEventData::HandlerSetupError {
+                    data: MessageEventData::HandlerSetupError {
                         error: e.to_string(),
                         step: "respond_to_request_function_wrap".to_string(),
-                    }),
+                    }.into(),
                     timestamp: chrono::Utc::now().timestamp_millis() as u64,
                     description: Some(format!(
                         "Failed to set up 'respond-to-request' function wrapper: {}",
@@ -1062,9 +1067,9 @@ impl Handler for MessageServerHandler {
 
         actor_component.actor_store.record_event(ChainEventData {
             event_type: "message-server-setup".to_string(),
-            data: EventData::Message(MessageEventData::FunctionSetupSuccess {
+            data: MessageEventData::FunctionSetupSuccess {
                 function_name: "respond-to-request".to_string(),
-            }),
+            }.into(),
             timestamp: chrono::Utc::now().timestamp_millis() as u64,
             description: Some(
                 "Successfully set up 'respond-to-request' function wrapper".to_string(),
@@ -1076,9 +1081,9 @@ impl Handler for MessageServerHandler {
 
         actor_component.actor_store.record_event(ChainEventData {
             event_type: "message-server-setup".to_string(),
-            data: EventData::Message(MessageEventData::FunctionSetupStart {
+            data: MessageEventData::FunctionSetupStart {
                 function_name: "cancel-request".to_string(),
-            }),
+            }.into(),
             timestamp: chrono::Utc::now().timestamp_millis() as u64,
             description: Some("Setting up 'cancel-request' function wrapper".to_string()),
         });
@@ -1086,7 +1091,7 @@ impl Handler for MessageServerHandler {
         interface
             .func_wrap_async(
                 "cancel-request",
-                move |mut ctx: StoreContextMut<'_, ActorStore>,
+                move |mut ctx: StoreContextMut<'_, ActorStore<E>>,
                       (request_id,): (String,)|
                       -> Box<dyn Future<Output = Result<(Result<(), String>,)>> + Send> {
                     let request_id_clone = request_id.clone();
@@ -1094,9 +1099,9 @@ impl Handler for MessageServerHandler {
                     ctx.data_mut().record_event(ChainEventData {
                         event_type: "theater:simple/message-server-host/cancel-request"
                             .to_string(),
-                        data: EventData::Message(MessageEventData::CancelRequestCall {
+                        data: MessageEventData::CancelRequestCall {
                             request_id: request_id.clone(),
-                        }),
+                        }.into(),
                         timestamp: chrono::Utc::now().timestamp_millis() as u64,
                         description: Some(format!("Canceling request {}", request_id)),
                     });
@@ -1108,10 +1113,10 @@ impl Handler for MessageServerHandler {
                             ctx.data_mut().record_event(ChainEventData {
                                 event_type: "theater:simple/message-server-host/cancel-request"
                                     .to_string(),
-                                data: EventData::Message(MessageEventData::CancelRequestResult {
+                                data: MessageEventData::CancelRequestResult {
                                     request_id: request_id_clone.clone(),
                                     success: true,
-                                }),
+                                }.into(),
                                 timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                 description: Some(format!(
                                     "Successfully canceled request {}",
@@ -1124,11 +1129,11 @@ impl Handler for MessageServerHandler {
                             ctx.data_mut().record_event(ChainEventData {
                                 event_type: "theater:simple/message-server-host/cancel-request"
                                     .to_string(),
-                                data: EventData::Message(MessageEventData::Error {
+                                data: MessageEventData::Error {
                                     operation: "cancel-request".to_string(),
                                     recipient: None,
                                     message: err_msg.clone(),
-                                }),
+                                }.into(),
                                 timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                 description: Some(format!(
                                     "Request {} not found",
@@ -1143,10 +1148,10 @@ impl Handler for MessageServerHandler {
             .map_err(|e| {
                 actor_component.actor_store.record_event(ChainEventData {
                     event_type: "message-server-setup".to_string(),
-                    data: EventData::Message(MessageEventData::HandlerSetupError {
+                    data: MessageEventData::HandlerSetupError {
                         error: e.to_string(),
                         step: "cancel_request_function_wrap".to_string(),
-                    }),
+                    }.into(),
                     timestamp: chrono::Utc::now().timestamp_millis() as u64,
                     description: Some(format!(
                         "Failed to set up 'cancel-request' function wrapper: {}",
@@ -1158,9 +1163,9 @@ impl Handler for MessageServerHandler {
 
         actor_component.actor_store.record_event(ChainEventData {
             event_type: "message-server-setup".to_string(),
-            data: EventData::Message(MessageEventData::FunctionSetupSuccess {
+            data: MessageEventData::FunctionSetupSuccess {
                 function_name: "cancel-request".to_string(),
-            }),
+            }.into(),
             timestamp: chrono::Utc::now().timestamp_millis() as u64,
             description: Some("Successfully set up 'cancel-request' function wrapper".to_string()),
         });
@@ -1170,9 +1175,9 @@ impl Handler for MessageServerHandler {
 
         actor_component.actor_store.record_event(ChainEventData {
             event_type: "message-server-setup".to_string(),
-            data: EventData::Message(MessageEventData::FunctionSetupStart {
+            data: MessageEventData::FunctionSetupStart {
                 function_name: "open-channel".to_string(),
-            }),
+            }.into(),
             timestamp: chrono::Utc::now().timestamp_millis() as u64,
             description: Some("Setting up 'open-channel' function wrapper".to_string()),
         });
@@ -1180,7 +1185,7 @@ impl Handler for MessageServerHandler {
         interface
             .func_wrap_async(
                 "open-channel",
-                move |mut ctx: StoreContextMut<'_, ActorStore>,
+                move |mut ctx: StoreContextMut<'_, ActorStore<E>>,
                       (address, initial_msg): (String, Vec<u8>)|
                       -> Box<dyn Future<Output = Result<(Result<String, String>,)>> + Send> {
                     let current_actor_id = ctx.data().id.clone();
@@ -1188,11 +1193,11 @@ impl Handler for MessageServerHandler {
 
                     ctx.data_mut().record_event(ChainEventData {
                         event_type: "theater:simple/message-server-host/open-channel".to_string(),
-                        data: EventData::Message(MessageEventData::OpenChannelCall {
+                        data: MessageEventData::OpenChannelCall {
                             recipient: address.clone(),
                             message_type: "binary".to_string(),
                             size: initial_msg.len(),
-                        }),
+                        }.into(),
                         timestamp: chrono::Utc::now().timestamp_millis() as u64,
                         description: Some(format!("Opening channel to {}", address)),
                     });
@@ -1204,11 +1209,11 @@ impl Handler for MessageServerHandler {
                             ctx.data_mut().record_event(ChainEventData {
                                 event_type: "theater:simple/message-server-host/open-channel"
                                     .to_string(),
-                                data: EventData::Message(MessageEventData::Error {
+                                data: MessageEventData::Error {
                                     operation: "open-channel".to_string(),
                                     recipient: Some(address_clone.clone()),
                                     message: err_msg.clone(),
-                                }),
+                                }.into(),
                                 timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                 description: Some(format!(
                                     "Error opening channel to {}: {}",
@@ -1244,11 +1249,11 @@ impl Handler for MessageServerHandler {
                             ctx.data_mut().record_event(ChainEventData {
                                 event_type: "theater:simple/message-server-host/open-channel"
                                     .to_string(),
-                                data: EventData::Message(MessageEventData::Error {
+                                data: MessageEventData::Error {
                                     operation: "open-channel".to_string(),
                                     recipient: Some(address_clone.clone()),
                                     message: err_msg.clone(),
-                                }),
+                                }.into(),
                                 timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                 description: Some(format!(
                                     "Failed to send open-channel command: {}",
@@ -1264,13 +1269,12 @@ impl Handler for MessageServerHandler {
                                     event_type:
                                         "theater:simple/message-server-host/open-channel"
                                             .to_string(),
-                                    data: EventData::Message(
+                                    data: 
                                         MessageEventData::OpenChannelResult {
                                             recipient: address_clone.clone(),
                                             channel_id: channel_id_clone.clone(),
                                             accepted,
-                                        },
-                                    ),
+                                        }.into(),
                                     timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                     description: Some(format!(
                                         "Channel {} to {} {}",
@@ -1295,11 +1299,11 @@ impl Handler for MessageServerHandler {
                                     event_type:
                                         "theater:simple/message-server-host/open-channel"
                                             .to_string(),
-                                    data: EventData::Message(MessageEventData::Error {
+                                    data: MessageEventData::Error {
                                         operation: "open-channel".to_string(),
                                         recipient: Some(address_clone.clone()),
                                         message: err_msg.clone(),
-                                    }),
+                                    }.into(),
                                     timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                     description: Some(format!(
                                         "Error opening channel to {}: {}",
@@ -1313,11 +1317,11 @@ impl Handler for MessageServerHandler {
                                 ctx.data_mut().record_event(ChainEventData {
                                     event_type: "theater:simple/message-server-host/open-channel"
                                         .to_string(),
-                                    data: EventData::Message(MessageEventData::Error {
+                                    data: MessageEventData::Error {
                                         operation: "open-channel".to_string(),
                                         recipient: Some(address_clone.clone()),
                                         message: err_msg.clone(),
-                                    }),
+                                    }.into(),
                                     timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                     description: Some(format!(
                                         "Error opening channel to {}: {}",
@@ -1333,10 +1337,10 @@ impl Handler for MessageServerHandler {
             .map_err(|e| {
                 actor_component.actor_store.record_event(ChainEventData {
                     event_type: "message-server-setup".to_string(),
-                    data: EventData::Message(MessageEventData::HandlerSetupError {
+                    data: MessageEventData::HandlerSetupError {
                         error: e.to_string(),
                         step: "open_channel_function_wrap".to_string(),
-                    }),
+                    }.into(),
                     timestamp: chrono::Utc::now().timestamp_millis() as u64,
                     description: Some(format!(
                         "Failed to set up 'open-channel' function wrapper: {}",
@@ -1348,9 +1352,9 @@ impl Handler for MessageServerHandler {
 
         actor_component.actor_store.record_event(ChainEventData {
             event_type: "message-server-setup".to_string(),
-            data: EventData::Message(MessageEventData::FunctionSetupSuccess {
+            data: MessageEventData::FunctionSetupSuccess {
                 function_name: "open-channel".to_string(),
-            }),
+            }.into(),
             timestamp: chrono::Utc::now().timestamp_millis() as u64,
             description: Some("Successfully set up 'open-channel' function wrapper".to_string()),
         });
@@ -1361,9 +1365,9 @@ impl Handler for MessageServerHandler {
 
         actor_component.actor_store.record_event(ChainEventData {
             event_type: "message-server-setup".to_string(),
-            data: EventData::Message(MessageEventData::FunctionSetupStart {
+            data: MessageEventData::FunctionSetupStart {
                 function_name: "send-on-channel".to_string(),
-            }),
+            }.into(),
             timestamp: chrono::Utc::now().timestamp_millis() as u64,
             description: Some("Setting up 'send-on-channel' function wrapper".to_string()),
         });
@@ -1371,16 +1375,16 @@ impl Handler for MessageServerHandler {
         interface
             .func_wrap_async(
                 "send-on-channel",
-                move |mut ctx: StoreContextMut<'_, ActorStore>,
+                move |mut ctx: StoreContextMut<'_, ActorStore<E>>,
                       (channel_id_str, msg): (String, Vec<u8>)|
                       -> Box<dyn Future<Output = Result<(Result<(), String>,)>> + Send> {
                     ctx.data_mut().record_event(ChainEventData {
                         event_type: "theater:simple/message-server-host/send-on-channel"
                             .to_string(),
-                        data: EventData::Message(MessageEventData::ChannelMessageCall {
+                        data: MessageEventData::ChannelMessageCall {
                             channel_id: channel_id_str.clone(),
                             msg: msg.clone(),
-                        }),
+                        }.into(),
                         timestamp: chrono::Utc::now().timestamp_millis() as u64,
                         description: Some(format!(
                             "Sending message on channel {}",
@@ -1395,11 +1399,11 @@ impl Handler for MessageServerHandler {
                             ctx.data_mut().record_event(ChainEventData {
                                 event_type: "theater:simple/message-server-host/send-on-channel"
                                     .to_string(),
-                                data: EventData::Message(MessageEventData::Error {
+                                data: MessageEventData::Error {
                                     operation: "send-on-channel".to_string(),
                                     recipient: None,
                                     message: err_msg.clone(),
-                                }),
+                                }.into(),
                                 timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                 description: Some(format!(
                                     "Error sending on channel {}: {}",
@@ -1427,11 +1431,11 @@ impl Handler for MessageServerHandler {
                             ctx.data_mut().record_event(ChainEventData {
                                 event_type: "theater:simple/message-server-host/send-on-channel"
                                     .to_string(),
-                                data: EventData::Message(MessageEventData::Error {
+                                data: MessageEventData::Error {
                                     operation: "send-on-channel".to_string(),
                                     recipient: None,
                                     message: err.clone(),
-                                }),
+                                }.into(),
                                 timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                 description: Some(format!(
                                     "Failed to send command to message-server: {}",
@@ -1446,12 +1450,11 @@ impl Handler for MessageServerHandler {
                                 ctx.data_mut().record_event(ChainEventData {
                                     event_type: "theater:simple/message-server-host/send-on-channel"
                                         .to_string(),
-                                    data: EventData::Message(
+                                    data: 
                                         MessageEventData::ChannelMessageResult {
                                             channel_id: channel_id_clone.clone(),
                                             success: true,
-                                        },
-                                    ),
+                                        }.into(),
                                     timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                     description: Some(format!(
                                         "Successfully sent message on channel {}",
@@ -1465,11 +1468,11 @@ impl Handler for MessageServerHandler {
                                 ctx.data_mut().record_event(ChainEventData {
                                     event_type: "theater:simple/message-server-host/send-on-channel"
                                         .to_string(),
-                                    data: EventData::Message(MessageEventData::Error {
+                                    data: MessageEventData::Error {
                                         operation: "send-on-channel".to_string(),
                                         recipient: None,
                                         message: err.clone(),
-                                    }),
+                                    }.into(),
                                     timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                     description: Some(format!(
                                         "Failed to send message on channel {}: {}",
@@ -1483,11 +1486,11 @@ impl Handler for MessageServerHandler {
                                 ctx.data_mut().record_event(ChainEventData {
                                     event_type: "theater:simple/message-server-host/send-on-channel"
                                         .to_string(),
-                                    data: EventData::Message(MessageEventData::Error {
+                                    data: MessageEventData::Error {
                                         operation: "send-on-channel".to_string(),
                                         recipient: None,
                                         message: err.clone(),
-                                    }),
+                                    }.into(),
                                     timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                     description: Some(format!(
                                         "Failed to receive response from message-server: {}",
@@ -1503,10 +1506,10 @@ impl Handler for MessageServerHandler {
             .map_err(|e| {
                 actor_component.actor_store.record_event(ChainEventData {
                     event_type: "message-server-setup".to_string(),
-                    data: EventData::Message(MessageEventData::HandlerSetupError {
+                    data: MessageEventData::HandlerSetupError {
                         error: e.to_string(),
                         step: "send_on_channel_function_wrap".to_string(),
-                    }),
+                    }.into(),
                     timestamp: chrono::Utc::now().timestamp_millis() as u64,
                     description: Some(format!(
                         "Failed to set up 'send-on-channel' function wrapper: {}",
@@ -1518,9 +1521,9 @@ impl Handler for MessageServerHandler {
 
         actor_component.actor_store.record_event(ChainEventData {
             event_type: "message-server-setup".to_string(),
-            data: EventData::Message(MessageEventData::FunctionSetupSuccess {
+            data: MessageEventData::FunctionSetupSuccess {
                 function_name: "send-on-channel".to_string(),
-            }),
+            }.into(),
             timestamp: chrono::Utc::now().timestamp_millis() as u64,
             description: Some(
                 "Successfully set up 'send-on-channel' function wrapper".to_string(),
@@ -1533,9 +1536,9 @@ impl Handler for MessageServerHandler {
 
         actor_component.actor_store.record_event(ChainEventData {
             event_type: "message-server-setup".to_string(),
-            data: EventData::Message(MessageEventData::FunctionSetupStart {
+            data: MessageEventData::FunctionSetupStart {
                 function_name: "close-channel".to_string(),
-            }),
+            }.into(),
             timestamp: chrono::Utc::now().timestamp_millis() as u64,
             description: Some("Setting up 'close-channel' function wrapper".to_string()),
         });
@@ -1543,14 +1546,14 @@ impl Handler for MessageServerHandler {
         interface
             .func_wrap_async(
                 "close-channel",
-                move |mut ctx: StoreContextMut<'_, ActorStore>,
+                move |mut ctx: StoreContextMut<'_, ActorStore<E>>,
                       (channel_id_str,): (String,)|
                       -> Box<dyn Future<Output = Result<(Result<(), String>,)>> + Send> {
                     ctx.data_mut().record_event(ChainEventData {
                         event_type: "theater:simple/message-server-host/close-channel".to_string(),
-                        data: EventData::Message(MessageEventData::CloseChannelCall {
+                        data: MessageEventData::CloseChannelCall {
                             channel_id: channel_id_str.clone(),
-                        }),
+                        }.into(),
                         timestamp: chrono::Utc::now().timestamp_millis() as u64,
                         description: Some(format!("Closing channel {}", channel_id_str)),
                     });
@@ -1562,11 +1565,11 @@ impl Handler for MessageServerHandler {
                             ctx.data_mut().record_event(ChainEventData {
                                 event_type: "theater:simple/message-server-host/close-channel"
                                     .to_string(),
-                                data: EventData::Message(MessageEventData::Error {
+                                data: MessageEventData::Error {
                                     operation: "close-channel".to_string(),
                                     recipient: None,
                                     message: err_msg.clone(),
-                                }),
+                                }.into(),
                                 timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                 description: Some(format!(
                                     "Error closing channel {}: {}",
@@ -1593,11 +1596,11 @@ impl Handler for MessageServerHandler {
                             ctx.data_mut().record_event(ChainEventData {
                                 event_type: "theater:simple/message-server-host/close-channel"
                                     .to_string(),
-                                data: EventData::Message(MessageEventData::Error {
+                                data: MessageEventData::Error {
                                     operation: "close-channel".to_string(),
                                     recipient: None,
                                     message: err.clone(),
-                                }),
+                                }.into(),
                                 timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                 description: Some(format!(
                                     "Failed to send command to message-server: {}",
@@ -1612,12 +1615,11 @@ impl Handler for MessageServerHandler {
                                 ctx.data_mut().record_event(ChainEventData {
                                     event_type: "theater:simple/message-server-host/close-channel"
                                         .to_string(),
-                                    data: EventData::Message(
+                                    data: 
                                         MessageEventData::CloseChannelResult {
                                             channel_id: channel_id_clone.clone(),
                                             success: true,
-                                        },
-                                    ),
+                                        }.into(),
                                     timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                     description: Some(format!(
                                         "Successfully closed channel {}",
@@ -1631,11 +1633,11 @@ impl Handler for MessageServerHandler {
                                 ctx.data_mut().record_event(ChainEventData {
                                     event_type: "theater:simple/message-server-host/close-channel"
                                         .to_string(),
-                                    data: EventData::Message(MessageEventData::Error {
+                                    data: MessageEventData::Error {
                                         operation: "close-channel".to_string(),
                                         recipient: None,
                                         message: err.clone(),
-                                    }),
+                                    }.into(),
                                     timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                     description: Some(format!(
                                         "Failed to close channel {}: {}",
@@ -1649,11 +1651,11 @@ impl Handler for MessageServerHandler {
                                 ctx.data_mut().record_event(ChainEventData {
                                     event_type: "theater:simple/message-server-host/close-channel"
                                         .to_string(),
-                                    data: EventData::Message(MessageEventData::Error {
+                                    data: MessageEventData::Error {
                                         operation: "close-channel".to_string(),
                                         recipient: None,
                                         message: err.clone(),
-                                    }),
+                                    }.into(),
                                     timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                     description: Some(format!(
                                         "Failed to receive response from message-server: {}",
@@ -1669,10 +1671,10 @@ impl Handler for MessageServerHandler {
             .map_err(|e| {
                 actor_component.actor_store.record_event(ChainEventData {
                     event_type: "message-server-setup".to_string(),
-                    data: EventData::Message(MessageEventData::HandlerSetupError {
+                    data: MessageEventData::HandlerSetupError {
                         error: e.to_string(),
                         step: "close_channel_function_wrap".to_string(),
-                    }),
+                    }.into(),
                     timestamp: chrono::Utc::now().timestamp_millis() as u64,
                     description: Some(format!(
                         "Failed to set up 'close-channel' function wrapper: {}",
@@ -1684,9 +1686,9 @@ impl Handler for MessageServerHandler {
 
         actor_component.actor_store.record_event(ChainEventData {
             event_type: "message-server-setup".to_string(),
-            data: EventData::Message(MessageEventData::FunctionSetupSuccess {
+            data: MessageEventData::FunctionSetupSuccess {
                 function_name: "close-channel".to_string(),
-            }),
+            }.into(),
             timestamp: chrono::Utc::now().timestamp_millis() as u64,
             description: Some("Successfully set up 'close-channel' function wrapper".to_string()),
         });
@@ -1694,7 +1696,7 @@ impl Handler for MessageServerHandler {
         // Record overall setup completion
         actor_component.actor_store.record_event(ChainEventData {
             event_type: "message-server-setup".to_string(),
-            data: EventData::Message(MessageEventData::HandlerSetupSuccess),
+            data: MessageEventData::HandlerSetupSuccess.into(),
             timestamp: chrono::Utc::now().timestamp_millis() as u64,
             description: Some(
                 "Message server host functions setup completed successfully".to_string(),
@@ -1706,7 +1708,7 @@ impl Handler for MessageServerHandler {
         Ok(())
     }
 
-    fn add_export_functions(&self, actor_instance: &mut ActorInstance) -> Result<()> {
+    fn add_export_functions(&self, actor_instance: &mut ActorInstance<E>) -> Result<()> {
         info!("Adding export functions for message server");
 
         // 1. handle-send

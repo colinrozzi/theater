@@ -7,8 +7,6 @@
 use crate::actor::runtime::ActorRuntime;
 use crate::actor::types::{ActorControl, ActorError, ActorInfo, ActorOperation};
 use crate::chain::ChainEvent;
-use crate::events::runtime::RuntimeEventData;
-use crate::events::EventData;
 use crate::handler::HandlerRegistry;
 use crate::id::TheaterId;
 use crate::messages::{ActorMessage, ActorStatus, TheaterCommand};
@@ -27,7 +25,6 @@ use std::collections::HashSet;
 use std::marker::PhantomData;
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
-use theater_chain::event::EventType;
 use tokio::sync::mpsc::Receiver;
 use tokio::sync::mpsc::Sender;
 use tokio::sync::{mpsc, oneshot};
@@ -89,11 +86,11 @@ use tracing::{debug, error, info, warn};
 /// The runtime uses a command-based architecture where all operations are sent as messages
 /// through channels. This allows for asynchronous processing and helps maintain isolation
 /// between components.
-pub struct TheaterRuntime<E: EventType> {
+pub struct TheaterRuntime<E: crate::events::EventPayload + Clone> {
     /// Map of active actors indexed by their ID
     actors: HashMap<TheaterId, ActorProcess>,
     /// Map of chains index by actor ID
-    chains: HashMap<TheaterId, Arc<RwLock<StateChain>>>,
+    chains: HashMap<TheaterId, Arc<RwLock<StateChain<E>>>>,
     /// Sender for commands to the runtime
     theater_tx: Sender<TheaterCommand>,
     /// Receiver for commands to the runtime
@@ -103,11 +100,12 @@ pub struct TheaterRuntime<E: EventType> {
     /// Map of active communication channels
     channels: HashMap<ChannelId, HashSet<ChannelParticipant>>,
     /// Optional channel to send channel events back to the server
+    #[allow(dead_code)]
     channel_events_tx: Option<Sender<crate::messages::ChannelEvent>>,
     /// wasm engine
     wasm_engine: wasmtime::Engine,
     /// Handler registry
-    pub handler_registry: HandlerRegistry,
+    pub handler_registry: HandlerRegistry<E>,
     marker: PhantomData<E>,
 }
 
@@ -156,7 +154,11 @@ pub struct ActorProcess {
 
 impl<E> TheaterRuntime<E>
 where
-    E: EventType,
+    E: crate::events::EventPayload
+        + Clone
+        + From<crate::events::theater_runtime::TheaterRuntimeEventData>
+        + From<crate::events::wasm::WasmEventData>
+        + From<crate::events::runtime::RuntimeEventData>,
 {
     /// Creates a new TheaterRuntime with the given communication channels.
     ///
@@ -189,7 +191,7 @@ where
         theater_tx: Sender<TheaterCommand>,
         theater_rx: Receiver<TheaterCommand>,
         channel_events_tx: Option<Sender<crate::messages::ChannelEvent>>,
-        handler_registry: HandlerRegistry,
+        handler_registry: HandlerRegistry<E>,
     ) -> Result<Self> {
         info!("Theater runtime initializing");
         let engine = wasmtime::Engine::new(wasmtime::Config::new().async_support(true))?;
@@ -528,7 +530,7 @@ where
         manifest_path: String,
         init_bytes: Option<Vec<u8>>,
         parent_id: Option<TheaterId>,
-        init: bool,
+        _init: bool,
         supervisor_tx: Option<Sender<ActorResult>>,
         subscription_tx: Option<Sender<Result<ChainEvent, ActorError>>>,
     ) -> Result<TheaterId> {
@@ -576,7 +578,7 @@ where
 
         // Create a shutdown controller for this specific actor
         let mut shutdown_controller = ShutdownController::new();
-        let (mailbox_tx, mailbox_rx) = mpsc::channel(100);
+        let (mailbox_tx, _mailbox_rx) = mpsc::channel(100);
         let (operation_tx, operation_rx) = mpsc::channel(100);
         let (info_tx, info_rx) = mpsc::channel(100);
         let (control_tx, control_rx) = mpsc::channel(100);
@@ -586,8 +588,8 @@ where
         let actor_operation_tx = operation_tx.clone();
         let actor_info_tx = info_tx.clone();
         let actor_control_tx = control_tx.clone();
-        let shutdown_receiver_clone = shutdown_receiver;
-        let actor_sender = mailbox_tx.clone();
+        let _shutdown_receiver_clone = shutdown_receiver;
+        let _actor_sender = mailbox_tx.clone();
 
         let actor_id = TheaterId::generate();
         debug!("Initializing actor runtime");
@@ -612,7 +614,7 @@ where
         let engine = self.wasm_engine.clone();
         let handler_registry = self.handler_registry.clone();
         let actor_runtime_process = tokio::spawn(async move {
-            let actor_runtime = ActorRuntime::start(
+            let _actor_runtime = ActorRuntime::start(
                 actor_id_for_task.clone(),
                 &manifest_clone,
                 init_value,
@@ -631,7 +633,7 @@ where
         });
 
         // Create ActorHandle for lifecycle notification before moving channels
-        let actor_handle = crate::actor::handle::ActorHandle::new(
+        let _actor_handle = crate::actor::handle::ActorHandle::new(
             operation_tx.clone(),
             info_tx.clone(),
             control_tx.clone(),
@@ -836,7 +838,7 @@ where
             writable_chain
                 .add_typed_event(crate::events::ChainEventData {
                     event_type: "shutdown".to_string(),
-                    data: EventData::Runtime(RuntimeEventData::ShuttingDown {}),
+                    data: crate::events::runtime::RuntimeEventData::ShuttingDown {}.into(),
                     timestamp: chrono::Utc::now().timestamp_millis() as u64,
                     description: Some("shutting down".to_string()),
                 })

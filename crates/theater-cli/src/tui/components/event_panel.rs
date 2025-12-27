@@ -46,7 +46,7 @@ pub fn render_event_panel(f: &mut Frame, app: &TuiApp, area: Rect) {
     }
 }
 
-fn create_event_list_item(event: &DisplayEvent) -> ListItem {
+fn create_event_list_item(event: &DisplayEvent) -> ListItem<'_> {
     let timestamp = event.timestamp.format("%H:%M:%S").to_string();
 
     let (level_color, level_symbol) = match event.level {

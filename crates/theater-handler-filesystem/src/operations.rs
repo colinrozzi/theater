@@ -8,47 +8,47 @@ pub use commands::*;
 
 use tracing::info;
 
-use theater::events::filesystem::FilesystemEventData;
-use theater::events::{ChainEventData, EventData};
+use theater::events::EventPayload;
 use theater::wasm::ActorComponent;
 
+use crate::events::FilesystemEventData;
 use crate::FilesystemHandler;
 
 /// Setup all filesystem host functions
-pub fn setup_host_functions(
+pub fn setup_host_functions<E>(
     handler: &FilesystemHandler,
-    actor_component: &mut ActorComponent,
-) -> anyhow::Result<()> {
+    actor_component: &mut ActorComponent<E>,
+) -> anyhow::Result<()>
+where
+    E: EventPayload + Clone + From<FilesystemEventData>,
+{
     info!("Setting up filesystem host functions");
 
     // Record setup start
-    actor_component.actor_store.record_event(ChainEventData {
-        event_type: "filesystem-setup".to_string(),
-        data: EventData::Filesystem(FilesystemEventData::HandlerSetupStart),
-        timestamp: chrono::Utc::now().timestamp_millis() as u64,
-        description: Some("Starting filesystem host function setup".to_string()),
-    });
+    actor_component.actor_store.record_handler_event(
+        "filesystem-setup".to_string(),
+        FilesystemEventData::HandlerSetupStart,
+        Some("Starting filesystem host function setup".to_string()),
+    );
 
     let mut interface = match actor_component.linker.instance("theater:simple/filesystem") {
         Ok(interface) => {
-            actor_component.actor_store.record_event(ChainEventData {
-                event_type: "filesystem-setup".to_string(),
-                data: EventData::Filesystem(FilesystemEventData::LinkerInstanceSuccess),
-                timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                description: Some("Successfully created linker instance".to_string()),
-            });
+            actor_component.actor_store.record_handler_event(
+                "filesystem-setup".to_string(),
+                FilesystemEventData::LinkerInstanceSuccess,
+                Some("Successfully created linker instance".to_string()),
+            );
             interface
         }
         Err(e) => {
-            actor_component.actor_store.record_event(ChainEventData {
-                event_type: "filesystem-setup".to_string(),
-                data: EventData::Filesystem(FilesystemEventData::HandlerSetupError {
+            actor_component.actor_store.record_handler_event(
+                "filesystem-setup".to_string(),
+                FilesystemEventData::HandlerSetupError {
                     error: e.to_string(),
                     step: "linker_instance".to_string(),
-                }),
-                timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                description: Some(format!("Failed to create linker instance: {}", e)),
-            });
+                },
+                Some(format!("Failed to create linker instance: {}", e)),
+            );
             return Err(anyhow::anyhow!(
                 "Could not instantiate theater:simple/filesystem: {}",
                 e
@@ -68,12 +68,11 @@ pub fn setup_host_functions(
     setup_execute_nix_command(handler, &mut interface)?;
 
     // Record overall setup completion
-    actor_component.actor_store.record_event(ChainEventData {
-        event_type: "filesystem-setup".to_string(),
-        data: EventData::Filesystem(FilesystemEventData::HandlerSetupSuccess),
-        timestamp: chrono::Utc::now().timestamp_millis() as u64,
-        description: Some("Filesystem host functions setup completed successfully".to_string()),
-    });
+    actor_component.actor_store.record_handler_event(
+        "filesystem-setup".to_string(),
+        FilesystemEventData::HandlerSetupSuccess,
+        Some("Filesystem host functions setup completed successfully".to_string()),
+    );
 
     Ok(())
 }

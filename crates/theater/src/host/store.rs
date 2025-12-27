@@ -39,7 +39,7 @@ impl StoreHost {
         Self { permissions }
     }
 
-    pub async fn setup_host_functions(&self, actor_component: &mut ActorComponent) -> Result<()> {
+    pub async fn setup_host_functions(&self, actor_component: &mut ActorComponent<EventData>) -> Result<()> {
         // Record setup start
         actor_component.actor_store.record_event(ChainEventData {
             event_type: "store-setup".to_string(),
@@ -81,7 +81,7 @@ impl StoreHost {
 
         interface.func_wrap(
             "new",
-            move |mut ctx: StoreContextMut<'_, ActorStore>,
+            move |mut ctx: StoreContextMut<'_, ActorStore<EventData>>,
                   ()|
                   -> Result<(Result<String, String>,)> {
                 // Record store call event
@@ -111,7 +111,7 @@ impl StoreHost {
 
         interface.func_wrap_async(
             "store",
-            move |mut ctx: StoreContextMut<'_, ActorStore>, (store_id, content,): (String, Vec<u8>,)| 
+            move |mut ctx: StoreContextMut<'_, ActorStore<EventData>>, (store_id, content,): (String, Vec<u8>,)| 
                 -> Box<dyn Future<Output = Result<(Result<ContentRef, String>,)>> + Send> {
                 // Record store call event
                 ctx.data_mut().record_event(ChainEventData {
@@ -169,7 +169,7 @@ impl StoreHost {
 
         interface.func_wrap_async(
             "get",
-            move |mut ctx: StoreContextMut<'_, ActorStore>, (store_id, content_ref,): (String, ContentRef,)| 
+            move |mut ctx: StoreContextMut<'_, ActorStore<EventData>>, (store_id, content_ref,): (String, ContentRef,)| 
                 -> Box<dyn Future<Output = Result<(Result<Vec<u8>, String>,)>> + Send> {
                 // Record get call event
                 ctx.data_mut().record_event(ChainEventData {
@@ -228,7 +228,7 @@ impl StoreHost {
 
         interface.func_wrap_async(
             "exists",
-            move |mut ctx: StoreContextMut<'_, ActorStore>,
+            move |mut ctx: StoreContextMut<'_, ActorStore<EventData>>,
                   (store_id, content_ref): (String, ContentRef)|
                   -> Box<dyn Future<Output = Result<(Result<bool, String>,)>> + Send> {
                 // Record exists call event
@@ -279,7 +279,7 @@ impl StoreHost {
 
         interface.func_wrap_async(
             "label",
-            move |mut ctx: StoreContextMut<'_, ActorStore>,
+            move |mut ctx: StoreContextMut<'_, ActorStore<EventData>>,
                   (store_id, label_string, content_ref): (String, String, ContentRef)|
                   -> Box<dyn Future<Output = Result<(Result<(), String>,)>> + Send> {
                 // Record label call event
@@ -355,7 +355,7 @@ impl StoreHost {
 
         interface.func_wrap_async(
             "get-by-label",
-            move |mut ctx: StoreContextMut<'_, ActorStore>,
+            move |mut ctx: StoreContextMut<'_, ActorStore<EventData>>,
                   (store_id, label_string): (String, String)|
                   -> Box<
                 dyn Future<Output = Result<(Result<Option<ContentRef>, String>,)>> + Send,
@@ -428,7 +428,7 @@ impl StoreHost {
 
         interface.func_wrap_async(
             "remove-label",
-            move |mut ctx: StoreContextMut<'_, ActorStore>,
+            move |mut ctx: StoreContextMut<'_, ActorStore<EventData>>,
                   (store_id, label_string): (String, String)|
                   -> Box<dyn Future<Output = Result<(Result<(), String>,)>> + Send> {
                 // Record remove-label call event
@@ -495,7 +495,7 @@ impl StoreHost {
 
         interface.func_wrap_async(
             "store-at-label",
-            move |mut ctx: StoreContextMut<'_, ActorStore>, (store_id, label_string, content): (String, String, Vec<u8>)| 
+            move |mut ctx: StoreContextMut<'_, ActorStore<EventData>>, (store_id, label_string, content): (String, String, Vec<u8>)| 
                 -> Box<dyn Future<Output = Result<(Result<ContentRef, String>,)>> + Send> {
                 // Record put-at-label call event
                 ctx.data_mut().record_event(ChainEventData {
@@ -558,7 +558,7 @@ impl StoreHost {
 
         interface.func_wrap_async(
             "replace-content-at-label",
-            move |mut ctx: StoreContextMut<'_, ActorStore>, (store_id, label_string, content): (String, String, Vec<u8>)| 
+            move |mut ctx: StoreContextMut<'_, ActorStore<EventData>>, (store_id, label_string, content): (String, String, Vec<u8>)| 
                 -> Box<dyn Future<Output = Result<(Result<ContentRef, String>,)>> + Send> {
                 // Record replace-content-at-label call event
                 ctx.data_mut().record_event(ChainEventData {
@@ -621,7 +621,7 @@ impl StoreHost {
 
         interface.func_wrap_async(
             "replace-at-label",
-            move |mut ctx: StoreContextMut<'_, ActorStore>, (store_id, label_string, content_ref): (String, String, ContentRef)| 
+            move |mut ctx: StoreContextMut<'_, ActorStore<EventData>>, (store_id, label_string, content_ref): (String, String, ContentRef)| 
                 -> Box<dyn Future<Output = Result<(Result<(), String>,)>> + Send> {
                 // Record replace-at-label call event
                 ctx.data_mut().record_event(ChainEventData {
@@ -683,7 +683,7 @@ impl StoreHost {
 
         interface.func_wrap_async(
             "list-all-content",
-            move |mut ctx: StoreContextMut<'_, ActorStore>,
+            move |mut ctx: StoreContextMut<'_, ActorStore<EventData>>,
                   (store_id,): (String,)|
                   -> Box<
                 dyn Future<Output = Result<(Result<Vec<ContentRef>, String>,)>> + Send,
@@ -749,7 +749,7 @@ impl StoreHost {
 
         interface.func_wrap_async(
             "calculate-total-size",
-            move |mut ctx: StoreContextMut<'_, ActorStore>,
+            move |mut ctx: StoreContextMut<'_, ActorStore<EventData>>,
                   (store_id,): (String,)|
                   -> Box<dyn Future<Output = Result<(Result<u64, String>,)>> + Send> {
                 // Record calculate-total-size call event
@@ -813,7 +813,7 @@ impl StoreHost {
 
         interface.func_wrap_async(
             "list-labels",
-            move |mut ctx: StoreContextMut<'_, ActorStore>, (store_id,): (String,)| 
+            move |mut ctx: StoreContextMut<'_, ActorStore<EventData>>, (store_id,): (String,)| 
                 -> Box<dyn Future<Output = Result<(Result<Vec<String>, String>,)>> + Send> {
                 // Record list labels call event
                 ctx.data_mut().record_event(ChainEventData {
@@ -879,7 +879,7 @@ impl StoreHost {
         Ok(())
     }
 
-    pub async fn add_export_functions(&self, _actor_instance: &mut ActorInstance) -> Result<()> {
+    pub async fn add_export_functions(&self, _actor_instance: &mut ActorInstance<EventData>) -> Result<()> {
         info!("No functions needed for store");
         Ok(())
     }

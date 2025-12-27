@@ -1,7 +1,9 @@
+//! HTTP framework handler event types
+
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum HttpEventData {
+pub enum HttpFrameworkEventData {
     // HTTP framework server lifecycle events
     ServerCreate {
         server_id: u64,
@@ -88,7 +90,7 @@ pub enum HttpEventData {
         handler_type: String,
     },
 
-    // Original Request handling events
+    // Request handling events
     HttpRequestCall {
         method: String,
         path: String,
@@ -100,20 +102,6 @@ pub enum HttpEventData {
         headers_count: usize,
         body_size: usize,
         success: bool,
-    },
-
-    // Client request events
-    HttpClientRequestCall {
-        method: String,
-        url: String,
-        headers_count: usize,
-        body: Option<String>,
-    },
-    HttpClientRequestResult {
-        status: u16,
-        headers_count: usize,
-        success: bool,
-        body: Option<String>,
     },
 
     // TLS-specific events
@@ -173,8 +161,8 @@ pub enum HttpEventData {
     },
 }
 
-pub struct HttpEvent {
-    pub data: HttpEventData,
+pub struct HttpFrameworkEvent {
+    pub data: HttpFrameworkEventData,
     pub timestamp: u64,
     pub description: Option<String>,
 }

@@ -22,10 +22,13 @@
 //! let handler = HttpFrameworkHandler::new(None);
 //! ```
 
+pub mod events;
 mod handlers;
 mod server_instance;
 mod tls;
 mod types;
+
+pub use events::HttpFrameworkEventData;
 
 pub use handlers::{HandlerConfig, HandlerRegistry, HandlerType};
 pub use server_instance::ServerInstance;
@@ -49,11 +52,12 @@ use tracing::{debug, error, info, warn};
 use theater::actor::handle::ActorHandle;
 use theater::actor::store::ActorStore;
 use theater::config::permissions::HttpFrameworkPermissions;
-use theater::events::http::HttpEventData;
-use theater::events::{ChainEventData, EventData};
+use theater::events::EventPayload;
 use theater::handler::Handler;
 use theater::shutdown::ShutdownReceiver;
 use theater::wasm::{ActorComponent, ActorInstance};
+
+use crate::events::HttpFrameworkEventData as HandlerEventData;
 
 /// Error types for HTTP framework operations
 #[derive(Error, Debug)]
@@ -101,6 +105,7 @@ pub struct HttpFrameworkHandler {
     next_route_id: Arc<AtomicU64>,
     next_middleware_id: Arc<AtomicU64>,
     server_handles: Arc<RwLock<HashMap<u64, ServerHandle>>>,
+    #[allow(dead_code)]
     permissions: Option<HttpFrameworkPermissions>,
 }
 
@@ -124,60 +129,33 @@ impl HttpFrameworkHandler {
     }
 }
 
-impl Handler for HttpFrameworkHandler {
-    fn create_instance(&self) -> Box<dyn Handler> {
+impl<E> Handler<E> for HttpFrameworkHandler
+where
+    E: EventPayload + Clone + From<HandlerEventData> + From<theater::events::theater_runtime::TheaterRuntimeEventData> + From<theater::events::wasm::WasmEventData>,
+{
+    fn create_instance(&self) -> Box<dyn Handler<E>> {
         Box::new(self.clone())
     }
 
-    fn setup_host_functions(&mut self, actor_component: &mut ActorComponent) -> Result<()> {
-        // Record setup start
-        actor_component.actor_store.record_event(ChainEventData {
-            event_type: "http-framework-setup".to_string(),
-            data: EventData::Http(HttpEventData::HandlerSetupStart),
-            timestamp: chrono::Utc::now().timestamp_millis() as u64,
-            description: Some("Starting HTTP framework host function setup".to_string()),
-        });
-
+    fn setup_host_functions(&mut self, actor_component: &mut ActorComponent<E>) -> Result<()> {
         info!("Setting up HTTP framework host functions");
 
-        let mut interface = match actor_component
+        let mut interface = actor_component
             .linker
             .instance("theater:simple/http-framework")
-        {
-            Ok(interface) => {
-                // Record successful linker instance creation
-                actor_component.actor_store.record_event(ChainEventData {
-                    event_type: "http-framework-setup".to_string(),
-                    data: EventData::Http(HttpEventData::LinkerInstanceSuccess),
-                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                    description: Some("Successfully created linker instance".to_string()),
-                });
-                interface
-            }
-            Err(e) => {
-                // Record the specific error where it happens
-                actor_component.actor_store.record_event(ChainEventData {
-                    event_type: "http-framework-setup".to_string(),
-                    data: EventData::Http(HttpEventData::HandlerSetupError {
-                        error: e.to_string(),
-                        step: "linker_instance".to_string(),
-                    }),
-                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                    description: Some(format!("Failed to create linker instance: {}", e)),
-                });
-                return Err(anyhow::anyhow!(
+            .map_err(|e| {
+                anyhow::anyhow!(
                     "Could not instantiate theater:simple/http-framework: {}",
                     e
-                ));
-            }
-        };
+                )
+            })?;
 
         // 1. create-server
         let servers_clone = self.servers.clone();
         let next_server_id = self.next_server_id.clone();
         interface.func_wrap(
             "create-server",
-            move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore>,
+            move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore<E>>,
                   (config,): (ServerConfig,)|
                   -> Result<(Result<u64, String>,)> {
                 let server_id = next_server_id.fetch_add(1, Ordering::SeqCst);
@@ -203,20 +181,19 @@ impl Handler for HttpFrameworkHandler {
                     ServerInstance::new(server_id, port, host.clone(), config.tls_config.clone());
 
                 // Record event in hash chain
-                ctx.data_mut().record_event(ChainEventData {
-                    event_type: "http-framework/create-server".to_string(),
-                    data: EventData::Http(HttpEventData::ServerCreate {
+                ctx.data_mut().record_handler_event(
+                    "http-framework/create-server".to_string(),
+                    HandlerEventData::ServerCreate {
                         server_id,
                         host: host.clone(),
                         port,
                         with_tls: config.tls_config.is_some(),
-                    }),
-                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                    description: Some(format!(
+                    },
+                    Some(format!(
                         "Created HTTP server {} on {}:{}",
                         server_id, host, port
                     )),
-                });
+                );
 
                 // Store server instance
                 let servers_clone_inner = servers_clone.clone();
@@ -233,7 +210,7 @@ impl Handler for HttpFrameworkHandler {
         let servers_clone = self.servers.clone();
         interface.func_wrap(
             "get-server-info",
-            move |_ctx: wasmtime::StoreContextMut<'_, ActorStore>,
+            move |_ctx: wasmtime::StoreContextMut<'_, ActorStore<E>>,
                   (server_id,): (u64,)|
                   -> Result<(Result<ServerInfo, String>,)> {
                 let servers_clone = servers_clone.clone();
@@ -265,7 +242,7 @@ impl Handler for HttpFrameworkHandler {
         let server_handles_clone = self.server_handles.clone();
         interface.func_wrap_async(
             "start-server",
-            move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore>,
+            move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore<E>>,
                   (server_id,): (u64,)|
                   -> Box<dyn Future<Output = Result<(Result<u16, String>,)>> + Send> {
                 let servers_clone = servers_clone.clone();
@@ -280,16 +257,16 @@ impl Handler for HttpFrameworkHandler {
                             Ok(port) => {
                                 // Record appropriate event based on server type
                                 let event_data = if server.is_https() {
-                                    EventData::Http(HttpEventData::ServerStartHttps {
+                                    HandlerEventData::ServerStartHttps {
                                         server_id,
                                         port,
                                         cert_path: server
                                             .get_tls_cert_path()
                                             .unwrap_or("unknown")
                                             .to_string(),
-                                    })
+                                    }
                                 } else {
-                                    EventData::Http(HttpEventData::ServerStart { server_id, port })
+                                    HandlerEventData::ServerStart { server_id, port }
                                 };
 
                                 let description = if server.is_https() {
@@ -298,12 +275,11 @@ impl Handler for HttpFrameworkHandler {
                                     format!("Started HTTP server {} on port {}", server_id, port)
                                 };
 
-                                ctx.data_mut().record_event(ChainEventData {
-                                    event_type: "http-framework/start-server".to_string(),
-                                    data: event_data,
-                                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                                    description: Some(description),
-                                });
+                                ctx.data_mut().record_handler_event(
+                                    "http-framework/start-server".to_string(),
+                                    event_data,
+                                    Some(description),
+                                );
 
                                 // Create server handle for tracking
                                 let server_handle = ServerHandle {
@@ -327,19 +303,18 @@ impl Handler for HttpFrameworkHandler {
                                 error!("Failed to start server {}: {}", server_id, e);
 
                                 // Record error event
-                                ctx.data_mut().record_event(ChainEventData {
-                                    event_type: "http-framework/start-server".to_string(),
-                                    data: EventData::Http(HttpEventData::Error {
+                                ctx.data_mut().record_handler_event(
+                                    "http-framework/start-server".to_string(),
+                                    HandlerEventData::Error {
                                         operation: "start-server".to_string(),
                                         path: format!("server-{}", server_id),
                                         message: e.to_string(),
-                                    }),
-                                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                                    description: Some(format!(
+                                    },
+                                    Some(format!(
                                         "Failed to start HTTP server {}: {}",
                                         server_id, e
                                     )),
-                                });
+                                );
 
                                 Ok((Err(format!("Failed to start server: {}", e)),))
                             }
@@ -356,7 +331,7 @@ impl Handler for HttpFrameworkHandler {
         let server_handles_clone = self.server_handles.clone();
         interface.func_wrap_async(
             "stop-server",
-            move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore>,
+            move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore<E>>,
                   (server_id,): (u64,)|
                   -> Box<dyn Future<Output = Result<(Result<(), String>,)>> + Send> {
                 let servers_clone = servers_clone.clone();
@@ -380,12 +355,11 @@ impl Handler for HttpFrameworkHandler {
                         match result {
                             Ok(_) => {
                                 // Record event
-                                ctx.data_mut().record_event(ChainEventData {
-                                    event_type: "http-framework/stop-server".to_string(),
-                                    data: EventData::Http(HttpEventData::ServerStop { server_id }),
-                                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                                    description: Some(format!("Stopped HTTP server {}", server_id)),
-                                });
+                                ctx.data_mut().record_handler_event(
+                                    "http-framework/stop-server".to_string(),
+                                    HandlerEventData::ServerStop { server_id },
+                                    Some(format!("Stopped HTTP server {}", server_id)),
+                                );
 
                                 Ok((Ok(()),))
                             }
@@ -393,19 +367,18 @@ impl Handler for HttpFrameworkHandler {
                                 error!("Failed to stop server {}: {}", server_id, e);
 
                                 // Record error event
-                                ctx.data_mut().record_event(ChainEventData {
-                                    event_type: "http-framework/stop-server".to_string(),
-                                    data: EventData::Http(HttpEventData::Error {
+                                ctx.data_mut().record_handler_event(
+                                    "http-framework/stop-server".to_string(),
+                                    HandlerEventData::Error {
                                         operation: "stop-server".to_string(),
                                         path: format!("server-{}", server_id),
                                         message: e.to_string(),
-                                    }),
-                                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                                    description: Some(format!(
+                                    },
+                                    Some(format!(
                                         "Failed to stop HTTP server {}: {}",
                                         server_id, e
                                     )),
-                                });
+                                );
 
                                 Ok((Err(format!("Failed to stop server: {}", e)),))
                             }
@@ -422,7 +395,7 @@ impl Handler for HttpFrameworkHandler {
         let server_handles_clone = self.server_handles.clone();
         interface.func_wrap_async(
             "destroy-server",
-            move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore>,
+            move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore<E>>,
                   (server_id,): (u64,)|
                   -> Box<dyn Future<Output = Result<(Result<(), String>,)>> + Send> {
                 let servers_clone = servers_clone.clone();
@@ -459,12 +432,11 @@ impl Handler for HttpFrameworkHandler {
                         });
 
                         // Record event
-                        ctx.data_mut().record_event(ChainEventData {
-                            event_type: "http-framework/destroy-server".to_string(),
-                            data: EventData::Http(HttpEventData::ServerDestroy { server_id }),
-                            timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                            description: Some(format!("Destroyed HTTP server {}", server_id)),
-                        });
+                        ctx.data_mut().record_handler_event(
+                            "http-framework/destroy-server".to_string(),
+                            HandlerEventData::ServerDestroy { server_id },
+                            Some(format!("Destroyed HTTP server {}", server_id)),
+                        );
 
                         Ok((Ok(()),))
                     } else {
@@ -479,7 +451,7 @@ impl Handler for HttpFrameworkHandler {
         let next_handler_id = self.next_handler_id.clone();
         interface.func_wrap(
             "register-handler",
-            move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore>,
+            move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore<E>>,
                   (handler_name,): (String,)|
                   -> Result<(Result<u64, String>,)> {
                 let handlers_clone = handlers_clone.clone();
@@ -498,18 +470,17 @@ impl Handler for HttpFrameworkHandler {
                 };
 
                 // Record event
-                ctx.data_mut().record_event(ChainEventData {
-                    event_type: "http-framework/register-handler".to_string(),
-                    data: EventData::Http(HttpEventData::HandlerRegister {
+                ctx.data_mut().record_handler_event(
+                    "http-framework/register-handler".to_string(),
+                    HandlerEventData::HandlerRegister {
                         handler_id,
                         name: handler_name.clone(),
-                    }),
-                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                    description: Some(format!(
+                    },
+                    Some(format!(
                         "Registered handler {} with name '{}'",
                         handler_id, handler_name
                     )),
-                });
+                );
 
                 // Store handler
                 tokio::spawn(async move {
@@ -527,7 +498,7 @@ impl Handler for HttpFrameworkHandler {
         let next_route_id = self.next_route_id.clone();
         interface.func_wrap(
             "add-route",
-            move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore>,
+            move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore<E>>,
                   (server_id, path, method, handler_id): (u64, String, String, u64)|
                   -> Result<(Result<u64, String>,)> {
                 let servers_clone = servers_clone.clone();
@@ -593,21 +564,20 @@ impl Handler for HttpFrameworkHandler {
                 match result {
                     Ok(_) => {
                         // Record event
-                        ctx.data_mut().record_event(ChainEventData {
-                            event_type: "http-framework/add-route".to_string(),
-                            data: EventData::Http(HttpEventData::RouteAdd {
+                        ctx.data_mut().record_handler_event(
+                            "http-framework/add-route".to_string(),
+                            HandlerEventData::RouteAdd {
                                 route_id,
                                 server_id,
                                 path: path_clone.clone(),
                                 method: method_clone.clone(),
                                 handler_id,
-                            }),
-                            timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                            description: Some(format!(
+                            },
+                            Some(format!(
                                 "Added route {} for {} {} on server {}",
                                 route_id, method_clone, path_clone, server_id
                             )),
-                        });
+                        );
 
                         Ok((Ok(route_id),))
                     }
@@ -620,7 +590,7 @@ impl Handler for HttpFrameworkHandler {
         let servers_clone = self.servers.clone();
         interface.func_wrap(
             "remove-route",
-            move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore>,
+            move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore<E>>,
                   (route_id,): (u64,)|
                   -> Result<(Result<(), String>,)> {
                 let servers_clone = servers_clone.clone();
@@ -659,18 +629,17 @@ impl Handler for HttpFrameworkHandler {
                 match result {
                     Ok(server_id) => {
                         // Record event
-                        ctx.data_mut().record_event(ChainEventData {
-                            event_type: "http-framework/remove-route".to_string(),
-                            data: EventData::Http(HttpEventData::RouteRemove {
+                        ctx.data_mut().record_handler_event(
+                            "http-framework/remove-route".to_string(),
+                            HandlerEventData::RouteRemove {
                                 route_id,
                                 server_id,
-                            }),
-                            timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                            description: Some(format!(
+                            },
+                            Some(format!(
                                 "Removed route {} from server {}",
                                 route_id, server_id
                             )),
-                        });
+                        );
 
                         Ok((Ok(()),))
                     }
@@ -685,7 +654,7 @@ impl Handler for HttpFrameworkHandler {
         let next_middleware_id = self.next_middleware_id.clone();
         interface.func_wrap(
             "add-middleware",
-            move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore>,
+            move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore<E>>,
                   (server_id, path, handler_id): (u64, String, u64)|
                   -> Result<(Result<u64, String>,)> {
                 let servers_clone = servers_clone.clone();
@@ -735,20 +704,19 @@ impl Handler for HttpFrameworkHandler {
                 match result {
                     Ok(_) => {
                         // Record event
-                        ctx.data_mut().record_event(ChainEventData {
-                            event_type: "http-framework/add-middleware".to_string(),
-                            data: EventData::Http(HttpEventData::MiddlewareAdd {
+                        ctx.data_mut().record_handler_event(
+                            "http-framework/add-middleware".to_string(),
+                            HandlerEventData::MiddlewareAdd {
                                 middleware_id,
                                 server_id,
                                 path: path_clone.clone(),
                                 handler_id,
-                            }),
-                            timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                            description: Some(format!(
+                            },
+                            Some(format!(
                                 "Added middleware {} for path {} on server {}",
                                 middleware_id, path_clone, server_id
                             )),
-                        });
+                        );
 
                         Ok((Ok(middleware_id),))
                     }
@@ -761,7 +729,7 @@ impl Handler for HttpFrameworkHandler {
         let servers_clone = self.servers.clone();
         interface.func_wrap(
             "remove-middleware",
-            move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore>,
+            move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore<E>>,
                   (middleware_id,): (u64,)|
                   -> Result<(Result<(), String>,)> {
                 let servers_clone = servers_clone.clone();
@@ -800,18 +768,17 @@ impl Handler for HttpFrameworkHandler {
                 match result {
                     Ok(server_id) => {
                         // Record event
-                        ctx.data_mut().record_event(ChainEventData {
-                            event_type: "http-framework/remove-middleware".to_string(),
-                            data: EventData::Http(HttpEventData::MiddlewareRemove {
+                        ctx.data_mut().record_handler_event(
+                            "http-framework/remove-middleware".to_string(),
+                            HandlerEventData::MiddlewareRemove {
                                 middleware_id,
                                 server_id,
-                            }),
-                            timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                            description: Some(format!(
+                            },
+                            Some(format!(
                                 "Removed middleware {} from server {}",
                                 middleware_id, server_id
                             )),
-                        });
+                        );
 
                         Ok((Ok(()),))
                     }
@@ -825,7 +792,7 @@ impl Handler for HttpFrameworkHandler {
         let handlers_clone = self.handlers.clone();
         interface.func_wrap(
             "enable-websocket",
-            move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore>,
+            move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore<E>>,
                   (
                 server_id,
                 path,
@@ -912,21 +879,20 @@ impl Handler for HttpFrameworkHandler {
                 match result {
                     Ok(_) => {
                         // Record event
-                        ctx.data_mut().record_event(ChainEventData {
-                            event_type: "http-framework/enable-websocket".to_string(),
-                            data: EventData::Http(HttpEventData::WebSocketEnable {
+                        ctx.data_mut().record_handler_event(
+                            "http-framework/enable-websocket".to_string(),
+                            HandlerEventData::WebSocketEnable {
                                 server_id,
                                 path: path_clone.clone(),
                                 connect_handler_id,
                                 message_handler_id,
                                 disconnect_handler_id,
-                            }),
-                            timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                            description: Some(format!(
+                            },
+                            Some(format!(
                                 "Enabled WebSocket on path {} for server {}",
                                 path_clone, server_id
                             )),
-                        });
+                        );
 
                         Ok((Ok(()),))
                     }
@@ -939,7 +905,7 @@ impl Handler for HttpFrameworkHandler {
         let servers_clone = self.servers.clone();
         interface.func_wrap(
             "disable-websocket",
-            move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore>,
+            move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore<E>>,
                   (server_id, path): (u64, String)|
                   -> Result<(Result<(), String>,)> {
                 let servers_clone = servers_clone.clone();
@@ -967,18 +933,17 @@ impl Handler for HttpFrameworkHandler {
                 match result {
                     Ok(_) => {
                         // Record event
-                        ctx.data_mut().record_event(ChainEventData {
-                            event_type: "http-framework/disable-websocket".to_string(),
-                            data: EventData::Http(HttpEventData::WebSocketDisable {
+                        ctx.data_mut().record_handler_event(
+                            "http-framework/disable-websocket".to_string(),
+                            HandlerEventData::WebSocketDisable {
                                 server_id,
                                 path: path.clone(),
-                            }),
-                            timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                            description: Some(format!(
+                            },
+                            Some(format!(
                                 "Disabled WebSocket on path {} for server {}",
                                 path, server_id
                             )),
-                        });
+                        );
 
                         Ok((Ok(()),))
                     }
@@ -991,7 +956,7 @@ impl Handler for HttpFrameworkHandler {
         let servers_clone = self.servers.clone();
         interface.func_wrap(
             "send-websocket-message",
-            move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore>,
+            move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore<E>>,
                   (server_id, connection_id, message): (u64, u64, WebSocketMessage)|
                   -> Result<(Result<(), String>,)> {
                 let servers_clone = servers_clone.clone();
@@ -1041,20 +1006,19 @@ impl Handler for HttpFrameworkHandler {
                         let message_size = message_clone.data.as_ref().map_or(0, |d| d.len())
                             + message_clone.text.as_ref().map_or(0, |t| t.len());
 
-                        ctx.data_mut().record_event(ChainEventData {
-                            event_type: "http-framework/send-websocket-message".to_string(),
-                            data: EventData::Http(HttpEventData::WebSocketMessage {
+                        ctx.data_mut().record_handler_event(
+                            "http-framework/send-websocket-message".to_string(),
+                            HandlerEventData::WebSocketMessage {
                                 server_id,
                                 connection_id,
                                 message_type: message_type.to_string(),
                                 message_size,
-                            }),
-                            timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                            description: Some(format!(
+                            },
+                            Some(format!(
                                 "Sent WebSocket message to connection {} on server {}",
                                 connection_id, server_id
                             )),
-                        });
+                        );
 
                         Ok((Ok(()),))
                     }
@@ -1067,7 +1031,7 @@ impl Handler for HttpFrameworkHandler {
         let servers_clone = self.servers.clone();
         interface.func_wrap(
             "close-websocket",
-            move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore>,
+            move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore<E>>,
                   (server_id, connection_id): (u64, u64)|
                   -> Result<(Result<(), String>,)> {
                 let servers_clone = servers_clone.clone();
@@ -1109,18 +1073,17 @@ impl Handler for HttpFrameworkHandler {
                 match result {
                     Ok(_) => {
                         // Record event
-                        ctx.data_mut().record_event(ChainEventData {
-                            event_type: "http-framework/close-websocket".to_string(),
-                            data: EventData::Http(HttpEventData::WebSocketDisconnect {
+                        ctx.data_mut().record_handler_event(
+                            "http-framework/close-websocket".to_string(),
+                            HandlerEventData::WebSocketDisconnect {
                                 server_id,
                                 connection_id,
-                            }),
-                            timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                            description: Some(format!(
+                            },
+                            Some(format!(
                                 "Closed WebSocket connection {} on server {}",
                                 connection_id, server_id
                             )),
-                        });
+                        );
 
                         Ok((Ok(()),))
                     }
@@ -1129,22 +1092,12 @@ impl Handler for HttpFrameworkHandler {
             },
         )?;
 
-        // Record overall setup completion
-        actor_component.actor_store.record_event(ChainEventData {
-            event_type: "http-framework-setup".to_string(),
-            data: EventData::Http(HttpEventData::HandlerSetupSuccess),
-            timestamp: chrono::Utc::now().timestamp_millis() as u64,
-            description: Some(
-                "HTTP framework host functions setup completed successfully".to_string(),
-            ),
-        });
-
         info!("HTTP framework host functions set up");
 
         Ok(())
     }
 
-    fn add_export_functions(&self, actor_instance: &mut ActorInstance) -> Result<()> {
+    fn add_export_functions(&self, actor_instance: &mut ActorInstance<E>) -> Result<()> {
         info!("Adding export functions for HTTP framework");
 
         match actor_instance.register_function::<(u64, HttpRequest), (HttpResponse,)>(

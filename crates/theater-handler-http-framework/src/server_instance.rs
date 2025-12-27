@@ -71,9 +71,11 @@ pub struct WebSocketHandlerState {
 
 // Simplified server state (no more route mapping needed)
 pub struct ServerState {
+    #[allow(dead_code)]
     pub id: u64,
     pub actor_handle: ActorHandle,
     pub middlewares: HashMap<u64, MiddlewareConfig>,
+    #[allow(dead_code)]
     pub websockets: HashMap<String, WebSocketConfig>,
     pub active_ws_connections: Arc<RwLock<HashMap<u64, WebSocketConnection>>>,
 }

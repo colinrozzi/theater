@@ -25,6 +25,9 @@ thiserror = "1.0"
 # Time handling
 chrono = { version = "0.4", features = ["serde"] }
 
+# Serialization
+serde = { workspace = true }
+
 # WASM runtime
 wasmtime = { version = "31.0", features = ["component-model", "async"] }
 
