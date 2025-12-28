@@ -1,0 +1,13 @@
+package wasi:random@0.2.8;
+
+/// WASI Random provides cryptographically secure random data.
+/// All functions must produce unpredictable data without blocking.
+interface random {
+    /// Generate cryptographically secure random bytes
+    /// Returns a list of random bytes of the specified length
+    get-random-bytes: func(len: u64) -> list<u8>;
+
+    /// Generate a single random u64 value
+    /// Equivalent to get-random-bytes but returns u64
+    get-random-u64: func() -> u64;
+}

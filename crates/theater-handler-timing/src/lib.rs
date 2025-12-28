@@ -3,8 +3,16 @@
 //! Provides timing capabilities to WebAssembly actors in the Theater system.
 //! This handler allows actors to get the current time, sleep for durations,
 //! and wait until specific deadlines.
+//!
+//! ## Architecture
+//!
+//! This handler uses wasmtime's bindgen to generate type-safe Host traits from
+//! the WASI Clocks WIT definitions. This ensures compile-time verification that
+//! our implementation matches the WASI specification.
 
 pub mod events;
+pub mod bindings;
+pub mod host_impl;
 
 use anyhow::Result;
 use chrono::Utc;
@@ -16,17 +24,40 @@ use tracing::{info, error};
 use wasmtime::StoreContextMut;
 
 use theater::actor::handle::ActorHandle;
-use theater::actor::store::ActorStore;
 use theater::actor::types::ActorError;
 use theater::config::actor_manifest::TimingHostConfig;
 use theater::config::enforcement::PermissionChecker;
 use theater::config::permissions::TimingPermissions;
 use theater::events::EventPayload;
-use theater::handler::Handler;
+use theater::handler::{Handler, SharedActorInstance};
 use theater::shutdown::ShutdownReceiver;
 use theater::wasm::{ActorComponent, ActorInstance};
 
 pub use events::TimingEventData;
+
+/// Represents a pollable resource for timing operations
+///
+/// Pollables are used in the Component Model to represent async events.
+/// For timing, they represent events that become "ready" when a specific
+/// time is reached or a duration has elapsed.
+#[derive(Debug, Clone)]
+pub struct Pollable {
+    /// The monotonic clock instant (in nanoseconds) when this pollable becomes ready
+    pub deadline: u64,
+
+    /// The kind of pollable (instant or duration-based)
+    pub kind: PollableKind,
+}
+
+/// The kind of timing pollable
+#[derive(Debug, Clone)]
+pub enum PollableKind {
+    /// Becomes ready at a specific monotonic instant
+    MonotonicInstant(u64),
+
+    /// Becomes ready after a duration from creation time
+    MonotonicDuration { duration: u64, created_at: u64 },
+}
 
 #[derive(Clone)]
 pub struct TimingHandler {
@@ -60,6 +91,10 @@ impl TimingHandler {
             permissions,
         }
     }
+
+    // Note: The old manual setup_wasi_wall_clock, setup_wasi_monotonic_clock, and setup_wasi_poll
+    // methods have been replaced by bindgen-generated add_to_linker calls in setup_host_functions_impl.
+    // The Host trait implementations are in host_impl.rs.
 
     fn setup_host_functions_impl<E>(&mut self, actor_component: &mut ActorComponent<E>) -> Result<()>
     where
@@ -295,7 +330,37 @@ impl TimingHandler {
             Some("Timing host functions setup completed successfully".to_string()),
         );
 
-        info!("Timing host functions added successfully");
+        info!("Theater timing host functions added successfully");
+
+        // Setup WASI-compliant clock and poll interfaces using bindgen-generated add_to_linker
+        info!("Setting up WASI clocks/poll interfaces using bindgen");
+
+        use crate::bindings;
+        use theater::actor::ActorStore;
+
+        // Add wasi:clocks/wall-clock interface
+        bindings::wasi::clocks::wall_clock::add_to_linker(
+            &mut actor_component.linker,
+            |state: &mut ActorStore<E>| state,
+        )?;
+        info!("wasi:clocks/wall-clock interface added");
+
+        // Add wasi:clocks/monotonic-clock interface
+        bindings::wasi::clocks::monotonic_clock::add_to_linker(
+            &mut actor_component.linker,
+            |state: &mut ActorStore<E>| state,
+        )?;
+        info!("wasi:clocks/monotonic-clock interface added");
+
+        // Add wasi:io/poll interface
+        bindings::wasi::io::poll::add_to_linker(
+            &mut actor_component.linker,
+            |state: &mut ActorStore<E>| state,
+        )?;
+        info!("wasi:io/poll interface added");
+
+        info!("WASI clock/poll interfaces setup complete (using bindgen traits)");
+
         Ok(())
     }
 
@@ -328,6 +393,7 @@ where
     fn start(
         &mut self,
         actor_handle: ActorHandle,
+        _actor_instance: SharedActorInstance<E>,
         shutdown_receiver: ShutdownReceiver,
     ) -> Pin<Box<dyn Future<Output = Result<()>> + Send>> {
         let handler = self.clone();
@@ -353,7 +419,9 @@ where
     }
 
     fn imports(&self) -> Option<String> {
-        Some("theater:simple/timing".to_string())
+        // Handler provides WASI clocks and poll interfaces (version 0.2.3)
+        // Supports: wall-clock, monotonic-clock, and poll
+        Some("wasi:clocks/wall-clock@0.2.3,wasi:clocks/monotonic-clock@0.2.3,wasi:io/poll@0.2.3".to_string())
     }
 
     fn exports(&self) -> Option<String> {

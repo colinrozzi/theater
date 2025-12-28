@@ -1,0 +1,6 @@
+package test:wasi-random;
+
+world wasi-random-test {
+    import wasi:random/random@0.2.0;
+    export theater:simple/actor;
+}

@@ -1,0 +1,8 @@
+package theater:simple;
+
+interface random {
+    random-bytes: func(length: u32) -> result<list<u8>, string>;
+    random-range: func(min: u64, max: u64) -> result<u64, string>;
+    random-float: func() -> result<f64, string>;
+    generate-uuid: func() -> result<string, string>;
+}

@@ -112,6 +112,54 @@ pub enum FilesystemEventData {
     FunctionSetupSuccess {
         function_name: String,
     },
+
+    // WASI Filesystem events
+    ReadCall {
+        path: String,
+        offset: u64,
+        length: u64,
+    },
+    ReadResult {
+        bytes_read: usize,
+        success: bool,
+    },
+    WriteCall {
+        path: String,
+        size: usize,
+    },
+    WriteResult {
+        bytes_written: usize,
+        success: bool,
+    },
+    OpenAtCall {
+        path: String,
+        flags: String,
+    },
+    OpenAtResult {
+        success: bool,
+    },
+    CreateDirCall {
+        path: String,
+    },
+    CreateDirResult {
+        success: bool,
+    },
+    DeleteDirCall {
+        path: String,
+    },
+    DeleteDirResult {
+        success: bool,
+    },
+    DeleteFileCall {
+        path: String,
+    },
+    DeleteFileResult {
+        success: bool,
+    },
+    GetPreopensCall,
+    GetPreopensResult {
+        count: usize,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ComponentType, Lift, Lower)]

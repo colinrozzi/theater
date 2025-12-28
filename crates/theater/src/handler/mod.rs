@@ -5,6 +5,12 @@ use crate::wasm::{ActorComponent, ActorInstance};
 use anyhow::Result;
 use std::future::Future;
 use std::pin::Pin;
+use std::sync::Arc;
+use tokio::sync::RwLock;
+use tracing::{debug, info};
+
+/// Shared reference to an actor instance for handlers that need direct store access
+pub type SharedActorInstance<E> = Arc<RwLock<Option<ActorInstance<E>>>>;
 
 pub struct HandlerRegistry<E>
 where
@@ -34,20 +40,53 @@ where
         let component_imports = actor_component.import_types.clone(); // What the component imports
         let component_exports = actor_component.export_types.clone(); // What the component exports
 
+        debug!("setup_handlers called");
+        debug!("Component imports: {:?}", component_imports.iter().map(|(n, _)| n).collect::<Vec<_>>());
+        debug!("Component exports: {:?}", component_exports.iter().map(|(n, _)| n).collect::<Vec<_>>());
+        debug!("Number of registered handlers: {}", self.handlers.len());
+
         let mut active_handlers = Vec::new();
 
         for handler in &self.handlers {
-            let needs_this_handler = handler.imports().map_or(false, |import| {
-                component_imports.iter().any(|(name, _)| name == &import)
-            }) || handler.exports().map_or(false, |export| {
-                component_exports.iter().any(|(name, _)| name == &export)
+            debug!("Checking handler '{}' - imports: {:?}, exports: {:?}",
+                   handler.name(), handler.imports(), handler.exports());
+
+            // Check if handler's imports match component's imports
+            // Handler imports can be comma-separated (e.g., "wasi:clocks/wall-clock@0.2.3,wasi:io/poll@0.2.3")
+            let imports_match = handler.imports().map_or(false, |imports_str| {
+                // Split comma-separated imports and check if any match
+                imports_str.split(',')
+                    .map(|s| s.trim())
+                    .any(|handler_import| {
+                        let matches = component_imports.iter().any(|(name, _)| name == handler_import);
+                        debug!("Checking import '{}' against component imports: {}", handler_import, matches);
+                        matches
+                    })
             });
+
+            // Check if handler's exports match component's exports
+            let exports_match = handler.exports().map_or(false, |exports_str| {
+                // Split comma-separated exports and check if any match
+                exports_str.split(',')
+                    .map(|s| s.trim())
+                    .any(|handler_export| {
+                        let matches = component_exports.iter().any(|(name, _)| name == handler_export);
+                        debug!("Checking export '{}' against component exports: {}", handler_export, matches);
+                        matches
+                    })
+            });
+
+            let needs_this_handler = imports_match || exports_match;
+            debug!("Handler '{}': imports_match={}, exports_match={}, needs_this_handler={}",
+                   handler.name(), imports_match, exports_match, needs_this_handler);
 
             if needs_this_handler {
                 active_handlers.push(handler.create_instance());
+                info!("Activated handler '{}'", handler.name());
             }
         }
 
+        debug!("setup_handlers returning {} handlers", active_handlers.len());
         active_handlers
     }
 }
@@ -79,6 +118,7 @@ where
     fn start(
         &mut self,
         actor_handle: ActorHandle,
+        actor_instance: SharedActorInstance<E>,
         shutdown_receiver: ShutdownReceiver,
     ) -> Pin<Box<dyn Future<Output = Result<()>> + Send>>;
 

@@ -1,0 +1,15 @@
+/// WIT world for the Random Handler
+///
+/// This world defines what the host provides to actors that import
+/// the WASI random interfaces.
+
+package theater:random-handler;
+
+world random-handler-host {
+    /// We provide the WASI random interface to the actor
+    import wasi:random/random@0.2.3;
+
+    /// We also provide the insecure random interfaces
+    import wasi:random/insecure@0.2.3;
+    import wasi:random/insecure-seed@0.2.3;
+}

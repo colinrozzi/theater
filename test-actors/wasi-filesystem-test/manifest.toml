@@ -1,0 +1,17 @@
+name = "wasi-filesystem-test"
+version = "0.1.0"
+component = "/Users/colinrozzi/work/theater/test-actors/wasi-filesystem-test/./target/wasm32-unknown-unknown/release/wasi_filesystem_test.wasm"
+description = "WASI filesystem interface test actor"
+save_chain = true
+
+[[handler]]
+type = "runtime"
+
+[[handler]]
+type = "timing"
+max_sleep_duration = 3600000
+min_sleep_duration = 1
+
+[[handler]]
+type = "filesystem"
+path = "/tmp/theater-fs-test"

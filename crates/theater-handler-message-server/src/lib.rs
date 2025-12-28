@@ -14,7 +14,7 @@ use theater::actor::store::ActorStore;
 use theater::actor::types::ActorError;
 use theater::config::permissions::MessageServerPermissions;
 use theater::events::{ChainEventData, EventPayload};
-use theater::handler::Handler;
+use theater::handler::{Handler, SharedActorInstance};
 use theater::messages::{
     ActorChannelClose, ActorChannelInitiated, ActorChannelMessage, ActorChannelOpen,
     ActorMessage, ActorRequest, ActorSend, ChannelId, ChannelParticipant,
@@ -1764,6 +1764,7 @@ where
     fn start(
         &mut self,
         actor_handle: ActorHandle,
+        _actor_instance: SharedActorInstance<E>,
         mut shutdown_receiver: ShutdownReceiver,
     ) -> Pin<Box<dyn Future<Output = Result<()>> + Send>> {
         info!("Starting message server handler for actor");

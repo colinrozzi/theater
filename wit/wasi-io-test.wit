@@ -1,0 +1,7 @@
+package test:wasi-io;
+
+world wasi-io-test {
+    import wasi:io/error@0.2.3;
+    import wasi:io/streams@0.2.3;
+    export theater:simple/actor;
+}

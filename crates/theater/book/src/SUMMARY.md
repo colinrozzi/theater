@@ -24,6 +24,7 @@
 # Development
 - [Building Actors](development/building-actors.md)
 - [Building Host Functions](development/building-host-functions.md)
+- [WIT Debugging](development/wit-debugging.md)
 - [Making Changes](development/making-changes.md)
 - [System Internals](development/system-internals/README.md)
     - [System Architecture](development/system-internals/architecture.md)
@@ -38,6 +39,7 @@
   - [Handler System](services/handlers/README.md)
   - [Message Server](services/handlers/message-server.md)
   - [HTTP Client](services/handlers/http-client.md)
+  - [WASI HTTP](services/handlers/wasi-http.md)
   - [HTTP Framework](services/handlers/http-framework.md)
   - [Filesystem](services/handlers/filesystem.md)
   - [Supervisor](services/handlers/supervisor.md)

@@ -109,6 +109,11 @@ pub fn validate_manifest_permissions(
                     });
                 }
             }
+            HandlerConfig::WasiHttp { .. } => {
+                // WASI HTTP handler is allowed by default
+                // It provides both incoming (server) and outgoing (client) capabilities
+                // Permission enforcement for HTTP operations happens at a finer grain
+            }
         }
     }
     Ok(())

@@ -1,0 +1,15 @@
+package test:http-proxy;
+
+world http-proxy {
+    // Import HTTP client to forward requests upstream
+    import theater:simple/http-client;
+
+    // Import HTTP framework to create the proxy server
+    import theater:simple/http-framework;
+
+    // Export actor interface
+    export theater:simple/actor;
+
+    // Export HTTP handlers to handle incoming requests
+    export theater:simple/http-handlers;
+}

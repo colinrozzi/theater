@@ -65,7 +65,7 @@ use theater::config::enforcement::PermissionChecker;
 use theater::events::EventPayload;
 use theater::events::theater_runtime::TheaterRuntimeEventData;
 use theater::events::wasm::WasmEventData;
-use theater::handler::Handler;
+use theater::handler::{Handler, SharedActorInstance};
 use theater::shutdown::ShutdownReceiver;
 use theater::wasm::{ActorComponent, ActorInstance};
 
@@ -405,6 +405,7 @@ where
     fn start(
         &mut self,
         actor_handle: ActorHandle,
+        _actor_instance: SharedActorInstance<E>,
         shutdown_receiver: ShutdownReceiver,
     ) -> Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send>> {
         info!("Starting process handler");

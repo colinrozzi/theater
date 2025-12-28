@@ -174,6 +174,36 @@ pub enum ActorOperation {
         /// Channel to send the result back to the caller
         response_tx: oneshot::Sender<Result<Vec<u8>, ActorError>>,
     },
+    /// Handle a WASI HTTP incoming request
+    /// This operation creates resources in the actor's store and calls the exported
+    /// wasi:http/incoming-handler.handle function
+    HandleWasiHttpRequest {
+        /// HTTP method (GET, POST, etc.)
+        method: String,
+        /// URL scheme (http, https, etc.)
+        scheme: Option<String>,
+        /// Authority (host:port)
+        authority: Option<String>,
+        /// Path with query string
+        path_with_query: Option<String>,
+        /// Request headers as (name, value) pairs
+        headers: Vec<(String, Vec<u8>)>,
+        /// Request body
+        body: Vec<u8>,
+        /// Channel to send the response back
+        response_tx: oneshot::Sender<Result<WasiHttpResponse, ActorError>>,
+    },
+}
+
+/// Response from a WASI HTTP request
+#[derive(Debug, Clone)]
+pub struct WasiHttpResponse {
+    /// HTTP status code
+    pub status: u16,
+    /// Response headers
+    pub headers: Vec<(String, Vec<u8>)>,
+    /// Response body
+    pub body: Vec<u8>,
 }
 
 #[derive(Debug)]

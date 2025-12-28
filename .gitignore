@@ -1,21 +1,31 @@
-/target
+# Build artifacts
+target/
+
+# Theater runtime directories
 /notes
 /chain
 /logs
+/store
+/chains
+/events
+
+# Editor and tool files
 .aider*
 .env
 !.gitignore
 dir-rep.xml
 debug.log
-/store
-/tmp
 note.md
+todo.md
 .DS_Store
-book/book/
-/chains
-/events
 git.json
 inline-chat.log
 theater-client.log
 /.theater-chat
-todo.md
+
+# Documentation build
+book/book/
+
+# Temporary files
+/tmp
+test-actors/wasi-random-test/target

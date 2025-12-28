@@ -1,0 +1,2199 @@
+package theater:simple;
+
+/// # Actor Interface
+///
+/// Defines the core interface that all Theater actors must implement. This is the
+/// fundamental contract between the Theater runtime and WebAssembly actor components.
+///
+/// ## Purpose
+///
+/// The actor interface establishes the minimal required functionality for a component
+/// to be recognized and managed as a Theater actor. By implementing this interface,
+/// a WebAssembly component can be:
+///
+/// - Loaded by the Theater runtime
+/// - Initialized with state and parameters
+/// - Managed within the supervision hierarchy
+/// - Integrated with the event chain system
+///
+/// This interface is deliberately minimal to make it as easy as possible to create
+/// compatible actors, while still providing the core functionality needed for the
+/// Theater system to manage them.
+///
+/// ## Example
+///
+/// Here's how a typical actor would implement this interface in Rust:
+///
+/// ```rust
+/// use ntwk::theater::actor::Guest;
+/// use ntwk::theater::types::State;
+///
+/// struct MyActor;
+///
+/// impl Guest for MyActor {
+/// fn init(state: State, params: (String,)) -> Result<(State,), String> {
+/// // Parse the initial parameters
+/// let (actor_id,) = params;
+/// println!("Initializing actor with ID: {}", actor_id);
+///
+/// // Create initial state if none exists
+/// let new_state = match state {
+/// Some(existing) => {
+/// // Use existing state
+/// existing
+/// }
+/// None => {
+/// // Create new initial state
+/// let initial_data = MyActorState {
+/// counter: 0,
+/// last_updated: chrono::Utc::now(),
+/// };
+/// serde_json::to_vec(&initial_data).map_err(|e| e.to_string())?
+/// }
+/// };
+///
+/// // Return the new state
+/// Ok((new_state,))
+/// }
+/// }
+/// ```
+///
+/// ## Security
+///
+/// This interface is the primary entry point for actor execution. The Theater runtime
+/// ensures that actors can only access resources they have been explicitly granted
+/// through handler configurations.
+///
+/// ## Implementation Notes
+///
+/// - The state parameter is passed as a blob of bytes, typically serialized/deserialized
+/// using formats like JSON, MessagePack, or bincode.
+/// - Actors are responsible for managing their own state format and serialization.
+/// - The parameters tuple allows for flexible initialization with a variety of data types.
+/// - Returning an error string from the init function will cause the actor to fail to start.
+interface actor {
+  /// # Initialize the actor
+  ///
+  /// Called when the actor is first started or restarted. This function is responsible
+  /// for setting up the actor's initial state and responding to initialization parameters.
+  ///
+  /// ## Parameters
+  ///
+  /// * `state` - Current state of the actor, or None if first initialization
+  /// * `params` - Tuple of initialization parameters, typically including actor ID
+  ///
+  /// ## Returns
+  ///
+  /// * `Ok((state,))` - The updated state to store
+  /// * `Err(string)` - An error message if initialization fails
+  ///
+  /// ## Implementation Notes
+  ///
+  /// - If state is None, the actor should create a new initial state
+  /// - If state contains data, the actor should validate and use that state
+  /// - The first parameter in the tuple is typically the actor's ID
+  /// - Any error returned will cause the actor to fail to start
+  init: func(state: option<list<u8>>, params: tuple<string>) -> result<tuple<option<list<u8>>>, string>;
+}
+
+interface environment {
+  /// Get a specific environment variable
+  /// Returns None if the variable doesn't exist or access is denied
+  get-var: func(name: string) -> option<string>;
+
+  /// List all accessible environment variables
+  /// Returns empty list if list_all is not enabled in config
+  list-vars: func() -> list<tuple<string, string>>;
+
+  /// Check if a specific environment variable exists (and is accessible)
+  exists: func(name: string) -> bool;
+}
+
+interface filesystem {
+  record command-success {
+    stdout: string,
+    stderr: string,
+    exit-code: s32,
+  }
+
+  record command-error {
+    message: string,
+  }
+
+  variant command-result {
+    success(command-success),
+    error(command-error),
+  }
+
+  read-file: func(path: string) -> result<list<u8>, string>;
+
+  write-file: func(path: string, content: string) -> result<_, string>;
+
+  list-files: func(path: string) -> result<list<string>, string>;
+
+  delete-file: func(path: string) -> result<_, string>;
+
+  create-dir: func(path: string) -> result<_, string>;
+
+  delete-dir: func(path: string) -> result<_, string>;
+
+  path-exists: func(path: string) -> result<bool, string>;
+
+  execute-command: func(dir: string, command: string, args: list<string>) -> result<command-result, string>;
+
+  execute-nix-command: func(dir: string, command: string) -> result<command-result, string>;
+}
+
+interface http-types {
+  /// Raw binary data type
+  type bytes = list<u8>;
+
+  record http-request {
+    /// HTTP method (GET, POST, PUT, DELETE, etc.)
+    method: string,
+    /// Full request URI including query parameters
+    uri: string,
+    /// List of request headers as key-value pairs
+    headers: list<tuple<string, string>>,
+    /// Optional request body as binary data
+    body: option<bytes>,
+  }
+
+  record http-response {
+    /// HTTP status code (e.g., 200, 404, 500)
+    status: u16,
+    /// List of response headers as key-value pairs
+    headers: list<tuple<string, string>>,
+    /// Optional response body as binary data
+    body: option<bytes>,
+  }
+
+  record tls-config {
+    /// Path to the certificate file
+    cert-path: string,
+    /// Path to the key file
+    key-path: string,
+  }
+
+  record server-config {
+    /// Port to listen on, 0 means system-assigned
+    port: option<u16>,
+    /// Host address to bind to
+    host: option<string>,
+    /// TLS configuration for HTTPS
+    tls-config: option<tls-config>,
+  }
+
+  record server-info {
+    /// Server ID
+    id: u64,
+    /// Current listening port
+    port: u16,
+    /// Host address
+    host: string,
+    /// Whether the server is running
+    running: bool,
+    /// Number of active routes
+    routes-count: u32,
+    /// Number of active middleware
+    middleware-count: u32,
+    /// Whether WebSocket is enabled
+    websocket-enabled: bool,
+  }
+
+  record middleware-result {
+    /// Whether to continue processing the request
+    proceed: bool,
+    /// The potentially modified request
+    request: http-request,
+  }
+}
+
+interface http-client {
+  use http-types.{http-request, http-response};
+
+  send-http: func(req: http-request) -> result<http-response, string>;
+}
+
+interface websocket-types {
+  variant message-type {
+    /// A text message (UTF-8 encoded)
+    text,
+    /// A binary message
+    binary,
+    /// A new connection was established
+    connect,
+    /// The connection was closed
+    close,
+    /// A ping message (for keep-alive)
+    ping,
+    /// A pong message (response to ping)
+    pong,
+    /// Any other message type with string identifier
+    other(string),
+  }
+
+  /// # WebSocket Message
+  ///
+  /// Represents a message sent or received over a WebSocket connection.
+  record websocket-message {
+    /// The type of the message
+    ty: message-type,
+    /// Binary data payload (used for binary messages)
+    data: option<list<u8>>,
+    /// Text payload (used for text messages)
+    text: option<string>,
+  }
+}
+
+interface http-framework {
+  use http-types.{http-request, http-response, server-config, server-info, tls-config};
+  use websocket-types.{websocket-message};
+
+  /// Core types
+  /// Unique identifier for an HTTP server instance
+  type server-id = u64;
+
+  /// Unique identifier for a registered handler function
+  type handler-id = u64;
+
+  /// Unique identifier for a registered route
+  type route-id = u64;
+
+  /// Unique identifier for registered middleware
+  type middleware-id = u64;
+
+  create-server: func(config: server-config) -> result<server-id, string>;
+
+  get-server-info: func(server-id: server-id) -> result<server-info, string>;
+
+  start-server: func(server-id: server-id) -> result<u16, string>;
+
+  stop-server: func(server-id: server-id) -> result<_, string>;
+
+  destroy-server: func(server-id: server-id) -> result<_, string>;
+
+  register-handler: func(handler-name: string) -> result<handler-id, string>;
+
+  add-route: func(server-id: server-id, path: string, method: string, handler-id: handler-id) -> result<route-id, string>;
+
+  remove-route: func(route-id: route-id) -> result<_, string>;
+
+  add-middleware: func(server-id: server-id, path: string, handler-id: handler-id) -> result<middleware-id, string>;
+
+  remove-middleware: func(middleware-id: middleware-id) -> result<_, string>;
+
+  enable-websocket: func(server-id: server-id, path: string, connect-handler-id: option<handler-id>, message-handler-id: handler-id, disconnect-handler-id: option<handler-id>) -> result<_, string>;
+
+  send-websocket-message: func(server-id: server-id, connection-id: u64, message: websocket-message) -> result<_, string>;
+
+  close-websocket: func(server-id: server-id, connection-id: u64) -> result<_, string>;
+}
+
+interface http-handlers {
+  use http-types.{http-request, http-response};
+  use websocket-types.{websocket-message};
+  use http-types.{middleware-result};
+  use http-framework.{handler-id};
+
+  handle-request: func(state: option<list<u8>>, params: tuple<handler-id, http-request>) -> result<tuple<option<list<u8>>, tuple<http-response>>, string>;
+
+  handle-middleware: func(state: option<list<u8>>, params: tuple<handler-id, http-request>) -> result<tuple<option<list<u8>>, tuple<middleware-result>>, string>;
+
+  handle-websocket-connect: func(state: option<list<u8>>, params: tuple<handler-id, u64, string, option<string>>) -> result<tuple<option<list<u8>>>, string>;
+
+  handle-websocket-message: func(state: option<list<u8>>, params: tuple<handler-id, u64, websocket-message>) -> result<tuple<option<list<u8>>, tuple<list<websocket-message>>>, string>;
+
+  handle-websocket-disconnect: func(state: option<list<u8>>, params: tuple<handler-id, u64>) -> result<tuple<option<list<u8>>>, string>;
+}
+
+/// OS Process handler interface for managing operating system processes
+interface process {
+  /// Output processing mode
+  variant output-mode {
+    /// Process raw bytes without any special handling
+    raw,
+    /// Process output line by line
+    line-by-line,
+    /// Process output as JSON objects (newline-delimited)
+    json,
+    /// Process output in chunks of specified size
+    chunked,
+  }
+
+  /// Configuration for a process
+  record process-config {
+    /// Executable path
+    program: string,
+    /// Command line arguments
+    args: list<string>,
+    /// Working directory (optional)
+    cwd: option<string>,
+    /// Environment variables
+    env: list<tuple<string, string>>,
+    /// Buffer size for stdout/stderr (in bytes)
+    buffer-size: u32,
+    /// How to process stdout
+    stdout-mode: output-mode,
+    /// How to process stderr
+    stderr-mode: output-mode,
+    /// Chunk size for chunked mode (in bytes)
+    chunk-size: option<u32>,
+    /// Execution timeout in seconds (optional)
+    execution-timeout: option<u64>,
+  }
+
+  /// Status of a running process
+  record process-status {
+    /// Process ID
+    pid: u64,
+    /// Whether the process is running
+    running: bool,
+    /// Exit code if not running (optional)
+    exit-code: option<s32>,
+    /// Start time in milliseconds since epoch
+    start-time: u64,
+  }
+
+  /// Start a new OS process
+  os-spawn: func(config: process-config) -> result<u64, string>;
+
+  /// Write to the standard input of a process
+  os-write-stdin: func(pid: u64, data: list<u8>) -> result<u32, string>;
+
+  /// Get the status of a process
+  os-status: func(pid: u64) -> result<process-status, string>;
+
+  /// Send a signal to a process
+  os-signal: func(pid: u64, signal: u32) -> result<_, string>;
+
+  /// Terminate a process
+  os-kill: func(pid: u64) -> result<_, string>;
+}
+
+/// Process handler export interface
+interface process-handlers {
+  /// Process output event
+  handle-stdout: func(state: option<list<u8>>, params: tuple<u64, list<u8>>) -> result<tuple<option<list<u8>>>, string>;
+
+  /// Process error output event
+  handle-stderr: func(state: option<list<u8>>, params: tuple<u64, list<u8>>) -> result<tuple<option<list<u8>>>, string>;
+
+  /// Process exit event
+  handle-exit: func(state: option<list<u8>>, params: tuple<u64, s32>) -> result<tuple<option<list<u8>>>, string>;
+}
+
+interface random {
+  random-bytes: func(length: u32) -> result<list<u8>, string>;
+
+  random-range: func(min: u64, max: u64) -> result<u64, string>;
+
+  random-float: func() -> result<f64, string>;
+
+  generate-uuid: func() -> result<string, string>;
+}
+
+/// # Content Store
+///
+/// Provides a content-addressable storage system for actors to store and retrieve data.
+///
+/// ## Purpose
+///
+/// The store interface allows actors to save and retrieve content using content-addressed
+/// storage, where each piece of content is referenced by a hash of its data. This provides
+/// immutability, deduplication, and integrity verification for all stored content.
+///
+/// Additionally, the store supports a labeling system that allows human-readable names
+/// to be attached to content references, making it easier to locate and manage content.
+///
+/// ## Example
+///
+/// ```rust
+/// use ntwk::theater::store;
+///
+/// // Create a new store
+/// let store_id = store::new()?;
+///
+/// // Store some content
+/// let content = "Hello, Theater!".as_bytes().to_vec();
+/// let content_ref = store::store(store_id, content)?;
+///
+/// // Retrieve it by its content reference
+/// let retrieved = store::get(store_id, content_ref.clone())?;
+/// assert_eq!(retrieved, "Hello, Theater!".as_bytes());
+///
+/// // Label the content for easier access
+/// store::label(store_id, "greeting", content_ref.clone())?;
+///
+/// // Later, retrieve by label
+/// let label_ref = store::get_by_label(store_id, "greeting")?.unwrap();
+/// let greeting = store::get(store_id, label_ref)?;
+/// ```
+///
+/// ## Security
+///
+/// The content store is isolated per actor, preventing direct access to other actors' data.
+/// All store operations are tracked in the actor's event chain, providing a complete
+/// audit trail of data operations.
+///
+/// ## Implementation Notes
+///
+/// The store uses content-based addressing where the reference to content is derived from
+/// a cryptographic hash of the content itself. This ensures:
+///
+/// - Content cannot be modified without changing its reference
+/// - Identical content is stored only once (automatic deduplication)
+/// - Content integrity can be verified
+interface store {
+  /// # Content Reference
+  ///
+  /// A reference to content stored in the content-addressable store.
+  ///
+  /// ## Purpose
+  ///
+  /// ContentRef provides a stable, immutable reference to content based on its hash,
+  /// enabling content-addressable storage where data is referenced by its cryptographic hash
+  /// rather than by location or name.
+  ///
+  /// ## Example
+  ///
+  /// ```rust
+  /// use ntwk::theater::store::{content_ref, store};
+  ///
+  /// // Store content and get its reference
+  /// let store_id = store::new()?;
+  /// let data = b"Some important data".to_vec();
+  /// let ref = store::store(store_id, data)?;
+  ///
+  /// // The hash in the content ref is a SHA-256 digest
+  /// println!("Stored content with hash: {}", ref.hash);
+  /// ```
+  ///
+  /// ## Security
+  ///
+  /// Content references use cryptographic hashes that are collision-resistant,
+  /// ensuring that distinct content will have distinct references. This provides
+  /// integrity verification for all stored content.
+  record content-ref {
+    /// Cryptographic hash of the content (SHA-256 in hexadecimal format)
+    hash: string,
+  }
+
+  /// # Create a new store
+  ///
+  /// Creates a new content-addressable store instance.
+  ///
+  /// ## Returns
+  ///
+  /// * `Ok(string)` - The ID of the newly created store
+  /// * `Err(string)` - Error message if store creation fails
+  ///
+  /// ## Example
+  ///
+  /// ```rust
+  /// use ntwk::theater::store;
+  ///
+  /// // Create a new store
+  /// let store_id = store::new()?;
+  /// ```
+  ///
+  /// ## Implementation Notes
+  ///
+  /// Each actor has access to its own isolated store instances. Store IDs are only
+  /// valid within the context of the actor that created them.
+  new: func() -> result<string, string>;
+
+  /// # Store content
+  ///
+  /// Stores content in the content-addressable store and returns a reference to it.
+  ///
+  /// ## Parameters
+  ///
+  /// * `store-id` - ID of the store to use
+  /// * `content` - The content bytes to store
+  ///
+  /// ## Returns
+  ///
+  /// * `Ok(content-ref)` - Reference to the stored content
+  /// * `Err(string)` - Error message if storage fails
+  ///
+  /// ## Example
+  ///
+  /// ```rust
+  /// use ntwk::theater::store;
+  ///
+  /// // Store some content
+  /// let data = serde_json::to_vec(&my_data)?;
+  /// let content_ref = store::store(store_id, data)?;
+  /// ```
+  ///
+  /// ## Implementation Notes
+  ///
+  /// If identical content already exists in the store, the existing content reference
+  /// will be returned without storing a duplicate copy.
+  store: func(store-id: string, content: list<u8>) -> result<content-ref, string>;
+
+  /// # Retrieve content
+  ///
+  /// Retrieves content from the store using its content reference.
+  ///
+  /// ## Parameters
+  ///
+  /// * `store-id` - ID of the store to use
+  /// * `content-ref` - Reference to the content to retrieve
+  ///
+  /// ## Returns
+  ///
+  /// * `Ok(list<u8>)` - The retrieved content bytes
+  /// * `Err(string)` - Error message if retrieval fails
+  ///
+  /// ## Example
+  ///
+  /// ```rust
+  /// use ntwk::theater::store;
+  ///
+  /// // Retrieve content
+  /// let content = store::get(store_id, content_ref)?;
+  /// let my_data: MyData = serde_json::from_slice(&content)?;
+  /// ```
+  get: func(store-id: string, content-ref: content-ref) -> result<list<u8>, string>;
+
+  /// # Check if content exists
+  ///
+  /// Checks if a particular content reference exists in the store.
+  ///
+  /// ## Parameters
+  ///
+  /// * `store-id` - ID of the store to check
+  /// * `content-ref` - Reference to check for
+  ///
+  /// ## Returns
+  ///
+  /// * `Ok(bool)` - True if the content exists, false otherwise
+  /// * `Err(string)` - Error message if the check fails
+  ///
+  /// ## Example
+  ///
+  /// ```rust
+  /// use ntwk::theater::store;
+  ///
+  /// // Check if content exists before attempting to retrieve it
+  /// if store::exists(store_id, content_ref)? {
+  /// let content = store::get(store_id, content_ref)?;
+  /// // Process content...
+  /// } else {
+  /// // Handle missing content case
+  /// }
+  /// ```
+  exists: func(store-id: string, content-ref: content-ref) -> result<bool, string>;
+
+  /// # Attach a label to content
+  ///
+  /// Associates a human-readable label with a content reference.
+  ///
+  /// ## Parameters
+  ///
+  /// * `store-id` - ID of the store to use
+  /// * `label` - The human-readable label to attach
+  /// * `content-ref` - Reference to the content to label
+  ///
+  /// ## Returns
+  ///
+  /// * `Ok(_)` - Label was successfully attached
+  /// * `Err(string)` - Error message if labeling fails
+  ///
+  /// ## Example
+  ///
+  /// ```rust
+  /// use ntwk::theater::store;
+  ///
+  /// // Store and label config data
+  /// let config_data = serde_json::to_vec(&my_config)?;
+  /// let ref = store::store(store_id, config_data)?;
+  /// store::label(store_id, "current-config", ref)?;
+  /// ```
+  ///
+  /// ## Implementation Notes
+  ///
+  /// A label can point to multiple content references, effectively acting as a collection.
+  /// Each call to this function adds the content reference to the label without removing
+  /// previous references.
+  label: func(store-id: string, label: string, content-ref: content-ref) -> result<_, string>;
+
+  /// # Get content reference by label
+  ///
+  /// Retrieves a content reference associated with a label.
+  ///
+  /// ## Parameters
+  ///
+  /// * `store-id` - ID of the store to use
+  /// * `label` - The label to look up
+  ///
+  /// ## Returns
+  ///
+  /// * `Ok(option<content-ref>)` - The content reference if found, None if the label doesn't exist
+  /// * `Err(string)` - Error message if the lookup fails
+  ///
+  /// ## Example
+  ///
+  /// ```rust
+  /// use ntwk::theater::store;
+  ///
+  /// // Retrieve the current configuration
+  /// if let Some(ref) = store::get_by_label(store_id, "current-config")? {
+  /// let config_data = store::get(store_id, ref)?;
+  /// let config: MyConfig = serde_json::from_slice(&config_data)?;
+  /// // Use configuration...
+  /// } else {
+  /// // No configuration found
+  /// }
+  /// ```
+  ///
+  /// ## Implementation Notes
+  ///
+  /// If a label points to multiple content references, this function returns the most
+  /// recently added reference.
+  get-by-label: func(store-id: string, label: string) -> result<option<content-ref>, string>;
+
+  /// # Remove a label
+  ///
+  /// Deletes a label and its associations with content references.
+  ///
+  /// ## Parameters
+  ///
+  /// * `store-id` - ID of the store to use
+  /// * `label` - The label to remove
+  ///
+  /// ## Returns
+  ///
+  /// * `Ok(_)` - Label was successfully removed
+  /// * `Err(string)` - Error message if removal fails
+  ///
+  /// ## Example
+  ///
+  /// ```rust
+  /// use ntwk::theater::store;
+  ///
+  /// // Remove an obsolete label
+  /// store::remove_label(store_id, "old-config")?;
+  /// ```
+  ///
+  /// ## Implementation Notes
+  ///
+  /// Removing a label does not delete the content it points to, only the association
+  /// between the label and the content references.
+  remove-label: func(store-id: string, label: string) -> result<_, string>;
+
+  /// # Remove a specific content reference from a label
+  ///
+  /// Removes the association between a label and a specific content reference.
+  ///
+  /// ## Parameters
+  ///
+  /// * `store-id` - ID of the store to use
+  /// * `label` - The label to modify
+  /// * `content-ref` - The content reference to remove from the label
+  ///
+  /// ## Returns
+  ///
+  /// * `Ok(_)` - Reference was successfully removed from the label
+  /// * `Err(string)` - Error message if removal fails
+  ///
+  /// ## Example
+  ///
+  /// ```rust
+  /// use ntwk::theater::store;
+  ///
+  /// // Remove a specific version from the "historical-configs" label
+  /// store::remove_from_label(store_id, "historical-configs", outdated_ref)?;
+  /// ```
+  ///
+  /// ## Implementation Notes
+  ///
+  /// This operation only removes the association between the label and the content reference.
+  /// It does not delete the content itself.
+  remove-from-label: func(store-id: string, label: string, content-ref: content-ref) -> result<_, string>;
+
+  /// # Store content and immediately label it
+  ///
+  /// Stores content and associates it with a label in a single operation.
+  ///
+  /// ## Parameters
+  ///
+  /// * `store-id` - ID of the store to use
+  /// * `label` - The label to attach to the content
+  /// * `content` - The content bytes to store
+  ///
+  /// ## Returns
+  ///
+  /// * `Ok(content-ref)` - Reference to the stored content
+  /// * `Err(string)` - Error message if the operation fails
+  ///
+  /// ## Example
+  ///
+  /// ```rust
+  /// use ntwk::theater::store;
+  ///
+  /// // Store and label user data in one operation
+  /// let user_data = serde_json::to_vec(&user)?;
+  /// let ref = store::store_at_label(store_id, "user-profile", user_data)?;
+  /// ```
+  ///
+  /// ## Implementation Notes
+  ///
+  /// This is a convenience function that combines `store` and `label` operations.
+  /// The label will point to the new content reference in addition to any existing
+  /// content references it may already point to.
+  store-at-label: func(store-id: string, label: string, content: list<u8>) -> result<content-ref, string>;
+
+  /// # Replace content at a label
+  ///
+  /// Stores new content and makes the label point exclusively to it, removing any
+  /// previous associations.
+  ///
+  /// ## Parameters
+  ///
+  /// * `store-id` - ID of the store to use
+  /// * `label` - The label to update
+  /// * `content` - The new content bytes to store
+  ///
+  /// ## Returns
+  ///
+  /// * `Ok(content-ref)` - Reference to the stored content
+  /// * `Err(string)` - Error message if the operation fails
+  ///
+  /// ## Example
+  ///
+  /// ```rust
+  /// use ntwk::theater::store;
+  ///
+  /// // Update configuration with new values
+  /// let new_config = serde_json::to_vec(&updated_config)?;
+  /// let ref = store::replace_content_at_label(store_id, "current-config", new_config)?;
+  /// ```
+  ///
+  /// ## Implementation Notes
+  ///
+  /// This operation is atomic - the label will either point to the new content reference
+  /// or remain unchanged if the operation fails.
+  replace-content-at-label: func(store-id: string, label: string, content: list<u8>) -> result<content-ref, string>;
+
+  /// # Replace label with specific content reference
+  ///
+  /// Updates a label to point exclusively to an existing content reference.
+  ///
+  /// ## Parameters
+  ///
+  /// * `store-id` - ID of the store to use
+  /// * `label` - The label to update
+  /// * `content-ref` - The content reference the label should point to
+  ///
+  /// ## Returns
+  ///
+  /// * `Ok(_)` - Label was successfully updated
+  /// * `Err(string)` - Error message if the update fails
+  ///
+  /// ## Example
+  ///
+  /// ```rust
+  /// use ntwk::theater::store;
+  ///
+  /// // Revert to a previous version
+  /// store::replace_at_label(store_id, "current-config", previous_version_ref)?;
+  /// ```
+  ///
+  /// ## Implementation Notes
+  ///
+  /// This operation removes any existing associations between the label and other
+  /// content references. After this operation, the label will point only to the
+  /// specified content reference.
+  replace-at-label: func(store-id: string, label: string, content-ref: content-ref) -> result<_, string>;
+
+  /// # List all labels
+  ///
+  /// Retrieves a list of all labels in the store.
+  ///
+  /// ## Parameters
+  ///
+  /// * `store-id` - ID of the store to query
+  ///
+  /// ## Returns
+  ///
+  /// * `Ok(list<string>)` - List of all labels in the store
+  /// * `Err(string)` - Error message if the operation fails
+  ///
+  /// ## Example
+  ///
+  /// ```rust
+  /// use ntwk::theater::store;
+  ///
+  /// // Get all available labels
+  /// let labels = store::list_labels(store_id)?;
+  /// for label in labels {
+  /// println!("Found label: {}", label);
+  /// }
+  /// ```
+  list-labels: func(store-id: string) -> result<list<string>, string>;
+
+  /// # List all content references
+  ///
+  /// Retrieves a list of all content references in the store.
+  ///
+  /// ## Parameters
+  ///
+  /// * `store-id` - ID of the store to query
+  ///
+  /// ## Returns
+  ///
+  /// * `Ok(list<content-ref>)` - List of all content references in the store
+  /// * `Err(string)` - Error message if the operation fails
+  ///
+  /// ## Example
+  ///
+  /// ```rust
+  /// use ntwk::theater::store;
+  ///
+  /// // Get all content references
+  /// let refs = store::list_all_content(store_id)?;
+  /// println!("Store contains {} content items", refs.len());
+  /// ```
+  ///
+  /// ## Implementation Notes
+  ///
+  /// This operation may be expensive for stores with a large amount of content.
+  /// Consider using labels to organize and access content more efficiently.
+  list-all-content: func(store-id: string) -> result<list<content-ref>, string>;
+
+  /// # Calculate total size
+  ///
+  /// Calculates the total size of all content in the store.
+  ///
+  /// ## Parameters
+  ///
+  /// * `store-id` - ID of the store to query
+  ///
+  /// ## Returns
+  ///
+  /// * `Ok(u64)` - Total size in bytes
+  /// * `Err(string)` - Error message if the calculation fails
+  ///
+  /// ## Example
+  ///
+  /// ```rust
+  /// use ntwk::theater::store;
+  ///
+  /// // Check store size
+  /// let total_bytes = store::calculate_total_size(store_id)?;
+  /// println!("Store contains {} bytes of data", total_bytes);
+  ///
+  /// // Format as human-readable size
+  /// let size_mb = total_bytes as f64 / (1024.0 * 1024.0);
+  /// println!("Store size: {:.2} MB", size_mb);
+  /// ```
+  ///
+  /// ## Implementation Notes
+  ///
+  /// This operation calculates the actual storage space used, accounting for
+  /// deduplication of identical content.
+  calculate-total-size: func(store-id: string) -> result<u64, string>;
+}
+
+/// # Timing Interface
+///
+/// Provides time-related functions for actors to get the current time and control execution timing.
+///
+/// ## Purpose
+///
+/// The timing interface gives actors access to time information and timing control
+/// within the Theater runtime. It allows actors to:
+/// - Get the current time
+/// - Pause execution for specific durations
+/// - Delay execution until specific points in time
+///
+/// ## Example
+///
+/// ```rust
+/// use ntwk::theater::timing;
+///
+/// async fn example() -> Result<(), String> {
+/// // Get the current time
+/// let now = timing::now();
+/// println!("Current time: {}", now);
+///
+/// // Sleep for 500 milliseconds
+/// timing::sleep(500)?;
+///
+/// // Wait until a specific future time
+/// let five_seconds_later = now + 5000;
+/// timing::deadline(five_seconds_later)?;
+///
+/// Ok(())
+/// }
+/// ```
+///
+/// ## Security
+///
+/// The timing operations are managed by the Theater runtime, which may enforce:
+/// - Rate limits on sleep operations to prevent resource exhaustion
+/// - Maximum duration limits to prevent indefinite blocking
+/// - Tracking and reporting of sleep patterns in the event chain
+///
+/// ## Implementation Notes
+///
+/// When actors call timing functions, the WebAssembly execution is suspended without
+/// blocking the entire runtime. This allows the runtime to continue processing other
+/// actors while an actor is waiting.
+interface timing {
+  /// # Get current time
+  ///
+  /// Returns the current time in milliseconds since the UNIX epoch (January 1, 1970 UTC).
+  ///
+  /// ## Returns
+  ///
+  /// The current timestamp in milliseconds
+  ///
+  /// ## Example
+  ///
+  /// ```rust
+  /// use ntwk::theater::timing;
+  ///
+  /// // Get current timestamp
+  /// let now = timing::now();
+  ///
+  /// // Convert to seconds
+  /// let seconds_since_epoch = now / 1000;
+  /// ```
+  ///
+  /// ## Implementation Notes
+  ///
+  /// The time value is consistent across the entire Theater runtime, ensuring that
+  /// all actors have a synchronized view of time.
+  now: func() -> u64;
+
+  /// # Pause execution
+  ///
+  /// Pauses the execution of the actor for the specified number of milliseconds.
+  ///
+  /// ## Parameters
+  ///
+  /// * `duration` - Number of milliseconds to sleep
+  ///
+  /// ## Returns
+  ///
+  /// * `Ok(_)` - Sleep completed successfully
+  /// * `Err(string)` - Error message if sleep was interrupted or not allowed
+  ///
+  /// ## Example
+  ///
+  /// ```rust
+  /// use ntwk::theater::timing;
+  ///
+  /// // Sleep for 1 second
+  /// timing::sleep(1000)?;
+  ///
+  /// // Sleep for 100ms
+  /// timing::sleep(100)?;
+  /// ```
+  ///
+  /// ## Security
+  ///
+  /// The runtime may enforce limits on how long an actor can sleep to prevent
+  /// resource exhaustion or denial of service. Sleep operations are recorded
+  /// in the actor's event chain.
+  sleep: func(duration: u64) -> result<_, string>;
+
+  /// # Wait until specific time
+  ///
+  /// Pauses execution until the specified timestamp is reached.
+  ///
+  /// ## Parameters
+  ///
+  /// * `timestamp` - Target time in milliseconds since UNIX epoch
+  ///
+  /// ## Returns
+  ///
+  /// * `Ok(_)` - Deadline was reached successfully
+  /// * `Err(string)` - Error message if the wait was interrupted or not allowed
+  ///
+  /// ## Example
+  ///
+  /// ```rust
+  /// use ntwk::theater::timing;
+  ///
+  /// // Wait until a specific time
+  /// let target_time = 1672531200000; // Jan 1, 2023 00:00:00 UTC
+  /// timing::deadline(target_time)?;
+  ///
+  /// // Wait until 10 seconds from now
+  /// let now = timing::now();
+  /// let ten_seconds_later = now + 10000;
+  /// timing::deadline(ten_seconds_later)?;
+  /// ```
+  ///
+  /// ## Implementation Notes
+  ///
+  /// - If the specified timestamp is in the past, the function returns immediately
+  /// - The runtime may reject excessive deadline values that are too far in the future
+  /// - Deadline operations are recorded in the actor's event chain
+  deadline: func(timestamp: u64) -> result<_, string>;
+}
+
+/// # Common Type Definitions
+///
+/// Defines shared types used across multiple interfaces in the Theater system.
+/// This interface serves as a central location for type definitions to ensure
+/// consistency and avoid duplication.
+///
+/// ## Purpose
+///
+/// The types interface provides common data structures and type aliases used
+/// throughout the Theater system. These types represent core concepts such as:
+///
+/// - Message formats
+/// - Event chain structures
+/// - Identifiers
+///
+/// By centralizing these definitions, the system maintains type consistency
+/// across different interfaces and components.
+///
+/// ## Example
+///
+/// These types are typically imported and used in actor implementations:
+///
+/// ```rust
+/// use ntwk::theater::types::actor_id;
+///
+/// // Using actor-id for referring to actors
+/// fn get_actor_info(id: actor_id) -> String {
+/// format!("Info for actor {}", id)
+/// }
+/// ```
+///
+/// ## Implementation Notes
+///
+/// - Most types are designed to be serialization-format agnostic
+/// - The `list<u8>` (byte array) representation allows for flexible serialization
+/// - Actors typically use serde-compatible formats for serialization/deserialization
+/// Define a shared type for messages
+interface types {
+  /// Unique identifier for an actor
+  ///
+  /// Actors are identified by string identifiers throughout the system. These
+  /// identifiers are typically UUIDs or other unique strings.
+  type actor-id = string;
+
+  /// Unique identifier for a channel
+  ///
+  /// Channels are communication pathways between actors or between actors and
+  /// external systems. They are identified by string identifiers.
+  type channel-id = string;
+
+  /// Response to a channel connection request
+  ///
+  /// When an actor is asked to accept a channel connection, it responds with
+  /// this structure to indicate acceptance and provide an optional initial message.
+  record channel-accept {
+    /// Whether the channel connection was accepted
+    accepted: bool,
+    /// Optional initial message to send on the channel
+    message: option<list<u8>>,
+  }
+
+  /// Core event structure
+  ///
+  /// Represents a single event in an actor's history, including its type,
+  /// parent reference, and associated data.
+  record event {
+    /// Type of event (e.g., "http", "message", "wasm")
+    event-type: string,
+    /// Optional reference to parent event (previous in chain)
+    parent: option<u64>,
+    /// Serialized event data
+    data: list<u8>,
+  }
+
+  /// Event with associated metadata
+  ///
+  /// Represents a single event in the chain with its metadata (hash),
+  /// allowing for verification and referencing.
+  record meta-event {
+    /// Hash of the event, used for verification and referencing
+    hash: u64,
+    /// The actual event data
+    event: event,
+  }
+
+  /// Complete event chain for an actor
+  ///
+  /// Represents the full history of events that have occurred in an actor,
+  /// providing traceability and auditability.
+  record chain {
+    /// List of events in the chain, each with metadata
+    events: list<meta-event>,
+  }
+
+  /// # Event in a chain
+  ///
+  /// Represents a single event in an actor's chain (audit log).
+  ///
+  /// ## Fields
+  ///
+  /// * `hash` - Unique identifier/hash for this event
+  /// * `parent-hash` - Hash of the previous event in the chain (None for first event)
+  /// * `event-type` - Type of event (e.g., "wasm", "http", "message")
+  /// * `data` - Serialized event data
+  /// * `timestamp` - Timestamp when the event occurred (milliseconds since epoch)
+  record chain-event {
+    hash: list<u8>,
+    parent-hash: option<list<u8>>,
+    event-type: string,
+    data: list<u8>,
+    timestamp: u64,
+    description: option<string>,
+  }
+
+  /// Actor error
+  enum wit-error-type {
+    operation-timeout,
+    channel-closed,
+    shutting-down,
+    function-not-found,
+    type-mismatch,
+    internal,
+    serialization-error,
+    update-component-error,
+    paused,
+  }
+
+  record wit-actor-error {
+    error-type: wit-error-type,
+    data: option<list<u8>>,
+  }
+}
+
+/// # Message Server Client Interface
+///
+/// Defines the callback handlers that actors must implement to receive messages through
+/// the message server system.
+///
+/// ## Purpose
+///
+/// This interface enables actors to receive and process various types of messages:
+/// - One-way messages (send)
+/// - Request-response interactions (request)
+/// - Bidirectional channel-based communication (channel operations)
+///
+/// By implementing these handler functions, an actor can participate in different
+/// communication patterns with other actors and external systems.
+///
+/// ## Example
+///
+/// ```rust
+/// use ntwk::theater::message_server_client::Guest;
+/// use ntwk::theater::types::{channel_accept, channel_id};
+/// use serde_json::{json, Value};
+///
+/// struct MyMessageHandler;
+///
+/// impl Guest for MyMessageHandler {
+/// fn handle_send(state: Option<Value>, params: (Value,))
+/// -> Result<(Option<Value>,), String> {
+/// let (message,) = params;
+/// println!("Received message: {}", message);
+///
+/// // Update state if needed
+/// let new_state = if let Some(mut state) = state {
+/// state["message_count"] = json!(state["message_count"].as_u64().unwrap_or(0) + 1);
+/// Some(state)
+/// } else {
+/// Some(json!({"message_count": 1}))
+/// };
+///
+/// Ok((new_state,))
+/// }
+///
+/// // Implement other handlers...
+/// }
+/// ```
+///
+/// ## Security
+///
+/// The message handlers receive input from potentially untrusted sources, so they should:
+/// - Validate all incoming message data
+/// - Handle malformed messages gracefully
+/// - Protect against common attack vectors like JSON injection
+///
+/// ## Implementation Notes
+///
+/// - All handlers receive and can update the actor's state
+/// - Errors returned from handlers are logged and may trigger supervision
+/// - Handler execution is tracked in the actor's event chain
+interface message-server-client {
+  use types.{event, channel-id, channel-accept};
+
+  /// # Handle one-way message
+  ///
+  /// Processes a one-way message that doesn't require a response.
+  ///
+  /// ## Parameters
+  ///
+  /// * `state` - The current actor state or None if not initialized
+  /// * `params` - Tuple containing:
+  /// * `json` - The message payload
+  ///
+  /// ## Returns
+  ///
+  /// * `Ok((option<list<u8>>,))` - Updated actor state (or None to retain current state)
+  /// * `Err(string)` - Error message if message handling fails
+  ///
+  /// ## Example
+  ///
+  /// ```rust
+  /// fn handle_send(state: Option<Value>, params: (Value,)) -> Result<(Option<Value>,), String> {
+  /// let (message,) = params;
+  ///
+  /// // Process the message...
+  ///
+  /// // Return updated state (or None to keep current state)
+  /// Ok((Some(updated_state),))
+  /// }
+  /// ```
+  handle-send: func(state: option<list<u8>>, params: tuple<list<u8>>) -> result<tuple<option<list<u8>>>, string>;
+
+  /// # Handle request-response message
+  ///
+  /// Processes a request that requires a response.
+  ///
+  /// ## Parameters
+  ///
+  /// * `state` - The current actor state or None if not initialized
+  /// * `params` - Tuple containing:
+  /// * `string` - The request ID
+  /// * `json` - The request payload
+  ///
+  /// ## Returns
+  ///
+  /// * `Ok((option<list<u8>>, (option<list<u8>>,)))` - Tuple containing:
+  /// * Updated actor state (or None)
+  /// * Response message to send back (or None to send a response yet)
+  /// * `Err(string)` - Error message if request handling fails
+  ///
+  /// ## Example
+  ///
+  /// ```rust
+  /// fn handle_request(state: Option<Vec<u8>>, params: (String, Vec<u8>))
+  /// -> Result<(Option<Vec<u8>>, (Option<Vec<u8>>,)), String> {
+  /// let (request_id, request) = params;
+  ///
+  /// // Process the request...
+  /// let response = json!({"status": "success", "data": "result"});
+  ///
+  /// // Return updated state and response
+  /// Ok((Some(updated_state), (Some(response),)))
+  /// }
+  /// ```
+  handle-request: func(state: option<list<u8>>, params: tuple<string, list<u8>>) -> result<tuple<option<list<u8>>, tuple<option<list<u8>>>>, string>;
+
+  /// # Handle channel open request
+  ///
+  /// Called when another actor requests to open a communication channel.
+  ///
+  /// ## Parameters
+  ///
+  /// * `state` - The current actor state or None if not initialized
+  /// * `params` - Tuple containing:
+  /// * `json` - The initial message payload
+  ///
+  /// ## Returns
+  ///
+  /// * `Ok((option<list<u8>>, (channel-accept,)))` - Tuple containing:
+  /// * Updated actor state (or None to retain current state)
+  /// * Channel acceptance decision
+  /// * `Err(string)` - Error message if open handling fails
+  ///
+  /// ## Example
+  ///
+  /// ```rust
+  /// fn handle_channel_open(state: Option<Value>, params: (Value,))
+  /// -> Result<(Option<Value>, (channel_accept,)), String> {
+  /// let (initial_message,) = params;
+  ///
+  /// // Decide whether to accept the channel
+  /// let accept = channel_accept {
+  /// accept: true,
+  /// error_message: None,
+  /// };
+  ///
+  /// // Return updated state and acceptance decision
+  /// Ok((Some(updated_state), (accept,)))
+  /// }
+  /// ```
+  ///
+  /// ## Security
+  ///
+  /// The actor should validate the channel request and only accept channels from
+  /// trusted sources. The acceptance mechanism provides a security checkpoint.
+  handle-channel-open: func(state: option<list<u8>>, params: tuple<string, list<u8>>) -> result<tuple<option<list<u8>>, tuple<channel-accept>>, string>;
+
+  /// # Handle channel message
+  ///
+  /// Processes a message received on an established channel.
+  ///
+  /// ## Parameters
+  ///
+  /// * `state` - The current actor state or None if not initialized
+  /// * `params` - Tuple containing:
+  /// * `channel-id` - ID of the channel the message was received on
+  /// * `json` - The message payload
+  ///
+  /// ## Returns
+  ///
+  /// * `Ok((option<list<u8>>,))` - Updated actor state (or None to retain current state)
+  /// * `Err(string)` - Error message if message handling fails
+  ///
+  /// ## Example
+  ///
+  /// ```rust
+  /// fn handle_channel_message(state: Option<Value>, params: (channel_id, Value))
+  /// -> Result<(Option<Value>,), String> {
+  /// let (channel_id, message) = params;
+  ///
+  /// // Process the channel message...
+  /// println!("Received message on channel {}: {}", channel_id, message);
+  ///
+  /// // Return updated state (or None to keep current state)
+  /// Ok((Some(updated_state),))
+  /// }
+  /// ```
+  handle-channel-message: func(state: option<list<u8>>, params: tuple<channel-id, list<u8>>) -> result<tuple<option<list<u8>>>, string>;
+
+  /// # Handle channel close
+  ///
+  /// Called when a communication channel is closed.
+  ///
+  /// ## Parameters
+  ///
+  /// * `state` - The current actor state or None if not initialized
+  /// * `params` - Tuple containing:
+  /// * `channel-id` - ID of the channel that was closed
+  ///
+  /// ## Returns
+  ///
+  /// * `Ok((option<list<u8>>,))` - Updated actor state (or None to retain current state)
+  /// * `Err(string)` - Error message if close handling fails
+  ///
+  /// ## Example
+  ///
+  /// ```rust
+  /// fn handle_channel_close(state: Option<Value>, params: (channel_id,))
+  /// -> Result<(Option<Value>,), String> {
+  /// let (channel_id,) = params;
+  ///
+  /// // Clean up any resources associated with the channel
+  /// println!("Channel {} closed", channel_id);
+  ///
+  /// // Return updated state (or None to keep current state)
+  /// Ok((Some(updated_state),))
+  /// }
+  /// ```
+  ///
+  /// ## Implementation Notes
+  ///
+  /// This function should perform any necessary cleanup for the closed channel,
+  /// such as releasing resources or updating internal state to reflect the channel closure.
+  handle-channel-close: func(state: option<list<u8>>, params: tuple<channel-id>) -> result<tuple<option<list<u8>>>, string>;
+}
+
+/// # Message Server Host Interface
+///
+/// Provides functions for actors to send messages to other actors and manage communication channels.
+///
+/// ## Purpose
+///
+/// This interface enables actors to initiate various types of communication:
+/// - Send one-way messages to other actors
+/// - Make request-response interactions with other actors
+/// - Establish and use bidirectional communication channels
+///
+/// These functions allow actors to collaborate, share data, and coordinate their activities
+/// within the Theater system.
+///
+/// ## Example
+///
+/// ```rust
+/// use ntwk::theater::message_server_host;
+/// use ntwk::theater::types::actor_id;
+/// use serde_json::json;
+///
+/// async fn example() -> Result<(), String> {
+/// // Get the target actor ID (in a real scenario)
+/// let target_actor = actor_id { id: "actor-123".to_string() };
+///
+/// // Send a one-way message
+/// let message = json!({"action": "update", "value": 42});
+/// message_server_host::send(target_actor.clone(), message)?;
+///
+/// // Make a request and get a response
+/// let request = json!({"action": "query", "key": "user-profile"});
+/// let response = message_server_host::request(target_actor.clone(), request)?;
+/// println!("Received response: {}", response);
+///
+/// // Open a channel for ongoing communication
+/// let initial_msg = json!({"action": "subscribe", "topic": "updates"});
+/// let channel_id = message_server_host::open_channel(target_actor, initial_msg)?;
+///
+/// // Send messages on the channel
+/// message_server_host::send_on_channel(channel_id.clone(), json!({"update": 1}))?;
+/// message_server_host::send_on_channel(channel_id.clone(), json!({"update": 2}))?;
+///
+/// // Close the channel when done
+/// message_server_host::close_channel(channel_id)?;
+///
+/// Ok(())
+/// }
+/// ```
+///
+/// ## Security
+///
+/// The message server enforces security boundaries to ensure that:
+/// - Actors can only communicate with actors they have permission to access
+/// - Messages are delivered reliably and in order
+/// - Channel operations are authenticated
+///
+/// All message operations are tracked in the actor's event chain for complete auditability.
+///
+/// ## Implementation Notes
+///
+/// The message server operations are asynchronous but appear synchronous to the WebAssembly
+/// component. The runtime suspends the actor's execution as needed without blocking the
+/// entire system.
+interface message-server-host {
+  use types.{actor-id, channel-id};
+
+  /// # Send one-way message
+  ///
+  /// Sends a message to another actor without waiting for a response.
+  ///
+  /// ## Parameters
+  ///
+  /// * `actor-id` - ID of the target actor
+  /// * `msg` - JSON message payload to send
+  ///
+  /// ## Returns
+  ///
+  /// * `Ok(_)` - Message was successfully sent
+  /// * `Err(string)` - Error message if send fails
+  ///
+  /// ## Example
+  ///
+  /// ```rust
+  /// use ntwk::theater::message_server_host;
+  /// use ntwk::theater::types::actor_id;
+  /// use serde_json::json;
+  ///
+  /// // Send a notification
+  /// let target = actor_id { id: "logging-service".to_string() };
+  /// let log_msg = json!({
+  /// "level": "info",
+  /// "message": "User logged in",
+  /// "timestamp": 1625097600000
+  /// });
+  /// message_server_host::send(target, log_msg)?;
+  /// ```
+  ///
+  /// ## Security
+  ///
+  /// The runtime verifies that the sender has permission to send messages to the
+  /// target actor before delivery.
+  send: func(actor-id: actor-id, msg: list<u8>) -> result<_, string>;
+
+  /// # Send request and await response
+  ///
+  /// Sends a message to another actor and waits for a response.
+  ///
+  /// ## Parameters
+  ///
+  /// * `actor-id` - ID of the target actor
+  /// * `msg` - JSON request payload to send
+  ///
+  /// ## Returns
+  ///
+  /// * `Ok(json)` - The response from the target actor
+  /// * `Err(string)` - Error message if the request fails
+  ///
+  /// ## Example
+  ///
+  /// ```rust
+  /// use ntwk::theater::message_server_host;
+  /// use ntwk::theater::types::actor_id;
+  /// use serde_json::json;
+  ///
+  /// // Query a data service
+  /// let data_service = actor_id { id: "data-service".to_string() };
+  /// let query = json!({
+  /// "query": "SELECT * FROM users WHERE id = ?",
+  /// "parameters": [42]
+  /// });
+  /// let result = message_server_host::request(data_service, query)?;
+  /// ```
+  ///
+  /// ## Implementation Notes
+  ///
+  /// This function suspends the calling actor's execution until a response is received
+  /// or a timeout occurs. The runtime handles the suspension efficiently without
+  /// blocking other actors.
+  request: func(actor-id: actor-id, msg: list<u8>) -> result<list<u8>, string>;
+
+  /// # Open communication channel
+  ///
+  /// Establishes a bidirectional communication channel with another actor.
+  ///
+  /// ## Parameters
+  ///
+  /// * `actor-id` - ID of the target actor
+  /// * `initial-msg` - JSON message sent as part of channel establishment
+  ///
+  /// ## Returns
+  ///
+  /// * `Ok(channel-id)` - ID of the established channel
+  /// * `Err(string)` - Error message if channel establishment fails
+  ///
+  /// ## Example
+  ///
+  /// ```rust
+  /// use ntwk::theater::message_server_host;
+  /// use ntwk::theater::types::actor_id;
+  /// use serde_json::json;
+  ///
+  /// // Open a channel to a streaming service
+  /// let streaming_service = actor_id { id: "data-stream".to_string() };
+  /// let subscription = json!({
+  /// "action": "subscribe",
+  /// "topics": ["market-data", "news-feed"],
+  /// "options": {"buffer_size": 100}
+  /// });
+  /// let channel = message_server_host::open_channel(streaming_service, subscription)?;
+  /// ```
+  ///
+  /// ## Security
+  ///
+  /// Channel establishment requires mutual consent:
+  /// 1. The initiator requests the channel by calling this function
+  /// 2. The target actor explicitly accepts or rejects the channel
+  ///
+  /// This provides a security checkpoint to prevent unwanted channels.
+  open-channel: func(actor-id: actor-id, initial-msg: list<u8>) -> result<channel-id, string>;
+
+  /// # Send message on channel
+  ///
+  /// Sends a message through an established channel.
+  ///
+  /// ## Parameters
+  ///
+  /// * `channel-id` - ID of the channel to send on
+  /// * `msg` - JSON message payload to send
+  ///
+  /// ## Returns
+  ///
+  /// * `Ok(_)` - Message was successfully sent
+  /// * `Err(string)` - Error message if send fails
+  ///
+  /// ## Example
+  ///
+  /// ```rust
+  /// use ntwk::theater::message_server_host;
+  /// use serde_json::json;
+  ///
+  /// // Send a message on an established channel
+  /// let update = json!({
+  /// "type": "position-update",
+  /// "x": 10.5,
+  /// "y": 20.3,
+  /// "timestamp": 1625097600000
+  /// });
+  /// message_server_host::send_on_channel(channel_id, update)?;
+  /// ```
+  ///
+  /// ## Implementation Notes
+  ///
+  /// Messages sent on a channel are delivered in order. If the channel is closed
+  /// or invalid, this function will return an error.
+  send-on-channel: func(channel-id: channel-id, msg: list<u8>) -> result<_, string>;
+
+  /// # Close channel
+  ///
+  /// Closes an open communication channel.
+  ///
+  /// ## Parameters
+  ///
+  /// * `channel-id` - ID of the channel to close
+  ///
+  /// ## Returns
+  ///
+  /// * `Ok(_)` - Channel was successfully closed
+  /// * `Err(string)` - Error message if close fails
+  ///
+  /// ## Example
+  ///
+  /// ```rust
+  /// use ntwk::theater::message_server_host;
+  ///
+  /// // Close a channel when done with it
+  /// message_server_host::close_channel(channel_id)?;
+  /// ```
+  ///
+  /// ## Implementation Notes
+  ///
+  /// Closing a channel is a final operation - once closed, a channel cannot be reopened.
+  /// Both participants receive a notification when a channel is closed.
+  close-channel: func(channel-id: channel-id) -> result<_, string>;
+
+  /// # List outstanding requests
+  ///
+  /// Retrieves a list of all pending request IDs that haven't been responded to yet.
+  ///
+  /// ## Returns
+  ///
+  /// * `list<string>` - List of outstanding request IDs
+  ///
+  /// ## Example
+  ///
+  /// ```rust
+  /// use ntwk::theater::message_server_host;
+  ///
+  /// // Get all pending requests
+  /// let pending_requests = message_server_host::list_outstanding_requests();
+  /// for request_id in pending_requests {
+  /// println!("Pending request: {}", request_id);
+  /// }
+  /// ```
+  ///
+  /// ## Implementation Notes
+  ///
+  /// This function is useful for actors that need to track and manage asynchronous
+  /// request processing. It allows actors to check for pending requests and decide
+  /// which ones to process next.
+  list-outstanding-requests: func() -> list<string>;
+
+  /// # Respond to a specific request
+  ///
+  /// Sends a response to a previously received request identified by its ID.
+  ///
+  /// ## Parameters
+  ///
+  /// * `request-id` - ID of the request to respond to
+  /// * `response` - JSON response payload to send
+  ///
+  /// ## Returns
+  ///
+  /// * `Ok(_)` - Response was successfully sent
+  /// * `Err(string)` - Error message if response fails
+  ///
+  /// ## Example
+  ///
+  /// ```rust
+  /// use ntwk::theater::message_server_host;
+  /// use serde_json::json;
+  ///
+  /// // Respond to a specific request
+  /// let response = json!({
+  /// "status": "success",
+  /// "data": {
+  /// "result": 42
+  /// }
+  /// });
+  /// message_server_host::respond_to_request("req-123", response)?;
+  /// ```
+  ///
+  /// ## Implementation Notes
+  ///
+  /// This function allows actors to implement asynchronous request handling patterns,
+  /// where requests are received, processed in the background, and responded to later.
+  /// If the request ID is not found, an error is returned.
+  respond-to-request: func(request-id: string, response: list<u8>) -> result<_, string>;
+
+  /// # Cancel a pending request
+  ///
+  /// Explicitly cancels a pending request without sending a response.
+  ///
+  /// ## Parameters
+  ///
+  /// * `request-id` - ID of the request to cancel
+  ///
+  /// ## Returns
+  ///
+  /// * `Ok(_)` - Request was successfully canceled
+  /// * `Err(string)` - Error message if cancellation fails
+  ///
+  /// ## Example
+  ///
+  /// ```rust
+  /// use ntwk::theater::message_server_host;
+  ///
+  /// // Cancel a request that can't be fulfilled
+  /// message_server_host::cancel_request("req-123")?;
+  /// ```
+  ///
+  /// ## Implementation Notes
+  ///
+  /// Canceling a request causes the requester to receive an error indicating that
+  /// the request was canceled. This is useful for cleanup operations and handling
+  /// error cases where a proper response cannot be generated.
+  cancel-request: func(request-id: string) -> result<_, string>;
+}
+
+/// # Runtime Interface
+///
+/// The `runtime` interface provides core runtime capabilities to actors in the Theater system.
+/// It allows actors to access their environment, log messages, and retrieve their event chain.
+///
+/// ## Purpose
+///
+/// This interface serves as a bridge between the actor and its execution environment,
+/// providing essential services for operation, debugging, and state management. It enables
+/// actors to log information to the system and access their immutable event history.
+///
+/// ## Example
+///
+/// ```wit
+/// // Using the runtime interface in a WIT definition
+/// use theater:simple/runtime;
+///
+/// // Using the runtime interface in a Rust implementation
+/// runtime::log("Actor initialized successfully");
+/// let my_chain = runtime::get_chain();
+/// ```
+///
+/// ## Security
+///
+/// The runtime interface is designed to be safe to expose to all actors, as it provides
+/// only read access to state and controlled logging functionality. It doesn't allow actors
+/// to modify runtime state or access system resources outside their sandbox.
+///
+/// ## Implementation Notes
+///
+/// This interface is typically implemented by the Theater runtime and automatically
+/// provided to all actors. No special configuration is required to use it, though
+/// logging behavior can be controlled through manifest settings.
+interface runtime {
+  use types.{chain, actor-id};
+
+  /// Logs a message to the actor's log stream.
+  ///
+  /// ## Purpose
+  ///
+  /// This function allows actors to send log messages to the Theater logging system.
+  /// Messages are tagged with the actor's ID and can be viewed through the Theater CLI
+  /// or event subscription system.
+  ///
+  /// ## Parameters
+  ///
+  /// * `msg` - The message to log
+  ///
+  /// ## Example
+  ///
+  /// ```rust
+  /// // In Rust actor code
+  /// runtime::log("Processing request with ID: 12345");
+  /// ```
+  ///
+  /// ## Implementation Notes
+  ///
+  /// Log messages are subject to the logging level configuration specified in the actor's
+  /// manifest. The Theater runtime may filter or redirect logs based on this configuration.
+  log: func(msg: string);
+
+  /// Retrieves the actor's event chain.
+  ///
+  /// ## Purpose
+  ///
+  /// This function provides access to the actor's complete event history as a chain of
+  /// cryptographically linked events. This allows actors to inspect their state evolution
+  /// and verify the integrity of their history.
+  ///
+  /// ## Returns
+  ///
+  /// * `chain` - The actor's event chain containing all recorded events
+  ///
+  /// ## Example
+  ///
+  /// ```rust
+  /// // In Rust actor code
+  /// let chain = runtime::get_chain();
+  ///
+  /// // Count events by type
+  /// let mut event_counts = std::collections::HashMap::new();
+  /// for event in chain.events {
+  /// *event_counts.entry(event.event_type.clone()).or_insert(0) += 1;
+  /// }
+  /// ```
+  ///
+  /// ## Security
+  ///
+  /// The event chain is immutable and cryptographically verifiable, ensuring that actors
+  /// cannot tamper with their event history. This provides a secure audit trail of all
+  /// actor actions.
+  get-chain: func() -> chain;
+
+  shutdown: func(data: option<list<u8>>) -> result<_, string>;
+}
+
+interface supervisor {
+  use types.{chain-event};
+
+  /// # Spawn a new child actor
+  ///
+  /// Creates and starts a new actor from the specified manifest file.
+  ///
+  /// ## Parameters
+  ///
+  /// * `manifest` - Path or content of the manifest file describing the actor
+  /// * `init-bytes` - Optional initial state for the actor (serialized bytes)
+  ///
+  /// ## Returns
+  ///
+  /// * `Ok(string)` - ID of the newly created actor
+  /// * `Err(string)` - Error message if spawning fails
+  spawn: func(manifest: string, init-bytes: option<list<u8>>) -> result<string, string>;
+
+  /// # Resume a previously stopped child actor
+  ///
+  /// Restarts a previously created actor using an existing manifest but with a potentially
+  /// new initial state.
+  ///
+  /// ## Parameters
+  ///
+  /// * `manifest` - Path or content of the manifest file describing the actor
+  /// * `init-state` - Optional new initial state for the actor (serialized bytes)
+  ///
+  /// ## Returns
+  ///
+  /// * `Ok(string)` - ID of the resumed actor
+  /// * `Err(string)` - Error message if resuming fails
+  resume: func(manifest: string, init-state: option<list<u8>>) -> result<string, string>;
+
+  /// # List all child actors
+  ///
+  /// Retrieves a list of all children directly managed by this actor.
+  ///
+  /// ## Returns
+  ///
+  /// * `list<string>` - IDs of all child actors
+  list-children: func() -> list<string>;
+
+  /// # Stop a specific child actor
+  ///
+  /// Gracefully stops a child actor identified by its ID.
+  ///
+  /// ## Parameters
+  ///
+  /// * `child-id` - ID of the child actor to stop
+  ///
+  /// ## Returns
+  ///
+  /// * `Ok(_)` - Child was successfully stopped
+  /// * `Err(string)` - Error message if stopping fails
+  stop-child: func(child-id: string) -> result<_, string>;
+
+  /// # Restart a specific child actor
+  ///
+  /// Stops and then starts a child actor, maintaining its ID but resetting its state.
+  ///
+  /// ## Parameters
+  ///
+  /// * `child-id` - ID of the child actor to restart
+  ///
+  /// ## Returns
+  ///
+  /// * `Ok(_)` - Child was successfully restarted
+  /// * `Err(string)` - Error message if restarting fails
+  restart-child: func(child-id: string) -> result<_, string>;
+
+  /// # Get the latest state of a child actor
+  ///
+  /// Retrieves the current serialized state of a specified child actor.
+  ///
+  /// ## Parameters
+  ///
+  /// * `child-id` - ID of the child actor
+  ///
+  /// ## Returns
+  ///
+  /// * `Ok(option<list<u8>>)` - Current state of the child (None if no state)
+  /// * `Err(string)` - Error message if retrieving state fails
+  get-child-state: func(child-id: string) -> result<option<list<u8>>, string>;
+
+  /// # Get event history of a child actor
+  ///
+  /// Retrieves the chain of events that have occurred in a child actor,
+  /// providing visibility into its execution history.
+  ///
+  /// ## Parameters
+  ///
+  /// * `child-id` - ID of the child actor
+  ///
+  /// ## Returns
+  ///
+  /// * `Ok(list<chain-event>)` - List of events in the child's chain
+  /// * `Err(string)` - Error message if retrieving events fails
+  get-child-events: func(child-id: string) -> result<list<chain-event>, string>;
+}
+
+interface supervisor-handlers {
+  use types.{wit-actor-error};
+
+  /// # Handle a child actor error
+  ///
+  /// Processes an error from a child actor, allowing the parent to react or log the error.
+  ///
+  /// ## Parameters
+  ///
+  /// * `state` - Optional state of the parent actor (for context)
+  /// * `params` - Tuple containing the child ID and error data
+  ///
+  /// ## Returns
+  ///
+  /// * `Ok(tuple<option<list<u8>>, string>)` - Updated state and result message
+  /// * `Err(string)` - Error message if handling fails
+  handle-child-error: func(state: option<list<u8>>, params: tuple<string, wit-actor-error>) -> result<tuple<option<list<u8>>>, string>;
+
+  handle-child-exit: func(state: option<list<u8>>, params: tuple<string, option<list<u8>>>) -> result<tuple<option<list<u8>>>, string>;
+
+  handle-child-external-stop: func(state: option<list<u8>>, params: tuple<string>) -> result<tuple<option<list<u8>>>, string>;
+}
+
+/// # WebSocket Server Interface
+///
+/// The `websocket-server` interface provides capabilities for handling WebSocket connections,
+/// receiving messages, and sending responses. It allows actors to implement real-time
+/// bidirectional communication with web clients.
+///
+/// ## Purpose
+///
+/// This interface enables actors to build WebSocket-based applications such as chat servers,
+/// real-time dashboards, collaborative tools, and streaming data services. It handles the
+/// WebSocket protocol details and exposes a simple event-driven API for actors to process
+/// messages and maintain connections.
+///
+/// ## Example
+///
+/// ```wit
+/// // Using the websocket-server interface in a WIT definition
+/// use theater:simple/websocket-server;
+///
+/// // Implementing the interface in Rust
+/// impl websocket_server::Guest for MyActor {
+/// fn handle_message(state: State, params: (websocket_server::WebsocketMessage,))
+/// -> Result<(State, (websocket_server::WebsocketResponse,)), String> {
+/// // Process the message and update state
+/// // Return updated state and response
+/// }
+/// }
+/// ```
+///
+/// ## Security
+///
+/// WebSocket connections can be long-lived and consume server resources, so implementations
+/// should consider rate limiting, connection timeouts, and payload size limits. Validate
+/// all incoming data and be cautious about trusting client-provided information.
+///
+/// ## Implementation Notes
+///
+/// The actor must implement the `handle_message` function, which is called for every
+/// WebSocket event (connection, message, disconnection). The actor maintains its state
+/// across these invocations, allowing it to track connected clients and conversation history.
+/// Interface for handling WebSocket connections and messages
+interface websocket-server {
+  /// The type of WebSocket message/event
+  ///
+  /// ## Purpose
+  ///
+  /// This enum represents the different types of WebSocket events that can occur,
+  /// including text and binary messages, connection events, and protocol control messages.
+  /// It allows actors to differentiate between different kinds of events and handle them
+  /// appropriately.
+  ///
+  /// ## Example
+  ///
+  /// ```rust
+  /// // In Rust actor code
+  /// match message.ty {
+  /// MessageType::Text => { /* Handle text message */ },
+  /// MessageType::Binary => { /* Handle binary message */ },
+  /// MessageType::Connect => { /* Handle new connection */ },
+  /// MessageType::Close => { /* Handle connection closed */ },
+  /// // Handle other message types
+  /// }
+  /// ```
+  variant message-type {
+    /// A text message
+    text,
+    /// A binary message
+    binary,
+    /// A new connection was established
+    connect,
+    /// The connection was closed
+    close,
+    /// A ping message (for keep-alive)
+    ping,
+    /// A pong message (response to ping)
+    pong,
+    /// Any other message type
+    other(string),
+  }
+
+  /// Represents a message sent or received over a WebSocket connection
+  ///
+  /// ## Purpose
+  ///
+  /// This record encapsulates the data for a WebSocket message or event, including its
+  /// type and payload (which can be either text or binary). It's the primary data structure
+  /// used for communication in the WebSocket system.
+  ///
+  /// ## Example
+  ///
+  /// ```rust
+  /// // In Rust actor code
+  /// if message.ty == MessageType::Text {
+  /// if let Some(text) = &message.text {
+  /// println!("Received text message: {}", text);
+  /// }
+  /// } else if message.ty == MessageType::Binary {
+  /// if let Some(data) = &message.data {
+  /// println!("Received binary message of {} bytes", data.len());
+  /// }
+  /// }
+  /// ```
+  ///
+  /// ## Implementation Notes
+  ///
+  /// For text messages, the `text` field will be populated and the `data` field will be None.
+  /// For binary messages, the `data` field will be populated and the `text` field will be None.
+  /// For control messages (connect, close, ping, pong), both fields may be None.
+  record websocket-message {
+    /// The type of the message
+    ty: message-type,
+    /// Binary data payload (used for binary messages)
+    data: option<list<u8>>,
+    /// Text payload (used for text messages)
+    text: option<string>,
+  }
+
+  /// Response containing messages to send back over the WebSocket
+  ///
+  /// ## Purpose
+  ///
+  /// This record contains the messages that the actor wants to send back to connected
+  /// WebSocket clients. It allows actors to respond to incoming messages or send
+  /// unsolicited messages to connected clients.
+  ///
+  /// ## Example
+  ///
+  /// ```rust
+  /// // In Rust actor code
+  /// let response = WebsocketResponse {
+  /// messages: vec![
+  /// WebsocketMessage {
+  /// ty: MessageType::Text,
+  /// data: None,
+  /// text: Some("Hello, client!".to_string()),
+  /// },
+  /// ],
+  /// };
+  /// ```
+  ///
+  /// ## Implementation Notes
+  ///
+  /// The response can contain multiple messages, which will be sent to the client in order.
+  /// An empty list means no messages will be sent back to the client.
+  record websocket-response {
+    /// List of messages to send back to the client
+    messages: list<websocket-message>,
+  }
+
+  /// Called for each event on the WebSocket (connections, messages, disconnections)
+  ///
+  /// ## Purpose
+  ///
+  /// This function is the core of the WebSocket interface. It's called by the Theater runtime
+  /// whenever a WebSocket event occurs (new connection, incoming message, disconnection). The
+  /// actor implements this function to handle the events, update its state, and respond to clients.
+  ///
+  /// ## Parameters
+  ///
+  /// * `state` - The current state of the actor
+  /// * `params` - A tuple containing the WebSocket message that triggered this call
+  ///
+  /// ## Returns
+  ///
+  /// * `Ok(tuple<state, tuple<websocket-response>>)` - The updated state and response to send
+  /// * `Err(string)` - An error message if processing fails
+  ///
+  /// ## Example
+  ///
+  /// ```rust
+  /// // In Rust actor code
+  /// fn handle_message(
+  /// state: State,
+  /// params: (WebsocketMessage,)
+  /// ) -> Result<(State, (WebsocketResponse,)), String> {
+  /// let message = &params.0;
+  ///
+  /// // Handle a text message
+  /// if message.ty == MessageType::Text {
+  /// if let Some(text) = &message.text {
+  /// // Echo the message back to the client
+  /// let response = WebsocketResponse {
+  /// messages: vec![
+  /// WebsocketMessage {
+  /// ty: MessageType::Text,
+  /// data: None,
+  /// text: Some(format!("You said: {}", text)),
+  /// },
+  /// ],
+  /// };
+  ///
+  /// return Ok((state, (response,)));
+  /// }
+  /// }
+  ///
+  /// // Handle a new connection
+  /// if message.ty == MessageType::Connect {
+  /// // Send a welcome message
+  /// let response = WebsocketResponse {
+  /// messages: vec![
+  /// WebsocketMessage {
+  /// ty: MessageType::Text,
+  /// data: None,
+  /// text: Some("Welcome to the WebSocket server!".to_string()),
+  /// },
+  /// ],
+  /// };
+  ///
+  /// return Ok((state, (response,)));
+  /// }
+  ///
+  /// // Return empty response for other message types
+  /// Ok((state, (WebsocketResponse { messages: vec![] },)))
+  /// }
+  /// ```
+  ///
+  /// ## Security
+  ///
+  /// Validate all incoming messages and don't trust client-provided data. Consider size limits
+  /// for message payloads and rate limiting to prevent abuse.
+  ///
+  /// ## Implementation Notes
+  ///
+  /// The function is called once for each WebSocket event. For efficient handling of multiple
+  /// connections, the actor should store connection IDs or other identifying information in its
+  /// state to track individual clients.
+  handle-message: func(state: option<list<u8>>, params: tuple<websocket-message>) -> result<tuple<option<list<u8>>, tuple<websocket-response>>, string>;
+}
+
+world minimal {
+  import types;
+  import runtime;
+
+  export actor;
+}

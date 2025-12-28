@@ -1,0 +1,15 @@
+/// WIT world for the Timing Handler
+///
+/// This world defines what the host provides to actors that import
+/// the WASI clocks and poll interfaces.
+
+package theater:timing-handler;
+
+world timing-handler-host {
+    /// WASI clocks interfaces
+    import wasi:clocks/monotonic-clock@0.2.0;
+    import wasi:clocks/wall-clock@0.2.0;
+
+    /// WASI I/O poll interface (for pollables from clocks)
+    import wasi:io/poll@0.2.0;
+}

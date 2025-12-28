@@ -7,8 +7,10 @@ members = [
     "crates/theater-client",
     "crates/theater-handler-environment",
     "crates/theater-handler-filesystem",
+    "crates/theater-handler-http",
     "crates/theater-handler-http-client",
     "crates/theater-handler-http-framework",
+    "crates/theater-handler-io",
     "crates/theater-handler-message-server",
     "crates/theater-handler-process",
     "crates/theater-handler-random",
@@ -45,8 +47,10 @@ theater-client = { version = "0.2.1", path = "crates/theater-client" }
 theater-server = { version = "0.2.1", path = "crates/theater-server" }
 theater-handler-environment = { version = "0.2.1", path = "crates/theater-handler-environment" }
 theater-handler-filesystem = { version = "0.2.1", path = "crates/theater-handler-filesystem" }
+theater-handler-http = { version = "0.2.1", path = "crates/theater-handler-http" }
 theater-handler-http-client = { version = "0.2.1", path = "crates/theater-handler-http-client" }
 theater-handler-http-framework = { version = "0.2.1", path = "crates/theater-handler-http-framework" }
+theater-handler-io = { version = "0.2.1", path = "crates/theater-handler-io" }
 theater-handler-message-server = { version = "0.2.1", path = "crates/theater-handler-message-server" }
 theater-handler-process = { version = "0.2.1", path = "crates/theater-handler-process" }
 theater-handler-random = { version = "0.2.1", path = "crates/theater-handler-random" }

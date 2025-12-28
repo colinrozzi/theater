@@ -1,0 +1,11 @@
+name = "wasi-random-test"
+version = "0.1.0"
+component = "/Users/colinrozzi/work/theater/test-actors/wasi-random-test/target/wasm32-unknown-unknown/release/wasi_random_test.wasm"
+description = "WASI random interface test actor"
+save_chain = true
+
+[[handler]]
+type = "random"
+max_bytes = 1048576
+max_int = 9223372036854775807
+allow_crypto_secure = false

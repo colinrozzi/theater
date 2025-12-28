@@ -10,7 +10,7 @@ use tokio::sync::{mpsc, oneshot};
 use tokio::time::timeout;
 use tracing::error;
 
-use crate::actor::types::{ActorError, ActorOperation, DEFAULT_OPERATION_TIMEOUT};
+use crate::actor::types::{ActorError, ActorOperation, WasiHttpResponse, DEFAULT_OPERATION_TIMEOUT};
 use crate::chain::ChainEvent;
 use crate::metrics::ActorMetrics;
 
@@ -117,6 +117,74 @@ impl ActorHandle {
             },
             Err(_) => {
                 error!("Operation timed out after {:?}", DEFAULT_OPERATION_TIMEOUT);
+                Err(ActorError::OperationTimeout(
+                    DEFAULT_OPERATION_TIMEOUT.as_secs(),
+                ))
+            }
+        }
+    }
+
+    /// Handle a WASI HTTP incoming request.
+    ///
+    /// ## Purpose
+    ///
+    /// This method handles an incoming HTTP request by creating WASI HTTP resources
+    /// in the actor's store and calling the actor's exported `wasi:http/incoming-handler.handle`
+    /// function.
+    ///
+    /// ## Parameters
+    ///
+    /// * `method` - HTTP method (GET, POST, etc.)
+    /// * `scheme` - URL scheme (http, https, etc.)
+    /// * `authority` - Authority component (host:port)
+    /// * `path_with_query` - Path with optional query string
+    /// * `headers` - Request headers as (name, value) pairs
+    /// * `body` - Request body bytes
+    ///
+    /// ## Returns
+    ///
+    /// * `Ok(WasiHttpResponse)` - The HTTP response from the actor
+    /// * `Err(ActorError)` - An error occurred during request handling
+    pub async fn handle_wasi_http_request(
+        &self,
+        method: String,
+        scheme: Option<String>,
+        authority: Option<String>,
+        path_with_query: Option<String>,
+        headers: Vec<(String, Vec<u8>)>,
+        body: Vec<u8>,
+    ) -> Result<WasiHttpResponse, ActorError> {
+        let (tx, rx) = oneshot::channel();
+
+        self.operation_tx
+            .send(ActorOperation::HandleWasiHttpRequest {
+                method,
+                scheme,
+                authority,
+                path_with_query,
+                headers,
+                body,
+                response_tx: tx,
+            })
+            .await
+            .map_err(|e| {
+                error!("Failed to send HandleWasiHttpRequest operation: {}", e);
+                ActorError::ChannelClosed
+            })?;
+
+        match timeout(DEFAULT_OPERATION_TIMEOUT, rx).await {
+            Ok(result) => match result {
+                Ok(result) => result,
+                Err(e) => {
+                    error!("Channel closed while waiting for HTTP response: {:?}", e);
+                    Err(ActorError::ChannelClosed)
+                }
+            },
+            Err(_) => {
+                error!(
+                    "HTTP request timed out after {:?}",
+                    DEFAULT_OPERATION_TIMEOUT
+                );
                 Err(ActorError::OperationTimeout(
                     DEFAULT_OPERATION_TIMEOUT.as_secs(),
                 ))

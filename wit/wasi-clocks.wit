@@ -1,0 +1,66 @@
+package wasi:clocks@0.2.3;
+
+/// WASI Wall Clock provides access to the current wall-clock time.
+///
+/// It is intended to be portable at least between Unix-family platforms and Windows.
+interface wall-clock {
+    /// A time and date in seconds plus nanoseconds.
+    record datetime {
+        seconds: u64,
+        nanoseconds: u32,
+    }
+
+    /// Read the current value of the clock.
+    ///
+    /// This clock is not monotonic, therefore calling this function repeatedly
+    /// will not necessarily produce a sequence of non-decreasing values.
+    ///
+    /// The returned timestamps represent the number of seconds since
+    /// 1970-01-01T00:00:00Z, also known as POSIX's Seconds Since the Epoch,
+    /// also known as Unix Time.
+    ///
+    /// The nanoseconds field of the output is always less than 1000000000.
+    now: func() -> datetime;
+
+    /// Query the resolution of the clock.
+    ///
+    /// The nanoseconds field of the output is always less than 1000000000.
+    resolution: func() -> datetime;
+}
+
+/// WASI Monotonic Clock is a clock API intended to let users measure elapsed time.
+///
+/// It is intended to be portable at least between Unix-family platforms and Windows.
+interface monotonic-clock {
+    use wasi:io/poll@0.2.3.{pollable};
+
+    /// An instant in time, in nanoseconds. An instant is a point in time which
+    /// has no meaning on its own - it can only be interpreted by diffing two
+    /// instants.
+    type instant = u64;
+
+    /// A duration of time, in nanoseconds.
+    type duration = u64;
+
+    /// Read the current value of the clock.
+    ///
+    /// The clock is monotonic, therefore calling this function repeatedly will
+    /// produce a sequence of non-decreasing values.
+    now: func() -> instant;
+
+    /// Query the resolution of the clock. Returns the duration of time
+    /// corresponding to a clock tick.
+    resolution: func() -> duration;
+
+    /// Create a pollable which will resolve once the specified instant has occurred.
+    ///
+    /// The pollable becomes ready when the monotonic clock reaches or exceeds the
+    /// specified instant.
+    subscribe-instant: func(when: instant) -> pollable;
+
+    /// Create a pollable that will resolve after the specified duration has elapsed.
+    ///
+    /// The pollable becomes ready after the duration has passed from the time
+    /// this function is invoked.
+    subscribe-duration: func(when: duration) -> pollable;
+}

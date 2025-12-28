@@ -3,12 +3,20 @@
 //! Provides filesystem access capabilities to WebAssembly actors in the Theater system.
 //! This handler allows actors to read, write, list, delete files and directories with
 //! permission-based access control.
+//!
+//! ## Architecture
+//!
+//! This handler uses wasmtime's bindgen to generate type-safe Host traits from
+//! the WASI Filesystem WIT definitions. This ensures compile-time verification that
+//! our implementation matches the WASI specification.
 
 pub mod events;
+pub mod bindings;
+pub mod host_impl;
+pub mod types;
 mod path_validation;
 mod operations;
 mod command_execution;
-mod types;
 
 use std::future::Future;
 use std::path::PathBuf;
@@ -19,12 +27,13 @@ use theater::actor::handle::ActorHandle;
 use theater::config::actor_manifest::FileSystemHandlerConfig;
 use theater::config::permissions::FileSystemPermissions;
 use theater::events::EventPayload;
-use theater::handler::Handler;
+use theater::handler::{Handler, SharedActorInstance};
 use theater::shutdown::ShutdownReceiver;
 use theater::wasm::{ActorComponent, ActorInstance};
 
 pub use events::FilesystemEventData;
-pub use types::FileSystemError;
+pub use types::{FileSystemError, Descriptor, DescriptorType, DescriptorFlags, DirectoryEntryStream};
+pub use host_impl::FilesystemPreopens;
 
 /// Handler for providing filesystem access to WebAssembly actors
 #[derive(Clone)]
@@ -86,6 +95,7 @@ where
     fn start(
         &mut self,
         _actor_handle: ActorHandle,
+        _actor_instance: SharedActorInstance<E>,
         shutdown_receiver: ShutdownReceiver,
     ) -> Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send>> {
         info!("Starting filesystem handler on path {:?}", self.path);
@@ -101,7 +111,36 @@ where
         &mut self,
         actor_component: &mut ActorComponent<E>,
     ) -> anyhow::Result<()> {
-        operations::setup_host_functions(self, actor_component)
+        // Setup the Theater simple filesystem interface (for backwards compatibility)
+        operations::setup_host_functions(self, actor_component)?;
+
+        // Setup WASI filesystem interfaces using bindgen-generated add_to_linker
+        info!("Setting up WASI filesystem interfaces using bindgen");
+
+        // Set up preopened directories for this actor using ActorStore extensions
+        let preopens = vec![(self.path.clone(), "/".to_string())];
+        actor_component.actor_store.set_extension(FilesystemPreopens(preopens));
+        info!("Set filesystem preopens in ActorStore extensions");
+
+        use crate::bindings;
+        use theater::actor::ActorStore;
+
+        // Add wasi:filesystem/types interface
+        bindings::wasi::filesystem::types::add_to_linker(
+            &mut actor_component.linker,
+            |state: &mut ActorStore<E>| state,
+        )?;
+        info!("wasi:filesystem/types interface added");
+
+        // Add wasi:filesystem/preopens interface
+        bindings::wasi::filesystem::preopens::add_to_linker(
+            &mut actor_component.linker,
+            |state: &mut ActorStore<E>| state,
+        )?;
+        info!("wasi:filesystem/preopens interface added");
+
+        info!("WASI filesystem interfaces setup complete");
+        Ok(())
     }
 
     fn add_export_functions(
@@ -117,7 +156,8 @@ where
     }
 
     fn imports(&self) -> Option<String> {
-        Some("theater:simple/filesystem".to_string())
+        // Handler provides both Theater-specific and WASI filesystem interfaces
+        Some("theater:simple/filesystem,wasi:filesystem/types@0.2.3,wasi:filesystem/preopens@0.2.3".to_string())
     }
 
     fn exports(&self) -> Option<String> {

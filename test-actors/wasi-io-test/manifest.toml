@@ -1,0 +1,6 @@
+[actor]
+name = "wasi-io-test"
+version = "0.1.0"
+
+[[actor.handlers]]
+handler = "wasi-io"

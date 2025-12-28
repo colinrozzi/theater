@@ -1,0 +1,22 @@
+// Theater HTTP Handler Host World
+//
+// This world defines the interfaces that the HTTP handler provides to guest components.
+// Using wasmtime::component::bindgen! on this world generates Host traits that we implement.
+
+package theater:http-handler;
+
+// The host world - we provide these interfaces to guest components
+world http-handler-host {
+    // We provide the IO interfaces (HTTP depends on these)
+    import wasi:io/error@0.2.3;
+    import wasi:io/streams@0.2.3;
+
+    // We provide the HTTP types interface (guest imports this)
+    import wasi:http/types@0.2.3;
+
+    // We provide the outgoing handler (guest imports this to make HTTP requests)
+    import wasi:http/outgoing-handler@0.2.3;
+
+    // Guest exports this - we call it to handle incoming HTTP requests
+    export wasi:http/incoming-handler@0.2.3;
+}

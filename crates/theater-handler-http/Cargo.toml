@@ -1,0 +1,24 @@
+[package]
+name = "theater-handler-http"
+version = "0.2.1"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "WASI HTTP handler for Theater - provides incoming and outgoing HTTP"
+
+[dependencies]
+anyhow = "1.0"
+theater = { path = "../theater" }
+theater-handler-io = { path = "../theater-handler-io" }
+tokio = { version = "1.43", features = ["sync", "rt", "time"] }
+tracing = "0.1"
+wasmtime = { version = "31.0.0", features = ["component-model", "async"] }
+wasmtime-wasi-http = "31.0.0"
+serde = { version = "1.0", features = ["derive"] }
+hyper = { version = "1.0", features = ["server", "http1", "http2"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
+http-body-util = "0.1"
+reqwest = { version = "0.12", features = ["stream"] }
+bytes = "1.0"
+
+[dev-dependencies]
+tokio = { version = "1.43", features = ["full"] }

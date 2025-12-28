@@ -149,6 +149,11 @@ pub enum HandlerConfig {
         #[serde(flatten)]
         config: RandomHandlerConfig,
     },
+    #[serde(rename = "wasi-http")]
+    WasiHttp {
+        #[serde(flatten)]
+        config: WasiHttpHandlerConfig,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -197,6 +202,23 @@ pub struct FileSystemHandlerConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct HttpClientHandlerConfig {}
+
+/// Configuration for the WASI HTTP handler
+/// This handler provides both incoming (server) and outgoing (client) HTTP capabilities
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct WasiHttpHandlerConfig {
+    /// Port to listen on for incoming HTTP requests
+    /// If None, no incoming handler server will be started
+    #[serde(default)]
+    pub port: Option<u16>,
+    /// Host to bind to for incoming requests (default: 127.0.0.1)
+    #[serde(default = "default_wasi_http_host")]
+    pub host: String,
+}
+
+fn default_wasi_http_host() -> String {
+    "127.0.0.1".to_string()
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct StoreHandlerConfig {}

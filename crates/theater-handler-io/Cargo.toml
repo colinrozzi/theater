@@ -1,0 +1,17 @@
+[package]
+name = "theater-handler-io"
+version = "0.2.1"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "WASI I/O handler for Theater - provides streams, error handling, and poll"
+
+[dependencies]
+anyhow = "1.0"
+theater = { path = "../theater" }
+tokio = { version = "1.43", features = ["sync", "rt"] }
+tracing = "0.1"
+wasmtime = "31.0.0"
+serde = { version = "1.0", features = ["derive"] }
+
+[dev-dependencies]
+tokio = { version = "1.43", features = ["full"] }

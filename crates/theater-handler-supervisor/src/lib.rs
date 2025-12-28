@@ -12,7 +12,7 @@ use theater::actor::types::{ActorError, WitActorError};
 use theater::config::actor_manifest::SupervisorHostConfig;
 use theater::config::permissions::SupervisorPermissions;
 use theater::events::{ChainEventData, EventPayload};
-use theater::handler::Handler;
+use theater::handler::{Handler, SharedActorInstance};
 use theater::messages::{ActorResult, TheaterCommand};
 use theater::shutdown::ShutdownReceiver;
 use theater::wasm::{ActorComponent, ActorInstance};
@@ -1160,6 +1160,7 @@ where
     fn start(
         &mut self,
         actor_handle: ActorHandle,
+        _actor_instance: SharedActorInstance<E>,
         mut shutdown_receiver: ShutdownReceiver,
     ) -> Pin<Box<dyn Future<Output = Result<()>> + Send>> {
         info!("Starting supervisor handler");

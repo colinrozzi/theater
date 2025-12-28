@@ -1,0 +1,30 @@
+[package]
+name = "wasi-http-test"
+version = "0.1.0"
+edition = "2021"
+
+[workspace]
+
+[dependencies]
+wit-bindgen-rt = { version = "0.43.0", features = ["bitflags"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+[lib]
+crate-type = ["cdylib"]
+
+[package.metadata.component]
+package = "test:wasi-http"
+
+[package.metadata.component.target.dependencies]
+"wasi:http" = { path = "./wit/deps/wasi-http-0.2.0" }
+"wasi:cli" = { path = "./wit/deps/wasi-cli-0.2.0" }
+"wasi:clocks" = { path = "./wit/deps/wasi-clocks-0.2.0" }
+"wasi:io" = { path = "./wit/deps/wasi-io-0.2.0" }
+"wasi:random" = { path = "./wit/deps/wasi-random-0.2.0" }
+"wasi:filesystem" = { path = "./wit/deps/wasi-filesystem-0.2.0" }
+"wasi:sockets" = { path = "./wit/deps/wasi-sockets-0.2.0" }
+"theater:simple" = { path = "./wit/deps/theater-simple" }
+
+[package.metadata.component.bindings]
+generate_unused_types = true

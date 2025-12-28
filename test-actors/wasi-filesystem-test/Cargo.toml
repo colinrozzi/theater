@@ -1,0 +1,24 @@
+[package]
+name = "wasi-filesystem-test"
+version = "0.1.0"
+edition = "2021"
+
+[workspace]
+
+[dependencies]
+wit-bindgen-rt = { version = "0.43.0", features = ["bitflags"] }
+
+[lib]
+crate-type = ["cdylib"]
+
+[package.metadata.component]
+package = "test:wasi-filesystem"
+
+[package.metadata.component.target.dependencies]
+"wasi:filesystem" = { path = "./wit/deps/wasi-filesystem-0.2.3" }
+"wasi:io" = { path = "./wit/deps/wasi-io-0.2.3" }
+"wasi:clocks" = { path = "./wit/deps/wasi-clocks-0.2.3" }
+"theater:simple" = { path = "./wit/deps/theater-simple" }
+
+[package.metadata.component.bindings]
+generate_unused_types = true

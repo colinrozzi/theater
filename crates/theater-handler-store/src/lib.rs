@@ -38,7 +38,7 @@ use theater::actor::types::ActorError;
 use theater::config::actor_manifest::StoreHandlerConfig;
 use theater::config::permissions::StorePermissions;
 use theater::events::{ChainEventData, EventPayload};
-use theater::handler::Handler;
+use theater::handler::{Handler, SharedActorInstance};
 use theater::shutdown::ShutdownReceiver;
 use theater::store::{ContentRef, ContentStore, Label};
 use theater::wasm::{ActorComponent, ActorInstance};
@@ -84,6 +84,7 @@ where
     fn start(
         &mut self,
         _actor_handle: ActorHandle,
+        _actor_instance: SharedActorInstance<E>,
         shutdown_receiver: ShutdownReceiver,
     ) -> Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send>> {
         info!("Store handler starting...");

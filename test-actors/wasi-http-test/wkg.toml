@@ -1,0 +1,7 @@
+[overrides]
+"theater:simple" = { version = "0.1.0" }
+"wasi:http" = { version = "0.2.0" }
+"wasi:cli" = { version = "0.2.0" }
+"wasi:clocks" = { version = "0.2.0" }
+"wasi:io" = { version = "0.2.0" }
+"wasi:random" = { version = "0.2.0" }

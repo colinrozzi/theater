@@ -21,6 +21,7 @@ use theater::config::actor_manifest::{
     ProcessHostConfig, RandomHandlerConfig, RuntimeHostConfig, StoreHandlerConfig,
     SupervisorHostConfig, TimingHostConfig,
 };
+use theater::config::permissions::HttpClientPermissions;
 use theater::handler::HandlerRegistry;
 use theater::id::TheaterId;
 use theater::messages::{ChannelId, TheaterCommand};
@@ -30,8 +31,10 @@ use theater::TheaterRuntimeError;
 // Import all migrated handlers
 use theater_handler_environment::{EnvironmentEventData, EnvironmentHandler};
 use theater_handler_filesystem::{FilesystemEventData, FilesystemHandler};
+use theater_handler_http::{HttpEventData, WasiHttpHandler};
 use theater_handler_http_client::{HttpEventData as HttpClientEventData, HttpClientHandler};
 use theater_handler_http_framework::{HttpFrameworkEventData, HttpFrameworkHandler};
+use theater_handler_io::{IoEventData, WasiIoHandler};
 use theater_handler_message_server::{MessageEventData, MessageServerHandler};
 use theater_handler_process::{events::ProcessEventData, ProcessHandler};
 use theater_handler_random::{RandomEventData, RandomHandler};
@@ -47,8 +50,10 @@ use crate::fragmenting_codec::FragmentingCodec;
 pub enum ServerHandlerEvents {
     Environment(EnvironmentEventData),
     Filesystem(FilesystemEventData),
+    Http(HttpEventData),
     HttpClient(HttpClientEventData),
     HttpFramework(HttpFrameworkEventData),
+    Io(IoEventData),
     Message(MessageEventData),
     Process(ProcessEventData),
     Random(RandomEventData),
@@ -138,6 +143,18 @@ impl From<SupervisorEventData> for ServerEvents {
 impl From<TimingEventData> for ServerEvents {
     fn from(event: TimingEventData) -> Self {
         ServerEvents(theater::events::TheaterEvents::Handler(ServerHandlerEvents::Timing(event)))
+    }
+}
+
+impl From<HttpEventData> for ServerEvents {
+    fn from(event: HttpEventData) -> Self {
+        ServerEvents(theater::events::TheaterEvents::Handler(ServerHandlerEvents::Http(event)))
+    }
+}
+
+impl From<IoEventData> for ServerEvents {
+    fn from(event: IoEventData) -> Self {
+        ServerEvents(theater::events::TheaterEvents::Handler(ServerHandlerEvents::Io(event)))
     }
 }
 
@@ -451,7 +468,15 @@ fn create_root_handler_registry(
 
     // Phase 2: Medium Complexity Handlers
     let http_client_config = HttpClientHandlerConfig {};
-    registry.register(HttpClientHandler::new(http_client_config, None));
+    // TEMPORARY: Use permissive permissions for testing (no restrictions)
+    // TODO: Apply per-actor permissions from manifests
+    let permissive_perms = Some(HttpClientPermissions {
+        allowed_methods: None,  // No restrictions
+        allowed_hosts: None,    // No restrictions
+        max_redirects: None,
+        timeout: None,
+    });
+    registry.register(HttpClientHandler::new(http_client_config, permissive_perms));
 
     let filesystem_config = FileSystemHandlerConfig {
         path: None,                      // No path restrictions (root access)
@@ -459,6 +484,13 @@ fn create_root_handler_registry(
         allowed_commands: None,          // All commands allowed
     };
     registry.register(FilesystemHandler::new(filesystem_config, None));
+
+    // WASI I/O handler for streams and polling
+    registry.register(WasiIoHandler::new());
+
+    // WASI HTTP handler for both incoming (server) and outgoing (client) requests
+    // Port 8080 is used for incoming HTTP handler when component exports wasi:http/incoming-handler
+    registry.register(WasiHttpHandler::new().with_port(8080));
 
     // Phase 3: Complex Handlers
     let process_config = ProcessHostConfig {
@@ -482,7 +514,7 @@ fn create_root_handler_registry(
 
     registry.register(HttpFrameworkHandler::new(None));
 
-    info!("✓ All 11 handlers registered successfully");
+    info!("✓ All 13 handlers registered successfully");
 
     (registry, message_router)
 }

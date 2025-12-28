@@ -53,7 +53,7 @@ use theater::actor::handle::ActorHandle;
 use theater::actor::store::ActorStore;
 use theater::config::permissions::HttpFrameworkPermissions;
 use theater::events::EventPayload;
-use theater::handler::Handler;
+use theater::handler::{Handler, SharedActorInstance};
 use theater::shutdown::ShutdownReceiver;
 use theater::wasm::{ActorComponent, ActorInstance};
 
@@ -1198,6 +1198,7 @@ where
     fn start(
         &mut self,
         _actor_handle: ActorHandle,
+        _actor_instance: SharedActorInstance<E>,
         shutdown_receiver: ShutdownReceiver,
     ) -> Pin<Box<dyn Future<Output = Result<()>> + Send>> {
         let servers_ref = self.servers.clone();

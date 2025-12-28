@@ -13,7 +13,7 @@ use theater::actor::store::ActorStore;
 use theater::config::actor_manifest::RuntimeHostConfig;
 use theater::config::permissions::RuntimePermissions;
 use theater::events::{runtime::RuntimeEventData, ChainEventData, EventPayload};
-use theater::handler::Handler;
+use theater::handler::{Handler, SharedActorInstance};
 use theater::messages::TheaterCommand;
 use theater::shutdown::ShutdownReceiver;
 use theater::wasm::{ActorComponent, ActorInstance};
@@ -56,6 +56,7 @@ where
     fn start(
         &mut self,
         _actor_handle: ActorHandle,
+        _actor_instance: SharedActorInstance<E>,
         shutdown_receiver: ShutdownReceiver,
     ) -> Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send>> {
         info!("Starting runtime handler");

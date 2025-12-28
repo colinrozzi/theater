@@ -1,0 +1,56 @@
+package wasi:http@0.2.3;
+
+/// WASI HTTP Types - common types used by both incoming and outgoing HTTP
+interface types {
+    use wasi:io/streams@0.2.3.{input-stream, output-stream};
+    use wasi:io/error@0.2.3.{error as io-error};
+
+    /// HTTP methods
+    variant method {
+        get,
+        head,
+        post,
+        put,
+        delete,
+        connect,
+        options,
+        trace,
+        patch,
+        other(string),
+    }
+
+    /// HTTP scheme (protocol)
+    variant scheme {
+        HTTP,
+        HTTPS,
+        other(string),
+    }
+
+    /// HTTP status code
+    type status-code = u16;
+
+    /// HTTP headers - a resource that holds header name-value pairs
+    resource headers {
+        /// Create a new, empty headers resource
+        constructor();
+
+        /// Get all values for a header name
+        get: func(name: string) -> list<list<u8>>;
+
+        /// Set a header to a list of values (replaces existing)
+        set: func(name: string, value: list<list<u8>>);
+
+        /// Delete a header
+        delete: func(name: string);
+
+        /// Append a value to a header
+        append: func(name: string, value: list<u8>);
+
+        /// Get all header entries
+        entries: func() -> list<tuple<string, list<u8>>>;
+    }
+
+    /// Alias for creating new headers
+    /// Create a new, empty fields resource
+    new-fields: func() -> headers;
+}

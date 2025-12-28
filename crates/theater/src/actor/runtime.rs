@@ -204,7 +204,8 @@ impl<E: EventPayload + Clone> ActorRuntime<E> {
         info_tx: Sender<ActorInfo>,
         control_tx: Sender<ActorControl>,
         actor_phase_manager: ActorPhaseManager,
-    ) -> Result<(ActorInstance<E>, ShutdownController, Vec<JoinHandle<()>>), ActorRuntimeError>
+        actor_instance_wrapper: Arc<RwLock<Option<ActorInstance<E>>>>,
+    ) -> Result<(ShutdownController, Vec<JoinHandle<()>>), ActorRuntimeError>
     where
         E: From<TheaterRuntimeEventData> + From<WasmEventData>,
     {
@@ -321,6 +322,7 @@ impl<E: EventPayload + Clone> ActorRuntime<E> {
         }
 
         let mut handlers = handler_registry.setup_handlers(&mut actor_component);
+        debug!("setup_handlers returned {} handlers", handlers.len());
 
         actor_component.actor_store.record_event(ChainEventData {
             event_type: "theater-runtime".to_string(),
@@ -342,9 +344,18 @@ impl<E: EventPayload + Clone> ActorRuntime<E> {
             });
         }
 
-        handlers.iter_mut().for_each(|handler| {
-            let _ = handler.setup_host_functions(&mut actor_component);
-        });
+        debug!("Setting up host functions for {} handlers", handlers.len());
+        for handler in handlers.iter_mut() {
+            debug!("Setting up host functions for handler '{}'", handler.name());
+            match handler.setup_host_functions(&mut actor_component) {
+                Ok(()) => {
+                    debug!("Handler '{}' host functions set up successfully", handler.name());
+                }
+                Err(e) => {
+                    error!("Handler '{}' host functions FAILED: {:?}", handler.name(), e);
+                }
+            }
+        }
 
         actor_component.actor_store.record_event(ChainEventData {
             event_type: "theater-runtime".to_string(),
@@ -366,6 +377,7 @@ impl<E: EventPayload + Clone> ActorRuntime<E> {
             });
         }
 
+        debug!("About to instantiate actor component");
         let mut actor_instance = actor_component.instantiate().await.map_err(|e| {
             let error_message = format!("Failed to instantiate actor {}: {}", id, e);
             error!("{}", error_message);
@@ -373,6 +385,7 @@ impl<E: EventPayload + Clone> ActorRuntime<E> {
                 message: error_message,
             }
         })?;
+        debug!("Actor component instantiated successfully");
 
         actor_instance
             .actor_component
@@ -472,40 +485,54 @@ impl<E: EventPayload + Clone> ActorRuntime<E> {
                 })
         });
 
+        // Put actor_instance in the shared wrapper
+        {
+            let mut instance_guard = actor_instance_wrapper.write().await;
+            *instance_guard = Some(actor_instance);
+        }
+
         // Start the handlers
         let mut handler_tasks: Vec<JoinHandle<()>> = vec![];
         let mut shutdown_controller = ShutdownController::new();
         let handler_actor_handle = actor_handle.clone();
+        debug!("Starting {} handlers", handlers.len());
         for mut handler in handlers {
+            let handler_name = handler.name().to_string();
+            debug!("Spawning task for handler: {}", handler_name);
             let actor_handle = handler_actor_handle.clone();
+            let actor_instance = actor_instance_wrapper.clone();
             let shutdown_receiver = shutdown_controller.subscribe();
             let handler_task = tokio::spawn(async move {
-                handler
-                    .start(actor_handle, shutdown_receiver)
+                debug!("Handler task running: {}", handler_name);
+                if let Err(e) = handler
+                    .start(actor_handle, actor_instance, shutdown_receiver)
                     .await
-                    .unwrap();
+                {
+                    error!("Handler '{}' start() failed: {:?}", handler_name, e);
+                } else {
+                    debug!("Handler '{}' start() completed", handler_name);
+                }
             });
             handler_tasks.push(handler_task);
-            // Store handler task for later management
-            // Note: In a real implementation, you might want to store these in a more
-            // structured way
-            // For simplicity, we just push them into a vector here
-            // You might want to use a Mutex or RwLock if you need to modify this later
-            // For now, we assume they are static after startup
-            // handler_tasks.push(handler_task);
         }
 
-        actor_instance
-            .actor_component
-            .actor_store
-            .record_event(ChainEventData {
-                event_type: "theater-runtime".to_string(),
-                data: TheaterRuntimeEventData::ActorReady.into(),
-                timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                description: format!("Actor [{}] is ready", id).into(),
-            });
+        // Record ready event
+        {
+            let instance_guard = actor_instance_wrapper.read().await;
+            if let Some(ref instance) = *instance_guard {
+                instance
+                    .actor_component
+                    .actor_store
+                    .record_event(ChainEventData {
+                        event_type: "theater-runtime".to_string(),
+                        data: TheaterRuntimeEventData::ActorReady.into(),
+                        timestamp: chrono::Utc::now().timestamp_millis() as u64,
+                        description: format!("Actor [{}] is ready", id).into(),
+                    });
+            }
+        }
 
-        Ok((actor_instance, shutdown_controller, handler_tasks))
+        Ok((shutdown_controller, handler_tasks))
     }
 
     pub async fn start(
@@ -561,14 +588,11 @@ impl<E: EventPayload + Clone> ActorRuntime<E> {
                     info_tx,
                     control_tx,
                     actor_phase_manager.clone(),
+                    actor_instance_wrapper,
                 )
                 .await
                 {
-                    Ok((actor_instance, shutdown_controller, handlers)) => {
-                        {
-                            let mut instance_guard = actor_instance_wrapper.write().await;
-                            *instance_guard = Some(actor_instance);
-                        }
+                    Ok((shutdown_controller, handlers)) => {
                         {
                             let mut handler_tasks_guard = handler_tasks.write().await;
                             *handler_tasks_guard = handlers;
@@ -823,6 +847,15 @@ impl<E: EventPayload + Clone> ActorRuntime<E> {
                         actor_phase_manager.set_phase(ActorPhase::Paused);
                     }
                 }
+            }
+            ActorOperation::HandleWasiHttpRequest { response_tx, .. } => {
+                // WASI HTTP incoming requests are handled directly by the http handler
+                // via the SharedActorInstance, not through this operation channel.
+                // If this operation is received, it indicates a configuration error.
+                let err = ActorError::UnexpectedError(
+                    "HandleWasiHttpRequest should be handled by the HTTP handler directly".to_string(),
+                );
+                let _ = response_tx.send(Err(err));
             }
         }
     }

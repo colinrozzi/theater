@@ -1,0 +1,10 @@
+name = "wasi-clocks-test"
+version = "0.1.0"
+component = "/Users/colinrozzi/work/theater/test-actors/wasi-clocks-test/target/wasm32-unknown-unknown/release/wasi_clocks_test.wasm"
+description = "WASI clocks and poll interface test actor"
+save_chain = true
+
+[[handler]]
+type = "timing"
+max_sleep_duration = 3600000
+min_sleep_duration = 1

@@ -1,0 +1,59 @@
+package wasi:http@0.2.3;
+
+/// WASI HTTP Outgoing Handler - HTTP client capability
+interface outgoing-handler {
+    use types.{headers, method, scheme, status-code};
+    use wasi:io/streams@0.2.3.{input-stream, output-stream};
+    use wasi:io/error@0.2.3.{error as io-error};
+
+    /// Outgoing HTTP request resource
+    resource outgoing-request {
+        /// Create a new outgoing request with the given headers
+        constructor(headers: headers);
+
+        /// Get/set the HTTP method
+        method: func() -> method;
+        set-method: func(method: method);
+
+        /// Get/set the path with query string
+        path-with-query: func() -> option<string>;
+        set-path-with-query: func(path: option<string>);
+
+        /// Get/set the scheme (HTTP/HTTPS)
+        scheme: func() -> option<scheme>;
+        set-scheme: func(scheme: option<scheme>);
+
+        /// Get/set the authority (host:port)
+        authority: func() -> option<string>;
+        set-authority: func(authority: option<string>);
+
+        /// Get the headers for this request
+        headers: func() -> headers;
+    }
+
+    /// Incoming HTTP response resource
+    resource incoming-response {
+        /// Get the status code
+        status: func() -> status-code;
+
+        /// Get the response headers
+        headers: func() -> headers;
+    }
+
+    /// Future incoming response - represents a pending HTTP response
+    resource future-incoming-response {
+        /// Get the response (blocking until available)
+        get: func() -> option<incoming-response>;
+    }
+
+    /// Request options for outgoing requests
+    resource request-options {
+        constructor();
+    }
+
+    /// Perform an HTTP request
+    handle: func(
+        request: outgoing-request,
+        options: option<request-options>
+    ) -> future-incoming-response;
+}

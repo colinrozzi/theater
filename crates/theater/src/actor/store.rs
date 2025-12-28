@@ -9,8 +9,11 @@ use crate::chain::{ChainEvent, StateChain};
 use crate::events::{ChainEventData, EventPayload};
 use crate::id::TheaterId;
 use crate::messages::TheaterCommand;
-use std::sync::{Arc, RwLock};
+use std::any::{Any, TypeId};
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex, RwLock};
 use tokio::sync::mpsc::Sender;
+use wasmtime::component::ResourceTable;
 
 /// # ActorStore
 ///
@@ -23,6 +26,7 @@ use tokio::sync::mpsc::Sender;
 /// - The event chain for audit and verification
 /// - The actor's current state data
 /// - A handle to interact with the actor
+/// - A resource table for Component Model resources (pollables, file handles, etc.)
 #[derive(Clone)]
 pub struct ActorStore<E>
 where
@@ -42,6 +46,15 @@ where
 
     /// Handle to interact with the actor
     pub actor_handle: ActorHandle,
+
+    /// Resource table for managing Component Model resources
+    /// This table stores all resources (pollables, file handles, etc.) that are exposed to the actor
+    pub resource_table: Arc<Mutex<ResourceTable>>,
+
+    /// Extension storage for handlers to store arbitrary data
+    /// Keyed by TypeId of the data type for type-safe retrieval
+    /// This allows handlers to pass data from setup_host_functions to Host trait implementations
+    pub extensions: Arc<RwLock<HashMap<TypeId, Box<dyn Any + Send + Sync>>>>,
 }
 
 impl<E> ActorStore<E>
@@ -74,6 +87,8 @@ where
             chain,
             state: Some(vec![]),
             actor_handle,
+            resource_table: Arc::new(Mutex::new(ResourceTable::new())),
+            extensions: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
@@ -340,7 +355,103 @@ where
         self.actor_handle.clone()
     }
 
-    // NEW METHODS: These benefit significantly from RwLock's concurrent read access
+    // =========================================================================
+    // Extension Methods
+    // =========================================================================
+
+    /// Store extension data of a specific type
+    ///
+    /// Handlers use this to store data during setup that can be retrieved
+    /// later in Host trait implementations. Each type can only have one value;
+    /// calling this again with the same type will overwrite the previous value.
+    ///
+    /// ## Type Parameters
+    ///
+    /// * `T` - The type of data to store. Must be Send + Sync + 'static.
+    ///
+    /// ## Parameters
+    ///
+    /// * `value` - The value to store
+    ///
+    /// ## Example
+    ///
+    /// ```rust,ignore
+    /// #[derive(Clone)]
+    /// struct MyHandlerConfig { path: PathBuf }
+    ///
+    /// // In setup_host_functions:
+    /// actor_store.set_extension(MyHandlerConfig { path: "/tmp".into() });
+    /// ```
+    pub fn set_extension<T: Send + Sync + 'static>(&self, value: T) {
+        let mut extensions = self.extensions.write().unwrap();
+        extensions.insert(TypeId::of::<T>(), Box::new(value));
+    }
+
+    /// Retrieve extension data of a specific type
+    ///
+    /// Returns a clone of the stored value if it exists and matches the requested type.
+    ///
+    /// ## Type Parameters
+    ///
+    /// * `T` - The type of data to retrieve. Must be Clone + Send + Sync + 'static.
+    ///
+    /// ## Returns
+    ///
+    /// * `Some(T)` - A clone of the stored value
+    /// * `None` - If no value of this type was stored
+    ///
+    /// ## Example
+    ///
+    /// ```rust,ignore
+    /// // In Host trait implementation:
+    /// if let Some(config) = self.get_extension::<MyHandlerConfig>() {
+    ///     println!("Using path: {:?}", config.path);
+    /// }
+    /// ```
+    pub fn get_extension<T: Clone + Send + Sync + 'static>(&self) -> Option<T> {
+        let extensions = self.extensions.read().unwrap();
+        extensions
+            .get(&TypeId::of::<T>())
+            .and_then(|boxed| boxed.downcast_ref::<T>())
+            .cloned()
+    }
+
+    /// Check if extension data of a specific type exists
+    ///
+    /// ## Type Parameters
+    ///
+    /// * `T` - The type to check for
+    ///
+    /// ## Returns
+    ///
+    /// `true` if a value of this type is stored, `false` otherwise
+    pub fn has_extension<T: Send + Sync + 'static>(&self) -> bool {
+        let extensions = self.extensions.read().unwrap();
+        extensions.contains_key(&TypeId::of::<T>())
+    }
+
+    /// Remove and return extension data of a specific type
+    ///
+    /// ## Type Parameters
+    ///
+    /// * `T` - The type of data to remove
+    ///
+    /// ## Returns
+    ///
+    /// * `Some(T)` - The removed value
+    /// * `None` - If no value of this type was stored
+    pub fn remove_extension<T: Send + Sync + 'static>(&self) -> Option<T> {
+        let mut extensions = self.extensions.write().unwrap();
+        extensions
+            .remove(&TypeId::of::<T>())
+            .and_then(|boxed| boxed.downcast::<T>().ok())
+            .map(|b| *b)
+    }
+
+    // =========================================================================
+    // Event Query Methods
+    // =========================================================================
+    // These benefit significantly from RwLock's concurrent read access
 
     /// # Get events by type
     ///

@@ -1,0 +1,25 @@
+/// WIT world for the I/O Handler
+///
+/// This world defines what the host provides to actors that import
+/// the WASI I/O and CLI interfaces.
+
+package theater:io-handler;
+
+world io-handler-host {
+    /// WASI I/O interfaces
+    import wasi:io/error@0.2.0;
+    import wasi:io/poll@0.2.0;
+    import wasi:io/streams@0.2.0;
+
+    /// WASI CLI interfaces
+    import wasi:cli/stdin@0.2.0;
+    import wasi:cli/stdout@0.2.0;
+    import wasi:cli/stderr@0.2.0;
+    import wasi:cli/environment@0.2.0;
+    import wasi:cli/exit@0.2.0;
+    import wasi:cli/terminal-input@0.2.0;
+    import wasi:cli/terminal-output@0.2.0;
+    import wasi:cli/terminal-stdin@0.2.0;
+    import wasi:cli/terminal-stdout@0.2.0;
+    import wasi:cli/terminal-stderr@0.2.0;
+}

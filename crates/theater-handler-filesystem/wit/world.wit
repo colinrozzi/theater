@@ -1,0 +1,14 @@
+/// WIT world for the Filesystem Handler
+///
+/// This world defines what the host provides to actors that import
+/// the WASI filesystem interfaces.
+
+package theater:filesystem-handler;
+
+world filesystem-handler-host {
+    /// We provide the WASI filesystem types interface to the actor
+    import wasi:filesystem/types@0.2.3;
+
+    /// We provide the WASI filesystem preopens interface to the actor
+    import wasi:filesystem/preopens@0.2.3;
+}

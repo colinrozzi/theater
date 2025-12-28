@@ -22,6 +22,9 @@ pub enum RandomEventData {
     RandomBytesResult {
         /// Number of bytes actually generated
         generated_size: usize,
+        /// The actual random bytes generated (critical for event chain replay)
+        #[serde(skip_serializing_if = "Option::is_none")]
+        bytes: Option<Vec<u8>>,
         /// Whether the operation was successful
         success: bool,
     },
@@ -57,6 +60,66 @@ pub enum RandomEventData {
     RandomFloatResult {
         /// The generated float value
         value: f64,
+        /// Whether the operation was successful
+        success: bool,
+    },
+
+    /// Random u64 generation was called (WASI get-random-u64)
+    #[serde(rename = "random_u64_call")]
+    RandomU64Call,
+
+    /// Random u64 generation completed (WASI get-random-u64)
+    #[serde(rename = "random_u64_result")]
+    RandomU64Result {
+        /// The generated u64 value
+        value: u64,
+        /// Whether the operation was successful
+        success: bool,
+    },
+
+    // WASI insecure random events
+    /// Insecure random bytes generation was called
+    #[serde(rename = "insecure_random_bytes_call")]
+    InsecureRandomBytesCall {
+        /// Number of bytes requested
+        requested_size: usize,
+    },
+
+    /// Insecure random bytes generation completed
+    #[serde(rename = "insecure_random_bytes_result")]
+    InsecureRandomBytesResult {
+        /// Number of bytes actually generated
+        generated_size: usize,
+        /// The actual random bytes generated
+        #[serde(skip_serializing_if = "Option::is_none")]
+        bytes: Option<Vec<u8>>,
+        /// Whether the operation was successful
+        success: bool,
+    },
+
+    /// Insecure random u64 generation was called
+    #[serde(rename = "insecure_random_u64_call")]
+    InsecureRandomU64Call,
+
+    /// Insecure random u64 generation completed
+    #[serde(rename = "insecure_random_u64_result")]
+    InsecureRandomU64Result {
+        /// The generated u64 value
+        value: u64,
+        /// Whether the operation was successful
+        success: bool,
+    },
+
+    // WASI insecure-seed events
+    /// Insecure seed was called
+    #[serde(rename = "insecure_seed_call")]
+    InsecureSeedCall,
+
+    /// Insecure seed completed
+    #[serde(rename = "insecure_seed_result")]
+    InsecureSeedResult {
+        /// The generated seed tuple
+        seed: (u64, u64),
         /// Whether the operation was successful
         success: bool,
     },

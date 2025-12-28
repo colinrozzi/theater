@@ -1,0 +1,13 @@
+name = "http-proxy"
+version = "0.1.0"
+component = "/Users/colinrozzi/work/theater/test-actors/http-proxy/./target/wasm32-unknown-unknown/release/http_proxy.wasm"
+description = "HTTP proxy actor that forwards requests to upstream servers"
+save_chain = true
+
+[[handler]]
+type = "http-framework"
+
+[[handler]]
+type = "http-client"
+# Note: permissions in manifest are not currently being applied to handler instances
+# This appears to be a Theater framework limitation
