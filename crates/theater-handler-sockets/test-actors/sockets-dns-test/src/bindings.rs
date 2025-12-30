@@ -7,15 +7,12 @@
 #[allow(dead_code, clippy::all)]
 pub mod wasi {
     pub mod io {
-        /// A poll API intended to let users wait for I/O events on multiple handles
-        /// at once.
         #[allow(dead_code, async_fn_in_trait, unused_imports, clippy::all)]
         pub mod poll {
             #[used]
             #[doc(hidden)]
             static __FORCE_SECTION_REF: fn() = super::super::super::__link_custom_section_describing_imports;
             use super::super::super::_rt;
-            /// `pollable` represents a single I/O event which may be ready, or not.
             #[derive(Debug)]
             #[repr(transparent)]
             pub struct Pollable {
@@ -55,9 +52,6 @@ pub mod wasi {
             }
             impl Pollable {
                 #[allow(unused_unsafe, clippy::all)]
-                /// Return the readiness of a pollable. This function never blocks.
-                ///
-                /// Returns `true` when the pollable is ready, and `false` otherwise.
                 pub fn ready(&self) -> bool {
                     unsafe {
                         #[cfg(target_arch = "wasm32")]
@@ -77,11 +71,6 @@ pub mod wasi {
             }
             impl Pollable {
                 #[allow(unused_unsafe, clippy::all)]
-                /// `block` returns immediately if the pollable is ready, and otherwise
-                /// blocks until ready.
-                ///
-                /// This function is equivalent to calling `poll.poll` on a list
-                /// containing only this pollable.
                 pub fn block(&self) -> () {
                     unsafe {
                         #[cfg(target_arch = "wasm32")]
@@ -99,24 +88,6 @@ pub mod wasi {
                 }
             }
             #[allow(unused_unsafe, clippy::all)]
-            /// Poll for completion on a set of pollables.
-            ///
-            /// This function takes a list of pollables, which identify I/O sources of
-            /// interest, and waits until one or more of the events is ready for I/O.
-            ///
-            /// The result `list<u32>` contains one or more indices of handles in the
-            /// argument list that is ready for I/O.
-            ///
-            /// If the list contains more elements than can be indexed with a `u32`
-            /// value, this function traps.
-            ///
-            /// A timeout can be implemented by adding a pollable from the
-            /// wasi-clocks API to the list.
-            ///
-            /// This function does not return a `result`; polling in itself does not
-            /// do any I/O so it doesn't fail. If any of the I/O sources identified by
-            /// the pollables has an error, it is indicated by marking the source as
-            /// being reaedy for I/O.
             pub fn poll(in_: &[&Pollable]) -> _rt::Vec<u32> {
                 unsafe {
                     #[cfg_attr(target_pointer_width = "64", repr(align(8)))]

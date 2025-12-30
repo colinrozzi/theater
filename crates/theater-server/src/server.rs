@@ -39,6 +39,7 @@ use theater_handler_message_server::{MessageEventData, MessageServerHandler};
 use theater_handler_process::{events::ProcessEventData, ProcessHandler};
 use theater_handler_random::{RandomEventData, RandomHandler};
 use theater_handler_runtime::RuntimeHandler;
+use theater_handler_sockets::{SocketsEventData, WasiSocketsHandler};
 use theater_handler_store::{StoreEventData, StoreHandler};
 use theater_handler_supervisor::{SupervisorEventData, SupervisorHandler};
 use theater_handler_timing::{TimingEventData, TimingHandler};
@@ -57,6 +58,7 @@ pub enum ServerHandlerEvents {
     Message(MessageEventData),
     Process(ProcessEventData),
     Random(RandomEventData),
+    Sockets(SocketsEventData),
     Store(StoreEventData),
     Supervisor(SupervisorEventData),
     Timing(TimingEventData),
@@ -125,6 +127,12 @@ impl From<ProcessEventData> for ServerEvents {
 impl From<RandomEventData> for ServerEvents {
     fn from(event: RandomEventData) -> Self {
         ServerEvents(theater::events::TheaterEvents::Handler(ServerHandlerEvents::Random(event)))
+    }
+}
+
+impl From<SocketsEventData> for ServerEvents {
+    fn from(event: SocketsEventData) -> Self {
+        ServerEvents(theater::events::TheaterEvents::Handler(ServerHandlerEvents::Sockets(event)))
     }
 }
 
@@ -492,6 +500,9 @@ fn create_root_handler_registry(
     // Port 8080 is used for incoming HTTP handler when component exports wasi:http/incoming-handler
     registry.register(WasiHttpHandler::new().with_port(8080));
 
+    // WASI Sockets handler for TCP/UDP networking
+    registry.register(WasiSocketsHandler::new());
+
     // Phase 3: Complex Handlers
     let process_config = ProcessHostConfig {
         max_processes: usize::MAX,       // No limit
@@ -514,7 +525,7 @@ fn create_root_handler_registry(
 
     registry.register(HttpFrameworkHandler::new(None));
 
-    info!("✓ All 13 handlers registered successfully");
+    info!("✓ All 14 handlers registered successfully");
 
     (registry, message_router)
 }

@@ -1,5 +1,5 @@
 [package]
-name = "sockets-dns-test"
+name = "sockets-tcp-test"
 version = "0.1.0"
 edition = "2021"
 
@@ -14,7 +14,7 @@ serde_json = "1.0"
 wit-bindgen-rt = { version = "0.43.0", features = ["bitflags"] }
 
 [package.metadata.component]
-package = "test:sockets-dns"
+package = "test:sockets-tcp"
 
 [package.metadata.component.target.dependencies]
 "wasi:sockets" = "=0.2.0"
@@ -23,5 +23,4 @@ package = "test:sockets-dns"
 "theater:simple" = { path = "./wit/deps/theater-simple" }
 
 [package.metadata.component.bindings]
-derives = ["serde::Serialize", "serde::Deserialize", "PartialEq"]
 generate_unused_types = true

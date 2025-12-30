@@ -4013,6 +4013,7 @@ dependencies = [
  "theater-handler-process",
  "theater-handler-random",
  "theater-handler-runtime",
+ "theater-handler-sockets",
  "theater-handler-store",
  "theater-handler-supervisor",
  "theater-handler-timing",

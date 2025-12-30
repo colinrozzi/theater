@@ -72,33 +72,8 @@ where
     fn setup_host_functions(&mut self, actor_component: &mut ActorComponent<E>) -> Result<()> {
         debug!("WasiSocketsHandler::setup_host_functions() starting");
 
-        // wasi:io/error interface (sockets use this)
-        info!("Setting up wasi:io/error interface for sockets");
-        bindings::wasi::io::error::add_to_linker(
-            &mut actor_component.linker,
-            |state: &mut ActorStore<E>| state,
-        )?;
-
-        // wasi:io/poll interface (sockets use pollables)
-        info!("Setting up wasi:io/poll interface for sockets");
-        bindings::wasi::io::poll::add_to_linker(
-            &mut actor_component.linker,
-            |state: &mut ActorStore<E>| state,
-        )?;
-
-        // wasi:io/streams interface (TCP connections use streams)
-        info!("Setting up wasi:io/streams interface for sockets");
-        bindings::wasi::io::streams::add_to_linker(
-            &mut actor_component.linker,
-            |state: &mut ActorStore<E>| state,
-        )?;
-
-        // wasi:clocks/monotonic-clock interface (TCP keepalive uses duration)
-        info!("Setting up wasi:clocks/monotonic-clock interface for sockets");
-        bindings::wasi::clocks::monotonic_clock::add_to_linker(
-            &mut actor_component.linker,
-            |state: &mut ActorStore<E>| state,
-        )?;
+        // Note: wasi:io and wasi:clocks interfaces are provided by other handlers
+        // (wasi-io and timing handlers). We only add sockets-specific interfaces here.
 
         // wasi:sockets/network interface
         info!("Setting up wasi:sockets/network interface");
@@ -165,8 +140,8 @@ where
     }
 
     fn imports(&self) -> Option<String> {
-        // Support both 0.2.0 and 0.2.3 versions (ABI compatible)
-        Some("wasi:sockets/network@0.2.0,wasi:sockets/instance-network@0.2.0,wasi:sockets/tcp@0.2.0,wasi:sockets/tcp-create-socket@0.2.0,wasi:sockets/udp@0.2.0,wasi:sockets/udp-create-socket@0.2.0,wasi:sockets/ip-name-lookup@0.2.0,wasi:sockets/network@0.2.3,wasi:sockets/instance-network@0.2.3,wasi:sockets/tcp@0.2.3,wasi:sockets/tcp-create-socket@0.2.3,wasi:sockets/udp@0.2.3,wasi:sockets/udp-create-socket@0.2.3,wasi:sockets/ip-name-lookup@0.2.3".to_string())
+        // Handler provides WASI sockets interfaces (version 0.2.0)
+        Some("wasi:sockets/network@0.2.0,wasi:sockets/instance-network@0.2.0,wasi:sockets/tcp@0.2.0,wasi:sockets/tcp-create-socket@0.2.0,wasi:sockets/udp@0.2.0,wasi:sockets/udp-create-socket@0.2.0,wasi:sockets/ip-name-lookup@0.2.0".to_string())
     }
 
     fn exports(&self) -> Option<String> {
