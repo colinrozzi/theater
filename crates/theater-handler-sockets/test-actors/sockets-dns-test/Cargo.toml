@@ -1,0 +1,27 @@
+[package]
+name = "sockets-dns-test"
+version = "0.1.0"
+edition = "2021"
+
+[workspace]
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+wit-bindgen-rt = { version = "0.43.0", features = ["bitflags"] }
+
+[package.metadata.component]
+package = "test:sockets-dns"
+
+[package.metadata.component.target.dependencies]
+"wasi:sockets" = { path = "./wit/deps/wasi-sockets-0.2.0" }
+"wasi:io" = { path = "./wit/deps/wasi-io-0.2.0" }
+"wasi:clocks" = { path = "./wit/deps/wasi-clocks-0.2.0" }
+"theater:simple" = { path = "./wit/deps/theater-simple" }
+
+[package.metadata.component.bindings]
+derives = ["serde::Serialize", "serde::Deserialize", "PartialEq"]
+generate_unused_types = true

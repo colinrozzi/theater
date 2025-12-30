@@ -1,0 +1,9 @@
+package test:sockets-dns;
+
+world sockets-dns-test {
+    import wasi:sockets/network@0.2.0;
+    import wasi:sockets/instance-network@0.2.0;
+    import wasi:sockets/ip-name-lookup@0.2.0;
+    import wasi:io/poll@0.2.0;
+    export theater:simple/actor;
+}

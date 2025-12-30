@@ -15,6 +15,7 @@ members = [
     "crates/theater-handler-process",
     "crates/theater-handler-random",
     "crates/theater-handler-runtime",
+    "crates/theater-handler-sockets",
     "crates/theater-handler-store",
     "crates/theater-handler-supervisor",
     "crates/theater-handler-timing",
@@ -55,6 +56,7 @@ theater-handler-message-server = { version = "0.2.1", path = "crates/theater-han
 theater-handler-process = { version = "0.2.1", path = "crates/theater-handler-process" }
 theater-handler-random = { version = "0.2.1", path = "crates/theater-handler-random" }
 theater-handler-runtime = { version = "0.2.1", path = "crates/theater-handler-runtime" }
+theater-handler-sockets = { version = "0.2.1", path = "crates/theater-handler-sockets" }
 theater-handler-store = { version = "0.2.1", path = "crates/theater-handler-store" }
 theater-handler-supervisor = { version = "0.2.1", path = "crates/theater-handler-supervisor" }
 theater-handler-timing = { version = "0.2.1", path = "crates/theater-handler-timing" }

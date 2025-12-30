@@ -1,0 +1,37 @@
+[package]
+name = "theater-handler-sockets"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+# Core theater dependencies
+theater = { path = "../theater" }
+theater-handler-io = { path = "../theater-handler-io" }
+
+# WebAssembly runtime
+wasmtime = { version = "31.0", features = ["component-model", "async"] }
+
+# Async runtime
+tokio = { version = "1.0", features = ["full", "net"] }
+
+# Error handling
+anyhow = "1.0"
+thiserror = "1.0"
+
+# Logging
+tracing = "0.1"
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+[dev-dependencies]
+test-log = "0.2"
+pretty_assertions = "1.4"

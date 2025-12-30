@@ -1,0 +1,31 @@
+/// WIT world for the Sockets Handler
+///
+/// This world defines what the host provides to actors that import
+/// the WASI sockets interfaces for TCP/UDP networking.
+
+package theater:sockets-handler;
+
+world sockets-handler-host {
+    /// WASI I/O interfaces (sockets depend on poll for async operations)
+    import wasi:io/poll@0.2.0;
+    import wasi:io/error@0.2.0;
+    import wasi:io/streams@0.2.0;
+
+    /// WASI Clocks (TCP keepalive uses duration)
+    import wasi:clocks/monotonic-clock@0.2.0;
+
+    /// WASI Sockets - Network types and instance
+    import wasi:sockets/network@0.2.0;
+    import wasi:sockets/instance-network@0.2.0;
+
+    /// WASI Sockets - UDP
+    import wasi:sockets/udp@0.2.0;
+    import wasi:sockets/udp-create-socket@0.2.0;
+
+    /// WASI Sockets - TCP
+    import wasi:sockets/tcp@0.2.0;
+    import wasi:sockets/tcp-create-socket@0.2.0;
+
+    /// WASI Sockets - DNS resolution
+    import wasi:sockets/ip-name-lookup@0.2.0;
+}
