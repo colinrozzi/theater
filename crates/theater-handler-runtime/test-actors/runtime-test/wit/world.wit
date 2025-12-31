@@ -1,0 +1,12 @@
+package test:runtime;
+
+world runtime-test {
+    // Import Theater runtime interface
+    import theater:simple/runtime;
+    
+    // Import types needed by runtime
+    import theater:simple/types;
+    
+    // Export the Theater actor interface
+    export theater:simple/actor;
+}

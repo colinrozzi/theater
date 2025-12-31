@@ -1,21 +1,21 @@
-wit_bindgen::generate!({
-    world: "wasi-io-test",
-});
+mod bindings;
 
 struct Component;
 
-impl Guest for Component {
-    fn init() -> Result<Vec<u8>, String> {
-        // Successfully imported wasi:io/error and wasi:io/streams
+impl bindings::exports::theater::simple::actor::Guest for Component {
+    fn init(
+        _state: Option<Vec<u8>>,
+        _params: (String,),
+    ) -> Result<(Option<Vec<u8>>,), String> {
+        // Successfully imported wasi:io/error, wasi:io/streams, and wasi:io/poll
         // The real testing will happen when we integrate with WASI HTTP
         // which will provide actual stream resources
-
-        Ok(b"WASI I/O imports successful!".to_vec())
-    }
-
-    fn handle(_msg: Vec<u8>) -> Result<Vec<u8>, String> {
-        Ok(vec![])
+        //
+        // For now, we just verify that the imports are satisfied and
+        // the bindings compile correctly.
+        
+        Ok((Some(b"WASI I/O imports successful!".to_vec()),))
     }
 }
 
-export!(Component);
+bindings::export!(Component with_types_in bindings);

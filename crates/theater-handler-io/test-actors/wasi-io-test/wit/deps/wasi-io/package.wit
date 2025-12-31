@@ -1,0 +1,60 @@
+package wasi:io@0.2.3;
+
+/// WASI I/O Error provides a generic error resource for I/O operations.
+interface error {
+    /// A resource which represents some error information.
+    resource error {
+        /// Returns a string that is suitable to assist humans in debugging this error.
+        to-debug-string: func() -> string;
+    }
+}
+
+/// WASI Poll provides a mechanism to wait for I/O events on pollable resources.
+interface poll {
+    /// A pollable resource represents a single I/O event source.
+    resource pollable {
+        /// Check if the pollable is ready.
+        ready: func() -> bool;
+
+        /// Block until the pollable becomes ready.
+        block: func();
+    }
+
+    /// Wait for one or more pollables to become ready.
+    poll: func(in: list<borrow<pollable>>) -> list<u32>;
+}
+
+/// WASI I/O Streams provides stream types for I/O operations.
+interface streams {
+    use error.{error};
+    use poll.{pollable};
+
+    /// An error for input-stream and output-stream operations.
+    variant stream-error {
+        last-operation-failed(error),
+        closed
+    }
+
+    /// An input bytestream.
+    resource input-stream {
+        read: func(len: u64) -> result<list<u8>, stream-error>;
+        blocking-read: func(len: u64) -> result<list<u8>, stream-error>;
+        skip: func(len: u64) -> result<u64, stream-error>;
+        blocking-skip: func(len: u64) -> result<u64, stream-error>;
+        subscribe: func() -> pollable;
+    }
+
+    /// An output bytestream.
+    resource output-stream {
+        check-write: func() -> result<u64, stream-error>;
+        write: func(contents: list<u8>) -> result<_, stream-error>;
+        blocking-write-and-flush: func(contents: list<u8>) -> result<_, stream-error>;
+        flush: func() -> result<_, stream-error>;
+        blocking-flush: func() -> result<_, stream-error>;
+        subscribe: func() -> pollable;
+        write-zeroes: func(len: u64) -> result<_, stream-error>;
+        blocking-write-zeroes-and-flush: func(len: u64) -> result<_, stream-error>;
+        splice: func(src: borrow<input-stream>, len: u64) -> result<u64, stream-error>;
+        blocking-splice: func(src: borrow<input-stream>, len: u64) -> result<u64, stream-error>;
+    }
+}

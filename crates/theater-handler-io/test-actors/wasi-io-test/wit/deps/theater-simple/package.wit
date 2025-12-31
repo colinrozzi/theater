@@ -1,0 +1,7 @@
+package theater:simple;
+
+/// Actor interface that all Theater actors must implement.
+interface actor {
+    /// Initialize the actor with optional initial state.
+    init: func(state: option<list<u8>>, params: tuple<string>) -> result<tuple<option<list<u8>>>, string>;
+}

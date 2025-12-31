@@ -77,6 +77,15 @@ where
     ) -> anyhow::Result<()> {
         info!("Setting up runtime host functions");
         
+        // The theater:simple/types interface contains only type definitions, no functions.
+        // We need to create an empty instance for it so the linker can resolve the import.
+        if let Err(e) = actor_component.linker.instance("theater:simple/types") {
+            // Types interface has no functions, so if we can't create an instance,
+            // it might already exist or not be needed for this component.
+            // Log but don't fail - the instantiation will fail later if truly needed.
+            info!("Note: Could not create theater:simple/types instance (may not be needed): {}", e);
+        }
+        
         let name1 = actor_component.name.clone();
         let name2 = actor_component.name.clone();
         let theater_tx = self.theater_tx.clone();
@@ -146,40 +155,66 @@ where
                 anyhow::anyhow!("Failed to wrap log function: {}", e)
             })?;
 
-        // Get state function
+        // Get chain function - returns the actor's event chain
+        // The chain record has: events: list<meta-event>
+        // meta-event has: hash: u64, event: event
+        // event has: event-type: string, parent: option<u64>, data: list<u8>
+        // 
+        // WIT record -> Rust tuple:
+        //   chain { events } -> (list<meta-event>,)
+        //   meta-event { hash, event } -> (u64, event)
+        //   event { event-type, parent, data } -> (String, Option<u64>, Vec<u8>)
+        //
+        // So return type is: ((Vec<(u64, (String, Option<u64>, Vec<u8>))>,),)
+        // But func_wrap expects result type directly, so we return:
+        //   (chain_record,) where chain_record = (events_list,)
         interface
             .func_wrap(
-                "get-state",
-                move |mut ctx: StoreContextMut<'_, ActorStore<E>>, ()| -> anyhow::Result<(Vec<u8>,)> {
-                    // Record state request call event
+                "get-chain",
+                move |mut ctx: StoreContextMut<'_, ActorStore<E>>, ()| -> anyhow::Result<((Vec<(u64, (String, Option<u64>, Vec<u8>))>,),)> {
+                    // Record get-chain call event
                     ctx.data_mut().record_event(ChainEventData {
-                        event_type: "theater:simple/runtime/get-state".to_string(),
+                        event_type: "theater:simple/runtime/get-chain".to_string(),
                         data: RuntimeEventData::StateChangeCall {
-                            old_state: "unknown".to_string(),
+                            old_state: "chain".to_string(),
                             new_state: "requested".to_string(),
                         }.into(),
                         timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                        description: Some("Get state request".to_string()),
+                        description: Some("Get chain request".to_string()),
                     });
 
-                    // Return current state
-                    let state = ctx
-                        .data()
-                        .get_last_event()
-                        .map(|e| e.data.clone())
-                        .unwrap_or_default();
+                    // Get all events from the chain
+                    let events = ctx.data().get_all_events();
+                    
+                    // Convert to WIT format: list<meta-event>
+                    // meta-event = { hash: u64, event: event }
+                    // event = { event-type: string, parent: option<u64>, data: list<u8> }
+                    let chain_events: Vec<(u64, (String, Option<u64>, Vec<u8>))> = events
+                        .iter()
+                        .enumerate()
+                        .map(|(i, e)| {
+                            // Use a simple hash based on index and event type
+                            let hash = i as u64;
+                            let parent = if i > 0 { Some((i - 1) as u64) } else { None };
+                            let event = (e.event_type.clone(), parent, e.data.clone());
+                            (hash, event)
+                        })
+                        .collect();
 
-                    // Record state request result event
+                    let event_count = chain_events.len();
+
+                    // Record get-chain result event
                     ctx.data_mut().record_event(ChainEventData {
-                        event_type: "theater:simple/runtime/get-state".to_string(),
+                        event_type: "theater:simple/runtime/get-chain".to_string(),
                         data: RuntimeEventData::StateChangeResult {
                             success: true,
                         }.into(),
                         timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                        description: Some(format!("State retrieved: {} bytes", state.len())),
+                        description: Some(format!("Chain retrieved: {} events", event_count)),
                     });
 
-                    Ok((state,))
+                    // Return as chain record: (events,)
+                    Ok(((chain_events,),))
                 },
             )
             .map_err(|e| {
@@ -188,12 +223,12 @@ where
                     event_type: "runtime-setup".to_string(),
                     data: RuntimeEventData::HandlerSetupError {
                         error: e.to_string(),
-                        step: "get_state_function_wrap".to_string(),
+                        step: "get_chain_function_wrap".to_string(),
                     }.into(),
                     timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                    description: Some(format!("Failed to wrap get-state function: {}", e)),
+                    description: Some(format!("Failed to wrap get-chain function: {}", e)),
                 });
-                anyhow::anyhow!("Failed to wrap get-state function: {}", e)
+                anyhow::anyhow!("Failed to wrap get-chain function: {}", e)
             })?;
 
         // Shutdown function
@@ -296,7 +331,10 @@ where
     }
 
     fn imports(&self) -> Option<Vec<String>> {
-        Some(vec!["theater:simple/runtime".to_string()])
+        Some(vec![
+            "theater:simple/runtime".to_string(),
+            "theater:simple/types".to_string(),
+        ])
     }
 
     fn exports(&self) -> Option<Vec<String>> {

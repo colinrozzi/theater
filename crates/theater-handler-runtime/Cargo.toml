@@ -37,3 +37,12 @@ chrono = "0.4"
 test-log = "0.2"
 pretty_assertions = "1.4"
 tempfile = "3.8.1"
+theater-handler-io = { path = "../theater-handler-io" }
+theater-handler-timing = { path = "../theater-handler-timing" }
+theater-handler-filesystem = { path = "../theater-handler-filesystem" }
+tracing-subscriber = "0.3"
+serde_json = "1.0"
+
+[[test]]
+name = "integration_test"
+path = "tests/integration_test.rs"

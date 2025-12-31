@@ -33,3 +33,17 @@ wasmtime = { version = "31.0", features = ["component-model", "async"] }
 
 # Logging
 tracing = { workspace = true }
+
+[dev-dependencies]
+test-log = "0.2"
+pretty_assertions = "1.4"
+tempfile = "3.8.1"
+theater-handler-runtime = { path = "../theater-handler-runtime" }
+theater-handler-io = { path = "../theater-handler-io" }
+theater-handler-random = { path = "../theater-handler-random" }
+theater-handler-filesystem = { path = "../theater-handler-filesystem" }
+tracing-subscriber = "0.3"
+
+[[test]]
+name = "integration_test"
+path = "tests/integration_test.rs"

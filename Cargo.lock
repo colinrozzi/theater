@@ -3854,10 +3854,18 @@ name = "theater-handler-io"
 version = "0.2.1"
 dependencies = [
  "anyhow",
+ "pretty_assertions",
  "serde",
+ "tempfile",
+ "test-log",
  "theater",
+ "theater-handler-filesystem",
+ "theater-handler-random",
+ "theater-handler-runtime",
+ "theater-handler-timing",
  "tokio",
  "tracing",
+ "tracing-subscriber",
  "wasmtime",
 ]
 
@@ -3925,12 +3933,17 @@ dependencies = [
  "chrono",
  "pretty_assertions",
  "serde",
+ "serde_json",
  "tempfile",
  "test-log",
  "theater",
+ "theater-handler-filesystem",
+ "theater-handler-io",
+ "theater-handler-timing",
  "thiserror 1.0.69",
  "tokio",
  "tracing",
+ "tracing-subscriber",
  "wasmtime",
 ]
 
@@ -3988,11 +4001,19 @@ dependencies = [
  "anyhow",
  "chrono",
  "futures",
+ "pretty_assertions",
  "serde",
+ "tempfile",
+ "test-log",
  "theater",
+ "theater-handler-filesystem",
+ "theater-handler-io",
+ "theater-handler-random",
+ "theater-handler-runtime",
  "thiserror 1.0.69",
  "tokio",
  "tracing",
+ "tracing-subscriber",
  "wasmtime",
 ]
 
