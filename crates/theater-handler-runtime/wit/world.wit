@@ -1,0 +1,15 @@
+/// WIT world for the Runtime Handler
+///
+/// This world defines what the host provides to actors that import
+/// the theater:simple/runtime interface for core runtime capabilities.
+
+package theater:runtime-handler;
+
+world runtime-handler-host {
+    /// Theater simple runtime interface
+    /// Provides logging, event chain access, and shutdown capabilities
+    import theater:simple/runtime;
+
+    /// Types used by the runtime interface
+    import theater:simple/types;
+}

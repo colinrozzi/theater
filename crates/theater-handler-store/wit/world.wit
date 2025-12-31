@@ -1,0 +1,12 @@
+/// WIT world for the Store Handler
+///
+/// This world defines what the host provides to actors that import
+/// the theater:simple/store interface for content-addressable storage.
+
+package theater:store-handler;
+
+world store-handler-host {
+    /// Theater simple store interface
+    /// Provides content-addressable storage with labeling support
+    import theater:simple/store;
+}

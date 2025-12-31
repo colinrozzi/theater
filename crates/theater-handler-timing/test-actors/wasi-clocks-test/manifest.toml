@@ -1,6 +1,6 @@
 name = "wasi-clocks-test"
 version = "0.1.0"
-component = "/Users/colinrozzi/work/theater/test-actors/wasi-clocks-test/target/wasm32-unknown-unknown/release/wasi_clocks_test.wasm"
+component = "./target/wasm32-unknown-unknown/release/wasi_clocks_test.wasm"
 description = "WASI clocks and poll interface test actor"
 save_chain = true
 

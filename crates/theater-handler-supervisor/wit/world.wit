@@ -1,0 +1,18 @@
+/// WIT world for the Supervisor Handler
+///
+/// This world defines what the host provides to actors that import
+/// the theater:simple/supervisor interface for managing child actors.
+
+package theater:supervisor-handler;
+
+world supervisor-handler-host {
+    /// Theater simple supervisor interface
+    /// Provides child actor spawning, lifecycle management, and supervision
+    import theater:simple/supervisor;
+
+    /// Types used by the supervisor interface
+    import theater:simple/types;
+
+    /// Actor must export handlers for child actor events (errors, exits)
+    export theater:simple/supervisor-handlers;
+}

@@ -1,0 +1,12 @@
+/// WIT world for the HTTP Client Handler
+///
+/// This world defines what the host provides to actors that import
+/// the theater:simple/http-client interface for making HTTP requests.
+
+package theater:http-client-handler;
+
+world http-client-handler-host {
+    /// Theater simple HTTP client interface
+    /// Provides ability to make outgoing HTTP requests
+    import theater:simple/http-client;
+}

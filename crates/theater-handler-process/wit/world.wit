@@ -1,0 +1,15 @@
+/// WIT world for the Process Handler
+///
+/// This world defines what the host provides to actors that import
+/// the theater:simple/process interface for spawning and managing OS processes.
+
+package theater:process-handler;
+
+world process-handler-host {
+    /// Theater simple process interface
+    /// Provides OS process spawning, I/O, and lifecycle management
+    import theater:simple/process;
+
+    /// Actor must export handlers for process events (stdout, stderr, exit)
+    export theater:simple/process-handlers;
+}

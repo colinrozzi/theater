@@ -1,0 +1,15 @@
+/// WIT world for the Message Server Handler
+///
+/// This world defines what the host provides to actors that import
+/// the theater:simple/message-server interface for inter-actor messaging.
+
+package theater:message-server-handler;
+
+world message-server-handler-host {
+    /// Theater simple message server interface
+    /// Provides inter-actor messaging capabilities
+    import theater:simple/message-server;
+
+    /// Actor must export message handlers
+    export theater:simple/message-server-handlers;
+}

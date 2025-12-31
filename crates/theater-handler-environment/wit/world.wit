@@ -1,0 +1,12 @@
+/// WIT world for the Environment Handler
+///
+/// This world defines what the host provides to actors that import
+/// the theater:simple/environment interface for accessing environment variables.
+
+package theater:environment-handler;
+
+world environment-handler-host {
+    /// Theater simple environment interface
+    /// Provides access to environment variables with configurable filtering
+    import theater:simple/environment;
+}

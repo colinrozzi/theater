@@ -1,0 +1,22 @@
+/// WIT world for the HTTP Framework Handler
+///
+/// This world defines what the host provides to actors that import
+/// the theater:simple/http-framework interface for building HTTP servers
+/// with routing, middleware, and WebSocket support.
+
+package theater:http-framework-handler;
+
+world http-framework-handler-host {
+    /// Theater simple HTTP framework interface
+    /// Provides HTTP server creation, routing, middleware, and WebSocket support
+    import theater:simple/http-framework;
+
+    /// HTTP types used by the framework
+    import theater:simple/http-types;
+
+    /// WebSocket types for WebSocket support
+    import theater:simple/websocket-types;
+
+    /// Actor must export handlers for HTTP requests and WebSocket events
+    export theater:simple/http-handlers;
+}
