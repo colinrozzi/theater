@@ -76,39 +76,39 @@ where
         // Skip interfaces already satisfied by other handlers (e.g., sockets handler)
 
         // wasi:io/error interface
-        if !ctx.is_satisfied("wasi:io/error@0.2.0") {
+        if !ctx.is_satisfied("wasi:io/error@0.2.3") {
             info!("Setting up wasi:io/error interface");
             bindings::wasi::io::error::add_to_linker(
                 &mut actor_component.linker,
                 |state: &mut ActorStore<E>| state,
             )?;
-            ctx.mark_satisfied("wasi:io/error@0.2.0");
+            ctx.mark_satisfied("wasi:io/error@0.2.3");
         } else {
-            debug!("wasi:io/error@0.2.0 already satisfied, skipping");
+            debug!("wasi:io/error@0.2.3 already satisfied, skipping");
         }
 
         // wasi:io/poll interface
-        if !ctx.is_satisfied("wasi:io/poll@0.2.0") {
+        if !ctx.is_satisfied("wasi:io/poll@0.2.3") {
             info!("Setting up wasi:io/poll interface");
             bindings::wasi::io::poll::add_to_linker(
                 &mut actor_component.linker,
                 |state: &mut ActorStore<E>| state,
             )?;
-            ctx.mark_satisfied("wasi:io/poll@0.2.0");
+            ctx.mark_satisfied("wasi:io/poll@0.2.3");
         } else {
-            debug!("wasi:io/poll@0.2.0 already satisfied, skipping");
+            debug!("wasi:io/poll@0.2.3 already satisfied, skipping");
         }
 
         // wasi:io/streams interface
-        if !ctx.is_satisfied("wasi:io/streams@0.2.0") {
+        if !ctx.is_satisfied("wasi:io/streams@0.2.3") {
             info!("Setting up wasi:io/streams interface");
             bindings::wasi::io::streams::add_to_linker(
                 &mut actor_component.linker,
                 |state: &mut ActorStore<E>| state,
             )?;
-            ctx.mark_satisfied("wasi:io/streams@0.2.0");
+            ctx.mark_satisfied("wasi:io/streams@0.2.3");
         } else {
-            debug!("wasi:io/streams@0.2.0 already satisfied, skipping");
+            debug!("wasi:io/streams@0.2.3 already satisfied, skipping");
         }
 
         // wasi:cli/stdin interface
@@ -197,21 +197,21 @@ where
     }
 
     fn imports(&self) -> Option<Vec<String>> {
-        // These versions should match the WIT files we use (0.2.0)
+        // These versions should match the WASI 0.2.3 specification
         Some(vec![
-            "wasi:io/streams@0.2.0".to_string(),
-            "wasi:io/error@0.2.0".to_string(),
-            "wasi:io/poll@0.2.0".to_string(),
-            "wasi:cli/stdin@0.2.0".to_string(),
-            "wasi:cli/stdout@0.2.0".to_string(),
-            "wasi:cli/stderr@0.2.0".to_string(),
-            "wasi:cli/environment@0.2.0".to_string(),
-            "wasi:cli/exit@0.2.0".to_string(),
-            "wasi:cli/terminal-input@0.2.0".to_string(),
-            "wasi:cli/terminal-output@0.2.0".to_string(),
-            "wasi:cli/terminal-stdin@0.2.0".to_string(),
-            "wasi:cli/terminal-stdout@0.2.0".to_string(),
-            "wasi:cli/terminal-stderr@0.2.0".to_string(),
+            "wasi:io/streams@0.2.3".to_string(),
+            "wasi:io/error@0.2.3".to_string(),
+            "wasi:io/poll@0.2.3".to_string(),
+            "wasi:cli/stdin@0.2.3".to_string(),
+            "wasi:cli/stdout@0.2.3".to_string(),
+            "wasi:cli/stderr@0.2.3".to_string(),
+            "wasi:cli/environment@0.2.3".to_string(),
+            "wasi:cli/exit@0.2.3".to_string(),
+            "wasi:cli/terminal-input@0.2.3".to_string(),
+            "wasi:cli/terminal-output@0.2.3".to_string(),
+            "wasi:cli/terminal-stdin@0.2.3".to_string(),
+            "wasi:cli/terminal-stdout@0.2.3".to_string(),
+            "wasi:cli/terminal-stderr@0.2.3".to_string(),
         ])
     }
 

@@ -45,7 +45,7 @@ pub mod wasi {
                     );
                     let ptr0 = ret_area.0.as_mut_ptr().cast::<u8>();
                     #[cfg(target_arch = "wasm32")]
-                    #[link(wasm_import_module = "wasi:random/random@0.2.0")]
+                    #[link(wasm_import_module = "wasi:random/random@0.2.3")]
                     unsafe extern "C" {
                         #[link_name = "get-random-bytes"]
                         fn wit_import1(_: i64, _: *mut u8);
@@ -72,7 +72,7 @@ pub mod wasi {
             pub fn get_random_u64() -> u64 {
                 unsafe {
                     #[cfg(target_arch = "wasm32")]
-                    #[link(wasm_import_module = "wasi:random/random@0.2.0")]
+                    #[link(wasm_import_module = "wasi:random/random@0.2.3")]
                     unsafe extern "C" {
                         #[link_name = "get-random-u64"]
                         fn wit_import0() -> i64;
@@ -428,7 +428,7 @@ pub(crate) use __export_wasi_random_test_impl as export;
 pub static __WIT_BINDGEN_COMPONENT_TYPE: [u8; 346] = *b"\
 \0asm\x0d\0\x01\0\0\x19\x16wit-component-encoding\x04\0\x07\xd3\x01\x01A\x02\x01\
 A\x04\x01B\x05\x01p}\x01@\x01\x03lenw\0\0\x04\0\x10get-random-bytes\x01\x01\x01@\
-\0\0w\x04\0\x0eget-random-u64\x01\x02\x03\0\x18wasi:random/random@0.2.0\x05\0\x01\
+\0\0w\x04\0\x0eget-random-u64\x01\x02\x03\0\x18wasi:random/random@0.2.3\x05\0\x01\
 B\x07\x01p}\x01k\0\x01o\x01s\x01o\x01\x01\x01j\x01\x03\x01s\x01@\x02\x05state\x01\
 \x06params\x02\0\x04\x04\0\x04init\x01\x05\x04\0\x14theater:simple/actor\x05\x01\
 \x04\0!test:wasi-random/wasi-random-test\x04\0\x0b\x16\x01\0\x10wasi-random-test\
