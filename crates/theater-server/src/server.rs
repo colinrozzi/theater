@@ -494,14 +494,15 @@ fn create_root_handler_registry(
     registry.register(FilesystemHandler::new(filesystem_config, None));
 
     // WASI I/O handler for streams and polling
+    // WASI Sockets handler for TCP/UDP networking
+    // Register BEFORE io handler so sockets can provide io interfaces with compatible types
+    registry.register(WasiSocketsHandler::new());
+
     registry.register(WasiIoHandler::new());
 
     // WASI HTTP handler for both incoming (server) and outgoing (client) requests
     // Port 8080 is used for incoming HTTP handler when component exports wasi:http/incoming-handler
     registry.register(WasiHttpHandler::new().with_port(8080));
-
-    // WASI Sockets handler for TCP/UDP networking
-    registry.register(WasiSocketsHandler::new());
 
     // Phase 3: Complex Handlers
     let process_config = ProcessHostConfig {

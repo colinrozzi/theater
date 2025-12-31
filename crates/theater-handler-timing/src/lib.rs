@@ -29,7 +29,7 @@ use theater::config::actor_manifest::TimingHostConfig;
 use theater::config::enforcement::PermissionChecker;
 use theater::config::permissions::TimingPermissions;
 use theater::events::EventPayload;
-use theater::handler::{Handler, SharedActorInstance};
+use theater::handler::{Handler, HandlerContext, SharedActorInstance};
 use theater::shutdown::ShutdownReceiver;
 use theater::wasm::{ActorComponent, ActorInstance};
 
@@ -403,6 +403,7 @@ where
     fn setup_host_functions(
         &mut self,
         actor_component: &mut ActorComponent<E>,
+        _ctx: &mut HandlerContext,
     ) -> Result<()> {
         self.setup_host_functions_impl(actor_component)
     }
@@ -418,13 +419,17 @@ where
         "timing"
     }
 
-    fn imports(&self) -> Option<String> {
+    fn imports(&self) -> Option<Vec<String>> {
         // Handler provides WASI clocks and poll interfaces (version 0.2.3)
         // Supports: wall-clock, monotonic-clock, and poll
-        Some("wasi:clocks/wall-clock@0.2.3,wasi:clocks/monotonic-clock@0.2.3,wasi:io/poll@0.2.3".to_string())
+        Some(vec![
+            "wasi:clocks/wall-clock@0.2.3".to_string(),
+            "wasi:clocks/monotonic-clock@0.2.3".to_string(),
+            "wasi:io/poll@0.2.3".to_string(),
+        ])
     }
 
-    fn exports(&self) -> Option<String> {
+    fn exports(&self) -> Option<Vec<String>> {
         None
     }
 }

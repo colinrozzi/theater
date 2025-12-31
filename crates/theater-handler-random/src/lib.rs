@@ -28,7 +28,7 @@ use theater::actor::handle::ActorHandle;
 use theater::config::actor_manifest::RandomHandlerConfig;
 use theater::config::permissions::RandomPermissions;
 use theater::events::EventPayload;
-use theater::handler::{Handler, SharedActorInstance};
+use theater::handler::{Handler, HandlerContext, SharedActorInstance};
 use theater::shutdown::ShutdownReceiver;
 use theater::wasm::{ActorComponent, ActorInstance};
 
@@ -107,6 +107,7 @@ where
     fn setup_host_functions(
         &mut self,
         actor_component: &mut ActorComponent<E>,
+        _ctx: &mut HandlerContext,
     ) -> anyhow::Result<()> {
         use crate::bindings;
         use theater::actor::ActorStore;
@@ -153,12 +154,16 @@ where
         "random"
     }
 
-    fn imports(&self) -> Option<String> {
+    fn imports(&self) -> Option<Vec<String>> {
         // Handler provides WASI random interfaces (version 0.2.3)
-        Some("wasi:random/random@0.2.3,wasi:random/insecure@0.2.3,wasi:random/insecure-seed@0.2.3".to_string())
+        Some(vec![
+            "wasi:random/random@0.2.3".to_string(),
+            "wasi:random/insecure@0.2.3".to_string(),
+            "wasi:random/insecure-seed@0.2.3".to_string(),
+        ])
     }
 
-    fn exports(&self) -> Option<String> {
+    fn exports(&self) -> Option<Vec<String>> {
         None
     }
 }

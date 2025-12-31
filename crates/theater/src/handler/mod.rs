@@ -3,6 +3,7 @@ use crate::events::EventPayload;
 use crate::shutdown::ShutdownReceiver;
 use crate::wasm::{ActorComponent, ActorInstance};
 use anyhow::Result;
+use std::collections::HashSet;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -11,6 +12,38 @@ use tracing::{debug, info};
 
 /// Shared reference to an actor instance for handlers that need direct store access
 pub type SharedActorInstance<E> = Arc<RwLock<Option<ActorInstance<E>>>>;
+
+/// Context passed to handlers during setup, tracking which imports are already satisfied
+#[derive(Debug, Clone, Default)]
+pub struct HandlerContext {
+    /// Set of imports that have already been registered by other handlers
+    pub satisfied_imports: HashSet<String>,
+}
+
+impl HandlerContext {
+    pub fn new() -> Self {
+        Self {
+            satisfied_imports: HashSet::new(),
+        }
+    }
+
+    /// Check if an import is already satisfied
+    pub fn is_satisfied(&self, import: &str) -> bool {
+        self.satisfied_imports.contains(import)
+    }
+
+    /// Mark an import as satisfied
+    pub fn mark_satisfied(&mut self, import: &str) {
+        self.satisfied_imports.insert(import.to_string());
+    }
+
+    /// Mark multiple imports as satisfied
+    pub fn mark_all_satisfied(&mut self, imports: &[String]) {
+        for import in imports {
+            self.satisfied_imports.insert(import.clone());
+        }
+    }
+}
 
 pub struct HandlerRegistry<E>
 where
@@ -37,48 +70,71 @@ where
         &mut self,
         actor_component: &mut ActorComponent<E>,
     ) -> Vec<Box<dyn Handler<E>>> {
-        let component_imports = actor_component.import_types.clone(); // What the component imports
-        let component_exports = actor_component.export_types.clone(); // What the component exports
+        let component_imports: HashSet<String> = actor_component
+            .import_types
+            .iter()
+            .map(|(name, _)| name.clone())
+            .collect();
+        let component_exports: HashSet<String> = actor_component
+            .export_types
+            .iter()
+            .map(|(name, _)| name.clone())
+            .collect();
 
         debug!("setup_handlers called");
-        debug!("Component imports: {:?}", component_imports.iter().map(|(n, _)| n).collect::<Vec<_>>());
-        debug!("Component exports: {:?}", component_exports.iter().map(|(n, _)| n).collect::<Vec<_>>());
+        debug!("Component imports: {:?}", component_imports);
+        debug!("Component exports: {:?}", component_exports);
         debug!("Number of registered handlers: {}", self.handlers.len());
 
         let mut active_handlers = Vec::new();
 
         for handler in &self.handlers {
-            debug!("Checking handler '{}' - imports: {:?}, exports: {:?}",
-                   handler.name(), handler.imports(), handler.exports());
+            let handler_imports = handler.imports();
+            let handler_exports = handler.exports();
 
-            // Check if handler's imports match component's imports
-            // Handler imports can be comma-separated (e.g., "wasi:clocks/wall-clock@0.2.3,wasi:io/poll@0.2.3")
-            let imports_match = handler.imports().map_or(false, |imports_str| {
-                // Split comma-separated imports and check if any match
-                imports_str.split(',')
-                    .map(|s| s.trim())
-                    .any(|handler_import| {
-                        let matches = component_imports.iter().any(|(name, _)| name == handler_import);
-                        debug!("Checking import '{}' against component imports: {}", handler_import, matches);
+            debug!(
+                "Checking handler '{}' - imports: {:?}, exports: {:?}",
+                handler.name(),
+                handler_imports,
+                handler_exports
+            );
+
+            // Check if any of handler's imports match component's imports
+            let imports_match = handler_imports
+                .as_ref()
+                .map_or(false, |imports| {
+                    imports.iter().any(|import| {
+                        let matches = component_imports.contains(import);
+                        debug!(
+                            "Checking import '{}' against component imports: {}",
+                            import, matches
+                        );
                         matches
                     })
-            });
+                });
 
-            // Check if handler's exports match component's exports
-            let exports_match = handler.exports().map_or(false, |exports_str| {
-                // Split comma-separated exports and check if any match
-                exports_str.split(',')
-                    .map(|s| s.trim())
-                    .any(|handler_export| {
-                        let matches = component_exports.iter().any(|(name, _)| name == handler_export);
-                        debug!("Checking export '{}' against component exports: {}", handler_export, matches);
+            // Check if any of handler's exports match component's exports
+            let exports_match = handler_exports
+                .as_ref()
+                .map_or(false, |exports| {
+                    exports.iter().any(|export| {
+                        let matches = component_exports.contains(export);
+                        debug!(
+                            "Checking export '{}' against component exports: {}",
+                            export, matches
+                        );
                         matches
                     })
-            });
+                });
 
             let needs_this_handler = imports_match || exports_match;
-            debug!("Handler '{}': imports_match={}, exports_match={}, needs_this_handler={}",
-                   handler.name(), imports_match, exports_match, needs_this_handler);
+            debug!(
+                "Handler '{}': imports_match={}, exports_match={}, needs_this_handler={}",
+                handler.name(),
+                imports_match,
+                exports_match,
+                needs_this_handler
+            );
 
             if needs_this_handler {
                 active_handlers.push(handler.create_instance());
@@ -86,7 +142,10 @@ where
             }
         }
 
-        debug!("setup_handlers returning {} handlers", active_handlers.len());
+        debug!(
+            "setup_handlers returning {} handlers",
+            active_handlers.len()
+        );
         active_handlers
     }
 }
@@ -122,19 +181,27 @@ where
         shutdown_receiver: ShutdownReceiver,
     ) -> Pin<Box<dyn Future<Output = Result<()>> + Send>>;
 
+    /// Set up host functions for this handler.
+    ///
+    /// The `ctx` parameter provides information about which imports have already been
+    /// satisfied by other handlers. Handlers should check `ctx.is_satisfied(import)`
+    /// before registering an interface, and call `ctx.mark_satisfied(import)` after
+    /// successfully registering one.
     fn setup_host_functions(
         &mut self,
         actor_component: &mut ActorComponent<E>,
+        ctx: &mut HandlerContext,
     ) -> Result<()>;
 
-    fn add_export_functions(
-        &self,
-        actor_instance: &mut ActorInstance<E>,
-    ) -> Result<()>;
+    fn add_export_functions(&self, actor_instance: &mut ActorInstance<E>) -> Result<()>;
 
     fn name(&self) -> &str;
 
-    fn imports(&self) -> Option<String>;
+    /// Returns the list of imports this handler can satisfy.
+    /// Used for matching handlers to components that need these imports.
+    fn imports(&self) -> Option<Vec<String>>;
 
-    fn exports(&self) -> Option<String>;
+    /// Returns the list of exports this handler expects from the component.
+    /// Used for matching handlers to components that export these interfaces.
+    fn exports(&self) -> Option<Vec<String>>;
 }

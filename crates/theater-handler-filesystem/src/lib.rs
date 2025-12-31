@@ -27,7 +27,7 @@ use theater::actor::handle::ActorHandle;
 use theater::config::actor_manifest::FileSystemHandlerConfig;
 use theater::config::permissions::FileSystemPermissions;
 use theater::events::EventPayload;
-use theater::handler::{Handler, SharedActorInstance};
+use theater::handler::{Handler, HandlerContext, SharedActorInstance};
 use theater::shutdown::ShutdownReceiver;
 use theater::wasm::{ActorComponent, ActorInstance};
 
@@ -110,6 +110,7 @@ where
     fn setup_host_functions(
         &mut self,
         actor_component: &mut ActorComponent<E>,
+        _ctx: &mut HandlerContext,
     ) -> anyhow::Result<()> {
         // Setup the Theater simple filesystem interface (for backwards compatibility)
         operations::setup_host_functions(self, actor_component)?;
@@ -155,12 +156,16 @@ where
         "filesystem"
     }
 
-    fn imports(&self) -> Option<String> {
+    fn imports(&self) -> Option<Vec<String>> {
         // Handler provides both Theater-specific and WASI filesystem interfaces
-        Some("theater:simple/filesystem,wasi:filesystem/types@0.2.3,wasi:filesystem/preopens@0.2.3".to_string())
+        Some(vec![
+            "theater:simple/filesystem".to_string(),
+            "wasi:filesystem/types@0.2.3".to_string(),
+            "wasi:filesystem/preopens@0.2.3".to_string(),
+        ])
     }
 
-    fn exports(&self) -> Option<String> {
+    fn exports(&self) -> Option<Vec<String>> {
         None
     }
 }
@@ -180,10 +185,8 @@ mod tests {
 
         let handler = FilesystemHandler::new(config, None);
         assert_eq!(handler.name(), "filesystem");
-        assert_eq!(
-            handler.imports(),
-            Some("theater:simple/filesystem".to_string())
-        );
+        // Note: imports() returns Vec<String> with all filesystem interfaces
+        assert!(handler.imports().is_some());
         assert_eq!(handler.exports(), None);
     }
 

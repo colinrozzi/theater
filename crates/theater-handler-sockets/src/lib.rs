@@ -31,7 +31,7 @@ pub use types::{
     IpAddressFamily,
 };
 
-use theater::handler::{Handler, SharedActorInstance};
+use theater::handler::{Handler, HandlerContext, SharedActorInstance};
 use theater::events::EventPayload;
 use theater::wasm::{ActorComponent, ActorInstance};
 use theater::actor::{handle::ActorHandle, ActorStore};
@@ -69,11 +69,48 @@ where
         Box::pin(async { Ok(()) })
     }
 
-    fn setup_host_functions(&mut self, actor_component: &mut ActorComponent<E>) -> Result<()> {
+    fn setup_host_functions(&mut self, actor_component: &mut ActorComponent<E>, ctx: &mut HandlerContext) -> Result<()> {
         debug!("WasiSocketsHandler::setup_host_functions() starting");
 
-        // Note: wasi:io and wasi:clocks interfaces are provided by other handlers
-        // (wasi-io and timing handlers). We only add sockets-specific interfaces here.
+        // The sockets interfaces depend on wasi:io types (Pollable, Error, streams).
+        // We need to register these using our own types if not already satisfied.
+        // Note: if wasi-io handler registered them first, we skip to avoid conflicts.
+
+        if !ctx.is_satisfied("wasi:io/error@0.2.0") {
+            info!("Setting up wasi:io/error interface for sockets");
+            bindings::wasi::io::error::add_to_linker(
+                &mut actor_component.linker,
+                |state: &mut ActorStore<E>| state,
+            )?;
+            ctx.mark_satisfied("wasi:io/error@0.2.0");
+        }
+
+        if !ctx.is_satisfied("wasi:io/poll@0.2.0") {
+            info!("Setting up wasi:io/poll interface for sockets");
+            bindings::wasi::io::poll::add_to_linker(
+                &mut actor_component.linker,
+                |state: &mut ActorStore<E>| state,
+            )?;
+            ctx.mark_satisfied("wasi:io/poll@0.2.0");
+        }
+
+        if !ctx.is_satisfied("wasi:io/streams@0.2.0") {
+            info!("Setting up wasi:io/streams interface for sockets");
+            bindings::wasi::io::streams::add_to_linker(
+                &mut actor_component.linker,
+                |state: &mut ActorStore<E>| state,
+            )?;
+            ctx.mark_satisfied("wasi:io/streams@0.2.0");
+        }
+
+        if !ctx.is_satisfied("wasi:clocks/monotonic-clock@0.2.0") {
+            info!("Setting up wasi:clocks/monotonic-clock interface for sockets");
+            bindings::wasi::clocks::monotonic_clock::add_to_linker(
+                &mut actor_component.linker,
+                |state: &mut ActorStore<E>| state,
+            )?;
+            ctx.mark_satisfied("wasi:clocks/monotonic-clock@0.2.0");
+        }
 
         // wasi:sockets/network interface
         info!("Setting up wasi:sockets/network interface");
@@ -139,12 +176,20 @@ where
         "wasi-sockets"
     }
 
-    fn imports(&self) -> Option<String> {
+    fn imports(&self) -> Option<Vec<String>> {
         // Handler provides WASI sockets interfaces (version 0.2.0)
-        Some("wasi:sockets/network@0.2.0,wasi:sockets/instance-network@0.2.0,wasi:sockets/tcp@0.2.0,wasi:sockets/tcp-create-socket@0.2.0,wasi:sockets/udp@0.2.0,wasi:sockets/udp-create-socket@0.2.0,wasi:sockets/ip-name-lookup@0.2.0".to_string())
+        Some(vec![
+            "wasi:sockets/network@0.2.0".to_string(),
+            "wasi:sockets/instance-network@0.2.0".to_string(),
+            "wasi:sockets/tcp@0.2.0".to_string(),
+            "wasi:sockets/tcp-create-socket@0.2.0".to_string(),
+            "wasi:sockets/udp@0.2.0".to_string(),
+            "wasi:sockets/udp-create-socket@0.2.0".to_string(),
+            "wasi:sockets/ip-name-lookup@0.2.0".to_string(),
+        ])
     }
 
-    fn exports(&self) -> Option<String> {
+    fn exports(&self) -> Option<Vec<String>> {
         None
     }
 }

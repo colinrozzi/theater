@@ -53,7 +53,7 @@ use theater::actor::handle::ActorHandle;
 use theater::actor::store::ActorStore;
 use theater::config::permissions::HttpFrameworkPermissions;
 use theater::events::EventPayload;
-use theater::handler::{Handler, SharedActorInstance};
+use theater::handler::{Handler, HandlerContext, SharedActorInstance};
 use theater::shutdown::ShutdownReceiver;
 use theater::wasm::{ActorComponent, ActorInstance};
 
@@ -137,7 +137,7 @@ where
         Box::new(self.clone())
     }
 
-    fn setup_host_functions(&mut self, actor_component: &mut ActorComponent<E>) -> Result<()> {
+    fn setup_host_functions(&mut self, actor_component: &mut ActorComponent<E>, _ctx: &mut HandlerContext) -> Result<()> {
         info!("Setting up HTTP framework host functions");
 
         let mut interface = actor_component
@@ -1366,12 +1366,12 @@ where
         "http-framework"
     }
 
-    fn imports(&self) -> Option<String> {
-        Some("theater:simple/http-framework".to_string())
+    fn imports(&self) -> Option<Vec<String>> {
+        Some(vec!["theater:simple/http-framework".to_string()])
     }
 
-    fn exports(&self) -> Option<String> {
-        Some("theater:simple/http-handlers".to_string())
+    fn exports(&self) -> Option<Vec<String>> {
+        Some(vec!["theater:simple/http-handlers".to_string()])
     }
 }
 

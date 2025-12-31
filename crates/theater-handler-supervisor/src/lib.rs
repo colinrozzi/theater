@@ -12,7 +12,7 @@ use theater::actor::types::{ActorError, WitActorError};
 use theater::config::actor_manifest::SupervisorHostConfig;
 use theater::config::permissions::SupervisorPermissions;
 use theater::events::{ChainEventData, EventPayload};
-use theater::handler::{Handler, SharedActorInstance};
+use theater::handler::{Handler, HandlerContext, SharedActorInstance};
 use theater::messages::{ActorResult, TheaterCommand};
 use theater::shutdown::ShutdownReceiver;
 use theater::wasm::{ActorComponent, ActorInstance};
@@ -146,15 +146,15 @@ where
         "supervisor"
     }
 
-    fn imports(&self) -> Option<String> {
-        Some("theater:simple/supervisor".to_string())
+    fn imports(&self) -> Option<Vec<String>> {
+        Some(vec!["theater:simple/supervisor".to_string()])
     }
 
-    fn exports(&self) -> Option<String> {
-        Some("theater:simple/supervisor-handlers".to_string())
+    fn exports(&self) -> Option<Vec<String>> {
+        Some(vec!["theater:simple/supervisor-handlers".to_string()])
     }
 
-    fn setup_host_functions(&mut self, actor_component: &mut ActorComponent<E>) -> Result<()> {
+    fn setup_host_functions(&mut self, actor_component: &mut ActorComponent<E>, _ctx: &mut HandlerContext) -> Result<()> {
         // Record setup start
         actor_component.actor_store.record_event(ChainEventData {
             event_type: "supervisor-setup".to_string(),
@@ -1206,11 +1206,11 @@ mod tests {
         assert_eq!(handler.name(), "supervisor");
         assert_eq!(
             handler.imports(),
-            Some("theater:simple/supervisor".to_string())
+            Some(vec!["theater:simple/supervisor".to_string()])
         );
         assert_eq!(
             handler.exports(),
-            Some("theater:simple/supervisor-handlers".to_string())
+            Some(vec!["theater:simple/supervisor-handlers".to_string()])
         );
     }
 

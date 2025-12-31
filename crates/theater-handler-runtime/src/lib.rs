@@ -13,7 +13,7 @@ use theater::actor::store::ActorStore;
 use theater::config::actor_manifest::RuntimeHostConfig;
 use theater::config::permissions::RuntimePermissions;
 use theater::events::{runtime::RuntimeEventData, ChainEventData, EventPayload};
-use theater::handler::{Handler, SharedActorInstance};
+use theater::handler::{Handler, HandlerContext, SharedActorInstance};
 use theater::messages::TheaterCommand;
 use theater::shutdown::ShutdownReceiver;
 use theater::wasm::{ActorComponent, ActorInstance};
@@ -73,6 +73,7 @@ where
     fn setup_host_functions(
         &mut self,
         actor_component: &mut ActorComponent<E>,
+        _ctx: &mut HandlerContext,
     ) -> anyhow::Result<()> {
         info!("Setting up runtime host functions");
         
@@ -294,12 +295,12 @@ where
         "runtime"
     }
 
-    fn imports(&self) -> Option<String> {
-        Some("theater:simple/runtime".to_string())
+    fn imports(&self) -> Option<Vec<String>> {
+        Some(vec!["theater:simple/runtime".to_string()])
     }
 
-    fn exports(&self) -> Option<String> {
-        Some("theater:simple/actor".to_string())
+    fn exports(&self) -> Option<Vec<String>> {
+        Some(vec!["theater:simple/actor".to_string()])
     }
 }
 
@@ -313,10 +314,10 @@ mod tests {
     fn test_runtime_handler_creation() {
         let config = RuntimeHostConfig {};
         let (tx, _rx) = mpsc::channel(100);
-        
+
         let handler = RuntimeHandler::new(config, tx, None);
         assert_eq!(handler.name(), "runtime");
-        assert_eq!(handler.imports(), Some("theater:simple/runtime".to_string()));
-        assert_eq!(handler.exports(), Some("theater:simple/actor".to_string()));
+        assert_eq!(handler.imports(), Some(vec!["theater:simple/runtime".to_string()]));
+        assert_eq!(handler.exports(), Some(vec!["theater:simple/actor".to_string()]));
     }
 }

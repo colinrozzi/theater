@@ -41,7 +41,7 @@ use theater::config::actor_manifest::HttpClientHandlerConfig;
 use theater::config::enforcement::PermissionChecker;
 use theater::config::permissions::HttpClientPermissions;
 use theater::events::EventPayload;
-use theater::handler::{Handler, SharedActorInstance};
+use theater::handler::{Handler, HandlerContext, SharedActorInstance};
 use theater::shutdown::ShutdownReceiver;
 use theater::wasm::{ActorComponent, ActorInstance};
 
@@ -109,12 +109,12 @@ impl HttpClientHandler {
     }
 
     /// Get the imports
-    pub fn imports(&self) -> Option<String> {
-        Some("theater:simple/http-client".to_string())
+    pub fn imports(&self) -> Option<Vec<String>> {
+        Some(vec!["theater:simple/http-client".to_string()])
     }
 
     /// Get the exports
-    pub fn exports(&self) -> Option<String> {
+    pub fn exports(&self) -> Option<Vec<String>> {
         None
     }
 }
@@ -136,7 +136,7 @@ where
         Box::pin(async { Ok(()) })
     }
 
-    fn setup_host_functions(&mut self, actor_component: &mut ActorComponent<E>) -> Result<()> {
+    fn setup_host_functions(&mut self, actor_component: &mut ActorComponent<E>, _ctx: &mut HandlerContext) -> Result<()> {
         // Record setup start
         actor_component.actor_store.record_handler_event(
             "http-client-setup".to_string(),
@@ -354,11 +354,11 @@ where
         "http-client"
     }
 
-    fn imports(&self) -> Option<String> {
-        Some("theater:simple/http-client".to_string())
+    fn imports(&self) -> Option<Vec<String>> {
+        Some(vec!["theater:simple/http-client".to_string()])
     }
 
-    fn exports(&self) -> Option<String> {
+    fn exports(&self) -> Option<Vec<String>> {
         None
     }
 }
@@ -374,7 +374,7 @@ mod tests {
         assert_eq!(handler.name(), "http-client");
         assert_eq!(
             handler.imports(),
-            Some("theater:simple/http-client".to_string())
+            Some(vec!["theater:simple/http-client".to_string()])
         );
         assert_eq!(handler.exports(), None);
     }

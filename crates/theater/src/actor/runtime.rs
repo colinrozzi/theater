@@ -12,6 +12,7 @@ use crate::events::theater_runtime::TheaterRuntimeEventData;
 use crate::events::wasm::WasmEventData;
 use crate::events::{ChainEventData, EventPayload};
 use crate::handler::Handler;
+use crate::handler::HandlerContext;
 use crate::handler::HandlerRegistry;
 use crate::id::TheaterId;
 use crate::messages::TheaterCommand;
@@ -345,9 +346,10 @@ impl<E: EventPayload + Clone> ActorRuntime<E> {
         }
 
         debug!("Setting up host functions for {} handlers", handlers.len());
+        let mut handler_ctx = HandlerContext::new();
         for handler in handlers.iter_mut() {
             debug!("Setting up host functions for handler '{}'", handler.name());
-            match handler.setup_host_functions(&mut actor_component) {
+            match handler.setup_host_functions(&mut actor_component, &mut handler_ctx) {
                 Ok(()) => {
                     debug!("Handler '{}' host functions set up successfully", handler.name());
                 }
@@ -356,6 +358,7 @@ impl<E: EventPayload + Clone> ActorRuntime<E> {
                 }
             }
         }
+        debug!("Handler context satisfied imports: {:?}", handler_ctx.satisfied_imports);
 
         actor_component.actor_store.record_event(ChainEventData {
             event_type: "theater-runtime".to_string(),

@@ -38,7 +38,7 @@ use theater::actor::types::ActorError;
 use theater::config::actor_manifest::StoreHandlerConfig;
 use theater::config::permissions::StorePermissions;
 use theater::events::{ChainEventData, EventPayload};
-use theater::handler::{Handler, SharedActorInstance};
+use theater::handler::{Handler, HandlerContext, SharedActorInstance};
 use theater::shutdown::ShutdownReceiver;
 use theater::store::{ContentRef, ContentStore, Label};
 use theater::wasm::{ActorComponent, ActorInstance};
@@ -99,6 +99,7 @@ where
     fn setup_host_functions(
         &mut self,
         actor_component: &mut ActorComponent<E>,
+        _ctx: &mut HandlerContext,
     ) -> anyhow::Result<()> {
         // Record setup start
         actor_component.actor_store.record_event(ChainEventData {
@@ -883,11 +884,11 @@ where
         "store"
     }
 
-    fn imports(&self) -> Option<String> {
-        Some("theater:simple/store".to_string())
+    fn imports(&self) -> Option<Vec<String>> {
+        Some(vec!["theater:simple/store".to_string()])
     }
 
-    fn exports(&self) -> Option<String> {
+    fn exports(&self) -> Option<Vec<String>> {
         None
     }
 }
@@ -902,7 +903,7 @@ mod tests {
         let handler = StoreHandler::new(config, None);
 
         assert_eq!(handler.name(), "store");
-        assert_eq!(handler.imports(), Some("theater:simple/store".to_string()));
+        assert_eq!(handler.imports(), Some(vec!["theater:simple/store".to_string()]));
         assert_eq!(handler.exports(), None);
     }
 

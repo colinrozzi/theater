@@ -4,7 +4,7 @@
 
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::sync::Arc;
-use tokio::net::{TcpListener, TcpStream, UdpSocket as TokioUdpSocket};
+use tokio::net::{TcpListener, TcpSocket as TokioTcpSocket, TcpStream, UdpSocket as TokioUdpSocket};
 
 /// Network resource - represents access to the network
 ///
@@ -24,7 +24,8 @@ impl Network {
 }
 
 /// TCP socket state machine
-#[derive(Debug)]
+///
+/// Note: Manual Debug impl because TokioTcpSocket doesn't implement Debug
 pub enum TcpSocketState {
     /// Socket created but not bound
     Unbound,
@@ -32,12 +33,14 @@ pub enum TcpSocketState {
     BindInProgress {
         local_address: SocketAddr,
     },
-    /// Socket bound to local address
+    /// Socket bound to local address (holds the actual OS socket)
     Bound {
+        socket: TokioTcpSocket,
         local_address: SocketAddr,
     },
-    /// Listen operation in progress
+    /// Listen operation in progress (holds the socket to convert to listener)
     ListenInProgress {
+        socket: TokioTcpSocket,
         local_address: SocketAddr,
     },
     /// Socket listening for connections
@@ -58,6 +61,51 @@ pub enum TcpSocketState {
     },
     /// Socket closed
     Closed,
+}
+
+impl std::fmt::Debug for TcpSocketState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            TcpSocketState::Unbound => write!(f, "Unbound"),
+            TcpSocketState::BindInProgress { local_address } => {
+                f.debug_struct("BindInProgress")
+                    .field("local_address", local_address)
+                    .finish()
+            }
+            TcpSocketState::Bound { local_address, .. } => {
+                f.debug_struct("Bound")
+                    .field("local_address", local_address)
+                    .field("socket", &"<TokioTcpSocket>")
+                    .finish()
+            }
+            TcpSocketState::ListenInProgress { local_address, .. } => {
+                f.debug_struct("ListenInProgress")
+                    .field("local_address", local_address)
+                    .field("socket", &"<TokioTcpSocket>")
+                    .finish()
+            }
+            TcpSocketState::Listening { local_address, .. } => {
+                f.debug_struct("Listening")
+                    .field("local_address", local_address)
+                    .field("listener", &"<TcpListener>")
+                    .finish()
+            }
+            TcpSocketState::ConnectInProgress { local_address, remote_address } => {
+                f.debug_struct("ConnectInProgress")
+                    .field("local_address", local_address)
+                    .field("remote_address", remote_address)
+                    .finish()
+            }
+            TcpSocketState::Connected { local_address, remote_address, .. } => {
+                f.debug_struct("Connected")
+                    .field("local_address", local_address)
+                    .field("remote_address", remote_address)
+                    .field("stream", &"<TcpStream>")
+                    .finish()
+            }
+            TcpSocketState::Closed => write!(f, "Closed"),
+        }
+    }
 }
 
 /// TCP socket resource
@@ -117,8 +165,8 @@ impl TcpSocket {
     /// Get the local address if bound
     pub fn local_address(&self) -> Option<SocketAddr> {
         match &self.state {
-            TcpSocketState::Bound { local_address } => Some(*local_address),
-            TcpSocketState::ListenInProgress { local_address } => Some(*local_address),
+            TcpSocketState::Bound { local_address, .. } => Some(*local_address),
+            TcpSocketState::ListenInProgress { local_address, .. } => Some(*local_address),
             TcpSocketState::Listening { local_address, .. } => Some(*local_address),
             TcpSocketState::ConnectInProgress { local_address, .. } => *local_address,
             TcpSocketState::Connected { local_address, .. } => Some(*local_address),

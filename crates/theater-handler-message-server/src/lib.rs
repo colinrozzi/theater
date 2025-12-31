@@ -14,7 +14,7 @@ use theater::actor::store::ActorStore;
 use theater::actor::types::ActorError;
 use theater::config::permissions::MessageServerPermissions;
 use theater::events::{ChainEventData, EventPayload};
-use theater::handler::{Handler, SharedActorInstance};
+use theater::handler::{Handler, HandlerContext, SharedActorInstance};
 use theater::messages::{
     ActorChannelClose, ActorChannelInitiated, ActorChannelMessage, ActorChannelOpen,
     ActorMessage, ActorRequest, ActorSend, ChannelId, ChannelParticipant,
@@ -446,15 +446,15 @@ where
         "message-server"
     }
 
-    fn imports(&self) -> Option<String> {
-        Some("theater:simple/message-server-host".to_string())
+    fn imports(&self) -> Option<Vec<String>> {
+        Some(vec!["theater:simple/message-server-host".to_string()])
     }
 
-    fn exports(&self) -> Option<String> {
-        Some("theater:simple/message-server-client".to_string())
+    fn exports(&self) -> Option<Vec<String>> {
+        Some(vec!["theater:simple/message-server-client".to_string()])
     }
 
-    fn setup_host_functions(&mut self, actor_component: &mut ActorComponent<E>) -> Result<()> {
+    fn setup_host_functions(&mut self, actor_component: &mut ActorComponent<E>, _ctx: &mut HandlerContext) -> Result<()> {
         info!("Setting up message server host functions");
 
         // Get this actor's ID
@@ -1832,11 +1832,11 @@ mod tests {
         assert_eq!(handler.name(), "message-server");
         assert_eq!(
             handler.imports(),
-            Some("theater:simple/message-server-host".to_string())
+            Some(vec!["theater:simple/message-server-host".to_string()])
         );
         assert_eq!(
             handler.exports(),
-            Some("theater:simple/message-server-client".to_string())
+            Some(vec!["theater:simple/message-server-client".to_string()])
         );
     }
 

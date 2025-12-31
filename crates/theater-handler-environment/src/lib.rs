@@ -45,7 +45,7 @@ use theater::config::actor_manifest::EnvironmentHandlerConfig;
 use theater::config::enforcement::PermissionChecker;
 use theater::config::permissions::EnvironmentPermissions;
 use theater::events::EventPayload;
-use theater::handler::{Handler, SharedActorInstance};
+use theater::handler::{Handler, HandlerContext, SharedActorInstance};
 use theater::shutdown::ShutdownReceiver;
 use theater::wasm::{ActorComponent, ActorInstance};
 
@@ -122,6 +122,7 @@ where
     fn setup_host_functions(
         &mut self,
         actor_component: &mut ActorComponent<E>,
+        _ctx: &mut HandlerContext,
     ) -> Result<()> {
         // Clone what we need for the closures
         let permissions_get = self.permissions.clone();
@@ -338,11 +339,11 @@ where
         "environment"
     }
 
-    fn imports(&self) -> Option<String> {
-        Some("theater:simple/environment".to_string())
+    fn imports(&self) -> Option<Vec<String>> {
+        Some(vec!["theater:simple/environment".to_string()])
     }
 
-    fn exports(&self) -> Option<String> {
+    fn exports(&self) -> Option<Vec<String>> {
         None
     }
 }

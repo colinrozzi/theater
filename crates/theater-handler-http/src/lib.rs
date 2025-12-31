@@ -25,7 +25,7 @@ mod server;
 pub use types::*;
 pub use events::HttpEventData;
 
-use theater::handler::{Handler, SharedActorInstance};
+use theater::handler::{Handler, HandlerContext, SharedActorInstance};
 use theater::events::EventPayload;
 use theater::wasm::{ActorComponent, ActorInstance};
 use theater::actor::handle::ActorHandle;
@@ -132,7 +132,7 @@ where
         })
     }
 
-    fn setup_host_functions(&mut self, actor_component: &mut ActorComponent<E>) -> Result<()> {
+    fn setup_host_functions(&mut self, actor_component: &mut ActorComponent<E>, _ctx: &mut HandlerContext) -> Result<()> {
         use crate::bindings;
         use theater::actor::ActorStore;
 
@@ -184,15 +184,20 @@ where
         "wasi-http"
     }
 
-    fn imports(&self) -> Option<String> {
+    fn imports(&self) -> Option<Vec<String>> {
         // Component imports these interfaces (we provide them to the component)
         // HTTP handler also provides IO interfaces since HTTP depends on them
-        Some("wasi:io/error@0.2.3,wasi:io/streams@0.2.3,wasi:http/types@0.2.0,wasi:http/outgoing-handler@0.2.0".to_string())
+        Some(vec![
+            "wasi:io/error@0.2.3".to_string(),
+            "wasi:io/streams@0.2.3".to_string(),
+            "wasi:http/types@0.2.0".to_string(),
+            "wasi:http/outgoing-handler@0.2.0".to_string(),
+        ])
     }
 
-    fn exports(&self) -> Option<String> {
+    fn exports(&self) -> Option<Vec<String>> {
         // Component exports this interface (we call it to handle incoming requests)
-        Some("wasi:http/incoming-handler@0.2.0".to_string())
+        Some(vec!["wasi:http/incoming-handler@0.2.0".to_string()])
     }
 }
 

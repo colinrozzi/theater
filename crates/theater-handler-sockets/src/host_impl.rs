@@ -24,7 +24,7 @@ use crate::types::{
 use anyhow::Result;
 use std::net::ToSocketAddrs;
 use std::sync::Arc;
-use tokio::net::{TcpListener, TcpStream, UdpSocket as TokioUdpSocket};
+use tokio::net::{TcpStream, UdpSocket as TokioUdpSocket};
 use wasmtime::component::Resource;
 use theater::actor::ActorStore;
 use theater::events::EventPayload;
@@ -430,29 +430,71 @@ where
             Some("TCP finish-bind".to_string()),
         );
 
-        // Actually perform the bind and update state
-        let result = {
-            let mut table = self.resource_table.lock().unwrap();
-            let tcp_socket: &mut TcpSocket = table.get_mut(&socket)?;
-
+        // Get the local address and family from the socket state
+        let (local_addr, family) = {
+            let table = self.resource_table.lock().unwrap();
+            let tcp_socket: &TcpSocket = table.get(&socket)?;
             match &tcp_socket.state {
-                TcpSocketState::BindInProgress { local_address } => {
-                    let addr = *local_address;
-                    tcp_socket.state = TcpSocketState::Bound { local_address: addr };
-                    Ok(())
+                TcpSocketState::BindInProgress { local_address } => (*local_address, tcp_socket.family),
+                _ => {
+                    return Ok(Err(ErrorCode::NotInProgress));
                 }
-                _ => Err(ErrorCode::NotInProgress),
             }
         };
 
-        let success = result.is_ok();
-        self.record_handler_event(
-            "wasi:sockets/tcp/finish-bind".to_string(),
-            SocketsEventData::TcpFinishBindResult { success },
-            Some(format!("TCP finish-bind: success={}", success)),
-        );
+        // Create and bind the actual OS socket
+        let tokio_socket = match family {
+            IpAddressFamily::Ipv4 => tokio::net::TcpSocket::new_v4(),
+            IpAddressFamily::Ipv6 => tokio::net::TcpSocket::new_v6(),
+        };
 
-        Ok(result)
+        let tokio_socket = match tokio_socket {
+            Ok(s) => s,
+            Err(e) => {
+                warn!("Failed to create TCP socket: {}", e);
+                self.record_handler_event(
+                    "wasi:sockets/tcp/finish-bind".to_string(),
+                    SocketsEventData::TcpFinishBindResult { success: false },
+                    Some(format!("TCP finish-bind failed: {}", e)),
+                );
+                return Ok(Err(ErrorCode::Unknown));
+            }
+        };
+
+        // Bind the socket
+        match tokio_socket.bind(local_addr) {
+            Ok(()) => {
+                // Get the actual bound address (port may have been assigned if 0 was specified)
+                let actual_addr = tokio_socket.local_addr().unwrap_or(local_addr);
+
+                // Update state with the bound socket
+                {
+                    let mut table = self.resource_table.lock().unwrap();
+                    let tcp_socket: &mut TcpSocket = table.get_mut(&socket)?;
+                    tcp_socket.state = TcpSocketState::Bound {
+                        socket: tokio_socket,
+                        local_address: actual_addr,
+                    };
+                }
+
+                self.record_handler_event(
+                    "wasi:sockets/tcp/finish-bind".to_string(),
+                    SocketsEventData::TcpFinishBindResult { success: true },
+                    Some(format!("TCP bound socket to {}", actual_addr)),
+                );
+
+                Ok(Ok(()))
+            }
+            Err(e) => {
+                warn!("TCP bind failed: {}", e);
+                self.record_handler_event(
+                    "wasi:sockets/tcp/finish-bind".to_string(),
+                    SocketsEventData::TcpFinishBindResult { success: false },
+                    Some(format!("TCP bind failed: {}", e)),
+                );
+                Ok(Err(ErrorCode::AddressInUse))
+            }
+        }
     }
 
     async fn start_connect(
@@ -588,12 +630,18 @@ where
             let mut table = self.resource_table.lock().unwrap();
             let tcp_socket: &mut TcpSocket = table.get_mut(&socket)?;
 
-            match &tcp_socket.state {
-                TcpSocketState::Bound { local_address } => {
-                    let addr = *local_address;
-                    tcp_socket.state = TcpSocketState::ListenInProgress { local_address: addr };
+            // Take the socket from Bound state and move to ListenInProgress
+            let old_state = std::mem::replace(&mut tcp_socket.state, TcpSocketState::Closed);
+            match old_state {
+                TcpSocketState::Bound { socket: tokio_socket, local_address } => {
+                    tcp_socket.state = TcpSocketState::ListenInProgress {
+                        socket: tokio_socket,
+                        local_address,
+                    };
                 }
-                _ => {
+                other => {
+                    // Restore the state
+                    tcp_socket.state = other;
                     return Ok(Err(ErrorCode::InvalidState));
                 }
             }
@@ -617,18 +665,27 @@ where
             Some("TCP finish-listen".to_string()),
         );
 
-        // Get the local address
-        let local_addr = {
-            let table = self.resource_table.lock().unwrap();
-            let tcp_socket: &TcpSocket = table.get(&socket)?;
-            match &tcp_socket.state {
-                TcpSocketState::ListenInProgress { local_address } => *local_address,
-                _ => return Ok(Err(ErrorCode::NotInProgress)),
+        // Take the socket from ListenInProgress state
+        let (tokio_socket, local_addr, backlog) = {
+            let mut table = self.resource_table.lock().unwrap();
+            let tcp_socket: &mut TcpSocket = table.get_mut(&socket)?;
+
+            let backlog = tcp_socket.options.listen_backlog_size as u32;
+            let old_state = std::mem::replace(&mut tcp_socket.state, TcpSocketState::Closed);
+            match old_state {
+                TcpSocketState::ListenInProgress { socket: tokio_socket, local_address } => {
+                    (tokio_socket, local_address, backlog)
+                }
+                other => {
+                    // Restore the state
+                    tcp_socket.state = other;
+                    return Ok(Err(ErrorCode::NotInProgress));
+                }
             }
         };
 
-        // Actually start listening
-        match TcpListener::bind(local_addr).await {
+        // Convert the bound socket to a listener
+        match tokio_socket.listen(backlog) {
             Ok(listener) => {
                 let actual_addr = listener.local_addr().unwrap_or(local_addr);
 

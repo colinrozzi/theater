@@ -65,7 +65,7 @@ use theater::config::enforcement::PermissionChecker;
 use theater::events::EventPayload;
 use theater::events::theater_runtime::TheaterRuntimeEventData;
 use theater::events::wasm::WasmEventData;
-use theater::handler::{Handler, SharedActorInstance};
+use theater::handler::{Handler, HandlerContext, SharedActorInstance};
 use theater::shutdown::ShutdownReceiver;
 use theater::wasm::{ActorComponent, ActorInstance};
 
@@ -424,6 +424,7 @@ where
     fn setup_host_functions(
         &mut self,
         actor_component: &mut ActorComponent<E>,
+        _ctx: &mut HandlerContext,
     ) -> anyhow::Result<()> {
         // Record setup start
         actor_component.actor_store.record_handler_event(
@@ -950,12 +951,12 @@ where
         "process"
     }
 
-    fn imports(&self) -> Option<String> {
-        Some("theater:simple/process".to_string())
+    fn imports(&self) -> Option<Vec<String>> {
+        Some(vec!["theater:simple/process".to_string()])
     }
 
-    fn exports(&self) -> Option<String> {
-        Some("theater:simple/process-handlers".to_string())
+    fn exports(&self) -> Option<Vec<String>> {
+        Some(vec!["theater:simple/process-handlers".to_string()])
     }
 }
 

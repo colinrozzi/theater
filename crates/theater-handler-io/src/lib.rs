@@ -30,7 +30,7 @@ pub use error::{IoError, StreamError};
 pub use events::IoEventData;
 pub use poll::IoHandlerPollable;
 
-use theater::handler::{Handler, SharedActorInstance};
+use theater::handler::{Handler, HandlerContext, SharedActorInstance};
 use theater::events::EventPayload;
 use theater::wasm::{ActorComponent, ActorInstance};
 use theater::actor::{handle::ActorHandle, ActorStore};
@@ -68,32 +68,48 @@ where
         Box::pin(async { Ok(()) })
     }
 
-    fn setup_host_functions(&mut self, actor_component: &mut ActorComponent<E>) -> Result<()> {
+    fn setup_host_functions(&mut self, actor_component: &mut ActorComponent<E>, ctx: &mut HandlerContext) -> Result<()> {
         debug!("WasiIoHandler::setup_host_functions() starting");
 
         // Use bindgen-generated add_to_linker calls for all interfaces
         // This is much simpler than manual func_wrap and ensures type safety
+        // Skip interfaces already satisfied by other handlers (e.g., sockets handler)
 
         // wasi:io/error interface
-        info!("Setting up wasi:io/error interface");
-        bindings::wasi::io::error::add_to_linker(
-            &mut actor_component.linker,
-            |state: &mut ActorStore<E>| state,
-        )?;
+        if !ctx.is_satisfied("wasi:io/error@0.2.0") {
+            info!("Setting up wasi:io/error interface");
+            bindings::wasi::io::error::add_to_linker(
+                &mut actor_component.linker,
+                |state: &mut ActorStore<E>| state,
+            )?;
+            ctx.mark_satisfied("wasi:io/error@0.2.0");
+        } else {
+            debug!("wasi:io/error@0.2.0 already satisfied, skipping");
+        }
 
         // wasi:io/poll interface
-        info!("Setting up wasi:io/poll interface");
-        bindings::wasi::io::poll::add_to_linker(
-            &mut actor_component.linker,
-            |state: &mut ActorStore<E>| state,
-        )?;
+        if !ctx.is_satisfied("wasi:io/poll@0.2.0") {
+            info!("Setting up wasi:io/poll interface");
+            bindings::wasi::io::poll::add_to_linker(
+                &mut actor_component.linker,
+                |state: &mut ActorStore<E>| state,
+            )?;
+            ctx.mark_satisfied("wasi:io/poll@0.2.0");
+        } else {
+            debug!("wasi:io/poll@0.2.0 already satisfied, skipping");
+        }
 
         // wasi:io/streams interface
-        info!("Setting up wasi:io/streams interface");
-        bindings::wasi::io::streams::add_to_linker(
-            &mut actor_component.linker,
-            |state: &mut ActorStore<E>| state,
-        )?;
+        if !ctx.is_satisfied("wasi:io/streams@0.2.0") {
+            info!("Setting up wasi:io/streams interface");
+            bindings::wasi::io::streams::add_to_linker(
+                &mut actor_component.linker,
+                |state: &mut ActorStore<E>| state,
+            )?;
+            ctx.mark_satisfied("wasi:io/streams@0.2.0");
+        } else {
+            debug!("wasi:io/streams@0.2.0 already satisfied, skipping");
+        }
 
         // wasi:cli/stdin interface
         info!("Setting up wasi:cli/stdin interface");
@@ -180,12 +196,26 @@ where
         "wasi-io"
     }
 
-    fn imports(&self) -> Option<String> {
+    fn imports(&self) -> Option<Vec<String>> {
         // These versions should match the WIT files we use (0.2.0)
-        Some("wasi:io/streams@0.2.0,wasi:io/error@0.2.0,wasi:io/poll@0.2.0,wasi:cli/stdin@0.2.0,wasi:cli/stdout@0.2.0,wasi:cli/stderr@0.2.0,wasi:cli/environment@0.2.0,wasi:cli/exit@0.2.0,wasi:cli/terminal-input@0.2.0,wasi:cli/terminal-output@0.2.0,wasi:cli/terminal-stdin@0.2.0,wasi:cli/terminal-stdout@0.2.0,wasi:cli/terminal-stderr@0.2.0".to_string())
+        Some(vec![
+            "wasi:io/streams@0.2.0".to_string(),
+            "wasi:io/error@0.2.0".to_string(),
+            "wasi:io/poll@0.2.0".to_string(),
+            "wasi:cli/stdin@0.2.0".to_string(),
+            "wasi:cli/stdout@0.2.0".to_string(),
+            "wasi:cli/stderr@0.2.0".to_string(),
+            "wasi:cli/environment@0.2.0".to_string(),
+            "wasi:cli/exit@0.2.0".to_string(),
+            "wasi:cli/terminal-input@0.2.0".to_string(),
+            "wasi:cli/terminal-output@0.2.0".to_string(),
+            "wasi:cli/terminal-stdin@0.2.0".to_string(),
+            "wasi:cli/terminal-stdout@0.2.0".to_string(),
+            "wasi:cli/terminal-stderr@0.2.0".to_string(),
+        ])
     }
 
-    fn exports(&self) -> Option<String> {
+    fn exports(&self) -> Option<Vec<String>> {
         None
     }
 }
