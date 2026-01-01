@@ -9,7 +9,10 @@ changes/
 ├── proposals/          # Detailed change proposals
 │   └── 2025-11-30-handler-migration.md
 ├── in-progress/        # Active work tracking
-│   └── handler-migration.md
+│   ├── handler-migration.md           # Handler crate extraction (COMPLETE)
+│   ├── handler-test-infrastructure.md # Test actors + integration tests (ACTIVE)
+│   ├── message-router-architecture.md # Message routing design
+│   └── ...                            # Other migration tracking docs
 └── README.md          # This file
 ```
 
@@ -23,11 +26,13 @@ changes/
 
 | Date | Change | Status | Tracking |
 |------|--------|--------|----------|
-| 2025-11-30 | Handler Migration | In Progress | [handler-migration.md](in-progress/handler-migration.md) |
+| 2025-12-31 | Handler Test Infrastructure | In Progress | [handler-test-infrastructure.md](in-progress/handler-test-infrastructure.md) |
 
 ## Completed Changes
 
-None yet at the workspace level.
+| Date | Change | Status | Tracking |
+|------|--------|--------|----------|
+| 2025-11-30 | Handler Migration | Complete (100%) | [handler-migration.md](in-progress/handler-migration.md) |
 
 ## Note on Crate-Level Changes
 
