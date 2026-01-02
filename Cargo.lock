@@ -4029,6 +4029,7 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
+ "wasmtime",
 ]
 
 [[package]]
