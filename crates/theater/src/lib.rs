@@ -70,7 +70,7 @@ pub use metrics::{
     ActorMetrics, MetricsCollector, OperationMetrics, OperationStats, ResourceMetrics,
 };
 pub use shutdown::{ShutdownController, ShutdownReceiver, ShutdownSignal, ShutdownType};
-pub use replay::HostFunctionCall;
+pub use replay::{HostFunctionCall, ReplayHandler, ReplayState};
 pub use store::{ContentRef, ContentStore, Label};
 pub use theater_runtime::TheaterRuntime;
 pub use wasm::{ActorComponent, ActorInstance, MemoryStats, WasmError};

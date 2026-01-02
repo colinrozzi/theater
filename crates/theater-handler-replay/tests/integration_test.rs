@@ -20,7 +20,7 @@ use theater::theater_runtime::TheaterRuntime;
 
 use theater_handler_filesystem::{FilesystemEventData, FilesystemHandler};
 use theater_handler_io::{IoEventData, WasiIoHandler};
-use theater_handler_replay::ReplayHandler;
+use theater::ReplayHandler;
 use theater_handler_runtime::RuntimeHandler;
 use theater_handler_timing::{TimingEventData, TimingHandler};
 

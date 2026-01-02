@@ -1,11 +1,37 @@
 //! # Replay Module
 //!
-//! This module provides types for recording host function calls in a standardized format
-//! that supports replay. The key insight is that the chain + component binary contain
-//! everything needed for replay:
+//! This module provides types and handlers for recording and replaying actor executions.
+//! The key insight is that the chain + component binary contain everything needed for replay:
 //!
 //! - **Chain**: Records which functions were called and their I/O (serialized bytes)
 //! - **Component**: Contains the type definitions (extracted at replay time)
+//!
+//! ## Recording
+//!
+//! During normal execution, handlers record host function calls using `HostFunctionCall`:
+//!
+//! ```ignore
+//! ctx.data_mut().record_host_function_call(
+//!     "theater:simple/timing",
+//!     "now",
+//!     &(),      // input
+//!     &result,  // output
+//! );
+//! ```
+//!
+//! ## Replaying
+//!
+//! To replay an actor, use the `ReplayHandler`:
+//!
+//! ```ignore
+//! let expected_chain = load_chain("actor_events.json")?;
+//! let mut registry = HandlerRegistry::new();
+//! registry.register(ReplayHandler::new(expected_chain));
+//! ```
+
+mod handler;
+
+pub use handler::{ReplayHandler, ReplayState};
 
 use serde::{Deserialize, Serialize};
 
