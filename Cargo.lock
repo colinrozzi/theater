@@ -4018,6 +4018,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "theater-replay-experimenting"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "hex",
+ "serde",
+ "serde_json",
+ "theater",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "theater-server"
 version = "0.2.1"
 dependencies = [

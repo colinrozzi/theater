@@ -1,0 +1,19 @@
+[package]
+name = "theater-replay-experimenting"
+version = "0.1.0"
+edition = "2021"
+description = "Experimental crate for developing Theater replay functionality"
+
+[dependencies]
+theater = { path = "../theater" }
+tokio = { version = "1", features = ["full"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+anyhow = "1.0"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+hex = "0.4"
+
+[[bin]]
+name = "replay-experiment"
+path = "src/main.rs"
