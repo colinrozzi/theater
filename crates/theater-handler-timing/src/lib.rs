@@ -98,7 +98,7 @@ impl TimingHandler {
 
     fn setup_host_functions_impl<E>(&mut self, actor_component: &mut ActorComponent<E>) -> Result<()>
     where
-        E: EventPayload + Clone + From<TimingEventData>,
+        E: EventPayload + Clone + From<TimingEventData> + From<theater::HostFunctionCall>,
     {
         // Record setup start
         actor_component.actor_store.record_handler_event(
@@ -143,16 +143,13 @@ impl TimingHandler {
                 move |mut ctx: StoreContextMut<'_, ActorStore<E>>, ()| -> Result<(u64,)> {
                     let now = Utc::now().timestamp_millis() as u64;
 
-                    ctx.data_mut().record_handler_event(
-                        "theater:simple/timing/now".to_string(),
-                        TimingEventData::NowCall {},
-                        Some("Getting current timestamp".to_string()),
-                    );
-
-                    ctx.data_mut().record_handler_event(
-                        "theater:simple/timing/now".to_string(),
-                        TimingEventData::NowResult { timestamp: now },
-                        Some(format!("Current timestamp: {}", now)),
+                    // Record with standardized HostFunctionCall format for replay
+                    ctx.data_mut().record_host_function_call(
+                        "theater:simple/timing",
+                        "now",
+                        &(),   // no input
+                        &now,  // output: timestamp
+                        Some(format!("now() -> {}", now)),
                     );
 
                     Ok((now,))
@@ -178,29 +175,24 @@ impl TimingHandler {
                 move |mut ctx: StoreContextMut<'_, ActorStore<E>>,
                       (duration,): (u64,)|
                       -> Box<dyn Future<Output = Result<(Result<(), String>,)>> + Send> {
-                    let _now = Utc::now().timestamp_millis() as u64;
-
-                    ctx.data_mut().record_handler_event(
-                        "theater:simple/timing/sleep".to_string(),
-                        TimingEventData::SleepCall { duration },
-                        Some(format!("Sleeping for {} ms", duration)),
-                    );
 
                     if let Err(e) = PermissionChecker::check_timing_operation(
                         &permissions_clone,
                         "sleep",
                         duration,
                     ) {
-                        ctx.data_mut().record_handler_event(
-                            "theater:simple/timing/permission-denied".to_string(),
-                            TimingEventData::PermissionDenied {
-                                operation: "sleep".to_string(),
-                                reason: e.to_string(),
-                            },
-                            Some(format!("Permission denied for sleep operation: {}", e)),
+                        let result: Result<(), String> = Err(format!("Permission denied: {}", e));
+
+                        // Record the call with error result for replay
+                        ctx.data_mut().record_host_function_call(
+                            "theater:simple/timing",
+                            "sleep",
+                            &duration,
+                            &result,
+                            Some(format!("sleep({}) -> permission denied", duration)),
                         );
 
-                        return Box::new(futures::future::ready(Ok((Err(format!("Permission denied: {}", e)),))));
+                        return Box::new(futures::future::ready(Ok((result,))));
                     }
 
                     let duration_clone = duration;
@@ -210,18 +202,18 @@ impl TimingHandler {
                             sleep(Duration::from_millis(duration_clone)).await;
                         }
 
-                        let _end_time = Utc::now().timestamp_millis() as u64;
+                        let result: Result<(), String> = Ok(());
 
-                        ctx.data_mut().record_handler_event(
-                            "theater:simple/timing/sleep".to_string(),
-                            TimingEventData::SleepResult {
-                                duration: duration_clone,
-                                success: true,
-                            },
-                            Some(format!("Successfully slept for {} ms", duration_clone)),
+                        // Record with standardized HostFunctionCall format for replay
+                        ctx.data_mut().record_host_function_call(
+                            "theater:simple/timing",
+                            "sleep",
+                            &duration_clone,
+                            &result,
+                            Some(format!("sleep({}) -> ok", duration_clone)),
                         );
 
-                        Ok((Ok(()),))
+                        Ok((result,))
                     })
                 },
             )
@@ -247,25 +239,19 @@ impl TimingHandler {
                       -> Box<dyn Future<Output = Result<(Result<(), String>,)>> + Send> {
                     let now = Utc::now().timestamp_millis() as u64;
 
-                    ctx.data_mut().record_handler_event(
-                        "theater:simple/timing/deadline".to_string(),
-                        TimingEventData::DeadlineCall { timestamp },
-                        Some(format!("Waiting until timestamp: {}", timestamp)),
-                    );
-
                     if timestamp <= now {
-                        let success_msg = "Deadline already passed, continuing immediately";
+                        let result: Result<(), String> = Ok(());
 
-                        ctx.data_mut().record_handler_event(
-                            "theater:simple/timing/deadline".to_string(),
-                            TimingEventData::DeadlineResult {
-                                timestamp,
-                                success: true,
-                            },
-                            Some(success_msg.to_string()),
+                        // Record immediately - deadline already passed
+                        ctx.data_mut().record_host_function_call(
+                            "theater:simple/timing",
+                            "deadline",
+                            &timestamp,
+                            &result,
+                            Some(format!("deadline({}) -> ok (already passed)", timestamp)),
                         );
 
-                        return Box::new(futures::future::ready(Ok((Ok(()),))));
+                        return Box::new(futures::future::ready(Ok((result,))));
                     }
 
                     let duration = timestamp - now;
@@ -275,16 +261,17 @@ impl TimingHandler {
                         "deadline",
                         duration,
                     ) {
-                        ctx.data_mut().record_handler_event(
-                            "theater:simple/timing/permission-denied".to_string(),
-                            TimingEventData::PermissionDenied {
-                                operation: "deadline".to_string(),
-                                reason: e.to_string(),
-                            },
-                            Some(format!("Permission denied for deadline operation: {}", e)),
+                        let result: Result<(), String> = Err(format!("Permission denied: {}", e));
+
+                        ctx.data_mut().record_host_function_call(
+                            "theater:simple/timing",
+                            "deadline",
+                            &timestamp,
+                            &result,
+                            Some(format!("deadline({}) -> permission denied", timestamp)),
                         );
 
-                        return Box::new(futures::future::ready(Ok((Err(format!("Permission denied: {}", e)),))));
+                        return Box::new(futures::future::ready(Ok((result,))));
                     }
 
                     let timestamp_clone = timestamp;
@@ -292,23 +279,18 @@ impl TimingHandler {
                     Box::new(async move {
                         sleep(Duration::from_millis(duration)).await;
 
-                        let end_time = Utc::now().timestamp_millis() as u64;
-                        let reached_deadline = end_time >= timestamp_clone;
+                        let result: Result<(), String> = Ok(());
 
-                        ctx.data_mut().record_handler_event(
-                            "theater:simple/timing/deadline".to_string(),
-                            TimingEventData::DeadlineResult {
-                                timestamp: timestamp_clone,
-                                success: reached_deadline,
-                            },
-                            Some(format!(
-                                "Deadline wait completed at {}. Target was {}",
-                                end_time,
-                                timestamp_clone
-                            )),
+                        // Record with standardized HostFunctionCall format for replay
+                        ctx.data_mut().record_host_function_call(
+                            "theater:simple/timing",
+                            "deadline",
+                            &timestamp_clone,
+                            &result,
+                            Some(format!("deadline({}) -> ok", timestamp_clone)),
                         );
 
-                        Ok((Ok(()),))
+                        Ok((result,))
                     })
                 },
             )
@@ -366,7 +348,7 @@ impl TimingHandler {
 
     fn add_export_functions_impl<E>(&self, _actor_instance: &mut ActorInstance<E>) -> Result<()>
     where
-        E: EventPayload + Clone + From<TimingEventData>,
+        E: EventPayload + Clone + From<TimingEventData> + From<theater::HostFunctionCall>,
     {
         info!("No export functions needed for timing handler");
         Ok(())
@@ -384,7 +366,7 @@ impl TimingHandler {
 
 impl<E> Handler<E> for TimingHandler
 where
-    E: EventPayload + Clone + From<TimingEventData>,
+    E: EventPayload + Clone + From<TimingEventData> + From<theater::HostFunctionCall>,
 {
     fn create_instance(&self) -> Box<dyn Handler<E>> {
         Box::new(self.clone())

@@ -44,6 +44,7 @@ pub mod id;
 pub mod logging;
 pub mod messages;
 pub mod metrics;
+pub mod replay;
 pub mod shutdown;
 pub mod store;
 pub mod theater_runtime;
@@ -69,6 +70,7 @@ pub use metrics::{
     ActorMetrics, MetricsCollector, OperationMetrics, OperationStats, ResourceMetrics,
 };
 pub use shutdown::{ShutdownController, ShutdownReceiver, ShutdownSignal, ShutdownType};
+pub use replay::HostFunctionCall;
 pub use store::{ContentRef, ContentStore, Label};
 pub use theater_runtime::TheaterRuntime;
 pub use wasm::{ActorComponent, ActorInstance, MemoryStats, WasmError};

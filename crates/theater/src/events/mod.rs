@@ -1,4 +1,5 @@
 use crate::chain::ChainEvent;
+use crate::replay::HostFunctionCall;
 use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
 
@@ -63,6 +64,7 @@ impl<T> EventPayload for T where
 /// - **Runtime**: Actor lifecycle events (init, shutdown, state changes, logs, errors)
 /// - **Wasm**: WebAssembly execution events (component creation, function calls)
 /// - **TheaterRuntime**: System-level events (actor loading, permissions, updates)
+/// - **HostFunction**: Standardized host function call recording (for replay)
 /// - **Handler**: Application-specific handler events (defined by application)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "category")]
@@ -82,6 +84,9 @@ where
 
     /// Core theater system events (actor loading, permissions, updates)
     TheaterRuntime(theater_runtime::TheaterRuntimeEventData),
+
+    /// Standardized host function call with full I/O (for replay)
+    HostFunction(HostFunctionCall),
 
     /// Handler-specific events (environment, HTTP, timing, etc.)
     Handler(H),
@@ -110,6 +115,11 @@ where
     pub fn handler(event: H) -> Self {
         TheaterEvents::Handler(event)
     }
+
+    /// Creates a HostFunction event variant
+    pub fn host_function(event: HostFunctionCall) -> Self {
+        TheaterEvents::HostFunction(event)
+    }
 }
 
 // Implement From for core event types so they can be automatically converted
@@ -137,6 +147,15 @@ where
 {
     fn from(event: theater_runtime::TheaterRuntimeEventData) -> Self {
         TheaterEvents::TheaterRuntime(event)
+    }
+}
+
+impl<H> From<HostFunctionCall> for TheaterEvents<H>
+where
+    H: Serialize + serde::de::DeserializeOwned + Clone + Send + Sync,
+{
+    fn from(event: HostFunctionCall) -> Self {
+        TheaterEvents::HostFunction(event)
     }
 }
 

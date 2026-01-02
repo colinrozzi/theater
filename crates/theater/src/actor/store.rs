@@ -283,6 +283,61 @@ where
         })
     }
 
+    /// Record a host function call with full I/O for replay.
+    ///
+    /// This is the standardized way to record handler host function calls.
+    /// The event captures the interface name, function name, and serialized
+    /// input/output, which is everything needed to replay the call.
+    ///
+    /// ## Parameters
+    ///
+    /// * `interface` - The WIT interface name (e.g., "theater:simple/timing")
+    /// * `function` - The function name (e.g., "now")
+    /// * `input` - Serialized input parameters
+    /// * `output` - Serialized output/return value
+    /// * `description` - Optional human-readable description
+    ///
+    /// ## Example
+    ///
+    /// ```rust,ignore
+    /// // Record a timing "now" call
+    /// ctx.data_mut().record_host_function_call(
+    ///     "theater:simple/timing",
+    ///     "now",
+    ///     &(),           // no input
+    ///     &timestamp,    // output
+    ///     Some(format!("now() -> {}", timestamp)),
+    /// );
+    /// ```
+    pub fn record_host_function_call<I, O>(
+        &self,
+        interface: &str,
+        function: &str,
+        input: &I,
+        output: &O,
+        description: Option<String>,
+    ) -> ChainEvent
+    where
+        E: From<crate::replay::HostFunctionCall>,
+        I: serde::Serialize,
+        O: serde::Serialize,
+    {
+        let host_call = crate::replay::HostFunctionCall {
+            interface: interface.to_string(),
+            function: function.to_string(),
+            input: serde_json::to_vec(input).unwrap_or_default(),
+            output: serde_json::to_vec(output).unwrap_or_default(),
+        };
+
+        let app_event: E = host_call.into();
+        self.record_event(ChainEventData {
+            event_type: format!("{}/{}", interface, function),
+            data: app_event,
+            timestamp: chrono::Utc::now().timestamp_millis() as u64,
+            description,
+        })
+    }
+
     /// # Verify the integrity of the event chain
     ///
     /// Checks that the event chain has not been tampered with.

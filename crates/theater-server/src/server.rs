@@ -166,6 +166,12 @@ impl From<IoEventData> for ServerEvents {
     }
 }
 
+impl From<theater::HostFunctionCall> for ServerEvents {
+    fn from(event: theater::HostFunctionCall) -> Self {
+        ServerEvents(theater::events::TheaterEvents::HostFunction(event))
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ManagementCommand {
     StartActor {

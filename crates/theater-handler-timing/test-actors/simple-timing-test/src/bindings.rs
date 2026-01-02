@@ -550,6 +550,272 @@ pub mod theater {
                 }
             }
         }
+        /// # Timing Interface
+        ///
+        /// Provides time-related functions for actors to get the current time and control execution timing.
+        ///
+        /// ## Purpose
+        ///
+        /// The timing interface gives actors access to time information and timing control
+        /// within the Theater runtime. It allows actors to:
+        /// - Get the current time
+        /// - Pause execution for specific durations
+        /// - Delay execution until specific points in time
+        ///
+        /// ## Example
+        ///
+        /// ```rust
+        /// use ntwk::theater::timing;
+        ///
+        /// async fn example() -> Result<(), String> {
+        /// // Get the current time
+        /// let now = timing::now();
+        /// println!("Current time: {}", now);
+        ///
+        /// // Sleep for 500 milliseconds
+        /// timing::sleep(500)?;
+        ///
+        /// // Wait until a specific future time
+        /// let five_seconds_later = now + 5000;
+        /// timing::deadline(five_seconds_later)?;
+        ///
+        /// Ok(())
+        /// }
+        /// ```
+        ///
+        /// ## Security
+        ///
+        /// The timing operations are managed by the Theater runtime, which may enforce:
+        /// - Rate limits on sleep operations to prevent resource exhaustion
+        /// - Maximum duration limits to prevent indefinite blocking
+        /// - Tracking and reporting of sleep patterns in the event chain
+        ///
+        /// ## Implementation Notes
+        ///
+        /// When actors call timing functions, the WebAssembly execution is suspended without
+        /// blocking the entire runtime. This allows the runtime to continue processing other
+        /// actors while an actor is waiting.
+        #[allow(dead_code, async_fn_in_trait, unused_imports, clippy::all)]
+        pub mod timing {
+            #[used]
+            #[doc(hidden)]
+            static __FORCE_SECTION_REF: fn() = super::super::super::__link_custom_section_describing_imports;
+            use super::super::super::_rt;
+            #[allow(unused_unsafe, clippy::all)]
+            /// # Get current time
+            ///
+            /// Returns the current time in milliseconds since the UNIX epoch (January 1, 1970 UTC).
+            ///
+            /// ## Returns
+            ///
+            /// The current timestamp in milliseconds
+            ///
+            /// ## Example
+            ///
+            /// ```rust
+            /// use ntwk::theater::timing;
+            ///
+            /// // Get current timestamp
+            /// let now = timing::now();
+            ///
+            /// // Convert to seconds
+            /// let seconds_since_epoch = now / 1000;
+            /// ```
+            ///
+            /// ## Implementation Notes
+            ///
+            /// The time value is consistent across the entire Theater runtime, ensuring that
+            /// all actors have a synchronized view of time.
+            pub fn now() -> u64 {
+                unsafe {
+                    #[cfg(target_arch = "wasm32")]
+                    #[link(wasm_import_module = "theater:simple/timing")]
+                    unsafe extern "C" {
+                        #[link_name = "now"]
+                        fn wit_import0() -> i64;
+                    }
+                    #[cfg(not(target_arch = "wasm32"))]
+                    unsafe extern "C" fn wit_import0() -> i64 {
+                        unreachable!()
+                    }
+                    let ret = unsafe { wit_import0() };
+                    ret as u64
+                }
+            }
+            #[allow(unused_unsafe, clippy::all)]
+            /// # Pause execution
+            ///
+            /// Pauses the execution of the actor for the specified number of milliseconds.
+            ///
+            /// ## Parameters
+            ///
+            /// * `duration` - Number of milliseconds to sleep
+            ///
+            /// ## Returns
+            ///
+            /// * `Ok(_)` - Sleep completed successfully
+            /// * `Err(string)` - Error message if sleep was interrupted or not allowed
+            ///
+            /// ## Example
+            ///
+            /// ```rust
+            /// use ntwk::theater::timing;
+            ///
+            /// // Sleep for 1 second
+            /// timing::sleep(1000)?;
+            ///
+            /// // Sleep for 100ms
+            /// timing::sleep(100)?;
+            /// ```
+            ///
+            /// ## Security
+            ///
+            /// The runtime may enforce limits on how long an actor can sleep to prevent
+            /// resource exhaustion or denial of service. Sleep operations are recorded
+            /// in the actor's event chain.
+            pub fn sleep(duration: u64) -> Result<(), _rt::String> {
+                unsafe {
+                    #[cfg_attr(target_pointer_width = "64", repr(align(8)))]
+                    #[cfg_attr(target_pointer_width = "32", repr(align(4)))]
+                    struct RetArea(
+                        [::core::mem::MaybeUninit<
+                            u8,
+                        >; 3 * ::core::mem::size_of::<*const u8>()],
+                    );
+                    let mut ret_area = RetArea(
+                        [::core::mem::MaybeUninit::uninit(); 3
+                            * ::core::mem::size_of::<*const u8>()],
+                    );
+                    let ptr0 = ret_area.0.as_mut_ptr().cast::<u8>();
+                    #[cfg(target_arch = "wasm32")]
+                    #[link(wasm_import_module = "theater:simple/timing")]
+                    unsafe extern "C" {
+                        #[link_name = "sleep"]
+                        fn wit_import1(_: i64, _: *mut u8);
+                    }
+                    #[cfg(not(target_arch = "wasm32"))]
+                    unsafe extern "C" fn wit_import1(_: i64, _: *mut u8) {
+                        unreachable!()
+                    }
+                    unsafe { wit_import1(_rt::as_i64(&duration), ptr0) };
+                    let l2 = i32::from(*ptr0.add(0).cast::<u8>());
+                    let result6 = match l2 {
+                        0 => {
+                            let e = ();
+                            Ok(e)
+                        }
+                        1 => {
+                            let e = {
+                                let l3 = *ptr0
+                                    .add(::core::mem::size_of::<*const u8>())
+                                    .cast::<*mut u8>();
+                                let l4 = *ptr0
+                                    .add(2 * ::core::mem::size_of::<*const u8>())
+                                    .cast::<usize>();
+                                let len5 = l4;
+                                let bytes5 = _rt::Vec::from_raw_parts(
+                                    l3.cast(),
+                                    len5,
+                                    len5,
+                                );
+                                _rt::string_lift(bytes5)
+                            };
+                            Err(e)
+                        }
+                        _ => _rt::invalid_enum_discriminant(),
+                    };
+                    result6
+                }
+            }
+            #[allow(unused_unsafe, clippy::all)]
+            /// # Wait until specific time
+            ///
+            /// Pauses execution until the specified timestamp is reached.
+            ///
+            /// ## Parameters
+            ///
+            /// * `timestamp` - Target time in milliseconds since UNIX epoch
+            ///
+            /// ## Returns
+            ///
+            /// * `Ok(_)` - Deadline was reached successfully
+            /// * `Err(string)` - Error message if the wait was interrupted or not allowed
+            ///
+            /// ## Example
+            ///
+            /// ```rust
+            /// use ntwk::theater::timing;
+            ///
+            /// // Wait until a specific time
+            /// let target_time = 1672531200000; // Jan 1, 2023 00:00:00 UTC
+            /// timing::deadline(target_time)?;
+            ///
+            /// // Wait until 10 seconds from now
+            /// let now = timing::now();
+            /// let ten_seconds_later = now + 10000;
+            /// timing::deadline(ten_seconds_later)?;
+            /// ```
+            ///
+            /// ## Implementation Notes
+            ///
+            /// - If the specified timestamp is in the past, the function returns immediately
+            /// - The runtime may reject excessive deadline values that are too far in the future
+            /// - Deadline operations are recorded in the actor's event chain
+            pub fn deadline(timestamp: u64) -> Result<(), _rt::String> {
+                unsafe {
+                    #[cfg_attr(target_pointer_width = "64", repr(align(8)))]
+                    #[cfg_attr(target_pointer_width = "32", repr(align(4)))]
+                    struct RetArea(
+                        [::core::mem::MaybeUninit<
+                            u8,
+                        >; 3 * ::core::mem::size_of::<*const u8>()],
+                    );
+                    let mut ret_area = RetArea(
+                        [::core::mem::MaybeUninit::uninit(); 3
+                            * ::core::mem::size_of::<*const u8>()],
+                    );
+                    let ptr0 = ret_area.0.as_mut_ptr().cast::<u8>();
+                    #[cfg(target_arch = "wasm32")]
+                    #[link(wasm_import_module = "theater:simple/timing")]
+                    unsafe extern "C" {
+                        #[link_name = "deadline"]
+                        fn wit_import1(_: i64, _: *mut u8);
+                    }
+                    #[cfg(not(target_arch = "wasm32"))]
+                    unsafe extern "C" fn wit_import1(_: i64, _: *mut u8) {
+                        unreachable!()
+                    }
+                    unsafe { wit_import1(_rt::as_i64(&timestamp), ptr0) };
+                    let l2 = i32::from(*ptr0.add(0).cast::<u8>());
+                    let result6 = match l2 {
+                        0 => {
+                            let e = ();
+                            Ok(e)
+                        }
+                        1 => {
+                            let e = {
+                                let l3 = *ptr0
+                                    .add(::core::mem::size_of::<*const u8>())
+                                    .cast::<*mut u8>();
+                                let l4 = *ptr0
+                                    .add(2 * ::core::mem::size_of::<*const u8>())
+                                    .cast::<usize>();
+                                let len5 = l4;
+                                let bytes5 = _rt::Vec::from_raw_parts(
+                                    l3.cast(),
+                                    len5,
+                                    len5,
+                                );
+                                _rt::string_lift(bytes5)
+                            };
+                            Err(e)
+                        }
+                        _ => _rt::invalid_enum_discriminant(),
+                    };
+                    result6
+                }
+            }
+        }
     }
 }
 #[rustfmt::skip]
@@ -823,6 +1089,29 @@ mod _rt {
         let layout = alloc::Layout::from_size_align_unchecked(size, align);
         alloc::dealloc(ptr, layout);
     }
+    pub fn as_i64<T: AsI64>(t: T) -> i64 {
+        t.as_i64()
+    }
+    pub trait AsI64 {
+        fn as_i64(self) -> i64;
+    }
+    impl<'a, T: Copy + AsI64> AsI64 for &'a T {
+        fn as_i64(self) -> i64 {
+            (*self).as_i64()
+        }
+    }
+    impl AsI64 for i64 {
+        #[inline]
+        fn as_i64(self) -> i64 {
+            self as i64
+        }
+    }
+    impl AsI64 for u64 {
+        #[inline]
+        fn as_i64(self) -> i64 {
+            self as i64
+        }
+    }
     #[cfg(target_arch = "wasm32")]
     pub fn run_ctors_once() {
         wit_bindgen_rt::run_ctors_once();
@@ -848,7 +1137,7 @@ mod _rt {
 /// ```
 #[allow(unused_macros)]
 #[doc(hidden)]
-macro_rules! __export_runtime_test_impl {
+macro_rules! __export_simple_timing_test_impl {
     ($ty:ident) => {
         self::export!($ty with_types_in self);
     };
@@ -859,16 +1148,16 @@ macro_rules! __export_runtime_test_impl {
     };
 }
 #[doc(inline)]
-pub(crate) use __export_runtime_test_impl as export;
+pub(crate) use __export_simple_timing_test_impl as export;
 #[cfg(target_arch = "wasm32")]
 #[unsafe(
-    link_section = "component-type:wit-bindgen:0.41.0:test:runtime:runtime-test:encoded world"
+    link_section = "component-type:wit-bindgen:0.41.0:test:simple-timing:simple-timing-test:encoded world"
 )]
 #[doc(hidden)]
 #[allow(clippy::octal_escapes)]
-pub static __WIT_BINDGEN_COMPONENT_TYPE: [u8; 902] = *b"\
-\0asm\x0d\0\x01\0\0\x19\x16wit-component-encoding\x04\0\x07\x83\x06\x01A\x02\x01\
-A\x08\x01B\x17\x01s\x04\0\x08actor-id\x03\0\0\x01s\x04\0\x0achannel-id\x03\0\x02\
+pub static __WIT_BINDGEN_COMPONENT_TYPE: [u8; 1021] = *b"\
+\0asm\x0d\0\x01\0\0\x19\x16wit-component-encoding\x04\0\x07\xf4\x06\x01A\x02\x01\
+A\x0a\x01B\x17\x01s\x04\0\x08actor-id\x03\0\0\x01s\x04\0\x0achannel-id\x03\0\x02\
 \x01p}\x01k\x04\x01r\x02\x08accepted\x7f\x07message\x05\x04\0\x0echannel-accept\x03\
 \0\x06\x01kw\x01r\x03\x0aevent-types\x06parent\x08\x04data\x04\x04\0\x05event\x03\
 \0\x09\x01r\x02\x04hashw\x05event\x0a\x04\0\x0ameta-event\x03\0\x0b\x01p\x0c\x01\
@@ -882,11 +1171,14 @@ imple/types\x05\0\x02\x03\0\0\x05chain\x02\x03\0\0\x08actor-id\x01B\x0d\x02\x03\
 \x01\x01\x04\0\x05chain\x03\0\0\x02\x03\x02\x01\x02\x04\0\x08actor-id\x03\0\x02\x01\
 @\x01\x03msgs\x01\0\x04\0\x03log\x01\x04\x01@\0\0\x01\x04\0\x09get-chain\x01\x05\
 \x01p}\x01k\x06\x01j\0\x01s\x01@\x01\x04data\x07\0\x08\x04\0\x08shutdown\x01\x09\
-\x03\0\x16theater:simple/runtime\x05\x03\x01B\x07\x01p}\x01k\0\x01o\x01s\x01o\x01\
-\x01\x01j\x01\x03\x01s\x01@\x02\x05state\x01\x06params\x02\0\x04\x04\0\x04init\x01\
-\x05\x04\0\x14theater:simple/actor\x05\x04\x04\0\x19test:runtime/runtime-test\x04\
-\0\x0b\x12\x01\0\x0cruntime-test\x03\0\0\0G\x09producers\x01\x0cprocessed-by\x02\
-\x0dwit-component\x070.227.1\x10wit-bindgen-rust\x060.41.0";
+\x03\0\x16theater:simple/runtime\x05\x03\x01B\x07\x01@\0\0w\x04\0\x03now\x01\0\x01\
+j\0\x01s\x01@\x01\x08durationw\0\x01\x04\0\x05sleep\x01\x02\x01@\x01\x09timestam\
+pw\0\x01\x04\0\x08deadline\x01\x03\x03\0\x15theater:simple/timing\x05\x04\x01B\x07\
+\x01p}\x01k\0\x01o\x01s\x01o\x01\x01\x01j\x01\x03\x01s\x01@\x02\x05state\x01\x06\
+params\x02\0\x04\x04\0\x04init\x01\x05\x04\0\x14theater:simple/actor\x05\x05\x04\
+\0%test:simple-timing/simple-timing-test\x04\0\x0b\x18\x01\0\x12simple-timing-te\
+st\x03\0\0\0G\x09producers\x01\x0cprocessed-by\x02\x0dwit-component\x070.227.1\x10\
+wit-bindgen-rust\x060.41.0";
 #[inline(never)]
 #[doc(hidden)]
 pub fn __link_custom_section_describing_imports() {
