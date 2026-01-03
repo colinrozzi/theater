@@ -7,8 +7,10 @@
 use crate::actor::runtime::ActorRuntime;
 use crate::actor::types::{ActorControl, ActorError, ActorInfo, ActorOperation};
 use crate::chain::ChainEvent;
+use crate::config::actor_manifest::HandlerConfig;
 use crate::handler::HandlerRegistry;
 use crate::id::TheaterId;
+use crate::replay::ReplayHandler;
 use crate::messages::{ActorMessage, ActorStatus, TheaterCommand};
 use crate::messages::{
     ActorResult, ChannelId, ChannelParticipant, ChildError, ChildExternalStop, ChildResult,
@@ -607,12 +609,14 @@ where
 
         self.chains.insert(actor_id.clone(), chain.clone());
 
+        // Check if manifest specifies a replay handler and create modified registry if so
+        let handler_registry = self.create_handler_registry_for_manifest(&manifest).await?;
+
         // Start the actor in a detached task
         let actor_id_for_task = actor_id.clone();
         let actor_name = manifest.name.clone();
         let manifest_clone = manifest.clone();
         let engine = self.wasm_engine.clone();
-        let handler_registry = self.handler_registry.clone();
         let actor_runtime_process = tokio::spawn(async move {
             let _actor_runtime = ActorRuntime::start(
                 actor_id_for_task.clone(),
@@ -1114,6 +1118,58 @@ where
             .iter()
             .map(|(id, participants)| (id.clone(), participants.iter().cloned().collect()))
             .collect()
+    }
+
+    /// Creates a handler registry for an actor based on its manifest.
+    ///
+    /// If the manifest contains a replay handler configuration, this method
+    /// will create a new registry with the ReplayHandler included. Otherwise,
+    /// it returns a clone of the runtime's default handler registry.
+    async fn create_handler_registry_for_manifest(
+        &self,
+        manifest: &ManifestConfig,
+    ) -> Result<HandlerRegistry<E>> {
+        // Check if the manifest has a replay handler config
+        for handler_config in &manifest.handlers {
+            if let HandlerConfig::Replay { config } = handler_config {
+                info!(
+                    "Found replay handler config, loading chain from: {:?}",
+                    config.chain
+                );
+
+                // Load the chain from the file
+                let chain_bytes = tokio::fs::read(&config.chain).await.map_err(|e| {
+                    TheaterRuntimeError::ActorInitializationError(format!(
+                        "Failed to read replay chain file {:?}: {}",
+                        config.chain, e
+                    ))
+                })?;
+
+                let chain_events: Vec<ChainEvent> =
+                    serde_json::from_slice(&chain_bytes).map_err(|e| {
+                        TheaterRuntimeError::ActorInitializationError(format!(
+                            "Failed to parse replay chain JSON: {}",
+                            e
+                        ))
+                    })?;
+
+                info!(
+                    "Loaded replay chain with {} events from {:?}",
+                    chain_events.len(),
+                    config.chain
+                );
+
+                // Clone the base registry and prepend ReplayHandler
+                // ReplayHandler will intercept imports, other handlers will handle exports
+                let mut registry = self.handler_registry.clone();
+                registry.prepend(ReplayHandler::new(chain_events));
+
+                return Ok(registry);
+            }
+        }
+
+        // No replay config, use the default registry
+        Ok(self.handler_registry.clone())
     }
 
     /// Stops the entire runtime and all actors gracefully.

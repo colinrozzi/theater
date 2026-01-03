@@ -154,6 +154,19 @@ pub enum HandlerConfig {
         #[serde(flatten)]
         config: WasiHttpHandlerConfig,
     },
+    #[serde(rename = "replay")]
+    Replay {
+        #[serde(flatten)]
+        config: ReplayHandlerConfig,
+    },
+}
+
+/// Configuration for the Replay handler
+/// This handler replays an actor from a recorded event chain
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ReplayHandlerConfig {
+    /// Path to the JSON file containing the recorded event chain
+    pub chain: PathBuf,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

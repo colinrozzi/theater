@@ -1,7 +1,8 @@
 //! Replay Experimenting
 //!
 //! This crate experiments with the replay functionality in Theater.
-//! It demonstrates recording an actor run and then replaying it.
+//! It demonstrates recording an actor run and then replaying it using
+//! manifest-based configuration.
 
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
@@ -15,7 +16,6 @@ use theater::events::runtime::RuntimeEventData;
 use theater::handler::HandlerRegistry;
 use theater::messages::TheaterCommand;
 use theater::theater_runtime::TheaterRuntime;
-use theater::ReplayHandler;
 
 use theater_handler_runtime::RuntimeHandler;
 
@@ -46,6 +46,9 @@ impl From<theater::events::wasm::WasmEventData> for TestEvents {
     }
 }
 
+/// Path to save the recorded chain
+const CHAIN_PATH: &str = "/tmp/recorded_chain.json";
+
 /// Get the path to the test actor's WASM component
 fn get_test_wasm_path() -> PathBuf {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
@@ -54,14 +57,14 @@ fn get_test_wasm_path() -> PathBuf {
     manifest_dir.join("../theater-handler-runtime/test-actors/runtime-test/target/wasm32-unknown-unknown/release/runtime_test.wasm")
 }
 
-/// Create a manifest for the test actor
-fn create_test_manifest_content() -> String {
+/// Create a manifest for recording mode
+fn create_recording_manifest() -> String {
     let wasm_path = get_test_wasm_path();
     format!(
         r#"name = "runtime-test"
 version = "0.1.0"
 component = "{}"
-description = "Test actor for replay handler"
+description = "Test actor for replay handler - recording mode"
 save_chain = true
 
 [[handler]]
@@ -71,33 +74,35 @@ type = "runtime"
     )
 }
 
-/// Creates a handler registry for normal (recording) mode
-fn create_recording_registry(
+/// Create a manifest for replay mode using the recorded chain
+fn create_replay_manifest() -> String {
+    let wasm_path = get_test_wasm_path();
+    format!(
+        r#"name = "runtime-test-replay"
+version = "0.1.0"
+component = "{}"
+description = "Test actor for replay handler - replay mode"
+save_chain = true
+
+[[handler]]
+type = "replay"
+chain = "{}"
+
+[[handler]]
+type = "runtime"
+"#,
+        wasm_path.display(),
+        CHAIN_PATH
+    )
+}
+
+/// Creates a handler registry with RuntimeHandler
+fn create_base_registry(
     theater_tx: mpsc::Sender<TheaterCommand>,
 ) -> HandlerRegistry<TestEvents> {
     let mut registry = HandlerRegistry::new();
 
     // Runtime handler - provides theater:simple/runtime interface
-    // This is the only handler needed for the runtime-test actor
-    let runtime_config = RuntimeHostConfig {};
-    registry.register(RuntimeHandler::new(runtime_config, theater_tx, None));
-
-    registry
-}
-
-/// Creates a handler registry for replay mode
-fn create_replay_registry(
-    expected_chain: Vec<theater::chain::ChainEvent>,
-    theater_tx: mpsc::Sender<TheaterCommand>,
-) -> HandlerRegistry<TestEvents> {
-    let mut registry = HandlerRegistry::new();
-
-    // Replay handler - intercepts all imports and returns recorded outputs
-    // Must be registered FIRST so it intercepts imports before RuntimeHandler
-    registry.register(ReplayHandler::new(expected_chain));
-
-    // RuntimeHandler is still needed to register export functions like
-    // theater:simple/actor.init - the ReplayHandler intercepts the imports
     let runtime_config = RuntimeHostConfig {};
     registry.register(RuntimeHandler::new(runtime_config, theater_tx, None));
 
@@ -125,10 +130,10 @@ async fn main() -> Result<()> {
     println!("\n=== Phase 1: Recording ===\n");
 
     // --- Phase 1: Record a run ---
-    let manifest_content = create_test_manifest_content();
+    let recording_manifest = create_recording_manifest();
 
     let (theater_tx, theater_rx) = mpsc::channel::<TheaterCommand>(32);
-    let handler_registry = create_recording_registry(theater_tx.clone());
+    let handler_registry = create_base_registry(theater_tx.clone());
 
     let mut runtime: TheaterRuntime<TestEvents> =
         TheaterRuntime::new(theater_tx.clone(), theater_rx, None, handler_registry).await?;
@@ -142,7 +147,7 @@ async fn main() -> Result<()> {
     let (response_tx, response_rx) = tokio::sync::oneshot::channel();
     theater_tx
         .send(TheaterCommand::SpawnActor {
-            manifest_path: manifest_content.clone(),
+            manifest_path: recording_manifest,
             init_bytes: None,
             parent_id: None,
             response_tx,
@@ -192,13 +197,12 @@ async fn main() -> Result<()> {
 
     println!("\nRecorded chain has {} events", recorded_chain.len());
 
-    // Save chain to file for later use
+    // Save chain to file for replay
     let chain_json = serde_json::to_string_pretty(&recorded_chain)?;
-    let chain_path = "/tmp/recorded_chain.json";
-    std::fs::write(chain_path, &chain_json)?;
-    println!("Saved chain to {}", chain_path);
+    std::fs::write(CHAIN_PATH, &chain_json)?;
+    println!("Saved chain to {}", CHAIN_PATH);
 
-    // Stop the first actor and runtime
+    // Stop the first actor
     let (stop_tx, stop_rx) = tokio::sync::oneshot::channel();
     theater_tx
         .send(TheaterCommand::StopActor {
@@ -207,33 +211,35 @@ async fn main() -> Result<()> {
         })
         .await?;
     let _ = timeout(Duration::from_secs(5), stop_rx).await;
-    drop(theater_tx);
-    let _ = timeout(Duration::from_secs(5), runtime_handle).await;
 
     if recorded_chain.is_empty() {
         println!("No events recorded, skipping replay test");
+        drop(theater_tx);
+        let _ = timeout(Duration::from_secs(5), runtime_handle).await;
         return Ok(());
     }
 
-    println!("\n=== Phase 2: Replay ===\n");
+    println!("\n=== Phase 2: Replay (via manifest) ===\n");
 
-    // --- Phase 2: Replay using the recorded chain ---
-    let (theater_tx2, theater_rx2) = mpsc::channel::<TheaterCommand>(32);
-    let replay_registry = create_replay_registry(recorded_chain.clone(), theater_tx2.clone());
+    // --- Phase 2: Replay using manifest-configured ReplayHandler ---
+    // The replay manifest includes:
+    //   [[handler]]
+    //   type = "replay"
+    //   chain = "/tmp/recorded_chain.json"
+    // This tells the runtime to load the chain and prepend a ReplayHandler
 
-    let mut replay_runtime: TheaterRuntime<TestEvents> =
-        TheaterRuntime::new(theater_tx2.clone(), theater_rx2, None, replay_registry).await?;
-
-    let replay_runtime_handle = tokio::spawn(async move { replay_runtime.run().await });
+    let replay_manifest = create_replay_manifest();
+    println!("Replay manifest:\n{}", replay_manifest);
 
     // Create subscription for replay events
     let (replay_event_tx, mut replay_event_rx) = mpsc::channel(100);
 
-    // Spawn the actor in replay mode
+    // Spawn the replay actor using the same runtime
+    // The runtime will detect the replay handler config and load the chain
     let (response_tx2, response_rx2) = tokio::sync::oneshot::channel();
-    theater_tx2
+    theater_tx
         .send(TheaterCommand::SpawnActor {
-            manifest_path: manifest_content,
+            manifest_path: replay_manifest,
             init_bytes: None,
             parent_id: None,
             response_tx: response_tx2,
@@ -290,7 +296,7 @@ async fn main() -> Result<()> {
 
             // Stop the replay actor
             let (stop_tx2, stop_rx2) = tokio::sync::oneshot::channel();
-            let _ = theater_tx2
+            let _ = theater_tx
                 .send(TheaterCommand::StopActor {
                     actor_id: replay_actor_id,
                     response_tx: stop_tx2,
@@ -309,8 +315,9 @@ async fn main() -> Result<()> {
         }
     }
 
-    drop(theater_tx2);
-    let _ = timeout(Duration::from_secs(5), replay_runtime_handle).await;
+    // Shutdown the runtime
+    drop(theater_tx);
+    let _ = timeout(Duration::from_secs(5), runtime_handle).await;
 
     println!("\n=== Experiment Complete ===");
     Ok(())

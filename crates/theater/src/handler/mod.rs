@@ -66,6 +66,13 @@ where
         self.handlers.push(Box::new(handler));
     }
 
+    /// Prepend a handler to the beginning of the registry.
+    /// This is useful when you want a handler to be checked first
+    /// (e.g., ReplayHandler should intercept imports before other handlers).
+    pub fn prepend<H: Handler<E>>(&mut self, handler: H) {
+        self.handlers.insert(0, Box::new(handler));
+    }
+
     pub fn setup_handlers(
         &mut self,
         actor_component: &mut ActorComponent<E>,
