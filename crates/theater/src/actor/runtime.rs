@@ -234,7 +234,7 @@ impl<E: EventPayload + Clone> ActorRuntime<E> {
                 manifest: config.clone(),
             }.into(),
             timestamp: chrono::Utc::now().timestamp_millis() as u64,
-            description: format!("Initial values set up for [{}]", id).into(),
+            description: Some("Initial values set up".to_string()),
         });
 
         // ----------------- Checkpoint Store Manifest ----------------
@@ -270,7 +270,7 @@ impl<E: EventPayload + Clone> ActorRuntime<E> {
                 manifest: config.clone(),
             }.into(),
             timestamp: chrono::Utc::now().timestamp_millis() as u64,
-            description: format!("Manifest for actor [{}] stored at [{}]", id, manifest_id).into(),
+            description: format!("Manifest stored at [{}]", manifest_id).into(),
         });
 
         // ----------------- Checkpoint Create Handlers -----------------
@@ -306,7 +306,7 @@ impl<E: EventPayload + Clone> ActorRuntime<E> {
             event_type: "theater-runtime".to_string(),
             data: TheaterRuntimeEventData::CreatingHandlers.into(),
             timestamp: chrono::Utc::now().timestamp_millis() as u64,
-            description: format!("Created handlers for actor [{}]", id).into(),
+            description: Some("Created handlers".to_string()),
         });
 
         // ----------------- Checkpoint Setup Handlers -----------------
@@ -329,7 +329,7 @@ impl<E: EventPayload + Clone> ActorRuntime<E> {
             event_type: "theater-runtime".to_string(),
             data: TheaterRuntimeEventData::CreatingHandlers.into(),
             timestamp: chrono::Utc::now().timestamp_millis() as u64,
-            description: format!("Set up handlers for actor [{}]", id).into(),
+            description: Some("Set up handlers".to_string()),
         });
 
         // ----------------- Checkpoint Setup Host Functions -----------------
@@ -364,7 +364,7 @@ impl<E: EventPayload + Clone> ActorRuntime<E> {
             event_type: "theater-runtime".to_string(),
             data: TheaterRuntimeEventData::CreatingHandlers.into(),
             timestamp: chrono::Utc::now().timestamp_millis() as u64,
-            description: format!("Set up host functions for actor [{}]", id).into(),
+            description: Some("Set up host functions".to_string()),
         });
 
         // ----------------- Checkpoint Instantiate Actor -----------------
@@ -397,7 +397,7 @@ impl<E: EventPayload + Clone> ActorRuntime<E> {
                 event_type: "theater-runtime".to_string(),
                 data: TheaterRuntimeEventData::InstantiatingActor.into(),
                 timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                description: format!("Instantiated actor [{}]", id).into(),
+                description: Some("Instantiated actor".to_string()),
             });
 
         // ----------------- Checkpoint Add Export Functions -----------------
@@ -424,7 +424,7 @@ impl<E: EventPayload + Clone> ActorRuntime<E> {
                 event_type: "theater-runtime".to_string(),
                 data: TheaterRuntimeEventData::CreatingHandlers.into(),
                 timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                description: format!("Added export functions for actor [{}]", id).into(),
+                description: Some("Added export functions".to_string()),
             });
 
         // ----------------- Checkpoint Initialize State -----------------
@@ -457,7 +457,7 @@ impl<E: EventPayload + Clone> ActorRuntime<E> {
                 event_type: "theater-runtime".to_string(),
                 data: TheaterRuntimeEventData::InitializingState.into(),
                 timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                description: format!("Initialized state for actor [{}]", id).into(),
+                description: Some("Initialized state".to_string()),
             });
 
         // ----------------- Checkpoint Finalize Setup -----------------
@@ -530,7 +530,7 @@ impl<E: EventPayload + Clone> ActorRuntime<E> {
                         event_type: "theater-runtime".to_string(),
                         data: TheaterRuntimeEventData::ActorReady.into(),
                         timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                        description: format!("Actor [{}] is ready", id).into(),
+                        description: Some("Actor is ready".to_string()),
                     });
             }
         }
