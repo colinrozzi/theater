@@ -100,18 +100,21 @@ where
             );
 
             // Check if any of handler's imports match component's imports
-            let imports_match = handler_imports
-                .as_ref()
-                .map_or(false, |imports| {
-                    imports.iter().any(|import| {
-                        let matches = component_imports.contains(import);
-                        debug!(
-                            "Checking import '{}' against component imports: {}",
-                            import, matches
-                        );
-                        matches
-                    })
-                });
+            // None means "match all imports" (useful for catch-all handlers like ReplayHandler)
+            let imports_match = match handler_imports.as_ref() {
+                None => {
+                    debug!("Handler '{}' has None imports - matches all", handler.name());
+                    true
+                }
+                Some(imports) => imports.iter().any(|import| {
+                    let matches = component_imports.contains(import);
+                    debug!(
+                        "Checking import '{}' against component imports: {}",
+                        import, matches
+                    );
+                    matches
+                }),
+            };
 
             // Check if any of handler's exports match component's exports
             let exports_match = handler_exports

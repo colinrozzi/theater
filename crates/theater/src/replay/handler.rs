@@ -326,10 +326,10 @@ where
     }
 
     fn imports(&self) -> Option<Vec<String>> {
-        // Return all interfaces discovered from the chain
-        // This allows the replay handler to be matched to components
-        // that used those interfaces in the original run
-        Some(self.state.interfaces())
+        // Return None to indicate "match all imports"
+        // The ReplayHandler will register stubs for any unsatisfied imports
+        // during setup_host_functions
+        None
     }
 
     fn exports(&self) -> Option<Vec<String>> {
