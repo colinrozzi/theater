@@ -109,6 +109,18 @@ fn create_base_registry(
     registry
 }
 
+/// Format event data as readable string
+fn format_event_data(event: &theater::chain::ChainEvent) -> String {
+    if event.data.is_empty() {
+        return "<empty>".to_string();
+    }
+
+    match String::from_utf8(event.data.clone()) {
+        Ok(s) => s,
+        Err(_) => format!("<{} bytes binary>", event.data.len()),
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     tracing_subscriber::fmt()
@@ -293,6 +305,61 @@ async fn main() -> Result<()> {
             println!("\n=== Comparison ===\n");
             println!("Original events: {}", recorded_chain.len());
             println!("Replay events:   {}", replay_chain.len());
+
+            // Print hashes side by side
+            println!("\n=== Hash Comparison ===\n");
+            println!(
+                "{:<4} {:<40} {:<40} {:<30}",
+                "#", "Original Hash", "Replay Hash", "Event Type"
+            );
+            println!("{}", "-".repeat(120));
+
+            let max_len = recorded_chain.len().max(replay_chain.len());
+            for i in 0..max_len {
+                let orig_hash = recorded_chain
+                    .get(i)
+                    .map(|e| hex::encode(&e.hash))
+                    .unwrap_or_else(|| "-".to_string());
+                let replay_hash = replay_chain
+                    .get(i)
+                    .map(|e| hex::encode(&e.hash))
+                    .unwrap_or_else(|| "-".to_string());
+                let event_type = recorded_chain
+                    .get(i)
+                    .map(|e| e.event_type.clone())
+                    .or_else(|| replay_chain.get(i).map(|e| e.event_type.clone()))
+                    .unwrap_or_else(|| "-".to_string());
+
+                let match_indicator = if orig_hash == replay_hash { "✓" } else { "✗" };
+
+                println!(
+                    "{:<4} {:<40} {:<40} {:<30} {}",
+                    i,
+                    &orig_hash[..orig_hash.len().min(38)],
+                    &replay_hash[..replay_hash.len().min(38)],
+                    &event_type[..event_type.len().min(28)],
+                    match_indicator
+                );
+            }
+
+            // Print chain contents
+            println!("\n=== Original Chain ===\n");
+            for (i, event) in recorded_chain.iter().enumerate() {
+                println!("--- Event {} ---", i);
+                println!("Type: {}", event.event_type);
+                println!("Desc: {}", event.description.as_deref().unwrap_or("-"));
+                println!("Data: {}", format_event_data(event));
+                println!();
+            }
+
+            println!("\n=== Replay Chain ===\n");
+            for (i, event) in replay_chain.iter().enumerate() {
+                println!("--- Event {} ---", i);
+                println!("Type: {}", event.event_type);
+                println!("Desc: {}", event.description.as_deref().unwrap_or("-"));
+                println!("Data: {}", format_event_data(event));
+                println!();
+            }
 
             // Stop the replay actor
             let (stop_tx2, stop_rx2) = tokio::sync::oneshot::channel();
