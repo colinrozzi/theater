@@ -14,6 +14,7 @@ use theater::config::actor_manifest::RuntimeHostConfig;
 use theater::config::permissions::RuntimePermissions;
 use theater::events::{runtime::RuntimeEventData, ChainEventData, EventPayload};
 use theater::handler::{Handler, HandlerContext, SharedActorInstance};
+use theater::replay::HostFunctionCall;
 use theater::messages::TheaterCommand;
 use theater::shutdown::ShutdownReceiver;
 use theater::wasm::{ActorComponent, ActorInstance};
@@ -47,7 +48,8 @@ impl<E> Handler<E> for RuntimeHandler
 where
     E: EventPayload + Clone + From<RuntimeEventData>
         + From<theater::events::theater_runtime::TheaterRuntimeEventData>
-        + From<theater::events::wasm::WasmEventData>,
+        + From<theater::events::wasm::WasmEventData>
+        + From<theater::replay::HostFunctionCall>,
 {
     fn create_instance(&self) -> Box<dyn Handler<E>> {
         Box::new(self.clone())
@@ -106,7 +108,7 @@ where
                         error: e.to_string(),
                         step: "linker_instance".to_string(),
                     }.into(),
-                    description: Some(format!("Failed to create linker instance: {}", e)),
+                    // description: Some(format!("Failed to create linker instance: {}", e)),
                 });
                 return Err(anyhow::anyhow!(
                     "Could not instantiate theater:simple/runtime: {}",
@@ -122,14 +124,17 @@ where
                 move |mut ctx: StoreContextMut<'_, ActorStore<E>>, (msg,): (String,)| {
                     let id = ctx.data().id.clone();
 
-                    // Record log call event
+                    // Record host function call
+                    let input = serde_json::to_vec(&msg).unwrap_or_default();
                     ctx.data_mut().record_event(ChainEventData {
                         event_type: "theater:simple/runtime/log".to_string(),
-                        data: RuntimeEventData::Log {
-                            level: "info".to_string(),
-                            message: msg.clone(),
-                        }.into(),
-                        description: Some(format!("Actor log: {}", msg)),
+                        data: HostFunctionCall::new(
+                            "theater:simple/runtime",
+                            "log",
+                            input,
+                            vec![], // log returns nothing
+                        ).into(),
+                        // description removedformat!("Actor log: {}", msg)),
                     });
 
                     info!("[ACTOR] [{}] [{}] {}", id, name1, msg);
@@ -144,7 +149,7 @@ where
                         error: e.to_string(),
                         step: "log_function_wrap".to_string(),
                     }.into(),
-                    description: Some(format!("Failed to wrap log function: {}", e)),
+                    // description: Some(format!("Failed to wrap log function: {}", e)),
                 });
                 anyhow::anyhow!("Failed to wrap log function: {}", e)
             })?;
@@ -173,7 +178,7 @@ where
                             old_state: "chain".to_string(),
                             new_state: "requested".to_string(),
                         }.into(),
-                        description: Some("Get chain request".to_string()),
+                        // description removed"Get chain request".to_string()),
                     });
 
                     // Get all events from the chain
@@ -202,7 +207,7 @@ where
                         data: RuntimeEventData::StateChangeResult {
                             success: true,
                         }.into(),
-                        description: Some(format!("Chain retrieved: {} events", event_count)),
+                        // description removedformat!("Chain retrieved: {} events", event_count)),
                     });
 
                     // Return as chain record: (events,)
@@ -217,7 +222,7 @@ where
                         error: e.to_string(),
                         step: "get_chain_function_wrap".to_string(),
                     }.into(),
-                    description: Some(format!("Failed to wrap get-chain function: {}", e)),
+                    // description: Some(format!("Failed to wrap get-chain function: {}", e)),
                 });
                 anyhow::anyhow!("Failed to wrap get-chain function: {}", e)
             })?;
@@ -234,7 +239,7 @@ where
                         data: RuntimeEventData::ShutdownCall {
                             data: data.clone(),
                         }.into(),
-                        description: Some(format!("Actor shutdown with data: {:?}", data)),
+                        // description removedformat!("Actor shutdown with data: {:?}", data)),
                     });
 
                     info!(
@@ -259,7 +264,6 @@ where
                                     data: RuntimeEventData::ShutdownRequested {
                                         success: true,
                                     }.into(),
-                                    description: Some("Shutdown command sent successfully".to_string()),
                                 });
                                 Ok((Ok(()),))
                             }
@@ -271,10 +275,6 @@ where
                                     data: RuntimeEventData::ShutdownRequested {
                                         success: false,
                                     }.into(),
-                                    description: Some(format!(
-                                        "Failed to send shutdown command: {}",
-                                        err
-                                    )),
                                 });
                                 Ok((Err(err),))
                             }
@@ -290,7 +290,7 @@ where
                         error: e.to_string(),
                         step: "shutdown_function_wrap".to_string(),
                     }.into(),
-                    description: Some(format!("Failed to wrap shutdown function: {}", e)),
+                    // description: Some(format!("Failed to wrap shutdown function: {}", e)),
                 });
                 anyhow::anyhow!("Failed to wrap shutdown function: {}", e)
             })?;
@@ -302,7 +302,9 @@ where
         &self,
         actor_instance: &mut ActorInstance<E>,
     ) -> anyhow::Result<()> {
-        actor_instance.register_function_no_result::<(String,)>("theater:simple/actor", "init")
+        // init: func(state: option<list<u8>>) -> result<tuple<option<list<u8>>>, string>
+        // This is a state-only function - it takes only state and returns state
+        actor_instance.register_function_state_only("theater:simple/actor", "init")
     }
 
     fn name(&self) -> &str {

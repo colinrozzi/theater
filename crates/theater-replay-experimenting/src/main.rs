@@ -46,6 +46,12 @@ impl From<theater::events::wasm::WasmEventData> for TestEvents {
     }
 }
 
+impl From<theater::replay::HostFunctionCall> for TestEvents {
+    fn from(event: theater::replay::HostFunctionCall) -> Self {
+        TestEvents(theater::events::TheaterEvents::HostFunction(event))
+    }
+}
+
 /// Path to save the recorded chain
 const CHAIN_PATH: &str = "/tmp/recorded_chain.json";
 
@@ -69,6 +75,9 @@ save_chain = true
 
 [[handler]]
 type = "runtime"
+
+[[handler]]
+type = "environment"
 "#,
         wasm_path.display()
     )
@@ -90,6 +99,9 @@ chain = "{}"
 
 [[handler]]
 type = "runtime"
+
+[[handler]]
+type = "environment"
 "#,
         wasm_path.display(),
         CHAIN_PATH
@@ -347,7 +359,7 @@ async fn main() -> Result<()> {
             for (i, event) in recorded_chain.iter().enumerate() {
                 println!("--- Event {} ---", i);
                 println!("Type: {}", event.event_type);
-                println!("Desc: {}", event.description.as_deref().unwrap_or("-"));
+                // Description field removed from chain events
                 println!("Data: {}", format_event_data(event));
                 println!();
             }
@@ -356,7 +368,7 @@ async fn main() -> Result<()> {
             for (i, event) in replay_chain.iter().enumerate() {
                 println!("--- Event {} ---", i);
                 println!("Type: {}", event.event_type);
-                println!("Desc: {}", event.description.as_deref().unwrap_or("-"));
+                // Description field removed from chain events
                 println!("Data: {}", format_event_data(event));
                 println!();
             }

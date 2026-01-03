@@ -210,8 +210,6 @@ where
     pub event_type: String,
     /// The specific event data payload, containing domain-specific information.
     pub data: E,
-    /// Optional human-readable description of the event for logging and debugging.
-    pub description: Option<String>,
 }
 
 impl<E> ChainEventData<E>
@@ -238,7 +236,6 @@ where
     /// # let event = ChainEventData {
     /// #     event_type: "runtime.init".to_string(),
     /// #     data: EventData::Runtime(RuntimeEventData::InitCall { params: String::new() }),
-    /// #     description: None,
     /// # };
     ///
     /// let event_type = event.event_type();
@@ -253,41 +250,6 @@ where
     pub fn event_type(&self) -> String {
         let event_type = self.event_type.clone();
         event_type
-    }
-
-    /// Gets the human-readable description of the event, if available.
-    ///
-    /// ## Purpose
-    ///
-    /// This method returns the optional human-readable description of the event,
-    /// which can be used for logging, debugging, or displaying to users. If no
-    /// description is available, it returns an empty string.
-    ///
-    /// ## Returns
-    ///
-    /// The event description as a String, or an empty string if none is available
-    ///
-    /// ## Example
-    ///
-    /// ```rust
-    /// # use theater::events::ChainEventData;
-    /// # use theater::events::EventData;
-    /// # use theater::events::runtime::RuntimeEventData;
-    /// # let event = ChainEventData {
-    /// #     event_type: "runtime.init".to_string(),
-    /// #     data: EventData::Runtime(RuntimeEventData::InitCall { params: String::new() }),
-    /// #     description: Some("Actor initialized".to_string()),
-    /// # };
-    ///
-    /// let description = event.description();
-    /// println!("Event description: {}", description);
-    /// ```
-    #[allow(dead_code)]
-    pub fn description(&self) -> String {
-        match &self.description {
-            Some(desc) => desc.clone(),
-            None => String::from(""),
-        }
     }
 
     /// Serializes the event data to JSON.
@@ -311,7 +273,6 @@ where
     /// # let event = ChainEventData {
     /// #     event_type: "runtime.init".to_string(),
     /// #     data: EventData::Runtime(RuntimeEventData::InitCall { params: String::new() }),
-    /// #     description: None,
     /// # };
     ///
     /// match event.to_json() {
@@ -381,7 +342,6 @@ where
             hash: vec![],
             event_type: self.event_type.clone(),
             data: serde_json::to_vec(&self.data).unwrap_or_else(|_| vec![]),
-            description: self.description.clone(),
         }
     }
 }

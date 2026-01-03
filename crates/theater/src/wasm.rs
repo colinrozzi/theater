@@ -289,7 +289,6 @@ where
                     TheaterRuntimeEventData::ActorSetupError {
                         error: e.to_string(),
                     },
-                    format!("Failed to resolve component [{}]: {}", name, e).into(),
                 );
                 return Err(WasmError::WasmError {
                     context: "resolving component reference",
@@ -307,7 +306,6 @@ where
                     TheaterRuntimeEventData::ActorSetupError {
                         error: e.to_string(),
                     },
-                    format!("Failed to load component [{}]: {}", name, e).into(),
                 );
                 return Err(WasmError::WasmError {
                     context: "loading component",
@@ -329,7 +327,6 @@ where
                     WasmEventData::WasmComponentCreationError {
                         error: e.to_string(),
                     },
-                    format!("Failed to create component [{}]: {}", name, e).into(),
                 );
                 return Err(WasmError::WasmError {
                     context: "creating component",
@@ -995,6 +992,39 @@ where
         self.functions.insert(name.to_string(), Box::new(func));
         Ok(())
     }
+
+    /// Register a state-only function like init.
+    ///
+    /// This is for functions that take only state as input and return state as output,
+    /// matching the WIT signature:
+    /// ```wit
+    /// func(state: option<list<u8>>) -> result<tuple<option<list<u8>>>, string>
+    /// ```
+    pub fn register_function_state_only(
+        &mut self,
+        interface: &str,
+        function_name: &str,
+    ) -> Result<()> {
+        let export_index = self
+            .actor_component
+            .find_function_export(interface, function_name)
+            .map_err(|e| {
+                error!("Failed to find function export: {}", e);
+                e
+            })?;
+        let name = format!("{}.{}", interface, function_name);
+        debug!(
+            "Found state-only function: {}.{} with export index: {:?}",
+            interface, function_name, export_index
+        );
+        let func = TypedComponentFunctionStateOnly::<E>::new(
+            &mut self.store,
+            &self.instance,
+            export_index,
+        )?;
+        self.functions.insert(name.to_string(), Box::new(func));
+        Ok(())
+    }
 }
 
 pub struct TypedComponentFunction<P, R, E>
@@ -1393,6 +1423,100 @@ where
                     Ok((new_state, Vec::new()))
                 }
                 Err(e) => Err(anyhow::anyhow!("Failed to call function: {}", e)),
+            }
+        })
+    }
+}
+
+/// A typed function for state-only functions like init.
+///
+/// This matches WIT functions of the form:
+/// ```wit
+/// func(state: option<list<u8>>) -> result<tuple<option<list<u8>>>, string>
+/// ```
+///
+/// Unlike other function types, this doesn't add extra parameters or tuple wrapping.
+pub struct TypedComponentFunctionStateOnly<E>
+where
+    E: EventPayload + Clone,
+{
+    func: TypedFunc<(Option<Vec<u8>>,), (Result<(Option<Vec<u8>>,), String>,)>,
+    _phantom: std::marker::PhantomData<E>,
+}
+
+impl<E> TypedComponentFunctionStateOnly<E>
+where
+    E: EventPayload + Clone,
+{
+    pub fn new(
+        store: &mut Store<ActorStore<E>>,
+        instance: &Instance,
+        export_index: ComponentExportIndex,
+    ) -> Result<Self> {
+        let func = instance
+            .get_func(&mut *store, export_index)
+            .ok_or_else(|| WasmError::WasmError {
+                context: "function retrieval",
+                message: "Function not found".to_string(),
+            })?;
+
+        let typed_func = func
+            .typed::<(Option<Vec<u8>>,), (Result<(Option<Vec<u8>>,), String>,)>(store)
+            .inspect_err(|e| {
+                error!("Failed to get typed function for state-only: {}", e);
+            })?;
+
+        Ok(TypedComponentFunctionStateOnly {
+            func: typed_func,
+            _phantom: std::marker::PhantomData,
+        })
+    }
+
+    pub async fn call_func(
+        &self,
+        store: &mut Store<ActorStore<E>>,
+        state: Option<Vec<u8>>,
+    ) -> Result<(Option<Vec<u8>>,), String> {
+        let result = match self.func.call_async(&mut *store, (state,)).await {
+            Ok(res) => match self.func.post_return_async(store).await {
+                Ok(_) => res,
+                Err(e) => {
+                    let error_msg = format!("Failed to post return: {}", e);
+                    error!("{}", error_msg);
+                    return Err(error_msg);
+                }
+            },
+            Err(e) => {
+                let error_msg = format!(
+                    "Failed to call WebAssembly state-only function: {}",
+                    e
+                );
+                error!("{}", error_msg);
+                return Err(error_msg);
+            }
+        };
+        result.0
+    }
+}
+
+impl<E> TypedFunction<E> for TypedComponentFunctionStateOnly<E>
+where
+    E: EventPayload + Clone,
+{
+    fn call_func<'a>(
+        &'a self,
+        store: &'a mut Store<ActorStore<E>>,
+        state: Option<Vec<u8>>,
+        _params: Vec<u8>, // Ignore params - this function only takes state
+    ) -> Pin<Box<dyn Future<Output = Result<(Option<Vec<u8>>, Vec<u8>)>> + Send + 'a>> {
+        Box::pin(async move {
+            match self.call_func(store, state).await {
+                Ok((new_state,)) => {
+                    // Return "null" as JSON result - this is valid JSON for () type
+                    // and can be deserialized by the caller
+                    Ok((new_state, b"null".to_vec()))
+                }
+                Err(e) => Err(anyhow::anyhow!("Failed to call state-only function: {}", e)),
             }
         })
     }

@@ -25,12 +25,13 @@ use std::sync::{Arc, Mutex};
 
 use tracing::{debug, info, warn};
 use wasmtime::component::types::ComponentItem;
+use wasmtime::component::Val;
 use wasmtime::StoreContextMut;
 
 use crate::actor::handle::ActorHandle;
 use crate::actor::store::ActorStore;
 use crate::chain::ChainEvent;
-use crate::events::EventPayload;
+use crate::events::{ChainEventData, EventPayload};
 use crate::handler::{Handler, HandlerContext, SharedActorInstance};
 use crate::shutdown::ShutdownReceiver;
 use crate::wasm::{ActorComponent, ActorInstance};
@@ -198,9 +199,88 @@ impl ReplayHandler {
     }
 }
 
+/// Convert a wasmtime Val to a JSON value for serialization
+fn val_to_json(val: &Val) -> serde_json::Value {
+    match val {
+        Val::Bool(b) => serde_json::Value::Bool(*b),
+        Val::S8(n) => serde_json::Value::Number((*n as i64).into()),
+        Val::U8(n) => serde_json::Value::Number((*n as u64).into()),
+        Val::S16(n) => serde_json::Value::Number((*n as i64).into()),
+        Val::U16(n) => serde_json::Value::Number((*n as u64).into()),
+        Val::S32(n) => serde_json::Value::Number((*n as i64).into()),
+        Val::U32(n) => serde_json::Value::Number((*n as u64).into()),
+        Val::S64(n) => serde_json::Value::Number((*n).into()),
+        Val::U64(n) => serde_json::Value::Number((*n).into()),
+        Val::Float32(f) => serde_json::Number::from_f64(*f as f64)
+            .map(serde_json::Value::Number)
+            .unwrap_or(serde_json::Value::Null),
+        Val::Float64(f) => serde_json::Number::from_f64(*f)
+            .map(serde_json::Value::Number)
+            .unwrap_or(serde_json::Value::Null),
+        Val::Char(c) => serde_json::Value::String(c.to_string()),
+        Val::String(s) => serde_json::Value::String(s.clone()),
+        Val::List(items) => serde_json::Value::Array(items.iter().map(val_to_json).collect()),
+        Val::Record(fields) => {
+            let map: serde_json::Map<String, serde_json::Value> = fields
+                .iter()
+                .map(|(k, v)| (k.clone(), val_to_json(v)))
+                .collect();
+            serde_json::Value::Object(map)
+        }
+        Val::Tuple(items) => serde_json::Value::Array(items.iter().map(val_to_json).collect()),
+        Val::Variant(name, value) => {
+            let mut map = serde_json::Map::new();
+            map.insert(
+                name.clone(),
+                value.as_ref().map(|v| val_to_json(v)).unwrap_or(serde_json::Value::Null),
+            );
+            serde_json::Value::Object(map)
+        }
+        Val::Enum(name) => serde_json::Value::String(name.clone()),
+        Val::Option(opt) => opt
+            .as_ref()
+            .map(|v| val_to_json(v))
+            .unwrap_or(serde_json::Value::Null),
+        Val::Result(res) => match res {
+            Ok(v) => {
+                let mut map = serde_json::Map::new();
+                map.insert(
+                    "ok".to_string(),
+                    v.as_ref().map(|v| val_to_json(v)).unwrap_or(serde_json::Value::Null),
+                );
+                serde_json::Value::Object(map)
+            }
+            Err(v) => {
+                let mut map = serde_json::Map::new();
+                map.insert(
+                    "err".to_string(),
+                    v.as_ref().map(|v| val_to_json(v)).unwrap_or(serde_json::Value::Null),
+                );
+                serde_json::Value::Object(map)
+            }
+        },
+        Val::Flags(flags) => {
+            serde_json::Value::Array(flags.iter().map(|f| serde_json::Value::String(f.clone())).collect())
+        }
+        Val::Resource(_) => serde_json::Value::String("<resource>".to_string()),
+    }
+}
+
+/// Serialize params to JSON bytes
+fn serialize_params(params: &[Val]) -> Vec<u8> {
+    let json_params: Vec<serde_json::Value> = params.iter().map(val_to_json).collect();
+    // For single param, don't wrap in array
+    let json = if json_params.len() == 1 {
+        json_params.into_iter().next().unwrap()
+    } else {
+        serde_json::Value::Array(json_params)
+    };
+    serde_json::to_vec(&json).unwrap_or_default()
+}
+
 impl<E> Handler<E> for ReplayHandler
 where
-    E: EventPayload + Clone,
+    E: EventPayload + Clone + From<HostFunctionCall>,
 {
     fn create_instance(&self) -> Box<dyn Handler<E>> {
         Box::new(self.clone())
@@ -240,8 +320,14 @@ where
         let component_type = actor_component.component.component_type();
         let engine = &actor_component.engine;
 
+        // Collect all imports first to avoid lifetime issues with the async closures
+        let imports: Vec<_> = component_type.imports(engine).collect();
+
         // Iterate over all imports and register stub functions
-        for (import_name, import_item) in component_type.imports(engine) {
+        for (import_name, import_item) in imports {
+            // Clone import_name since we need it to outlive this iteration
+            let import_name = import_name.to_string();
+
             // Skip if already satisfied by another handler
             if ctx.is_satisfied(&import_name) {
                 debug!("Skipping {} - already satisfied", import_name);
@@ -263,8 +349,13 @@ where
                     }
                 };
 
+                // Collect exports to avoid lifetime issues
+                let exports: Vec<_> = instance_type.exports(engine).collect();
+
                 // Register a stub for each function in the interface
-                for (func_name, export_item) in instance_type.exports(engine) {
+                for (func_name, export_item) in exports {
+                    let func_name = func_name.to_string();
+
                     if let ComponentItem::ComponentFunc(_func_type) = export_item {
                         let full_name = format!("{}::{}", import_name, func_name);
                         let state = self.state.clone();
@@ -277,36 +368,62 @@ where
                         let expected_event_type = format!("{}/{}", import_name, func_name);
                         let expected_event_type_clone = expected_event_type.clone();
 
+                        // Capture interface and function names for the closure
+                        let interface_name = import_name.clone();
+                        let func_name_owned = func_name.clone();
+
                         // Register an async stub function
                         interface.func_new_async(
                             &func_name,
-                            move |_ctx: StoreContextMut<'_, ActorStore<E>>,
-                                  _params,
+                            move |mut ctx: StoreContextMut<'_, ActorStore<E>>,
+                                  params: &[Val],
                                   _results| {
                                 let state = state.clone();
                                 let full_name = full_name_clone.clone();
                                 let expected_type = expected_event_type_clone.clone();
+                                let interface = interface_name.clone();
+                                let function = func_name_owned.clone();
+
+                                // Serialize the ACTUAL params from the actor
+                                let actual_input = serialize_params(params);
 
                                 Box::new(async move {
                                     debug!("[REPLAY] {} called, looking for event type: {}", full_name, expected_type);
 
                                     // Find the next event matching this function's event type
-                                    if let Some(event) = state.find_next_event(&expected_type) {
+                                    // (to get the recorded output to return)
+                                    let recorded_output = if let Some(event) = state.find_next_event(&expected_type) {
                                         debug!(
                                             "  Found matching event at pos {}: {}",
                                             state.current_position().saturating_sub(1),
                                             event.event_type
                                         );
 
-                                        // In replay mode, we return the recorded outputs.
-                                        // TODO: Deserialize output bytes to proper Val types
-                                        // based on the function signature.
+                                        // Extract the recorded output from the event
+                                        if let Ok(host_call) = serde_json::from_slice::<HostFunctionCall>(&event.data) {
+                                            host_call.output
+                                        } else {
+                                            vec![]
+                                        }
                                     } else {
                                         warn!(
                                             "[REPLAY] No matching event found for {} (type: {})",
                                             full_name, expected_type
                                         );
-                                    }
+                                        vec![]
+                                    };
+
+                                    // Record a NEW event with the ACTUAL input from the actor
+                                    // This allows us to verify the actor is making the same calls
+                                    ctx.data_mut().record_event(ChainEventData {
+                                        event_type: expected_type,
+                                        data: HostFunctionCall::new(
+                                            interface,
+                                            function,
+                                            actual_input,
+                                            recorded_output,
+                                        ).into(),
+                                    });
 
                                     // For functions that return (), the results slice is empty
                                     // For functions with results, we need to deserialize from chain

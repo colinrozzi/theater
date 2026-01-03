@@ -4,6 +4,27 @@
 //! - One-way send messages
 //! - Request-response patterns
 //! - Bidirectional channels
+//!
+//! # TODO: Messaging Address Refactor
+//!
+//! Currently this handler uses `TheaterId` (the runtime's internal actor identifier)
+//! for message addressing. This is problematic because:
+//!
+//! 1. TheaterId is a runtime concept - it's generated when spawning actors and is
+//!    non-deterministic (uses UUIDs)
+//! 2. Using TheaterId for messaging couples the actor's identity to runtime internals
+//! 3. This breaks chain reproducibility - the same actor run twice gets different IDs,
+//!    so message addresses in the chain differ
+//!
+//! The messaging system should have its own address concept that is:
+//! - Separate from the runtime's internal actor tracking
+//! - Configurable/deterministic (e.g., from manifest config)
+//! - Part of the actor's "world" rather than runtime internals
+//!
+//! This would allow:
+//! - Actors to have stable, reproducible addresses
+//! - Chain events to be deterministic
+//! - Clear separation between runtime bookkeeping and actor behavior
 
 pub mod events;
 
@@ -480,7 +501,6 @@ where
         actor_component.actor_store.record_event(ChainEventData {
             event_type: "message-server-setup".to_string(),
             data: MessageEventData::HandlerSetupStart.into(),
-            timestamp: chrono::Utc::now().timestamp_millis() as u64,
             description: Some("Starting message server host function setup".to_string()),
         });
 
@@ -492,8 +512,7 @@ where
                 actor_component.actor_store.record_event(ChainEventData {
                     event_type: "message-server-setup".to_string(),
                     data: MessageEventData::LinkerInstanceSuccess.into(),
-                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                    description: Some(
+                            description: Some(
                         "Successfully created linker instance for message-server-host".to_string(),
                     ),
                 });
@@ -506,8 +525,7 @@ where
                         error: e.to_string(),
                         step: "linker_instance".to_string(),
                     }.into(),
-                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                    description: Some(format!("Failed to create linker instance: {}", e)),
+                            description: Some(format!("Failed to create linker instance: {}", e)),
                 });
                 return Err(anyhow::anyhow!(
                     "Could not instantiate theater:simple/message-server-host: {}",
@@ -522,7 +540,6 @@ where
             data: MessageEventData::FunctionSetupStart {
                 function_name: "send".to_string(),
             }.into(),
-            timestamp: chrono::Utc::now().timestamp_millis() as u64,
             description: Some("Setting up 'send' function wrapper".to_string()),
         });
 
@@ -541,8 +558,7 @@ where
                             message_type: "binary".to_string(),
                             data: msg.clone(),
                         }.into(),
-                        timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                        description: Some(format!("Sending message to {}", address)),
+                                    description: Some(format!("Sending message to {}", address)),
                     });
 
                     info!("Sending message to actor: {}", address);
@@ -558,8 +574,7 @@ where
                                     recipient: Some(address.clone()),
                                     message: err_msg.clone(),
                                 }.into(),
-                                timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                                description: Some(format!(
+                                                    description: Some(format!(
                                     "Error sending message to {}: {}",
                                     address, err_msg
                                 )),
@@ -589,8 +604,7 @@ where
                                     recipient: Some(address_clone.clone()),
                                     message: err.clone(),
                                 }.into(),
-                                timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                                description: Some(format!(
+                                                    description: Some(format!(
                                     "Failed to send command to message-server: {}",
                                     err
                                 )),
@@ -607,8 +621,7 @@ where
                                         recipient: address_clone.clone(),
                                         success: true,
                                     }.into(),
-                                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                                    description: Some(format!(
+                                                            description: Some(format!(
                                         "Successfully sent message to {}",
                                         address_clone
                                     )),
@@ -625,8 +638,7 @@ where
                                         recipient: Some(address_clone.clone()),
                                         message: err.clone(),
                                     }.into(),
-                                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                                    description: Some(format!(
+                                                            description: Some(format!(
                                         "Failed to send message to {}: {}",
                                         address_clone, err
                                     )),
@@ -643,8 +655,7 @@ where
                                         recipient: Some(address_clone.clone()),
                                         message: err.clone(),
                                     }.into(),
-                                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                                    description: Some(format!(
+                                                            description: Some(format!(
                                         "Failed to receive response from message-server: {}",
                                         err
                                     )),
@@ -662,8 +673,7 @@ where
                         error: e.to_string(),
                         step: "send_function_wrap".to_string(),
                     }.into(),
-                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                    description: Some(format!(
+                            description: Some(format!(
                         "Failed to set up 'send' function wrapper: {}",
                         e
                     )),
@@ -676,7 +686,6 @@ where
             data: MessageEventData::FunctionSetupSuccess {
                 function_name: "send".to_string(),
             }.into(),
-            timestamp: chrono::Utc::now().timestamp_millis() as u64,
             description: Some("Successfully set up 'send' function wrapper".to_string()),
         });
 
@@ -686,7 +695,6 @@ where
             data: MessageEventData::FunctionSetupStart {
                 function_name: "request".to_string(),
             }.into(),
-            timestamp: chrono::Utc::now().timestamp_millis() as u64,
             description: Some("Setting up 'request' function wrapper".to_string()),
         });
 
@@ -705,8 +713,7 @@ where
                             message_type: "binary".to_string(),
                             data: msg.clone(),
                         }.into(),
-                        timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                        description: Some(format!("Requesting message from {}", address)),
+                                    description: Some(format!("Requesting message from {}", address)),
                     });
 
                     let router = router.clone();
@@ -725,8 +732,7 @@ where
                                         recipient: Some(address_clone.clone()),
                                         message: err_msg.clone(),
                                     }.into(),
-                                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                                    description: Some(format!(
+                                                            description: Some(format!(
                                         "Error requesting message from {}: {}",
                                         address_clone, err_msg
                                     )),
@@ -757,8 +763,7 @@ where
                                     recipient: Some(address_clone.clone()),
                                     message: err.clone(),
                                 }.into(),
-                                timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                                description: Some(format!(
+                                                    description: Some(format!(
                                     "Failed to send command to message-server: {}",
                                     err
                                 )),
@@ -781,8 +786,7 @@ where
                                                     data: response.clone(),
                                                     success: true,
                                                 }.into(),
-                                            timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                                            description: Some(format!(
+                                                                            description: Some(format!(
                                                 "Successfully received response from {}",
                                                 address_clone
                                             )),
@@ -799,8 +803,7 @@ where
                                                 recipient: Some(address_clone.clone()),
                                                 message: err.clone(),
                                             }.into(),
-                                            timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                                            description: Some(format!(
+                                                                            description: Some(format!(
                                                 "Failed to receive response from {}: {}",
                                                 address_clone, err
                                             )),
@@ -819,8 +822,7 @@ where
                                         recipient: Some(address_clone.clone()),
                                         message: err.clone(),
                                     }.into(),
-                                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                                    description: Some(format!(
+                                                            description: Some(format!(
                                         "Failed to send request to {}: {}",
                                         address_clone, err
                                     )),
@@ -837,8 +839,7 @@ where
                                         recipient: Some(address_clone.clone()),
                                         message: err.clone(),
                                     }.into(),
-                                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                                    description: Some(format!(
+                                                            description: Some(format!(
                                         "Failed to receive command response from message-server: {}",
                                         err
                                     )),
@@ -856,8 +857,7 @@ where
                         error: e.to_string(),
                         step: "request_function_wrap".to_string(),
                     }.into(),
-                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                    description: Some(format!(
+                            description: Some(format!(
                         "Failed to set up 'request' function wrapper: {}",
                         e
                     )),
@@ -870,7 +870,6 @@ where
             data: MessageEventData::FunctionSetupSuccess {
                 function_name: "request".to_string(),
             }.into(),
-            timestamp: chrono::Utc::now().timestamp_millis() as u64,
             description: Some("Successfully set up 'request' function wrapper".to_string()),
         });
 
@@ -880,7 +879,6 @@ where
             data: MessageEventData::FunctionSetupStart {
                 function_name: "list-outstanding-requests".to_string(),
             }.into(),
-            timestamp: chrono::Utc::now().timestamp_millis() as u64,
             description: Some(
                 "Setting up 'list-outstanding-requests' function wrapper".to_string(),
             ),
@@ -898,8 +896,7 @@ where
                         event_type: "theater:simple/message-server-host/list-outstanding-requests"
                             .to_string(),
                         data: MessageEventData::ListOutstandingRequestsCall {}.into(),
-                        timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                        description: Some("Listing outstanding requests".to_string()),
+                                    description: Some("Listing outstanding requests".to_string()),
                     });
 
                     let outstanding_clone = outstanding_requests.clone();
@@ -916,8 +913,7 @@ where
                                     request_count: ids.len(),
                                     request_ids: ids.clone(),
                                 }.into(),
-                            timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                            description: Some(format!("Found {} outstanding requests", ids.len())),
+                                            description: Some(format!("Found {} outstanding requests", ids.len())),
                         });
 
                         Ok((ids,))
@@ -931,8 +927,7 @@ where
                         error: e.to_string(),
                         step: "list_outstanding_requests_function_wrap".to_string(),
                     }.into(),
-                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                    description: Some(format!(
+                            description: Some(format!(
                         "Failed to set up 'list-outstanding-requests' function wrapper: {}",
                         e
                     )),
@@ -948,7 +943,6 @@ where
             data: MessageEventData::FunctionSetupSuccess {
                 function_name: "list-outstanding-requests".to_string(),
             }.into(),
-            timestamp: chrono::Utc::now().timestamp_millis() as u64,
             description: Some(
                 "Successfully set up 'list-outstanding-requests' function wrapper".to_string(),
             ),
@@ -962,7 +956,6 @@ where
             data: MessageEventData::FunctionSetupStart {
                 function_name: "respond-to-request".to_string(),
             }.into(),
-            timestamp: chrono::Utc::now().timestamp_millis() as u64,
             description: Some("Setting up 'respond-to-request' function wrapper".to_string()),
         });
 
@@ -981,8 +974,7 @@ where
                             request_id: request_id.clone(),
                             response_size: response_data.len(),
                         }.into(),
-                        timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                        description: Some(format!("Responding to request {}", request_id)),
+                                    description: Some(format!("Responding to request {}", request_id)),
                     });
 
                     let outstanding_clone = outstanding_requests.clone();
@@ -1000,8 +992,7 @@ where
                                                 request_id: request_id_clone.clone(),
                                                 success: true,
                                             }.into(),
-                                        timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                                        description: Some(format!(
+                                                                    description: Some(format!(
                                             "Successfully responded to request {}",
                                             request_id_clone
                                         )),
@@ -1019,8 +1010,7 @@ where
                                             recipient: None,
                                             message: err_msg.clone(),
                                         }.into(),
-                                        timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                                        description: Some(format!(
+                                                                    description: Some(format!(
                                             "Error responding to request {}: {}",
                                             request_id_clone, err_msg
                                         )),
@@ -1038,8 +1028,7 @@ where
                                     recipient: None,
                                     message: err_msg.clone(),
                                 }.into(),
-                                timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                                description: Some(format!(
+                                                    description: Some(format!(
                                     "Request {} not found",
                                     request_id_clone
                                 )),
@@ -1056,8 +1045,7 @@ where
                         error: e.to_string(),
                         step: "respond_to_request_function_wrap".to_string(),
                     }.into(),
-                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                    description: Some(format!(
+                            description: Some(format!(
                         "Failed to set up 'respond-to-request' function wrapper: {}",
                         e
                     )),
@@ -1070,7 +1058,6 @@ where
             data: MessageEventData::FunctionSetupSuccess {
                 function_name: "respond-to-request".to_string(),
             }.into(),
-            timestamp: chrono::Utc::now().timestamp_millis() as u64,
             description: Some(
                 "Successfully set up 'respond-to-request' function wrapper".to_string(),
             ),
@@ -1084,7 +1071,6 @@ where
             data: MessageEventData::FunctionSetupStart {
                 function_name: "cancel-request".to_string(),
             }.into(),
-            timestamp: chrono::Utc::now().timestamp_millis() as u64,
             description: Some("Setting up 'cancel-request' function wrapper".to_string()),
         });
 
@@ -1102,8 +1088,7 @@ where
                         data: MessageEventData::CancelRequestCall {
                             request_id: request_id.clone(),
                         }.into(),
-                        timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                        description: Some(format!("Canceling request {}", request_id)),
+                                    description: Some(format!("Canceling request {}", request_id)),
                     });
 
                     let outstanding_clone = outstanding_requests.clone();
@@ -1117,8 +1102,7 @@ where
                                     request_id: request_id_clone.clone(),
                                     success: true,
                                 }.into(),
-                                timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                                description: Some(format!(
+                                                    description: Some(format!(
                                     "Successfully canceled request {}",
                                     request_id_clone
                                 )),
@@ -1134,8 +1118,7 @@ where
                                     recipient: None,
                                     message: err_msg.clone(),
                                 }.into(),
-                                timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                                description: Some(format!(
+                                                    description: Some(format!(
                                     "Request {} not found",
                                     request_id_clone
                                 )),
@@ -1152,8 +1135,7 @@ where
                         error: e.to_string(),
                         step: "cancel_request_function_wrap".to_string(),
                     }.into(),
-                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                    description: Some(format!(
+                            description: Some(format!(
                         "Failed to set up 'cancel-request' function wrapper: {}",
                         e
                     )),
@@ -1166,7 +1148,6 @@ where
             data: MessageEventData::FunctionSetupSuccess {
                 function_name: "cancel-request".to_string(),
             }.into(),
-            timestamp: chrono::Utc::now().timestamp_millis() as u64,
             description: Some("Successfully set up 'cancel-request' function wrapper".to_string()),
         });
 
@@ -1178,7 +1159,6 @@ where
             data: MessageEventData::FunctionSetupStart {
                 function_name: "open-channel".to_string(),
             }.into(),
-            timestamp: chrono::Utc::now().timestamp_millis() as u64,
             description: Some("Setting up 'open-channel' function wrapper".to_string()),
         });
 
@@ -1198,8 +1178,7 @@ where
                             message_type: "binary".to_string(),
                             size: initial_msg.len(),
                         }.into(),
-                        timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                        description: Some(format!("Opening channel to {}", address)),
+                                    description: Some(format!("Opening channel to {}", address)),
                     });
 
                     let target_id = match TheaterId::parse(&address) {
@@ -1214,8 +1193,7 @@ where
                                     recipient: Some(address_clone.clone()),
                                     message: err_msg.clone(),
                                 }.into(),
-                                timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                                description: Some(format!(
+                                                    description: Some(format!(
                                     "Error opening channel to {}: {}",
                                     address_clone, err_msg
                                 )),
@@ -1254,8 +1232,7 @@ where
                                     recipient: Some(address_clone.clone()),
                                     message: err_msg.clone(),
                                 }.into(),
-                                timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                                description: Some(format!(
+                                                    description: Some(format!(
                                     "Failed to send open-channel command: {}",
                                     err_msg
                                 )),
@@ -1275,8 +1252,7 @@ where
                                             channel_id: channel_id_clone.clone(),
                                             accepted,
                                         }.into(),
-                                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                                    description: Some(format!(
+                                                            description: Some(format!(
                                         "Channel {} to {} {}",
                                         channel_id_clone,
                                         address_clone,
@@ -1304,8 +1280,7 @@ where
                                         recipient: Some(address_clone.clone()),
                                         message: err_msg.clone(),
                                     }.into(),
-                                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                                    description: Some(format!(
+                                                            description: Some(format!(
                                         "Error opening channel to {}: {}",
                                         address_clone, err_msg
                                     )),
@@ -1322,8 +1297,7 @@ where
                                         recipient: Some(address_clone.clone()),
                                         message: err_msg.clone(),
                                     }.into(),
-                                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                                    description: Some(format!(
+                                                            description: Some(format!(
                                         "Error opening channel to {}: {}",
                                         address_clone, err_msg
                                     )),
@@ -1341,8 +1315,7 @@ where
                         error: e.to_string(),
                         step: "open_channel_function_wrap".to_string(),
                     }.into(),
-                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                    description: Some(format!(
+                            description: Some(format!(
                         "Failed to set up 'open-channel' function wrapper: {}",
                         e
                     )),
@@ -1355,7 +1328,6 @@ where
             data: MessageEventData::FunctionSetupSuccess {
                 function_name: "open-channel".to_string(),
             }.into(),
-            timestamp: chrono::Utc::now().timestamp_millis() as u64,
             description: Some("Successfully set up 'open-channel' function wrapper".to_string()),
         });
 
@@ -1368,7 +1340,6 @@ where
             data: MessageEventData::FunctionSetupStart {
                 function_name: "send-on-channel".to_string(),
             }.into(),
-            timestamp: chrono::Utc::now().timestamp_millis() as u64,
             description: Some("Setting up 'send-on-channel' function wrapper".to_string()),
         });
 
@@ -1385,8 +1356,7 @@ where
                             channel_id: channel_id_str.clone(),
                             msg: msg.clone(),
                         }.into(),
-                        timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                        description: Some(format!(
+                                    description: Some(format!(
                             "Sending message on channel {}",
                             channel_id_str
                         )),
@@ -1404,8 +1374,7 @@ where
                                     recipient: None,
                                     message: err_msg.clone(),
                                 }.into(),
-                                timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                                description: Some(format!(
+                                                    description: Some(format!(
                                     "Error sending on channel {}: {}",
                                     channel_id_str, err_msg
                                 )),
@@ -1436,8 +1405,7 @@ where
                                     recipient: None,
                                     message: err.clone(),
                                 }.into(),
-                                timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                                description: Some(format!(
+                                                    description: Some(format!(
                                     "Failed to send command to message-server: {}",
                                     err
                                 )),
@@ -1455,8 +1423,7 @@ where
                                             channel_id: channel_id_clone.clone(),
                                             success: true,
                                         }.into(),
-                                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                                    description: Some(format!(
+                                                            description: Some(format!(
                                         "Successfully sent message on channel {}",
                                         channel_id_clone
                                     )),
@@ -1473,8 +1440,7 @@ where
                                         recipient: None,
                                         message: err.clone(),
                                     }.into(),
-                                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                                    description: Some(format!(
+                                                            description: Some(format!(
                                         "Failed to send message on channel {}: {}",
                                         channel_id_clone, err
                                     )),
@@ -1491,8 +1457,7 @@ where
                                         recipient: None,
                                         message: err.clone(),
                                     }.into(),
-                                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                                    description: Some(format!(
+                                                            description: Some(format!(
                                         "Failed to receive response from message-server: {}",
                                         err
                                     )),
@@ -1510,8 +1475,7 @@ where
                         error: e.to_string(),
                         step: "send_on_channel_function_wrap".to_string(),
                     }.into(),
-                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                    description: Some(format!(
+                            description: Some(format!(
                         "Failed to set up 'send-on-channel' function wrapper: {}",
                         e
                     )),
@@ -1524,7 +1488,6 @@ where
             data: MessageEventData::FunctionSetupSuccess {
                 function_name: "send-on-channel".to_string(),
             }.into(),
-            timestamp: chrono::Utc::now().timestamp_millis() as u64,
             description: Some(
                 "Successfully set up 'send-on-channel' function wrapper".to_string(),
             ),
@@ -1539,7 +1502,6 @@ where
             data: MessageEventData::FunctionSetupStart {
                 function_name: "close-channel".to_string(),
             }.into(),
-            timestamp: chrono::Utc::now().timestamp_millis() as u64,
             description: Some("Setting up 'close-channel' function wrapper".to_string()),
         });
 
@@ -1554,8 +1516,7 @@ where
                         data: MessageEventData::CloseChannelCall {
                             channel_id: channel_id_str.clone(),
                         }.into(),
-                        timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                        description: Some(format!("Closing channel {}", channel_id_str)),
+                                    description: Some(format!("Closing channel {}", channel_id_str)),
                     });
 
                     let channel_id = match ChannelId::parse(&channel_id_str) {
@@ -1570,8 +1531,7 @@ where
                                     recipient: None,
                                     message: err_msg.clone(),
                                 }.into(),
-                                timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                                description: Some(format!(
+                                                    description: Some(format!(
                                     "Error closing channel {}: {}",
                                     channel_id_str, err_msg
                                 )),
@@ -1601,8 +1561,7 @@ where
                                     recipient: None,
                                     message: err.clone(),
                                 }.into(),
-                                timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                                description: Some(format!(
+                                                    description: Some(format!(
                                     "Failed to send command to message-server: {}",
                                     err
                                 )),
@@ -1620,8 +1579,7 @@ where
                                             channel_id: channel_id_clone.clone(),
                                             success: true,
                                         }.into(),
-                                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                                    description: Some(format!(
+                                                            description: Some(format!(
                                         "Successfully closed channel {}",
                                         channel_id_clone
                                     )),
@@ -1638,8 +1596,7 @@ where
                                         recipient: None,
                                         message: err.clone(),
                                     }.into(),
-                                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                                    description: Some(format!(
+                                                            description: Some(format!(
                                         "Failed to close channel {}: {}",
                                         channel_id_clone, err
                                     )),
@@ -1656,8 +1613,7 @@ where
                                         recipient: None,
                                         message: err.clone(),
                                     }.into(),
-                                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                                    description: Some(format!(
+                                                            description: Some(format!(
                                         "Failed to receive response from message-server: {}",
                                         err
                                     )),
@@ -1675,8 +1631,7 @@ where
                         error: e.to_string(),
                         step: "close_channel_function_wrap".to_string(),
                     }.into(),
-                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                    description: Some(format!(
+                            description: Some(format!(
                         "Failed to set up 'close-channel' function wrapper: {}",
                         e
                     )),
@@ -1689,7 +1644,6 @@ where
             data: MessageEventData::FunctionSetupSuccess {
                 function_name: "close-channel".to_string(),
             }.into(),
-            timestamp: chrono::Utc::now().timestamp_millis() as u64,
             description: Some("Successfully set up 'close-channel' function wrapper".to_string()),
         });
 
@@ -1697,7 +1651,6 @@ where
         actor_component.actor_store.record_event(ChainEventData {
             event_type: "message-server-setup".to_string(),
             data: MessageEventData::HandlerSetupSuccess.into(),
-            timestamp: chrono::Utc::now().timestamp_millis() as u64,
             description: Some(
                 "Message server host functions setup completed successfully".to_string(),
             ),

@@ -5,13 +5,8 @@ use bindings::theater::simple::runtime;
 struct Component;
 
 impl bindings::exports::theater::simple::actor::Guest for Component {
-    fn init(_state: Option<Vec<u8>>, params: (String,)) -> Result<(Option<Vec<u8>>,), String> {
-        let (actor_id,) = params;
-
-        runtime::log(&format!(
-            "Runtime test actor initialized with ID: {}",
-            actor_id
-        ));
+    fn init(_state: Option<Vec<u8>>) -> Result<(Option<Vec<u8>>,), String> {
+        runtime::log("Runtime test actor initialized");
 
         runtime::log("Test message 1");
         runtime::log("Test message 2");
@@ -20,7 +15,6 @@ impl bindings::exports::theater::simple::actor::Guest for Component {
         // Return success state
         let result = serde_json::json!({
             "status": "success",
-            "actor_id": actor_id,
             "message": "Runtime handler tests passed!"
         });
 

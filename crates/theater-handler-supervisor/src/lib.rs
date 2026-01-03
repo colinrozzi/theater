@@ -159,7 +159,6 @@ where
         actor_component.actor_store.record_event(ChainEventData {
             event_type: "supervisor-setup".to_string(),
             data: SupervisorEventData::HandlerSetupStart.into(),
-            timestamp: chrono::Utc::now().timestamp_millis() as u64,
             description: Some("Starting supervisor host function setup".to_string()),
         });
 
@@ -171,8 +170,7 @@ where
                 actor_component.actor_store.record_event(ChainEventData {
                     event_type: "supervisor-setup".to_string(),
                     data: SupervisorEventData::LinkerInstanceSuccess.into(),
-                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                    description: Some("Successfully created linker instance".to_string()),
+                            description: Some("Successfully created linker instance".to_string()),
                 });
                 interface
             }
@@ -184,8 +182,7 @@ where
                         error: e.to_string(),
                         step: "linker_instance".to_string(),
                     }.into(),
-                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                    description: Some(format!("Failed to create linker instance: {}", e)),
+                            description: Some(format!("Failed to create linker instance: {}", e)),
                 });
                 return Err(anyhow::anyhow!(
                     "Could not instantiate theater:simple/supervisor: {}",
@@ -210,8 +207,7 @@ where
                         data: SupervisorEventData::SpawnChildCall {
                             manifest_path: manifest.clone(),
                         }.into(),
-                        timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                        description: Some(format!("Spawning child from manifest: {}", manifest)),
+                                    description: Some(format!("Spawning child from manifest: {}", manifest)),
                     });
 
                     let store = ctx.data_mut();
@@ -244,8 +240,7 @@ where
                                                 child_id: actor_id_str.clone(),
                                                 success: true,
                                             }.into(),
-                                        timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                                        description: Some(format!(
+                                                                    description: Some(format!(
                                             "Successfully spawned child with ID: {}",
                                             actor_id_str
                                         )),
@@ -262,8 +257,7 @@ where
                                             child_id: None,
                                             message: e.to_string(),
                                         }.into(),
-                                        timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                                        description: Some(format!("Failed to spawn child: {}", e)),
+                                                                    description: Some(format!("Failed to spawn child: {}", e)),
                                     });
 
                                     Ok((Err(e.to_string()),))
@@ -277,8 +271,7 @@ where
                                             child_id: None,
                                             message: e.to_string(),
                                         }.into(),
-                                        timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                                        description: Some(format!(
+                                                                    description: Some(format!(
                                             "Failed to receive spawn response: {}",
                                             e
                                         )),
@@ -296,8 +289,7 @@ where
                                         child_id: None,
                                         message: e.to_string(),
                                     }.into(),
-                                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                                    description: Some(format!(
+                                                            description: Some(format!(
                                         "Failed to send spawn command: {}",
                                         e
                                     )),
@@ -328,8 +320,7 @@ where
                             manifest_path: manifest.clone(),
                             initial_state: state_bytes.clone(),
                         }.into(),
-                        timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                        description: Some(format!("Resuming child from manifest: {}", manifest)),
+                                    description: Some(format!("Resuming child from manifest: {}", manifest)),
                     });
 
                     let store = ctx.data_mut();
@@ -362,8 +353,7 @@ where
                                                 child_id: actor_id_str.clone(),
                                                 success: true,
                                             }.into(),
-                                        timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                                        description: Some(format!(
+                                                                    description: Some(format!(
                                             "Successfully resumed child with ID: {}",
                                             actor_id_str
                                         )),
@@ -380,8 +370,7 @@ where
                                             child_id: None,
                                             message: e.to_string(),
                                         }.into(),
-                                        timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                                        description: Some(format!("Failed to resume child: {}", e)),
+                                                                    description: Some(format!("Failed to resume child: {}", e)),
                                     });
 
                                     Ok((Err(e.to_string()),))
@@ -395,8 +384,7 @@ where
                                             child_id: None,
                                             message: e.to_string(),
                                         }.into(),
-                                        timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                                        description: Some(format!(
+                                                                    description: Some(format!(
                                             "Failed to receive resume response: {}",
                                             e
                                         )),
@@ -414,8 +402,7 @@ where
                                         child_id: None,
                                         message: e.to_string(),
                                     }.into(),
-                                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                                    description: Some(format!(
+                                                            description: Some(format!(
                                         "Failed to send resume command: {}",
                                         e
                                     )),
@@ -441,8 +428,7 @@ where
                     ctx.data_mut().record_event(ChainEventData {
                         event_type: "theater:simple/supervisor/list-children".to_string(),
                         data: SupervisorEventData::ListChildrenCall {}.into(),
-                        timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                        description: Some("Listing children".to_string()),
+                                    description: Some("Listing children".to_string()),
                     });
 
                     let store = ctx.data_mut();
@@ -472,8 +458,7 @@ where
                                                 children_count: children_str.len(),
                                                 success: true,
                                             }.into(),
-                                        timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                                        description: Some(format!(
+                                                                    description: Some(format!(
                                             "Found {} children",
                                             children_str.len()
                                         )),
@@ -491,8 +476,7 @@ where
                                             child_id: None,
                                             message: e.to_string(),
                                         }.into(),
-                                        timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                                        description: Some(format!(
+                                                                    description: Some(format!(
                                             "Failed to receive children list: {}",
                                             e
                                         )),
@@ -511,8 +495,7 @@ where
                                         child_id: None,
                                         message: e.to_string(),
                                     }.into(),
-                                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                                    description: Some(format!(
+                                                            description: Some(format!(
                                         "Failed to send list children command: {}",
                                         e
                                     )),
@@ -543,8 +526,7 @@ where
                         data: SupervisorEventData::RestartChildCall {
                             child_id: child_id.clone(),
                         }.into(),
-                        timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                        description: Some(format!("Restarting child: {}", child_id)),
+                                    description: Some(format!("Restarting child: {}", child_id)),
                     });
 
                     let store = ctx.data_mut();
@@ -569,8 +551,7 @@ where
                                                     child_id: Some(child_id_clone.clone()),
                                                     message: e.to_string(),
                                                 }.into(),
-                                            timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                                            description: Some(format!(
+                                                                            description: Some(format!(
                                                 "Failed to parse child ID: {}",
                                                 e
                                             )),
@@ -594,8 +575,7 @@ where
                                                 child_id: child_id_clone.clone(),
                                                 success: true,
                                             }.into(),
-                                        timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                                        description: Some(format!(
+                                                                    description: Some(format!(
                                             "Successfully restarted child: {}",
                                             child_id_clone
                                         )),
@@ -613,8 +593,7 @@ where
                                             child_id: Some(child_id_clone.clone()),
                                             message: e.to_string(),
                                         }.into(),
-                                        timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                                        description: Some(format!(
+                                                                    description: Some(format!(
                                             "Failed to restart child: {}",
                                             e
                                         )),
@@ -632,8 +611,7 @@ where
                                             child_id: Some(child_id_clone.clone()),
                                             message: e.to_string(),
                                         }.into(),
-                                        timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                                        description: Some(format!(
+                                                                    description: Some(format!(
                                             "Failed to receive restart response: {}",
                                             e
                                         )),
@@ -652,8 +630,7 @@ where
                                         child_id: Some(child_id_clone.clone()),
                                         message: e.to_string(),
                                     }.into(),
-                                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                                    description: Some(format!(
+                                                            description: Some(format!(
                                         "Failed to send restart command: {}",
                                         e
                                     )),
@@ -681,8 +658,7 @@ where
                         data: SupervisorEventData::StopChildCall {
                             child_id: child_id.clone(),
                         }.into(),
-                        timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                        description: Some(format!("Stopping child: {}", child_id)),
+                                    description: Some(format!("Stopping child: {}", child_id)),
                     });
 
                     let store = ctx.data_mut();
@@ -706,8 +682,7 @@ where
                                                     child_id: Some(child_id_clone.clone()),
                                                     message: e.to_string(),
                                                 }.into(),
-                                            timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                                            description: Some(format!(
+                                                                            description: Some(format!(
                                                 "Failed to parse child ID: {}",
                                                 e
                                             )),
@@ -731,8 +706,7 @@ where
                                                 child_id: child_id_clone.clone(),
                                                 success: true,
                                             }.into(),
-                                        timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                                        description: Some(format!(
+                                                                    description: Some(format!(
                                             "Successfully stopped child: {}",
                                             child_id_clone
                                         )),
@@ -750,8 +724,7 @@ where
                                             child_id: Some(child_id_clone.clone()),
                                             message: e.to_string(),
                                         }.into(),
-                                        timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                                        description: Some(format!("Failed to stop child: {}", e)),
+                                                                    description: Some(format!("Failed to stop child: {}", e)),
                                     });
 
                                     Ok((Err(e.to_string()),))
@@ -766,8 +739,7 @@ where
                                             child_id: Some(child_id_clone.clone()),
                                             message: e.to_string(),
                                         }.into(),
-                                        timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                                        description: Some(format!(
+                                                                    description: Some(format!(
                                             "Failed to receive stop response: {}",
                                             e
                                         )),
@@ -785,8 +757,7 @@ where
                                         child_id: Some(child_id_clone.clone()),
                                         message: e.to_string(),
                                     }.into(),
-                                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                                    description: Some(format!(
+                                                            description: Some(format!(
                                         "Failed to send stop command: {}",
                                         e
                                     )),
@@ -816,8 +787,7 @@ where
                         data: SupervisorEventData::GetChildStateCall {
                             child_id: child_id.clone(),
                         }.into(),
-                        timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                        description: Some(format!("Getting state for child: {}", child_id)),
+                                    description: Some(format!("Getting state for child: {}", child_id)),
                     });
 
                     let store = ctx.data_mut();
@@ -841,8 +811,7 @@ where
                                                     child_id: Some(child_id_clone.clone()),
                                                     message: e.to_string(),
                                                 }.into(),
-                                            timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                                            description: Some(format!(
+                                                                            description: Some(format!(
                                                 "Failed to parse child ID: {}",
                                                 e
                                             )),
@@ -868,8 +837,7 @@ where
                                                 state_size,
                                                 success: true,
                                             }.into(),
-                                        timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                                        description: Some(format!(
+                                                                    description: Some(format!(
                                             "Successfully retrieved state for child {}: {} bytes",
                                             child_id_clone, state_size
                                         )),
@@ -887,8 +855,7 @@ where
                                             child_id: Some(child_id_clone.clone()),
                                             message: e.to_string(),
                                         }.into(),
-                                        timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                                        description: Some(format!(
+                                                                    description: Some(format!(
                                             "Failed to get child state: {}",
                                             e
                                         )),
@@ -906,8 +873,7 @@ where
                                             child_id: Some(child_id_clone.clone()),
                                             message: e.to_string(),
                                         }.into(),
-                                        timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                                        description: Some(format!(
+                                                                    description: Some(format!(
                                             "Failed to receive state: {}",
                                             e
                                         )),
@@ -926,8 +892,7 @@ where
                                         child_id: Some(child_id_clone.clone()),
                                         message: e.to_string(),
                                     }.into(),
-                                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                                    description: Some(format!(
+                                                            description: Some(format!(
                                         "Failed to send state request: {}",
                                         e
                                     )),
@@ -957,8 +922,7 @@ where
                         data: SupervisorEventData::GetChildEventsCall {
                             child_id: child_id.clone(),
                         }.into(),
-                        timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                        description: Some(format!("Getting events for child: {}", child_id)),
+                                    description: Some(format!("Getting events for child: {}", child_id)),
                     });
 
                     let store = ctx.data_mut();
@@ -983,8 +947,7 @@ where
                                                     child_id: Some(child_id_clone.clone()),
                                                     message: e.to_string(),
                                                 }.into(),
-                                            timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                                            description: Some(format!(
+                                                                            description: Some(format!(
                                                 "Failed to parse child ID: {}",
                                                 e
                                             )),
@@ -1009,8 +972,7 @@ where
                                                 events_count: events.len(),
                                                 success: true,
                                             }.into(),
-                                        timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                                        description: Some(format!(
+                                                                    description: Some(format!(
                                             "Successfully retrieved {} events for child {}",
                                             events.len(),
                                             child_id_clone
@@ -1029,8 +991,7 @@ where
                                             child_id: Some(child_id_clone.clone()),
                                             message: e.to_string(),
                                         }.into(),
-                                        timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                                        description: Some(format!(
+                                                                    description: Some(format!(
                                             "Failed to get child events: {}",
                                             e
                                         )),
@@ -1048,8 +1009,7 @@ where
                                             child_id: Some(child_id_clone.clone()),
                                             message: e.to_string(),
                                         }.into(),
-                                        timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                                        description: Some(format!(
+                                                                    description: Some(format!(
                                             "Failed to receive events: {}",
                                             e
                                         )),
@@ -1068,8 +1028,7 @@ where
                                         child_id: Some(child_id_clone.clone()),
                                         message: e.to_string(),
                                     }.into(),
-                                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                                    description: Some(format!(
+                                                            description: Some(format!(
                                         "Failed to send events request: {}",
                                         e
                                     )),
@@ -1087,7 +1046,6 @@ where
         actor_component.actor_store.record_event(ChainEventData {
             event_type: "supervisor-setup".to_string(),
             data: SupervisorEventData::HandlerSetupSuccess.into(),
-            timestamp: chrono::Utc::now().timestamp_millis() as u64,
             description: Some("Supervisor host functions setup completed successfully".to_string()),
         });
 

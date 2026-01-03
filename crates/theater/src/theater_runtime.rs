@@ -160,7 +160,8 @@ where
         + Clone
         + From<crate::events::theater_runtime::TheaterRuntimeEventData>
         + From<crate::events::wasm::WasmEventData>
-        + From<crate::events::runtime::RuntimeEventData>,
+        + From<crate::events::runtime::RuntimeEventData>
+        + From<crate::replay::HostFunctionCall>,
 {
     /// Creates a new TheaterRuntime with the given communication channels.
     ///
@@ -843,7 +844,6 @@ where
                 .add_typed_event(crate::events::ChainEventData {
                     event_type: "shutdown".to_string(),
                     data: crate::events::runtime::RuntimeEventData::ShuttingDown {}.into(),
-                    description: Some("shutting down".to_string()),
                 })
                 .expect("Failed to record event");
             debug!("Final event added to chain for actor {:?}", actor_id);

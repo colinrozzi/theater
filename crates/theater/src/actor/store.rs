@@ -200,12 +200,7 @@ where
     ///
     /// If the application hasn't implemented `From<EnvironmentEventData>` for its event type,
     /// this call will fail to compile with a clear error message indicating the missing trait.
-    pub fn record_handler_event<H>(
-        &self,
-        event_type: String,
-        handler_event: H,
-        description: Option<String>,
-    ) -> ChainEvent
+    pub fn record_handler_event<H>(&self, event_type: String, handler_event: H) -> ChainEvent
     where
         E: From<H>,
         H: serde::Serialize + Clone,
@@ -216,19 +211,13 @@ where
         self.record_event(ChainEventData {
             event_type,
             data: app_event,
-            description,
         })
     }
 
     /// Record a core runtime event with type-safe conversion
     ///
     /// This method allows the core runtime to record Runtime events.
-    pub fn record_runtime_event<R>(
-        &self,
-        event_type: String,
-        runtime_event: R,
-        description: Option<String>,
-    ) -> ChainEvent
+    pub fn record_runtime_event<R>(&self, event_type: String, runtime_event: R) -> ChainEvent
     where
         E: From<R>,
         R: serde::Serialize + Clone,
@@ -237,17 +226,11 @@ where
         self.record_event(ChainEventData {
             event_type,
             data: app_event,
-            description,
         })
     }
 
     /// Record a core WASM event with type-safe conversion
-    pub fn record_wasm_event<W>(
-        &self,
-        event_type: String,
-        wasm_event: W,
-        description: Option<String>,
-    ) -> ChainEvent
+    pub fn record_wasm_event<W>(&self, event_type: String, wasm_event: W) -> ChainEvent
     where
         E: From<W>,
         W: serde::Serialize + Clone,
@@ -256,17 +239,11 @@ where
         self.record_event(ChainEventData {
             event_type,
             data: app_event,
-            description,
         })
     }
 
     /// Record a core TheaterRuntime event with type-safe conversion
-    pub fn record_theater_runtime_event<T>(
-        &self,
-        event_type: String,
-        theater_event: T,
-        description: Option<String>,
-    ) -> ChainEvent
+    pub fn record_theater_runtime_event<T>(&self, event_type: String, theater_event: T) -> ChainEvent
     where
         E: From<T>,
         T: serde::Serialize + Clone,
@@ -275,7 +252,6 @@ where
         self.record_event(ChainEventData {
             event_type,
             data: app_event,
-            description,
         })
     }
 
@@ -291,7 +267,6 @@ where
     /// * `function` - The function name (e.g., "now")
     /// * `input` - Serialized input parameters
     /// * `output` - Serialized output/return value
-    /// * `description` - Optional human-readable description
     ///
     /// ## Example
     ///
@@ -302,7 +277,6 @@ where
     ///     "now",
     ///     &(),           // no input
     ///     &timestamp,    // output
-    ///     Some(format!("now() -> {}", timestamp)),
     /// );
     /// ```
     pub fn record_host_function_call<I, O>(
@@ -311,7 +285,6 @@ where
         function: &str,
         input: &I,
         output: &O,
-        description: Option<String>,
     ) -> ChainEvent
     where
         E: From<crate::replay::HostFunctionCall>,
@@ -329,7 +302,6 @@ where
         self.record_event(ChainEventData {
             event_type: format!("{}/{}", interface, function),
             data: app_event,
-            description,
         })
     }
 

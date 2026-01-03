@@ -100,13 +100,14 @@ impl OutputFormat for ActorEvents {
             return Ok(());
         }
 
-        let headers = vec!["Timestamp", "Type", "Description"];
+        let headers = vec!["#", "Type", "Description"];
         let rows: Vec<Vec<String>> = self
             .events
             .iter()
-            .map(|event| {
+            .enumerate()
+            .map(|(idx, event)| {
                 vec![
-                    format_timestamp(event.timestamp),
+                    format!("{}", idx),
                     event.event_type.clone(),
                     truncate_string(event.description.as_deref().unwrap_or("No description"), 50),
                 ]

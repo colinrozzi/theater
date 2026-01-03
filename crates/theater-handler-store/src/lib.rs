@@ -105,7 +105,6 @@ where
         actor_component.actor_store.record_event(ChainEventData {
             event_type: "store-setup".to_string(),
             data: StoreEventData::HandlerSetupStart.into(),
-            timestamp: chrono::Utc::now().timestamp_millis() as u64,
             description: Some("Starting store host function setup".to_string()),
         });
 
@@ -117,8 +116,7 @@ where
                 actor_component.actor_store.record_event(ChainEventData {
                     event_type: "store-setup".to_string(),
                     data: StoreEventData::LinkerInstanceSuccess.into(),
-                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                    description: Some("Successfully created linker instance".to_string()),
+                            description: Some("Successfully created linker instance".to_string()),
                 });
                 interface
             }
@@ -129,8 +127,7 @@ where
                     data: StoreEventData::HandlerSetupError {                        error: e.to_string(),
                         step: "linker_instance".to_string(),
                     }.into(),
-                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                    description: Some(format!("Failed to create linker instance: {}", e)),
+                            description: Some(format!("Failed to create linker instance: {}", e)),
                 });
                 return Err(anyhow::anyhow!(
                     "Could not instantiate theater:simple/store: {}",
@@ -154,8 +151,7 @@ where
                     data: StoreEventData::NewStoreResult {                        store_id: store.id().to_string(),
                         success: true,
                     }.into(),
-                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                    description: Some(format!("New content store created with ID: {}", store.id())),
+                            description: Some(format!("New content store created with ID: {}", store.id())),
                 });
 
                 Ok((Ok(store.id().to_string()),))
@@ -173,8 +169,7 @@ where
                     data: StoreEventData::StoreCall {                        store_id: store_id.clone(),
                         content: content.clone(),
                     }.into(),
-                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                    description: Some(format!("Storing {} bytes of content", content.len())),
+                            description: Some(format!("Storing {} bytes of content", content.len())),
                 });
 
                 let store = ContentStore::from_id(&store_id);
@@ -191,8 +186,7 @@ where
                             content_ref: content_ref.clone(),
                             success: true,
                         }.into(),
-                        timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                        description: Some(format!("Content stored successfully with hash: {}", content_ref.hash())),
+                                    description: Some(format!("Content stored successfully with hash: {}", content_ref.hash())),
                     });
 
                     Ok((Ok(ContentRef::from(content_ref)),))
@@ -211,8 +205,7 @@ where
                     data: StoreEventData::GetCall {                        store_id: store_id.clone(),
                         content_ref: content_ref.clone(),
                     }.into(),
-                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                    description: Some(format!("Getting content with hash: {}", content_ref.hash())),
+                            description: Some(format!("Getting content with hash: {}", content_ref.hash())),
                 });
 
                 let store = ContentStore::from_id(&store_id);
@@ -231,8 +224,7 @@ where
                                     content: Some(content.clone()),
                                     success: true,
                                 }.into(),
-                                timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                                description: Some(format!("Retrieved {} bytes of content with hash: {}", content.len(), content_ref.hash())),
+                                                    description: Some(format!("Retrieved {} bytes of content with hash: {}", content.len(), content_ref.hash())),
                             });
 
                             Ok((Ok(content),))
@@ -246,8 +238,7 @@ where
                                 data: StoreEventData::Error {                                    operation: "get".to_string(),
                                     message: e.to_string(),
                                 }.into(),
-                                timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                                description: Some(format!("Error retrieving content with hash {}: {}", content_ref.hash(), e)),
+                                                    description: Some(format!("Error retrieving content with hash {}: {}", content_ref.hash(), e)),
                             });
 
                             Ok((Err(e.to_string()),))
@@ -269,8 +260,7 @@ where
                     data: StoreEventData::ExistsCall {                        store_id: store_id.clone(),
                         content_ref: content_ref.clone(),
                     }.into(),
-                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                    description: Some(format!(
+                            description: Some(format!(
                         "Checking if content with hash {} exists",
                         content_ref.hash()
                     )),
@@ -291,8 +281,7 @@ where
                             exists,
                             success: true,
                         }.into(),
-                        timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                        description: Some(format!(
+                                    description: Some(format!(
                             "Content with hash {} exists: {}",
                             content_ref.hash(),
                             exists
@@ -317,8 +306,7 @@ where
                         label: label_string.clone(),
                         content_ref: content_ref.clone(),
                     }.into(),
-                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                    description: Some(format!(
+                            description: Some(format!(
                         "Labeling content with hash {} as '{}'",
                         content_ref.hash(),
                         label_string
@@ -343,8 +331,7 @@ where
                                     content_ref: content_ref.clone(),
                                     success: true,
                                 }.into(),
-                                timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                                description: Some(format!(
+                                                    description: Some(format!(
                                     "Successfully labeled content with hash {} as '{}'",
                                     content_ref.hash(),
                                     label_clone
@@ -362,8 +349,7 @@ where
                                 data: StoreEventData::Error {                                    operation: "label".to_string(),
                                     message: e.to_string(),
                                 }.into(),
-                                timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                                description: Some(format!(
+                                                    description: Some(format!(
                                     "Error labeling content with hash {} as '{}': {}",
                                     content_ref.hash(),
                                     label_clone,
@@ -390,8 +376,7 @@ where
                     data: StoreEventData::GetByLabelCall {                        store_id: store_id.clone(),
                         label: label_string.clone(),
                     }.into(),
-                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                    description: Some(format!(
+                            description: Some(format!(
                         "Getting content reference by label: {}",
                         label_string
                     )),
@@ -415,8 +400,7 @@ where
                                     content_ref: content_ref_opt.clone(),
                                     success: true,
                                 }.into(),
-                                timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                                description: Some(format!(
+                                                    description: Some(format!(
                                     "Successfully retrieved content reference {:?} for label '{}'",
                                     content_ref_opt, label_clone
                                 )),
@@ -433,8 +417,7 @@ where
                                 data: StoreEventData::Error {                                    operation: "get-by-label".to_string(),
                                     message: e.to_string(),
                                 }.into(),
-                                timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                                description: Some(format!(
+                                                    description: Some(format!(
                                     "Error retrieving content reference for label '{}': {}",
                                     label_clone, e
                                 )),
@@ -459,8 +442,7 @@ where
                     data: StoreEventData::RemoveLabelCall {                        store_id: store_id.clone(),
                         label: label_string.clone(),
                     }.into(),
-                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                    description: Some(format!("Removing label: {}", label_string)),
+                            description: Some(format!("Removing label: {}", label_string)),
                 });
 
                 let store = ContentStore::from_id(&store_id);
@@ -480,8 +462,7 @@ where
                                     label: label_string.clone(),
                                     success: true,
                                 }.into(),
-                                timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                                description: Some(format!(
+                                                    description: Some(format!(
                                     "Successfully removed label '{}'",
                                     label_clone
                                 )),
@@ -498,8 +479,7 @@ where
                                 data: StoreEventData::Error {                                    operation: "remove-label".to_string(),
                                     message: e.to_string(),
                                 }.into(),
-                                timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                                description: Some(format!(
+                                                    description: Some(format!(
                                     "Error removing label '{}': {}",
                                     label_clone, e
                                 )),
@@ -547,8 +527,7 @@ where
                                     content_ref: content_ref.clone(),
                                     success: true,
                                 }.into(),
-                                timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                                description: Some(format!("Successfully stored content with hash {} at label '{}'", content_ref.hash(), label_clone)),
+                                                    description: Some(format!("Successfully stored content with hash {} at label '{}'", content_ref.hash(), label_clone)),
                             });
 
                             Ok((Ok(content_ref_wit),))
@@ -562,8 +541,7 @@ where
                                 data: StoreEventData::Error {                                    operation: "store-at-label".to_string(),
                                     message: e.to_string(),
                                 }.into(),
-                                timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                                description: Some(format!("Error storing content at label '{}': {}", label_clone, e)),
+                                                    description: Some(format!("Error storing content at label '{}': {}", label_clone, e)),
                             });
 
                             Ok((Err(e.to_string()),))
@@ -585,8 +563,7 @@ where
                         label: label_string.clone(),
                         content: content.clone(),
                     }.into(),
-                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                    description: Some(format!("Replacing content at label {} with {} bytes of new content", label_string, content.len())),
+                            description: Some(format!("Replacing content at label {} with {} bytes of new content", label_string, content.len())),
                 });
 
                 let store = ContentStore::from_id(&store_id);
@@ -608,8 +585,7 @@ where
                                     content_ref: content_ref.clone(),
                                     success: true,
                                 }.into(),
-                                timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                                description: Some(format!("Successfully replaced content at label '{}' with new content (hash: {})", label_clone, content_ref.hash())),
+                                                    description: Some(format!("Successfully replaced content at label '{}' with new content (hash: {})", label_clone, content_ref.hash())),
                             });
 
                             Ok((Ok(content_ref_wit),))
@@ -623,8 +599,7 @@ where
                                 data: StoreEventData::Error {                                    operation: "replace-content-at-label".to_string(),
                                     message: e.to_string(),
                                 }.into(),
-                                timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                                description: Some(format!("Error replacing content at label '{}': {}", label_clone, e)),
+                                                    description: Some(format!("Error replacing content at label '{}': {}", label_clone, e)),
                             });
 
                             Ok((Err(e.to_string()),))
@@ -646,8 +621,7 @@ where
                         label: label_string.clone(),
                         content_ref: content_ref.clone(),
                     }.into(),
-                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                    description: Some(format!("Replacing content at label {} with content reference: {}", label_string, content_ref.hash())),
+                            description: Some(format!("Replacing content at label {} with content reference: {}", label_string, content_ref.hash())),
                 });
 
                 let store = ContentStore::from_id(&store_id);
@@ -668,8 +642,7 @@ where
                                     content_ref: content_ref.clone(),
                                     success: true,
                                 }.into(),
-                                timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                                description: Some(format!("Successfully replaced content at label '{}' with content reference (hash: {})", label_clone, content_ref.hash())),
+                                                    description: Some(format!("Successfully replaced content at label '{}' with content reference (hash: {})", label_clone, content_ref.hash())),
                             });
 
                             Ok((Ok(()),))
@@ -683,8 +656,7 @@ where
                                 data: StoreEventData::Error {                                    operation: "replace-at-label".to_string(),
                                     message: e.to_string(),
                                 }.into(),
-                                timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                                description: Some(format!("Error replacing content at label '{}' with reference (hash: {}): {}", label_clone, content_ref.hash(), e)),
+                                                    description: Some(format!("Error replacing content at label '{}' with reference (hash: {}): {}", label_clone, content_ref.hash(), e)),
                             });
 
                             Ok((Err(e.to_string()),))
@@ -720,8 +692,7 @@ where
                                     content_refs: content_refs.clone(),
                                     success: true,
                                 }.into(),
-                                timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                                description: Some(format!(
+                                                    description: Some(format!(
                                     "Successfully listed {} content references",
                                     content_refs.len()
                                 )),
@@ -738,8 +709,7 @@ where
                                 data: StoreEventData::Error {                                    operation: "list-all-content".to_string(),
                                     message: e.to_string(),
                                 }.into(),
-                                timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                                description: Some(format!(
+                                                    description: Some(format!(
                                     "Error listing all content references: {}",
                                     e
                                 )),
@@ -778,8 +748,7 @@ where
                                     size: total_size,
                                     success: true,
                                 }.into(),
-                                timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                                description: Some(format!(
+                                                    description: Some(format!(
                                     "Successfully calculated total content size: {} bytes",
                                     total_size
                                 )),
@@ -796,8 +765,7 @@ where
                                 data: StoreEventData::Error {                                    operation: "calculate-total-size".to_string(),
                                     message: e.to_string(),
                                 }.into(),
-                                timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                                description: Some(format!(
+                                                    description: Some(format!(
                                     "Error calculating total content size: {}",
                                     e
                                 )),
@@ -833,8 +801,7 @@ where
                                     labels: labels.clone(),
                                     success: true,
                                 }.into(),
-                                timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                                description: Some(format!("Successfully listed {} labels", labels.len())),
+                                                    description: Some(format!("Successfully listed {} labels", labels.len())),
                             });
 
                             Ok((Ok(labels),))
@@ -848,8 +815,7 @@ where
                                 data: StoreEventData::Error {                                    operation: "list-labels".to_string(),
                                     message: e.to_string(),
                                 }.into(),
-                                timestamp: chrono::Utc::now().timestamp_millis() as u64,
-                                description: Some(format!("Error listing labels: {}", e)),
+                                                    description: Some(format!("Error listing labels: {}", e)),
                             });
 
                             Ok((Err(e.to_string()),))
@@ -863,7 +829,6 @@ where
         actor_component.actor_store.record_event(ChainEventData {
             event_type: "store-setup".to_string(),
             data: StoreEventData::HandlerSetupSuccess.into(),
-            timestamp: chrono::Utc::now().timestamp_millis() as u64,
             description: Some("Store host functions setup completed successfully".to_string()),
         });
 

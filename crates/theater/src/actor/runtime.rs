@@ -407,14 +407,18 @@ impl<E: EventPayload + Clone> ActorRuntime<E> {
         let init_actor_handle = actor_handle.clone();
         let init_id = id.clone();
         tokio::spawn(async move {
+            // Call init - it's a state-only function that takes state from the store
+            // and returns updated state. The params we pass are ignored since
+            // TypedComponentFunctionStateOnly handles state directly.
+            // init: func(state: option<list<u8>>) -> result<tuple<option<list<u8>>>, string>
             init_actor_handle
-                .call_function::<(String,), ()>(
+                .call_function::<(), ()>(
                     "theater:simple/actor.init".to_string(),
-                    (init_id.to_string(),),
+                    (),
                 )
                 .await
                 .map_err(|e| {
-                    error!("Failed to call actor.init for actor {}: {}", id, e);
+                    error!("Failed to call actor.init for actor {}: {}", init_id, e);
                     e
                 })
         });
@@ -932,7 +936,6 @@ impl<E: EventPayload + Clone> ActorRuntime<E> {
             .data_mut()
             .record_event(ChainEventData {
                 event_type: "wasm".to_string(),
-                description: Some(format!("Wasm call to function '{}'", name)),
                 data: WasmEventData::WasmCall {
                     function_name: name.clone(),
                     params: params.clone(),
@@ -947,7 +950,6 @@ impl<E: EventPayload + Clone> ActorRuntime<E> {
                     .data_mut()
                     .record_event(ChainEventData {
                         event_type: "wasm".to_string(),
-                        description: Some(format!("Wasm call to function '{}' completed", name)),
                         data: WasmEventData::WasmResult {
                             function_name: name.clone(),
                             result: result.clone(),
@@ -961,7 +963,6 @@ impl<E: EventPayload + Clone> ActorRuntime<E> {
                     .data_mut()
                     .record_event(ChainEventData {
                         event_type: "wasm".to_string(),
-                        description: Some(format!("Wasm call to function '{}' failed", name)),
                         data: WasmEventData::WasmError {
                             function_name: name.clone(),
                             message: e.to_string(),

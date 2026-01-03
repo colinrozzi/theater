@@ -163,7 +163,6 @@ pub mod theater {
                 pub parent_hash: Option<_rt::Vec<u8>>,
                 pub event_type: _rt::String,
                 pub data: _rt::Vec<u8>,
-                pub timestamp: u64,
                 pub description: Option<_rt::String>,
             }
             impl ::core::fmt::Debug for ChainEvent {
@@ -176,7 +175,6 @@ pub mod theater {
                         .field("parent-hash", &self.parent_hash)
                         .field("event-type", &self.event_type)
                         .field("data", &self.data)
-                        .field("timestamp", &self.timestamp)
                         .field("description", &self.description)
                         .finish()
                 }
@@ -640,13 +638,9 @@ pub mod exports {
                     arg0: i32,
                     arg1: *mut u8,
                     arg2: usize,
-                    arg3: *mut u8,
-                    arg4: usize,
                 ) -> *mut u8 {
                     #[cfg(target_arch = "wasm32")] _rt::run_ctors_once();
-                    let len1 = arg4;
-                    let bytes1 = _rt::Vec::from_raw_parts(arg3.cast(), len1, len1);
-                    let result2 = T::init(
+                    let result1 = T::init(
                         match arg0 {
                             0 => None,
                             1 => {
@@ -658,51 +652,50 @@ pub mod exports {
                             }
                             _ => _rt::invalid_enum_discriminant(),
                         },
-                        (_rt::string_lift(bytes1),),
                     );
-                    let ptr3 = (&raw mut _RET_AREA.0).cast::<u8>();
-                    match result2 {
+                    let ptr2 = (&raw mut _RET_AREA.0).cast::<u8>();
+                    match result1 {
                         Ok(e) => {
-                            *ptr3.add(0).cast::<u8>() = (0i32) as u8;
-                            let (t4_0,) = e;
-                            match t4_0 {
+                            *ptr2.add(0).cast::<u8>() = (0i32) as u8;
+                            let (t3_0,) = e;
+                            match t3_0 {
                                 Some(e) => {
-                                    *ptr3
+                                    *ptr2
                                         .add(::core::mem::size_of::<*const u8>())
                                         .cast::<u8>() = (1i32) as u8;
-                                    let vec5 = (e).into_boxed_slice();
-                                    let ptr5 = vec5.as_ptr().cast::<u8>();
-                                    let len5 = vec5.len();
-                                    ::core::mem::forget(vec5);
-                                    *ptr3
+                                    let vec4 = (e).into_boxed_slice();
+                                    let ptr4 = vec4.as_ptr().cast::<u8>();
+                                    let len4 = vec4.len();
+                                    ::core::mem::forget(vec4);
+                                    *ptr2
                                         .add(3 * ::core::mem::size_of::<*const u8>())
-                                        .cast::<usize>() = len5;
-                                    *ptr3
+                                        .cast::<usize>() = len4;
+                                    *ptr2
                                         .add(2 * ::core::mem::size_of::<*const u8>())
-                                        .cast::<*mut u8>() = ptr5.cast_mut();
+                                        .cast::<*mut u8>() = ptr4.cast_mut();
                                 }
                                 None => {
-                                    *ptr3
+                                    *ptr2
                                         .add(::core::mem::size_of::<*const u8>())
                                         .cast::<u8>() = (0i32) as u8;
                                 }
                             };
                         }
                         Err(e) => {
-                            *ptr3.add(0).cast::<u8>() = (1i32) as u8;
-                            let vec6 = (e.into_bytes()).into_boxed_slice();
-                            let ptr6 = vec6.as_ptr().cast::<u8>();
-                            let len6 = vec6.len();
-                            ::core::mem::forget(vec6);
-                            *ptr3
+                            *ptr2.add(0).cast::<u8>() = (1i32) as u8;
+                            let vec5 = (e.into_bytes()).into_boxed_slice();
+                            let ptr5 = vec5.as_ptr().cast::<u8>();
+                            let len5 = vec5.len();
+                            ::core::mem::forget(vec5);
+                            *ptr2
                                 .add(2 * ::core::mem::size_of::<*const u8>())
-                                .cast::<usize>() = len6;
-                            *ptr3
+                                .cast::<usize>() = len5;
+                            *ptr2
                                 .add(::core::mem::size_of::<*const u8>())
-                                .cast::<*mut u8>() = ptr6.cast_mut();
+                                .cast::<*mut u8>() = ptr5.cast_mut();
                         }
                     };
-                    ptr3
+                    ptr2
                 }
                 #[doc(hidden)]
                 #[allow(non_snake_case)]
@@ -743,12 +736,11 @@ pub mod exports {
                     /// # Initialize the actor
                     ///
                     /// Called when the actor is first started or restarted. This function is responsible
-                    /// for setting up the actor's initial state and responding to initialization parameters.
+                    /// for setting up the actor's initial state.
                     ///
                     /// ## Parameters
                     ///
                     /// * `state` - Current state of the actor, or None if first initialization
-                    /// * `params` - Tuple of initialization parameters, typically including actor ID
                     ///
                     /// ## Returns
                     ///
@@ -759,11 +751,9 @@ pub mod exports {
                     ///
                     /// - If state is None, the actor should create a new initial state
                     /// - If state contains data, the actor should validate and use that state
-                    /// - The first parameter in the tuple is typically the actor's ID
                     /// - Any error returned will cause the actor to fail to start
                     fn init(
                         state: Option<_rt::Vec<u8>>,
-                        params: (_rt::String,),
                     ) -> Result<(Option<_rt::Vec<u8>>,), _rt::String>;
                 }
                 #[doc(hidden)]
@@ -771,10 +761,9 @@ pub mod exports {
                     ($ty:ident with_types_in $($path_to_types:tt)*) => {
                         const _ : () = { #[unsafe (export_name =
                         "theater:simple/actor#init")] unsafe extern "C" fn
-                        export_init(arg0 : i32, arg1 : * mut u8, arg2 : usize, arg3 : *
-                        mut u8, arg4 : usize,) -> * mut u8 { unsafe {
-                        $($path_to_types)*:: _export_init_cabi::<$ty > (arg0, arg1, arg2,
-                        arg3, arg4) } } #[unsafe (export_name =
+                        export_init(arg0 : i32, arg1 : * mut u8, arg2 : usize,) -> * mut
+                        u8 { unsafe { $($path_to_types)*:: _export_init_cabi::<$ty >
+                        (arg0, arg1, arg2) } } #[unsafe (export_name =
                         "cabi_post_theater:simple/actor#init")] unsafe extern "C" fn
                         _post_return_init(arg0 : * mut u8,) { unsafe {
                         $($path_to_types)*:: __post_return_init::<$ty > (arg0) } } };
@@ -866,27 +855,27 @@ pub(crate) use __export_runtime_test_impl as export;
 )]
 #[doc(hidden)]
 #[allow(clippy::octal_escapes)]
-pub static __WIT_BINDGEN_COMPONENT_TYPE: [u8; 902] = *b"\
-\0asm\x0d\0\x01\0\0\x19\x16wit-component-encoding\x04\0\x07\x83\x06\x01A\x02\x01\
+pub static __WIT_BINDGEN_COMPONENT_TYPE: [u8; 879] = *b"\
+\0asm\x0d\0\x01\0\0\x19\x16wit-component-encoding\x04\0\x07\xec\x05\x01A\x02\x01\
 A\x08\x01B\x17\x01s\x04\0\x08actor-id\x03\0\0\x01s\x04\0\x0achannel-id\x03\0\x02\
 \x01p}\x01k\x04\x01r\x02\x08accepted\x7f\x07message\x05\x04\0\x0echannel-accept\x03\
 \0\x06\x01kw\x01r\x03\x0aevent-types\x06parent\x08\x04data\x04\x04\0\x05event\x03\
 \0\x09\x01r\x02\x04hashw\x05event\x0a\x04\0\x0ameta-event\x03\0\x0b\x01p\x0c\x01\
-r\x01\x06events\x0d\x04\0\x05chain\x03\0\x0e\x01ks\x01r\x06\x04hash\x04\x0bparen\
-t-hash\x05\x0aevent-types\x04data\x04\x09timestampw\x0bdescription\x10\x04\0\x0b\
-chain-event\x03\0\x11\x01m\x09\x11operation-timeout\x0echannel-closed\x0dshuttin\
-g-down\x12function-not-found\x0dtype-mismatch\x08internal\x13serialization-error\
-\x16update-component-error\x06paused\x04\0\x0ewit-error-type\x03\0\x13\x01r\x02\x0a\
-error-type\x14\x04data\x05\x04\0\x0fwit-actor-error\x03\0\x15\x03\0\x14theater:s\
-imple/types\x05\0\x02\x03\0\0\x05chain\x02\x03\0\0\x08actor-id\x01B\x0d\x02\x03\x02\
-\x01\x01\x04\0\x05chain\x03\0\0\x02\x03\x02\x01\x02\x04\0\x08actor-id\x03\0\x02\x01\
-@\x01\x03msgs\x01\0\x04\0\x03log\x01\x04\x01@\0\0\x01\x04\0\x09get-chain\x01\x05\
-\x01p}\x01k\x06\x01j\0\x01s\x01@\x01\x04data\x07\0\x08\x04\0\x08shutdown\x01\x09\
-\x03\0\x16theater:simple/runtime\x05\x03\x01B\x07\x01p}\x01k\0\x01o\x01s\x01o\x01\
-\x01\x01j\x01\x03\x01s\x01@\x02\x05state\x01\x06params\x02\0\x04\x04\0\x04init\x01\
-\x05\x04\0\x14theater:simple/actor\x05\x04\x04\0\x19test:runtime/runtime-test\x04\
-\0\x0b\x12\x01\0\x0cruntime-test\x03\0\0\0G\x09producers\x01\x0cprocessed-by\x02\
-\x0dwit-component\x070.227.1\x10wit-bindgen-rust\x060.41.0";
+r\x01\x06events\x0d\x04\0\x05chain\x03\0\x0e\x01ks\x01r\x05\x04hash\x04\x0bparen\
+t-hash\x05\x0aevent-types\x04data\x04\x0bdescription\x10\x04\0\x0bchain-event\x03\
+\0\x11\x01m\x09\x11operation-timeout\x0echannel-closed\x0dshutting-down\x12funct\
+ion-not-found\x0dtype-mismatch\x08internal\x13serialization-error\x16update-comp\
+onent-error\x06paused\x04\0\x0ewit-error-type\x03\0\x13\x01r\x02\x0aerror-type\x14\
+\x04data\x05\x04\0\x0fwit-actor-error\x03\0\x15\x03\0\x14theater:simple/types\x05\
+\0\x02\x03\0\0\x05chain\x02\x03\0\0\x08actor-id\x01B\x0d\x02\x03\x02\x01\x01\x04\
+\0\x05chain\x03\0\0\x02\x03\x02\x01\x02\x04\0\x08actor-id\x03\0\x02\x01@\x01\x03\
+msgs\x01\0\x04\0\x03log\x01\x04\x01@\0\0\x01\x04\0\x09get-chain\x01\x05\x01p}\x01\
+k\x06\x01j\0\x01s\x01@\x01\x04data\x07\0\x08\x04\0\x08shutdown\x01\x09\x03\0\x16\
+theater:simple/runtime\x05\x03\x01B\x06\x01p}\x01k\0\x01o\x01\x01\x01j\x01\x02\x01\
+s\x01@\x01\x05state\x01\0\x03\x04\0\x04init\x01\x04\x04\0\x14theater:simple/acto\
+r\x05\x04\x04\0\x19test:runtime/runtime-test\x04\0\x0b\x12\x01\0\x0cruntime-test\
+\x03\0\0\0G\x09producers\x01\x0cprocessed-by\x02\x0dwit-component\x070.227.1\x10\
+wit-bindgen-rust\x060.41.0";
 #[inline(never)]
 #[doc(hidden)]
 pub fn __link_custom_section_describing_imports() {

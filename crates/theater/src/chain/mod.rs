@@ -35,7 +35,7 @@ use std::fmt;
 use std::marker::PhantomData;
 use std::path::Path;
 use tokio::sync::mpsc::Sender;
-use tracing::debug;
+use tracing::{debug, warn};
 use wasmtime::component::{ComponentType, Lift, Lower};
 
 use crate::events::{ChainEventData, EventPayload};
@@ -104,8 +104,6 @@ pub struct ChainEvent {
     pub event_type: String,
     /// The actual payload of the event, typically serialized structured data.
     pub data: Vec<u8>,
-    /// Optional human-readable description of the event for logging and debugging.
-    pub description: Option<String>,
 }
 
 impl ChainEvent {}
@@ -137,27 +135,14 @@ impl fmt::Display for ChainEvent {
             None => "(root)".to_string(),
         };
 
-        // Use the description if available
-        let content = if let Some(desc) = &self.description {
-            desc.clone()
-        } else {
-            // Format data preview, attempting JSON formatting if possible
-            if let Ok(text) = std::str::from_utf8(&self.data) {
-                if let Ok(json) = serde_json::from_str::<serde_json::Value>(text) {
-                    if json.is_object() && text.len() < 100 {
-                        // For small JSON objects, inline them
-                        serde_json::to_string(&json).unwrap_or_else(|_| text.to_string())
-                    } else {
-                        // For larger JSON, just show a preview
-                        let preview = if text.len() > 30 {
-                            format!("{}...", &text[0..27])
-                        } else {
-                            text.to_string()
-                        };
-                        format!("'{}'", preview)
-                    }
+        // Format data preview, attempting JSON formatting if possible
+        let content = if let Ok(text) = std::str::from_utf8(&self.data) {
+            if let Ok(json) = serde_json::from_str::<serde_json::Value>(text) {
+                if json.is_object() && text.len() < 100 {
+                    // For small JSON objects, inline them
+                    serde_json::to_string(&json).unwrap_or_else(|_| text.to_string())
                 } else {
-                    // Not JSON, just show text preview
+                    // For larger JSON, just show a preview
                     let preview = if text.len() > 30 {
                         format!("{}...", &text[0..27])
                     } else {
@@ -166,9 +151,17 @@ impl fmt::Display for ChainEvent {
                     format!("'{}'", preview)
                 }
             } else {
-                // Binary data
-                format!("{} bytes of binary data", self.data.len())
+                // Not JSON, just show text preview
+                let preview = if text.len() > 30 {
+                    format!("{}...", &text[0..27])
+                } else {
+                    text.to_string()
+                };
+                format!("'{}'", preview)
             }
+        } else {
+            // Binary data
+            format!("{} bytes of binary data", self.data.len())
         };
 
         write!(
@@ -395,20 +388,13 @@ where
         self.events.push(event.clone());
         self.current_hash = Some(event.hash.clone());
 
-        // notify the runtime of the event
-        let evt = event.clone();
-        let id = self.actor_id.clone();
-        let tx = self.theater_tx.clone();
-        tokio::spawn(async move {
-            debug!("actor [{}]: Sending event {} to runtime", id, evt);
-            tx.send(TheaterCommand::NewEvent {
-                actor_id: id.clone(),
-                event: evt.clone(),
-            })
-            .await
-            .expect("Failed to send event to runtime");
-            debug!("Sent event {} to runtime", hex::encode(evt.hash.clone()));
-        });
+        // notify the runtime of the event synchronously to preserve ordering
+        if let Err(e) = self.theater_tx.try_send(TheaterCommand::NewEvent {
+            actor_id: self.actor_id.clone(),
+            event: event.clone(),
+        }) {
+            warn!("Failed to send event notification: {}", e);
+        }
 
         // I am removing storing the events in the content store for now because they are
         // accumulating too quickly. I need to build out the store local to each actor to store its
@@ -501,7 +487,6 @@ where
                 parent_hash: prev_hash.clone(),
                 event_type: event.event_type.clone(),
                 data: event.data.clone(),
-                description: event.description.clone(),
             };
 
             // Serialize the event (just like in add_typed_event)

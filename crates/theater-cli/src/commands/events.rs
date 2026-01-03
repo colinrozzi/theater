@@ -120,15 +120,9 @@ fn apply_filters(events: &mut Vec<ChainEvent>, args: &EventsArgs) -> CliResult<(
         events.retain(|e| e.event_type.contains(event_type));
     }
 
-    // Parse and apply timestamp filters
-    if let Some(from_str) = &args.from {
-        let from_time = parse_time_spec(from_str)?;
-        events.retain(|e| e.timestamp >= from_time);
-    }
-
-    if let Some(to_str) = &args.to {
-        let to_time = parse_time_spec(to_str)?;
-        events.retain(|e| e.timestamp <= to_time);
+    // Timestamp filters are no longer supported (timestamps removed for determinism)
+    if args.from.is_some() || args.to.is_some() {
+        eprintln!("Warning: --from and --to filters are no longer supported (timestamps removed for determinism)");
     }
 
     // Apply text search
@@ -168,11 +162,11 @@ fn apply_sorting(events: &mut Vec<ChainEvent>, sort_type: &str, reverse: bool) -
             *events = ordered_events;
         }
         "time" => {
-            if reverse {
-                events.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
-            } else {
-                events.sort_by(|a, b| a.timestamp.cmp(&b.timestamp));
-            }
+            // Time sorting no longer supported (timestamps removed for determinism)
+            // Fall back to chain ordering
+            eprintln!("Warning: --sort=time is no longer supported (timestamps removed). Using chain order.");
+            let ordered_events = order_events_by_chain(events, reverse);
+            *events = ordered_events;
         }
         "type" => {
             if reverse {
