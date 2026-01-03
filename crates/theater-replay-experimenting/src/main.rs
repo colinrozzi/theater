@@ -10,27 +10,20 @@ use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio::time::timeout;
 
-use theater::config::actor_manifest::{FileSystemHandlerConfig, TimingHostConfig};
+use theater::config::actor_manifest::RuntimeHostConfig;
 use theater::events::runtime::RuntimeEventData;
 use theater::handler::HandlerRegistry;
 use theater::messages::TheaterCommand;
 use theater::theater_runtime::TheaterRuntime;
 use theater::ReplayHandler;
 
-use theater_handler_filesystem::{FilesystemEventData, FilesystemHandler};
-use theater_handler_io::{IoEventData, WasiIoHandler};
-use theater_handler_timing::{TimingEventData, TimingHandler};
+use theater_handler_runtime::RuntimeHandler;
 
-/// Define test-specific handler events
+/// No custom handler events needed for runtime-test actor
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum TestHandlerEvents {
-    Io(IoEventData),
-    Timing(TimingEventData),
-    Filesystem(FilesystemEventData),
-    HostFunction(theater::HostFunctionCall),
-}
+pub enum TestHandlerEvents {}
 
-/// Test event type wrapping Theater's core events with our handler events
+/// Test event type wrapping Theater's core events
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TestEvents(theater::events::TheaterEvents<TestHandlerEvents>);
 
@@ -53,55 +46,26 @@ impl From<theater::events::wasm::WasmEventData> for TestEvents {
     }
 }
 
-// Implement From for the handler events
-impl From<IoEventData> for TestEvents {
-    fn from(event: IoEventData) -> Self {
-        TestEvents(theater::events::TheaterEvents::Handler(
-            TestHandlerEvents::Io(event),
-        ))
-    }
-}
-
-impl From<TimingEventData> for TestEvents {
-    fn from(event: TimingEventData) -> Self {
-        TestEvents(theater::events::TheaterEvents::Handler(
-            TestHandlerEvents::Timing(event),
-        ))
-    }
-}
-
-impl From<FilesystemEventData> for TestEvents {
-    fn from(event: FilesystemEventData) -> Self {
-        TestEvents(theater::events::TheaterEvents::Handler(
-            TestHandlerEvents::Filesystem(event),
-        ))
-    }
-}
-
-impl From<theater::HostFunctionCall> for TestEvents {
-    fn from(event: theater::HostFunctionCall) -> Self {
-        TestEvents(theater::events::TheaterEvents::Handler(
-            TestHandlerEvents::HostFunction(event),
-        ))
-    }
-}
-
 /// Get the path to the test actor's WASM component
 fn get_test_wasm_path() -> PathBuf {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    // Use the simpler wasi-io-test actor that doesn't need theater:simple/runtime
-    manifest_dir.join("../theater-handler-io/test-actors/wasi-io-test/target/wasm32-wasip1/release/wasi_io_test.wasm")
+    // Use the runtime-test actor which uses theater:simple/runtime
+    // Built with cargo component, target is wasm32-unknown-unknown
+    manifest_dir.join("../theater-handler-runtime/test-actors/runtime-test/target/wasm32-unknown-unknown/release/runtime_test.wasm")
 }
 
 /// Create a manifest for the test actor
 fn create_test_manifest_content() -> String {
     let wasm_path = get_test_wasm_path();
     format!(
-        r#"name = "wasi-io-test"
+        r#"name = "runtime-test"
 version = "0.1.0"
 component = "{}"
 description = "Test actor for replay handler"
 save_chain = true
+
+[[handler]]
+type = "runtime"
 "#,
         wasm_path.display()
     )
@@ -109,27 +73,14 @@ save_chain = true
 
 /// Creates a handler registry for normal (recording) mode
 fn create_recording_registry(
-    _theater_tx: mpsc::Sender<TheaterCommand>,
+    theater_tx: mpsc::Sender<TheaterCommand>,
 ) -> HandlerRegistry<TestEvents> {
     let mut registry = HandlerRegistry::new();
 
-    // IO handler - provides wasi:io and wasi:cli interfaces
-    registry.register(WasiIoHandler::new());
-
-    // Timing handler - provides wasi:clocks interfaces
-    let timing_config = TimingHostConfig {
-        max_sleep_duration: 3600000,
-        min_sleep_duration: 1,
-    };
-    registry.register(TimingHandler::new(timing_config, None));
-
-    // Filesystem handler - provides wasi:filesystem interfaces
-    let filesystem_config = FileSystemHandlerConfig {
-        path: Some(std::path::PathBuf::from("/tmp")),
-        new_dir: Some(true),
-        allowed_commands: None,
-    };
-    registry.register(FilesystemHandler::new(filesystem_config, None));
+    // Runtime handler - provides theater:simple/runtime interface
+    // This is the only handler needed for the runtime-test actor
+    let runtime_config = RuntimeHostConfig {};
+    registry.register(RuntimeHandler::new(runtime_config, theater_tx, None));
 
     registry
 }
@@ -137,27 +88,18 @@ fn create_recording_registry(
 /// Creates a handler registry for replay mode
 fn create_replay_registry(
     expected_chain: Vec<theater::chain::ChainEvent>,
+    theater_tx: mpsc::Sender<TheaterCommand>,
 ) -> HandlerRegistry<TestEvents> {
     let mut registry = HandlerRegistry::new();
 
-    // Replay handler for theater:simple/* interfaces
+    // Replay handler - intercepts all imports and returns recorded outputs
+    // Must be registered FIRST so it intercepts imports before RuntimeHandler
     registry.register(ReplayHandler::new(expected_chain));
 
-    // We still need WASI handlers for basic IO
-    registry.register(WasiIoHandler::new());
-
-    let timing_config = TimingHostConfig {
-        max_sleep_duration: 3600000,
-        min_sleep_duration: 1,
-    };
-    registry.register(TimingHandler::new(timing_config, None));
-
-    let filesystem_config = FileSystemHandlerConfig {
-        path: Some(std::path::PathBuf::from("/tmp")),
-        new_dir: Some(true),
-        allowed_commands: None,
-    };
-    registry.register(FilesystemHandler::new(filesystem_config, None));
+    // RuntimeHandler is still needed to register export functions like
+    // theater:simple/actor.init - the ReplayHandler intercepts the imports
+    let runtime_config = RuntimeHostConfig {};
+    registry.register(RuntimeHandler::new(runtime_config, theater_tx, None));
 
     registry
 }
@@ -277,7 +219,7 @@ async fn main() -> Result<()> {
 
     // --- Phase 2: Replay using the recorded chain ---
     let (theater_tx2, theater_rx2) = mpsc::channel::<TheaterCommand>(32);
-    let replay_registry = create_replay_registry(recorded_chain.clone());
+    let replay_registry = create_replay_registry(recorded_chain.clone(), theater_tx2.clone());
 
     let mut replay_runtime: TheaterRuntime<TestEvents> =
         TheaterRuntime::new(theater_tx2.clone(), theater_rx2, None, replay_registry).await?;

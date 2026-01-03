@@ -25,7 +25,6 @@ use std::sync::{Arc, Mutex};
 
 use tracing::{debug, info, warn};
 use wasmtime::component::types::ComponentItem;
-use wasmtime::component::Val;
 use wasmtime::StoreContextMut;
 
 use crate::actor::handle::ActorHandle;
@@ -102,6 +101,24 @@ impl ReplayState {
     pub fn advance(&self) {
         let mut pos = self.position.lock().unwrap();
         *pos += 1;
+    }
+
+    /// Find the next event matching the given event type and return it.
+    /// This skips any events that don't match the expected type.
+    pub fn find_next_event(&self, expected_type: &str) -> Option<ChainEvent> {
+        let mut pos = self.position.lock().unwrap();
+
+        // Search from current position for an event matching the expected type
+        while *pos < self.events.len() {
+            let event = &self.events[*pos];
+            if event.event_type == expected_type {
+                let result = event.clone();
+                *pos += 1; // Advance past this event
+                return Some(result);
+            }
+            *pos += 1;
+        }
+        None
     }
 
     /// Get current position in the chain.
@@ -255,46 +272,46 @@ where
 
                         debug!("  Registering stub for {}", func_name);
 
+                        // The expected event type for this function
+                        // Format: "interface/function" e.g., "theater:simple/runtime/log"
+                        let expected_event_type = format!("{}/{}", import_name, func_name);
+                        let expected_event_type_clone = expected_event_type.clone();
+
                         // Register an async stub function
                         interface.func_new_async(
                             &func_name,
                             move |_ctx: StoreContextMut<'_, ActorStore<E>>,
                                   _params,
-                                  results| {
+                                  _results| {
                                 let state = state.clone();
                                 let full_name = full_name_clone.clone();
+                                let expected_type = expected_event_type_clone.clone();
 
                                 Box::new(async move {
-                                    debug!("[REPLAY] {} called", full_name);
+                                    debug!("[REPLAY] {} called, looking for event type: {}", full_name, expected_type);
 
-                                    // Get the expected event
-                                    if let Some(expected) = state.current_event() {
+                                    // Find the next event matching this function's event type
+                                    if let Some(event) = state.find_next_event(&expected_type) {
                                         debug!(
-                                            "  Expected event: {} (pos {})",
-                                            expected.event_type,
-                                            state.current_position()
+                                            "  Found matching event at pos {}: {}",
+                                            state.current_position().saturating_sub(1),
+                                            event.event_type
                                         );
 
                                         // In replay mode, we return the recorded outputs.
-                                        // The caller should have matching inputs.
-                                        //
                                         // TODO: Deserialize output bytes to proper Val types
                                         // based on the function signature.
-
-                                        // Advance to next event
-                                        state.advance();
                                     } else {
                                         warn!(
-                                            "[REPLAY] No more expected events for {}",
-                                            full_name
+                                            "[REPLAY] No matching event found for {} (type: {})",
+                                            full_name, expected_type
                                         );
                                     }
 
-                                    // Fill results with defaults for now
-                                    // Full implementation would deserialize from chain
-                                    for result in results.iter_mut() {
-                                        *result = Val::Bool(false);
-                                    }
+                                    // For functions that return (), the results slice is empty
+                                    // For functions with results, we need to deserialize from chain
+                                    // For now, leave results empty (works for void functions)
+                                    // TODO: Proper deserialization for non-void functions
 
                                     Ok(())
                                 })

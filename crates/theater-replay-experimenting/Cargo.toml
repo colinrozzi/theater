@@ -5,9 +5,7 @@ edition = "2021"
 
 [dependencies]
 theater = { path = "../theater" }
-theater-handler-io = { path = "../theater-handler-io" }
-theater-handler-timing = { path = "../theater-handler-timing" }
-theater-handler-filesystem = { path = "../theater-handler-filesystem" }
+theater-handler-runtime = { path = "../theater-handler-runtime" }
 anyhow = "1.0"
 tokio = { version = "1.0", features = ["full"] }
 serde = { version = "1.0", features = ["derive"] }

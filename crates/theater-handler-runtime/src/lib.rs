@@ -73,10 +73,16 @@ where
     fn setup_host_functions(
         &mut self,
         actor_component: &mut ActorComponent<E>,
-        _ctx: &mut HandlerContext,
+        ctx: &mut HandlerContext,
     ) -> anyhow::Result<()> {
         info!("Setting up runtime host functions");
-        
+
+        // Check if the interface is already satisfied by another handler (e.g., ReplayHandler)
+        if ctx.is_satisfied("theater:simple/runtime") {
+            info!("theater:simple/runtime already satisfied by another handler, skipping import setup");
+            return Ok(());
+        }
+
         // The theater:simple/types interface contains only type definitions, no functions.
         // We need to create an empty instance for it so the linker can resolve the import.
         if let Err(e) = actor_component.linker.instance("theater:simple/types") {
@@ -85,7 +91,7 @@ where
             // Log but don't fail - the instantiation will fail later if truly needed.
             info!("Note: Could not create theater:simple/types instance (may not be needed): {}", e);
         }
-        
+
         let name1 = actor_component.name.clone();
         let name2 = actor_component.name.clone();
         let theater_tx = self.theater_tx.clone();
