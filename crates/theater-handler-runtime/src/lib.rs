@@ -97,15 +97,7 @@ where
         let theater_tx = self.theater_tx.clone();
 
         let mut interface = match actor_component.linker.instance("theater:simple/runtime") {
-            Ok(interface) => {
-                // Record successful linker instance creation
-                actor_component.actor_store.record_event(ChainEventData {
-                    event_type: "runtime-setup".to_string(),
-                    data: RuntimeEventData::LinkerInstanceSuccess.into(),
-                    description: Some("Successfully created linker instance".to_string()),
-                });
-                interface
-            }
+            Ok(interface) => interface,
             Err(e) => {
                 // Record the specific error where it happens
                 actor_component.actor_store.record_event(ChainEventData {
@@ -302,13 +294,6 @@ where
                 });
                 anyhow::anyhow!("Failed to wrap shutdown function: {}", e)
             })?;
-
-        // Record overall setup completion
-        actor_component.actor_store.record_event(ChainEventData {
-            event_type: "runtime-setup".to_string(),
-            data: RuntimeEventData::HandlerSetupSuccess.into(),
-            description: Some("Runtime host functions setup completed successfully".to_string()),
-        });
 
         Ok(())
     }
