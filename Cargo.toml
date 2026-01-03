@@ -14,7 +14,6 @@ members = [
     "crates/theater-handler-message-server",
     "crates/theater-handler-process",
     "crates/theater-handler-random",
-    "crates/theater-handler-replay",
     "crates/theater-handler-runtime",
     "crates/theater-handler-sockets",
     "crates/theater-handler-store",

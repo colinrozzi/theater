@@ -3926,25 +3926,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "theater-handler-replay"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "chrono",
- "hex",
- "serde",
- "serde_json",
- "theater",
- "theater-handler-filesystem",
- "theater-handler-io",
- "theater-handler-runtime",
- "theater-handler-timing",
- "tokio",
- "tracing",
- "wasmtime",
-]
-
-[[package]]
 name = "theater-handler-runtime"
 version = "0.2.1"
 dependencies = [
@@ -4045,10 +4026,12 @@ dependencies = [
  "serde",
  "serde_json",
  "theater",
+ "theater-handler-filesystem",
+ "theater-handler-io",
+ "theater-handler-timing",
  "tokio",
  "tracing",
  "tracing-subscriber",
- "wasmtime",
 ]
 
 [[package]]

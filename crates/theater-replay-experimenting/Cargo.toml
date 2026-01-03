@@ -2,19 +2,16 @@
 name = "theater-replay-experimenting"
 version = "0.1.0"
 edition = "2021"
-description = "Experimental crate for developing Theater replay functionality"
 
 [dependencies]
 theater = { path = "../theater" }
-tokio = { version = "1", features = ["full"] }
+theater-handler-io = { path = "../theater-handler-io" }
+theater-handler-timing = { path = "../theater-handler-timing" }
+theater-handler-filesystem = { path = "../theater-handler-filesystem" }
+anyhow = "1.0"
+tokio = { version = "1.0", features = ["full"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-anyhow = "1.0"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 hex = "0.4"
-wasmtime = { version = "31.0", features = ["component-model", "async"] }
-
-[[bin]]
-name = "replay-experiment"
-path = "src/main.rs"
