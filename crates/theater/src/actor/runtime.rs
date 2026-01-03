@@ -228,12 +228,6 @@ impl<E: EventPayload + Clone> ActorRuntime<E> {
         let actor_store =
             ActorStore::new(id.clone(), theater_tx.clone(), actor_handle.clone(), chain);
 
-        actor_store.record_event(ChainEventData {
-            event_type: "theater-runtime".to_string(),
-            data: TheaterRuntimeEventData::ActorLoadCall.into(),
-            description: Some("Initial values set up".to_string()),
-        });
-
         // ----------------- Checkpoint Store Manifest ----------------
 
         debug!("Storing manifest for actor: {}", id);
@@ -290,12 +284,6 @@ impl<E: EventPayload + Clone> ActorRuntime<E> {
             <anyhow::Error as Into<ActorRuntimeError>>::into(e)
         })?;
 
-        actor_component.actor_store.record_event(ChainEventData {
-            event_type: "theater-runtime".to_string(),
-            data: TheaterRuntimeEventData::CreatingHandlers.into(),
-            description: Some("Created handlers".to_string()),
-        });
-
         // ----------------- Checkpoint Setup Handlers -----------------
 
         debug!("Setting up handlers");
@@ -311,12 +299,6 @@ impl<E: EventPayload + Clone> ActorRuntime<E> {
 
         let mut handlers = handler_registry.setup_handlers(&mut actor_component);
         debug!("setup_handlers returned {} handlers", handlers.len());
-
-        actor_component.actor_store.record_event(ChainEventData {
-            event_type: "theater-runtime".to_string(),
-            data: TheaterRuntimeEventData::CreatingHandlers.into(),
-            description: Some("Set up handlers".to_string()),
-        });
 
         // ----------------- Checkpoint Setup Host Functions -----------------
 
@@ -346,12 +328,6 @@ impl<E: EventPayload + Clone> ActorRuntime<E> {
         }
         debug!("Handler context satisfied imports: {:?}", handler_ctx.satisfied_imports);
 
-        actor_component.actor_store.record_event(ChainEventData {
-            event_type: "theater-runtime".to_string(),
-            data: TheaterRuntimeEventData::CreatingHandlers.into(),
-            description: Some("Set up host functions".to_string()),
-        });
-
         // ----------------- Checkpoint Instantiate Actor -----------------
 
         debug!("Instantiating component");
@@ -375,15 +351,6 @@ impl<E: EventPayload + Clone> ActorRuntime<E> {
         })?;
         debug!("Actor component instantiated successfully");
 
-        actor_instance
-            .actor_component
-            .actor_store
-            .record_event(ChainEventData {
-                event_type: "theater-runtime".to_string(),
-                data: TheaterRuntimeEventData::InstantiatingActor.into(),
-                description: Some("Instantiated actor".to_string()),
-            });
-
         // ----------------- Checkpoint Add Export Functions -----------------
 
         debug!("Adding export functions");
@@ -400,15 +367,6 @@ impl<E: EventPayload + Clone> ActorRuntime<E> {
         handlers.iter_mut().for_each(|handler| {
             let _ = handler.add_export_functions(&mut actor_instance);
         });
-
-        actor_instance
-            .actor_component
-            .actor_store
-            .record_event(ChainEventData {
-                event_type: "theater-runtime".to_string(),
-                data: TheaterRuntimeEventData::CreatingHandlers.into(),
-                description: Some("Added export functions".to_string()),
-            });
 
         // ----------------- Checkpoint Initialize State -----------------
 
@@ -432,15 +390,6 @@ impl<E: EventPayload + Clone> ActorRuntime<E> {
         };
 
         actor_instance.store.data_mut().set_state(init_state);
-
-        actor_instance
-            .actor_component
-            .actor_store
-            .record_event(ChainEventData {
-                event_type: "theater-runtime".to_string(),
-                data: TheaterRuntimeEventData::InitializingState.into(),
-                description: Some("Initialized state".to_string()),
-            });
 
         // ----------------- Checkpoint Finalize Setup -----------------
 
@@ -499,21 +448,6 @@ impl<E: EventPayload + Clone> ActorRuntime<E> {
                 }
             });
             handler_tasks.push(handler_task);
-        }
-
-        // Record ready event
-        {
-            let instance_guard = actor_instance_wrapper.read().await;
-            if let Some(ref instance) = *instance_guard {
-                instance
-                    .actor_component
-                    .actor_store
-                    .record_event(ChainEventData {
-                        event_type: "theater-runtime".to_string(),
-                        data: TheaterRuntimeEventData::ActorReady.into(),
-                        description: Some("Actor is ready".to_string()),
-                    });
-            }
         }
 
         Ok((shutdown_controller, handler_tasks))
