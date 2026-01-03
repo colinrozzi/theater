@@ -366,7 +366,6 @@ mod tests {
             parent_hash: None,
             event_type: "theater:simple/runtime/log".to_string(),
             data: vec![],
-            timestamp: 0,
             description: Some("Test event".to_string()),
         }];
 
@@ -387,7 +386,6 @@ mod tests {
                 parent_hash: None,
                 event_type: "test".to_string(),
                 data: vec![],
-                timestamp: 0,
                 description: None,
             },
             ChainEvent {
@@ -395,7 +393,6 @@ mod tests {
                 parent_hash: Some(vec![1, 2, 3, 4]),
                 event_type: "test2".to_string(),
                 data: vec![],
-                timestamp: 0,
                 description: None,
             },
         ];
@@ -418,7 +415,6 @@ mod tests {
             parent_hash: None,
             event_type: "theater:simple/runtime/log".to_string(),
             data: vec![],
-            timestamp: 0,
             description: Some("Test".to_string()),
         }];
 

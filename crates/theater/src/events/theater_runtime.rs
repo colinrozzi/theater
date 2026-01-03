@@ -1,12 +1,10 @@
-use crate::{config::permissions::HandlerPermission, ManifestConfig};
+use crate::config::permissions::HandlerPermission;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum TheaterRuntimeEventData {
     // Theater runtime lifecycle events
-    ActorLoadCall {
-        manifest: ManifestConfig,
-    },
+    ActorLoadCall,
 
     ActorLoadResult {
         success: bool,

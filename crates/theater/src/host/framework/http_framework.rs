@@ -110,7 +110,6 @@ impl HttpFramework {
         actor_component.actor_store.record_event(ChainEventData {
             event_type: "http-framework-setup".to_string(),
             data: EventData::Http(HttpEventData::HandlerSetupStart),
-            timestamp: chrono::Utc::now().timestamp_millis() as u64,
             description: Some("Starting HTTP framework host function setup".to_string()),
         });
 
@@ -133,7 +132,6 @@ impl HttpFramework {
                 actor_component.actor_store.record_event(ChainEventData {
                     event_type: "http-framework-setup".to_string(),
                     data: EventData::Http(HttpEventData::LinkerInstanceSuccess),
-                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
                     description: Some("Successfully created linker instance".to_string()),
                 });
                 interface
@@ -146,7 +144,6 @@ impl HttpFramework {
                         error: e.to_string(),
                         step: "linker_instance".to_string(),
                     }),
-                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
                     description: Some(format!("Failed to create linker instance: {}", e)),
                 });
                 return Err(anyhow::anyhow!(
@@ -193,7 +190,6 @@ impl HttpFramework {
                         port,
                         with_tls: config.tls_config.is_some(),
                     }),
-                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
                     description: Some(format!(
                         "Created HTTP server {} on {}:{}",
                         server_id, host, port
@@ -283,7 +279,6 @@ impl HttpFramework {
                                 ctx.data_mut().record_event(ChainEventData {
                                     event_type: "http-framework/start-server".to_string(),
                                     data: event_data,
-                                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                     description: Some(description),
                                 });
 
@@ -316,7 +311,6 @@ impl HttpFramework {
                                         path: format!("server-{}", server_id),
                                         message: e.to_string(),
                                     }),
-                                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                     description: Some(format!(
                                         "Failed to start HTTP server {}: {}",
                                         server_id, e
@@ -365,7 +359,6 @@ impl HttpFramework {
                                 ctx.data_mut().record_event(ChainEventData {
                                     event_type: "http-framework/stop-server".to_string(),
                                     data: EventData::Http(HttpEventData::ServerStop { server_id }),
-                                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                     description: Some(format!("Stopped HTTP server {}", server_id)),
                                 });
 
@@ -382,7 +375,6 @@ impl HttpFramework {
                                         path: format!("server-{}", server_id),
                                         message: e.to_string(),
                                     }),
-                                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                     description: Some(format!(
                                         "Failed to stop HTTP server {}: {}",
                                         server_id, e
@@ -444,7 +436,6 @@ impl HttpFramework {
                         ctx.data_mut().record_event(ChainEventData {
                             event_type: "http-framework/destroy-server".to_string(),
                             data: EventData::Http(HttpEventData::ServerDestroy { server_id }),
-                            timestamp: chrono::Utc::now().timestamp_millis() as u64,
                             description: Some(format!("Destroyed HTTP server {}", server_id)),
                         });
 
@@ -486,7 +477,6 @@ impl HttpFramework {
                         handler_id,
                         name: handler_name.clone(),
                     }),
-                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
                     description: Some(format!(
                         "Registered handler {} with name '{}'",
                         handler_id, handler_name
@@ -584,7 +574,6 @@ impl HttpFramework {
                                 method: method_clone.clone(),
                                 handler_id,
                             }),
-                            timestamp: chrono::Utc::now().timestamp_millis() as u64,
                             description: Some(format!(
                                 "Added route {} for {} {} on server {}",
                                 route_id, method_clone, path_clone, server_id
@@ -647,7 +636,6 @@ impl HttpFramework {
                                 route_id,
                                 server_id,
                             }),
-                            timestamp: chrono::Utc::now().timestamp_millis() as u64,
                             description: Some(format!(
                                 "Removed route {} from server {}",
                                 route_id, server_id
@@ -725,7 +713,6 @@ impl HttpFramework {
                                 path: path_clone.clone(),
                                 handler_id,
                             }),
-                            timestamp: chrono::Utc::now().timestamp_millis() as u64,
                             description: Some(format!(
                                 "Added middleware {} for path {} on server {}",
                                 middleware_id, path_clone, server_id
@@ -788,7 +775,6 @@ impl HttpFramework {
                                 middleware_id,
                                 server_id,
                             }),
-                            timestamp: chrono::Utc::now().timestamp_millis() as u64,
                             description: Some(format!(
                                 "Removed middleware {} from server {}",
                                 middleware_id, server_id
@@ -903,7 +889,6 @@ impl HttpFramework {
                                 message_handler_id,
                                 disconnect_handler_id,
                             }),
-                            timestamp: chrono::Utc::now().timestamp_millis() as u64,
                             description: Some(format!(
                                 "Enabled WebSocket on path {} for server {}",
                                 path_clone, server_id
@@ -955,7 +940,6 @@ impl HttpFramework {
                                 server_id,
                                 path: path.clone(),
                             }),
-                            timestamp: chrono::Utc::now().timestamp_millis() as u64,
                             description: Some(format!(
                                 "Disabled WebSocket on path {} for server {}",
                                 path, server_id
@@ -1031,7 +1015,6 @@ impl HttpFramework {
                                 message_type: message_type.to_string(),
                                 message_size,
                             }),
-                            timestamp: chrono::Utc::now().timestamp_millis() as u64,
                             description: Some(format!(
                                 "Sent WebSocket message to connection {} on server {}",
                                 connection_id, server_id
@@ -1097,7 +1080,6 @@ impl HttpFramework {
                                 server_id,
                                 connection_id,
                             }),
-                            timestamp: chrono::Utc::now().timestamp_millis() as u64,
                             description: Some(format!(
                                 "Closed WebSocket connection {} on server {}",
                                 connection_id, server_id
@@ -1115,7 +1097,6 @@ impl HttpFramework {
         actor_component.actor_store.record_event(ChainEventData {
             event_type: "http-framework-setup".to_string(),
             data: EventData::Http(HttpEventData::HandlerSetupSuccess),
-            timestamp: chrono::Utc::now().timestamp_millis() as u64,
             description: Some(
                 "HTTP framework host functions setup completed successfully".to_string(),
             ),

@@ -843,7 +843,6 @@ where
                 .add_typed_event(crate::events::ChainEventData {
                     event_type: "shutdown".to_string(),
                     data: crate::events::runtime::RuntimeEventData::ShuttingDown {}.into(),
-                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
                     description: Some("shutting down".to_string()),
                 })
                 .expect("Failed to record event");

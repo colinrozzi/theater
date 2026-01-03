@@ -56,7 +56,6 @@ impl TimingHost {
         actor_component.actor_store.record_event(ChainEventData {
             event_type: "timing-setup".to_string(),
             data: EventData::Timing(TimingEventData::HandlerSetupStart),
-            timestamp: chrono::Utc::now().timestamp_millis() as u64,
             description: Some("Starting timing host function setup".to_string()),
         });
 
@@ -68,7 +67,6 @@ impl TimingHost {
                 actor_component.actor_store.record_event(ChainEventData {
                     event_type: "timing-setup".to_string(),
                     data: EventData::Timing(TimingEventData::LinkerInstanceSuccess),
-                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
                     description: Some("Successfully created linker instance".to_string()),
                 });
                 interface
@@ -81,7 +79,6 @@ impl TimingHost {
                         error: e.to_string(),
                         step: "linker_instance".to_string(),
                     }),
-                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
                     description: Some(format!("Failed to create linker instance: {}", e)),
                 });
                 return Err(anyhow::anyhow!(
@@ -127,7 +124,6 @@ impl TimingHost {
                         error: e.to_string(),
                         step: "now_function_wrap".to_string(),
                     }),
-                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
                     description: Some(format!("Failed to wrap now function: {}", e)),
                 });
                 anyhow::anyhow!("Failed to wrap now function: {}", e)
@@ -204,7 +200,6 @@ impl TimingHost {
                         error: e.to_string(),
                         step: "sleep_function_wrap".to_string(),
                     }),
-                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
                     description: Some(format!("Failed to wrap sleep function: {}", e)),
                 });
                 anyhow::anyhow!("Failed to wrap sleep function: {}", e)
@@ -306,7 +301,6 @@ impl TimingHost {
                         error: e.to_string(),
                         step: "deadline_function_wrap".to_string(),
                     }),
-                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
                     description: Some(format!("Failed to wrap deadline function: {}", e)),
                 });
                 anyhow::anyhow!("Failed to wrap deadline function: {}", e)
@@ -316,7 +310,6 @@ impl TimingHost {
         actor_component.actor_store.record_event(ChainEventData {
             event_type: "timing-setup".to_string(),
             data: EventData::Timing(TimingEventData::HandlerSetupSuccess),
-            timestamp: chrono::Utc::now().timestamp_millis() as u64,
             description: Some("Timing host functions setup completed successfully".to_string()),
         });
 

@@ -44,7 +44,6 @@ impl StoreHost {
         actor_component.actor_store.record_event(ChainEventData {
             event_type: "store-setup".to_string(),
             data: EventData::Store(StoreEventData::HandlerSetupStart),
-            timestamp: chrono::Utc::now().timestamp_millis() as u64,
             description: Some("Starting store host function setup".to_string()),
         });
 
@@ -56,7 +55,6 @@ impl StoreHost {
                 actor_component.actor_store.record_event(ChainEventData {
                     event_type: "store-setup".to_string(),
                     data: EventData::Store(StoreEventData::LinkerInstanceSuccess),
-                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
                     description: Some("Successfully created linker instance".to_string()),
                 });
                 interface
@@ -69,7 +67,6 @@ impl StoreHost {
                         error: e.to_string(),
                         step: "linker_instance".to_string(),
                     }),
-                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
                     description: Some(format!("Failed to create linker instance: {}", e)),
                 });
                 return Err(anyhow::anyhow!(
@@ -88,7 +85,6 @@ impl StoreHost {
                 ctx.data_mut().record_event(ChainEventData {
                     event_type: "theater:simple/store/store".to_string(),
                     data: EventData::Store(StoreEventData::NewStoreCall {}),
-                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
                     description: Some("Creating new content store".to_string()),
                 });
 
@@ -101,7 +97,6 @@ impl StoreHost {
                         store_id: store.id().to_string(),
                         success: true,
                     }),
-                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
                     description: Some(format!("New content store created with ID: {}", store.id())),
                 });
 
@@ -120,7 +115,6 @@ impl StoreHost {
                         store_id: store_id.clone(),
                         content: content.clone(),
                     }),
-                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
                     description: Some(format!("Storing {} bytes of content", content.len())),
                 });
 
@@ -140,7 +134,6 @@ impl StoreHost {
                                     content_ref: content_ref.clone(),
                                     success: true,
                                 }),
-                                timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                 description: Some(format!("Content stored successfully with hash: {}", content_ref.hash())),
                             });
                             
@@ -156,7 +149,6 @@ impl StoreHost {
                                     operation: "store".to_string(),
                                     message: e.to_string(),
                                 }),
-                                timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                 description: Some(format!("Error storing content: {}", e)),
                             });
                             
@@ -178,7 +170,6 @@ impl StoreHost {
                         store_id: store_id.clone(),
                         content_ref: content_ref.clone(),
                     }),
-                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
                     description: Some(format!("Getting content with hash: {}", content_ref.hash())),
                 });
                 
@@ -199,7 +190,6 @@ impl StoreHost {
                                     content: Some(content.clone()),
                                     success: true,
                                 }),
-                                timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                 description: Some(format!("Retrieved {} bytes of content with hash: {}", content.len(), content_ref.hash())),
                             });
                             
@@ -215,7 +205,6 @@ impl StoreHost {
                                     operation: "get".to_string(),
                                     message: e.to_string(),
                                 }),
-                                timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                 description: Some(format!("Error retrieving content with hash {}: {}", content_ref.hash(), e)),
                             });
                             
@@ -238,7 +227,6 @@ impl StoreHost {
                         store_id: store_id.clone(),
                         content_ref: content_ref.clone(),
                     }),
-                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
                     description: Some(format!(
                         "Checking if content with hash {} exists",
                         content_ref.hash()
@@ -262,7 +250,6 @@ impl StoreHost {
                                     exists,
                                     success: true,
                                 }),
-                                timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                 description: Some(format!(
                                     "Content with hash {} exists: {}",
                                     content_ref.hash(),
@@ -290,7 +277,6 @@ impl StoreHost {
                         label: label_string.clone(),
                         content_ref: content_ref.clone(),
                     }),
-                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
                     description: Some(format!(
                         "Labeling content with hash {} as '{}'",
                         content_ref.hash(),
@@ -317,7 +303,6 @@ impl StoreHost {
                                     content_ref: content_ref.clone(),
                                     success: true,
                                 }),
-                                timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                 description: Some(format!(
                                     "Successfully labeled content with hash {} as '{}'",
                                     content_ref.hash(),
@@ -337,7 +322,6 @@ impl StoreHost {
                                     operation: "label".to_string(),
                                     message: e.to_string(),
                                 }),
-                                timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                 description: Some(format!(
                                     "Error labeling content with hash {} as '{}': {}",
                                     content_ref.hash(),
@@ -367,7 +351,6 @@ impl StoreHost {
                         store_id: store_id.clone(),
                         label: label_string.clone(),
                     }),
-                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
                     description: Some(format!(
                         "Getting content reference by label: {}",
                         label_string
@@ -393,7 +376,6 @@ impl StoreHost {
                                     content_ref: content_ref_opt.clone(),
                                     success: true,
                                 }),
-                                timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                 description: Some(format!(
                                     "Successfully retrieved content reference {:?} for label '{}'",
                                     content_ref_opt, label_clone
@@ -412,7 +394,6 @@ impl StoreHost {
                                     operation: "get-by-label".to_string(),
                                     message: e.to_string(),
                                 }),
-                                timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                 description: Some(format!(
                                     "Error retrieving content reference for label '{}': {}",
                                     label_clone, e
@@ -438,7 +419,6 @@ impl StoreHost {
                         store_id: store_id.clone(),
                         label: label_string.clone(),
                     }),
-                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
                     description: Some(format!("Removing label: {}", label_string)),
                 });
 
@@ -460,7 +440,6 @@ impl StoreHost {
                                     label: label_string.clone(),
                                     success: true,
                                 }),
-                                timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                 description: Some(format!(
                                     "Successfully removed label '{}'",
                                     label_clone
@@ -479,7 +458,6 @@ impl StoreHost {
                                     operation: "remove-label".to_string(),
                                     message: e.to_string(),
                                 }),
-                                timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                 description: Some(format!(
                                     "Error removing label '{}': {}",
                                     label_clone, e
@@ -505,7 +483,6 @@ impl StoreHost {
                         label: label_string.clone(),
                         content: content.clone(),
                     }),
-                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
                     description: Some(format!("Storing {} bytes of content at label: {}", content.len(), label_string)),
                 });
 
@@ -529,7 +506,6 @@ impl StoreHost {
                                     content_ref: content_ref.clone(),
                                     success: true,
                                 }),
-                                timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                 description: Some(format!("Successfully stored content with hash {} at label '{}'", content_ref.hash(), label_clone)),
                             });
                             
@@ -545,7 +521,6 @@ impl StoreHost {
                                     operation: "put-at-label".to_string(),
                                     message: e.to_string(),
                                 }),
-                                timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                 description: Some(format!("Error storing content at label '{}': {}", label_clone, e)),
                             });
                             
@@ -568,7 +543,6 @@ impl StoreHost {
                         label: label_string.clone(),
                         content: content.clone(),
                     }),
-                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
                     description: Some(format!("Replacing content at label {} with {} bytes of new content", label_string, content.len())),
                 });
 
@@ -592,7 +566,6 @@ impl StoreHost {
                                     content_ref: content_ref.clone(),
                                     success: true,
                                 }),
-                                timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                 description: Some(format!("Successfully replaced content at label '{}' with new content (hash: {})", label_clone, content_ref.hash())),
                             });
                             
@@ -608,7 +581,6 @@ impl StoreHost {
                                     operation: "replace-content-at-label".to_string(),
                                     message: e.to_string(),
                                 }),
-                                timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                 description: Some(format!("Error replacing content at label '{}': {}", label_clone, e)),
                             });
                             
@@ -631,7 +603,6 @@ impl StoreHost {
                         label: label_string.clone(),
                         content_ref: content_ref.clone(),
                     }),
-                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
                     description: Some(format!("Replacing content at label {} with content reference: {}", label_string, content_ref.hash())),
                 });
                 
@@ -654,7 +625,6 @@ impl StoreHost {
                                     content_ref: content_ref.clone(),
                                     success: true,
                                 }),
-                                timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                 description: Some(format!("Successfully replaced content at label '{}' with content reference (hash: {})", label_clone, content_ref.hash())),
                             });
                             
@@ -670,7 +640,6 @@ impl StoreHost {
                                     operation: "replace-at-label".to_string(),
                                     message: e.to_string(),
                                 }),
-                                timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                 description: Some(format!("Error replacing content at label '{}' with reference (hash: {}): {}", label_clone, content_ref.hash(), e)),
                             });
                             
@@ -694,7 +663,6 @@ impl StoreHost {
                     data: EventData::Store(StoreEventData::ListAllContentCall {
                         store_id: store_id.clone(),
                     }),
-                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
                     description: Some("Listing all content references".to_string()),
                 });
 
@@ -714,7 +682,6 @@ impl StoreHost {
                                     content_refs: content_refs.clone(),
                                     success: true,
                                 }),
-                                timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                 description: Some(format!(
                                     "Successfully listed {} content references",
                                     content_refs.len()
@@ -733,7 +700,6 @@ impl StoreHost {
                                     operation: "list-all-content".to_string(),
                                     message: e.to_string(),
                                 }),
-                                timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                 description: Some(format!(
                                     "Error listing all content references: {}",
                                     e
@@ -758,7 +724,6 @@ impl StoreHost {
                     data: EventData::Store(StoreEventData::CalculateTotalSizeCall {
                         store_id: store_id.clone(),
                     }),
-                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
                     description: Some("Calculating total size of all content".to_string()),
                 });
 
@@ -778,7 +743,6 @@ impl StoreHost {
                                     size: total_size,
                                     success: true,
                                 }),
-                                timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                 description: Some(format!(
                                     "Successfully calculated total content size: {} bytes",
                                     total_size
@@ -797,7 +761,6 @@ impl StoreHost {
                                     operation: "calculate-total-size".to_string(),
                                     message: e.to_string(),
                                 }),
-                                timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                 description: Some(format!(
                                     "Error calculating total content size: {}",
                                     e
@@ -819,7 +782,6 @@ impl StoreHost {
                 ctx.data_mut().record_event(ChainEventData {
                     event_type: "theater:simple/store/list-labels".to_string(),
                     data: EventData::Store(StoreEventData::ListLabelsCall { store_id: store_id.clone() }),
-                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
                     description: Some("Listing all labels".to_string()),
                 });
 
@@ -839,7 +801,6 @@ impl StoreHost {
                                     labels: labels.clone(),
                                     success: true,
                                 }),
-                                timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                 description: Some(format!("Successfully listed {} labels", labels.len())),
                             });
                             
@@ -855,7 +816,6 @@ impl StoreHost {
                                     operation: "list-labels".to_string(),
                                     message: e.to_string(),
                                 }),
-                                timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                 description: Some(format!("Error listing labels: {}", e)),
                             });
                             
@@ -870,7 +830,6 @@ impl StoreHost {
         actor_component.actor_store.record_event(ChainEventData {
             event_type: "store-setup".to_string(),
             data: EventData::Store(StoreEventData::HandlerSetupSuccess),
-            timestamp: chrono::Utc::now().timestamp_millis() as u64,
             description: Some("Store host functions setup completed successfully".to_string()),
         });
 

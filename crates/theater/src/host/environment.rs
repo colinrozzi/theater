@@ -59,7 +59,6 @@ impl EnvironmentHost {
         actor_component.actor_store.record_event(ChainEventData {
             event_type: "environment-setup".to_string(),
             data: EventData::Environment(EnvironmentEventData::HandlerSetupStart),
-            timestamp: chrono::Utc::now().timestamp_millis() as u64,
             description: Some("Starting environment host function setup".to_string()),
         });
 
@@ -74,7 +73,6 @@ impl EnvironmentHost {
                 actor_component.actor_store.record_event(ChainEventData {
                     event_type: "environment-setup".to_string(),
                     data: EventData::Environment(EnvironmentEventData::LinkerInstanceSuccess),
-                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
                     description: Some("Successfully created linker instance".to_string()),
                 });
                 interface
@@ -87,7 +85,6 @@ impl EnvironmentHost {
                         error: e.to_string(),
                         step: "linker_instance".to_string(),
                     }),
-                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
                     description: Some(format!("Failed to create linker instance: {}", e)),
                 });
                 return Err(anyhow::anyhow!(
@@ -264,7 +261,6 @@ impl EnvironmentHost {
         actor_component.actor_store.record_event(ChainEventData {
             event_type: "environment-setup".to_string(),
             data: EventData::Environment(EnvironmentEventData::HandlerSetupSuccess),
-            timestamp: chrono::Utc::now().timestamp_millis() as u64,
             description: Some(
                 "Environment host functions setup completed successfully".to_string(),
             ),

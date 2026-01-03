@@ -72,7 +72,6 @@ use theater_chain::event::EventType;
 ///     parent_hash: None,      // This is a root event with no parent
 ///     event_type: "example".to_string(),
 ///     data,
-///     timestamp: chrono::Utc::now().timestamp() as u64,
 ///     description: Some("Example event".to_string()),
 /// };
 /// ```
@@ -105,8 +104,6 @@ pub struct ChainEvent {
     pub event_type: String,
     /// The actual payload of the event, typically serialized structured data.
     pub data: Vec<u8>,
-    /// Unix timestamp (in seconds) when the event was created.
-    pub timestamp: u64,
     /// Optional human-readable description of the event for logging and debugging.
     pub description: Option<String>,
 }
@@ -115,11 +112,6 @@ impl ChainEvent {}
 
 impl fmt::Display for ChainEvent {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        // Format timestamp as human-readable date with millisecond precision
-        let datetime = chrono::DateTime::from_timestamp(self.timestamp as i64, 0)
-            .unwrap_or_else(|| chrono::DateTime::UNIX_EPOCH);
-        let formatted_time = datetime.format("%Y-%m-%d %H:%M:%S%.3f").to_string();
-
         // Format hash as short hex string (first 7 characters)
         let hash_str = self
             .hash
@@ -181,8 +173,7 @@ impl fmt::Display for ChainEvent {
 
         write!(
             f,
-            "[{}] Event[{}] {} {} {}",
-            formatted_time,
+            "Event[{}] {} {} {}",
             short_hash,
             parent_str,
             style(&self.event_type).cyan(),
@@ -363,7 +354,6 @@ where
     /// let event_data = ChainEventData {
     ///     event_type: "state_change".to_string(),
     ///     data: EventData::Runtime(theater::events::runtime::RuntimeEventData::Log { level: "info".to_string(), message: "state changed".to_string() }),
-    ///     timestamp: chrono::Utc::now().timestamp() as u64,
     ///     description: Some("Actor state changed".to_string()),
     /// };
     ///
@@ -511,7 +501,6 @@ where
                 parent_hash: prev_hash.clone(),
                 event_type: event.event_type.clone(),
                 data: event.data.clone(),
-                timestamp: event.timestamp,
                 description: event.description.clone(),
             };
 

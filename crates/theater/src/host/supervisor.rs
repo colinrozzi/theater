@@ -60,7 +60,6 @@ impl SupervisorHost {
         actor_component.actor_store.record_event(ChainEventData {
             event_type: "supervisor-setup".to_string(),
             data: EventData::Supervisor(SupervisorEventData::HandlerSetupStart),
-            timestamp: chrono::Utc::now().timestamp_millis() as u64,
             description: Some("Starting supervisor host function setup".to_string()),
         });
 
@@ -72,7 +71,6 @@ impl SupervisorHost {
                 actor_component.actor_store.record_event(ChainEventData {
                     event_type: "supervisor-setup".to_string(),
                     data: EventData::Supervisor(SupervisorEventData::LinkerInstanceSuccess),
-                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
                     description: Some("Successfully created linker instance".to_string()),
                 });
                 interface
@@ -85,7 +83,6 @@ impl SupervisorHost {
                         error: e.to_string(),
                         step: "linker_instance".to_string(),
                     }),
-                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
                     description: Some(format!("Failed to create linker instance: {}", e)),
                 });
                 return Err(anyhow::anyhow!(
@@ -113,7 +110,6 @@ impl SupervisorHost {
                         data: EventData::Supervisor(SupervisorEventData::SpawnChildCall {
                             manifest_path: manifest.clone(),
                         }),
-                        timestamp: chrono::Utc::now().timestamp_millis() as u64,
                         description: Some(format!("Spawning child from manifest: {}", manifest)),
                     });
                     
@@ -147,7 +143,6 @@ impl SupervisorHost {
                                                 child_id: actor_id_str.clone(),
                                                 success: true,
                                             }),
-                                            timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                             description: Some(format!("Successfully spawned child with ID: {}", actor_id_str)),
                                         });
                                         
@@ -162,7 +157,6 @@ impl SupervisorHost {
                                                 child_id: None,
                                                 message: e.to_string(),
                                             }),
-                                            timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                             description: Some(format!("Failed to spawn child: {}", e)),
                                         });
                                         
@@ -177,7 +171,6 @@ impl SupervisorHost {
                                                 child_id: None,
                                                 message: e.to_string(),
                                             }),
-                                            timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                             description: Some(format!("Failed to receive spawn response: {}", e)),
                                         });
                                         
@@ -194,7 +187,6 @@ impl SupervisorHost {
                                         child_id: None,
                                         message: e.to_string(),
                                     }),
-                                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                     description: Some(format!("Failed to send spawn command: {}", e)),
                                 });
                                 
@@ -223,7 +215,6 @@ impl SupervisorHost {
                             manifest_path: manifest.clone(),
                             initial_state: state_bytes.clone(),
                         }),
-                        timestamp: chrono::Utc::now().timestamp_millis() as u64,
                         description: Some(format!("Resuming child from manifest: {}", manifest)),
                     });
                     
@@ -257,7 +248,6 @@ impl SupervisorHost {
                                                 child_id: actor_id_str.clone(),
                                                 success: true,
                                             }),
-                                            timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                             description: Some(format!("Successfully resumed child with ID: {}", actor_id_str)),
                                         });
                                         
@@ -272,7 +262,6 @@ impl SupervisorHost {
                                                 child_id: None,
                                                 message: e.to_string(),
                                             }),
-                                            timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                             description: Some(format!("Failed to spawn child: {}", e)),
                                         });
                                         
@@ -287,7 +276,6 @@ impl SupervisorHost {
                                                 child_id: None,
                                                 message: e.to_string(),
                                             }),
-                                            timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                             description: Some(format!("Failed to receive spawn response: {}", e)),
                                         });
                                         
@@ -304,7 +292,6 @@ impl SupervisorHost {
                                         child_id: None,
                                         message: e.to_string(),
                                     }),
-                                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                     description: Some(format!("Failed to send resume command: {}", e)),
                                 });
                                 
@@ -329,7 +316,6 @@ impl SupervisorHost {
                     ctx.data_mut().record_event(ChainEventData {
                         event_type: "theater:simple/supervisor/list-children".to_string(),
                         data: EventData::Supervisor(SupervisorEventData::ListChildrenCall {}),
-                        timestamp: chrono::Utc::now().timestamp_millis() as u64,
                         description: Some("Listing children".to_string()),
                     });
 
@@ -361,7 +347,6 @@ impl SupervisorHost {
                                                 success: true,
                                             },
                                         ),
-                                        timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                         description: Some(format!(
                                             "Found {} children",
                                             children_str.len()
@@ -380,7 +365,6 @@ impl SupervisorHost {
                                             child_id: None,
                                             message: e.to_string(),
                                         }),
-                                        timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                         description: Some(format!(
                                             "Failed to receive children list: {}",
                                             e
@@ -400,7 +384,6 @@ impl SupervisorHost {
                                         child_id: None,
                                         message: e.to_string(),
                                     }),
-                                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                     description: Some(format!(
                                         "Failed to send list children command: {}",
                                         e
@@ -433,7 +416,6 @@ impl SupervisorHost {
                         data: EventData::Supervisor(SupervisorEventData::RestartChildCall {
                             child_id: child_id.clone(),
                         }),
-                        timestamp: chrono::Utc::now().timestamp_millis() as u64,
                         description: Some(format!("Restarting child: {}", child_id)),
                     });
                     
@@ -456,7 +438,6 @@ impl SupervisorHost {
                                                 child_id: Some(child_id_clone.clone()),
                                                 message: e.to_string(),
                                             }),
-                                            timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                             description: Some(format!("Failed to parse child ID: {}", e)),
                                         });
                                         
@@ -476,7 +457,6 @@ impl SupervisorHost {
                                             child_id: child_id_clone.clone(),
                                             success: true,
                                         }),
-                                        timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                         description: Some(format!("Successfully restarted child: {}", child_id_clone)),
                                     });
                                     
@@ -491,7 +471,6 @@ impl SupervisorHost {
                                             child_id: Some(child_id_clone.clone()),
                                             message: e.to_string(),
                                         }),
-                                        timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                         description: Some(format!("Failed to restart child: {}", e)),
                                     });
                                     
@@ -506,7 +485,6 @@ impl SupervisorHost {
                                             child_id: Some(child_id_clone.clone()),
                                             message: e.to_string(),
                                         }),
-                                        timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                         description: Some(format!("Failed to receive restart response: {}", e)),
                                     });
                                     
@@ -522,7 +500,6 @@ impl SupervisorHost {
                                         child_id: Some(child_id_clone.clone()),
                                         message: e.to_string(),
                                     }),
-                                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                     description: Some(format!("Failed to send restart command: {}", e)),
                                 });
                                 
@@ -549,7 +526,6 @@ impl SupervisorHost {
                         data: EventData::Supervisor(SupervisorEventData::StopChildCall {
                             child_id: child_id.clone(),
                         }),
-                        timestamp: chrono::Utc::now().timestamp_millis() as u64,
                         description: Some(format!("Stopping child: {}", child_id)),
                     });
                     
@@ -572,7 +548,6 @@ impl SupervisorHost {
                                                 child_id: Some(child_id_clone.clone()),
                                                 message: e.to_string(),
                                             }),
-                                            timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                             description: Some(format!("Failed to parse child ID: {}", e)),
                                         });
                                         
@@ -592,7 +567,6 @@ impl SupervisorHost {
                                             child_id: child_id_clone.clone(),
                                             success: true,
                                         }),
-                                        timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                         description: Some(format!("Successfully stopped child: {}", child_id_clone)),
                                     });
                                     
@@ -607,7 +581,6 @@ impl SupervisorHost {
                                             child_id: Some(child_id_clone.clone()),
                                             message: e.to_string(),
                                         }),
-                                        timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                         description: Some(format!("Failed to stop child: {}", e)),
                                     });
                                     
@@ -622,7 +595,6 @@ impl SupervisorHost {
                                             child_id: Some(child_id_clone.clone()),
                                             message: e.to_string(),
                                         }),
-                                        timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                         description: Some(format!("Failed to receive stop response: {}", e)),
                                     });
                                     
@@ -638,7 +610,6 @@ impl SupervisorHost {
                                         child_id: Some(child_id_clone.clone()),
                                         message: e.to_string(),
                                     }),
-                                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                     description: Some(format!("Failed to send stop command: {}", e)),
                                 });
                                 
@@ -667,7 +638,6 @@ impl SupervisorHost {
                         data: EventData::Supervisor(SupervisorEventData::GetChildStateCall {
                             child_id: child_id.clone(),
                         }),
-                        timestamp: chrono::Utc::now().timestamp_millis() as u64,
                         description: Some(format!("Getting state for child: {}", child_id)),
                     });
 
@@ -693,7 +663,6 @@ impl SupervisorHost {
                                                     message: e.to_string(),
                                                 },
                                             ),
-                                            timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                             description: Some(format!(
                                                 "Failed to parse child ID: {}",
                                                 e
@@ -721,7 +690,6 @@ impl SupervisorHost {
                                                 success: true,
                                             },
                                         ),
-                                        timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                         description: Some(format!(
                                             "Successfully retrieved state for child {}: {} bytes",
                                             child_id_clone, state_size
@@ -740,7 +708,6 @@ impl SupervisorHost {
                                             child_id: Some(child_id_clone.clone()),
                                             message: e.to_string(),
                                         }),
-                                        timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                         description: Some(format!(
                                             "Failed to get child state: {}",
                                             e
@@ -759,7 +726,6 @@ impl SupervisorHost {
                                             child_id: Some(child_id_clone.clone()),
                                             message: e.to_string(),
                                         }),
-                                        timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                         description: Some(format!(
                                             "Failed to receive state: {}",
                                             e
@@ -779,7 +745,6 @@ impl SupervisorHost {
                                         child_id: Some(child_id_clone.clone()),
                                         message: e.to_string(),
                                     }),
-                                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                     description: Some(format!(
                                         "Failed to send state request: {}",
                                         e
@@ -811,7 +776,6 @@ impl SupervisorHost {
                         data: EventData::Supervisor(SupervisorEventData::GetChildEventsCall {
                             child_id: child_id.clone(),
                         }),
-                        timestamp: chrono::Utc::now().timestamp_millis() as u64,
                         description: Some(format!("Getting events for child: {}", child_id)),
                     });
 
@@ -838,7 +802,6 @@ impl SupervisorHost {
                                                     message: e.to_string(),
                                                 },
                                             ),
-                                            timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                             description: Some(format!(
                                                 "Failed to parse child ID: {}",
                                                 e
@@ -865,7 +828,6 @@ impl SupervisorHost {
                                                 success: true,
                                             },
                                         ),
-                                        timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                         description: Some(format!(
                                             "Successfully retrieved {} events for child {}",
                                             events.len(),
@@ -885,7 +847,6 @@ impl SupervisorHost {
                                             child_id: Some(child_id_clone.clone()),
                                             message: e.to_string(),
                                         }),
-                                        timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                         description: Some(format!(
                                             "Failed to get child events: {}",
                                             e
@@ -904,7 +865,6 @@ impl SupervisorHost {
                                             child_id: Some(child_id_clone.clone()),
                                             message: e.to_string(),
                                         }),
-                                        timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                         description: Some(format!(
                                             "Failed to receive events: {}",
                                             e
@@ -924,7 +884,6 @@ impl SupervisorHost {
                                         child_id: Some(child_id_clone.clone()),
                                         message: e.to_string(),
                                     }),
-                                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                     description: Some(format!(
                                         "Failed to send events request: {}",
                                         e
@@ -945,7 +904,6 @@ impl SupervisorHost {
         actor_component.actor_store.record_event(ChainEventData {
             event_type: "supervisor-setup".to_string(),
             data: EventData::Supervisor(SupervisorEventData::HandlerSetupSuccess),
-            timestamp: chrono::Utc::now().timestamp_millis() as u64,
             description: Some("Supervisor host functions setup completed successfully".to_string()),
         });
 

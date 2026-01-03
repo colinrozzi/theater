@@ -230,10 +230,7 @@ impl<E: EventPayload + Clone> ActorRuntime<E> {
 
         actor_store.record_event(ChainEventData {
             event_type: "theater-runtime".to_string(),
-            data: TheaterRuntimeEventData::ActorLoadCall {
-                manifest: config.clone(),
-            }.into(),
-            timestamp: chrono::Utc::now().timestamp_millis() as u64,
+            data: TheaterRuntimeEventData::ActorLoadCall.into(),
             description: Some("Initial values set up".to_string()),
         });
 
@@ -251,11 +248,11 @@ impl<E: EventPayload + Clone> ActorRuntime<E> {
             });
         }
 
-        // Store manifest
+        // Store manifest (but don't record an event - the manifest hash varies between runs)
         let manifest_store = ContentStore::from_id("manifest");
         debug!("Storing manifest for actor: {}", id);
         debug!("Manifest store: {:?}", manifest_store);
-        let manifest_id = manifest_store
+        let _manifest_id = manifest_store
             .store(
                 config
                     .clone()
@@ -263,15 +260,6 @@ impl<E: EventPayload + Clone> ActorRuntime<E> {
                     .expect("Failed to serialize manifest"),
             )
             .await;
-
-        actor_store.record_event(ChainEventData {
-            event_type: "theater-runtime".to_string(),
-            data: TheaterRuntimeEventData::ActorLoadCall {
-                manifest: config.clone(),
-            }.into(),
-            timestamp: chrono::Utc::now().timestamp_millis() as u64,
-            description: format!("Manifest stored at [{}]", manifest_id).into(),
-        });
 
         // ----------------- Checkpoint Create Handlers -----------------
 
@@ -305,7 +293,6 @@ impl<E: EventPayload + Clone> ActorRuntime<E> {
         actor_component.actor_store.record_event(ChainEventData {
             event_type: "theater-runtime".to_string(),
             data: TheaterRuntimeEventData::CreatingHandlers.into(),
-            timestamp: chrono::Utc::now().timestamp_millis() as u64,
             description: Some("Created handlers".to_string()),
         });
 
@@ -328,7 +315,6 @@ impl<E: EventPayload + Clone> ActorRuntime<E> {
         actor_component.actor_store.record_event(ChainEventData {
             event_type: "theater-runtime".to_string(),
             data: TheaterRuntimeEventData::CreatingHandlers.into(),
-            timestamp: chrono::Utc::now().timestamp_millis() as u64,
             description: Some("Set up handlers".to_string()),
         });
 
@@ -363,7 +349,6 @@ impl<E: EventPayload + Clone> ActorRuntime<E> {
         actor_component.actor_store.record_event(ChainEventData {
             event_type: "theater-runtime".to_string(),
             data: TheaterRuntimeEventData::CreatingHandlers.into(),
-            timestamp: chrono::Utc::now().timestamp_millis() as u64,
             description: Some("Set up host functions".to_string()),
         });
 
@@ -396,7 +381,6 @@ impl<E: EventPayload + Clone> ActorRuntime<E> {
             .record_event(ChainEventData {
                 event_type: "theater-runtime".to_string(),
                 data: TheaterRuntimeEventData::InstantiatingActor.into(),
-                timestamp: chrono::Utc::now().timestamp_millis() as u64,
                 description: Some("Instantiated actor".to_string()),
             });
 
@@ -423,7 +407,6 @@ impl<E: EventPayload + Clone> ActorRuntime<E> {
             .record_event(ChainEventData {
                 event_type: "theater-runtime".to_string(),
                 data: TheaterRuntimeEventData::CreatingHandlers.into(),
-                timestamp: chrono::Utc::now().timestamp_millis() as u64,
                 description: Some("Added export functions".to_string()),
             });
 
@@ -456,7 +439,6 @@ impl<E: EventPayload + Clone> ActorRuntime<E> {
             .record_event(ChainEventData {
                 event_type: "theater-runtime".to_string(),
                 data: TheaterRuntimeEventData::InitializingState.into(),
-                timestamp: chrono::Utc::now().timestamp_millis() as u64,
                 description: Some("Initialized state".to_string()),
             });
 
@@ -529,7 +511,6 @@ impl<E: EventPayload + Clone> ActorRuntime<E> {
                     .record_event(ChainEventData {
                         event_type: "theater-runtime".to_string(),
                         data: TheaterRuntimeEventData::ActorReady.into(),
-                        timestamp: chrono::Utc::now().timestamp_millis() as u64,
                         description: Some("Actor is ready".to_string()),
                     });
             }
@@ -1017,7 +998,6 @@ impl<E: EventPayload + Clone> ActorRuntime<E> {
             .data_mut()
             .record_event(ChainEventData {
                 event_type: "wasm".to_string(),
-                timestamp: chrono::Utc::now().timestamp_millis() as u64,
                 description: Some(format!("Wasm call to function '{}'", name)),
                 data: WasmEventData::WasmCall {
                     function_name: name.clone(),
@@ -1033,7 +1013,6 @@ impl<E: EventPayload + Clone> ActorRuntime<E> {
                     .data_mut()
                     .record_event(ChainEventData {
                         event_type: "wasm".to_string(),
-                        timestamp: chrono::Utc::now().timestamp_millis() as u64,
                         description: Some(format!("Wasm call to function '{}' completed", name)),
                         data: WasmEventData::WasmResult {
                             function_name: name.clone(),
@@ -1048,7 +1027,6 @@ impl<E: EventPayload + Clone> ActorRuntime<E> {
                     .data_mut()
                     .record_event(ChainEventData {
                         event_type: "wasm".to_string(),
-                        timestamp: chrono::Utc::now().timestamp_millis() as u64,
                         description: Some(format!("Wasm call to function '{}' failed", name)),
                         data: WasmEventData::WasmError {
                             function_name: name.clone(),

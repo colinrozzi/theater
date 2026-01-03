@@ -69,7 +69,6 @@ impl RandomHost {
         actor_component.actor_store.record_event(ChainEventData {
             event_type: "random-setup".to_string(),
             data: EventData::Random(RandomEventData::HandlerSetupStart),
-            timestamp: chrono::Utc::now().timestamp_millis() as u64,
             description: Some("Starting random host function setup".to_string()),
         });
 
@@ -81,7 +80,6 @@ impl RandomHost {
                 actor_component.actor_store.record_event(ChainEventData {
                     event_type: "random-setup".to_string(),
                     data: EventData::Random(RandomEventData::LinkerInstanceSuccess),
-                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
                     description: Some("Successfully created linker instance".to_string()),
                 });
                 interface
@@ -94,7 +92,6 @@ impl RandomHost {
                         error: e.to_string(),
                         step: "linker_instance".to_string(),
                     }),
-                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
                     description: Some(format!("Failed to create linker instance: {}", e)),
                 });
                 return Err(anyhow::anyhow!(
@@ -126,7 +123,6 @@ impl RandomHost {
                         data: EventData::Random(RandomEventData::RandomBytesCall {
                             requested_size: size,
                         }),
-                        timestamp: chrono::Utc::now().timestamp_millis() as u64,
                         description: Some(format!("Generating {} random bytes", size)),
                     });
 
@@ -144,7 +140,6 @@ impl RandomHost {
                                 operation: "random-bytes".to_string(),
                                 reason: e.to_string(),
                             }),
-                            timestamp: chrono::Utc::now().timestamp_millis() as u64,
                             description: Some(format!("Permission denied for random bytes generation: {}", e)),
                         });
                         
@@ -163,7 +158,6 @@ impl RandomHost {
                                     generated_size: size,
                                     success: true,
                                 }),
-                                timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                 description: Some(format!("Successfully generated {} random bytes", size)),
                             });
                             
@@ -178,7 +172,6 @@ impl RandomHost {
                                     operation: "random-bytes".to_string(),
                                     message: error_msg.clone(),
                                 }),
-                                timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                 description: Some(format!("Error generating random bytes: {}", error_msg)),
                             });
                             
@@ -206,7 +199,6 @@ impl RandomHost {
                     ctx.data_mut().record_event(ChainEventData {
                         event_type: "theater:simple/random-host/random-range".to_string(),
                         data: EventData::Random(RandomEventData::RandomRangeCall { min, max }),
-                        timestamp: chrono::Utc::now().timestamp_millis() as u64,
                         description: Some(format!(
                             "Generating random number in range {} to {}",
                             min, max
@@ -222,7 +214,6 @@ impl RandomHost {
                                 operation: "random-range".to_string(),
                                 message: error_msg.clone(),
                             }),
-                            timestamp: chrono::Utc::now().timestamp_millis() as u64,
                             description: Some(format!(
                                 "Error generating random range: {}",
                                 error_msg
@@ -244,7 +235,6 @@ impl RandomHost {
                                 operation: "random-range".to_string(),
                                 message: error_msg.clone(),
                             }),
-                            timestamp: chrono::Utc::now().timestamp_millis() as u64,
                             description: Some(format!(
                                 "Error generating random range: {}",
                                 error_msg
@@ -267,7 +257,6 @@ impl RandomHost {
                                     value,
                                     success: true,
                                 }),
-                                timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                 description: Some(format!(
                                     "Successfully generated random number {} in range {} to {}",
                                     value, min, max
@@ -285,7 +274,6 @@ impl RandomHost {
                                     operation: "random-range".to_string(),
                                     message: error_msg.clone(),
                                 }),
-                                timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                 description: Some(format!(
                                     "Error generating random range: {}",
                                     error_msg
@@ -314,7 +302,6 @@ impl RandomHost {
                     ctx.data_mut().record_event(ChainEventData {
                         event_type: "theater:simple/random-host/random-float".to_string(),
                         data: EventData::Random(RandomEventData::RandomFloatCall),
-                        timestamp: chrono::Utc::now().timestamp_millis() as u64,
                         description: Some(
                             "Generating random float between 0.0 and 1.0".to_string(),
                         ),
@@ -331,7 +318,6 @@ impl RandomHost {
                                     value,
                                     success: true,
                                 }),
-                                timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                 description: Some(format!(
                                     "Successfully generated random float: {}",
                                     value
@@ -349,7 +335,6 @@ impl RandomHost {
                                     operation: "random-float".to_string(),
                                     message: error_msg.clone(),
                                 }),
-                                timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                 description: Some(format!(
                                     "Error generating random float: {}",
                                     error_msg
@@ -376,7 +361,6 @@ impl RandomHost {
                         ctx.data_mut().record_event(ChainEventData {
                             event_type: "theater:simple/random-host/generate-uuid".to_string(),
                             data: EventData::Random(RandomEventData::GenerateUuidCall),
-                            timestamp: chrono::Utc::now().timestamp_millis() as u64,
                             description: Some("Generating random UUID".to_string()),
                         });
 
@@ -392,7 +376,6 @@ impl RandomHost {
                                         uuid: uuid_str.clone(),
                                         success: true,
                                     }),
-                                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                     description: Some(format!("Successfully generated UUID: {}", uuid_str)),
                                 });
                                 
@@ -407,7 +390,6 @@ impl RandomHost {
                                         operation: "generate-uuid".to_string(),
                                         message: error_msg.clone(),
                                     }),
-                                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                     description: Some(format!("Error generating UUID: {}", error_msg)),
                                 });
                                 
@@ -422,7 +404,6 @@ impl RandomHost {
         actor_component.actor_store.record_event(ChainEventData {
             event_type: "random-setup".to_string(),
             data: EventData::Random(RandomEventData::HandlerSetupSuccess),
-            timestamp: chrono::Utc::now().timestamp_millis() as u64,
             description: Some("Random host functions setup completed successfully".to_string()),
         });
 

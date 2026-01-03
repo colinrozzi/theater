@@ -216,7 +216,6 @@ where
         self.record_event(ChainEventData {
             event_type,
             data: app_event,
-            timestamp: chrono::Utc::now().timestamp_millis() as u64,
             description,
         })
     }
@@ -238,7 +237,6 @@ where
         self.record_event(ChainEventData {
             event_type,
             data: app_event,
-            timestamp: chrono::Utc::now().timestamp_millis() as u64,
             description,
         })
     }
@@ -258,7 +256,6 @@ where
         self.record_event(ChainEventData {
             event_type,
             data: app_event,
-            timestamp: chrono::Utc::now().timestamp_millis() as u64,
             description,
         })
     }
@@ -278,7 +275,6 @@ where
         self.record_event(ChainEventData {
             event_type,
             data: app_event,
-            timestamp: chrono::Utc::now().timestamp_millis() as u64,
             description,
         })
     }
@@ -333,7 +329,6 @@ where
         self.record_event(ChainEventData {
             event_type: format!("{}/{}", interface, function),
             data: app_event,
-            timestamp: chrono::Utc::now().timestamp_millis() as u64,
             description,
         })
     }
@@ -546,28 +541,6 @@ where
         let chain = self.chain.read().unwrap();
         let events = chain.get_events();
         events.iter().rev().take(count).cloned().collect()
-    }
-
-    /// # Get events since timestamp
-    ///
-    /// Gets all events that occurred after the specified timestamp.
-    /// Perfect for incremental monitoring.
-    ///
-    /// ## Parameters
-    ///
-    /// * `since` - Unix timestamp to filter events after
-    ///
-    /// ## Returns
-    ///
-    /// A Vec<ChainEvent> containing events after the timestamp.
-    pub fn get_events_since(&self, since: u64) -> Vec<ChainEvent> {
-        let chain = self.chain.read().unwrap();
-        chain
-            .get_events()
-            .iter()
-            .filter(|e| e.timestamp > since)
-            .cloned()
-            .collect()
     }
 
     /// # Check if chain contains event type

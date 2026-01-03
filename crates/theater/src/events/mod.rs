@@ -210,8 +210,6 @@ where
     pub event_type: String,
     /// The specific event data payload, containing domain-specific information.
     pub data: E,
-    /// Unix timestamp (in seconds) when the event was created.
-    pub timestamp: u64,
     /// Optional human-readable description of the event for logging and debugging.
     pub description: Option<String>,
 }
@@ -240,7 +238,6 @@ where
     /// # let event = ChainEventData {
     /// #     event_type: "runtime.init".to_string(),
     /// #     data: EventData::Runtime(RuntimeEventData::InitCall { params: String::new() }),
-    /// #     timestamp: 0,
     /// #     description: None,
     /// # };
     ///
@@ -279,7 +276,6 @@ where
     /// # let event = ChainEventData {
     /// #     event_type: "runtime.init".to_string(),
     /// #     data: EventData::Runtime(RuntimeEventData::InitCall { params: String::new() }),
-    /// #     timestamp: 0,
     /// #     description: Some("Actor initialized".to_string()),
     /// # };
     ///
@@ -315,7 +311,6 @@ where
     /// # let event = ChainEventData {
     /// #     event_type: "runtime.init".to_string(),
     /// #     data: EventData::Runtime(RuntimeEventData::InitCall { params: String::new() }),
-    /// #     timestamp: 0,
     /// #     description: None,
     /// # };
     ///
@@ -359,7 +354,6 @@ where
     /// # let event_data = ChainEventData {
     /// #     event_type: "runtime.init".to_string(),
     /// #     data: EventData::Runtime(RuntimeEventData::InitCall { params: String::new() }),
-    /// #     timestamp: 0,
     /// #     description: None,
     /// # };
     ///
@@ -371,7 +365,6 @@ where
     /// let child_event_data = ChainEventData {
     ///     event_type: "child.event".to_string(),
     ///     data: EventData::Runtime(RuntimeEventData::Log { level: "info".to_string(), message: "child event".to_string() }),
-    ///     timestamp: 0,
     ///     description: None,
     /// };
     /// let child_chain_event = child_event_data.to_chain_event(Some(chain_event.hash.clone()));
@@ -388,7 +381,6 @@ where
             hash: vec![],
             event_type: self.event_type.clone(),
             data: serde_json::to_vec(&self.data).unwrap_or_else(|_| vec![]),
-            timestamp: self.timestamp,
             description: self.description.clone(),
         }
     }

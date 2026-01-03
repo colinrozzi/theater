@@ -68,7 +68,6 @@ impl HttpClientHost {
         actor_component.actor_store.record_event(ChainEventData {
             event_type: "http-client-setup".to_string(),
             data: EventData::Http(HttpEventData::HandlerSetupStart),
-            timestamp: chrono::Utc::now().timestamp_millis() as u64,
             description: Some("Starting HTTP client host function setup".to_string()),
         });
 
@@ -83,7 +82,6 @@ impl HttpClientHost {
                 actor_component.actor_store.record_event(ChainEventData {
                     event_type: "http-client-setup".to_string(),
                     data: EventData::Http(HttpEventData::LinkerInstanceSuccess),
-                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
                     description: Some("Successfully created linker instance".to_string()),
                 });
                 interface
@@ -96,7 +94,6 @@ impl HttpClientHost {
                         error: e.to_string(),
                         step: "linker_instance".to_string(),
                     }),
-                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
                     description: Some(format!("Failed to create linker instance: {}", e)),
                 });
                 return Err(anyhow::anyhow!(
@@ -122,7 +119,6 @@ impl HttpClientHost {
                         headers_count: req.headers.len(),
                         body: req.body.clone().map(|b| String::from_utf8_lossy(&b).to_string()),
                     }),
-                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
                     description: Some(format!("Sending {} request to {}", req.method, req.uri)),
                 });
                 
@@ -148,7 +144,6 @@ impl HttpClientHost {
                             url: req.uri.clone(),
                             reason: e.to_string(),
                         }),
-                        timestamp: chrono::Utc::now().timestamp_millis() as u64,
                         description: Some(format!("Permission denied for {} request to {}", req.method, req.uri)),
                     });
                     return Box::new(async move {
@@ -175,7 +170,6 @@ impl HttpClientHost {
                                     path: req_clone.uri.clone(),
                                     message: err_msg.clone(),
                                 }),
-                                timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                 description: Some(format!("Error sending request to {}: {}", req_clone.uri, err_msg)),
                             });
                             
@@ -219,7 +213,6 @@ impl HttpClientHost {
                                             path: req_clone.uri.clone(),
                                             message: e.to_string(),
                                         }),
-                                        timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                         description: Some(format!("Error reading response body from {}: {}", req_clone.uri, e)),
                                     });
                                     
@@ -242,7 +235,6 @@ impl HttpClientHost {
                                     body: body.clone().map(|b| String::from_utf8_lossy(&b).to_string()),
                                     success: true,
                                 }),
-                                timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                 description: Some(format!("Received response from {} with status {}", req_clone.uri, status)),
                             });
                             
@@ -259,7 +251,6 @@ impl HttpClientHost {
                                     path: req_clone.uri.clone(),
                                     message: err_msg.clone(),
                                 }),
-                                timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                 description: Some(format!("Error sending request to {}: {}", req_clone.uri, err_msg)),
                             });
                             
@@ -274,7 +265,6 @@ impl HttpClientHost {
         actor_component.actor_store.record_event(ChainEventData {
             event_type: "http-client-setup".to_string(),
             data: EventData::Http(HttpEventData::HandlerSetupSuccess),
-            timestamp: chrono::Utc::now().timestamp_millis() as u64,
             description: Some(
                 "HTTP client host functions setup completed successfully".to_string(),
             ),

@@ -81,7 +81,6 @@ impl MessageServerHost {
         actor_component.actor_store.record_event(ChainEventData {
             event_type: "message-server-setup".to_string(),
             data: EventData::Message(MessageEventData::HandlerSetupStart),
-            timestamp: chrono::Utc::now().timestamp_millis() as u64,
             description: Some("Starting message server host function setup".to_string()),
         });
 
@@ -94,7 +93,6 @@ impl MessageServerHost {
                 actor_component.actor_store.record_event(ChainEventData {
                     event_type: "message-server-setup".to_string(),
                     data: EventData::Message(MessageEventData::LinkerInstanceSuccess),
-                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
                     description: Some(
                         "Successfully created linker instance for message-server-host".to_string(),
                     ),
@@ -109,7 +107,6 @@ impl MessageServerHost {
                         error: e.to_string(),
                         step: "linker_instance".to_string(),
                     }),
-                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
                     description: Some(format!("Failed to create linker instance: {}", e)),
                 });
                 return Err(anyhow::anyhow!(
@@ -125,7 +122,6 @@ impl MessageServerHost {
             data: EventData::Message(MessageEventData::FunctionSetupStart {
                 function_name: "send".to_string(),
             }),
-            timestamp: chrono::Utc::now().timestamp_millis() as u64,
             description: Some("Setting up 'send' function wrapper".to_string()),
         });
 
@@ -145,7 +141,6 @@ impl MessageServerHost {
                             message_type: "binary".to_string(), // Could be enhanced to detect type
                             data: msg.clone(),
                         }),
-                        timestamp: chrono::Utc::now().timestamp_millis() as u64,
                         description: Some(format!("Sending message to {}", address)),
                     });
                     
@@ -162,7 +157,6 @@ impl MessageServerHost {
                                         recipient: Some(address.clone()),
                                         message: err_msg.clone(),
                                     }),
-                                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                     description: Some(format!("Error sending message to {}: {}", address, err_msg)),
                                 });
                                 return Box::new(async move { Ok((Err(err_msg),)) });
@@ -187,7 +181,6 @@ impl MessageServerHost {
                                         recipient: address_clone.clone(),
                                         success: true,
                                     }),
-                                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                     description: Some(format!("Successfully sent message to {}", address_clone)),
                                 });
                                 Ok((Ok(()),))
@@ -202,7 +195,6 @@ impl MessageServerHost {
                                         recipient: Some(address_clone.clone()),
                                         message: err.clone(),
                                     }),
-                                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                     description: Some(format!("Failed to send message to {}: {}", address_clone, err)),
                                 });
                                 Ok((Err(err),))
@@ -219,7 +211,6 @@ impl MessageServerHost {
                         error: e.to_string(),
                         step: "send_function_wrap".to_string(),
                     }),
-                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
                     description: Some(format!("Failed to set up 'send' function wrapper: {}", e)),
                 });
                 anyhow::anyhow!("Failed to wrap async send function: {}", e)
@@ -231,7 +222,6 @@ impl MessageServerHost {
             data: EventData::Message(MessageEventData::FunctionSetupSuccess {
                 function_name: "send".to_string(),
             }),
-            timestamp: chrono::Utc::now().timestamp_millis() as u64,
             description: Some("Successfully set up 'send' function wrapper".to_string()),
         });
 
@@ -241,7 +231,6 @@ impl MessageServerHost {
             data: EventData::Message(MessageEventData::FunctionSetupStart {
                 function_name: "request".to_string(),
             }),
-            timestamp: chrono::Utc::now().timestamp_millis() as u64,
             description: Some("Setting up 'request' function wrapper".to_string()),
         });
 
@@ -261,7 +250,6 @@ impl MessageServerHost {
                             message_type: "binary".to_string(), // Could be enhanced to detect type
                             data: msg.clone(),
                         }),
-                        timestamp: chrono::Utc::now().timestamp_millis() as u64,
                         description: Some(format!("Requesting message from {}", address)),
                     });
                     
@@ -282,7 +270,6 @@ impl MessageServerHost {
                                             recipient: Some(address_clone.clone()),
                                             message: err_msg.clone(),
                                         }),
-                                        timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                         description: Some(format!("Error requesting message from {}: {}", address_clone, err_msg)),
                                     });
                                     return Ok((Err(err_msg),));
@@ -306,7 +293,6 @@ impl MessageServerHost {
                                                 data: response.clone(),
                                                 success: true,
                                             }),
-                                            timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                             description: Some(format!("Successfully received response from {}", address_clone)),
                                         });
                                         Ok((Ok(response),))
@@ -321,7 +307,6 @@ impl MessageServerHost {
                                                 recipient: Some(address_clone.clone()),
                                                 message: err.clone(),
                                             }),
-                                            timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                             description: Some(format!("Failed to receive response from {}: {}", address_clone, err)),
                                         });
                                         Ok((Err(err),))
@@ -338,7 +323,6 @@ impl MessageServerHost {
                                         recipient: Some(address_clone.clone()),
                                         message: err.clone(),
                                     }),
-                                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                     description: Some(format!("Failed to send request to {}: {}", address_clone, err)),
                                 });
                                 Ok((Err(err),))
@@ -355,7 +339,6 @@ impl MessageServerHost {
                         error: e.to_string(),
                         step: "request_function_wrap".to_string(),
                     }),
-                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
                     description: Some(format!("Failed to set up 'request' function wrapper: {}", e)),
                 });
                 anyhow::anyhow!("Failed to wrap async request function: {}", e)
@@ -367,7 +350,6 @@ impl MessageServerHost {
             data: EventData::Message(MessageEventData::FunctionSetupSuccess {
                 function_name: "request".to_string(),
             }),
-            timestamp: chrono::Utc::now().timestamp_millis() as u64,
             description: Some("Successfully set up 'request' function wrapper".to_string()),
         });
 
@@ -377,7 +359,6 @@ impl MessageServerHost {
             data: EventData::Message(MessageEventData::FunctionSetupStart {
                 function_name: "list-outstanding-requests".to_string(),
             }),
-            timestamp: chrono::Utc::now().timestamp_millis() as u64,
             description: Some(
                 "Setting up 'list-outstanding-requests' function wrapper".to_string(),
             ),
@@ -397,7 +378,6 @@ impl MessageServerHost {
                         event_type: "theater:simple/message-server-host/list-outstanding-requests"
                             .to_string(),
                         data: EventData::Message(MessageEventData::ListOutstandingRequestsCall {}),
-                        timestamp: chrono::Utc::now().timestamp_millis() as u64,
                         description: Some("Listing outstanding requests".to_string()),
                     });
 
@@ -418,7 +398,6 @@ impl MessageServerHost {
                                     request_ids: ids.clone(),
                                 },
                             ),
-                            timestamp: chrono::Utc::now().timestamp_millis() as u64,
                             description: Some(format!("Found {} outstanding requests", ids.len())),
                         });
 
@@ -434,7 +413,6 @@ impl MessageServerHost {
                         error: e.to_string(),
                         step: "list_outstanding_requests_function_wrap".to_string(),
                     }),
-                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
                     description: Some(format!(
                         "Failed to set up 'list-outstanding-requests' function wrapper: {}",
                         e
@@ -452,7 +430,6 @@ impl MessageServerHost {
             data: EventData::Message(MessageEventData::FunctionSetupSuccess {
                 function_name: "list-outstanding-requests".to_string(),
             }),
-            timestamp: chrono::Utc::now().timestamp_millis() as u64,
             description: Some(
                 "Successfully set up 'list-outstanding-requests' function wrapper".to_string(),
             ),
@@ -467,7 +444,6 @@ impl MessageServerHost {
             data: EventData::Message(MessageEventData::FunctionSetupStart {
                 function_name: "respond-to-request".to_string(),
             }),
-            timestamp: chrono::Utc::now().timestamp_millis() as u64,
             description: Some("Setting up 'respond-to-request' function wrapper".to_string()),
         });
 
@@ -487,7 +463,6 @@ impl MessageServerHost {
                             request_id: request_id.clone(),
                             response_size: response_data.len(),
                         }),
-                        timestamp: chrono::Utc::now().timestamp_millis() as u64,
                         description: Some(format!("Responding to request {}", request_id)),
                     });
                     
@@ -505,7 +480,6 @@ impl MessageServerHost {
                                             request_id: request_id_clone.clone(),
                                             success: true,
                                         }),
-                                        timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                         description: Some(format!("Successfully responded to request {}", request_id_clone)),
                                     });
                                     Ok((Ok(()),))
@@ -519,7 +493,6 @@ impl MessageServerHost {
                                             recipient: None,
                                             message: err_msg.clone(),
                                         }),
-                                        timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                         description: Some(format!("Error responding to request {}: {}", request_id_clone, err_msg)),
                                     });
                                     Ok((Err(err_msg),))
@@ -534,7 +507,6 @@ impl MessageServerHost {
                                     recipient: None,
                                     message: err_msg.clone(),
                                 }),
-                                timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                 description: Some(format!("Error responding to request {}: {}", request_id_clone, err_msg)),
                             });
                             Ok((Err(err_msg),))
@@ -550,7 +522,6 @@ impl MessageServerHost {
                         error: e.to_string(),
                         step: "respond_to_request_function_wrap".to_string(),
                     }),
-                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
                     description: Some(format!("Failed to set up 'respond-to-request' function wrapper: {}", e)),
                 });
                 anyhow::anyhow!("Failed to wrap async respond-to-request function: {}", e)
@@ -562,7 +533,6 @@ impl MessageServerHost {
             data: EventData::Message(MessageEventData::FunctionSetupSuccess {
                 function_name: "respond-to-request".to_string(),
             }),
-            timestamp: chrono::Utc::now().timestamp_millis() as u64,
             description: Some(
                 "Successfully set up 'respond-to-request' function wrapper".to_string(),
             ),
@@ -577,7 +547,6 @@ impl MessageServerHost {
             data: EventData::Message(MessageEventData::FunctionSetupStart {
                 function_name: "cancel-request".to_string(),
             }),
-            timestamp: chrono::Utc::now().timestamp_millis() as u64,
             description: Some("Setting up 'cancel-request' function wrapper".to_string()),
         });
 
@@ -596,7 +565,6 @@ impl MessageServerHost {
                         data: EventData::Message(MessageEventData::CancelRequestCall {
                             request_id: request_id.clone(),
                         }),
-                        timestamp: chrono::Utc::now().timestamp_millis() as u64,
                         description: Some(format!("Canceling request {}", request_id)),
                     });
                     
@@ -616,7 +584,6 @@ impl MessageServerHost {
                                     request_id: request_id_clone.clone(),
                                     success: true,
                                 }),
-                                timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                 description: Some(format!("Successfully canceled request {}", request_id_clone)),
                             });
                             Ok((Ok(()),))
@@ -629,7 +596,6 @@ impl MessageServerHost {
                                     recipient: None,
                                     message: err_msg.clone(),
                                 }),
-                                timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                 description: Some(format!("Error canceling request {}: {}", request_id_clone, err_msg)),
                             });
                             Ok((Err(err_msg),))
@@ -645,7 +611,6 @@ impl MessageServerHost {
                         error: e.to_string(),
                         step: "cancel_request_function_wrap".to_string(),
                     }),
-                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
                     description: Some(format!("Failed to set up 'cancel-request' function wrapper: {}", e)),
                 });
                 anyhow::anyhow!("Failed to wrap async cancel-request function: {}", e)
@@ -657,7 +622,6 @@ impl MessageServerHost {
             data: EventData::Message(MessageEventData::FunctionSetupSuccess {
                 function_name: "cancel-request".to_string(),
             }),
-            timestamp: chrono::Utc::now().timestamp_millis() as u64,
             description: Some("Successfully set up 'cancel-request' function wrapper".to_string()),
         });
 
@@ -671,7 +635,6 @@ impl MessageServerHost {
             data: EventData::Message(MessageEventData::FunctionSetupStart {
                 function_name: "open-channel".to_string(),
             }),
-            timestamp: chrono::Utc::now().timestamp_millis() as u64,
             description: Some("Setting up 'open-channel' function wrapper".to_string()),
         });
 
@@ -693,7 +656,6 @@ impl MessageServerHost {
                             message_type: "binary".to_string(),
                             size: initial_msg.len(),
                         }),
-                        timestamp: chrono::Utc::now().timestamp_millis() as u64,
                         description: Some(format!("Opening channel to {}", address)),
                     });
                     
@@ -708,7 +670,6 @@ impl MessageServerHost {
                                     recipient: Some(address_clone.clone()),
                                     message: err_msg.clone(),
                                 }),
-                                timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                 description: Some(format!("Error opening channel to {}: {}", address_clone, err_msg)),
                             });
                             return Box::new(async move { Ok((Err(err_msg),)) });
@@ -751,7 +712,6 @@ impl MessageServerHost {
                                                         channel_id: channel_id_clone.clone(),
                                                         accepted,
                                                     }),
-                                                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                                     description: Some(format!("Channel {} to {} {}", 
                                                         channel_id_clone, 
                                                         address_clone,
@@ -784,7 +744,6 @@ impl MessageServerHost {
                                                         recipient: Some(address_clone.clone()),
                                                         message: err_msg.clone(),
                                                     }),
-                                                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                                     description: Some(format!("Error opening channel to {}: {}", address_clone, err_msg)),
                                                 });
                                                 Ok((Err(err_msg),))
@@ -800,7 +759,6 @@ impl MessageServerHost {
                                                 recipient: Some(address_clone.clone()),
                                                 message: err_msg.clone(),
                                             }),
-                                            timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                             description: Some(format!("Error opening channel to {}: {}", address_clone, err_msg)),
                                         });
                                         Ok((Err(err_msg),))
@@ -816,7 +774,6 @@ impl MessageServerHost {
                                         recipient: Some(address_clone.clone()),
                                         message: err_msg.clone(),
                                     }),
-                                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                     description: Some(format!("Error opening channel to {}: {}", address_clone, err_msg)),
                                 });
                                 Ok((Err(err_msg),))
@@ -833,7 +790,6 @@ impl MessageServerHost {
                         error: e.to_string(),
                         step: "open_channel_function_wrap".to_string(),
                     }),
-                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
                     description: Some(format!("Failed to set up 'open-channel' function wrapper: {}", e)),
                 });
                 anyhow::anyhow!("Failed to wrap async open-channel function: {}", e)
@@ -845,7 +801,6 @@ impl MessageServerHost {
             data: EventData::Message(MessageEventData::FunctionSetupSuccess {
                 function_name: "open-channel".to_string(),
             }),
-            timestamp: chrono::Utc::now().timestamp_millis() as u64,
             description: Some("Successfully set up 'open-channel' function wrapper".to_string()),
         });
 
@@ -858,7 +813,6 @@ impl MessageServerHost {
             data: EventData::Message(MessageEventData::FunctionSetupStart {
                 function_name: "send-on-channel".to_string(),
             }),
-            timestamp: chrono::Utc::now().timestamp_millis() as u64,
             description: Some("Setting up 'send-on-channel' function wrapper".to_string()),
         });
 
@@ -884,7 +838,6 @@ impl MessageServerHost {
                             channel_id: channel_id.clone(),
                             msg: msg.clone(),
                         }),
-                        timestamp: chrono::Utc::now().timestamp_millis() as u64,
                         description: Some(format!("Sending message on channel [{}]: {}", channel_id, msg_str)),
                     });
                     
@@ -910,7 +863,6 @@ impl MessageServerHost {
                                         channel_id: channel_id_clone.clone(),
                                         success: true,
                                     }),
-                                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                     description: Some(format!("Successfully sent message on channel {}", channel_id_clone)),
                                 });
                                 Ok((Ok(()),))
@@ -924,7 +876,6 @@ impl MessageServerHost {
                                         recipient: None,
                                         message: err_msg.clone(),
                                     }),
-                                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                     description: Some(format!("Error sending on channel {}: {}", channel_id_clone, err_msg)),
                                 });
                                 Ok((Err(err_msg),))
@@ -941,7 +892,6 @@ impl MessageServerHost {
                         error: e.to_string(),
                         step: "send_on_channel_function_wrap".to_string(),
                     }),
-                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
                     description: Some(format!("Failed to set up 'send-on-channel' function wrapper: {}", e)),
                 });
                 anyhow::anyhow!("Failed to wrap async send-on-channel function: {}", e)
@@ -953,7 +903,6 @@ impl MessageServerHost {
             data: EventData::Message(MessageEventData::FunctionSetupSuccess {
                 function_name: "send-on-channel".to_string(),
             }),
-            timestamp: chrono::Utc::now().timestamp_millis() as u64,
             description: Some("Successfully set up 'send-on-channel' function wrapper".to_string()),
         });
 
@@ -966,7 +915,6 @@ impl MessageServerHost {
             data: EventData::Message(MessageEventData::FunctionSetupStart {
                 function_name: "close-channel".to_string(),
             }),
-            timestamp: chrono::Utc::now().timestamp_millis() as u64,
             description: Some("Setting up 'close-channel' function wrapper".to_string()),
         });
 
@@ -976,7 +924,6 @@ impl MessageServerHost {
             data: EventData::Message(MessageEventData::FunctionSetupStart {
                 function_name: "close-channel".to_string(),
             }),
-            timestamp: chrono::Utc::now().timestamp_millis() as u64,
             description: Some("Setting up 'close-channel' function wrapper".to_string()),
         });
 
@@ -994,7 +941,6 @@ impl MessageServerHost {
                         data: EventData::Message(MessageEventData::CloseChannelCall {
                             channel_id: channel_id.clone(),
                         }),
-                        timestamp: chrono::Utc::now().timestamp_millis() as u64,
                         description: Some(format!("Closing channel {}", channel_id)),
                     });
                     
@@ -1018,7 +964,6 @@ impl MessageServerHost {
                                         channel_id: channel_id_clone.clone(),
                                         success: true,
                                     }),
-                                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                     description: Some(format!("Successfully closed channel {}", channel_id_clone)),
                                 });
                                 Ok((Ok(()),))
@@ -1032,7 +977,6 @@ impl MessageServerHost {
                                         recipient: None,
                                         message: err_msg.clone(),
                                     }),
-                                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                     description: Some(format!("Error closing channel {}: {}", channel_id_clone, err_msg)),
                                 });
                                 Ok((Err(err_msg),))
@@ -1049,7 +993,6 @@ impl MessageServerHost {
                         error: e.to_string(),
                         step: "close_channel_function_wrap".to_string(),
                     }),
-                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
                     description: Some(format!("Failed to set up 'close-channel' function wrapper: {}", e)),
                 });
                 anyhow::anyhow!("Failed to wrap async close-channel function: {}", e)
@@ -1061,7 +1004,6 @@ impl MessageServerHost {
             data: EventData::Message(MessageEventData::FunctionSetupSuccess {
                 function_name: "close-channel".to_string(),
             }),
-            timestamp: chrono::Utc::now().timestamp_millis() as u64,
             description: Some("Successfully set up 'close-channel' function wrapper".to_string()),
         });
 
@@ -1069,7 +1011,6 @@ impl MessageServerHost {
         actor_component.actor_store.record_event(ChainEventData {
             event_type: "message-server-setup".to_string(),
             data: EventData::Message(MessageEventData::HandlerSetupSuccess),
-            timestamp: chrono::Utc::now().timestamp_millis() as u64,
             description: Some(
                 "Message server host functions setup completed successfully".to_string(),
             ),

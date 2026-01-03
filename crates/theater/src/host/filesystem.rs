@@ -216,7 +216,6 @@ impl FileSystemHost {
         actor_component.actor_store.record_event(ChainEventData {
             event_type: "filesystem-setup".to_string(),
             data: EventData::Filesystem(FilesystemEventData::HandlerSetupStart),
-            timestamp: chrono::Utc::now().timestamp_millis() as u64,
             description: Some("Starting filesystem host function setup".to_string()),
         });
 
@@ -226,7 +225,6 @@ impl FileSystemHost {
                 actor_component.actor_store.record_event(ChainEventData {
                     event_type: "filesystem-setup".to_string(),
                     data: EventData::Filesystem(FilesystemEventData::LinkerInstanceSuccess),
-                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
                     description: Some("Successfully created linker instance".to_string()),
                 });
                 interface
@@ -239,7 +237,6 @@ impl FileSystemHost {
                         error: e.to_string(),
                         step: "linker_instance".to_string(),
                     }),
-                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
                     description: Some(format!("Failed to create linker instance: {}", e)),
                 });
                 return Err(anyhow::anyhow!(
@@ -274,7 +271,6 @@ impl FileSystemHost {
                                 path: requested_path.clone(),
                                 reason: e.to_string(),
                             }),
-                            timestamp: chrono::Utc::now().timestamp_millis() as u64,
                             description: Some(format!(
                                 "Permission denied for read operation on {}",
                                 requested_path
@@ -290,7 +286,6 @@ impl FileSystemHost {
                     data: EventData::Filesystem(FilesystemEventData::FileReadCall {
                         path: requested_path.clone(),
                     }),
-                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
                     description: Some(format!("Read file {:?}", requested_path)),
                 });
 
@@ -307,7 +302,6 @@ impl FileSystemHost {
                                 path: file_path.to_string_lossy().to_string(),
                                 message: e.to_string(),
                             }),
-                            timestamp: chrono::Utc::now().timestamp_millis() as u64,
                             description: Some(format!("Error opening file {:?}", file_path)),
                         });
                         return Ok((Err(e.to_string()),));
@@ -325,7 +319,6 @@ impl FileSystemHost {
                             path: file_path.to_string_lossy().to_string(),
                             message: e.to_string(),
                         }),
-                        timestamp: chrono::Utc::now().timestamp_millis() as u64,
                         description: Some(format!("Error reading file {:?}", file_path)),
                     });
                     return Ok((Err(e.to_string()),));
@@ -338,7 +331,6 @@ impl FileSystemHost {
                         contents: contents.clone(),
                         success: true,
                     }),
-                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
                     description: Some(format!(
                         "Successfully read {} bytes from file {:?}",
                         contents.len(),
@@ -375,7 +367,6 @@ impl FileSystemHost {
                                 path: requested_path.clone(),
                                 reason: e.to_string(),
                             }),
-                            timestamp: chrono::Utc::now().timestamp_millis() as u64,
                             description: Some(format!(
                                 "Permission denied for write operation on {}",
                                 requested_path
@@ -392,7 +383,6 @@ impl FileSystemHost {
                         path: requested_path.clone(),
                         contents: contents.clone().into(),
                     }),
-                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
                     description: Some(format!(
                         "Writing {} bytes to file {:?}",
                         contents.len(),
@@ -412,7 +402,6 @@ impl FileSystemHost {
                                     path: file_path.to_string_lossy().to_string(),
                                     success: true,
                                 }),
-                                timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                 description: Some(format!(
                                     "Successfully wrote {} bytes to file {:?}",
                                     contents.len(),
@@ -432,7 +421,6 @@ impl FileSystemHost {
                                     path: file_path.to_string_lossy().to_string(),
                                     message: e.to_string(),
                                 }),
-                                timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                 description: Some(format!(
                                     "Error writing to file {:?}: {}",
                                     file_path, e
@@ -451,7 +439,6 @@ impl FileSystemHost {
                                 path: file_path.to_string_lossy().to_string(),
                                 message: e.to_string(),
                             }),
-                            timestamp: chrono::Utc::now().timestamp_millis() as u64,
                             description: Some(format!(
                                 "Error creating file {:?}: {}",
                                 file_path, e
@@ -488,7 +475,6 @@ impl FileSystemHost {
                                 path: requested_path.clone(),
                                 reason: e.to_string(),
                             }),
-                            timestamp: chrono::Utc::now().timestamp_millis() as u64,
                             description: Some(format!(
                                 "Permission denied for list operation on {}",
                                 requested_path
@@ -504,7 +490,6 @@ impl FileSystemHost {
                     data: EventData::Filesystem(FilesystemEventData::DirectoryListedCall {
                         path: requested_path.clone(),
                     }),
-                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
                     description: Some(format!("Listing files in directory {:?}", requested_path)),
                 });
 
@@ -526,7 +511,6 @@ impl FileSystemHost {
                                 path: dir_path.to_string_lossy().to_string(),
                                 success: true,
                             }),
-                            timestamp: chrono::Utc::now().timestamp_millis() as u64,
                             description: Some(format!(
                                 "Successfully listed {} files in directory {:?}",
                                 files.len(),
@@ -546,7 +530,6 @@ impl FileSystemHost {
                                 path: dir_path.to_string_lossy().to_string(),
                                 message: e.to_string(),
                             }),
-                            timestamp: chrono::Utc::now().timestamp_millis() as u64,
                             description: Some(format!(
                                 "Error listing files in directory {:?}: {}",
                                 dir_path, e
@@ -583,7 +566,6 @@ impl FileSystemHost {
                                 path: requested_path.clone(),
                                 reason: e.to_string(),
                             }),
-                            timestamp: chrono::Utc::now().timestamp_millis() as u64,
                             description: Some(format!(
                                 "Permission denied for delete operation on {}",
                                 requested_path
@@ -599,7 +581,6 @@ impl FileSystemHost {
                     data: EventData::Filesystem(FilesystemEventData::FileDeleteCall {
                         path: requested_path.clone(),
                     }),
-                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
                     description: Some(format!("Deleting file {:?}", requested_path)),
                 });
 
@@ -614,7 +595,6 @@ impl FileSystemHost {
                                 path: file_path.to_string_lossy().to_string(),
                                 success: true,
                             }),
-                            timestamp: chrono::Utc::now().timestamp_millis() as u64,
                             description: Some(format!("Successfully deleted file {:?}", file_path)),
                         });
 
@@ -630,7 +610,6 @@ impl FileSystemHost {
                                 path: file_path.to_string_lossy().to_string(),
                                 message: e.to_string(),
                             }),
-                            timestamp: chrono::Utc::now().timestamp_millis() as u64,
                             description: Some(format!(
                                 "Error deleting file {:?}: {}",
                                 file_path, e
@@ -667,7 +646,6 @@ impl FileSystemHost {
                                 path: requested_path.clone(),
                                 reason: e.to_string(),
                             }),
-                            timestamp: chrono::Utc::now().timestamp_millis() as u64,
                             description: Some(format!(
                                 "Permission denied for create-dir operation on {}",
                                 requested_path
@@ -683,7 +661,6 @@ impl FileSystemHost {
                     data: EventData::Filesystem(FilesystemEventData::DirectoryCreatedCall {
                         path: requested_path.clone(),
                     }),
-                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
                     description: Some(format!("Creating directory {:?}", requested_path)),
                 });
 
@@ -700,7 +677,6 @@ impl FileSystemHost {
                                     path: dir_path.to_string_lossy().to_string(),
                                 },
                             ),
-                            timestamp: chrono::Utc::now().timestamp_millis() as u64,
                             description: Some(format!(
                                 "Successfully created directory {:?}",
                                 dir_path
@@ -719,7 +695,6 @@ impl FileSystemHost {
                                 path: dir_path.to_string_lossy().to_string(),
                                 message: e.to_string(),
                             }),
-                            timestamp: chrono::Utc::now().timestamp_millis() as u64,
                             description: Some(format!(
                                 "Error creating directory {:?}: {}",
                                 dir_path, e
@@ -756,7 +731,6 @@ impl FileSystemHost {
                                 path: requested_path.clone(),
                                 reason: e.to_string(),
                             }),
-                            timestamp: chrono::Utc::now().timestamp_millis() as u64,
                             description: Some(format!(
                                 "Permission denied for delete-dir operation on {}",
                                 requested_path
@@ -772,7 +746,6 @@ impl FileSystemHost {
                     data: EventData::Filesystem(FilesystemEventData::DirectoryDeletedCall {
                         path: requested_path.clone(),
                     }),
-                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
                     description: Some(format!("Deleting directory {:?}", requested_path)),
                 });
 
@@ -789,7 +762,6 @@ impl FileSystemHost {
                                     path: dir_path.to_string_lossy().to_string(),
                                 },
                             ),
-                            timestamp: chrono::Utc::now().timestamp_millis() as u64,
                             description: Some(format!(
                                 "Successfully deleted directory {:?}",
                                 dir_path
@@ -808,7 +780,6 @@ impl FileSystemHost {
                                 path: dir_path.to_string_lossy().to_string(),
                                 message: e.to_string(),
                             }),
-                            timestamp: chrono::Utc::now().timestamp_millis() as u64,
                             description: Some(format!(
                                 "Error deleting directory {:?}: {}",
                                 dir_path, e
@@ -845,7 +816,6 @@ impl FileSystemHost {
                                 path: requested_path.clone(),
                                 reason: e.to_string(),
                             }),
-                            timestamp: chrono::Utc::now().timestamp_millis() as u64,
                             description: Some(format!(
                                 "Permission denied for path-exists operation on {}",
                                 requested_path
@@ -861,7 +831,6 @@ impl FileSystemHost {
                     data: EventData::Filesystem(FilesystemEventData::PathExistsCall {
                         path: requested_path.clone(),
                     }),
-                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
                     description: Some(format!("Checking if path {:?} exists", requested_path)),
                 });
 
@@ -877,7 +846,6 @@ impl FileSystemHost {
                         exists,
                         success: true,
                     }),
-                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
                     description: Some(format!("Path {:?} exists: {}", path, exists)),
                 });
 
@@ -927,7 +895,6 @@ impl FileSystemHost {
                             command: command.clone(),
                             args: args.clone(),
                         }),
-                        timestamp: chrono::Utc::now().timestamp_millis() as u64,
                         description: Some(format!(
                             "Executing command '{}' in directory '{}'",
                             command, requested_dir
@@ -957,7 +924,6 @@ impl FileSystemHost {
                                             result: result.clone(),
                                         },
                                     ),
-                                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                     description: Some("Command completed".to_string()),
                                 });
                                 Ok((Ok(result),))
@@ -1000,7 +966,6 @@ impl FileSystemHost {
                             directory: requested_dir.clone(),
                             command: command.clone(),
                         }),
-                        timestamp: chrono::Utc::now().timestamp_millis() as u64,
                         description: Some(format!(
                             "Executing nix command '{}' in directory '{}'",
                             command, requested_dir
@@ -1022,7 +987,6 @@ impl FileSystemHost {
                                             result: result.clone(),
                                         },
                                     ),
-                                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                     description: Some("Nix command completed".to_string()),
                                 });
                                 Ok((Ok(result),))
@@ -1037,7 +1001,6 @@ impl FileSystemHost {
         actor_component.actor_store.record_event(ChainEventData {
             event_type: "filesystem-setup".to_string(),
             data: EventData::Filesystem(FilesystemEventData::HandlerSetupSuccess),
-            timestamp: chrono::Utc::now().timestamp_millis() as u64,
             description: Some("Filesystem host functions setup completed successfully".to_string()),
         });
 

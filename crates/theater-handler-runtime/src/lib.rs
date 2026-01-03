@@ -102,7 +102,6 @@ where
                 actor_component.actor_store.record_event(ChainEventData {
                     event_type: "runtime-setup".to_string(),
                     data: RuntimeEventData::LinkerInstanceSuccess.into(),
-                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
                     description: Some("Successfully created linker instance".to_string()),
                 });
                 interface
@@ -115,7 +114,6 @@ where
                         error: e.to_string(),
                         step: "linker_instance".to_string(),
                     }.into(),
-                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
                     description: Some(format!("Failed to create linker instance: {}", e)),
                 });
                 return Err(anyhow::anyhow!(
@@ -139,7 +137,6 @@ where
                             level: "info".to_string(),
                             message: msg.clone(),
                         }.into(),
-                        timestamp: chrono::Utc::now().timestamp_millis() as u64,
                         description: Some(format!("Actor log: {}", msg)),
                     });
 
@@ -155,7 +152,6 @@ where
                         error: e.to_string(),
                         step: "log_function_wrap".to_string(),
                     }.into(),
-                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
                     description: Some(format!("Failed to wrap log function: {}", e)),
                 });
                 anyhow::anyhow!("Failed to wrap log function: {}", e)
@@ -185,7 +181,6 @@ where
                             old_state: "chain".to_string(),
                             new_state: "requested".to_string(),
                         }.into(),
-                        timestamp: chrono::Utc::now().timestamp_millis() as u64,
                         description: Some("Get chain request".to_string()),
                     });
 
@@ -215,7 +210,6 @@ where
                         data: RuntimeEventData::StateChangeResult {
                             success: true,
                         }.into(),
-                        timestamp: chrono::Utc::now().timestamp_millis() as u64,
                         description: Some(format!("Chain retrieved: {} events", event_count)),
                     });
 
@@ -231,7 +225,6 @@ where
                         error: e.to_string(),
                         step: "get_chain_function_wrap".to_string(),
                     }.into(),
-                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
                     description: Some(format!("Failed to wrap get-chain function: {}", e)),
                 });
                 anyhow::anyhow!("Failed to wrap get-chain function: {}", e)
@@ -249,7 +242,6 @@ where
                         data: RuntimeEventData::ShutdownCall {
                             data: data.clone(),
                         }.into(),
-                        timestamp: chrono::Utc::now().timestamp_millis() as u64,
                         description: Some(format!("Actor shutdown with data: {:?}", data)),
                     });
 
@@ -275,7 +267,6 @@ where
                                     data: RuntimeEventData::ShutdownRequested {
                                         success: true,
                                     }.into(),
-                                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                     description: Some("Shutdown command sent successfully".to_string()),
                                 });
                                 Ok((Ok(()),))
@@ -288,7 +279,6 @@ where
                                     data: RuntimeEventData::ShutdownRequested {
                                         success: false,
                                     }.into(),
-                                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                     description: Some(format!(
                                         "Failed to send shutdown command: {}",
                                         err
@@ -308,7 +298,6 @@ where
                         error: e.to_string(),
                         step: "shutdown_function_wrap".to_string(),
                     }.into(),
-                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
                     description: Some(format!("Failed to wrap shutdown function: {}", e)),
                 });
                 anyhow::anyhow!("Failed to wrap shutdown function: {}", e)
@@ -318,7 +307,6 @@ where
         actor_component.actor_store.record_event(ChainEventData {
             event_type: "runtime-setup".to_string(),
             data: RuntimeEventData::HandlerSetupSuccess.into(),
-            timestamp: chrono::Utc::now().timestamp_millis() as u64,
             description: Some("Runtime host functions setup completed successfully".to_string()),
         });
 

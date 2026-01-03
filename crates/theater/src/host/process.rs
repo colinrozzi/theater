@@ -472,7 +472,6 @@ impl ProcessHost {
         actor_component.actor_store.record_event(ChainEventData {
             event_type: "process-setup".to_string(),
             data: EventData::Process(ProcessEventData::HandlerSetupStart),
-            timestamp: chrono::Utc::now().timestamp_millis() as u64,
             description: Some("Starting process host function setup".to_string()),
         });
 
@@ -484,7 +483,6 @@ impl ProcessHost {
                 actor_component.actor_store.record_event(ChainEventData {
                     event_type: "process-setup".to_string(),
                     data: EventData::Process(ProcessEventData::LinkerInstanceSuccess),
-                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
                     description: Some("Successfully created linker instance".to_string()),
                 });
                 interface
@@ -497,7 +495,6 @@ impl ProcessHost {
                         error: e.to_string(),
                         step: "linker_instance".to_string(),
                     }),
-                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
                     description: Some(format!("Failed to create linker instance: {}", e)),
                 });
                 return Err(anyhow::anyhow!(
@@ -552,7 +549,6 @@ impl ProcessHost {
                                 program: program.clone(),
                                 reason: e.to_string(),
                             }),
-                            timestamp: chrono::Utc::now().timestamp_millis() as u64,
                             description: Some(format!("Permission denied for process spawn: {}", e)),
                         });
                         
@@ -747,7 +743,6 @@ impl ProcessHost {
                                             process_id: process_id_clone,
                                             exit_code,
                                         }),
-                                        timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                         description: Some(exit_description),
                                     };
                                     
@@ -823,7 +818,6 @@ impl ProcessHost {
                                                     timeout_seconds: timeout_secs,
                                                     action: "SIGTERM".to_string(),
                                                 }),
-                                                timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                                 description: Some(format!(
                                                     "Process {} execution timeout after {} seconds, initiating graceful termination",
                                                     process_id, timeout_secs
@@ -886,7 +880,6 @@ impl ProcessHost {
                                     args: args.clone(),
                                     os_pid: os_pid,
                                 }),
-                                timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                 description: Some(format!("Spawned process {} (OS PID: {:?}): {}", process_id, os_pid, program)),
                             });
                             
@@ -901,7 +894,6 @@ impl ProcessHost {
                                     operation: "spawn".to_string(),
                                     message: e.to_string(),
                                 }),
-                                timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                 description: Some(format!("Failed to spawn process: {}", e)),
                             });
                             
@@ -954,7 +946,6 @@ impl ProcessHost {
                                         process_id: pid,
                                         bytes_written,
                                     }),
-                                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                     description: Some(format!(
                                         "Wrote {} bytes to process {} stdin",
                                         bytes_written, pid
@@ -973,7 +964,6 @@ impl ProcessHost {
                                         operation: "write-stdin".to_string(),
                                         message: e.to_string(),
                                     }),
-                                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                     description: Some(format!(
                                         "Failed to write to process {} stdin: {}",
                                         pid, e
@@ -993,7 +983,6 @@ impl ProcessHost {
                                 operation: "write-stdin".to_string(),
                                 message: "Process stdin not available".to_string(),
                             }),
-                            timestamp: chrono::Utc::now().timestamp_millis() as u64,
                             description: Some(format!(
                                 "Failed to write to process {}: stdin not available",
                                 pid
@@ -1047,7 +1036,6 @@ impl ProcessHost {
                                 operation: "status".to_string(),
                                 message: format!("Process not found: {}", pid),
                             }),
-                            timestamp: chrono::Utc::now().timestamp_millis() as u64,
                             description: Some(format!("Failed to get status for process {}: process not found", pid)),
                         });
                         
@@ -1087,7 +1075,6 @@ impl ProcessHost {
                                     data: EventData::Process(ProcessEventData::KillRequest {
                                         process_id: pid,
                                     }),
-                                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                     description: Some(format!("Killed process {}", pid)),
                                 });
 
@@ -1110,7 +1097,6 @@ impl ProcessHost {
                                         operation: "kill".to_string(),
                                         message: e.to_string(),
                                     }),
-                                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                     description: Some(format!(
                                         "Failed to kill process {}: {}",
                                         pid, e
@@ -1127,7 +1113,6 @@ impl ProcessHost {
                             data: EventData::Process(ProcessEventData::KillRequest {
                                 process_id: pid,
                             }),
-                            timestamp: chrono::Utc::now().timestamp_millis() as u64,
                             description: Some(format!("Process {} is already terminated", pid)),
                         });
 
@@ -1184,7 +1169,6 @@ impl ProcessHost {
                                     process_id: pid,
                                     signal,
                                 }),
-                                timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                 description: Some(format!("Sent signal {} to process {}", signal, pid)),
                             });
                             
@@ -1209,7 +1193,6 @@ impl ProcessHost {
                                         process_id: pid,
                                         signal,
                                     }),
-                                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                     description: Some(format!("Sent kill signal to process {}", pid)),
                                 });
                                 
@@ -1222,7 +1205,6 @@ impl ProcessHost {
                                         operation: "signal".to_string(),
                                         message: format!("Signal {} not supported on this platform", signal),
                                     }),
-                                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                     description: Some(format!("Signal {} not supported on this platform", signal)),
                                 });
                                 
@@ -1238,7 +1220,6 @@ impl ProcessHost {
                                 operation: "signal".to_string(),
                                 message: "Process not found or not running".to_string(),
                             }),
-                            timestamp: chrono::Utc::now().timestamp_millis() as u64,
                             description: Some(format!("Failed to send signal to process {}: process not found or not running", pid)),
                         });
                         
@@ -1252,7 +1233,6 @@ impl ProcessHost {
         actor_component.actor_store.record_event(ChainEventData {
             event_type: "process-setup".to_string(),
             data: EventData::Process(ProcessEventData::HandlerSetupSuccess),
-            timestamp: chrono::Utc::now().timestamp_millis() as u64,
             description: Some("Process host functions setup completed successfully".to_string()),
         });
 
@@ -1305,7 +1285,6 @@ impl ProcessHost {
                         timeout_seconds: GRACE_PERIOD_SECS,
                         action: "SIGKILL".to_string(),
                     }),
-                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
                     description: Some(format!(
                         "Process {} did not exit gracefully, escalating to SIGKILL",
                         process_id

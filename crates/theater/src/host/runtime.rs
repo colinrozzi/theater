@@ -88,7 +88,6 @@ impl RuntimeHost {
                 actor_component.actor_store.record_event(ChainEventData {
                     event_type: "runtime-setup".to_string(),
                     data: EventData::Runtime(RuntimeEventData::LinkerInstanceSuccess),
-                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
                     description: Some("Successfully created linker instance".to_string()),
                 });
                 interface
@@ -101,7 +100,6 @@ impl RuntimeHost {
                         error: e.to_string(),
                         step: "linker_instance".to_string(),
                     }),
-                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
                     description: Some(format!("Failed to create linker instance: {}", e)),
                 });
                 return Err(anyhow::anyhow!(
@@ -124,7 +122,6 @@ impl RuntimeHost {
                             level: "info".to_string(),
                             message: msg.clone(),
                         }),
-                        timestamp: chrono::Utc::now().timestamp_millis() as u64,
                         description: Some(format!("Actor log: {}", msg)),
                     });
 
@@ -140,7 +137,6 @@ impl RuntimeHost {
                         error: e.to_string(),
                         step: "log_function_wrap".to_string(),
                     }),
-                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
                     description: Some(format!("Failed to wrap log function: {}", e)),
                 });
                 anyhow::anyhow!("Failed to wrap log function: {}", e)
@@ -157,7 +153,6 @@ impl RuntimeHost {
                             old_state: "unknown".to_string(),
                             new_state: "requested".to_string(),
                         }),
-                        timestamp: chrono::Utc::now().timestamp_millis() as u64,
                         description: Some("Get state request".to_string()),
                     });
 
@@ -174,7 +169,6 @@ impl RuntimeHost {
                         data: EventData::Runtime(RuntimeEventData::StateChangeResult {
                             success: true,
                         }),
-                        timestamp: chrono::Utc::now().timestamp_millis() as u64,
                         description: Some(format!("State retrieved: {} bytes", state.len())),
                     });
 
@@ -189,7 +183,6 @@ impl RuntimeHost {
                         error: e.to_string(),
                         step: "get_state_function_wrap".to_string(),
                     }),
-                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
                     description: Some(format!("Failed to wrap get-state function: {}", e)),
                 });
                 anyhow::anyhow!("Failed to wrap get-state function: {}", e)
@@ -209,7 +202,6 @@ impl RuntimeHost {
                         data: EventData::Runtime(RuntimeEventData::ShutdownCall {
                             data: data.clone(),
                         }),
-                        timestamp: chrono::Utc::now().timestamp_millis() as u64,
                         description: Some(format!("Actor shutdown with data: {:?}", data)),
                     });
 
@@ -235,7 +227,6 @@ impl RuntimeHost {
                                     data: EventData::Runtime(RuntimeEventData::ShutdownRequested {
                                         success: true,
                                     }),
-                                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                     description: Some("Shutdown command sent successfully".to_string()),
                                 });
                                 Ok((Ok(()),))
@@ -248,7 +239,6 @@ impl RuntimeHost {
                                     data: EventData::Runtime(RuntimeEventData::ShutdownRequested {
                                         success: false,
                                     }),
-                                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
                                     description: Some(format!(
                                         "Failed to send shutdown command: {}",
                                         err
@@ -268,7 +258,6 @@ impl RuntimeHost {
                         error: e.to_string(),
                         step: "shutdown_function_wrap".to_string(),
                     }),
-                    timestamp: chrono::Utc::now().timestamp_millis() as u64,
                     description: Some(format!("Failed to wrap shutdown function: {}", e)),
                 });
                 anyhow::anyhow!("Failed to wrap shutdown function: {}", e)
@@ -278,7 +267,6 @@ impl RuntimeHost {
         actor_component.actor_store.record_event(ChainEventData {
             event_type: "runtime-setup".to_string(),
             data: EventData::Runtime(RuntimeEventData::HandlerSetupSuccess),
-            timestamp: chrono::Utc::now().timestamp_millis() as u64,
             description: Some("Runtime host functions setup completed successfully".to_string()),
         });
 
