@@ -11,7 +11,6 @@ use rand::SeedableRng;
 use rand_chacha::ChaCha20Rng;
 use std::sync::{Arc, Mutex};
 use theater::actor::ActorStore;
-use theater::events::EventPayload;
 use tracing::debug;
 
 /// Thread-local RNG for random operations
@@ -37,9 +36,7 @@ fn get_rng() -> Arc<Mutex<ChaCha20Rng>> {
 }
 
 // Implement RandomHost for ActorStore
-impl<E> RandomHost for ActorStore<E>
-where
-    E: EventPayload + Clone + From<RandomEventData> + Send,
+impl RandomHost for ActorStore
 {
     async fn get_random_bytes(&mut self, len: u64) -> Result<Vec<u8>> {
         let len = len as usize;
@@ -140,9 +137,7 @@ where
 }
 
 // Implement InsecureHost for ActorStore
-impl<E> InsecureHost for ActorStore<E>
-where
-    E: EventPayload + Clone + From<RandomEventData> + Send,
+impl InsecureHost for ActorStore
 {
     async fn get_insecure_random_bytes(&mut self, len: u64) -> Result<Vec<u8>> {
         let len = len as usize;
@@ -243,9 +238,7 @@ where
 }
 
 // Implement InsecureSeedHost for ActorStore
-impl<E> InsecureSeedHost for ActorStore<E>
-where
-    E: EventPayload + Clone + From<RandomEventData> + Send,
+impl InsecureSeedHost for ActorStore
 {
     async fn insecure_seed(&mut self) -> Result<(u64, u64)> {
         debug!("wasi:random/insecure-seed insecure-seed");

@@ -19,23 +19,18 @@ use crate::streams::StreamError as InternalStreamError;
 use anyhow::Result;
 use wasmtime::component::Resource;
 use theater::actor::ActorStore;
-use theater::events::EventPayload;
 use tracing::{debug, warn};
 
 // =============================================================================
 // wasi:io/error Host implementation
 // =============================================================================
 
-impl<E> ErrorHost for ActorStore<E>
-where
-    E: EventPayload + Clone + From<IoEventData> + Send,
+impl ErrorHost for ActorStore
 {
     // No non-resource methods in the error interface
 }
 
-impl<E> HostError for ActorStore<E>
-where
-    E: EventPayload + Clone + From<IoEventData> + Send,
+impl HostError for ActorStore
 {
     async fn to_debug_string(&mut self, error: Resource<IoError>) -> Result<String> {
         let error_id = error.rep();
@@ -62,9 +57,7 @@ where
 // wasi:io/poll Host implementation
 // =============================================================================
 
-impl<E> PollHost for ActorStore<E>
-where
-    E: EventPayload + Clone + From<IoEventData> + Send,
+impl PollHost for ActorStore
 {
     async fn poll(&mut self, pollables: Vec<Resource<IoHandlerPollable>>) -> Result<Vec<u32>> {
         debug!("wasi:io/poll poll: {} pollables", pollables.len());
@@ -103,9 +96,7 @@ where
     }
 }
 
-impl<E> HostPollable for ActorStore<E>
-where
-    E: EventPayload + Clone + From<IoEventData> + Send,
+impl HostPollable for ActorStore
 {
     async fn ready(&mut self, pollable_handle: Resource<IoHandlerPollable>) -> Result<bool> {
         let pollable_id = pollable_handle.rep();
@@ -188,16 +179,12 @@ fn to_bindings_stream_error(e: InternalStreamError) -> crate::bindings::wasi::io
     }
 }
 
-impl<E> StreamsHost for ActorStore<E>
-where
-    E: EventPayload + Clone + From<IoEventData> + Send,
+impl StreamsHost for ActorStore
 {
     // No non-resource methods in streams interface
 }
 
-impl<E> HostInputStream for ActorStore<E>
-where
-    E: EventPayload + Clone + From<IoEventData> + Send,
+impl HostInputStream for ActorStore
 {
     async fn read(
         &mut self,
@@ -400,9 +387,7 @@ where
     }
 }
 
-impl<E> HostOutputStream for ActorStore<E>
-where
-    E: EventPayload + Clone + From<IoEventData> + Send,
+impl HostOutputStream for ActorStore
 {
     async fn check_write(
         &mut self,
@@ -804,9 +789,7 @@ where
 // wasi:cli Host implementations
 // =============================================================================
 
-impl<E> StdinHost for ActorStore<E>
-where
-    E: EventPayload + Clone + From<IoEventData> + Send,
+impl StdinHost for ActorStore
 {
     async fn get_stdin(&mut self) -> Result<Resource<InputStream>> {
         debug!("wasi:cli/stdin get-stdin");
@@ -834,9 +817,7 @@ where
     }
 }
 
-impl<E> StdoutHost for ActorStore<E>
-where
-    E: EventPayload + Clone + From<IoEventData> + Send,
+impl StdoutHost for ActorStore
 {
     async fn get_stdout(&mut self) -> Result<Resource<OutputStream>> {
         debug!("wasi:cli/stdout get-stdout");
@@ -863,9 +844,7 @@ where
     }
 }
 
-impl<E> StderrHost for ActorStore<E>
-where
-    E: EventPayload + Clone + From<IoEventData> + Send,
+impl StderrHost for ActorStore
 {
     async fn get_stderr(&mut self) -> Result<Resource<OutputStream>> {
         debug!("wasi:cli/stderr get-stderr");
@@ -892,9 +871,7 @@ where
     }
 }
 
-impl<E> EnvironmentHost for ActorStore<E>
-where
-    E: EventPayload + Clone + From<IoEventData> + Send,
+impl EnvironmentHost for ActorStore
 {
     async fn get_environment(&mut self) -> Result<Vec<(String, String)>> {
         debug!("wasi:cli/environment get-environment");
@@ -966,9 +943,7 @@ where
     }
 }
 
-impl<E> ExitHost for ActorStore<E>
-where
-    E: EventPayload + Clone + From<IoEventData> + Send,
+impl ExitHost for ActorStore
 {
     async fn exit(&mut self, status: Result<(), ()>) -> Result<()> {
         let status_code = match status {
@@ -992,16 +967,12 @@ where
 }
 
 // Terminal interfaces - we don't provide actual terminal access
-impl<E> TerminalInputHost for ActorStore<E>
-where
-    E: EventPayload + Clone + From<IoEventData> + Send,
+impl TerminalInputHost for ActorStore
 {
     // No methods - just a resource type
 }
 
-impl<E> HostTerminalInput for ActorStore<E>
-where
-    E: EventPayload + Clone + From<IoEventData> + Send,
+impl HostTerminalInput for ActorStore
 {
     async fn drop(&mut self, _rep: Resource<crate::bindings::wasi::cli::terminal_input::TerminalInput>) -> Result<()> {
         // Terminal resources are never actually created
@@ -1009,16 +980,12 @@ where
     }
 }
 
-impl<E> TerminalOutputHost for ActorStore<E>
-where
-    E: EventPayload + Clone + From<IoEventData> + Send,
+impl TerminalOutputHost for ActorStore
 {
     // No methods - just a resource type
 }
 
-impl<E> HostTerminalOutput for ActorStore<E>
-where
-    E: EventPayload + Clone + From<IoEventData> + Send,
+impl HostTerminalOutput for ActorStore
 {
     async fn drop(&mut self, _rep: Resource<crate::bindings::wasi::cli::terminal_output::TerminalOutput>) -> Result<()> {
         // Terminal resources are never actually created
@@ -1026,9 +993,7 @@ where
     }
 }
 
-impl<E> TerminalStdinHost for ActorStore<E>
-where
-    E: EventPayload + Clone + From<IoEventData> + Send,
+impl TerminalStdinHost for ActorStore
 {
     async fn get_terminal_stdin(&mut self) -> Result<Option<Resource<crate::bindings::wasi::cli::terminal_input::TerminalInput>>> {
         debug!("wasi:cli/terminal-stdin get-terminal-stdin");
@@ -1037,9 +1002,7 @@ where
     }
 }
 
-impl<E> TerminalStdoutHost for ActorStore<E>
-where
-    E: EventPayload + Clone + From<IoEventData> + Send,
+impl TerminalStdoutHost for ActorStore
 {
     async fn get_terminal_stdout(&mut self) -> Result<Option<Resource<crate::bindings::wasi::cli::terminal_output::TerminalOutput>>> {
         debug!("wasi:cli/terminal-stdout get-terminal-stdout");
@@ -1048,9 +1011,7 @@ where
     }
 }
 
-impl<E> TerminalStderrHost for ActorStore<E>
-where
-    E: EventPayload + Clone + From<IoEventData> + Send,
+impl TerminalStderrHost for ActorStore
 {
     async fn get_terminal_stderr(&mut self) -> Result<Option<Resource<crate::bindings::wasi::cli::terminal_output::TerminalOutput>>> {
         debug!("wasi:cli/terminal-stderr get-terminal-stderr");

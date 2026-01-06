@@ -4,14 +4,12 @@
 
 pub mod events;
 
-pub use events::SupervisorEventData;
 
 use theater::actor::handle::ActorHandle;
 use theater::actor::store::ActorStore;
 use theater::actor::types::{ActorError, WitActorError};
 use theater::config::actor_manifest::SupervisorHostConfig;
 use theater::config::permissions::SupervisorPermissions;
-use theater::events::{ChainEventData, EventPayload};
 use theater::handler::{Handler, HandlerContext, SharedActorInstance};
 use theater::messages::{ActorResult, TheaterCommand};
 use theater::shutdown::ShutdownReceiver;
@@ -132,13 +130,9 @@ impl SupervisorHandler {
     }
 }
 
-impl<E> Handler<E> for SupervisorHandler
-where
-    E: EventPayload + Clone + From<SupervisorEventData>
-        + From<theater::events::theater_runtime::TheaterRuntimeEventData>
-        + From<theater::events::wasm::WasmEventData>,
+impl Handler for SupervisorHandler
 {
-    fn create_instance(&self) -> Box<dyn Handler<E>> {
+    fn create_instance(&self) -> Box<dyn Handler> {
         Box::new(self.clone())
     }
 
@@ -154,36 +148,18 @@ where
         Some(vec!["theater:simple/supervisor-handlers".to_string()])
     }
 
-    fn setup_host_functions(&mut self, actor_component: &mut ActorComponent<E>, _ctx: &mut HandlerContext) -> Result<()> {
+    fn setup_host_functions(&mut self, actor_component: &mut ActorComponent, _ctx: &mut HandlerContext) -> Result<()> {
         // Record setup start
-        actor_component.actor_store.record_event(ChainEventData {
-            event_type: "supervisor-setup".to_string(),
-            data: SupervisorEventData::HandlerSetupStart.into(),
-            description: Some("Starting supervisor host function setup".to_string()),
-        });
 
         info!("Setting up host functions for supervisor");
 
         let mut interface = match actor_component.linker.instance("theater:simple/supervisor") {
             Ok(interface) => {
                 // Record successful linker instance creation
-                actor_component.actor_store.record_event(ChainEventData {
-                    event_type: "supervisor-setup".to_string(),
-                    data: SupervisorEventData::LinkerInstanceSuccess.into(),
-                            description: Some("Successfully created linker instance".to_string()),
-                });
                 interface
             }
             Err(e) => {
                 // Record the specific error where it happens
-                actor_component.actor_store.record_event(ChainEventData {
-                    event_type: "supervisor-setup".to_string(),
-                    data: SupervisorEventData::HandlerSetupError {
-                        error: e.to_string(),
-                        step: "linker_instance".to_string(),
-                    }.into(),
-                            description: Some(format!("Failed to create linker instance: {}", e)),
-                });
                 return Err(anyhow::anyhow!(
                     "Could not instantiate theater:simple/supervisor: {}",
                     e
@@ -198,17 +174,10 @@ where
         let _ = interface
             .func_wrap_async(
                 "spawn",
-                move |mut ctx: StoreContextMut<'_, ActorStore<E>>,
+                move |mut ctx: StoreContextMut<'_, ActorStore>,
                       (manifest, init_bytes): (String, Option<Vec<u8>>)|
                       -> Box<dyn Future<Output = Result<(Result<String, String>,)>> + Send> {
                     // Record spawn child call event
-                    ctx.data_mut().record_event(ChainEventData {
-                        event_type: "theater:simple/supervisor/spawn".to_string(),
-                        data: SupervisorEventData::SpawnChildCall {
-                            manifest_path: manifest.clone(),
-                        }.into(),
-                                    description: Some(format!("Spawning child from manifest: {}", manifest)),
-                    });
 
                     let store = ctx.data_mut();
                     let theater_tx = store.theater_tx.clone();
@@ -233,67 +202,22 @@ where
                                     let actor_id_str = actor_id.to_string();
 
                                     // Record spawn child result event
-                                    ctx.data_mut().record_event(ChainEventData {
-                                        event_type: "theater:simple/supervisor/spawn".to_string(),
-                                        data: 
-                                            SupervisorEventData::SpawnChildResult {
-                                                child_id: actor_id_str.clone(),
-                                                success: true,
-                                            }.into(),
-                                                                    description: Some(format!(
-                                            "Successfully spawned child with ID: {}",
-                                            actor_id_str
-                                        )),
-                                    });
 
                                     Ok((Ok(actor_id_str),))
                                 }
                                 Ok(Err(e)) => {
                                     // Record spawn child error event
-                                    ctx.data_mut().record_event(ChainEventData {
-                                        event_type: "theater:simple/supervisor/spawn".to_string(),
-                                        data: SupervisorEventData::Error {
-                                            operation: "spawn".to_string(),
-                                            child_id: None,
-                                            message: e.to_string(),
-                                        }.into(),
-                                                                    description: Some(format!("Failed to spawn child: {}", e)),
-                                    });
 
                                     Ok((Err(e.to_string()),))
                                 }
                                 Err(e) => {
                                     // Record spawn child error event
-                                    ctx.data_mut().record_event(ChainEventData {
-                                        event_type: "theater:simple/supervisor/spawn".to_string(),
-                                        data: SupervisorEventData::Error {
-                                            operation: "spawn".to_string(),
-                                            child_id: None,
-                                            message: e.to_string(),
-                                        }.into(),
-                                                                    description: Some(format!(
-                                            "Failed to receive spawn response: {}",
-                                            e
-                                        )),
-                                    });
 
                                     Ok((Err(format!("Failed to receive response: {}", e)),))
                                 }
                             },
                             Err(e) => {
                                 // Record spawn child error event
-                                ctx.data_mut().record_event(ChainEventData {
-                                    event_type: "theater:simple/supervisor/spawn".to_string(),
-                                    data: SupervisorEventData::Error {
-                                        operation: "spawn".to_string(),
-                                        child_id: None,
-                                        message: e.to_string(),
-                                    }.into(),
-                                                            description: Some(format!(
-                                        "Failed to send spawn command: {}",
-                                        e
-                                    )),
-                                });
 
                                 Ok((Err(format!("Failed to send spawn command: {}", e)),))
                             }
@@ -310,18 +234,10 @@ where
         let _ = interface
             .func_wrap_async(
                 "resume",
-                move |mut ctx: StoreContextMut<'_, ActorStore<E>>,
+                move |mut ctx: StoreContextMut<'_, ActorStore>,
                       (manifest, state_bytes): (String, Option<Vec<u8>>)|
                       -> Box<dyn Future<Output = Result<(Result<String, String>,)>> + Send> {
                     // Record resume child call event
-                    ctx.data_mut().record_event(ChainEventData {
-                        event_type: "theater:simple/supervisor/resume".to_string(),
-                        data: SupervisorEventData::ResumeChildCall {
-                            manifest_path: manifest.clone(),
-                            initial_state: state_bytes.clone(),
-                        }.into(),
-                                    description: Some(format!("Resuming child from manifest: {}", manifest)),
-                    });
 
                     let store = ctx.data_mut();
                     let theater_tx = store.theater_tx.clone();
@@ -346,67 +262,22 @@ where
                                     let actor_id_str = actor_id.to_string();
 
                                     // Record resume child result event
-                                    ctx.data_mut().record_event(ChainEventData {
-                                        event_type: "theater:simple/supervisor/resume".to_string(),
-                                        data: 
-                                            SupervisorEventData::ResumeChildResult {
-                                                child_id: actor_id_str.clone(),
-                                                success: true,
-                                            }.into(),
-                                                                    description: Some(format!(
-                                            "Successfully resumed child with ID: {}",
-                                            actor_id_str
-                                        )),
-                                    });
 
                                     Ok((Ok(actor_id_str),))
                                 }
                                 Ok(Err(e)) => {
                                     // Record resume child error event
-                                    ctx.data_mut().record_event(ChainEventData {
-                                        event_type: "theater:simple/supervisor/resume".to_string(),
-                                        data: SupervisorEventData::Error {
-                                            operation: "resume".to_string(),
-                                            child_id: None,
-                                            message: e.to_string(),
-                                        }.into(),
-                                                                    description: Some(format!("Failed to resume child: {}", e)),
-                                    });
 
                                     Ok((Err(e.to_string()),))
                                 }
                                 Err(e) => {
                                     // Record resume child error event
-                                    ctx.data_mut().record_event(ChainEventData {
-                                        event_type: "theater:simple/supervisor/resume".to_string(),
-                                        data: SupervisorEventData::Error {
-                                            operation: "resume".to_string(),
-                                            child_id: None,
-                                            message: e.to_string(),
-                                        }.into(),
-                                                                    description: Some(format!(
-                                            "Failed to receive resume response: {}",
-                                            e
-                                        )),
-                                    });
 
                                     Ok((Err(format!("Failed to receive response: {}", e)),))
                                 }
                             },
                             Err(e) => {
                                 // Record resume child error event
-                                ctx.data_mut().record_event(ChainEventData {
-                                    event_type: "theater:simple/supervisor/resume".to_string(),
-                                    data: SupervisorEventData::Error {
-                                        operation: "resume".to_string(),
-                                        child_id: None,
-                                        message: e.to_string(),
-                                    }.into(),
-                                                            description: Some(format!(
-                                        "Failed to send resume command: {}",
-                                        e
-                                    )),
-                                });
 
                                 Ok((Err(format!("Failed to send resume command: {}", e)),))
                             }
@@ -421,15 +292,10 @@ where
         let _ = interface
             .func_wrap_async(
                 "list-children",
-                move |mut ctx: StoreContextMut<'_, ActorStore<E>>,
+                move |mut ctx: StoreContextMut<'_, ActorStore>,
                       ()|
                       -> Box<dyn Future<Output = Result<(Vec<String>,)>> + Send> {
                     // Record list children call event
-                    ctx.data_mut().record_event(ChainEventData {
-                        event_type: "theater:simple/supervisor/list-children".to_string(),
-                        data: SupervisorEventData::ListChildrenCall {}.into(),
-                                    description: Some("Listing children".to_string()),
-                    });
 
                     let store = ctx.data_mut();
                     let theater_tx = store.theater_tx.clone();
@@ -450,56 +316,17 @@ where
                                         children.into_iter().map(|id| id.to_string()).collect();
 
                                     // Record list children result event
-                                    ctx.data_mut().record_event(ChainEventData {
-                                        event_type: "theater:simple/supervisor/list-children"
-                                            .to_string(),
-                                        data: 
-                                            SupervisorEventData::ListChildrenResult {
-                                                children_count: children_str.len(),
-                                                success: true,
-                                            }.into(),
-                                                                    description: Some(format!(
-                                            "Found {} children",
-                                            children_str.len()
-                                        )),
-                                    });
 
                                     Ok((children_str,))
                                 }
                                 Err(e) => {
                                     // Record list children error event
-                                    ctx.data_mut().record_event(ChainEventData {
-                                        event_type: "theater:simple/supervisor/list-children"
-                                            .to_string(),
-                                        data: SupervisorEventData::Error {
-                                            operation: "list-children".to_string(),
-                                            child_id: None,
-                                            message: e.to_string(),
-                                        }.into(),
-                                                                    description: Some(format!(
-                                            "Failed to receive children list: {}",
-                                            e
-                                        )),
-                                    });
 
                                     Err(anyhow::anyhow!("Failed to receive children list: {}", e))
                                 }
                             },
                             Err(e) => {
                                 // Record list children error event
-                                ctx.data_mut().record_event(ChainEventData {
-                                    event_type: "theater:simple/supervisor/list-children"
-                                        .to_string(),
-                                    data: SupervisorEventData::Error {
-                                        operation: "list-children".to_string(),
-                                        child_id: None,
-                                        message: e.to_string(),
-                                    }.into(),
-                                                            description: Some(format!(
-                                        "Failed to send list children command: {}",
-                                        e
-                                    )),
-                                });
 
                                 Err(anyhow::anyhow!(
                                     "Failed to send list children command: {}",
@@ -517,17 +344,10 @@ where
         let _ = interface
             .func_wrap_async(
                 "restart-child",
-                move |mut ctx: StoreContextMut<'_, ActorStore<E>>,
+                move |mut ctx: StoreContextMut<'_, ActorStore>,
                       (child_id,): (String,)|
                       -> Box<dyn Future<Output = Result<(Result<(), String>,)>> + Send> {
                     // Record restart child call event
-                    ctx.data_mut().record_event(ChainEventData {
-                        event_type: "theater:simple/supervisor/restart-child".to_string(),
-                        data: SupervisorEventData::RestartChildCall {
-                            child_id: child_id.clone(),
-                        }.into(),
-                                    description: Some(format!("Restarting child: {}", child_id)),
-                    });
 
                     let store = ctx.data_mut();
                     let theater_tx = store.theater_tx.clone();
@@ -541,21 +361,6 @@ where
                                     Ok(id) => id,
                                     Err(e) => {
                                         // Record error event
-                                        ctx.data_mut().record_event(ChainEventData {
-                                            event_type:
-                                                "theater:simple/supervisor/restart-child"
-                                                    .to_string(),
-                                            data: 
-                                                SupervisorEventData::Error {
-                                                    operation: "restart-child".to_string(),
-                                                    child_id: Some(child_id_clone.clone()),
-                                                    message: e.to_string(),
-                                                }.into(),
-                                                                            description: Some(format!(
-                                                "Failed to parse child ID: {}",
-                                                e
-                                            )),
-                                        });
 
                                         return Ok((Err(format!("Invalid child ID: {}", e)),));
                                     }
@@ -567,74 +372,22 @@ where
                             Ok(_) => match response_rx.await {
                                 Ok(Ok(())) => {
                                     // Record restart child result event
-                                    ctx.data_mut().record_event(ChainEventData {
-                                        event_type: "theater:simple/supervisor/restart-child"
-                                            .to_string(),
-                                        data: 
-                                            SupervisorEventData::RestartChildResult {
-                                                child_id: child_id_clone.clone(),
-                                                success: true,
-                                            }.into(),
-                                                                    description: Some(format!(
-                                            "Successfully restarted child: {}",
-                                            child_id_clone
-                                        )),
-                                    });
 
                                     Ok((Ok(()),))
                                 }
                                 Ok(Err(e)) => {
                                     // Record restart child error event
-                                    ctx.data_mut().record_event(ChainEventData {
-                                        event_type: "theater:simple/supervisor/restart-child"
-                                            .to_string(),
-                                        data: SupervisorEventData::Error {
-                                            operation: "restart-child".to_string(),
-                                            child_id: Some(child_id_clone.clone()),
-                                            message: e.to_string(),
-                                        }.into(),
-                                                                    description: Some(format!(
-                                            "Failed to restart child: {}",
-                                            e
-                                        )),
-                                    });
 
                                     Ok((Err(e.to_string()),))
                                 }
                                 Err(e) => {
                                     // Record restart child error event
-                                    ctx.data_mut().record_event(ChainEventData {
-                                        event_type: "theater:simple/supervisor/restart-child"
-                                            .to_string(),
-                                        data: SupervisorEventData::Error {
-                                            operation: "restart-child".to_string(),
-                                            child_id: Some(child_id_clone.clone()),
-                                            message: e.to_string(),
-                                        }.into(),
-                                                                    description: Some(format!(
-                                            "Failed to receive restart response: {}",
-                                            e
-                                        )),
-                                    });
 
                                     Ok((Err(format!("Failed to receive restart response: {}", e)),))
                                 }
                             },
                             Err(e) => {
                                 // Record restart child error event
-                                ctx.data_mut().record_event(ChainEventData {
-                                    event_type: "theater:simple/supervisor/restart-child"
-                                        .to_string(),
-                                    data: SupervisorEventData::Error {
-                                        operation: "restart-child".to_string(),
-                                        child_id: Some(child_id_clone.clone()),
-                                        message: e.to_string(),
-                                    }.into(),
-                                                            description: Some(format!(
-                                        "Failed to send restart command: {}",
-                                        e
-                                    )),
-                                });
 
                                 Ok((Err(format!("Failed to send restart command: {}", e)),))
                             }
@@ -649,17 +402,10 @@ where
         let _ = interface
             .func_wrap_async(
                 "stop-child",
-                move |mut ctx: StoreContextMut<'_, ActorStore<E>>,
+                move |mut ctx: StoreContextMut<'_, ActorStore>,
                       (child_id,): (String,)|
                       -> Box<dyn Future<Output = Result<(Result<(), String>,)>> + Send> {
                     // Record stop child call event
-                    ctx.data_mut().record_event(ChainEventData {
-                        event_type: "theater:simple/supervisor/stop-child".to_string(),
-                        data: SupervisorEventData::StopChildCall {
-                            child_id: child_id.clone(),
-                        }.into(),
-                                    description: Some(format!("Stopping child: {}", child_id)),
-                    });
 
                     let store = ctx.data_mut();
                     let theater_tx = store.theater_tx.clone();
@@ -673,20 +419,6 @@ where
                                     Ok(id) => id,
                                     Err(e) => {
                                         // Record error event
-                                        ctx.data_mut().record_event(ChainEventData {
-                                            event_type: "theater:simple/supervisor/stop-child"
-                                                .to_string(),
-                                            data: 
-                                                SupervisorEventData::Error {
-                                                    operation: "stop-child".to_string(),
-                                                    child_id: Some(child_id_clone.clone()),
-                                                    message: e.to_string(),
-                                                }.into(),
-                                                                            description: Some(format!(
-                                                "Failed to parse child ID: {}",
-                                                e
-                                            )),
-                                        });
 
                                         return Ok((Err(format!("Invalid child ID: {}", e)),));
                                     }
@@ -698,70 +430,22 @@ where
                             Ok(_) => match response_rx.await {
                                 Ok(Ok(())) => {
                                     // Record stop child result event
-                                    ctx.data_mut().record_event(ChainEventData {
-                                        event_type: "theater:simple/supervisor/stop-child"
-                                            .to_string(),
-                                        data: 
-                                            SupervisorEventData::StopChildResult {
-                                                child_id: child_id_clone.clone(),
-                                                success: true,
-                                            }.into(),
-                                                                    description: Some(format!(
-                                            "Successfully stopped child: {}",
-                                            child_id_clone
-                                        )),
-                                    });
 
                                     Ok((Ok(()),))
                                 }
                                 Ok(Err(e)) => {
                                     // Record stop child error event
-                                    ctx.data_mut().record_event(ChainEventData {
-                                        event_type: "theater:simple/supervisor/stop-child"
-                                            .to_string(),
-                                        data: SupervisorEventData::Error {
-                                            operation: "stop-child".to_string(),
-                                            child_id: Some(child_id_clone.clone()),
-                                            message: e.to_string(),
-                                        }.into(),
-                                                                    description: Some(format!("Failed to stop child: {}", e)),
-                                    });
 
                                     Ok((Err(e.to_string()),))
                                 }
                                 Err(e) => {
                                     // Record stop child error event
-                                    ctx.data_mut().record_event(ChainEventData {
-                                        event_type: "theater:simple/supervisor/stop-child"
-                                            .to_string(),
-                                        data: SupervisorEventData::Error {
-                                            operation: "stop-child".to_string(),
-                                            child_id: Some(child_id_clone.clone()),
-                                            message: e.to_string(),
-                                        }.into(),
-                                                                    description: Some(format!(
-                                            "Failed to receive stop response: {}",
-                                            e
-                                        )),
-                                    });
 
                                     Ok((Err(format!("Failed to receive stop response: {}", e)),))
                                 }
                             },
                             Err(e) => {
                                 // Record stop child error event
-                                ctx.data_mut().record_event(ChainEventData {
-                                    event_type: "theater:simple/supervisor/stop-child".to_string(),
-                                    data: SupervisorEventData::Error {
-                                        operation: "stop-child".to_string(),
-                                        child_id: Some(child_id_clone.clone()),
-                                        message: e.to_string(),
-                                    }.into(),
-                                                            description: Some(format!(
-                                        "Failed to send stop command: {}",
-                                        e
-                                    )),
-                                });
 
                                 Ok((Err(format!("Failed to send stop command: {}", e)),))
                             }
@@ -776,19 +460,12 @@ where
         let _ = interface
             .func_wrap_async(
                 "get-child-state",
-                move |mut ctx: StoreContextMut<'_, ActorStore<E>>,
+                move |mut ctx: StoreContextMut<'_, ActorStore>,
                       (child_id,): (String,)|
                       -> Box<
                     dyn Future<Output = Result<(Result<Option<Vec<u8>>, String>,)>> + Send,
                 > {
                     // Record get child state call event
-                    ctx.data_mut().record_event(ChainEventData {
-                        event_type: "theater:simple/supervisor/get-child-state".to_string(),
-                        data: SupervisorEventData::GetChildStateCall {
-                            child_id: child_id.clone(),
-                        }.into(),
-                                    description: Some(format!("Getting state for child: {}", child_id)),
-                    });
 
                     let store = ctx.data_mut();
                     let theater_tx = store.theater_tx.clone();
@@ -802,20 +479,6 @@ where
                                     Ok(id) => id,
                                     Err(e) => {
                                         // Record error event
-                                        ctx.data_mut().record_event(ChainEventData {
-                                            event_type: "theater:simple/supervisor/get-child-state"
-                                                .to_string(),
-                                            data: 
-                                                SupervisorEventData::Error {
-                                                    operation: "get-child-state".to_string(),
-                                                    child_id: Some(child_id_clone.clone()),
-                                                    message: e.to_string(),
-                                                }.into(),
-                                                                            description: Some(format!(
-                                                "Failed to parse child ID: {}",
-                                                e
-                                            )),
-                                        });
 
                                         return Ok((Err(format!("Invalid child ID: {}", e)),));
                                     }
@@ -828,75 +491,22 @@ where
                                 Ok(Ok(state)) => {
                                     // Record get child state result event
                                     let state_size = state.as_ref().map_or(0, |s| s.len());
-                                    ctx.data_mut().record_event(ChainEventData {
-                                        event_type: "theater:simple/supervisor/get-child-state"
-                                            .to_string(),
-                                        data: 
-                                            SupervisorEventData::GetChildStateResult {
-                                                child_id: child_id_clone.clone(),
-                                                state_size,
-                                                success: true,
-                                            }.into(),
-                                                                    description: Some(format!(
-                                            "Successfully retrieved state for child {}: {} bytes",
-                                            child_id_clone, state_size
-                                        )),
-                                    });
 
                                     Ok((Ok(state),))
                                 }
                                 Ok(Err(e)) => {
                                     // Record get child state error event
-                                    ctx.data_mut().record_event(ChainEventData {
-                                        event_type: "theater:simple/supervisor/get-child-state"
-                                            .to_string(),
-                                        data: SupervisorEventData::Error {
-                                            operation: "get-child-state".to_string(),
-                                            child_id: Some(child_id_clone.clone()),
-                                            message: e.to_string(),
-                                        }.into(),
-                                                                    description: Some(format!(
-                                            "Failed to get child state: {}",
-                                            e
-                                        )),
-                                    });
 
                                     Ok((Err(e.to_string()),))
                                 }
                                 Err(e) => {
                                     // Record get child state error event
-                                    ctx.data_mut().record_event(ChainEventData {
-                                        event_type: "theater:simple/supervisor/get-child-state"
-                                            .to_string(),
-                                        data: SupervisorEventData::Error {
-                                            operation: "get-child-state".to_string(),
-                                            child_id: Some(child_id_clone.clone()),
-                                            message: e.to_string(),
-                                        }.into(),
-                                                                    description: Some(format!(
-                                            "Failed to receive state: {}",
-                                            e
-                                        )),
-                                    });
 
                                     Ok((Err(format!("Failed to receive state: {}", e)),))
                                 }
                             },
                             Err(e) => {
                                 // Record get child state error event
-                                ctx.data_mut().record_event(ChainEventData {
-                                    event_type: "theater:simple/supervisor/get-child-state"
-                                        .to_string(),
-                                    data: SupervisorEventData::Error {
-                                        operation: "get-child-state".to_string(),
-                                        child_id: Some(child_id_clone.clone()),
-                                        message: e.to_string(),
-                                    }.into(),
-                                                            description: Some(format!(
-                                        "Failed to send state request: {}",
-                                        e
-                                    )),
-                                });
 
                                 Ok((Err(format!("Failed to send state request: {}", e)),))
                             }
@@ -911,19 +521,12 @@ where
         let _ = interface
             .func_wrap_async(
                 "get-child-events",
-                move |mut ctx: StoreContextMut<'_, ActorStore<E>>,
+                move |mut ctx: StoreContextMut<'_, ActorStore>,
                       (child_id,): (String,)|
                       -> Box<
                     dyn Future<Output = Result<(Result<Vec<ChainEvent>, String>,)>> + Send,
                 > {
                     // Record get child events call event
-                    ctx.data_mut().record_event(ChainEventData {
-                        event_type: "theater:simple/supervisor/get-child-events".to_string(),
-                        data: SupervisorEventData::GetChildEventsCall {
-                            child_id: child_id.clone(),
-                        }.into(),
-                                    description: Some(format!("Getting events for child: {}", child_id)),
-                    });
 
                     let store = ctx.data_mut();
                     let theater_tx = store.theater_tx.clone();
@@ -937,21 +540,6 @@ where
                                     Ok(id) => id,
                                     Err(e) => {
                                         // Record error event
-                                        ctx.data_mut().record_event(ChainEventData {
-                                            event_type:
-                                                "theater:simple/supervisor/get-child-events"
-                                                    .to_string(),
-                                            data: 
-                                                SupervisorEventData::Error {
-                                                    operation: "get-child-events".to_string(),
-                                                    child_id: Some(child_id_clone.clone()),
-                                                    message: e.to_string(),
-                                                }.into(),
-                                                                            description: Some(format!(
-                                                "Failed to parse child ID: {}",
-                                                e
-                                            )),
-                                        });
 
                                         return Ok((Err(format!("Invalid child ID: {}", e)),));
                                     }
@@ -963,76 +551,22 @@ where
                             Ok(_) => match response_rx.await {
                                 Ok(Ok(events)) => {
                                     // Record get child events result event
-                                    ctx.data_mut().record_event(ChainEventData {
-                                        event_type: "theater:simple/supervisor/get-child-events"
-                                            .to_string(),
-                                        data: 
-                                            SupervisorEventData::GetChildEventsResult {
-                                                child_id: child_id_clone.clone(),
-                                                events_count: events.len(),
-                                                success: true,
-                                            }.into(),
-                                                                    description: Some(format!(
-                                            "Successfully retrieved {} events for child {}",
-                                            events.len(),
-                                            child_id_clone
-                                        )),
-                                    });
 
                                     Ok((Ok(events),))
                                 }
                                 Ok(Err(e)) => {
                                     // Record get child events error event
-                                    ctx.data_mut().record_event(ChainEventData {
-                                        event_type: "theater:simple/supervisor/get-child-events"
-                                            .to_string(),
-                                        data: SupervisorEventData::Error {
-                                            operation: "get-child-events".to_string(),
-                                            child_id: Some(child_id_clone.clone()),
-                                            message: e.to_string(),
-                                        }.into(),
-                                                                    description: Some(format!(
-                                            "Failed to get child events: {}",
-                                            e
-                                        )),
-                                    });
 
                                     Ok((Err(e.to_string()),))
                                 }
                                 Err(e) => {
                                     // Record get child events error event
-                                    ctx.data_mut().record_event(ChainEventData {
-                                        event_type: "theater:simple/supervisor/get-child-events"
-                                            .to_string(),
-                                        data: SupervisorEventData::Error {
-                                            operation: "get-child-events".to_string(),
-                                            child_id: Some(child_id_clone.clone()),
-                                            message: e.to_string(),
-                                        }.into(),
-                                                                    description: Some(format!(
-                                            "Failed to receive events: {}",
-                                            e
-                                        )),
-                                    });
 
                                     Ok((Err(format!("Failed to receive events: {}", e)),))
                                 }
                             },
                             Err(e) => {
                                 // Record get child events error event
-                                ctx.data_mut().record_event(ChainEventData {
-                                    event_type: "theater:simple/supervisor/get-child-events"
-                                        .to_string(),
-                                    data: SupervisorEventData::Error {
-                                        operation: "get-child-events".to_string(),
-                                        child_id: Some(child_id_clone.clone()),
-                                        message: e.to_string(),
-                                    }.into(),
-                                                            description: Some(format!(
-                                        "Failed to send events request: {}",
-                                        e
-                                    )),
-                                });
 
                                 Ok((Err(format!("Failed to send events request: {}", e)),))
                             }
@@ -1043,18 +577,13 @@ where
             .expect("Failed to wrap get-child-events function");
 
         // Record overall setup completion
-        actor_component.actor_store.record_event(ChainEventData {
-            event_type: "supervisor-setup".to_string(),
-            data: SupervisorEventData::HandlerSetupSuccess.into(),
-            description: Some("Supervisor host functions setup completed successfully".to_string()),
-        });
 
         info!("Supervisor host functions added");
 
         Ok(())
     }
 
-    fn add_export_functions(&self, actor_instance: &mut ActorInstance<E>) -> Result<()> {
+    fn add_export_functions(&self, actor_instance: &mut ActorInstance) -> Result<()> {
         info!("Adding export functions for supervisor");
 
         // Register handle-child-error callback
@@ -1118,7 +647,7 @@ where
     fn start(
         &mut self,
         actor_handle: ActorHandle,
-        _actor_instance: SharedActorInstance<E>,
+        _actor_instance: SharedActorInstance,
         mut shutdown_receiver: ShutdownReceiver,
     ) -> Pin<Box<dyn Future<Output = Result<()>> + Send>> {
         info!("Starting supervisor handler");

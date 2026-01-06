@@ -46,7 +46,6 @@ use wasmtime::{Engine, Store};
 use crate::actor::store::ActorStore;
 use crate::events::theater_runtime::TheaterRuntimeEventData;
 use crate::events::wasm::WasmEventData;
-use crate::events::EventPayload;
 // use crate::config::ManifestConfig;
 use crate::id::TheaterId;
 use crate::store;
@@ -208,26 +207,18 @@ pub struct MemoryStats {
 /// Component loading uses the Wasmtime engine's component model support and is an
 /// asynchronous operation because it may involve fetching component bytes from remote
 /// storage or performing digest verification.
-pub struct ActorComponent<E>
-where
-    E: EventPayload + Clone,
-{
+pub struct ActorComponent {
     pub name: String,
     pub component: Component,
-    pub actor_store: ActorStore<E>,
-    pub linker: Linker<ActorStore<E>>,
+    pub actor_store: ActorStore,
+    pub linker: Linker<ActorStore>,
     pub engine: Engine,
     pub import_types: Vec<(String, ComponentItem)>,
     pub export_types: Vec<(String, ComponentItem)>,
     pub exports: HashMap<String, ComponentExportIndex>,
 }
 
-impl<E> ActorComponent<E>
-where
-    E: EventPayload + Clone
-        + From<TheaterRuntimeEventData>
-        + From<WasmEventData>,
-{
+impl ActorComponent {
     /// Creates a new `ActorComponent` from a manifest configuration and actor store.
     ///
     /// ## Purpose
@@ -274,7 +265,7 @@ where
     pub async fn new(
         name: String,
         component_path: String,
-        actor_store: ActorStore<E>,
+        actor_store: ActorStore,
         engine: Engine,
     ) -> Result<Self> {
         // Load WASM component
@@ -599,7 +590,7 @@ where
     /// This method consumes the `ActorComponent` (takes ownership of it) since a component
     /// can only be instantiated once. The resulting `ActorInstance` contains the original
     /// component information.
-    pub async fn instantiate(self) -> Result<ActorInstance<E>> {
+    pub async fn instantiate(self) -> Result<ActorInstance> {
         let mut store = Store::new(&self.engine, self.actor_store.clone());
 
         let instance = self
@@ -670,22 +661,14 @@ where
 /// The instance maintains a registry of typed functions that have been registered,
 /// allowing for efficient lookup and invocation. Function calls are asynchronous to
 /// support non-blocking operation in the actor system.
-pub struct ActorInstance<E>
-where
-    E: EventPayload + Clone,
-{
-    pub actor_component: ActorComponent<E>,
+pub struct ActorInstance {
+    pub actor_component: ActorComponent,
     pub instance: Instance,
-    pub store: Store<ActorStore<E>>,
-    pub functions: HashMap<String, Box<dyn TypedFunction<E>>>,
+    pub store: Store<ActorStore>,
+    pub functions: HashMap<String, Box<dyn TypedFunction>>,
 }
 
-impl<E> ActorInstance<E>
-where
-    E: EventPayload + Clone
-        + From<TheaterRuntimeEventData>
-        + From<WasmEventData>,
-{
+impl ActorInstance {
     pub fn save_chain(&self) -> Result<()> {
         self.actor_component.actor_store.save_chain()
     }
@@ -903,7 +886,7 @@ where
         );
         let name = format!("{}.{}", interface, function_name);
         let func =
-            TypedComponentFunction::<P, R, E>::new(&mut self.store, &self.instance, export_index)
+            TypedComponentFunction::<P, R>::new(&mut self.store, &self.instance, export_index)
                 .expect("Failed to create typed function");
         self.functions.insert(name.to_string(), Box::new(func));
         Ok(())
@@ -931,7 +914,7 @@ where
         );
         let name = format!("{}.{}", interface, function_name);
         let func =
-            TypedComponentFunctionNoParams::<R, E>::new(&mut self.store, &self.instance, export_index)
+            TypedComponentFunctionNoParams::<R>::new(&mut self.store, &self.instance, export_index)
                 .expect("Failed to create typed function");
         self.functions.insert(name.to_string(), Box::new(func));
         Ok(())
@@ -958,7 +941,7 @@ where
             interface, function_name, export_index
         );
         let name = format!("{}.{}", interface, function_name);
-        let func = TypedComponentFunctionNoResult::<P, E>::new(
+        let func = TypedComponentFunctionNoResult::<P>::new(
             &mut self.store,
             &self.instance,
             export_index,
@@ -984,7 +967,7 @@ where
             "Found function: {}.{} with export index: {:?}",
             interface, function_name, export_index
         );
-        let func = TypedComponentFunctionNoParamsNoResult::<E>::new(
+        let func = TypedComponentFunctionNoParamsNoResult::new(
             &mut self.store,
             &self.instance,
             export_index,
@@ -1017,7 +1000,7 @@ where
             "Found state-only function: {}.{} with export index: {:?}",
             interface, function_name, export_index
         );
-        let func = TypedComponentFunctionStateOnly::<E>::new(
+        let func = TypedComponentFunctionStateOnly::new(
             &mut self.store,
             &self.instance,
             export_index,
@@ -1027,24 +1010,21 @@ where
     }
 }
 
-pub struct TypedComponentFunction<P, R, E>
+pub struct TypedComponentFunction<P, R>
 where
     P: ComponentNamedList,
     R: ComponentNamedList,
-    E: EventPayload + Clone,
 {
     func: TypedFunc<(Option<Vec<u8>>, P), (Result<(Option<Vec<u8>>, R), String>,)>,
-    _phantom: std::marker::PhantomData<E>,
 }
 
-impl<P, R, E> TypedComponentFunction<P, R, E>
+impl<P, R> TypedComponentFunction<P, R>
 where
     P: ComponentNamedList + Lower + Sync + Send + 'static,
     R: ComponentNamedList + Lift + Sync + Send + 'static,
-    E: EventPayload + Clone,
 {
     pub fn new(
-        store: &mut Store<ActorStore<E>>,
+        store: &mut Store<ActorStore>,
         instance: &Instance,
         export_index: ComponentExportIndex,
     ) -> Result<Self> {
@@ -1062,15 +1042,12 @@ where
                 error!("Failed to get typed function: {}", e);
             })?;
 
-        Ok(TypedComponentFunction {
-            func: typed_func,
-            _phantom: std::marker::PhantomData,
-        })
+        Ok(TypedComponentFunction { func: typed_func })
     }
 
     pub async fn call_func(
         &self,
-        store: &mut Store<ActorStore<E>>,
+        store: &mut Store<ActorStore>,
         state: Option<Vec<u8>>,
         params: P,
     ) -> Result<(Option<Vec<u8>>, R), String> {
@@ -1122,27 +1099,23 @@ where
 /// the conversion between Rust types and WebAssembly values in a consistent way.
 /// The `Send + Sync + 'static` bounds ensure that implementations can be safely
 /// used across thread boundaries and stored in collections.
-pub trait TypedFunction<E>: Send + Sync + 'static
-where
-    E: EventPayload + Clone,
-{
+pub trait TypedFunction: Send + Sync + 'static {
     fn call_func<'a>(
         &'a self,
-        store: &'a mut Store<ActorStore<E>>,
+        store: &'a mut Store<ActorStore>,
         state: Option<Vec<u8>>,
         params: Vec<u8>,
     ) -> Pin<Box<dyn Future<Output = Result<(Option<Vec<u8>>, Vec<u8>)>> + Send + 'a>>;
 }
 
-impl<P, R, E> TypedFunction<E> for TypedComponentFunction<P, R, E>
+impl<P, R> TypedFunction for TypedComponentFunction<P, R>
 where
     P: ComponentNamedList + Lower + Sync + Send + 'static + for<'de> Deserialize<'de>,
     R: ComponentNamedList + Lift + Sync + Send + 'static + Serialize,
-    E: EventPayload + Clone,
 {
     fn call_func<'a>(
         &'a self,
-        store: &'a mut Store<ActorStore<E>>,
+        store: &'a mut Store<ActorStore>,
         state: Option<Vec<u8>>,
         params: Vec<u8>,
     ) -> Pin<Box<dyn Future<Output = Result<(Option<Vec<u8>>, Vec<u8>)>> + Send + 'a>> {
@@ -1165,22 +1138,19 @@ where
     }
 }
 
-pub struct TypedComponentFunctionNoParams<R, E>
+pub struct TypedComponentFunctionNoParams<R>
 where
     R: ComponentNamedList,
-    E: EventPayload + Clone,
 {
     func: TypedFunc<(Option<Vec<u8>>,), (Result<((Option<Vec<u8>>, R),), String>,)>,
-    _phantom: std::marker::PhantomData<E>,
 }
 
-impl<R, E> TypedComponentFunctionNoParams<R, E>
+impl<R> TypedComponentFunctionNoParams<R>
 where
     R: ComponentNamedList + Lift + Sync + Send + 'static,
-    E: EventPayload + Clone,
 {
     pub fn new(
-        store: &mut Store<ActorStore<E>>,
+        store: &mut Store<ActorStore>,
         instance: &Instance,
         export_index: ComponentExportIndex,
     ) -> Result<Self> {
@@ -1197,15 +1167,12 @@ where
                 error!("Failed to get typed function: {}", e);
             })?;
 
-        Ok(TypedComponentFunctionNoParams {
-            func: typed_func,
-            _phantom: std::marker::PhantomData,
-        })
+        Ok(TypedComponentFunctionNoParams { func: typed_func })
     }
 
     pub async fn call_func(
         &self,
-        store: &mut Store<ActorStore<E>>,
+        store: &mut Store<ActorStore>,
         state: Option<Vec<u8>>,
     ) -> Result<((Option<Vec<u8>>, R),), String> {
         let result = match self.func.call_async(&mut *store, (state,)).await {
@@ -1228,14 +1195,13 @@ where
     }
 }
 
-impl<R, E> TypedFunction<E> for TypedComponentFunctionNoParams<R, E>
+impl<R> TypedFunction for TypedComponentFunctionNoParams<R>
 where
     R: ComponentNamedList + Lift + Sync + Send + 'static + Serialize,
-    E: EventPayload + Clone,
 {
     fn call_func<'a>(
         &'a self,
-        store: &'a mut Store<ActorStore<E>>,
+        store: &'a mut Store<ActorStore>,
         state: Option<Vec<u8>>,
         _params: Vec<u8>, // Ignore params
     ) -> Pin<Box<dyn Future<Output = Result<(Option<Vec<u8>>, Vec<u8>)>> + Send + 'a>> {
@@ -1253,22 +1219,19 @@ where
     }
 }
 
-pub struct TypedComponentFunctionNoResult<P, E>
+pub struct TypedComponentFunctionNoResult<P>
 where
     P: ComponentNamedList,
-    E: EventPayload + Clone,
 {
     func: TypedFunc<(Option<Vec<u8>>, P), (Result<(Option<Vec<u8>>,), String>,)>,
-    _phantom: std::marker::PhantomData<E>,
 }
 
-impl<P, E> TypedComponentFunctionNoResult<P, E>
+impl<P> TypedComponentFunctionNoResult<P>
 where
     P: ComponentNamedList + Lower + Sync + Send + 'static,
-    E: EventPayload + Clone,
 {
     pub fn new(
-        store: &mut Store<ActorStore<E>>,
+        store: &mut Store<ActorStore>,
         instance: &Instance,
         export_index: ComponentExportIndex,
     ) -> Result<Self> {
@@ -1285,15 +1248,12 @@ where
                 error!("Failed to get typed function: {}", e);
             })?;
 
-        Ok(TypedComponentFunctionNoResult {
-            func: typed_func,
-            _phantom: std::marker::PhantomData,
-        })
+        Ok(TypedComponentFunctionNoResult { func: typed_func })
     }
 
     pub async fn call_func(
         &self,
-        store: &mut Store<ActorStore<E>>,
+        store: &mut Store<ActorStore>,
         state: Option<Vec<u8>>,
         params: P,
     ) -> Result<(Option<Vec<u8>>,), String> {
@@ -1317,14 +1277,13 @@ where
     }
 }
 
-impl<P, E> TypedFunction<E> for TypedComponentFunctionNoResult<P, E>
+impl<P> TypedFunction for TypedComponentFunctionNoResult<P>
 where
     P: ComponentNamedList + Lower + Sync + Send + 'static + for<'de> Deserialize<'de>,
-    E: EventPayload + Clone,
 {
     fn call_func<'a>(
         &'a self,
-        store: &'a mut Store<ActorStore<E>>,
+        store: &'a mut Store<ActorStore>,
         state: Option<Vec<u8>>,
         params: Vec<u8>,
     ) -> Pin<Box<dyn Future<Output = Result<(Option<Vec<u8>>, Vec<u8>)>> + Send + 'a>> {
@@ -1343,20 +1302,13 @@ where
     }
 }
 
-pub struct TypedComponentFunctionNoParamsNoResult<E>
-where
-    E: EventPayload + Clone,
-{
+pub struct TypedComponentFunctionNoParamsNoResult {
     func: TypedFunc<(Option<Vec<u8>>,), (Result<((Option<Vec<u8>>,),), String>,)>,
-    _phantom: std::marker::PhantomData<E>,
 }
 
-impl<E> TypedComponentFunctionNoParamsNoResult<E>
-where
-    E: EventPayload + Clone,
-{
+impl TypedComponentFunctionNoParamsNoResult {
     pub fn new(
-        store: &mut Store<ActorStore<E>>,
+        store: &mut Store<ActorStore>,
         instance: &Instance,
         export_index: ComponentExportIndex,
     ) -> Result<Self> {
@@ -1373,15 +1325,12 @@ where
                 error!("Failed to get typed function: {}", e);
             })?;
 
-        Ok(TypedComponentFunctionNoParamsNoResult {
-            func: typed_func,
-            _phantom: std::marker::PhantomData,
-        })
+        Ok(TypedComponentFunctionNoParamsNoResult { func: typed_func })
     }
 
     pub async fn call_func(
         &self,
-        store: &mut Store<ActorStore<E>>,
+        store: &mut Store<ActorStore>,
         state: Option<Vec<u8>>,
     ) -> Result<((Option<Vec<u8>>,),), String> {
         let result = match self.func.call_async(&mut *store, (state,)).await {
@@ -1406,13 +1355,10 @@ where
     }
 }
 
-impl<E> TypedFunction<E> for TypedComponentFunctionNoParamsNoResult<E>
-where
-    E: EventPayload + Clone,
-{
+impl TypedFunction for TypedComponentFunctionNoParamsNoResult {
     fn call_func<'a>(
         &'a self,
-        store: &'a mut Store<ActorStore<E>>,
+        store: &'a mut Store<ActorStore>,
         state: Option<Vec<u8>>,
         _params: Vec<u8>, // Ignore params
     ) -> Pin<Box<dyn Future<Output = Result<(Option<Vec<u8>>, Vec<u8>)>> + Send + 'a>> {
@@ -1436,20 +1382,13 @@ where
 /// ```
 ///
 /// Unlike other function types, this doesn't add extra parameters or tuple wrapping.
-pub struct TypedComponentFunctionStateOnly<E>
-where
-    E: EventPayload + Clone,
-{
+pub struct TypedComponentFunctionStateOnly {
     func: TypedFunc<(Option<Vec<u8>>,), (Result<(Option<Vec<u8>>,), String>,)>,
-    _phantom: std::marker::PhantomData<E>,
 }
 
-impl<E> TypedComponentFunctionStateOnly<E>
-where
-    E: EventPayload + Clone,
-{
+impl TypedComponentFunctionStateOnly {
     pub fn new(
-        store: &mut Store<ActorStore<E>>,
+        store: &mut Store<ActorStore>,
         instance: &Instance,
         export_index: ComponentExportIndex,
     ) -> Result<Self> {
@@ -1466,15 +1405,12 @@ where
                 error!("Failed to get typed function for state-only: {}", e);
             })?;
 
-        Ok(TypedComponentFunctionStateOnly {
-            func: typed_func,
-            _phantom: std::marker::PhantomData,
-        })
+        Ok(TypedComponentFunctionStateOnly { func: typed_func })
     }
 
     pub async fn call_func(
         &self,
-        store: &mut Store<ActorStore<E>>,
+        store: &mut Store<ActorStore>,
         state: Option<Vec<u8>>,
     ) -> Result<(Option<Vec<u8>>,), String> {
         let result = match self.func.call_async(&mut *store, (state,)).await {
@@ -1499,13 +1435,10 @@ where
     }
 }
 
-impl<E> TypedFunction<E> for TypedComponentFunctionStateOnly<E>
-where
-    E: EventPayload + Clone,
-{
+impl TypedFunction for TypedComponentFunctionStateOnly {
     fn call_func<'a>(
         &'a self,
-        store: &'a mut Store<ActorStore<E>>,
+        store: &'a mut Store<ActorStore>,
         state: Option<Vec<u8>>,
         _params: Vec<u8>, // Ignore params - this function only takes state
     ) -> Pin<Box<dyn Future<Output = Result<(Option<Vec<u8>>, Vec<u8>)>> + Send + 'a>> {

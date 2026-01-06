@@ -18,7 +18,6 @@ use crate::types::{
 use std::fs;
 use std::path::PathBuf;
 use theater::actor::ActorStore;
-use theater::events::EventPayload;
 use theater_handler_io::{InputStream, IoError, OutputStream};
 use tracing::debug;
 use wasmtime::component::Resource;
@@ -115,9 +114,7 @@ fn io_error_to_error_code(e: std::io::Error) -> ErrorCode {
 // HostDescriptor implementation
 // ============================================================================
 
-impl<E> HostDescriptor for ActorStore<E>
-where
-    E: EventPayload + Clone + From<FilesystemEventData> + Send + 'static,
+impl HostDescriptor for ActorStore
 {
     async fn read_via_stream(
         &mut self,
@@ -739,9 +736,7 @@ where
 // HostDirectoryEntryStream implementation
 // ============================================================================
 
-impl<E> HostDirectoryEntryStream for ActorStore<E>
-where
-    E: EventPayload + Clone + From<FilesystemEventData> + Send + 'static,
+impl HostDirectoryEntryStream for ActorStore
 {
     async fn read_directory_entry(
         &mut self,
@@ -775,9 +770,7 @@ where
 // FilesystemTypesHost implementation (top-level functions)
 // ============================================================================
 
-impl<E> FilesystemTypesHost for ActorStore<E>
-where
-    E: EventPayload + Clone + From<FilesystemEventData> + Send + 'static,
+impl FilesystemTypesHost for ActorStore
 {
     async fn filesystem_error_code(
         &mut self,
@@ -797,9 +790,7 @@ where
 #[derive(Clone, Debug)]
 pub struct FilesystemPreopens(pub Vec<(PathBuf, String)>);
 
-impl<E> PreopensHost for ActorStore<E>
-where
-    E: EventPayload + Clone + From<FilesystemEventData> + Send + 'static,
+impl PreopensHost for ActorStore
 {
     async fn get_directories(
         &mut self,

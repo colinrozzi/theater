@@ -31,7 +31,6 @@ pub use events::IoEventData;
 pub use poll::IoHandlerPollable;
 
 use theater::handler::{Handler, HandlerContext, SharedActorInstance};
-use theater::events::EventPayload;
 use theater::wasm::{ActorComponent, ActorInstance};
 use theater::actor::{handle::ActorHandle, ActorStore};
 use theater::shutdown::ShutdownReceiver;
@@ -51,24 +50,22 @@ impl WasiIoHandler {
     }
 }
 
-impl<E> Handler<E> for WasiIoHandler
-where
-    E: EventPayload + Clone + From<IoEventData> + Send,
+impl Handler for WasiIoHandler
 {
-    fn create_instance(&self) -> Box<dyn Handler<E>> {
+    fn create_instance(&self) -> Box<dyn Handler> {
         Box::new(Self::new())
     }
 
     fn start(
         &mut self,
         _actor_handle: ActorHandle,
-        _actor_instance: SharedActorInstance<E>,
+        _actor_instance: SharedActorInstance,
         _shutdown_receiver: ShutdownReceiver,
     ) -> Pin<Box<dyn Future<Output = Result<()>> + Send>> {
         Box::pin(async { Ok(()) })
     }
 
-    fn setup_host_functions(&mut self, actor_component: &mut ActorComponent<E>, ctx: &mut HandlerContext) -> Result<()> {
+    fn setup_host_functions(&mut self, actor_component: &mut ActorComponent, ctx: &mut HandlerContext) -> Result<()> {
         debug!("WasiIoHandler::setup_host_functions() starting");
 
         // Use bindgen-generated add_to_linker calls for all interfaces
@@ -80,7 +77,7 @@ where
             info!("Setting up wasi:io/error interface");
             bindings::wasi::io::error::add_to_linker(
                 &mut actor_component.linker,
-                |state: &mut ActorStore<E>| state,
+                |state: &mut ActorStore| state,
             )?;
             ctx.mark_satisfied("wasi:io/error@0.2.3");
         } else {
@@ -92,7 +89,7 @@ where
             info!("Setting up wasi:io/poll interface");
             bindings::wasi::io::poll::add_to_linker(
                 &mut actor_component.linker,
-                |state: &mut ActorStore<E>| state,
+                |state: &mut ActorStore| state,
             )?;
             ctx.mark_satisfied("wasi:io/poll@0.2.3");
         } else {
@@ -104,7 +101,7 @@ where
             info!("Setting up wasi:io/streams interface");
             bindings::wasi::io::streams::add_to_linker(
                 &mut actor_component.linker,
-                |state: &mut ActorStore<E>| state,
+                |state: &mut ActorStore| state,
             )?;
             ctx.mark_satisfied("wasi:io/streams@0.2.3");
         } else {
@@ -115,70 +112,70 @@ where
         info!("Setting up wasi:cli/stdin interface");
         bindings::wasi::cli::stdin::add_to_linker(
             &mut actor_component.linker,
-            |state: &mut ActorStore<E>| state,
+            |state: &mut ActorStore| state,
         )?;
 
         // wasi:cli/stdout interface
         info!("Setting up wasi:cli/stdout interface");
         bindings::wasi::cli::stdout::add_to_linker(
             &mut actor_component.linker,
-            |state: &mut ActorStore<E>| state,
+            |state: &mut ActorStore| state,
         )?;
 
         // wasi:cli/stderr interface
         info!("Setting up wasi:cli/stderr interface");
         bindings::wasi::cli::stderr::add_to_linker(
             &mut actor_component.linker,
-            |state: &mut ActorStore<E>| state,
+            |state: &mut ActorStore| state,
         )?;
 
         // wasi:cli/environment interface
         info!("Setting up wasi:cli/environment interface");
         bindings::wasi::cli::environment::add_to_linker(
             &mut actor_component.linker,
-            |state: &mut ActorStore<E>| state,
+            |state: &mut ActorStore| state,
         )?;
 
         // wasi:cli/exit interface
         info!("Setting up wasi:cli/exit interface");
         bindings::wasi::cli::exit::add_to_linker(
             &mut actor_component.linker,
-            |state: &mut ActorStore<E>| state,
+            |state: &mut ActorStore| state,
         )?;
 
         // wasi:cli/terminal-input interface
         info!("Setting up wasi:cli/terminal-input interface");
         bindings::wasi::cli::terminal_input::add_to_linker(
             &mut actor_component.linker,
-            |state: &mut ActorStore<E>| state,
+            |state: &mut ActorStore| state,
         )?;
 
         // wasi:cli/terminal-output interface
         info!("Setting up wasi:cli/terminal-output interface");
         bindings::wasi::cli::terminal_output::add_to_linker(
             &mut actor_component.linker,
-            |state: &mut ActorStore<E>| state,
+            |state: &mut ActorStore| state,
         )?;
 
         // wasi:cli/terminal-stdin interface
         info!("Setting up wasi:cli/terminal-stdin interface");
         bindings::wasi::cli::terminal_stdin::add_to_linker(
             &mut actor_component.linker,
-            |state: &mut ActorStore<E>| state,
+            |state: &mut ActorStore| state,
         )?;
 
         // wasi:cli/terminal-stdout interface
         info!("Setting up wasi:cli/terminal-stdout interface");
         bindings::wasi::cli::terminal_stdout::add_to_linker(
             &mut actor_component.linker,
-            |state: &mut ActorStore<E>| state,
+            |state: &mut ActorStore| state,
         )?;
 
         // wasi:cli/terminal-stderr interface
         info!("Setting up wasi:cli/terminal-stderr interface");
         bindings::wasi::cli::terminal_stderr::add_to_linker(
             &mut actor_component.linker,
-            |state: &mut ActorStore<E>| state,
+            |state: &mut ActorStore| state,
         )?;
 
         info!("WasiIoHandler setup complete");
@@ -187,7 +184,7 @@ where
 
     fn add_export_functions(
         &self,
-        _actor_instance: &mut ActorInstance<E>,
+        _actor_instance: &mut ActorInstance,
     ) -> Result<()> {
         Ok(())
     }

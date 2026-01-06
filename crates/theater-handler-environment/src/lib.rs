@@ -44,7 +44,6 @@ use theater::actor::store::ActorStore;
 use theater::config::actor_manifest::EnvironmentHandlerConfig;
 use theater::config::enforcement::PermissionChecker;
 use theater::config::permissions::EnvironmentPermissions;
-use theater::events::EventPayload;
 use theater::handler::{Handler, HandlerContext, SharedActorInstance};
 use theater::shutdown::ShutdownReceiver;
 use theater::wasm::{ActorComponent, ActorInstance};
@@ -94,18 +93,16 @@ impl EnvironmentHandler {
     }
 }
 
-impl<E> Handler<E> for EnvironmentHandler
-where
-    E: EventPayload + Clone + From<EnvironmentEventData>,
+impl Handler for EnvironmentHandler
 {
-    fn create_instance(&self) -> Box<dyn Handler<E>> {
+    fn create_instance(&self) -> Box<dyn Handler> {
         Box::new(self.clone())
     }
 
     fn start(
         &mut self,
         _actor_handle: ActorHandle,
-        _actor_instance: SharedActorInstance<E>,
+        _actor_instance: SharedActorInstance,
         shutdown_receiver: ShutdownReceiver,
     ) -> Pin<Box<dyn Future<Output = Result<()>> + Send>> {
         info!("Starting Environment handler (read-only)");
@@ -121,7 +118,7 @@ where
 
     fn setup_host_functions(
         &mut self,
-        actor_component: &mut ActorComponent<E>,
+        actor_component: &mut ActorComponent,
         _ctx: &mut HandlerContext,
     ) -> Result<()> {
         // Clone what we need for the closures
@@ -130,37 +127,14 @@ where
         let config_list = self.config.clone();
 
         // Record setup start
-        actor_component.actor_store.record_handler_event(
-            "environment-setup".to_string(),
-            EnvironmentEventData::HandlerSetupStart,
-            Some("Starting environment host function setup".to_string()),
-        );
-
         info!("Setting up environment host functions (read-only)");
 
         let mut interface = match actor_component
             .linker
             .instance("theater:simple/environment")
         {
-            Ok(interface) => {
-                // Record successful linker instance creation
-                actor_component.actor_store.record_handler_event(
-                    "environment-setup".to_string(),
-                    EnvironmentEventData::LinkerInstanceSuccess,
-                    Some("Successfully created linker instance".to_string()),
-                );
-                interface
-            }
+            Ok(interface) => interface,
             Err(e) => {
-                // Record the specific error where it happens
-                actor_component.actor_store.record_handler_event(
-                    "environment-setup".to_string(),
-                    EnvironmentEventData::HandlerSetupError {
-                        error: e.to_string(),
-                        step: "linker_instance".to_string(),
-                    },
-                    Some(format!("Failed to create linker instance: {}", e)),
-                );
                 return Err(anyhow::anyhow!(
                     "Could not instantiate theater:simple/environment: {}",
                     e
@@ -171,7 +145,7 @@ where
         // get-var implementation
         interface.func_wrap(
             "get-var",
-            move |mut ctx: StoreContextMut<'_, ActorStore<E>>,
+            move |mut ctx: StoreContextMut<'_, ActorStore>,
                   (var_name,): (String,)|
                   -> Result<(Option<String>,)> {
                 let _now = Utc::now().timestamp_millis() as u64;
@@ -179,39 +153,14 @@ where
                 // PERMISSION CHECK BEFORE OPERATION
                 if let Err(e) = PermissionChecker::check_env_var_access(&permissions_get, &var_name) {
                     // Record permission denied event
-                    ctx.data_mut().record_handler_event(
-                        "theater:simple/environment/permission-denied".to_string(),
-                        EnvironmentEventData::PermissionDenied {
-                            operation: "get-var".to_string(),
-                            variable_name: var_name.clone(),
-                            reason: e.to_string(),
-                        },
-                        Some(format!(
-                            "Permission denied for environment variable access: {}",
-                            e
-                        )),
-                    );
-                    return Ok((None,));
+                                        return Ok((None,));
                 }
 
                 let value = env::var(&var_name).ok();
                 let value_found = value.is_some();
 
                 // Record the access attempt
-                ctx.data_mut().record_handler_event(
-                    "theater:simple/environment/get-var".to_string(),
-                    EnvironmentEventData::GetVar {
-                        variable_name: var_name.clone(),
-                        success: true,
-                        value_found,
-                        timestamp: chrono::Utc::now(),
-                    },
-                    Some(format!(
-                        "Environment variable access: {} (found: {})",
-                        var_name, value_found
-                    )),
-                );
-
+                
                 Ok((value,))
             },
         )?;
@@ -219,7 +168,7 @@ where
         // exists implementation
         interface.func_wrap(
             "exists",
-            move |mut ctx: StoreContextMut<'_, ActorStore<E>>,
+            move |mut ctx: StoreContextMut<'_, ActorStore>,
                   (var_name,): (String,)|
                   -> Result<(bool,)> {
                 let _now = Utc::now().timestamp_millis() as u64;
@@ -229,38 +178,13 @@ where
                     PermissionChecker::check_env_var_access(&permissions_exists, &var_name)
                 {
                     // Record permission denied event
-                    ctx.data_mut().record_handler_event(
-                        "theater:simple/environment/permission-denied".to_string(),
-                        EnvironmentEventData::PermissionDenied {
-                            operation: "exists".to_string(),
-                            variable_name: var_name.clone(),
-                            reason: e.to_string(),
-                        },
-                        Some(format!(
-                            "Permission denied for environment variable exists check: {}",
-                            e
-                        )),
-                    );
-                    return Ok((false,));
+                                        return Ok((false,));
                 }
 
                 let exists = env::var(&var_name).is_ok();
 
                 // Record the check
-                ctx.data_mut().record_handler_event(
-                    "theater:simple/environment/exists".to_string(),
-                    EnvironmentEventData::GetVar {
-                        variable_name: var_name.clone(),
-                        success: true,
-                        value_found: exists,
-                        timestamp: chrono::Utc::now(),
-                    },
-                    Some(format!(
-                        "Environment variable exists check: {} (exists: {})",
-                        var_name, exists
-                    )),
-                );
-
+                
                 Ok((exists,))
             },
         )?;
@@ -268,26 +192,14 @@ where
         // list-vars implementation
         interface.func_wrap(
             "list-vars",
-            move |mut ctx: StoreContextMut<'_, ActorStore<E>>,
+            move |mut ctx: StoreContextMut<'_, ActorStore>,
                   ()|
                   -> Result<(Vec<(String, String)>,)> {
                 let _now = Utc::now().timestamp_millis() as u64;
 
                 if !config_list.allow_list_all {
                     // Record denied list attempt
-                    ctx.data_mut().record_handler_event(
-                        "theater:simple/environment/list-vars".to_string(),
-                        EnvironmentEventData::PermissionDenied {
-                            operation: "list-vars".to_string(),
-                            variable_name: "(list-all disabled)".to_string(),
-                            reason: "allow_list_all is false".to_string(),
-                        },
-                        Some(
-                            "Environment variable listing denied - allow_list_all is false"
-                                .to_string(),
-                        ),
-                    );
-                    return Ok((Vec::new(),));
+                                        return Ok((Vec::new(),));
                 }
 
                 let mut accessible_vars = Vec::new();
@@ -300,37 +212,16 @@ where
 
                 // Record the list operation
                 let count = accessible_vars.len();
-                ctx.data_mut().record_handler_event(
-                    "theater:simple/environment/list-vars".to_string(),
-                    EnvironmentEventData::GetVar {
-                        variable_name: format!("(returned {} variables)", count),
-                        success: true,
-                        value_found: count > 0,
-                        timestamp: chrono::Utc::now(),
-                    },
-                    Some(format!(
-                        "Environment variable listing returned {} accessible variables",
-                        count
-                    )),
-                );
-
+                
                 Ok((accessible_vars,))
             },
         )?;
 
         // Record overall setup completion
-        actor_component.actor_store.record_handler_event(
-            "environment-setup".to_string(),
-            EnvironmentEventData::HandlerSetupSuccess,
-            Some(
-                "Environment host functions setup completed successfully".to_string(),
-            ),
-        );
-
         Ok(())
     }
 
-    fn add_export_functions(&self, _actor_instance: &mut ActorInstance<E>) -> Result<()> {
+    fn add_export_functions(&self, _actor_instance: &mut ActorInstance) -> Result<()> {
         // Environment handler (read-only) doesn't need export functions
         Ok(())
     }

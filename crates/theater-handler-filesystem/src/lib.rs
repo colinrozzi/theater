@@ -26,7 +26,6 @@ use tracing::info;
 use theater::actor::handle::ActorHandle;
 use theater::config::actor_manifest::FileSystemHandlerConfig;
 use theater::config::permissions::FileSystemPermissions;
-use theater::events::EventPayload;
 use theater::handler::{Handler, HandlerContext, SharedActorInstance};
 use theater::shutdown::ShutdownReceiver;
 use theater::wasm::{ActorComponent, ActorInstance};
@@ -84,18 +83,16 @@ impl FilesystemHandler {
     }
 }
 
-impl<E> Handler<E> for FilesystemHandler
-where
-    E: EventPayload + Clone + From<FilesystemEventData>,
+impl Handler for FilesystemHandler
 {
-    fn create_instance(&self) -> Box<dyn Handler<E>> {
+    fn create_instance(&self) -> Box<dyn Handler> {
         Box::new(self.clone())
     }
 
     fn start(
         &mut self,
         _actor_handle: ActorHandle,
-        _actor_instance: SharedActorInstance<E>,
+        _actor_instance: SharedActorInstance,
         shutdown_receiver: ShutdownReceiver,
     ) -> Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send>> {
         info!("Starting filesystem handler on path {:?}", self.path);
@@ -109,7 +106,7 @@ where
 
     fn setup_host_functions(
         &mut self,
-        actor_component: &mut ActorComponent<E>,
+        actor_component: &mut ActorComponent,
         _ctx: &mut HandlerContext,
     ) -> anyhow::Result<()> {
         // Setup the Theater simple filesystem interface (for backwards compatibility)
@@ -129,14 +126,14 @@ where
         // Add wasi:filesystem/types interface
         bindings::wasi::filesystem::types::add_to_linker(
             &mut actor_component.linker,
-            |state: &mut ActorStore<E>| state,
+            |state: &mut ActorStore| state,
         )?;
         info!("wasi:filesystem/types interface added");
 
         // Add wasi:filesystem/preopens interface
         bindings::wasi::filesystem::preopens::add_to_linker(
             &mut actor_component.linker,
-            |state: &mut ActorStore<E>| state,
+            |state: &mut ActorStore| state,
         )?;
         info!("wasi:filesystem/preopens interface added");
 
@@ -146,7 +143,7 @@ where
 
     fn add_export_functions(
         &self,
-        _actor_instance: &mut ActorInstance<E>,
+        _actor_instance: &mut ActorInstance,
     ) -> anyhow::Result<()> {
         info!("No export functions needed for filesystem handler");
         Ok(())

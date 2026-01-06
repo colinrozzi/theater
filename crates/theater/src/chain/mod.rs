@@ -30,17 +30,13 @@
 use anyhow::Result;
 use console::style;
 use serde::{Deserialize, Serialize};
-// use sha1::Digest;
 use std::fmt;
-use std::marker::PhantomData;
 use std::path::Path;
 use tokio::sync::mpsc::Sender;
 use tracing::{debug, warn};
 use wasmtime::component::{ComponentType, Lift, Lower};
 
-use crate::events::{ChainEventData, EventPayload};
-#[allow(unused_imports)]
-use crate::events::EventData;
+use crate::events::ChainEventData;
 use crate::messages::TheaterCommand;
 use crate::store::ContentRef;
 use crate::TheaterId;
@@ -63,7 +59,6 @@ use theater_chain::event::EventType;
 ///
 /// ```rust
 /// use theater::chain::ChainEvent;
-/// use theater::events::ChainEventData;
 ///
 /// // Create an event
 /// let data = vec![1, 2, 3, 4]; // Example binary data
@@ -72,7 +67,6 @@ use theater_chain::event::EventType;
 ///     parent_hash: None,      // This is a root event with no parent
 ///     event_type: "example".to_string(),
 ///     data,
-///     description: Some("Example event".to_string()),
 /// };
 /// ```
 ///
@@ -210,22 +204,17 @@ impl PartialEq for ChainEvent {
 ///
 /// ```rust
 /// use theater::chain::StateChain;
-/// use theater::events::{ChainEventData, EventData};
 /// use theater::id::TheaterId;
 /// use tokio::sync::mpsc;
 ///
 /// async fn example() {
 ///     // Create channels for theater commands
 ///     let (theater_tx, _) = mpsc::channel(100);
-///     
+///
 ///     // Create a new state chain for an actor
 ///     let actor_id = TheaterId::generate();
-///     let mut chain = StateChain::new(actor_id, theater_tx);
-///     
-///     // Add events to the chain
-///     // let event_data = ChainEventData { ... };
-///     // chain.add_typed_event(event_data).unwrap();
-///     
+///     let chain = StateChain::new(actor_id, theater_tx);
+///
 ///     // Verify the chain integrity
 ///     assert!(chain.verify());
 /// }
@@ -245,30 +234,20 @@ impl PartialEq for ChainEvent {
 /// all actors in the system. The state chain can also be persisted to disk for
 /// long-term storage or debugging.
 #[derive(Debug, Clone, Serialize)]
-pub struct StateChain<E>
-where
-    E: EventPayload,
-{
+pub struct StateChain {
     /// The ordered sequence of events in this chain, from oldest to newest.
     events: Vec<ChainEvent>,
     /// Hash of the most recent event in the chain, or None if the chain is empty.
     current_hash: Option<Vec<u8>>,
     /// Channel for sending events to the Theater runtime.
-    /// This is excluded from serialization as it's a runtime-only concern.
     #[serde(skip)]
     theater_tx: Sender<TheaterCommand>,
     /// The identifier of the actor that owns this chain.
-    /// This is excluded from serialization as it's determined by context.
     #[serde(skip)]
     actor_id: TheaterId,
-    #[serde(skip)]
-    marker: PhantomData<E>,
 }
 
-impl<E> StateChain<E>
-where
-    E: EventPayload,
-{
+impl StateChain {
     /// Creates a new empty state chain for an actor.
     ///
     /// ## Purpose
@@ -307,7 +286,6 @@ where
             current_hash: None,
             theater_tx,
             actor_id,
-            marker: PhantomData,
         }
     }
 
@@ -333,7 +311,8 @@ where
     ///
     /// ```rust
     /// # use theater::chain::StateChain;
-    /// # use theater::events::{ChainEventData, EventData};
+    /// # use theater::events::{ChainEventData, ChainEventPayload};
+    /// # use theater::events::wasm::WasmEventData;
     /// # use theater::id::TheaterId;
     /// # use tokio::sync::mpsc;
     /// # use anyhow::Result;
@@ -346,8 +325,10 @@ where
     /// // Create event data
     /// let event_data = ChainEventData {
     ///     event_type: "state_change".to_string(),
-    ///     data: EventData::Runtime(theater::events::runtime::RuntimeEventData::Log { level: "info".to_string(), message: "state changed".to_string() }),
-    ///     description: Some("Actor state changed".to_string()),
+    ///     data: ChainEventPayload::Wasm(WasmEventData::WasmCall {
+    ///         function_name: "state_change".to_string(),
+    ///         params: vec![],
+    ///     }),
     /// };
     ///
     /// // Add the event to the chain
@@ -371,7 +352,7 @@ where
     /// the notification to be delivered.
     pub fn add_typed_event(
         &mut self,
-        event_data: ChainEventData<E>,
+        event_data: ChainEventData,
     ) -> Result<ChainEvent, serde_json::Error> {
         // Create initial event structure without hash
         let mut event = event_data.to_chain_event(self.current_hash.clone());

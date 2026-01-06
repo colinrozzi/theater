@@ -27,7 +27,6 @@ use tracing::info;
 use theater::actor::handle::ActorHandle;
 use theater::config::actor_manifest::RandomHandlerConfig;
 use theater::config::permissions::RandomPermissions;
-use theater::events::EventPayload;
 use theater::handler::{Handler, HandlerContext, SharedActorInstance};
 use theater::shutdown::ShutdownReceiver;
 use theater::wasm::{ActorComponent, ActorInstance};
@@ -79,18 +78,16 @@ impl RandomHandler {
     // The Host trait implementations are in host_impl.rs.
 }
 
-impl<E> Handler<E> for RandomHandler
-where
-    E: EventPayload + Clone + From<HandlerEventData>,
+impl Handler for RandomHandler
 {
-    fn create_instance(&self) -> Box<dyn Handler<E>> {
+    fn create_instance(&self) -> Box<dyn Handler> {
         Box::new(Self::new(self.config.clone(), self.permissions.clone()))
     }
 
     fn start(
         &mut self,
         _actor_handle: ActorHandle,
-        _actor_instance: SharedActorInstance<E>,
+        _actor_instance: SharedActorInstance,
         shutdown_receiver: ShutdownReceiver,
     ) -> Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send>> {
         info!("Starting random number generator handler");
@@ -106,7 +103,7 @@ where
 
     fn setup_host_functions(
         &mut self,
-        actor_component: &mut ActorComponent<E>,
+        actor_component: &mut ActorComponent,
         _ctx: &mut HandlerContext,
     ) -> anyhow::Result<()> {
         use crate::bindings;
@@ -120,21 +117,21 @@ where
         // Add wasi:random/random interface
         bindings::wasi::random::random::add_to_linker(
             &mut actor_component.linker,
-            |state: &mut ActorStore<E>| state,
+            |state: &mut ActorStore| state,
         )?;
         info!("wasi:random/random interface added");
 
         // Add wasi:random/insecure interface
         bindings::wasi::random::insecure::add_to_linker(
             &mut actor_component.linker,
-            |state: &mut ActorStore<E>| state,
+            |state: &mut ActorStore| state,
         )?;
         info!("wasi:random/insecure interface added");
 
         // Add wasi:random/insecure-seed interface
         bindings::wasi::random::insecure_seed::add_to_linker(
             &mut actor_component.linker,
-            |state: &mut ActorStore<E>| state,
+            |state: &mut ActorStore| state,
         )?;
         info!("wasi:random/insecure-seed interface added");
 
@@ -144,7 +141,7 @@ where
 
     fn add_export_functions(
         &self,
-        _actor_instance: &mut ActorInstance<E>,
+        _actor_instance: &mut ActorInstance,
     ) -> anyhow::Result<()> {
         // Random handler doesn't export functions to actors, only provides host functions
         Ok(())

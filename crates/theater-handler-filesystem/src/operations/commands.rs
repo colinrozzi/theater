@@ -5,19 +5,17 @@ use wasmtime::component::LinkerInstance;
 use wasmtime::StoreContextMut;
 
 use theater::actor::store::ActorStore;
-use theater::events::EventPayload;
+
 
 use crate::command_execution::{execute_command, execute_nix_command};
 use crate::events::{CommandResult, FilesystemEventData};
 use crate::path_validation::resolve_and_validate_path;
 use crate::FilesystemHandler;
 
-pub fn setup_execute_command<E>(
+pub fn setup_execute_command(
     handler: &FilesystemHandler,
-    interface: &mut LinkerInstance<ActorStore<E>>,
+    interface: &mut LinkerInstance<ActorStore>,
 ) -> anyhow::Result<()>
-where
-    E: EventPayload + Clone + From<FilesystemEventData>,
 {
     let filesystem_handler = handler.clone();
     let permissions = handler.permissions.clone();
@@ -26,7 +24,7 @@ where
     interface
         .func_wrap_async(
             "execute-command",
-            move |mut ctx: StoreContextMut<'_, ActorStore<E>>,
+            move |mut ctx: StoreContextMut<'_, ActorStore>,
                   (requested_dir, command, args): (String, String, Vec<String>)|
                   -> Box<dyn Future<Output = anyhow::Result<(Result<CommandResult, String>,)>> + Send> {
                 // Validate command if whitelist is configured
@@ -54,19 +52,7 @@ where
                 };
 
                 // Record command execution event
-                ctx.data_mut().record_handler_event(
-                    "theater:simple/filesystem/execute-command".to_string(),
-                    FilesystemEventData::CommandExecuted {
-                        directory: requested_dir.clone(),
-                        command: command.clone(),
-                        args: args.clone(),
-                    },
-                    Some(format!(
-                        "Executing command '{}' in directory '{}'",
-                        command, requested_dir
-                    )),
-                );
-
+                
                 let args_refs: Vec<String> = args.clone();
                 let base_path = filesystem_handler.path().clone();
                 let command_clone = command.clone();
@@ -82,14 +68,7 @@ where
                     {
                         Ok(result) => {
                             // Record successful
-                            ctx.data_mut().record_handler_event(
-                                "theater:simple/filesystem/command-result".to_string(),
-                                FilesystemEventData::CommandCompleted {
-                                    result: result.clone(),
-                                },
-                                Some("Command completed".to_string()),
-                            );
-                            Ok((Ok(result),))
+                                                        Ok((Ok(result),))
                         }
                         Err(e) => Ok((Err(e.to_string()),)),
                     }
@@ -101,12 +80,10 @@ where
     Ok(())
 }
 
-pub fn setup_execute_nix_command<E>(
+pub fn setup_execute_nix_command(
     handler: &FilesystemHandler,
-    interface: &mut LinkerInstance<ActorStore<E>>,
+    interface: &mut LinkerInstance<ActorStore>,
 ) -> anyhow::Result<()>
-where
-    E: EventPayload + Clone + From<FilesystemEventData>,
 {
     let filesystem_handler = handler.clone();
     let permissions = handler.permissions.clone();
@@ -114,7 +91,7 @@ where
     interface
         .func_wrap_async(
             "execute-nix-command",
-            move |mut ctx: StoreContextMut<'_, ActorStore<E>>,
+            move |mut ctx: StoreContextMut<'_, ActorStore>,
                   (requested_dir, command): (String, String)|
                   -> Box<dyn Future<Output = anyhow::Result<(Result<CommandResult, String>,)>> + Send> {
                 // RESOLVE AND VALIDATE PATH
@@ -133,18 +110,7 @@ where
                 };
 
                 // Record nix command execution event
-                ctx.data_mut().record_handler_event(
-                    "theater:simple/filesystem/execute-nix-command".to_string(),
-                    FilesystemEventData::NixCommandExecuted {
-                        directory: requested_dir.clone(),
-                        command: command.clone(),
-                    },
-                    Some(format!(
-                        "Executing nix command '{}' in directory '{}'",
-                        command, requested_dir
-                    )),
-                );
-
+                
                 let base_path = filesystem_handler.path().clone();
                 let command_clone = command.clone();
 
@@ -152,14 +118,7 @@ where
                     match execute_nix_command(base_path, &dir_path, &command_clone).await {
                         Ok(result) => {
                             // Record successful execution
-                            ctx.data_mut().record_handler_event(
-                                "theater:simple/filesystem/nix-command-result".to_string(),
-                                FilesystemEventData::CommandCompleted {
-                                    result: result.clone(),
-                                },
-                                Some("Nix command completed".to_string()),
-                            );
-                            Ok((Ok(result),))
+                                                        Ok((Ok(result),))
                         }
                         Err(e) => Ok((Err(e.to_string()),)),
                     }

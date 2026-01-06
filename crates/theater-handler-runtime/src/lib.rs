@@ -12,9 +12,7 @@ use theater::actor::handle::ActorHandle;
 use theater::actor::store::ActorStore;
 use theater::config::actor_manifest::RuntimeHostConfig;
 use theater::config::permissions::RuntimePermissions;
-use theater::events::{runtime::RuntimeEventData, ChainEventData, EventPayload};
 use theater::handler::{Handler, HandlerContext, SharedActorInstance};
-use theater::replay::HostFunctionCall;
 use theater::messages::TheaterCommand;
 use theater::shutdown::ShutdownReceiver;
 use theater::wasm::{ActorComponent, ActorInstance};
@@ -44,21 +42,15 @@ impl RuntimeHandler {
     }
 }
 
-impl<E> Handler<E> for RuntimeHandler
-where
-    E: EventPayload + Clone + From<RuntimeEventData>
-        + From<theater::events::theater_runtime::TheaterRuntimeEventData>
-        + From<theater::events::wasm::WasmEventData>
-        + From<theater::replay::HostFunctionCall>,
-{
-    fn create_instance(&self) -> Box<dyn Handler<E>> {
+impl Handler for RuntimeHandler {
+    fn create_instance(&self) -> Box<dyn Handler> {
         Box::new(self.clone())
     }
 
     fn start(
         &mut self,
         _actor_handle: ActorHandle,
-        _actor_instance: SharedActorInstance<E>,
+        _actor_instance: SharedActorInstance,
         shutdown_receiver: ShutdownReceiver,
     ) -> Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send>> {
         info!("Starting runtime handler");
@@ -74,7 +66,7 @@ where
 
     fn setup_host_functions(
         &mut self,
-        actor_component: &mut ActorComponent<E>,
+        actor_component: &mut ActorComponent,
         ctx: &mut HandlerContext,
     ) -> anyhow::Result<()> {
         info!("Setting up runtime host functions");
@@ -101,15 +93,6 @@ where
         let mut interface = match actor_component.linker.instance("theater:simple/runtime") {
             Ok(interface) => interface,
             Err(e) => {
-                // Record the specific error where it happens
-                actor_component.actor_store.record_event(ChainEventData {
-                    event_type: "runtime-setup".to_string(),
-                    data: RuntimeEventData::HandlerSetupError {
-                        error: e.to_string(),
-                        step: "linker_instance".to_string(),
-                    }.into(),
-                    // description: Some(format!("Failed to create linker instance: {}", e)),
-                });
                 return Err(anyhow::anyhow!(
                     "Could not instantiate theater:simple/runtime: {}",
                     e
@@ -121,44 +104,28 @@ where
         interface
             .func_wrap(
                 "log",
-                move |mut ctx: StoreContextMut<'_, ActorStore<E>>, (msg,): (String,)| {
+                move |mut ctx: StoreContextMut<'_, ActorStore>, (msg,): (String,)| {
                     let id = ctx.data().id.clone();
 
                     // Record host function call
-                    let input = serde_json::to_vec(&msg).unwrap_or_default();
-                    ctx.data_mut().record_event(ChainEventData {
-                        event_type: "theater:simple/runtime/log".to_string(),
-                        data: HostFunctionCall::new(
-                            "theater:simple/runtime",
-                            "log",
-                            input,
-                            vec![], // log returns nothing
-                        ).into(),
-                        // description removedformat!("Actor log: {}", msg)),
-                    });
+                    ctx.data_mut().record_host_function_call(
+                        "theater:simple/runtime",
+                        "log",
+                        &msg,
+                        &(),
+                    );
 
                     info!("[ACTOR] [{}] [{}] {}", id, name1, msg);
                     Ok(())
                 },
             )
-            .map_err(|e| {
-                // Record function setup error
-                actor_component.actor_store.record_event(ChainEventData {
-                    event_type: "runtime-setup".to_string(),
-                    data: RuntimeEventData::HandlerSetupError {
-                        error: e.to_string(),
-                        step: "log_function_wrap".to_string(),
-                    }.into(),
-                    // description: Some(format!("Failed to wrap log function: {}", e)),
-                });
-                anyhow::anyhow!("Failed to wrap log function: {}", e)
-            })?;
+            .map_err(|e| anyhow::anyhow!("Failed to wrap log function: {}", e))?;
 
         // Get chain function - returns the actor's event chain
         // The chain record has: events: list<meta-event>
         // meta-event has: hash: u64, event: event
         // event has: event-type: string, parent: option<u64>, data: list<u8>
-        // 
+        //
         // WIT record -> Rust tuple:
         //   chain { events } -> (list<meta-event>,)
         //   meta-event { hash, event } -> (u64, event)
@@ -170,20 +137,10 @@ where
         interface
             .func_wrap(
                 "get-chain",
-                move |mut ctx: StoreContextMut<'_, ActorStore<E>>, ()| -> anyhow::Result<((Vec<(u64, (String, Option<u64>, Vec<u8>))>,),)> {
-                    // Record get-chain call event
-                    ctx.data_mut().record_event(ChainEventData {
-                        event_type: "theater:simple/runtime/get-chain".to_string(),
-                        data: RuntimeEventData::StateChangeCall {
-                            old_state: "chain".to_string(),
-                            new_state: "requested".to_string(),
-                        }.into(),
-                        // description removed"Get chain request".to_string()),
-                    });
-
+                move |mut ctx: StoreContextMut<'_, ActorStore>, ()| -> anyhow::Result<((Vec<(u64, (String, Option<u64>, Vec<u8>))>,),)> {
                     // Get all events from the chain
                     let events = ctx.data().get_all_events();
-                    
+
                     // Convert to WIT format: list<meta-event>
                     // meta-event = { hash: u64, event: event }
                     // event = { event-type: string, parent: option<u64>, data: list<u8> }
@@ -199,49 +156,26 @@ where
                         })
                         .collect();
 
-                    let event_count = chain_events.len();
-
-                    // Record get-chain result event
-                    ctx.data_mut().record_event(ChainEventData {
-                        event_type: "theater:simple/runtime/get-chain".to_string(),
-                        data: RuntimeEventData::StateChangeResult {
-                            success: true,
-                        }.into(),
-                        // description removedformat!("Chain retrieved: {} events", event_count)),
-                    });
+                    // Record host function call
+                    ctx.data_mut().record_host_function_call(
+                        "theater:simple/runtime",
+                        "get-chain",
+                        &(),
+                        &chain_events.len(),
+                    );
 
                     // Return as chain record: (events,)
                     Ok(((chain_events,),))
                 },
             )
-            .map_err(|e| {
-                // Record function setup error
-                actor_component.actor_store.record_event(ChainEventData {
-                    event_type: "runtime-setup".to_string(),
-                    data: RuntimeEventData::HandlerSetupError {
-                        error: e.to_string(),
-                        step: "get_chain_function_wrap".to_string(),
-                    }.into(),
-                    // description: Some(format!("Failed to wrap get-chain function: {}", e)),
-                });
-                anyhow::anyhow!("Failed to wrap get-chain function: {}", e)
-            })?;
+            .map_err(|e| anyhow::anyhow!("Failed to wrap get-chain function: {}", e))?;
 
         // Shutdown function
         interface
             .func_wrap_async(
                 "shutdown",
-                move |mut ctx: StoreContextMut<'_, ActorStore<E>>, (data,): (Option<Vec<u8>>,)|
+                move |mut ctx: StoreContextMut<'_, ActorStore>, (data,): (Option<Vec<u8>>,)|
                       -> Box<dyn Future<Output = anyhow::Result<(Result<(), String>,)>> + Send> {
-                    // Record shutdown call event
-                    ctx.data_mut().record_event(ChainEventData {
-                        event_type: "theater:simple/runtime/shutdown".to_string(),
-                        data: RuntimeEventData::ShutdownCall {
-                            data: data.clone(),
-                        }.into(),
-                        // description removedformat!("Actor shutdown with data: {:?}", data)),
-                    });
-
                     info!(
                         "[ACTOR] [{}] [{}] Shutdown requested: {:?}",
                         ctx.data().id,
@@ -249,58 +183,40 @@ where
                         data
                     );
                     let theater_tx = theater_tx.clone();
+                    let data_clone = data.clone();
 
                     Box::new(async move {
-                        match theater_tx
+                        let result = match theater_tx
                             .send(TheaterCommand::ShuttingDown {
                                 actor_id: ctx.data().id.clone(),
                                 data,
                             })
                             .await
                         {
-                            Ok(_) => {
-                                ctx.data_mut().record_event(ChainEventData {
-                                    event_type: "theater:simple/runtime/shutdown".to_string(),
-                                    data: RuntimeEventData::ShutdownRequested {
-                                        success: true,
-                                    }.into(),
-                                });
-                                Ok((Ok(()),))
-                            }
-                            Err(e) => {
-                                let err = e.to_string();
-                                // Record failed shutdown result event
-                                ctx.data_mut().record_event(ChainEventData {
-                                    event_type: "theater:simple/runtime/shutdown".to_string(),
-                                    data: RuntimeEventData::ShutdownRequested {
-                                        success: false,
-                                    }.into(),
-                                });
-                                Ok((Err(err),))
-                            }
-                        }
+                            Ok(_) => Ok(()),
+                            Err(e) => Err(e.to_string()),
+                        };
+
+                        // Record host function call with result
+                        ctx.data_mut().record_host_function_call(
+                            "theater:simple/runtime",
+                            "shutdown",
+                            &data_clone,
+                            &result.is_ok(),
+                        );
+
+                        Ok((result,))
                     })
                 },
             )
-            .map_err(|e| {
-                // Record function setup error
-                actor_component.actor_store.record_event(ChainEventData {
-                    event_type: "runtime-setup".to_string(),
-                    data: RuntimeEventData::HandlerSetupError {
-                        error: e.to_string(),
-                        step: "shutdown_function_wrap".to_string(),
-                    }.into(),
-                    // description: Some(format!("Failed to wrap shutdown function: {}", e)),
-                });
-                anyhow::anyhow!("Failed to wrap shutdown function: {}", e)
-            })?;
+            .map_err(|e| anyhow::anyhow!("Failed to wrap shutdown function: {}", e))?;
 
         Ok(())
     }
 
     fn add_export_functions(
         &self,
-        actor_instance: &mut ActorInstance<E>,
+        actor_instance: &mut ActorInstance,
     ) -> anyhow::Result<()> {
         // init: func(state: option<list<u8>>) -> result<tuple<option<list<u8>>>, string>
         // This is a state-only function - it takes only state and returns state

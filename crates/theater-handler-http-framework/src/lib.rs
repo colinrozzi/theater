@@ -52,7 +52,6 @@ use tracing::{debug, error, info, warn};
 use theater::actor::handle::ActorHandle;
 use theater::actor::store::ActorStore;
 use theater::config::permissions::HttpFrameworkPermissions;
-use theater::events::EventPayload;
 use theater::handler::{Handler, HandlerContext, SharedActorInstance};
 use theater::shutdown::ShutdownReceiver;
 use theater::wasm::{ActorComponent, ActorInstance};
@@ -129,15 +128,13 @@ impl HttpFrameworkHandler {
     }
 }
 
-impl<E> Handler<E> for HttpFrameworkHandler
-where
-    E: EventPayload + Clone + From<HandlerEventData> + From<theater::events::theater_runtime::TheaterRuntimeEventData> + From<theater::events::wasm::WasmEventData>,
+impl Handler for HttpFrameworkHandler
 {
-    fn create_instance(&self) -> Box<dyn Handler<E>> {
+    fn create_instance(&self) -> Box<dyn Handler> {
         Box::new(self.clone())
     }
 
-    fn setup_host_functions(&mut self, actor_component: &mut ActorComponent<E>, _ctx: &mut HandlerContext) -> Result<()> {
+    fn setup_host_functions(&mut self, actor_component: &mut ActorComponent, _ctx: &mut HandlerContext) -> Result<()> {
         info!("Setting up HTTP framework host functions");
 
         let mut interface = actor_component
@@ -155,7 +152,7 @@ where
         let next_server_id = self.next_server_id.clone();
         interface.func_wrap(
             "create-server",
-            move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore<E>>,
+            move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore>,
                   (config,): (ServerConfig,)|
                   -> Result<(Result<u64, String>,)> {
                 let server_id = next_server_id.fetch_add(1, Ordering::SeqCst);
@@ -181,20 +178,7 @@ where
                     ServerInstance::new(server_id, port, host.clone(), config.tls_config.clone());
 
                 // Record event in hash chain
-                ctx.data_mut().record_handler_event(
-                    "http-framework/create-server".to_string(),
-                    HandlerEventData::ServerCreate {
-                        server_id,
-                        host: host.clone(),
-                        port,
-                        with_tls: config.tls_config.is_some(),
-                    },
-                    Some(format!(
-                        "Created HTTP server {} on {}:{}",
-                        server_id, host, port
-                    )),
-                );
-
+                
                 // Store server instance
                 let servers_clone_inner = servers_clone.clone();
                 tokio::spawn(async move {
@@ -210,7 +194,7 @@ where
         let servers_clone = self.servers.clone();
         interface.func_wrap(
             "get-server-info",
-            move |_ctx: wasmtime::StoreContextMut<'_, ActorStore<E>>,
+            move |_ctx: wasmtime::StoreContextMut<'_, ActorStore>,
                   (server_id,): (u64,)|
                   -> Result<(Result<ServerInfo, String>,)> {
                 let servers_clone = servers_clone.clone();
@@ -242,7 +226,7 @@ where
         let server_handles_clone = self.server_handles.clone();
         interface.func_wrap_async(
             "start-server",
-            move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore<E>>,
+            move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore>,
                   (server_id,): (u64,)|
                   -> Box<dyn Future<Output = Result<(Result<u16, String>,)>> + Send> {
                 let servers_clone = servers_clone.clone();
@@ -275,12 +259,7 @@ where
                                     format!("Started HTTP server {} on port {}", server_id, port)
                                 };
 
-                                ctx.data_mut().record_handler_event(
-                                    "http-framework/start-server".to_string(),
-                                    event_data,
-                                    Some(description),
-                                );
-
+                                
                                 // Create server handle for tracking
                                 let server_handle = ServerHandle {
                                     shutdown_tx: None,
@@ -303,19 +282,7 @@ where
                                 error!("Failed to start server {}: {}", server_id, e);
 
                                 // Record error event
-                                ctx.data_mut().record_handler_event(
-                                    "http-framework/start-server".to_string(),
-                                    HandlerEventData::Error {
-                                        operation: "start-server".to_string(),
-                                        path: format!("server-{}", server_id),
-                                        message: e.to_string(),
-                                    },
-                                    Some(format!(
-                                        "Failed to start HTTP server {}: {}",
-                                        server_id, e
-                                    )),
-                                );
-
+                                
                                 Ok((Err(format!("Failed to start server: {}", e)),))
                             }
                         }
@@ -331,7 +298,7 @@ where
         let server_handles_clone = self.server_handles.clone();
         interface.func_wrap_async(
             "stop-server",
-            move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore<E>>,
+            move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore>,
                   (server_id,): (u64,)|
                   -> Box<dyn Future<Output = Result<(Result<(), String>,)>> + Send> {
                 let servers_clone = servers_clone.clone();
@@ -355,31 +322,14 @@ where
                         match result {
                             Ok(_) => {
                                 // Record event
-                                ctx.data_mut().record_handler_event(
-                                    "http-framework/stop-server".to_string(),
-                                    HandlerEventData::ServerStop { server_id },
-                                    Some(format!("Stopped HTTP server {}", server_id)),
-                                );
-
+                                
                                 Ok((Ok(()),))
                             }
                             Err(e) => {
                                 error!("Failed to stop server {}: {}", server_id, e);
 
                                 // Record error event
-                                ctx.data_mut().record_handler_event(
-                                    "http-framework/stop-server".to_string(),
-                                    HandlerEventData::Error {
-                                        operation: "stop-server".to_string(),
-                                        path: format!("server-{}", server_id),
-                                        message: e.to_string(),
-                                    },
-                                    Some(format!(
-                                        "Failed to stop HTTP server {}: {}",
-                                        server_id, e
-                                    )),
-                                );
-
+                                
                                 Ok((Err(format!("Failed to stop server: {}", e)),))
                             }
                         }
@@ -395,7 +345,7 @@ where
         let server_handles_clone = self.server_handles.clone();
         interface.func_wrap_async(
             "destroy-server",
-            move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore<E>>,
+            move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore>,
                   (server_id,): (u64,)|
                   -> Box<dyn Future<Output = Result<(Result<(), String>,)>> + Send> {
                 let servers_clone = servers_clone.clone();
@@ -432,12 +382,7 @@ where
                         });
 
                         // Record event
-                        ctx.data_mut().record_handler_event(
-                            "http-framework/destroy-server".to_string(),
-                            HandlerEventData::ServerDestroy { server_id },
-                            Some(format!("Destroyed HTTP server {}", server_id)),
-                        );
-
+                        
                         Ok((Ok(()),))
                     } else {
                         Ok((Err(format!("Server not found: {}", server_id)),))
@@ -451,7 +396,7 @@ where
         let next_handler_id = self.next_handler_id.clone();
         interface.func_wrap(
             "register-handler",
-            move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore<E>>,
+            move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore>,
                   (handler_name,): (String,)|
                   -> Result<(Result<u64, String>,)> {
                 let handlers_clone = handlers_clone.clone();
@@ -470,18 +415,7 @@ where
                 };
 
                 // Record event
-                ctx.data_mut().record_handler_event(
-                    "http-framework/register-handler".to_string(),
-                    HandlerEventData::HandlerRegister {
-                        handler_id,
-                        name: handler_name.clone(),
-                    },
-                    Some(format!(
-                        "Registered handler {} with name '{}'",
-                        handler_id, handler_name
-                    )),
-                );
-
+                
                 // Store handler
                 tokio::spawn(async move {
                     let mut handlers = handlers_clone.write().await;
@@ -498,7 +432,7 @@ where
         let next_route_id = self.next_route_id.clone();
         interface.func_wrap(
             "add-route",
-            move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore<E>>,
+            move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore>,
                   (server_id, path, method, handler_id): (u64, String, String, u64)|
                   -> Result<(Result<u64, String>,)> {
                 let servers_clone = servers_clone.clone();
@@ -564,21 +498,7 @@ where
                 match result {
                     Ok(_) => {
                         // Record event
-                        ctx.data_mut().record_handler_event(
-                            "http-framework/add-route".to_string(),
-                            HandlerEventData::RouteAdd {
-                                route_id,
-                                server_id,
-                                path: path_clone.clone(),
-                                method: method_clone.clone(),
-                                handler_id,
-                            },
-                            Some(format!(
-                                "Added route {} for {} {} on server {}",
-                                route_id, method_clone, path_clone, server_id
-                            )),
-                        );
-
+                        
                         Ok((Ok(route_id),))
                     }
                     Err(e) => Ok((Err(e),)),
@@ -590,7 +510,7 @@ where
         let servers_clone = self.servers.clone();
         interface.func_wrap(
             "remove-route",
-            move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore<E>>,
+            move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore>,
                   (route_id,): (u64,)|
                   -> Result<(Result<(), String>,)> {
                 let servers_clone = servers_clone.clone();
@@ -629,18 +549,7 @@ where
                 match result {
                     Ok(server_id) => {
                         // Record event
-                        ctx.data_mut().record_handler_event(
-                            "http-framework/remove-route".to_string(),
-                            HandlerEventData::RouteRemove {
-                                route_id,
-                                server_id,
-                            },
-                            Some(format!(
-                                "Removed route {} from server {}",
-                                route_id, server_id
-                            )),
-                        );
-
+                        
                         Ok((Ok(()),))
                     }
                     Err(e) => Ok((Err(e),)),
@@ -654,7 +563,7 @@ where
         let next_middleware_id = self.next_middleware_id.clone();
         interface.func_wrap(
             "add-middleware",
-            move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore<E>>,
+            move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore>,
                   (server_id, path, handler_id): (u64, String, u64)|
                   -> Result<(Result<u64, String>,)> {
                 let servers_clone = servers_clone.clone();
@@ -704,20 +613,7 @@ where
                 match result {
                     Ok(_) => {
                         // Record event
-                        ctx.data_mut().record_handler_event(
-                            "http-framework/add-middleware".to_string(),
-                            HandlerEventData::MiddlewareAdd {
-                                middleware_id,
-                                server_id,
-                                path: path_clone.clone(),
-                                handler_id,
-                            },
-                            Some(format!(
-                                "Added middleware {} for path {} on server {}",
-                                middleware_id, path_clone, server_id
-                            )),
-                        );
-
+                        
                         Ok((Ok(middleware_id),))
                     }
                     Err(e) => Ok((Err(e),)),
@@ -729,7 +625,7 @@ where
         let servers_clone = self.servers.clone();
         interface.func_wrap(
             "remove-middleware",
-            move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore<E>>,
+            move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore>,
                   (middleware_id,): (u64,)|
                   -> Result<(Result<(), String>,)> {
                 let servers_clone = servers_clone.clone();
@@ -768,18 +664,7 @@ where
                 match result {
                     Ok(server_id) => {
                         // Record event
-                        ctx.data_mut().record_handler_event(
-                            "http-framework/remove-middleware".to_string(),
-                            HandlerEventData::MiddlewareRemove {
-                                middleware_id,
-                                server_id,
-                            },
-                            Some(format!(
-                                "Removed middleware {} from server {}",
-                                middleware_id, server_id
-                            )),
-                        );
-
+                        
                         Ok((Ok(()),))
                     }
                     Err(e) => Ok((Err(e),)),
@@ -792,7 +677,7 @@ where
         let handlers_clone = self.handlers.clone();
         interface.func_wrap(
             "enable-websocket",
-            move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore<E>>,
+            move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore>,
                   (
                 server_id,
                 path,
@@ -879,21 +764,7 @@ where
                 match result {
                     Ok(_) => {
                         // Record event
-                        ctx.data_mut().record_handler_event(
-                            "http-framework/enable-websocket".to_string(),
-                            HandlerEventData::WebSocketEnable {
-                                server_id,
-                                path: path_clone.clone(),
-                                connect_handler_id,
-                                message_handler_id,
-                                disconnect_handler_id,
-                            },
-                            Some(format!(
-                                "Enabled WebSocket on path {} for server {}",
-                                path_clone, server_id
-                            )),
-                        );
-
+                        
                         Ok((Ok(()),))
                     }
                     Err(e) => Ok((Err(e),)),
@@ -905,7 +776,7 @@ where
         let servers_clone = self.servers.clone();
         interface.func_wrap(
             "disable-websocket",
-            move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore<E>>,
+            move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore>,
                   (server_id, path): (u64, String)|
                   -> Result<(Result<(), String>,)> {
                 let servers_clone = servers_clone.clone();
@@ -933,18 +804,7 @@ where
                 match result {
                     Ok(_) => {
                         // Record event
-                        ctx.data_mut().record_handler_event(
-                            "http-framework/disable-websocket".to_string(),
-                            HandlerEventData::WebSocketDisable {
-                                server_id,
-                                path: path.clone(),
-                            },
-                            Some(format!(
-                                "Disabled WebSocket on path {} for server {}",
-                                path, server_id
-                            )),
-                        );
-
+                        
                         Ok((Ok(()),))
                     }
                     Err(e) => Ok((Err(e),)),
@@ -956,7 +816,7 @@ where
         let servers_clone = self.servers.clone();
         interface.func_wrap(
             "send-websocket-message",
-            move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore<E>>,
+            move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore>,
                   (server_id, connection_id, message): (u64, u64, WebSocketMessage)|
                   -> Result<(Result<(), String>,)> {
                 let servers_clone = servers_clone.clone();
@@ -1006,20 +866,7 @@ where
                         let message_size = message_clone.data.as_ref().map_or(0, |d| d.len())
                             + message_clone.text.as_ref().map_or(0, |t| t.len());
 
-                        ctx.data_mut().record_handler_event(
-                            "http-framework/send-websocket-message".to_string(),
-                            HandlerEventData::WebSocketMessage {
-                                server_id,
-                                connection_id,
-                                message_type: message_type.to_string(),
-                                message_size,
-                            },
-                            Some(format!(
-                                "Sent WebSocket message to connection {} on server {}",
-                                connection_id, server_id
-                            )),
-                        );
-
+                        
                         Ok((Ok(()),))
                     }
                     Err(e) => Ok((Err(e),)),
@@ -1031,7 +878,7 @@ where
         let servers_clone = self.servers.clone();
         interface.func_wrap(
             "close-websocket",
-            move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore<E>>,
+            move |mut ctx: wasmtime::StoreContextMut<'_, ActorStore>,
                   (server_id, connection_id): (u64, u64)|
                   -> Result<(Result<(), String>,)> {
                 let servers_clone = servers_clone.clone();
@@ -1073,18 +920,7 @@ where
                 match result {
                     Ok(_) => {
                         // Record event
-                        ctx.data_mut().record_handler_event(
-                            "http-framework/close-websocket".to_string(),
-                            HandlerEventData::WebSocketDisconnect {
-                                server_id,
-                                connection_id,
-                            },
-                            Some(format!(
-                                "Closed WebSocket connection {} on server {}",
-                                connection_id, server_id
-                            )),
-                        );
-
+                        
                         Ok((Ok(()),))
                     }
                     Err(e) => Ok((Err(e),)),
@@ -1097,7 +933,7 @@ where
         Ok(())
     }
 
-    fn add_export_functions(&self, actor_instance: &mut ActorInstance<E>) -> Result<()> {
+    fn add_export_functions(&self, actor_instance: &mut ActorInstance) -> Result<()> {
         info!("Adding export functions for HTTP framework");
 
         match actor_instance.register_function::<(u64, HttpRequest), (HttpResponse,)>(
@@ -1198,7 +1034,7 @@ where
     fn start(
         &mut self,
         _actor_handle: ActorHandle,
-        _actor_instance: SharedActorInstance<E>,
+        _actor_instance: SharedActorInstance,
         shutdown_receiver: ShutdownReceiver,
     ) -> Pin<Box<dyn Future<Output = Result<()>> + Send>> {
         let servers_ref = self.servers.clone();

@@ -10,14 +10,10 @@ use anyhow::Result;
 use chrono::Utc;
 use wasmtime::component::Resource;
 use theater::actor::ActorStore;
-use theater::events::EventPayload;
 use tracing::debug;
 
 // Implement WallClockHost for ActorStore
-impl<E> WallClockHost for ActorStore<E>
-where
-    E: EventPayload + Clone + From<TimingEventData> + Send,
-{
+impl WallClockHost for ActorStore {
     async fn now(&mut self) -> Result<Datetime> {
         debug!("wasi:clocks/wall-clock now");
 
@@ -65,10 +61,7 @@ where
 }
 
 // Implement MonotonicClockHost for ActorStore
-impl<E> MonotonicClockHost for ActorStore<E>
-where
-    E: EventPayload + Clone + From<TimingEventData> + Send,
-{
+impl MonotonicClockHost for ActorStore {
     async fn now(&mut self) -> Result<u64> {
         debug!("wasi:clocks/monotonic-clock now");
 
@@ -186,10 +179,7 @@ where
 }
 
 // Implement PollHost for ActorStore (the poll function)
-impl<E> PollHost for ActorStore<E>
-where
-    E: EventPayload + Clone + From<TimingEventData> + Send,
-{
+impl PollHost for ActorStore {
     async fn poll(&mut self, pollables: Vec<Resource<Pollable>>) -> Result<Vec<u32>> {
         debug!("wasi:io/poll poll: {} pollables", pollables.len());
 
@@ -232,10 +222,7 @@ where
 }
 
 // Implement HostPollable for ActorStore (pollable resource methods)
-impl<E> HostPollable for ActorStore<E>
-where
-    E: EventPayload + Clone + From<TimingEventData> + Send,
-{
+impl HostPollable for ActorStore {
     async fn ready(&mut self, pollable_handle: Resource<Pollable>) -> Result<bool> {
         let pollable_id = pollable_handle.rep();
         debug!("wasi:io/poll pollable.ready: {}", pollable_id);

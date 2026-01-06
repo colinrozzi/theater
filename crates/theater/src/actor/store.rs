@@ -6,9 +6,10 @@
 
 use crate::actor::handle::ActorHandle;
 use crate::chain::{ChainEvent, StateChain};
-use crate::events::{ChainEventData, EventPayload};
+use crate::events::{ChainEventData, ChainEventPayload};
 use crate::id::TheaterId;
 use crate::messages::TheaterCommand;
+use crate::replay::HostFunctionCall;
 use std::any::{Any, TypeId};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, RwLock};
@@ -28,10 +29,7 @@ use wasmtime::component::ResourceTable;
 /// - A handle to interact with the actor
 /// - A resource table for Component Model resources (pollables, file handles, etc.)
 #[derive(Clone)]
-pub struct ActorStore<E>
-where
-    E: EventPayload + Clone,
-{
+pub struct ActorStore {
     /// Unique identifier for the actor
     pub id: TheaterId,
 
@@ -39,7 +37,7 @@ where
     pub theater_tx: Sender<TheaterCommand>,
 
     /// The event chain that records all actor operations for verification and audit
-    pub chain: Arc<RwLock<StateChain<E>>>,
+    pub chain: Arc<RwLock<StateChain>>,
 
     /// The current state of the actor, stored as a binary blob
     pub state: Option<Vec<u8>>,
@@ -57,10 +55,7 @@ where
     pub extensions: Arc<RwLock<HashMap<TypeId, Box<dyn Any + Send + Sync>>>>,
 }
 
-impl<E> ActorStore<E>
-where
-    E: EventPayload + Clone,
-{
+impl ActorStore {
     /// # Create a new ActorStore
     ///
     /// Creates a new instance of the ActorStore with the given parameters.
@@ -69,8 +64,8 @@ where
     ///
     /// * `id` - Unique identifier for the actor
     /// * `theater_tx` - Channel for sending commands to the Theater runtime
-    /// * `message_tx` - Optional channel for sending message commands to the message-server handler
     /// * `actor_handle` - Handle for interacting with the actor
+    /// * `chain` - The event chain for this actor
     ///
     /// ## Returns
     ///
@@ -79,7 +74,7 @@ where
         id: TheaterId,
         theater_tx: Sender<TheaterCommand>,
         actor_handle: ActorHandle,
-        chain: Arc<RwLock<StateChain<E>>>,
+        chain: Arc<RwLock<StateChain>>,
     ) -> Self {
         Self {
             id: id.clone(),
@@ -146,113 +141,16 @@ where
     ///
     /// ## Parameters
     ///
-    /// * `event_data` - The event data to record, typically a variant of ChainEventData
+    /// * `event_data` - The event data to record
     ///
     /// ## Returns
     ///
     /// The ChainEvent that was created and added to the chain.
-    pub fn record_event(&self, event_data: ChainEventData<E>) -> ChainEvent {
+    pub fn record_event(&self, event_data: ChainEventData) -> ChainEvent {
         let mut chain = self.chain.write().unwrap();
         chain
             .add_typed_event(event_data)
             .expect("Failed to record event")
-    }
-
-    /// # Record a handler-specific event with type-safe conversion
-    ///
-    /// This method allows handlers to record their events while maintaining type safety.
-    /// The application must implement `From<H>` for its event type E, which the compiler
-    /// enforces. This ensures that applications can only use handlers for which they've
-    /// implemented proper event conversion.
-    ///
-    /// ## Type Parameters
-    ///
-    /// * `H` - The handler-specific event type. The application's event type `E` must
-    ///   implement `From<H>`, which is checked at compile time.
-    ///
-    /// ## Parameters
-    ///
-    /// * `event_type` - The type identifier for this event (e.g., "theater:simple/environment/get-var")
-    /// * `handler_event` - The handler-specific event data
-    /// * `description` - Optional human-readable description
-    ///
-    /// ## Returns
-    ///
-    /// The ChainEvent that was created and added to the chain.
-    ///
-    /// ## Example
-    ///
-    /// ```rust,ignore
-    /// // In a handler:
-    /// ctx.data_mut().record_handler_event(
-    ///     "theater:simple/environment/get-var".to_string(),
-    ///     EnvironmentEventData::GetVar {
-    ///         variable_name: var_name.clone(),
-    ///         success: true,
-    ///         value_found,
-    ///         timestamp: Utc::now(),
-    ///     },
-    ///     Some(format!("Environment variable access: {}", var_name)),
-    /// );
-    /// ```
-    ///
-    /// ## Compile-Time Safety
-    ///
-    /// If the application hasn't implemented `From<EnvironmentEventData>` for its event type,
-    /// this call will fail to compile with a clear error message indicating the missing trait.
-    pub fn record_handler_event<H>(&self, event_type: String, handler_event: H) -> ChainEvent
-    where
-        E: From<H>,
-        H: serde::Serialize + Clone,
-    {
-        // Convert handler event to application event type using From trait
-        let app_event: E = handler_event.into();
-
-        self.record_event(ChainEventData {
-            event_type,
-            data: app_event,
-        })
-    }
-
-    /// Record a core runtime event with type-safe conversion
-    ///
-    /// This method allows the core runtime to record Runtime events.
-    pub fn record_runtime_event<R>(&self, event_type: String, runtime_event: R) -> ChainEvent
-    where
-        E: From<R>,
-        R: serde::Serialize + Clone,
-    {
-        let app_event: E = runtime_event.into();
-        self.record_event(ChainEventData {
-            event_type,
-            data: app_event,
-        })
-    }
-
-    /// Record a core WASM event with type-safe conversion
-    pub fn record_wasm_event<W>(&self, event_type: String, wasm_event: W) -> ChainEvent
-    where
-        E: From<W>,
-        W: serde::Serialize + Clone,
-    {
-        let app_event: E = wasm_event.into();
-        self.record_event(ChainEventData {
-            event_type,
-            data: app_event,
-        })
-    }
-
-    /// Record a core TheaterRuntime event with type-safe conversion
-    pub fn record_theater_runtime_event<T>(&self, event_type: String, theater_event: T) -> ChainEvent
-    where
-        E: From<T>,
-        T: serde::Serialize + Clone,
-    {
-        let app_event: E = theater_event.into();
-        self.record_event(ChainEventData {
-            event_type,
-            data: app_event,
-        })
     }
 
     /// Record a host function call with full I/O for replay.
@@ -287,22 +185,80 @@ where
         output: &O,
     ) -> ChainEvent
     where
-        E: From<crate::replay::HostFunctionCall>,
         I: serde::Serialize,
         O: serde::Serialize,
     {
-        let host_call = crate::replay::HostFunctionCall {
+        let host_call = HostFunctionCall {
             interface: interface.to_string(),
             function: function.to_string(),
             input: serde_json::to_vec(input).unwrap_or_default(),
             output: serde_json::to_vec(output).unwrap_or_default(),
         };
 
-        let app_event: E = host_call.into();
         self.record_event(ChainEventData {
             event_type: format!("{}/{}", interface, function),
-            data: app_event,
+            data: ChainEventPayload::HostFunction(host_call),
         })
+    }
+
+    /// Record a WebAssembly execution event.
+    ///
+    /// This is used for recording WASM function calls, results, and errors.
+    ///
+    /// ## Parameters
+    ///
+    /// * `event_type` - A string identifier for this event (e.g., "wasm-call")
+    /// * `data` - The WasmEventData containing the event details
+    pub fn record_wasm_event(
+        &self,
+        event_type: String,
+        data: crate::events::wasm::WasmEventData,
+    ) -> ChainEvent {
+        self.record_event(ChainEventData {
+            event_type,
+            data: ChainEventPayload::Wasm(data),
+        })
+    }
+
+    /// Record a theater runtime event (for debugging/audit purposes).
+    ///
+    /// Note: These events are recorded as Wasm events with a special event type
+    /// since they're primarily for debugging and not essential for replay.
+    ///
+    /// ## Parameters
+    ///
+    /// * `event_type` - A string identifier for this event
+    /// * `data` - The TheaterRuntimeEventData
+    pub fn record_theater_runtime_event(
+        &self,
+        event_type: String,
+        data: crate::events::theater_runtime::TheaterRuntimeEventData,
+    ) -> ChainEvent {
+        // Convert theater runtime events to Wasm events for storage
+        // These are primarily for debugging/audit and not essential for replay
+        let wasm_data = crate::events::wasm::WasmEventData::WasmCall {
+            function_name: event_type.clone(),
+            params: serde_json::to_vec(&data).unwrap_or_default(),
+        };
+        self.record_event(ChainEventData {
+            event_type: format!("theater-runtime/{}", event_type),
+            data: ChainEventPayload::Wasm(wasm_data),
+        })
+    }
+
+    /// DEPRECATED: Legacy method for backward compatibility with handlers.
+    ///
+    /// This method is a no-op stub that allows existing handler code to compile.
+    /// Handlers should migrate to using `record_host_function_call` instead.
+    ///
+    /// TODO: Remove this once all handlers are updated to use the new event system.
+    pub fn record_handler_event<T: serde::Serialize>(
+        &self,
+        _event_type: String,
+        _data: T,
+        _description: Option<String>,
+    ) {
+        // No-op for backwards compatibility
     }
 
     /// # Verify the integrity of the event chain

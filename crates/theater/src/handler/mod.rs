@@ -1,5 +1,4 @@
 use crate::actor::handle::ActorHandle;
-use crate::events::EventPayload;
 use crate::shutdown::ShutdownReceiver;
 use crate::wasm::{ActorComponent, ActorInstance};
 use anyhow::Result;
@@ -11,7 +10,7 @@ use tokio::sync::RwLock;
 use tracing::{debug, info};
 
 /// Shared reference to an actor instance for handlers that need direct store access
-pub type SharedActorInstance<E> = Arc<RwLock<Option<ActorInstance<E>>>>;
+pub type SharedActorInstance = Arc<RwLock<Option<ActorInstance>>>;
 
 /// Context passed to handlers during setup, tracking which imports are already satisfied
 #[derive(Debug, Clone, Default)]
@@ -45,38 +44,32 @@ impl HandlerContext {
     }
 }
 
-pub struct HandlerRegistry<E>
-where
-    E: EventPayload + Clone,
-{
-    handlers: Vec<Box<dyn Handler<E>>>,
+pub struct HandlerRegistry {
+    handlers: Vec<Box<dyn Handler>>,
 }
 
-impl<E> HandlerRegistry<E>
-where
-    E: EventPayload + Clone,
-{
+impl HandlerRegistry {
     pub fn new() -> Self {
         Self {
             handlers: Vec::new(),
         }
     }
 
-    pub fn register<H: Handler<E>>(&mut self, handler: H) {
+    pub fn register<H: Handler>(&mut self, handler: H) {
         self.handlers.push(Box::new(handler));
     }
 
     /// Prepend a handler to the beginning of the registry.
     /// This is useful when you want a handler to be checked first
     /// (e.g., ReplayHandler should intercept imports before other handlers).
-    pub fn prepend<H: Handler<E>>(&mut self, handler: H) {
+    pub fn prepend<H: Handler>(&mut self, handler: H) {
         self.handlers.insert(0, Box::new(handler));
     }
 
     pub fn setup_handlers(
         &mut self,
-        actor_component: &mut ActorComponent<E>,
-    ) -> Vec<Box<dyn Handler<E>>> {
+        actor_component: &mut ActorComponent,
+    ) -> Vec<Box<dyn Handler>> {
         let component_imports: HashSet<String> = actor_component
             .import_types
             .iter()
@@ -160,10 +153,7 @@ where
     }
 }
 
-impl<E> Clone for HandlerRegistry<E>
-where
-    E: EventPayload + Clone,
-{
+impl Clone for HandlerRegistry {
     fn clone(&self) -> Self {
         let mut new_registry = HandlerRegistry::new();
         for handler in &self.handlers {
@@ -178,16 +168,13 @@ where
 ///
 /// External handler crates can implement this trait and register their handlers
 /// with the Theater runtime without depending on the concrete `Handler` enum.
-pub trait Handler<E>: Send + Sync + 'static
-where
-    E: EventPayload + Clone,
-{
-    fn create_instance(&self) -> Box<dyn Handler<E>>;
+pub trait Handler: Send + Sync + 'static {
+    fn create_instance(&self) -> Box<dyn Handler>;
 
     fn start(
         &mut self,
         actor_handle: ActorHandle,
-        actor_instance: SharedActorInstance<E>,
+        actor_instance: SharedActorInstance,
         shutdown_receiver: ShutdownReceiver,
     ) -> Pin<Box<dyn Future<Output = Result<()>> + Send>>;
 
@@ -199,11 +186,11 @@ where
     /// successfully registering one.
     fn setup_host_functions(
         &mut self,
-        actor_component: &mut ActorComponent<E>,
+        actor_component: &mut ActorComponent,
         ctx: &mut HandlerContext,
     ) -> Result<()>;
 
-    fn add_export_functions(&self, actor_instance: &mut ActorInstance<E>) -> Result<()>;
+    fn add_export_functions(&self, actor_instance: &mut ActorInstance) -> Result<()>;
 
     fn name(&self) -> &str;
 

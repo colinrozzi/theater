@@ -62,7 +62,6 @@ use theater::actor::handle::ActorHandle;
 use theater::actor::store::ActorStore;
 use theater::config::actor_manifest::ProcessHostConfig;
 use theater::config::enforcement::PermissionChecker;
-use theater::events::EventPayload;
 use theater::events::theater_runtime::TheaterRuntimeEventData;
 use theater::events::wasm::WasmEventData;
 use theater::handler::{Handler, HandlerContext, SharedActorInstance};
@@ -394,18 +393,16 @@ impl ProcessHandler {
     }
 }
 
-impl<E> Handler<E> for ProcessHandler
-where
-    E: EventPayload + Clone + From<ProcessEventData> + From<TheaterRuntimeEventData> + From<WasmEventData>,
+impl Handler for ProcessHandler
 {
-    fn create_instance(&self) -> Box<dyn Handler<E>> {
+    fn create_instance(&self) -> Box<dyn Handler> {
         Box::new(self.clone())
     }
 
     fn start(
         &mut self,
         actor_handle: ActorHandle,
-        _actor_instance: SharedActorInstance<E>,
+        _actor_instance: SharedActorInstance,
         shutdown_receiver: ShutdownReceiver,
     ) -> Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send>> {
         info!("Starting process handler");
@@ -423,37 +420,16 @@ where
 
     fn setup_host_functions(
         &mut self,
-        actor_component: &mut ActorComponent<E>,
+        actor_component: &mut ActorComponent,
         _ctx: &mut HandlerContext,
     ) -> anyhow::Result<()> {
         // Record setup start
-        actor_component.actor_store.record_handler_event(
-            "process-setup".to_string(),
-            ProcessEventData::HandlerSetupStart,
-            Some("Starting process host function setup".to_string())
-        );
-
         info!("Setting up host functions for process handling");
 
         let mut interface = match actor_component.linker.instance("theater:simple/process") {
-            Ok(interface) => {
-                actor_component.actor_store.record_handler_event(
-                    "process-setup".to_string(),
-                    ProcessEventData::LinkerInstanceSuccess,
-                    Some("Successfully created linker instance".to_string())
-                );
-                interface
+            Ok(interface) => {                interface
             }
-            Err(e) => {
-                actor_component.actor_store.record_handler_event(
-                    "process-setup".to_string(),
-                    ProcessEventData::HandlerSetupError {
-                        error: e.to_string(),
-                        step: "linker_instance".to_string(),
-                    },
-                    Some(format!("Failed to create linker instance: {}", e))
-                );
-                return Err(anyhow::anyhow!(
+            Err(e) => {                return Err(anyhow::anyhow!(
                     "Could not instantiate theater:simple/process: {}",
                     e
                 ));
@@ -469,7 +445,7 @@ where
 
         interface.func_wrap_async(
             "os-spawn",
-            move |mut ctx: StoreContextMut<'_, ActorStore<E>>,
+            move |mut ctx: StoreContextMut<'_, ActorStore>,
                   (process_config,): (ProcessConfig,)|
                   -> Box<dyn Future<Output = anyhow::Result<(Result<u64, String>,)>> + Send> {
                 let processes = processes.clone();
@@ -496,16 +472,7 @@ where
                         &program,
                         current_process_count,
                     ) {
-                        ctx.data_mut().record_handler_event(
-                            "process/permission-denied".to_string(),
-                            ProcessEventData::PermissionDenied {
-                                operation: "spawn".to_string(),
-                                program: program.clone(),
-                                reason: e.to_string(),
-                            },
-                            Some(format!("Permission denied for process spawn: {}", e))
-                        );
-
+                        
                         return Ok((Err(format!("Permission denied: {}", e)),));
                     }
 
@@ -518,17 +485,7 @@ where
                     };
 
                     // Record spawn attempt
-                    ctx.data_mut().record_handler_event(
-                        "process/spawn".to_string(),
-                        ProcessEventData::ProcessSpawn {
-                            process_id,
-                            program: program.clone(),
-                            args: args.clone(),
-                            os_pid: None,
-                        },
-                        Some(format!("Attempting to spawn process: {}", program))
-                    );
-
+                    
                     // Build command
                     let mut command = Command::new(&program);
                     command.args(&args);
@@ -698,33 +655,11 @@ where
                                 }
                             });
 
-                            ctx.data_mut().record_handler_event(
-                                "process/spawn-success".to_string(),
-                                ProcessEventData::ProcessSpawn {
-                                    process_id,
-                                    program: program.clone(),
-                                    args: args.clone(),
-                                    os_pid,
-                                },
-                                Some(format!(
-                                    "Successfully spawned process {} with OS PID {:?}",
-                                    process_id, os_pid
-                                ))
-                            );
-
+                            
                             Ok((Ok(process_id),))
                         }
                         Err(e) => {
-                            ctx.data_mut().record_handler_event(
-                                "process/spawn-error".to_string(),
-                                ProcessEventData::Error {
-                                    process_id: None,
-                                    operation: "spawn".to_string(),
-                                    message: e.to_string(),
-                                },
-                                Some(format!("Failed to spawn process: {}", e))
-                            );
-
+                            
                             Ok((Err(format!("Failed to spawn process: {}", e)),))
                         }
                     }
@@ -736,7 +671,7 @@ where
         let processes = self.processes.clone();
         interface.func_wrap_async(
             "os-write-stdin",
-            move |mut ctx: StoreContextMut<'_, ActorStore<E>>,
+            move |mut ctx: StoreContextMut<'_, ActorStore>,
                   (process_id, data): (u64, Vec<u8>)|
                   -> Box<dyn Future<Output = anyhow::Result<(Result<(), String>,)>> + Send> {
                 let processes = processes.clone();
@@ -761,27 +696,10 @@ where
 
                     match result {
                         Ok(_) => {
-                            ctx.data_mut().record_handler_event(
-                                "process/write-stdin".to_string(),
-                                ProcessEventData::StdinWrite {
-                                    process_id,
-                                    bytes_written: data.len() as u32,
-                                },
-                                Some(format!("Wrote {} bytes to process {} stdin", data.len(), process_id))
-                            );
-                            Ok((Ok(()),))
+                                                        Ok((Ok(()),))
                         }
                         Err(e) => {
-                            ctx.data_mut().record_handler_event(
-                                "process/write-stdin-error".to_string(),
-                                ProcessEventData::Error {
-                                    process_id: Some(process_id),
-                                    operation: "write-stdin".to_string(),
-                                    message: e.clone(),
-                                },
-                                Some(format!("Error writing to stdin: {}", e))
-                            );
-                            Ok((Err(e),))
+                                                        Ok((Err(e),))
                         }
                     }
                 })
@@ -792,7 +710,7 @@ where
         let processes = self.processes.clone();
         interface.func_wrap_async(
             "os-status",
-            move |mut ctx: StoreContextMut<'_, ActorStore<E>>,
+            move |mut ctx: StoreContextMut<'_, ActorStore>,
                   (process_id,): (u64,)|
                   -> Box<dyn Future<Output = anyhow::Result<(Result<ProcessStatus, String>,)>> + Send> {
                 let processes = processes.clone();
@@ -823,16 +741,7 @@ where
                             // Status check successful - event recorded via result
                         }
                         Err(e) => {
-                            ctx.data_mut().record_handler_event(
-                                "process/status-error".to_string(),
-                                ProcessEventData::Error {
-                                    process_id: Some(process_id),
-                                    operation: "status".to_string(),
-                                    message: e.clone(),
-                                },
-                                Some(format!("Error checking status: {}", e))
-                            );
-                        }
+                                                    }
                     }
 
                     Ok((result,))
@@ -844,7 +753,7 @@ where
         let processes = self.processes.clone();
         interface.func_wrap_async(
             "os-kill",
-            move |mut ctx: StoreContextMut<'_, ActorStore<E>>,
+            move |mut ctx: StoreContextMut<'_, ActorStore>,
                   (process_id,): (u64,)|
                   -> Box<dyn Future<Output = anyhow::Result<(Result<(), String>,)>> + Send> {
                 let processes = processes.clone();
@@ -856,23 +765,9 @@ where
 
                     match &result {
                         Ok(_) => {
-                            ctx.data_mut().record_handler_event(
-                                "process/kill".to_string(),
-                                ProcessEventData::KillRequest { process_id },
-                                Some(format!("Killed process {}", process_id))
-                            );
-                        }
+                                                    }
                         Err(e) => {
-                            ctx.data_mut().record_handler_event(
-                                "process/kill-error".to_string(),
-                                ProcessEventData::Error {
-                                    process_id: Some(process_id),
-                                    operation: "kill".to_string(),
-                                    message: e.clone(),
-                                },
-                                Some(format!("Error killing process: {}", e))
-                            );
-                        }
+                                                    }
                     }
 
                     Ok((result,))
@@ -884,35 +779,20 @@ where
         let processes = self.processes.clone();
         interface.func_wrap_async(
             "os-signal",
-            move |mut ctx: StoreContextMut<'_, ActorStore<E>>,
+            move |mut ctx: StoreContextMut<'_, ActorStore>,
                   (process_id, _signal): (u64, i32)|
                   -> Box<dyn Future<Output = anyhow::Result<(Result<(), String>,)>> + Send> {
                 let _processes = processes.clone();
 
                 Box::new(async move {
                     // Signal sending is platform-specific and not implemented in this version
-                    ctx.data_mut().record_handler_event(
-                        "process/signal-not-implemented".to_string(),
-                        ProcessEventData::Error {
-                            process_id: None,
-                            operation: "signal".to_string(),
-                            message: "Signal sending not implemented".to_string(),
-                        },
-                        Some(format!("Signal sending not implemented for process {}", process_id))
-                    );
-
+                    
                     Ok((Err("Signal sending not implemented".to_string()),))
                 })
             },
         )?;
 
         // Record overall setup completion
-        actor_component.actor_store.record_handler_event(
-            "process-setup".to_string(),
-            ProcessEventData::HandlerSetupSuccess,
-            Some("Process host functions setup completed successfully".to_string())
-        );
-
         info!("Process host functions set up successfully");
 
         Ok(())
@@ -920,7 +800,7 @@ where
 
     fn add_export_functions(
         &self,
-        actor_instance: &mut ActorInstance<E>,
+        actor_instance: &mut ActorInstance,
     ) -> anyhow::Result<()> {
         info!("Adding export functions for process handling");
 

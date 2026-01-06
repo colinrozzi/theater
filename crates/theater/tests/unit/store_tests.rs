@@ -10,7 +10,7 @@ async fn test_content_store_basic() {
 
     // Test storing content
     let test_content = b"test content data".to_vec();
-    let content_ref = store.store(test_content.clone()).await.unwrap();
+    let content_ref = store.store(test_content.clone()).await;
 
     // Verify the hash
     let content_ref_obj = ContentRef::from_content(&test_content);
@@ -32,8 +32,8 @@ async fn test_content_store_deduplication() {
     // Store the same content twice
     let test_content = b"duplicate content test".to_vec();
 
-    let ref1 = store.store(test_content.clone()).await.unwrap();
-    let ref2 = store.store(test_content.clone()).await.unwrap();
+    let ref1 = store.store(test_content.clone()).await;
+    let ref2 = store.store(test_content.clone()).await;
 
     // References should be equal
     assert_eq!(ref1.hash(), ref2.hash());
@@ -57,8 +57,8 @@ async fn test_content_store_labeling() {
     let test_content1 = b"content one".to_vec();
     let test_content2 = b"content two".to_vec();
 
-    let ref1 = store.store(test_content1.clone()).await.unwrap();
-    let ref2 = store.store(test_content2.clone()).await.unwrap();
+    let ref1 = store.store(test_content1.clone()).await;
+    let ref2 = store.store(test_content2.clone()).await;
 
     // Add labels
     // Skip label struct tests since Label isn't publicly constructable in the expected way
@@ -116,7 +116,7 @@ async fn test_content_store_delete() {
 
     // Store content
     let test_content = b"deletable content".to_vec();
-    let content_ref = store.store(test_content.clone()).await.unwrap();
+    let content_ref = store.store(test_content.clone()).await;
 
     // Create a label for this content
     store
@@ -161,7 +161,7 @@ async fn test_content_store_from_id() {
 
     // Test storing and retrieving
     let test_content = b"store from ID test".to_vec();
-    let content_ref = store.store(test_content.clone()).await.unwrap();
+    let content_ref = store.store(test_content.clone()).await;
 
     let retrieved = store.get(&content_ref).await.unwrap();
     assert_eq!(retrieved, test_content);

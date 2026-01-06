@@ -1,7 +1,6 @@
-use chrono::Utc;
 use theater::chain::StateChain;
-use theater::events::message::MessageEventData;
-use theater::events::{ChainEventData, EventData};
+use theater::events::{ChainEventData, ChainEventPayload};
+use theater::events::wasm::WasmEventData;
 use theater::id::TheaterId;
 use theater::messages::{ActorMessage, TheaterCommand};
 use theater::ActorOperation;
@@ -10,16 +9,13 @@ use theater::{ShutdownController, ShutdownReceiver};
 use tokio::sync::mpsc;
 
 /// Create a test event data object for testing
-pub fn create_test_event_data(event_type: &str, data: &[u8]) -> ChainEventData {
+pub fn create_test_event_data(event_type: &str, _data: &[u8]) -> ChainEventData {
     ChainEventData {
         event_type: event_type.to_string(),
-        data: EventData::Message(MessageEventData::HandleMessageCall {
-            sender: "test-sender".to_string(),
-            message_type: "test-message".to_string(),
-            size: data.len(),
+        data: ChainEventPayload::Wasm(WasmEventData::WasmCall {
+            function_name: "test-function".to_string(),
+            params: vec![],
         }),
-        timestamp: Utc::now().timestamp_millis() as u64,
-        description: Some(format!("Test event: {}", event_type)),
     }
 }
 

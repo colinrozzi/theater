@@ -27,7 +27,6 @@ use std::sync::Arc;
 use tokio::net::{TcpStream, UdpSocket as TokioUdpSocket};
 use wasmtime::component::Resource;
 use theater::actor::ActorStore;
-use theater::events::EventPayload;
 use theater_handler_io::{IoError, InputStream, OutputStream};
 use tracing::{debug, warn};
 
@@ -35,15 +34,11 @@ use tracing::{debug, warn};
 // wasi:io/error Host implementation (delegate to io handler types)
 // =============================================================================
 
-impl<E> ErrorHost for ActorStore<E>
-where
-    E: EventPayload + Clone + From<SocketsEventData> + Send,
+impl ErrorHost for ActorStore
 {
 }
 
-impl<E> HostError for ActorStore<E>
-where
-    E: EventPayload + Clone + From<SocketsEventData> + Send,
+impl HostError for ActorStore
 {
     async fn to_debug_string(&mut self, error: Resource<IoError>) -> Result<String> {
         let table = self.resource_table.lock().unwrap();
@@ -62,9 +57,7 @@ where
 // wasi:io/poll Host implementation
 // =============================================================================
 
-impl<E> PollHost for ActorStore<E>
-where
-    E: EventPayload + Clone + From<SocketsEventData> + Send,
+impl PollHost for ActorStore
 {
     async fn poll(&mut self, pollables: Vec<Resource<SocketsPollable>>) -> Result<Vec<u32>> {
         let mut ready_indices = Vec::new();
@@ -85,9 +78,7 @@ where
     }
 }
 
-impl<E> HostPollable for ActorStore<E>
-where
-    E: EventPayload + Clone + From<SocketsEventData> + Send,
+impl HostPollable for ActorStore
 {
     async fn ready(&mut self, pollable: Resource<SocketsPollable>) -> Result<bool> {
         let table = self.resource_table.lock().unwrap();
@@ -118,15 +109,11 @@ where
 // wasi:io/streams Host implementation (delegate to io handler)
 // =============================================================================
 
-impl<E> StreamsHost for ActorStore<E>
-where
-    E: EventPayload + Clone + From<SocketsEventData> + Send,
+impl StreamsHost for ActorStore
 {
 }
 
-impl<E> HostInputStream for ActorStore<E>
-where
-    E: EventPayload + Clone + From<SocketsEventData> + Send,
+impl HostInputStream for ActorStore
 {
     async fn read(&mut self, stream: Resource<InputStream>, len: u64) -> Result<Result<Vec<u8>, crate::bindings::wasi::io::streams::StreamError>> {
         let table = self.resource_table.lock().unwrap();
@@ -167,9 +154,7 @@ where
     }
 }
 
-impl<E> HostOutputStream for ActorStore<E>
-where
-    E: EventPayload + Clone + From<SocketsEventData> + Send,
+impl HostOutputStream for ActorStore
 {
     async fn check_write(&mut self, stream: Resource<OutputStream>) -> Result<Result<u64, crate::bindings::wasi::io::streams::StreamError>> {
         let table = self.resource_table.lock().unwrap();
@@ -245,9 +230,7 @@ where
 // wasi:clocks/monotonic-clock Host implementation
 // =============================================================================
 
-impl<E> MonotonicClockHost for ActorStore<E>
-where
-    E: EventPayload + Clone + From<SocketsEventData> + Send,
+impl MonotonicClockHost for ActorStore
 {
     async fn now(&mut self) -> Result<u64> {
         Ok(std::time::Instant::now().elapsed().as_nanos() as u64)
@@ -275,15 +258,11 @@ where
 // wasi:sockets/network Host implementation
 // =============================================================================
 
-impl<E> NetworkHost for ActorStore<E>
-where
-    E: EventPayload + Clone + From<SocketsEventData> + Send,
+impl NetworkHost for ActorStore
 {
 }
 
-impl<E> HostNetwork for ActorStore<E>
-where
-    E: EventPayload + Clone + From<SocketsEventData> + Send,
+impl HostNetwork for ActorStore
 {
     async fn drop(&mut self, network: Resource<Network>) -> Result<()> {
         let mut table = self.resource_table.lock().unwrap();
@@ -296,9 +275,7 @@ where
 // wasi:sockets/instance-network Host implementation
 // =============================================================================
 
-impl<E> InstanceNetworkHost for ActorStore<E>
-where
-    E: EventPayload + Clone + From<SocketsEventData> + Send,
+impl InstanceNetworkHost for ActorStore
 {
     async fn instance_network(&mut self) -> Result<Resource<Network>> {
         debug!("wasi:sockets/instance-network instance-network");
@@ -330,9 +307,7 @@ where
 // wasi:sockets/tcp-create-socket Host implementation
 // =============================================================================
 
-impl<E> TcpCreateSocketHost for ActorStore<E>
-where
-    E: EventPayload + Clone + From<SocketsEventData> + Send,
+impl TcpCreateSocketHost for ActorStore
 {
     async fn create_tcp_socket(
         &mut self,
@@ -372,15 +347,11 @@ where
 // wasi:sockets/tcp Host implementation
 // =============================================================================
 
-impl<E> TcpHost for ActorStore<E>
-where
-    E: EventPayload + Clone + From<SocketsEventData> + Send,
+impl TcpHost for ActorStore
 {
 }
 
-impl<E> HostTcpSocket for ActorStore<E>
-where
-    E: EventPayload + Clone + From<SocketsEventData> + Send,
+impl HostTcpSocket for ActorStore
 {
     async fn start_bind(
         &mut self,
@@ -942,9 +913,7 @@ where
 // wasi:sockets/udp-create-socket Host implementation
 // =============================================================================
 
-impl<E> UdpCreateSocketHost for ActorStore<E>
-where
-    E: EventPayload + Clone + From<SocketsEventData> + Send,
+impl UdpCreateSocketHost for ActorStore
 {
     async fn create_udp_socket(
         &mut self,
@@ -984,15 +953,11 @@ where
 // wasi:sockets/udp Host implementation
 // =============================================================================
 
-impl<E> UdpHost for ActorStore<E>
-where
-    E: EventPayload + Clone + From<SocketsEventData> + Send,
+impl UdpHost for ActorStore
 {
 }
 
-impl<E> HostUdpSocket for ActorStore<E>
-where
-    E: EventPayload + Clone + From<SocketsEventData> + Send,
+impl HostUdpSocket for ActorStore
 {
     async fn start_bind(
         &mut self,
@@ -1229,9 +1194,7 @@ where
     }
 }
 
-impl<E> HostIncomingDatagramStream for ActorStore<E>
-where
-    E: EventPayload + Clone + From<SocketsEventData> + Send,
+impl HostIncomingDatagramStream for ActorStore
 {
     async fn receive(
         &mut self,
@@ -1274,9 +1237,7 @@ where
     }
 }
 
-impl<E> HostOutgoingDatagramStream for ActorStore<E>
-where
-    E: EventPayload + Clone + From<SocketsEventData> + Send,
+impl HostOutgoingDatagramStream for ActorStore
 {
     async fn check_send(&mut self, stream: Resource<OutgoingDatagramStream>) -> Result<Result<u64, ErrorCode>> {
         debug!("wasi:sockets/udp outgoing-datagram-stream.check-send");
@@ -1375,9 +1336,7 @@ where
 // wasi:sockets/ip-name-lookup Host implementation
 // =============================================================================
 
-impl<E> IpNameLookupHost for ActorStore<E>
-where
-    E: EventPayload + Clone + From<SocketsEventData> + Send,
+impl IpNameLookupHost for ActorStore
 {
     async fn resolve_addresses(
         &mut self,
@@ -1424,9 +1383,7 @@ where
     }
 }
 
-impl<E> HostResolveAddressStream for ActorStore<E>
-where
-    E: EventPayload + Clone + From<SocketsEventData> + Send,
+impl HostResolveAddressStream for ActorStore
 {
     async fn resolve_next_address(
         &mut self,

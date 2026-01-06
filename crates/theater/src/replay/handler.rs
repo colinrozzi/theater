@@ -31,7 +31,7 @@ use wasmtime::StoreContextMut;
 use crate::actor::handle::ActorHandle;
 use crate::actor::store::ActorStore;
 use crate::chain::ChainEvent;
-use crate::events::{ChainEventData, EventPayload};
+use crate::events::{ChainEventData, ChainEventPayload};
 use crate::handler::{Handler, HandlerContext, SharedActorInstance};
 use crate::shutdown::ShutdownReceiver;
 use crate::wasm::{ActorComponent, ActorInstance};
@@ -278,18 +278,15 @@ fn serialize_params(params: &[Val]) -> Vec<u8> {
     serde_json::to_vec(&json).unwrap_or_default()
 }
 
-impl<E> Handler<E> for ReplayHandler
-where
-    E: EventPayload + Clone + From<HostFunctionCall>,
-{
-    fn create_instance(&self) -> Box<dyn Handler<E>> {
+impl Handler for ReplayHandler {
+    fn create_instance(&self) -> Box<dyn Handler> {
         Box::new(self.clone())
     }
 
     fn start(
         &mut self,
         _actor_handle: ActorHandle,
-        _actor_instance: SharedActorInstance<E>,
+        _actor_instance: SharedActorInstance,
         shutdown_receiver: ShutdownReceiver,
     ) -> Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send>> {
         info!("Starting replay handler");
@@ -312,7 +309,7 @@ where
 
     fn setup_host_functions(
         &mut self,
-        actor_component: &mut ActorComponent<E>,
+        actor_component: &mut ActorComponent,
         ctx: &mut HandlerContext,
     ) -> anyhow::Result<()> {
         info!("Setting up replay host functions");
@@ -375,7 +372,7 @@ where
                         // Register an async stub function
                         interface.func_new_async(
                             &func_name,
-                            move |mut ctx: StoreContextMut<'_, ActorStore<E>>,
+                            move |mut ctx: StoreContextMut<'_, ActorStore>,
                                   params: &[Val],
                                   _results| {
                                 let state = state.clone();
@@ -417,12 +414,12 @@ where
                                     // This allows us to verify the actor is making the same calls
                                     ctx.data_mut().record_event(ChainEventData {
                                         event_type: expected_type,
-                                        data: HostFunctionCall::new(
+                                        data: ChainEventPayload::HostFunction(HostFunctionCall::new(
                                             interface,
                                             function,
                                             actual_input,
                                             recorded_output,
-                                        ).into(),
+                                        )),
                                     });
 
                                     // For functions that return (), the results slice is empty
@@ -450,7 +447,7 @@ where
         Ok(())
     }
 
-    fn add_export_functions(&self, _actor_instance: &mut ActorInstance<E>) -> anyhow::Result<()> {
+    fn add_export_functions(&self, _actor_instance: &mut ActorInstance) -> anyhow::Result<()> {
         // Replay handler doesn't add export functions
         Ok(())
     }
@@ -483,7 +480,6 @@ mod tests {
             parent_hash: None,
             event_type: "theater:simple/runtime/log".to_string(),
             data: vec![],
-            description: Some("Test event".to_string()),
         }];
 
         let state = ReplayState::new(events);
@@ -503,14 +499,12 @@ mod tests {
                 parent_hash: None,
                 event_type: "test".to_string(),
                 data: vec![],
-                description: None,
             },
             ChainEvent {
                 hash: vec![5, 6, 7, 8],
                 parent_hash: Some(vec![1, 2, 3, 4]),
                 event_type: "test2".to_string(),
                 data: vec![],
-                description: None,
             },
         ];
 
@@ -532,7 +526,6 @@ mod tests {
             parent_hash: None,
             event_type: "theater:simple/runtime/log".to_string(),
             data: vec![],
-            description: Some("Test".to_string()),
         }];
 
         let handler = ReplayHandler::new(events);

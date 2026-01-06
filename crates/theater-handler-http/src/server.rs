@@ -7,7 +7,6 @@ use crate::incoming::{IncomingRequestResource, ResponseOutparam, ResponseOutpara
 use crate::types::{Headers, WasiMethod, WasiScheme};
 use crate::events::HttpEventData;
 use theater::handler::SharedActorInstance;
-use theater::events::EventPayload;
 use theater::events::theater_runtime::TheaterRuntimeEventData;
 use theater::events::wasm::WasmEventData;
 use theater::shutdown::ShutdownReceiver;
@@ -28,13 +27,11 @@ use wasmtime::component::{Resource, ResourceAny, Val};
 
 /// Start the incoming HTTP server
 pub async fn start_incoming_server<E>(
-    actor_instance: SharedActorInstance<E>,
+    actor_instance: SharedActorInstance,
     host: &str,
     port: u16,
     shutdown_receiver: ShutdownReceiver,
 ) -> Result<()>
-where
-    E: EventPayload + Clone + From<HttpEventData> + From<TheaterRuntimeEventData> + From<WasmEventData> + Send + Sync + 'static,
 {
     let addr: SocketAddr = format!("{}:{}", host, port).parse()?;
     let listener = TcpListener::bind(addr).await?;
@@ -93,10 +90,8 @@ where
 /// Handle a single HTTP request by calling the component's incoming-handler.handle export
 async fn handle_request<E>(
     req: Request<hyper::body::Incoming>,
-    actor_instance: Arc<SharedActorInstance<E>>,
+    actor_instance: Arc<SharedActorInstance>,
 ) -> Result<Response<Full<Bytes>>, Infallible>
-where
-    E: EventPayload + Clone + From<HttpEventData> + From<TheaterRuntimeEventData> + From<WasmEventData> + Send + Sync + 'static,
 {
     match handle_request_inner(req, actor_instance).await {
         Ok(response) => Ok(response),
@@ -112,10 +107,8 @@ where
 
 async fn handle_request_inner<E>(
     req: Request<hyper::body::Incoming>,
-    shared_instance: Arc<SharedActorInstance<E>>,
+    shared_instance: Arc<SharedActorInstance>,
 ) -> Result<Response<Full<Bytes>>>
-where
-    E: EventPayload + Clone + From<HttpEventData> + From<TheaterRuntimeEventData> + From<WasmEventData> + Send + Sync + 'static,
 {
     // Extract request information
     let method = convert_method(req.method());
@@ -166,15 +159,7 @@ where
         };
 
         // Record incoming request event
-        actor_instance.actor_component.actor_store.record_handler_event(
-            "wasi:http/incoming-handler/handle".to_string(),
-            HttpEventData::IncomingRequestReceived {
-                method: method_to_string(&method),
-                path: path_with_query.clone().unwrap_or_default(),
-            },
-            Some(format!("Incoming HTTP request: {} {}", method_to_string(&method), path_with_query.clone().unwrap_or_default())),
-        );
-
+        actor_instance.
         // Push resources to the resource table and get Resource handles
         let request_resource: Resource<IncomingRequestResource> = {
             let mut table = actor_instance.actor_component.actor_store.resource_table.lock().unwrap();

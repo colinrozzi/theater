@@ -8,9 +8,8 @@ use crate::actor::handle::ActorHandle;
 use crate::actor::store::ActorStore;
 use crate::actor::types::ActorError;
 use crate::actor::types::ActorOperation;
-use crate::events::theater_runtime::TheaterRuntimeEventData;
 use crate::events::wasm::WasmEventData;
-use crate::events::{ChainEventData, EventPayload};
+use crate::events::ChainEventData;
 use crate::handler::Handler;
 use crate::handler::HandlerContext;
 use crate::handler::HandlerRegistry;
@@ -50,12 +49,12 @@ const SHUTDOWN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 /// including handlers and communication channels. It's responsible for starting the actor,
 /// setting up its capabilities via handlers, executing operations, and ensuring proper shutdown.
 #[allow(dead_code)]
-pub struct ActorRuntime<E: EventPayload + Clone> {
+pub struct ActorRuntime {
     /// Unique identifier for this actor
     pub id: TheaterId,
     config: ManifestConfig,
-    handlers: Vec<Box<dyn Handler<E>>>,
-    actor_instance: ActorInstance<E>,
+    handlers: Vec<Box<dyn Handler>>,
+    actor_instance: ActorInstance,
     metrics: MetricsCollector,
     operation_rx: Receiver<ActorOperation>,
     info_rx: Receiver<ActorInfo>,
@@ -192,24 +191,21 @@ impl ActorPhaseManager {
     }
 }
 
-impl<E: EventPayload + Clone> ActorRuntime<E> {
+impl ActorRuntime {
     pub async fn build_actor_resources(
         id: TheaterId,
         config: &ManifestConfig,
         initial_state: Option<Value>,
         engine: Engine,
-        chain: Arc<SyncRwLock<StateChain<E>>>,
-        mut handler_registry: HandlerRegistry<E>,
+        chain: Arc<SyncRwLock<StateChain>>,
+        mut handler_registry: HandlerRegistry,
         theater_tx: Sender<TheaterCommand>,
         operation_tx: Sender<ActorOperation>,
         info_tx: Sender<ActorInfo>,
         control_tx: Sender<ActorControl>,
         actor_phase_manager: ActorPhaseManager,
-        actor_instance_wrapper: Arc<RwLock<Option<ActorInstance<E>>>>,
-    ) -> Result<(ShutdownController, Vec<JoinHandle<()>>), ActorRuntimeError>
-    where
-        E: From<TheaterRuntimeEventData> + From<WasmEventData>,
-    {
+        actor_instance_wrapper: Arc<RwLock<Option<ActorInstance>>>,
+    ) -> Result<(ShutdownController, Vec<JoinHandle<()>>), ActorRuntimeError> {
         // ---------------- Checkpoint Setup Initial ----------------
 
         debug!("Setting up actor store");
@@ -462,8 +458,8 @@ impl<E: EventPayload + Clone> ActorRuntime<E> {
         config: &ManifestConfig,
         initial_state: Option<Value>,
         engine: Engine,
-        chain: Arc<SyncRwLock<StateChain<E>>>,
-        handler_registry: HandlerRegistry<E>,
+        chain: Arc<SyncRwLock<StateChain>>,
+        handler_registry: HandlerRegistry,
         theater_tx: Sender<TheaterCommand>,
         operation_rx: Receiver<ActorOperation>,
         operation_tx: Sender<ActorOperation>,
@@ -471,15 +467,12 @@ impl<E: EventPayload + Clone> ActorRuntime<E> {
         info_tx: Sender<ActorInfo>,
         control_rx: Receiver<ActorControl>,
         control_tx: Sender<ActorControl>,
-    ) -> ()
-    where
-        E: From<TheaterRuntimeEventData> + From<WasmEventData>,
-    {
+    ) -> () {
         info!("Actor runtime starting communication loops");
         let actor_phase_manager = ActorPhaseManager::new();
 
         // These will be set once setup completes
-        let actor_instance_wrapper: Arc<RwLock<Option<ActorInstance<E>>>> =
+        let actor_instance_wrapper: Arc<RwLock<Option<ActorInstance>>> =
             Arc::new(RwLock::new(None));
         let metrics: Arc<RwLock<MetricsCollector>> = Arc::new(RwLock::new(MetricsCollector::new()));
         let handler_tasks: Arc<RwLock<Vec<JoinHandle<()>>>> = Arc::new(RwLock::new(vec![]));
@@ -665,14 +658,11 @@ impl<E: EventPayload + Clone> ActorRuntime<E> {
 
     async fn operation_loop(
         mut operation_rx: Receiver<ActorOperation>,
-        actor_instance_wrapper: Arc<RwLock<Option<ActorInstance<E>>>>,
+        actor_instance_wrapper: Arc<RwLock<Option<ActorInstance>>>,
         metrics: Arc<RwLock<MetricsCollector>>,
         theater_tx: Sender<TheaterCommand>,
         actor_phase_manager: ActorPhaseManager,
-    )
-    where
-        E: From<TheaterRuntimeEventData> + From<WasmEventData>,
-    {
+    ) {
         actor_phase_manager
             .wait_for_phase(ActorPhase::Running)
             .await;
@@ -702,14 +692,11 @@ impl<E: EventPayload + Clone> ActorRuntime<E> {
 
     async fn process_operation(
         op: ActorOperation,
-        actor_instance_wrapper: &Arc<RwLock<Option<ActorInstance<E>>>>,
+        actor_instance_wrapper: &Arc<RwLock<Option<ActorInstance>>>,
         metrics: &Arc<RwLock<MetricsCollector>>,
         theater_tx: &Sender<TheaterCommand>,
         actor_phase_manager: ActorPhaseManager,
-    ) -> ()
-    where
-        E: From<TheaterRuntimeEventData> + From<WasmEventData>,
-    {
+    ) -> () {
         match op {
             ActorOperation::CallFunction {
                 name,
@@ -784,13 +771,10 @@ impl<E: EventPayload + Clone> ActorRuntime<E> {
 
     async fn info_loop(
         mut info_rx: Receiver<ActorInfo>,
-        actor_instance_wrapper: Arc<RwLock<Option<ActorInstance<E>>>>,
+        actor_instance_wrapper: Arc<RwLock<Option<ActorInstance>>>,
         metrics: Arc<RwLock<MetricsCollector>>,
         actor_phase_manager: ActorPhaseManager,
-    )
-    where
-        E: From<TheaterRuntimeEventData> + From<WasmEventData>,
-    {
+    ) {
         // Handle info requests
         loop {
             tokio::select! {
@@ -907,15 +891,12 @@ impl<E: EventPayload + Clone> ActorRuntime<E> {
     /// * `Ok(Vec<u8>)` - Serialized result of the function call
     /// * `Err(ActorError)` - Error that occurred during execution
     async fn execute_call(
-        actor_instance: &mut ActorInstance<E>,
+        actor_instance: &mut ActorInstance,
         name: &String,
         params: Vec<u8>,
         _theater_tx: &mpsc::Sender<TheaterCommand>,
         metrics: &MetricsCollector,
-    ) -> Result<Vec<u8>, ActorError>
-    where
-        E: From<TheaterRuntimeEventData> + From<WasmEventData>,
-    {
+    ) -> Result<Vec<u8>, ActorError> {
         // Validate the function exists
         if !actor_instance.has_function(&name) {
             error!("Function '{}' not found in actor", name);

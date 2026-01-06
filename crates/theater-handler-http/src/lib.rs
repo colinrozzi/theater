@@ -26,7 +26,6 @@ pub use types::*;
 pub use events::HttpEventData;
 
 use theater::handler::{Handler, HandlerContext, SharedActorInstance};
-use theater::events::EventPayload;
 use theater::wasm::{ActorComponent, ActorInstance};
 use theater::actor::handle::ActorHandle;
 use theater::shutdown::ShutdownReceiver;
@@ -83,11 +82,9 @@ impl WasiHttpHandler {
     }
 }
 
-impl<E> Handler<E> for WasiHttpHandler
-where
-    E: EventPayload + Clone + From<HttpEventData> + From<TheaterRuntimeEventData> + From<WasmEventData> + Send + 'static,
+impl Handler for WasiHttpHandler
 {
-    fn create_instance(&self) -> Box<dyn Handler<E>> {
+    fn create_instance(&self) -> Box<dyn Handler> {
         Box::new(Self {
             config: self.config.clone(),
         })
@@ -96,7 +93,7 @@ where
     fn start(
         &mut self,
         _actor_handle: ActorHandle,
-        actor_instance: SharedActorInstance<E>,
+        actor_instance: SharedActorInstance,
         shutdown_receiver: ShutdownReceiver,
     ) -> Pin<Box<dyn Future<Output = Result<()>> + Send>> {
         let port = self.config.port;
@@ -132,7 +129,7 @@ where
         })
     }
 
-    fn setup_host_functions(&mut self, actor_component: &mut ActorComponent<E>, _ctx: &mut HandlerContext) -> Result<()> {
+    fn setup_host_functions(&mut self, actor_component: &mut ActorComponent, _ctx: &mut HandlerContext) -> Result<()> {
         use crate::bindings;
         use theater::actor::ActorStore;
 
@@ -141,28 +138,28 @@ where
         // Add wasi:io/error interface (HTTP depends on this)
         bindings::wasi::io::error::add_to_linker(
             &mut actor_component.linker,
-            |state: &mut ActorStore<E>| state,
+            |state: &mut ActorStore| state,
         )?;
         debug!("wasi:io/error interface added");
 
         // Add wasi:io/streams interface (HTTP depends on this)
         bindings::wasi::io::streams::add_to_linker(
             &mut actor_component.linker,
-            |state: &mut ActorStore<E>| state,
+            |state: &mut ActorStore| state,
         )?;
         debug!("wasi:io/streams interface added");
 
         // Add wasi:http/types interface (all HTTP types and resources)
         bindings::wasi::http::types::add_to_linker(
             &mut actor_component.linker,
-            |state: &mut ActorStore<E>| state,
+            |state: &mut ActorStore| state,
         )?;
         debug!("wasi:http/types interface added");
 
         // Add wasi:http/outgoing-handler interface (HTTP client)
         bindings::wasi::http::outgoing_handler::add_to_linker(
             &mut actor_component.linker,
-            |state: &mut ActorStore<E>| state,
+            |state: &mut ActorStore| state,
         )?;
         debug!("wasi:http/outgoing-handler interface added");
 
@@ -175,7 +172,7 @@ where
 
     fn add_export_functions(
         &self,
-        _actor_instance: &mut ActorInstance<E>,
+        _actor_instance: &mut ActorInstance,
     ) -> Result<()> {
         Ok(())
     }

@@ -1,4 +1,3 @@
-use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use theater::chain::ChainEvent;
 use theater::id::TheaterId;
@@ -98,8 +97,6 @@ async fn test_theater_command_new_event() {
         parent_hash: None,
         event_type: "test-event".to_string(),
         data: vec![4, 5, 6],
-        timestamp: Utc::now().timestamp_millis() as u64,
-        description: Some("Test event description".to_string()),
     };
 
     let command = TheaterCommand::NewEvent {
@@ -116,8 +113,6 @@ async fn test_theater_command_new_event() {
             assert_eq!(e.hash, event.hash);
             assert_eq!(e.event_type, event.event_type);
             assert_eq!(e.data, event.data);
-            assert_eq!(e.timestamp, event.timestamp);
-            assert_eq!(e.description, event.description);
         }
         _ => panic!("Wrong command type"),
     }

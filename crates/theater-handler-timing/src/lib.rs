@@ -28,7 +28,6 @@ use theater::actor::types::ActorError;
 use theater::config::actor_manifest::TimingHostConfig;
 use theater::config::enforcement::PermissionChecker;
 use theater::config::permissions::TimingPermissions;
-use theater::events::EventPayload;
 use theater::handler::{Handler, HandlerContext, SharedActorInstance};
 use theater::shutdown::ShutdownReceiver;
 use theater::wasm::{ActorComponent, ActorInstance};
@@ -96,38 +95,14 @@ impl TimingHandler {
     // methods have been replaced by bindgen-generated add_to_linker calls in setup_host_functions_impl.
     // The Host trait implementations are in host_impl.rs.
 
-    fn setup_host_functions_impl<E>(&mut self, actor_component: &mut ActorComponent<E>) -> Result<()>
-    where
-        E: EventPayload + Clone + From<TimingEventData> + From<theater::HostFunctionCall>,
-    {
-        // Record setup start
-        actor_component.actor_store.record_handler_event(
-            "timing-setup".to_string(),
-            TimingEventData::HandlerSetupStart,
-            Some("Starting timing host function setup".to_string()),
-        );
+    fn setup_host_functions_impl(&mut self, actor_component: &mut ActorComponent) -> Result<()> {
 
         info!("Setting up timing host functions");
 
         let mut interface = match actor_component.linker.instance("theater:simple/timing") {
-            Ok(interface) => {
-                actor_component.actor_store.record_handler_event(
-                    "timing-setup".to_string(),
-                    TimingEventData::LinkerInstanceSuccess,
-                    Some("Successfully created linker instance".to_string()),
-                );
-                interface
+            Ok(interface) => {                interface
             }
-            Err(e) => {
-                actor_component.actor_store.record_handler_event(
-                    "timing-setup".to_string(),
-                    TimingEventData::HandlerSetupError {
-                        error: e.to_string(),
-                        step: "linker_instance".to_string(),
-                    },
-                    Some(format!("Failed to create linker instance: {}", e)),
-                );
-                return Err(anyhow::anyhow!(
+            Err(e) => {                return Err(anyhow::anyhow!(
                     "Could not instantiate theater:simple/timing: {}",
                     e
                 ));
@@ -140,7 +115,7 @@ impl TimingHandler {
         let _ = interface
             .func_wrap(
                 "now",
-                move |mut ctx: StoreContextMut<'_, ActorStore<E>>, ()| -> Result<(u64,)> {
+                move |mut ctx: StoreContextMut<'_, ActorStore>, ()| -> Result<(u64,)> {
                     let now = Utc::now().timestamp_millis() as u64;
 
                     // Record with standardized HostFunctionCall format for replay
@@ -149,22 +124,12 @@ impl TimingHandler {
                         "now",
                         &(),   // no input
                         &now,  // output: timestamp
-                        Some(format!("now() -> {}", now)),
                     );
 
                     Ok((now,))
                 },
             )
-            .map_err(|e| {
-                actor_component.actor_store.record_handler_event(
-                    "timing-setup".to_string(),
-                    TimingEventData::HandlerSetupError {
-                        error: e.to_string(),
-                        step: "now_function_wrap".to_string(),
-                    },
-                    Some(format!("Failed to wrap now function: {}", e)),
-                );
-                anyhow::anyhow!("Failed to wrap now function: {}", e)
+            .map_err(|e| {                anyhow::anyhow!("Failed to wrap now function: {}", e)
             })?;
 
         // Implementation of the sleep() function
@@ -172,7 +137,7 @@ impl TimingHandler {
         let _ = interface
             .func_wrap_async(
                 "sleep",
-                move |mut ctx: StoreContextMut<'_, ActorStore<E>>,
+                move |mut ctx: StoreContextMut<'_, ActorStore>,
                       (duration,): (u64,)|
                       -> Box<dyn Future<Output = Result<(Result<(), String>,)>> + Send> {
 
@@ -189,7 +154,6 @@ impl TimingHandler {
                             "sleep",
                             &duration,
                             &result,
-                            Some(format!("sleep({}) -> permission denied", duration)),
                         );
 
                         return Box::new(futures::future::ready(Ok((result,))));
@@ -210,23 +174,13 @@ impl TimingHandler {
                             "sleep",
                             &duration_clone,
                             &result,
-                            Some(format!("sleep({}) -> ok", duration_clone)),
                         );
 
                         Ok((result,))
                     })
                 },
             )
-            .map_err(|e| {
-                actor_component.actor_store.record_handler_event(
-                    "timing-setup".to_string(),
-                    TimingEventData::HandlerSetupError {
-                        error: e.to_string(),
-                        step: "sleep_function_wrap".to_string(),
-                    },
-                    Some(format!("Failed to wrap sleep function: {}", e)),
-                );
-                anyhow::anyhow!("Failed to wrap sleep function: {}", e)
+            .map_err(|e| {                anyhow::anyhow!("Failed to wrap sleep function: {}", e)
             })?;
 
         // Implementation of the deadline() function
@@ -234,7 +188,7 @@ impl TimingHandler {
         let _ = interface
             .func_wrap_async(
                 "deadline",
-                move |mut ctx: StoreContextMut<'_, ActorStore<E>>,
+                move |mut ctx: StoreContextMut<'_, ActorStore>,
                       (timestamp,): (u64,)|
                       -> Box<dyn Future<Output = Result<(Result<(), String>,)>> + Send> {
                     let now = Utc::now().timestamp_millis() as u64;
@@ -248,7 +202,6 @@ impl TimingHandler {
                             "deadline",
                             &timestamp,
                             &result,
-                            Some(format!("deadline({}) -> ok (already passed)", timestamp)),
                         );
 
                         return Box::new(futures::future::ready(Ok((result,))));
@@ -268,7 +221,6 @@ impl TimingHandler {
                             "deadline",
                             &timestamp,
                             &result,
-                            Some(format!("deadline({}) -> permission denied", timestamp)),
                         );
 
                         return Box::new(futures::future::ready(Ok((result,))));
@@ -287,31 +239,14 @@ impl TimingHandler {
                             "deadline",
                             &timestamp_clone,
                             &result,
-                            Some(format!("deadline({}) -> ok", timestamp_clone)),
                         );
 
                         Ok((result,))
                     })
                 },
             )
-            .map_err(|e| {
-                actor_component.actor_store.record_handler_event(
-                    "timing-setup".to_string(),
-                    TimingEventData::HandlerSetupError {
-                        error: e.to_string(),
-                        step: "deadline_function_wrap".to_string(),
-                    },
-                    Some(format!("Failed to wrap deadline function: {}", e)),
-                );
-                anyhow::anyhow!("Failed to wrap deadline function: {}", e)
+            .map_err(|e| {                anyhow::anyhow!("Failed to wrap deadline function: {}", e)
             })?;
-
-        actor_component.actor_store.record_handler_event(
-            "timing-setup".to_string(),
-            TimingEventData::HandlerSetupSuccess,
-            Some("Timing host functions setup completed successfully".to_string()),
-        );
-
         info!("Theater timing host functions added successfully");
 
         // Setup WASI-compliant clock and poll interfaces using bindgen-generated add_to_linker
@@ -323,21 +258,21 @@ impl TimingHandler {
         // Add wasi:clocks/wall-clock interface
         bindings::wasi::clocks::wall_clock::add_to_linker(
             &mut actor_component.linker,
-            |state: &mut ActorStore<E>| state,
+            |state: &mut ActorStore| state,
         )?;
         info!("wasi:clocks/wall-clock interface added");
 
         // Add wasi:clocks/monotonic-clock interface
         bindings::wasi::clocks::monotonic_clock::add_to_linker(
             &mut actor_component.linker,
-            |state: &mut ActorStore<E>| state,
+            |state: &mut ActorStore| state,
         )?;
         info!("wasi:clocks/monotonic-clock interface added");
 
         // Add wasi:io/poll interface
         bindings::wasi::io::poll::add_to_linker(
             &mut actor_component.linker,
-            |state: &mut ActorStore<E>| state,
+            |state: &mut ActorStore| state,
         )?;
         info!("wasi:io/poll interface added");
 
@@ -346,10 +281,7 @@ impl TimingHandler {
         Ok(())
     }
 
-    fn add_export_functions_impl<E>(&self, _actor_instance: &mut ActorInstance<E>) -> Result<()>
-    where
-        E: EventPayload + Clone + From<TimingEventData> + From<theater::HostFunctionCall>,
-    {
+    fn add_export_functions_impl(&self, _actor_instance: &mut ActorInstance) -> Result<()> {
         info!("No export functions needed for timing handler");
         Ok(())
     }
@@ -364,18 +296,16 @@ impl TimingHandler {
     }
 }
 
-impl<E> Handler<E> for TimingHandler
-where
-    E: EventPayload + Clone + From<TimingEventData> + From<theater::HostFunctionCall>,
+impl Handler for TimingHandler
 {
-    fn create_instance(&self) -> Box<dyn Handler<E>> {
+    fn create_instance(&self) -> Box<dyn Handler> {
         Box::new(self.clone())
     }
 
     fn start(
         &mut self,
         actor_handle: ActorHandle,
-        _actor_instance: SharedActorInstance<E>,
+        _actor_instance: SharedActorInstance,
         shutdown_receiver: ShutdownReceiver,
     ) -> Pin<Box<dyn Future<Output = Result<()>> + Send>> {
         let handler = self.clone();
@@ -384,7 +314,7 @@ where
 
     fn setup_host_functions(
         &mut self,
-        actor_component: &mut ActorComponent<E>,
+        actor_component: &mut ActorComponent,
         _ctx: &mut HandlerContext,
     ) -> Result<()> {
         self.setup_host_functions_impl(actor_component)
@@ -392,7 +322,7 @@ where
 
     fn add_export_functions(
         &self,
-        actor_instance: &mut ActorInstance<E>,
+        actor_instance: &mut ActorInstance,
     ) -> Result<()> {
         self.add_export_functions_impl(actor_instance)
     }

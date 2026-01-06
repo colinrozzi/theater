@@ -28,13 +28,11 @@
 
 pub mod events;
 
-pub use events::MessageEventData;
 
 use theater::actor::handle::ActorHandle;
 use theater::actor::store::ActorStore;
 use theater::actor::types::ActorError;
 use theater::config::permissions::MessageServerPermissions;
-use theater::events::{ChainEventData, EventPayload};
 use theater::handler::{Handler, HandlerContext, SharedActorInstance};
 use theater::messages::{
     ActorChannelClose, ActorChannelInitiated, ActorChannelMessage, ActorChannelOpen,
@@ -453,13 +451,9 @@ impl MessageServerHandler {
     }
 }
 
-impl<E> Handler<E> for MessageServerHandler
-where
-    E: EventPayload + Clone + From<MessageEventData>
-        + From<theater::events::theater_runtime::TheaterRuntimeEventData>
-        + From<theater::events::wasm::WasmEventData>,
+impl Handler for MessageServerHandler
 {
-    fn create_instance(&self) -> Box<dyn Handler<E>> {
+    fn create_instance(&self) -> Box<dyn Handler> {
         Box::new(self.clone())
     }
 
@@ -475,7 +469,7 @@ where
         Some(vec!["theater:simple/message-server-client".to_string()])
     }
 
-    fn setup_host_functions(&mut self, actor_component: &mut ActorComponent<E>, _ctx: &mut HandlerContext) -> Result<()> {
+    fn setup_host_functions(&mut self, actor_component: &mut ActorComponent, _ctx: &mut HandlerContext) -> Result<()> {
         info!("Setting up message server host functions");
 
         // Get this actor's ID
@@ -498,35 +492,15 @@ where
         *self.mailbox_rx.lock().unwrap() = Some(mailbox_rx);
 
         // Record setup start
-        actor_component.actor_store.record_event(ChainEventData {
-            event_type: "message-server-setup".to_string(),
-            data: MessageEventData::HandlerSetupStart.into(),
-            description: Some("Starting message server host function setup".to_string()),
-        });
 
         let mut interface = match actor_component
             .linker
             .instance("theater:simple/message-server-host")
         {
             Ok(interface) => {
-                actor_component.actor_store.record_event(ChainEventData {
-                    event_type: "message-server-setup".to_string(),
-                    data: MessageEventData::LinkerInstanceSuccess.into(),
-                            description: Some(
-                        "Successfully created linker instance for message-server-host".to_string(),
-                    ),
-                });
                 interface
             }
             Err(e) => {
-                actor_component.actor_store.record_event(ChainEventData {
-                    event_type: "message-server-setup".to_string(),
-                    data: MessageEventData::HandlerSetupError {
-                        error: e.to_string(),
-                        step: "linker_instance".to_string(),
-                    }.into(),
-                            description: Some(format!("Failed to create linker instance: {}", e)),
-                });
                 return Err(anyhow::anyhow!(
                     "Could not instantiate theater:simple/message-server-host: {}",
                     e
@@ -535,50 +509,21 @@ where
         };
 
         // 1. send operation
-        actor_component.actor_store.record_event(ChainEventData {
-            event_type: "message-server-setup".to_string(),
-            data: MessageEventData::FunctionSetupStart {
-                function_name: "send".to_string(),
-            }.into(),
-            description: Some("Setting up 'send' function wrapper".to_string()),
-        });
 
         let router = self.router.clone();
 
         interface
             .func_wrap_async(
                 "send",
-                move |mut ctx: StoreContextMut<'_, ActorStore<E>>,
+                move |mut ctx: StoreContextMut<'_, ActorStore>,
                       (address, msg): (String, Vec<u8>)|
                       -> Box<dyn Future<Output = Result<(Result<(), String>,)>> + Send> {
-                    ctx.data_mut().record_event(ChainEventData {
-                        event_type: "theater:simple/message-server-host/send".to_string(),
-                        data: MessageEventData::SendMessageCall {
-                            recipient: address.clone(),
-                            message_type: "binary".to_string(),
-                            data: msg.clone(),
-                        }.into(),
-                                    description: Some(format!("Sending message to {}", address)),
-                    });
 
                     info!("Sending message to actor: {}", address);
                     let target_id = match TheaterId::parse(&address) {
                         Ok(id) => id,
                         Err(e) => {
                             let err_msg = format!("Failed to parse actor ID: {}", e);
-                            ctx.data_mut().record_event(ChainEventData {
-                                event_type: "theater:simple/message-server-host/send"
-                                    .to_string(),
-                                data: MessageEventData::Error {
-                                    operation: "send".to_string(),
-                                    recipient: Some(address.clone()),
-                                    message: err_msg.clone(),
-                                }.into(),
-                                                    description: Some(format!(
-                                    "Error sending message to {}: {}",
-                                    address, err_msg
-                                )),
-                            });
                             return Box::new(async move { Ok((Err(err_msg),)) });
                         }
                     };
@@ -596,70 +541,19 @@ where
                     Box::new(async move {
                         if let Err(e) = router.route_message(command).await {
                             let err = e.to_string();
-                            ctx.data_mut().record_event(ChainEventData {
-                                event_type: "theater:simple/message-server-host/send"
-                                    .to_string(),
-                                data: MessageEventData::Error {
-                                    operation: "send".to_string(),
-                                    recipient: Some(address_clone.clone()),
-                                    message: err.clone(),
-                                }.into(),
-                                                    description: Some(format!(
-                                    "Failed to send command to message-server: {}",
-                                    err
-                                )),
-                            });
                             return Ok((Err(err),));
                         }
 
                         match response_rx.await {
                             Ok(Ok(())) => {
-                                ctx.data_mut().record_event(ChainEventData {
-                                    event_type: "theater:simple/message-server-host/send"
-                                        .to_string(),
-                                    data: MessageEventData::SendMessageResult {
-                                        recipient: address_clone.clone(),
-                                        success: true,
-                                    }.into(),
-                                                            description: Some(format!(
-                                        "Successfully sent message to {}",
-                                        address_clone
-                                    )),
-                                });
                                 Ok((Ok(()),))
                             }
                             Ok(Err(e)) => {
                                 let err = e.to_string();
-                                ctx.data_mut().record_event(ChainEventData {
-                                    event_type: "theater:simple/message-server-host/send"
-                                        .to_string(),
-                                    data: MessageEventData::Error {
-                                        operation: "send".to_string(),
-                                        recipient: Some(address_clone.clone()),
-                                        message: err.clone(),
-                                    }.into(),
-                                                            description: Some(format!(
-                                        "Failed to send message to {}: {}",
-                                        address_clone, err
-                                    )),
-                                });
                                 Ok((Err(err),))
                             }
                             Err(e) => {
                                 let err = e.to_string();
-                                ctx.data_mut().record_event(ChainEventData {
-                                    event_type: "theater:simple/message-server-host/send"
-                                        .to_string(),
-                                    data: MessageEventData::Error {
-                                        operation: "send".to_string(),
-                                        recipient: Some(address_clone.clone()),
-                                        message: err.clone(),
-                                    }.into(),
-                                                            description: Some(format!(
-                                        "Failed to receive response from message-server: {}",
-                                        err
-                                    )),
-                                });
                                 Ok((Err(err),))
                             }
                         }
@@ -667,54 +561,20 @@ where
                 },
             )
             .map_err(|e| {
-                actor_component.actor_store.record_event(ChainEventData {
-                    event_type: "message-server-setup".to_string(),
-                    data: MessageEventData::HandlerSetupError {
-                        error: e.to_string(),
-                        step: "send_function_wrap".to_string(),
-                    }.into(),
-                            description: Some(format!(
-                        "Failed to set up 'send' function wrapper: {}",
-                        e
-                    )),
-                });
                 anyhow::anyhow!("Failed to wrap async send function: {}", e)
             })?;
 
-        actor_component.actor_store.record_event(ChainEventData {
-            event_type: "message-server-setup".to_string(),
-            data: MessageEventData::FunctionSetupSuccess {
-                function_name: "send".to_string(),
-            }.into(),
-            description: Some("Successfully set up 'send' function wrapper".to_string()),
-        });
 
         // 2. request operation
-        actor_component.actor_store.record_event(ChainEventData {
-            event_type: "message-server-setup".to_string(),
-            data: MessageEventData::FunctionSetupStart {
-                function_name: "request".to_string(),
-            }.into(),
-            description: Some("Setting up 'request' function wrapper".to_string()),
-        });
 
         let router = self.router.clone();
 
         interface
             .func_wrap_async(
                 "request",
-                move |mut ctx: StoreContextMut<'_, ActorStore<E>>,
+                move |mut ctx: StoreContextMut<'_, ActorStore>,
                       (address, msg): (String, Vec<u8>)|
                       -> Box<dyn Future<Output = Result<(Result<Vec<u8>, String>,)>> + Send> {
-                    ctx.data_mut().record_event(ChainEventData {
-                        event_type: "theater:simple/message-server-host/request".to_string(),
-                        data: MessageEventData::RequestMessageCall {
-                            recipient: address.clone(),
-                            message_type: "binary".to_string(),
-                            data: msg.clone(),
-                        }.into(),
-                                    description: Some(format!("Requesting message from {}", address)),
-                    });
 
                     let router = router.clone();
                     let address_clone = address.clone();
@@ -724,19 +584,6 @@ where
                             Ok(id) => id,
                             Err(e) => {
                                 let err_msg = format!("Failed to parse actor ID: {}", e);
-                                ctx.data_mut().record_event(ChainEventData {
-                                    event_type: "theater:simple/message-server-host/request"
-                                        .to_string(),
-                                    data: MessageEventData::Error {
-                                        operation: "request".to_string(),
-                                        recipient: Some(address_clone.clone()),
-                                        message: err_msg.clone(),
-                                    }.into(),
-                                                            description: Some(format!(
-                                        "Error requesting message from {}: {}",
-                                        address_clone, err_msg
-                                    )),
-                                });
                                 return Ok((Err(err_msg),));
                             }
                         };
@@ -755,19 +602,6 @@ where
 
                         if let Err(e) = router.route_message(command).await {
                             let err = e.to_string();
-                            ctx.data_mut().record_event(ChainEventData {
-                                event_type: "theater:simple/message-server-host/request"
-                                    .to_string(),
-                                data: MessageEventData::Error {
-                                    operation: "request".to_string(),
-                                    recipient: Some(address_clone.clone()),
-                                    message: err.clone(),
-                                }.into(),
-                                                    description: Some(format!(
-                                    "Failed to send command to message-server: {}",
-                                    err
-                                )),
-                            });
                             return Ok((Err(err),));
                         }
 
@@ -777,73 +611,20 @@ where
                                 // Command sent successfully, now wait for actor response
                                 match response_rx.await {
                                     Ok(response) => {
-                                        ctx.data_mut().record_event(ChainEventData {
-                                            event_type: "theater:simple/message-server-host/request"
-                                                .to_string(),
-                                            data: 
-                                                MessageEventData::RequestMessageResult {
-                                                    recipient: address_clone.clone(),
-                                                    data: response.clone(),
-                                                    success: true,
-                                                }.into(),
-                                                                            description: Some(format!(
-                                                "Successfully received response from {}",
-                                                address_clone
-                                            )),
-                                        });
                                         Ok((Ok(response),))
                                     }
                                     Err(e) => {
                                         let err = e.to_string();
-                                        ctx.data_mut().record_event(ChainEventData {
-                                            event_type: "theater:simple/message-server-host/request"
-                                                .to_string(),
-                                            data: MessageEventData::Error {
-                                                operation: "request".to_string(),
-                                                recipient: Some(address_clone.clone()),
-                                                message: err.clone(),
-                                            }.into(),
-                                                                            description: Some(format!(
-                                                "Failed to receive response from {}: {}",
-                                                address_clone, err
-                                            )),
-                                        });
                                         Ok((Err(err),))
                                     }
                                 }
                             }
                             Ok(Err(e)) => {
                                 let err = e.to_string();
-                                ctx.data_mut().record_event(ChainEventData {
-                                    event_type: "theater:simple/message-server-host/request"
-                                        .to_string(),
-                                    data: MessageEventData::Error {
-                                        operation: "request".to_string(),
-                                        recipient: Some(address_clone.clone()),
-                                        message: err.clone(),
-                                    }.into(),
-                                                            description: Some(format!(
-                                        "Failed to send request to {}: {}",
-                                        address_clone, err
-                                    )),
-                                });
                                 Ok((Err(err),))
                             }
                             Err(e) => {
                                 let err = e.to_string();
-                                ctx.data_mut().record_event(ChainEventData {
-                                    event_type: "theater:simple/message-server-host/request"
-                                        .to_string(),
-                                    data: MessageEventData::Error {
-                                        operation: "request".to_string(),
-                                        recipient: Some(address_clone.clone()),
-                                        message: err.clone(),
-                                    }.into(),
-                                                            description: Some(format!(
-                                        "Failed to receive command response from message-server: {}",
-                                        err
-                                    )),
-                                });
                                 Ok((Err(err),))
                             }
                         }
@@ -851,131 +632,51 @@ where
                 },
             )
             .map_err(|e| {
-                actor_component.actor_store.record_event(ChainEventData {
-                    event_type: "message-server-setup".to_string(),
-                    data: MessageEventData::HandlerSetupError {
-                        error: e.to_string(),
-                        step: "request_function_wrap".to_string(),
-                    }.into(),
-                            description: Some(format!(
-                        "Failed to set up 'request' function wrapper: {}",
-                        e
-                    )),
-                });
                 anyhow::anyhow!("Failed to wrap async request function: {}", e)
             })?;
 
-        actor_component.actor_store.record_event(ChainEventData {
-            event_type: "message-server-setup".to_string(),
-            data: MessageEventData::FunctionSetupSuccess {
-                function_name: "request".to_string(),
-            }.into(),
-            description: Some("Successfully set up 'request' function wrapper".to_string()),
-        });
 
         // 3. list-outstanding-requests operation
-        actor_component.actor_store.record_event(ChainEventData {
-            event_type: "message-server-setup".to_string(),
-            data: MessageEventData::FunctionSetupStart {
-                function_name: "list-outstanding-requests".to_string(),
-            }.into(),
-            description: Some(
-                "Setting up 'list-outstanding-requests' function wrapper".to_string(),
-            ),
-        });
 
         let outstanding_requests = self.outstanding_requests.clone();
 
         interface
             .func_wrap_async(
                 "list-outstanding-requests",
-                move |mut ctx: StoreContextMut<'_, ActorStore<E>>,
+                move |mut ctx: StoreContextMut<'_, ActorStore>,
                       _: ()|
                       -> Box<dyn Future<Output = Result<(Vec<String>,)>> + Send> {
-                    ctx.data_mut().record_event(ChainEventData {
-                        event_type: "theater:simple/message-server-host/list-outstanding-requests"
-                            .to_string(),
-                        data: MessageEventData::ListOutstandingRequestsCall {}.into(),
-                                    description: Some("Listing outstanding requests".to_string()),
-                    });
 
                     let outstanding_clone = outstanding_requests.clone();
                     Box::new(async move {
                         let requests = outstanding_clone.lock().unwrap();
                         let ids: Vec<String> = requests.keys().cloned().collect();
 
-                        ctx.data_mut().record_event(ChainEventData {
-                            event_type:
-                                "theater:simple/message-server-host/list-outstanding-requests"
-                                    .to_string(),
-                            data: 
-                                MessageEventData::ListOutstandingRequestsResult {
-                                    request_count: ids.len(),
-                                    request_ids: ids.clone(),
-                                }.into(),
-                                            description: Some(format!("Found {} outstanding requests", ids.len())),
-                        });
 
                         Ok((ids,))
                     })
                 },
             )
             .map_err(|e| {
-                actor_component.actor_store.record_event(ChainEventData {
-                    event_type: "message-server-setup".to_string(),
-                    data: MessageEventData::HandlerSetupError {
-                        error: e.to_string(),
-                        step: "list_outstanding_requests_function_wrap".to_string(),
-                    }.into(),
-                            description: Some(format!(
-                        "Failed to set up 'list-outstanding-requests' function wrapper: {}",
-                        e
-                    )),
-                });
                 anyhow::anyhow!(
                     "Failed to wrap async list-outstanding-requests function: {}",
                     e
                 )
             })?;
 
-        actor_component.actor_store.record_event(ChainEventData {
-            event_type: "message-server-setup".to_string(),
-            data: MessageEventData::FunctionSetupSuccess {
-                function_name: "list-outstanding-requests".to_string(),
-            }.into(),
-            description: Some(
-                "Successfully set up 'list-outstanding-requests' function wrapper".to_string(),
-            ),
-        });
 
         // 4. respond-to-request operation
         let outstanding_requests = self.outstanding_requests.clone();
 
-        actor_component.actor_store.record_event(ChainEventData {
-            event_type: "message-server-setup".to_string(),
-            data: MessageEventData::FunctionSetupStart {
-                function_name: "respond-to-request".to_string(),
-            }.into(),
-            description: Some("Setting up 'respond-to-request' function wrapper".to_string()),
-        });
 
         interface
             .func_wrap_async(
                 "respond-to-request",
-                move |mut ctx: StoreContextMut<'_, ActorStore<E>>,
+                move |mut ctx: StoreContextMut<'_, ActorStore>,
                       (request_id, response_data): (String, Vec<u8>)|
                       -> Box<dyn Future<Output = Result<(Result<(), String>,)>> + Send> {
                     let request_id_clone = request_id.clone();
 
-                    ctx.data_mut().record_event(ChainEventData {
-                        event_type: "theater:simple/message-server-host/respond-to-request"
-                            .to_string(),
-                        data: MessageEventData::RespondToRequestCall {
-                            request_id: request_id.clone(),
-                            response_size: response_data.len(),
-                        }.into(),
-                                    description: Some(format!("Responding to request {}", request_id)),
-                    });
 
                     let outstanding_clone = outstanding_requests.clone();
                     Box::new(async move {
@@ -983,221 +684,73 @@ where
                         if let Some(sender) = requests.remove(&request_id) {
                             match sender.send(response_data) {
                                 Ok(_) => {
-                                    ctx.data_mut().record_event(ChainEventData {
-                                        event_type:
-                                            "theater:simple/message-server-host/respond-to-request"
-                                                .to_string(),
-                                        data: 
-                                            MessageEventData::RespondToRequestResult {
-                                                request_id: request_id_clone.clone(),
-                                                success: true,
-                                            }.into(),
-                                                                    description: Some(format!(
-                                            "Successfully responded to request {}",
-                                            request_id_clone
-                                        )),
-                                    });
                                     Ok((Ok(()),))
                                 }
                                 Err(e) => {
                                     let err_msg = format!("Failed to send response: {:?}", e);
-                                    ctx.data_mut().record_event(ChainEventData {
-                                        event_type:
-                                            "theater:simple/message-server-host/respond-to-request"
-                                                .to_string(),
-                                        data: MessageEventData::Error {
-                                            operation: "respond-to-request".to_string(),
-                                            recipient: None,
-                                            message: err_msg.clone(),
-                                        }.into(),
-                                                                    description: Some(format!(
-                                            "Error responding to request {}: {}",
-                                            request_id_clone, err_msg
-                                        )),
-                                    });
                                     Ok((Err(err_msg),))
                                 }
                             }
                         } else {
                             let err_msg = format!("Request ID not found: {}", request_id);
-                            ctx.data_mut().record_event(ChainEventData {
-                                event_type: "theater:simple/message-server-host/respond-to-request"
-                                    .to_string(),
-                                data: MessageEventData::Error {
-                                    operation: "respond-to-request".to_string(),
-                                    recipient: None,
-                                    message: err_msg.clone(),
-                                }.into(),
-                                                    description: Some(format!(
-                                    "Request {} not found",
-                                    request_id_clone
-                                )),
-                            });
                             Ok((Err(err_msg),))
                         }
                     })
                 },
             )
             .map_err(|e| {
-                actor_component.actor_store.record_event(ChainEventData {
-                    event_type: "message-server-setup".to_string(),
-                    data: MessageEventData::HandlerSetupError {
-                        error: e.to_string(),
-                        step: "respond_to_request_function_wrap".to_string(),
-                    }.into(),
-                            description: Some(format!(
-                        "Failed to set up 'respond-to-request' function wrapper: {}",
-                        e
-                    )),
-                });
                 anyhow::anyhow!("Failed to wrap async respond-to-request function: {}", e)
             })?;
 
-        actor_component.actor_store.record_event(ChainEventData {
-            event_type: "message-server-setup".to_string(),
-            data: MessageEventData::FunctionSetupSuccess {
-                function_name: "respond-to-request".to_string(),
-            }.into(),
-            description: Some(
-                "Successfully set up 'respond-to-request' function wrapper".to_string(),
-            ),
-        });
 
         // 5. cancel-request operation
         let outstanding_requests = self.outstanding_requests.clone();
 
-        actor_component.actor_store.record_event(ChainEventData {
-            event_type: "message-server-setup".to_string(),
-            data: MessageEventData::FunctionSetupStart {
-                function_name: "cancel-request".to_string(),
-            }.into(),
-            description: Some("Setting up 'cancel-request' function wrapper".to_string()),
-        });
 
         interface
             .func_wrap_async(
                 "cancel-request",
-                move |mut ctx: StoreContextMut<'_, ActorStore<E>>,
+                move |mut ctx: StoreContextMut<'_, ActorStore>,
                       (request_id,): (String,)|
                       -> Box<dyn Future<Output = Result<(Result<(), String>,)>> + Send> {
                     let request_id_clone = request_id.clone();
 
-                    ctx.data_mut().record_event(ChainEventData {
-                        event_type: "theater:simple/message-server-host/cancel-request"
-                            .to_string(),
-                        data: MessageEventData::CancelRequestCall {
-                            request_id: request_id.clone(),
-                        }.into(),
-                                    description: Some(format!("Canceling request {}", request_id)),
-                    });
 
                     let outstanding_clone = outstanding_requests.clone();
                     Box::new(async move {
                         let mut requests = outstanding_clone.lock().unwrap();
                         if requests.remove(&request_id).is_some() {
-                            ctx.data_mut().record_event(ChainEventData {
-                                event_type: "theater:simple/message-server-host/cancel-request"
-                                    .to_string(),
-                                data: MessageEventData::CancelRequestResult {
-                                    request_id: request_id_clone.clone(),
-                                    success: true,
-                                }.into(),
-                                                    description: Some(format!(
-                                    "Successfully canceled request {}",
-                                    request_id_clone
-                                )),
-                            });
                             Ok((Ok(()),))
                         } else {
                             let err_msg = format!("Request ID not found: {}", request_id);
-                            ctx.data_mut().record_event(ChainEventData {
-                                event_type: "theater:simple/message-server-host/cancel-request"
-                                    .to_string(),
-                                data: MessageEventData::Error {
-                                    operation: "cancel-request".to_string(),
-                                    recipient: None,
-                                    message: err_msg.clone(),
-                                }.into(),
-                                                    description: Some(format!(
-                                    "Request {} not found",
-                                    request_id_clone
-                                )),
-                            });
                             Ok((Err(err_msg),))
                         }
                     })
                 },
             )
             .map_err(|e| {
-                actor_component.actor_store.record_event(ChainEventData {
-                    event_type: "message-server-setup".to_string(),
-                    data: MessageEventData::HandlerSetupError {
-                        error: e.to_string(),
-                        step: "cancel_request_function_wrap".to_string(),
-                    }.into(),
-                            description: Some(format!(
-                        "Failed to set up 'cancel-request' function wrapper: {}",
-                        e
-                    )),
-                });
                 anyhow::anyhow!("Failed to wrap async cancel-request function: {}", e)
             })?;
 
-        actor_component.actor_store.record_event(ChainEventData {
-            event_type: "message-server-setup".to_string(),
-            data: MessageEventData::FunctionSetupSuccess {
-                function_name: "cancel-request".to_string(),
-            }.into(),
-            description: Some("Successfully set up 'cancel-request' function wrapper".to_string()),
-        });
 
         // 6. open-channel operation
         let router = self.router.clone();
 
-        actor_component.actor_store.record_event(ChainEventData {
-            event_type: "message-server-setup".to_string(),
-            data: MessageEventData::FunctionSetupStart {
-                function_name: "open-channel".to_string(),
-            }.into(),
-            description: Some("Setting up 'open-channel' function wrapper".to_string()),
-        });
 
         interface
             .func_wrap_async(
                 "open-channel",
-                move |mut ctx: StoreContextMut<'_, ActorStore<E>>,
+                move |mut ctx: StoreContextMut<'_, ActorStore>,
                       (address, initial_msg): (String, Vec<u8>)|
                       -> Box<dyn Future<Output = Result<(Result<String, String>,)>> + Send> {
                     let current_actor_id = ctx.data().id.clone();
                     let address_clone = address.clone();
 
-                    ctx.data_mut().record_event(ChainEventData {
-                        event_type: "theater:simple/message-server-host/open-channel".to_string(),
-                        data: MessageEventData::OpenChannelCall {
-                            recipient: address.clone(),
-                            message_type: "binary".to_string(),
-                            size: initial_msg.len(),
-                        }.into(),
-                                    description: Some(format!("Opening channel to {}", address)),
-                    });
 
                     let target_id = match TheaterId::parse(&address) {
                         Ok(id) => ChannelParticipant::Actor(id),
                         Err(e) => {
                             let err_msg = format!("Failed to parse actor ID: {}", e);
-                            ctx.data_mut().record_event(ChainEventData {
-                                event_type: "theater:simple/message-server-host/open-channel"
-                                    .to_string(),
-                                data: MessageEventData::Error {
-                                    operation: "open-channel".to_string(),
-                                    recipient: Some(address_clone.clone()),
-                                    message: err_msg.clone(),
-                                }.into(),
-                                                    description: Some(format!(
-                                    "Error opening channel to {}: {}",
-                                    address_clone, err_msg
-                                )),
-                            });
                             return Box::new(async move { Ok((Err(err_msg),)) });
                         }
                     };
@@ -1224,41 +777,11 @@ where
                     Box::new(async move {
                         if let Err(e) = router.route_message(command).await {
                             let err_msg = format!("Failed to send command to message-server: {}", e);
-                            ctx.data_mut().record_event(ChainEventData {
-                                event_type: "theater:simple/message-server-host/open-channel"
-                                    .to_string(),
-                                data: MessageEventData::Error {
-                                    operation: "open-channel".to_string(),
-                                    recipient: Some(address_clone.clone()),
-                                    message: err_msg.clone(),
-                                }.into(),
-                                                    description: Some(format!(
-                                    "Failed to send open-channel command: {}",
-                                    err_msg
-                                )),
-                            });
                             return Ok((Err(err_msg),));
                         }
 
                         match response_rx.await {
                             Ok(Ok(accepted)) => {
-                                ctx.data_mut().record_event(ChainEventData {
-                                    event_type:
-                                        "theater:simple/message-server-host/open-channel"
-                                            .to_string(),
-                                    data: 
-                                        MessageEventData::OpenChannelResult {
-                                            recipient: address_clone.clone(),
-                                            channel_id: channel_id_clone.clone(),
-                                            accepted,
-                                        }.into(),
-                                                            description: Some(format!(
-                                        "Channel {} to {} {}",
-                                        channel_id_clone,
-                                        address_clone,
-                                        if accepted { "accepted" } else { "rejected" }
-                                    )),
-                                });
 
                                 if accepted {
                                     Ok((Ok(channel_id_clone),))
@@ -1271,37 +794,10 @@ where
                             }
                             Ok(Err(e)) => {
                                 let err_msg = format!("Error opening channel: {}", e);
-                                ctx.data_mut().record_event(ChainEventData {
-                                    event_type:
-                                        "theater:simple/message-server-host/open-channel"
-                                            .to_string(),
-                                    data: MessageEventData::Error {
-                                        operation: "open-channel".to_string(),
-                                        recipient: Some(address_clone.clone()),
-                                        message: err_msg.clone(),
-                                    }.into(),
-                                                            description: Some(format!(
-                                        "Error opening channel to {}: {}",
-                                        address_clone, err_msg
-                                    )),
-                                });
                                 Ok((Err(err_msg),))
                             }
                             Err(e) => {
                                 let err_msg = format!("Failed to receive channel open response: {}", e);
-                                ctx.data_mut().record_event(ChainEventData {
-                                    event_type: "theater:simple/message-server-host/open-channel"
-                                        .to_string(),
-                                    data: MessageEventData::Error {
-                                        operation: "open-channel".to_string(),
-                                        recipient: Some(address_clone.clone()),
-                                        message: err_msg.clone(),
-                                    }.into(),
-                                                            description: Some(format!(
-                                        "Error opening channel to {}: {}",
-                                        address_clone, err_msg
-                                    )),
-                                });
                                 Ok((Err(err_msg),))
                             }
                         }
@@ -1309,76 +805,26 @@ where
                 },
             )
             .map_err(|e| {
-                actor_component.actor_store.record_event(ChainEventData {
-                    event_type: "message-server-setup".to_string(),
-                    data: MessageEventData::HandlerSetupError {
-                        error: e.to_string(),
-                        step: "open_channel_function_wrap".to_string(),
-                    }.into(),
-                            description: Some(format!(
-                        "Failed to set up 'open-channel' function wrapper: {}",
-                        e
-                    )),
-                });
                 anyhow::anyhow!("Failed to wrap async open-channel function: {}", e)
             })?;
 
-        actor_component.actor_store.record_event(ChainEventData {
-            event_type: "message-server-setup".to_string(),
-            data: MessageEventData::FunctionSetupSuccess {
-                function_name: "open-channel".to_string(),
-            }.into(),
-            description: Some("Successfully set up 'open-channel' function wrapper".to_string()),
-        });
 
         // 7. send-on-channel operation
         let router = self.router.clone();
         let sender_actor_id = actor_id.clone();
 
-        actor_component.actor_store.record_event(ChainEventData {
-            event_type: "message-server-setup".to_string(),
-            data: MessageEventData::FunctionSetupStart {
-                function_name: "send-on-channel".to_string(),
-            }.into(),
-            description: Some("Setting up 'send-on-channel' function wrapper".to_string()),
-        });
 
         interface
             .func_wrap_async(
                 "send-on-channel",
-                move |mut ctx: StoreContextMut<'_, ActorStore<E>>,
+                move |mut ctx: StoreContextMut<'_, ActorStore>,
                       (channel_id_str, msg): (String, Vec<u8>)|
                       -> Box<dyn Future<Output = Result<(Result<(), String>,)>> + Send> {
-                    ctx.data_mut().record_event(ChainEventData {
-                        event_type: "theater:simple/message-server-host/send-on-channel"
-                            .to_string(),
-                        data: MessageEventData::ChannelMessageCall {
-                            channel_id: channel_id_str.clone(),
-                            msg: msg.clone(),
-                        }.into(),
-                                    description: Some(format!(
-                            "Sending message on channel {}",
-                            channel_id_str
-                        )),
-                    });
 
                     let channel_id = match ChannelId::parse(&channel_id_str) {
                         Ok(id) => id,
                         Err(e) => {
                             let err_msg = format!("Failed to parse channel ID: {}", e);
-                            ctx.data_mut().record_event(ChainEventData {
-                                event_type: "theater:simple/message-server-host/send-on-channel"
-                                    .to_string(),
-                                data: MessageEventData::Error {
-                                    operation: "send-on-channel".to_string(),
-                                    recipient: None,
-                                    message: err_msg.clone(),
-                                }.into(),
-                                                    description: Some(format!(
-                                    "Error sending on channel {}: {}",
-                                    channel_id_str, err_msg
-                                )),
-                            });
                             return Box::new(async move { Ok((Err(err_msg),)) });
                         }
                     };
@@ -1397,71 +843,19 @@ where
                     Box::new(async move {
                         if let Err(e) = router.route_message(command).await {
                             let err = e.to_string();
-                            ctx.data_mut().record_event(ChainEventData {
-                                event_type: "theater:simple/message-server-host/send-on-channel"
-                                    .to_string(),
-                                data: MessageEventData::Error {
-                                    operation: "send-on-channel".to_string(),
-                                    recipient: None,
-                                    message: err.clone(),
-                                }.into(),
-                                                    description: Some(format!(
-                                    "Failed to send command to message-server: {}",
-                                    err
-                                )),
-                            });
                             return Ok((Err(err),));
                         }
 
                         match response_rx.await {
                             Ok(Ok(())) => {
-                                ctx.data_mut().record_event(ChainEventData {
-                                    event_type: "theater:simple/message-server-host/send-on-channel"
-                                        .to_string(),
-                                    data: 
-                                        MessageEventData::ChannelMessageResult {
-                                            channel_id: channel_id_clone.clone(),
-                                            success: true,
-                                        }.into(),
-                                                            description: Some(format!(
-                                        "Successfully sent message on channel {}",
-                                        channel_id_clone
-                                    )),
-                                });
                                 Ok((Ok(()),))
                             }
                             Ok(Err(e)) => {
                                 let err = e.to_string();
-                                ctx.data_mut().record_event(ChainEventData {
-                                    event_type: "theater:simple/message-server-host/send-on-channel"
-                                        .to_string(),
-                                    data: MessageEventData::Error {
-                                        operation: "send-on-channel".to_string(),
-                                        recipient: None,
-                                        message: err.clone(),
-                                    }.into(),
-                                                            description: Some(format!(
-                                        "Failed to send message on channel {}: {}",
-                                        channel_id_clone, err
-                                    )),
-                                });
                                 Ok((Err(err),))
                             }
                             Err(e) => {
                                 let err = e.to_string();
-                                ctx.data_mut().record_event(ChainEventData {
-                                    event_type: "theater:simple/message-server-host/send-on-channel"
-                                        .to_string(),
-                                    data: MessageEventData::Error {
-                                        operation: "send-on-channel".to_string(),
-                                        recipient: None,
-                                        message: err.clone(),
-                                    }.into(),
-                                                            description: Some(format!(
-                                        "Failed to receive response from message-server: {}",
-                                        err
-                                    )),
-                                });
                                 Ok((Err(err),))
                             }
                         }
@@ -1469,73 +863,26 @@ where
                 },
             )
             .map_err(|e| {
-                actor_component.actor_store.record_event(ChainEventData {
-                    event_type: "message-server-setup".to_string(),
-                    data: MessageEventData::HandlerSetupError {
-                        error: e.to_string(),
-                        step: "send_on_channel_function_wrap".to_string(),
-                    }.into(),
-                            description: Some(format!(
-                        "Failed to set up 'send-on-channel' function wrapper: {}",
-                        e
-                    )),
-                });
                 anyhow::anyhow!("Failed to wrap async send-on-channel function: {}", e)
             })?;
 
-        actor_component.actor_store.record_event(ChainEventData {
-            event_type: "message-server-setup".to_string(),
-            data: MessageEventData::FunctionSetupSuccess {
-                function_name: "send-on-channel".to_string(),
-            }.into(),
-            description: Some(
-                "Successfully set up 'send-on-channel' function wrapper".to_string(),
-            ),
-        });
 
         // 8. close-channel operation
         let router = self.router.clone();
         let sender_actor_id = actor_id.clone();
 
-        actor_component.actor_store.record_event(ChainEventData {
-            event_type: "message-server-setup".to_string(),
-            data: MessageEventData::FunctionSetupStart {
-                function_name: "close-channel".to_string(),
-            }.into(),
-            description: Some("Setting up 'close-channel' function wrapper".to_string()),
-        });
 
         interface
             .func_wrap_async(
                 "close-channel",
-                move |mut ctx: StoreContextMut<'_, ActorStore<E>>,
+                move |mut ctx: StoreContextMut<'_, ActorStore>,
                       (channel_id_str,): (String,)|
                       -> Box<dyn Future<Output = Result<(Result<(), String>,)>> + Send> {
-                    ctx.data_mut().record_event(ChainEventData {
-                        event_type: "theater:simple/message-server-host/close-channel".to_string(),
-                        data: MessageEventData::CloseChannelCall {
-                            channel_id: channel_id_str.clone(),
-                        }.into(),
-                                    description: Some(format!("Closing channel {}", channel_id_str)),
-                    });
 
                     let channel_id = match ChannelId::parse(&channel_id_str) {
                         Ok(id) => id,
                         Err(e) => {
                             let err_msg = format!("Failed to parse channel ID: {}", e);
-                            ctx.data_mut().record_event(ChainEventData {
-                                event_type: "theater:simple/message-server-host/close-channel"
-                                    .to_string(),
-                                data: MessageEventData::Error {
-                                    operation: "close-channel".to_string(),
-                                    recipient: None,
-                                    message: err_msg.clone(),
-                                }.into(),
-                                                    description: Some(format!(
-                                    "Error closing channel {}: {}",
-                                    channel_id_str, err_msg
-                                )),
-                            });
                             return Box::new(async move { Ok((Err(err_msg),)) });
                         }
                     };
@@ -1553,71 +900,19 @@ where
                     Box::new(async move {
                         if let Err(e) = router.route_message(command).await {
                             let err = e.to_string();
-                            ctx.data_mut().record_event(ChainEventData {
-                                event_type: "theater:simple/message-server-host/close-channel"
-                                    .to_string(),
-                                data: MessageEventData::Error {
-                                    operation: "close-channel".to_string(),
-                                    recipient: None,
-                                    message: err.clone(),
-                                }.into(),
-                                                    description: Some(format!(
-                                    "Failed to send command to message-server: {}",
-                                    err
-                                )),
-                            });
                             return Ok((Err(err),));
                         }
 
                         match response_rx.await {
                             Ok(Ok(())) => {
-                                ctx.data_mut().record_event(ChainEventData {
-                                    event_type: "theater:simple/message-server-host/close-channel"
-                                        .to_string(),
-                                    data: 
-                                        MessageEventData::CloseChannelResult {
-                                            channel_id: channel_id_clone.clone(),
-                                            success: true,
-                                        }.into(),
-                                                            description: Some(format!(
-                                        "Successfully closed channel {}",
-                                        channel_id_clone
-                                    )),
-                                });
                                 Ok((Ok(()),))
                             }
                             Ok(Err(e)) => {
                                 let err = e.to_string();
-                                ctx.data_mut().record_event(ChainEventData {
-                                    event_type: "theater:simple/message-server-host/close-channel"
-                                        .to_string(),
-                                    data: MessageEventData::Error {
-                                        operation: "close-channel".to_string(),
-                                        recipient: None,
-                                        message: err.clone(),
-                                    }.into(),
-                                                            description: Some(format!(
-                                        "Failed to close channel {}: {}",
-                                        channel_id_clone, err
-                                    )),
-                                });
                                 Ok((Err(err),))
                             }
                             Err(e) => {
                                 let err = e.to_string();
-                                ctx.data_mut().record_event(ChainEventData {
-                                    event_type: "theater:simple/message-server-host/close-channel"
-                                        .to_string(),
-                                    data: MessageEventData::Error {
-                                        operation: "close-channel".to_string(),
-                                        recipient: None,
-                                        message: err.clone(),
-                                    }.into(),
-                                                            description: Some(format!(
-                                        "Failed to receive response from message-server: {}",
-                                        err
-                                    )),
-                                });
                                 Ok((Err(err),))
                             }
                         }
@@ -1625,43 +920,18 @@ where
                 },
             )
             .map_err(|e| {
-                actor_component.actor_store.record_event(ChainEventData {
-                    event_type: "message-server-setup".to_string(),
-                    data: MessageEventData::HandlerSetupError {
-                        error: e.to_string(),
-                        step: "close_channel_function_wrap".to_string(),
-                    }.into(),
-                            description: Some(format!(
-                        "Failed to set up 'close-channel' function wrapper: {}",
-                        e
-                    )),
-                });
                 anyhow::anyhow!("Failed to wrap async close-channel function: {}", e)
             })?;
 
-        actor_component.actor_store.record_event(ChainEventData {
-            event_type: "message-server-setup".to_string(),
-            data: MessageEventData::FunctionSetupSuccess {
-                function_name: "close-channel".to_string(),
-            }.into(),
-            description: Some("Successfully set up 'close-channel' function wrapper".to_string()),
-        });
 
         // Record overall setup completion
-        actor_component.actor_store.record_event(ChainEventData {
-            event_type: "message-server-setup".to_string(),
-            data: MessageEventData::HandlerSetupSuccess.into(),
-            description: Some(
-                "Message server host functions setup completed successfully".to_string(),
-            ),
-        });
 
         info!("Message server host functions added");
 
         Ok(())
     }
 
-    fn add_export_functions(&self, actor_instance: &mut ActorInstance<E>) -> Result<()> {
+    fn add_export_functions(&self, actor_instance: &mut ActorInstance) -> Result<()> {
         info!("Adding export functions for message server");
 
         // 1. handle-send
@@ -1717,7 +987,7 @@ where
     fn start(
         &mut self,
         actor_handle: ActorHandle,
-        _actor_instance: SharedActorInstance<E>,
+        _actor_instance: SharedActorInstance,
         mut shutdown_receiver: ShutdownReceiver,
     ) -> Pin<Box<dyn Future<Output = Result<()>> + Send>> {
         info!("Starting message server handler for actor");

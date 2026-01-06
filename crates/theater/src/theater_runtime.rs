@@ -24,7 +24,6 @@ use crate::{ManifestConfig, StateChain};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::collections::HashSet;
-use std::marker::PhantomData;
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 use tokio::sync::mpsc::Receiver;
@@ -48,6 +47,7 @@ use tracing::{debug, error, info, warn};
 ///
 /// ```rust,no_run
 /// use theater::theater_runtime::TheaterRuntime;
+/// use theater::handler::HandlerRegistry;
 /// use theater::messages::TheaterCommand;
 /// use tokio::sync::mpsc;
 /// use anyhow::Result;
@@ -55,18 +55,18 @@ use tracing::{debug, error, info, warn};
 /// async fn example() -> Result<()> {
 ///     // Create channels for theater commands
 ///     let (theater_tx, theater_rx) = mpsc::channel(100);
-///     
+///
 ///     // Initialize the runtime
-///     let mut runtime = TheaterRuntime::new(theater_tx.clone(), theater_rx, None, Default::default()).await?;
-///     
+///     let mut runtime = TheaterRuntime::new(theater_tx.clone(), theater_rx, None, HandlerRegistry::new()).await?;
+///
 ///     // Start a background task to run the runtime
 ///     let runtime_handle = tokio::spawn(async move {
 ///         runtime.run().await
 ///     });
-///     
+///
 ///     // Use the theater_tx to send commands to the runtime
 ///     // ...
-///     
+///
 ///     Ok(())
 /// }
 /// ```
@@ -88,11 +88,11 @@ use tracing::{debug, error, info, warn};
 /// The runtime uses a command-based architecture where all operations are sent as messages
 /// through channels. This allows for asynchronous processing and helps maintain isolation
 /// between components.
-pub struct TheaterRuntime<E: crate::events::EventPayload + Clone> {
+pub struct TheaterRuntime {
     /// Map of active actors indexed by their ID
     actors: HashMap<TheaterId, ActorProcess>,
     /// Map of chains index by actor ID
-    chains: HashMap<TheaterId, Arc<RwLock<StateChain<E>>>>,
+    chains: HashMap<TheaterId, Arc<RwLock<StateChain>>>,
     /// Sender for commands to the runtime
     theater_tx: Sender<TheaterCommand>,
     /// Receiver for commands to the runtime
@@ -107,8 +107,7 @@ pub struct TheaterRuntime<E: crate::events::EventPayload + Clone> {
     /// wasm engine
     wasm_engine: wasmtime::Engine,
     /// Handler registry
-    pub handler_registry: HandlerRegistry<E>,
-    marker: PhantomData<E>,
+    pub handler_registry: HandlerRegistry,
 }
 
 /// # ActorProcess
@@ -154,15 +153,7 @@ pub struct ActorProcess {
     pub supervisor_tx: Option<Sender<ActorResult>>,
 }
 
-impl<E> TheaterRuntime<E>
-where
-    E: crate::events::EventPayload
-        + Clone
-        + From<crate::events::theater_runtime::TheaterRuntimeEventData>
-        + From<crate::events::wasm::WasmEventData>
-        + From<crate::events::runtime::RuntimeEventData>
-        + From<crate::replay::HostFunctionCall>,
-{
+impl TheaterRuntime {
     /// Creates a new TheaterRuntime with the given communication channels.
     ///
     /// ## Parameters
@@ -180,13 +171,14 @@ where
     ///
     /// ```rust,no_run
     /// # use theater::theater_runtime::TheaterRuntime;
+    /// # use theater::handler::HandlerRegistry;
     /// # use theater::messages::TheaterCommand;
     /// # use tokio::sync::mpsc;
     /// # use anyhow::Result;
     /// #
     /// # async fn example() -> Result<()> {
     /// let (theater_tx, theater_rx) = mpsc::channel::<TheaterCommand>(100);
-    /// let runtime = TheaterRuntime::new(theater_tx, theater_rx, None, None, Default::default()).await?;
+    /// let runtime = TheaterRuntime::new(theater_tx, theater_rx, None, HandlerRegistry::new()).await?;
     /// # Ok(())
     /// # }
     /// ```
@@ -194,7 +186,7 @@ where
         theater_tx: Sender<TheaterCommand>,
         theater_rx: Receiver<TheaterCommand>,
         channel_events_tx: Option<Sender<crate::messages::ChannelEvent>>,
-        handler_registry: HandlerRegistry<E>,
+        handler_registry: HandlerRegistry,
     ) -> Result<Self> {
         info!("Theater runtime initializing");
         let engine = wasmtime::Engine::new(wasmtime::Config::new().async_support(true))?;
@@ -209,7 +201,6 @@ where
             channel_events_tx,
             wasm_engine: engine,
             handler_registry,
-            marker: PhantomData,
         })
     }
 
@@ -843,7 +834,12 @@ where
             writable_chain
                 .add_typed_event(crate::events::ChainEventData {
                     event_type: "shutdown".to_string(),
-                    data: crate::events::runtime::RuntimeEventData::ShuttingDown {}.into(),
+                    data: crate::events::ChainEventPayload::Wasm(
+                        crate::events::wasm::WasmEventData::WasmCall {
+                            function_name: "shutdown".to_string(),
+                            params: vec![],
+                        },
+                    ),
                 })
                 .expect("Failed to record event");
             debug!("Final event added to chain for actor {:?}", actor_id);
@@ -1127,7 +1123,7 @@ where
     async fn create_handler_registry_for_manifest(
         &self,
         manifest: &ManifestConfig,
-    ) -> Result<HandlerRegistry<E>> {
+    ) -> Result<HandlerRegistry> {
         // Check if the manifest has a replay handler config
         for handler_config in &manifest.handlers {
             if let HandlerConfig::Replay { config } = handler_config {

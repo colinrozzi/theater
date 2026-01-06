@@ -179,19 +179,23 @@ async fn test_permission_denial_events() {
     // 3. An appropriate error is returned
 
     // We can test this by verifying the event data structure
-    use theater::events::filesystem::FilesystemEventData;
+    // Permission denied events are now logged via the standardized host function call mechanism
+    // This test verifies the permission check structure works correctly
+    use theater::events::ChainEventPayload;
+    use theater::replay::HostFunctionCall;
 
-    let denial_event = FilesystemEventData::PermissionDenied {
-        operation: "write".to_string(),
-        path: "/tmp/forbidden/file.txt".to_string(),
-        reason: "Write operation not permitted".to_string(),
-    };
+    let denial_event = ChainEventPayload::HostFunction(HostFunctionCall {
+        interface: "theater:simple/filesystem".to_string(),
+        function: "write".to_string(),
+        input: serde_json::to_vec(&"/tmp/forbidden/file.txt").unwrap(),
+        output: serde_json::to_vec(&"Permission denied: Write operation not permitted").unwrap(),
+    });
 
     // Verify the event can be serialized (important for the event chain)
     let serialized = serde_json::to_string(&denial_event).expect("Failed to serialize event");
-    assert!(serialized.contains("PermissionDenied"));
+    assert!(serialized.contains("HostFunction"));
+    assert!(serialized.contains("filesystem"));
     assert!(serialized.contains("write"));
-    assert!(serialized.contains("/tmp/forbidden/file.txt"));
 
     println!("✅ Permission denial event structure verified");
 }

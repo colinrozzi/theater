@@ -32,7 +32,6 @@ pub use types::{
 };
 
 use theater::handler::{Handler, HandlerContext, SharedActorInstance};
-use theater::events::EventPayload;
 use theater::wasm::{ActorComponent, ActorInstance};
 use theater::actor::{handle::ActorHandle, ActorStore};
 use theater::shutdown::ShutdownReceiver;
@@ -52,24 +51,22 @@ impl WasiSocketsHandler {
     }
 }
 
-impl<E> Handler<E> for WasiSocketsHandler
-where
-    E: EventPayload + Clone + From<SocketsEventData> + Send,
+impl Handler for WasiSocketsHandler
 {
-    fn create_instance(&self) -> Box<dyn Handler<E>> {
+    fn create_instance(&self) -> Box<dyn Handler> {
         Box::new(Self::new())
     }
 
     fn start(
         &mut self,
         _actor_handle: ActorHandle,
-        _actor_instance: SharedActorInstance<E>,
+        _actor_instance: SharedActorInstance,
         _shutdown_receiver: ShutdownReceiver,
     ) -> Pin<Box<dyn Future<Output = Result<()>> + Send>> {
         Box::pin(async { Ok(()) })
     }
 
-    fn setup_host_functions(&mut self, actor_component: &mut ActorComponent<E>, ctx: &mut HandlerContext) -> Result<()> {
+    fn setup_host_functions(&mut self, actor_component: &mut ActorComponent, ctx: &mut HandlerContext) -> Result<()> {
         debug!("WasiSocketsHandler::setup_host_functions() starting");
 
         // The sockets interfaces depend on wasi:io types (Pollable, Error, streams).
@@ -80,7 +77,7 @@ where
             info!("Setting up wasi:io/error interface for sockets");
             bindings::wasi::io::error::add_to_linker(
                 &mut actor_component.linker,
-                |state: &mut ActorStore<E>| state,
+                |state: &mut ActorStore| state,
             )?;
             ctx.mark_satisfied("wasi:io/error@0.2.0");
         }
@@ -89,7 +86,7 @@ where
             info!("Setting up wasi:io/poll interface for sockets");
             bindings::wasi::io::poll::add_to_linker(
                 &mut actor_component.linker,
-                |state: &mut ActorStore<E>| state,
+                |state: &mut ActorStore| state,
             )?;
             ctx.mark_satisfied("wasi:io/poll@0.2.0");
         }
@@ -98,7 +95,7 @@ where
             info!("Setting up wasi:io/streams interface for sockets");
             bindings::wasi::io::streams::add_to_linker(
                 &mut actor_component.linker,
-                |state: &mut ActorStore<E>| state,
+                |state: &mut ActorStore| state,
             )?;
             ctx.mark_satisfied("wasi:io/streams@0.2.0");
         }
@@ -107,7 +104,7 @@ where
             info!("Setting up wasi:clocks/monotonic-clock interface for sockets");
             bindings::wasi::clocks::monotonic_clock::add_to_linker(
                 &mut actor_component.linker,
-                |state: &mut ActorStore<E>| state,
+                |state: &mut ActorStore| state,
             )?;
             ctx.mark_satisfied("wasi:clocks/monotonic-clock@0.2.0");
         }
@@ -116,49 +113,49 @@ where
         info!("Setting up wasi:sockets/network interface");
         bindings::wasi::sockets::network::add_to_linker(
             &mut actor_component.linker,
-            |state: &mut ActorStore<E>| state,
+            |state: &mut ActorStore| state,
         )?;
 
         // wasi:sockets/instance-network interface
         info!("Setting up wasi:sockets/instance-network interface");
         bindings::wasi::sockets::instance_network::add_to_linker(
             &mut actor_component.linker,
-            |state: &mut ActorStore<E>| state,
+            |state: &mut ActorStore| state,
         )?;
 
         // wasi:sockets/tcp interface
         info!("Setting up wasi:sockets/tcp interface");
         bindings::wasi::sockets::tcp::add_to_linker(
             &mut actor_component.linker,
-            |state: &mut ActorStore<E>| state,
+            |state: &mut ActorStore| state,
         )?;
 
         // wasi:sockets/tcp-create-socket interface
         info!("Setting up wasi:sockets/tcp-create-socket interface");
         bindings::wasi::sockets::tcp_create_socket::add_to_linker(
             &mut actor_component.linker,
-            |state: &mut ActorStore<E>| state,
+            |state: &mut ActorStore| state,
         )?;
 
         // wasi:sockets/udp interface
         info!("Setting up wasi:sockets/udp interface");
         bindings::wasi::sockets::udp::add_to_linker(
             &mut actor_component.linker,
-            |state: &mut ActorStore<E>| state,
+            |state: &mut ActorStore| state,
         )?;
 
         // wasi:sockets/udp-create-socket interface
         info!("Setting up wasi:sockets/udp-create-socket interface");
         bindings::wasi::sockets::udp_create_socket::add_to_linker(
             &mut actor_component.linker,
-            |state: &mut ActorStore<E>| state,
+            |state: &mut ActorStore| state,
         )?;
 
         // wasi:sockets/ip-name-lookup interface
         info!("Setting up wasi:sockets/ip-name-lookup interface");
         bindings::wasi::sockets::ip_name_lookup::add_to_linker(
             &mut actor_component.linker,
-            |state: &mut ActorStore<E>| state,
+            |state: &mut ActorStore| state,
         )?;
 
         info!("WasiSocketsHandler setup complete");
@@ -167,7 +164,7 @@ where
 
     fn add_export_functions(
         &self,
-        _actor_instance: &mut ActorInstance<E>,
+        _actor_instance: &mut ActorInstance,
     ) -> Result<()> {
         Ok(())
     }

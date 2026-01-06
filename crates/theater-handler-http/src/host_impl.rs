@@ -21,7 +21,6 @@ use crate::types::{
 };
 
 use theater::actor::ActorStore;
-use theater::events::EventPayload;
 use theater_handler_io::{InputStream, IoError, OutputStream};
 use wasmtime::component::Resource;
 
@@ -29,9 +28,7 @@ use wasmtime::component::Resource;
 // HostFields implementation
 // ============================================================================
 
-impl<E> HostFields for ActorStore<E>
-where
-    E: EventPayload + Clone + From<HttpEventData> + Send + 'static,
+impl HostFields for ActorStore
 {
     async fn new(&mut self) -> wasmtime::Result<Resource<FieldsData>> {
         let data = FieldsData::new();
@@ -142,9 +139,7 @@ where
 // HostOutgoingRequest implementation
 // ============================================================================
 
-impl<E> HostOutgoingRequest for ActorStore<E>
-where
-    E: EventPayload + Clone + From<HttpEventData> + Send + 'static,
+impl HostOutgoingRequest for ActorStore
 {
     async fn new(
         &mut self,
@@ -318,9 +313,7 @@ where
 // HostOutgoingResponse implementation
 // ============================================================================
 
-impl<E> HostOutgoingResponse for ActorStore<E>
-where
-    E: EventPayload + Clone + From<HttpEventData> + Send + 'static,
+impl HostOutgoingResponse for ActorStore
 {
     async fn new(
         &mut self,
@@ -400,9 +393,7 @@ where
 // HostOutgoingBody implementation
 // ============================================================================
 
-impl<E> HostOutgoingBody for ActorStore<E>
-where
-    E: EventPayload + Clone + From<HttpEventData> + Send + 'static,
+impl HostOutgoingBody for ActorStore
 {
     async fn write(
         &mut self,
@@ -439,9 +430,7 @@ where
 // HostIncomingRequest implementation
 // ============================================================================
 
-impl<E> HostIncomingRequest for ActorStore<E>
-where
-    E: EventPayload + Clone + From<HttpEventData> + Send + 'static,
+impl HostIncomingRequest for ActorStore
 {
     async fn method(&mut self, self_: Resource<IncomingRequestData>) -> wasmtime::Result<Method> {
         let table = self.resource_table.lock().unwrap();
@@ -531,9 +520,7 @@ where
 // HostIncomingResponse implementation
 // ============================================================================
 
-impl<E> HostIncomingResponse for ActorStore<E>
-where
-    E: EventPayload + Clone + From<HttpEventData> + Send + 'static,
+impl HostIncomingResponse for ActorStore
 {
     async fn status(
         &mut self,
@@ -584,9 +571,7 @@ where
 // HostIncomingBody implementation
 // ============================================================================
 
-impl<E> HostIncomingBody for ActorStore<E>
-where
-    E: EventPayload + Clone + From<HttpEventData> + Send + 'static,
+impl HostIncomingBody for ActorStore
 {
     async fn stream(
         &mut self,
@@ -626,9 +611,7 @@ where
 // HostResponseOutparam implementation
 // ============================================================================
 
-impl<E> HostResponseOutparam for ActorStore<E>
-where
-    E: EventPayload + Clone + From<HttpEventData> + Send + 'static,
+impl HostResponseOutparam for ActorStore
 {
     async fn set(
         &mut self,
@@ -677,9 +660,7 @@ where
 // HostFutureTrailers implementation
 // ============================================================================
 
-impl<E> HostFutureTrailers for ActorStore<E>
-where
-    E: EventPayload + Clone + From<HttpEventData> + Send + 'static,
+impl HostFutureTrailers for ActorStore
 {
     async fn subscribe(
         &mut self,
@@ -725,9 +706,7 @@ where
 // HostFutureIncomingResponse implementation
 // ============================================================================
 
-impl<E> HostFutureIncomingResponse for ActorStore<E>
-where
-    E: EventPayload + Clone + From<HttpEventData> + Send + 'static,
+impl HostFutureIncomingResponse for ActorStore
 {
     async fn subscribe(
         &mut self,
@@ -802,9 +781,7 @@ where
 // HostRequestOptions implementation
 // ============================================================================
 
-impl<E> HostRequestOptions for ActorStore<E>
-where
-    E: EventPayload + Clone + From<HttpEventData> + Send + 'static,
+impl HostRequestOptions for ActorStore
 {
     async fn new(&mut self) -> wasmtime::Result<Resource<RequestOptionsData>> {
         let data = RequestOptionsData::default();
@@ -882,9 +859,7 @@ where
 // HttpTypesHost implementation (top-level functions)
 // ============================================================================
 
-impl<E> HttpTypesHost for ActorStore<E>
-where
-    E: EventPayload + Clone + From<HttpEventData> + Send + 'static,
+impl HttpTypesHost for ActorStore
 {
     async fn http_error_code(
         &mut self,
@@ -898,9 +873,7 @@ where
 // OutgoingHandlerHost implementation
 // ============================================================================
 
-impl<E> OutgoingHandlerHost for ActorStore<E>
-where
-    E: EventPayload + Clone + From<HttpEventData> + Send + 'static,
+impl OutgoingHandlerHost for ActorStore
 {
     async fn handle(
         &mut self,
@@ -1053,9 +1026,7 @@ use crate::bindings::wasi::io::streams::{
     Host as IoStreamsHost, HostInputStream, HostOutputStream, StreamError,
 };
 
-impl<E> IoHostError for ActorStore<E>
-where
-    E: EventPayload + Clone + From<HttpEventData> + Send + 'static,
+impl IoHostError for ActorStore
 {
     async fn to_debug_string(
         &mut self,
@@ -1070,16 +1041,12 @@ where
     }
 }
 
-impl<E> IoErrorHost for ActorStore<E>
-where
-    E: EventPayload + Clone + From<HttpEventData> + Send + 'static,
+impl IoErrorHost for ActorStore
 {
     // No methods required - just resource types
 }
 
-impl<E> HostInputStream for ActorStore<E>
-where
-    E: EventPayload + Clone + From<HttpEventData> + Send + 'static,
+impl HostInputStream for ActorStore
 {
     async fn read(
         &mut self,
@@ -1132,9 +1099,7 @@ where
     }
 }
 
-impl<E> HostOutputStream for ActorStore<E>
-where
-    E: EventPayload + Clone + From<HttpEventData> + Send + 'static,
+impl HostOutputStream for ActorStore
 {
     async fn check_write(
         &mut self,
@@ -1243,9 +1208,7 @@ where
     }
 }
 
-impl<E> IoStreamsHost for ActorStore<E>
-where
-    E: EventPayload + Clone + From<HttpEventData> + Send + 'static,
+impl IoStreamsHost for ActorStore
 {
     // No methods required - just resource types
 }

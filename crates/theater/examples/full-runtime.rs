@@ -164,7 +164,7 @@ async fn main() -> Result<()> {
     info!("Creating Theater runtime...");
 
     // Create the Theater runtime with ChainEvent as the event type
-    let mut runtime: TheaterRuntime<ChainEvent> = TheaterRuntime::new(
+    let mut runtime: TheaterRuntime = TheaterRuntime::new(
         theater_tx.clone(),
         theater_rx,
         Some(channel_events_tx),
