@@ -1,5 +1,4 @@
 use anyhow::Result;
-use chrono;
 use console::style;
 use std::collections::HashMap;
 use theater::chain::ChainEvent;
@@ -43,16 +42,16 @@ pub fn display_events(
         if let Some(id) = actor_id {
             println!(
                 "{} Events for actor: {}",
-                style("ℹ").blue().bold(),
+                style("i").blue().bold(),
                 style(id.to_string()).cyan()
             );
         }
 
         println!(
-            "{:<12} {:<12} {:<25} {}",
-            "HASH", "PARENT", "EVENT TYPE", "DESCRIPTION"
+            "{:<12} {:<12} {:<30} {}",
+            "HASH", "PARENT", "EVENT TYPE", "DATA"
         );
-        println!("{}", style("─".repeat(100)).dim());
+        println!("{}", style("-".repeat(100)).dim());
     }
 
     // If no events, show a message and return
@@ -113,58 +112,42 @@ pub fn display_single_event(event: &ChainEvent, format: &str) -> Result<()> {
                 "message" => style(&event.event_type).magenta(),
                 "runtime" => style(&event.event_type).blue(),
                 "error" => style(&event.event_type).red(),
-                _ => style(&event.event_type).yellow(),
+                "wasm" => style(&event.event_type).yellow(),
+                _ => style(&event.event_type).white(),
             };
 
-            // Get a concise description
-            let description = event.description.clone().unwrap_or_else(|| {
-                if let Ok(text) = std::str::from_utf8(&event.data) {
-                    if text.len() > 40 {
-                        format!("{}...", &text[0..37])
-                    } else {
-                        text.to_string()
-                    }
+            // Get data preview
+            let data_preview = if let Ok(text) = std::str::from_utf8(&event.data) {
+                if text.len() > 40 {
+                    format!("{}...", &text[0..37])
                 } else {
-                    format!("{} bytes", event.data.len())
+                    text.to_string()
                 }
-            });
+            } else {
+                format!("{} bytes", event.data.len())
+            };
 
             println!(
-                "{:<12} {:<12} {:<25} {}",
+                "{:<12} {:<12} {:<30} {}",
                 style(&short_hash).dim(),
                 style(&parent_hash).dim(),
                 colored_type,
-                description
+                data_preview
             );
         }
         "csv" => {
-            // Format timestamp
-            let timestamp = event.timestamp.to_string();
             let event_type = &event.event_type;
             let hash = hex::encode(&event.hash);
             let parent_hash = event
                 .parent_hash
                 .as_ref()
                 .map(|h| hex::encode(h))
-                .unwrap_or_else(|| String::from(""));
-            let description = event
-                .description
-                .as_deref()
-                .unwrap_or("")
-                .replace(',', "\\,"); // Escape commas in the description
+                .unwrap_or_default();
             let data_size = event.data.len();
 
-            println!(
-                "{},{},{},{},{},{}",
-                timestamp, event_type, hash, parent_hash, description, data_size
-            );
+            println!("{},{},{},{}", event_type, hash, parent_hash, data_size);
         }
         "detailed" => {
-            let timestamp = chrono::DateTime::from_timestamp(event.timestamp as i64, 0)
-                .unwrap_or_else(|| chrono::DateTime::UNIX_EPOCH)
-                .format("%Y-%m-%d %H:%M:%S%.3f")
-                .to_string();
-
             let hash_str = hex::encode(&event.hash);
             let parent_hash = match &event.parent_hash {
                 Some(hash) => hex::encode(hash),
@@ -177,7 +160,8 @@ pub fn display_single_event(event: &ChainEvent, format: &str) -> Result<()> {
                 "message" => style(&event.event_type).magenta(),
                 "runtime" => style(&event.event_type).blue(),
                 "error" => style(&event.event_type).red(),
-                _ => style(&event.event_type).yellow(),
+                "wasm" => style(&event.event_type).yellow(),
+                _ => style(&event.event_type).white(),
             };
 
             // Print detailed event info
@@ -188,15 +172,9 @@ pub fn display_single_event(event: &ChainEvent, format: &str) -> Result<()> {
                 colored_type
             );
 
-            println!("   Timestamp: {}", timestamp);
             println!("   Parent Hash: {}", parent_hash);
-            if let Some(desc) = &event.description {
-                println!("   Description: {}", desc);
-            } else {
-                println!("   Description: None");
-            }
-
             println!("   Data Size: {} bytes", event.data.len());
+
             if let Ok(text) = std::str::from_utf8(&event.data) {
                 println!("   Data: {}", text);
             } else {
@@ -205,16 +183,10 @@ pub fn display_single_event(event: &ChainEvent, format: &str) -> Result<()> {
                 print_hex_dump(&event.data, 16);
             }
 
-            println!("");
+            println!();
         }
         _ => {
             // pretty format (default)
-            // Format timestamp
-            let timestamp = chrono::DateTime::from_timestamp(event.timestamp as i64, 0)
-                .unwrap_or_else(|| chrono::DateTime::UNIX_EPOCH)
-                .format("%Y-%m-%d %H:%M:%S%.3f")
-                .to_string();
-
             // Format event type with color based on category
             let colored_type = match event.event_type.split('.').next().unwrap_or("") {
                 "http" => style(&event.event_type).cyan(),
@@ -222,23 +194,28 @@ pub fn display_single_event(event: &ChainEvent, format: &str) -> Result<()> {
                 "message" => style(&event.event_type).magenta(),
                 "runtime" => style(&event.event_type).blue(),
                 "error" => style(&event.event_type).red(),
-                _ => style(&event.event_type).yellow(),
+                "wasm" => style(&event.event_type).yellow(),
+                _ => style(&event.event_type).white(),
+            };
+
+            let short_hash = {
+                let hash_str = hex::encode(&event.hash);
+                if hash_str.len() > 8 {
+                    format!("{}..{}", &hash_str[0..4], &hash_str[hash_str.len() - 4..])
+                } else {
+                    hash_str
+                }
             };
 
             // Print basic event info
             println!(
                 "{} [{}] {}",
                 style("EVENT").bold().blue(),
-                timestamp,
+                short_hash,
                 colored_type
             );
 
-            // Show event description if available
-            if let Some(desc) = &event.description {
-                println!("   {}", desc);
-            }
-
-            println!("");
+            println!();
         }
     }
 
@@ -249,24 +226,23 @@ pub fn display_events_header(format: &str) {
     match format {
         "compact" => {
             println!(
-                "{:<12} {:<12} {:<25} {}",
-                "HASH", "PARENT", "EVENT TYPE", "DESCRIPTION"
+                "{:<12} {:<12} {:<30} {}",
+                "HASH", "PARENT", "EVENT TYPE", "DATA"
             );
-            println!("{}", style("─".repeat(100)).dim());
+            println!("{}", style("-".repeat(100)).dim());
         }
         _ => {
-            println!("{} Events:", style("ℹ").blue().bold());
+            println!("{} Events:", style("i").blue().bold());
         }
     }
 }
 
-/// Display a timeline view of events
+/// Display a timeline view of events (simplified without timestamps)
 pub fn display_events_timeline(events: &[ChainEvent], actor_id: &TheaterId) -> Result<()> {
     println!(
-        "{} Timeline for actor: {} {}",
-        style("ℹ").blue().bold(),
-        style(actor_id.to_string()).cyan(),
-        style("")
+        "{} Event chain for actor: {}",
+        style("i").blue().bold(),
+        style(actor_id.to_string()).cyan()
     );
 
     if events.is_empty() {
@@ -274,25 +250,13 @@ pub fn display_events_timeline(events: &[ChainEvent], actor_id: &TheaterId) -> R
         return Ok(());
     }
 
-    // Get the time range
-    let start_time = events.iter().map(|e| e.timestamp).min().unwrap_or(0);
-    let end_time = events.iter().map(|e| e.timestamp).max().unwrap_or(0);
-    let range_ms = end_time.saturating_sub(start_time) as f64;
-
-    // Get terminal width for timeline display
+    // Get terminal width for display
     let term_width = match term_size::dimensions() {
-        Some((w, _)) => (w as f64 * 0.7) as usize, // Use 70% of terminal width for timeline
-        None => 80, // Default to 80 if terminal size can't be determined
+        Some((w, _)) => w.min(120),
+        None => 80,
     };
 
-    println!(
-        "\nTime span: {} to {} ({} sec)",
-        format_timestamp(start_time),
-        format_timestamp(end_time),
-        (range_ms / 1000.0).round()
-    );
-
-    println!("{}", style("─".repeat(term_width)).dim());
+    println!("{}", style("-".repeat(term_width)).dim());
 
     // Group events by type for the summary
     let mut event_types: HashMap<&str, usize> = HashMap::new();
@@ -309,28 +273,23 @@ pub fn display_events_timeline(events: &[ChainEvent], actor_id: &TheaterId) -> R
             "message" => style(event_type).magenta(),
             "runtime" => style(event_type).blue(),
             "error" => style(event_type).red(),
-            _ => style(event_type).yellow(),
+            "wasm" => style(event_type).yellow(),
+            _ => style(event_type).white(),
         };
         println!("  {} - {} events", type_color, count);
     }
 
-    println!("{}", style("─".repeat(term_width)).dim());
-    println!("Timeline:");
+    println!("{}", style("-".repeat(term_width)).dim());
+    println!("Chain ({} events):", events.len());
 
-    // Display timeline for each event
-    for event in events {
-        // Calculate position on the timeline
-        let position = if range_ms > 0.0 {
-            ((event.timestamp - start_time) as f64 / range_ms * (term_width as f64 - 10.0)) as usize
+    // Display chain sequence
+    for (i, event) in events.iter().enumerate() {
+        let hash_str = hex::encode(&event.hash);
+        let short_hash = if hash_str.len() > 8 {
+            format!("{}..{}", &hash_str[0..4], &hash_str[hash_str.len() - 4..])
         } else {
-            0
+            hash_str
         };
-
-        // Format timestamp
-        let time_str = chrono::DateTime::from_timestamp(event.timestamp as i64, 0)
-            .unwrap_or_else(|| chrono::DateTime::UNIX_EPOCH)
-            .format("%H:%M:%S")
-            .to_string();
 
         // Get event type with color
         let event_type = match event.event_type.split('.').next().unwrap_or("") {
@@ -339,73 +298,32 @@ pub fn display_events_timeline(events: &[ChainEvent], actor_id: &TheaterId) -> R
             "message" => style(&event.event_type).magenta(),
             "runtime" => style(&event.event_type).blue(),
             "error" => style(&event.event_type).red(),
-            _ => style(&event.event_type).yellow(),
+            "wasm" => style(&event.event_type).yellow(),
+            _ => style(&event.event_type).white(),
         };
 
-        // Print timeline with marker
-        print!("[{}] {} ", time_str, event_type);
-
-        // Display the timeline
-        for i in 0..term_width - 10 {
-            if i == position {
-                print!("{}", style("●").bold());
-            } else if i % 5 == 0 {
-                print!("{}", style(".").dim());
-            } else {
-                print!(" ");
-            }
-        }
-        println!("");
-
-        // Print event description if available
-        if let Some(desc) = &event.description {
-            let trimmed_desc = if desc.len() > 60 {
-                format!("{}...", &desc[0..57])
-            } else {
-                desc.clone()
-            };
-            println!("  {}", trimmed_desc);
-        }
+        println!("  {:>4}. [{}] {}", i + 1, short_hash, event_type);
     }
 
     Ok(())
 }
 
-// Helper function to format timestamps in a human-readable way
-pub fn format_timestamp(timestamp: u64) -> String {
-    chrono::DateTime::from_timestamp(timestamp as i64, 0)
-        .unwrap_or_else(|| chrono::DateTime::UNIX_EPOCH)
-        .format("%Y-%m-%d %H:%M:%S")
-        .to_string()
-}
-
 /// Create a CSV header row
 pub fn display_csv_header() {
-    println!("timestamp,event_type,hash,parent_hash,description,data_size");
+    println!("event_type,hash,parent_hash,data_size");
 }
 
 /// Helper function to pretty-stringify an event for the pretty format
 pub fn pretty_stringify_event(event: &ChainEvent, full: bool) -> String {
-    let timestamp = chrono::DateTime::from_timestamp(event.timestamp as i64, 0)
-        .unwrap_or_else(|| chrono::DateTime::UNIX_EPOCH)
-        .format("%Y-%m-%d %H:%M:%S%.3f")
-        .to_string();
-
     let event_type = match event.event_type.split('.').next().unwrap_or("") {
         "http" => style(&event.event_type).cyan(),
         "filesystem" => style(&event.event_type).green(),
         "message" => style(&event.event_type).magenta(),
         "runtime" => style(&event.event_type).blue(),
         "error" => style(&event.event_type).red(),
-        _ => style(&event.event_type).yellow(),
+        "wasm" => style(&event.event_type).yellow(),
+        _ => style(&event.event_type).white(),
     };
-
-    let mut output = format!(
-        "{} [{}] [{}]\n",
-        style("►").bold().blue(),
-        event_type,
-        timestamp,
-    );
 
     let hash_str = hex::encode(&event.hash);
     let short_hash = if hash_str.len() > 8 {
@@ -413,7 +331,13 @@ pub fn pretty_stringify_event(event: &ChainEvent, full: bool) -> String {
     } else {
         hash_str
     };
-    output.push_str(&format!("  Hash: {}\n", short_hash));
+
+    let mut output = format!(
+        "{} [{}] [{}]\n",
+        style(">").bold().blue(),
+        event_type,
+        short_hash,
+    );
 
     if let Some(parent) = &event.parent_hash {
         let parent_str = hex::encode(parent);
@@ -429,13 +353,8 @@ pub fn pretty_stringify_event(event: &ChainEvent, full: bool) -> String {
         output.push_str(&format!("  Parent: {}\n", short_parent));
     }
 
-    if let Some(desc) = &event.description {
-        output.push_str(&format!("  Description: {}\n", desc));
-    }
-
     if let Ok(text) = std::str::from_utf8(&event.data) {
         if !full {
-            // Do either the 57 chars or the max length of the string
             let max_len = std::cmp::min(text.len(), 57);
             output.push_str(&format!(
                 "  Data: {}... ({} bytes total)\n",
@@ -452,7 +371,7 @@ pub fn pretty_stringify_event(event: &ChainEvent, full: bool) -> String {
         ));
     }
 
-    output.push_str("\n");
+    output.push('\n');
     output
 }
 
@@ -504,7 +423,6 @@ pub fn print_hex_dump(data: &[u8], bytes_per_line: usize) {
 }
 
 /// Display a single event in structured format for Unix scripting
-/// Format: EVENT <hash>\n<parent>\n<type>\n<timestamp>\n<description>\n<data_size>\n\n<data>\n\n
 pub fn display_structured_event(event: &ChainEvent, fields: &[&str]) -> Result<()> {
     // Start with EVENT and hash (always included)
     let hash_str = format!("0x{}", hex::encode(&event.hash));
@@ -526,32 +444,13 @@ pub fn display_structured_event(event: &ChainEvent, fields: &[&str]) -> Result<(
         println!("{}", event.event_type);
     }
 
-    // Timestamp (if requested)
-    if should_include("timestamp") {
-        // Convert u64 milliseconds to RFC3339 format
-        let timestamp_secs = event.timestamp / 1000;
-        let timestamp_nanos = (event.timestamp % 1000) * 1_000_000;
-        let datetime =
-            chrono::DateTime::from_timestamp(timestamp_secs as i64, timestamp_nanos as u32)
-                .unwrap_or_else(|| chrono::Utc::now());
-        println!("{}", datetime.to_rfc3339());
-    }
-
-    // Description (if requested)
-    if should_include("description") {
-        match &event.description {
-            Some(desc) => println!("{}", desc),
-            None => println!(""),
-        }
-    }
-
     // Data size (if requested)
     if should_include("data_size") {
         println!("{}", event.data.len());
     }
 
     // Empty line before data
-    println!("");
+    println!();
 
     // Data (if requested)
     if should_include("data") {
@@ -575,5 +474,7 @@ pub fn parse_event_fields(fields_str: &str) -> Vec<&str> {
         .split(',')
         .map(|s| s.trim())
         .filter(|s| !s.is_empty())
+        // Filter out unsupported fields
+        .filter(|s| *s != "timestamp" && *s != "description")
         .collect()
 }

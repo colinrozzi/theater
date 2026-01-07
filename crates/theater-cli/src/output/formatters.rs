@@ -1,4 +1,3 @@
-use chrono::DateTime;
 use serde_json::Value;
 use theater::ChainEvent;
 
@@ -100,7 +99,7 @@ impl OutputFormat for ActorEvents {
             return Ok(());
         }
 
-        let headers = vec!["#", "Type", "Description"];
+        let headers = vec!["#", "Type", "Data Size"];
         let rows: Vec<Vec<String>> = self
             .events
             .iter()
@@ -109,7 +108,7 @@ impl OutputFormat for ActorEvents {
                 vec![
                     format!("{}", idx),
                     event.event_type.clone(),
-                    truncate_string(event.description.as_deref().unwrap_or("No description"), 50),
+                    format!("{} bytes", event.data.len()),
                 ]
             })
             .collect();
@@ -793,10 +792,10 @@ impl OutputFormat for ActorLogs {
         if self.events.is_empty() {
             println!("  No logs found.");
         } else {
-            for event in &self.events {
+            for (i, event) in self.events.iter().enumerate() {
                 if let Ok(json_data) = serde_json::from_slice::<serde_json::Value>(&event.data) {
                     if let Some(message) = json_data.get("message").and_then(|m| m.as_str()) {
-                        println!("[{}] {}", format_timestamp(event.timestamp), message);
+                        println!("[{}] {}", i + 1, message);
                     }
                 }
             }
@@ -823,13 +822,12 @@ impl OutputFormat for ActorLogs {
         if self.events.is_empty() {
             println!("No logs found.");
         } else {
-            for event in &self.events {
-                let timestamp = format_timestamp(event.timestamp);
+            for (i, event) in self.events.iter().enumerate() {
                 if let Ok(json_data) = serde_json::from_slice::<serde_json::Value>(&event.data) {
                     if let Some(message) = json_data.get("message").and_then(|m| m.as_str()) {
                         println!(
                             "{} {}",
-                            output.theme().muted().apply_to(&timestamp),
+                            output.theme().muted().apply_to(&format!("{}.", i + 1)),
                             message
                         );
                     }
@@ -851,11 +849,12 @@ impl OutputFormat for ActorLogs {
             return Ok(());
         }
 
-        let headers = vec!["Timestamp", "Message"];
+        let headers = vec!["#", "Message"];
         let rows: Vec<Vec<String>> = self
             .events
             .iter()
-            .filter_map(|event| {
+            .enumerate()
+            .filter_map(|(i, event)| {
                 serde_json::from_slice::<serde_json::Value>(&event.data)
                     .ok()
                     .and_then(|json_data| {
@@ -864,7 +863,7 @@ impl OutputFormat for ActorLogs {
                             .and_then(|m| m.as_str())
                             .map(|message| {
                                 vec![
-                                    format_timestamp(event.timestamp),
+                                    format!("{}", i + 1),
                                     truncate_string(message, 80),
                                 ]
                             })
@@ -974,8 +973,6 @@ impl OutputFormat for ActorInspection {
     }
 
     fn format_pretty(&self, output: &OutputManager) -> CliResult<()> {
-        use std::time::Duration;
-
         println!(
             "{}",
             output.theme().highlight().apply_to("ACTOR INFORMATION")
@@ -986,16 +983,6 @@ impl OutputFormat for ActorInspection {
             output.theme().accent().apply_to(&self.id.to_string())
         );
         println!("Status: {}", output.theme().muted().apply_to(&self.status));
-
-        // Calculate uptime if we have events
-        if let Some(first_event) = self.events.first() {
-            let now = chrono::Utc::now().timestamp() as u64;
-            let uptime = Duration::from_secs(now.saturating_sub(first_event.timestamp));
-            println!(
-                "Uptime: {}",
-                crate::utils::formatting::format_duration(uptime)
-            );
-        }
 
         println!();
         println!("{}", output.theme().highlight().apply_to("STATE"));
@@ -1580,13 +1567,6 @@ impl OutputFormat for ChannelOpened {
 }
 
 // Helper functions
-
-fn format_timestamp(timestamp: u64) -> String {
-    match DateTime::from_timestamp(timestamp as i64, 0) {
-        Some(dt) => dt.format("%Y-%m-%d %H:%M:%S UTC").to_string(),
-        None => timestamp.to_string(),
-    }
-}
 
 fn truncate_string(s: &str, max_len: usize) -> String {
     if s.len() <= max_len {

@@ -26,7 +26,7 @@ use tracing::{debug, error, info};
 use wasmtime::component::{Resource, ResourceAny, Val};
 
 /// Start the incoming HTTP server
-pub async fn start_incoming_server<E>(
+pub async fn start_incoming_server(
     actor_instance: SharedActorInstance,
     host: &str,
     port: u16,
@@ -88,7 +88,7 @@ pub async fn start_incoming_server<E>(
 }
 
 /// Handle a single HTTP request by calling the component's incoming-handler.handle export
-async fn handle_request<E>(
+async fn handle_request(
     req: Request<hyper::body::Incoming>,
     actor_instance: Arc<SharedActorInstance>,
 ) -> Result<Response<Full<Bytes>>, Infallible>
@@ -105,7 +105,7 @@ async fn handle_request<E>(
     }
 }
 
-async fn handle_request_inner<E>(
+async fn handle_request_inner(
     req: Request<hyper::body::Incoming>,
     shared_instance: Arc<SharedActorInstance>,
 ) -> Result<Response<Full<Bytes>>>
@@ -158,8 +158,6 @@ async fn handle_request_inner<E>(
             }
         };
 
-        // Record incoming request event
-        actor_instance.
         // Push resources to the resource table and get Resource handles
         let request_resource: Resource<IncomingRequestResource> = {
             let mut table = actor_instance.actor_component.actor_store.resource_table.lock().unwrap();

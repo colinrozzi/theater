@@ -25,13 +25,6 @@ pub fn format_status(status: &ActorStatus) -> String {
     }
 }
 
-/// Format a timestamp as a human-readable date/time
-pub fn format_timestamp(timestamp: &u64) -> String {
-    let datetime = chrono::DateTime::from_timestamp(*timestamp as i64, 0)
-        .unwrap_or_else(|| chrono::DateTime::UNIX_EPOCH);
-    datetime.format("%Y-%m-%d %H:%M:%S").to_string()
-}
-
 /// Format a duration in a human-readable form
 pub fn format_duration(duration: Duration) -> String {
     let total_secs = duration.as_secs();
@@ -87,14 +80,13 @@ pub fn format_key_value(key: &str, value: &str) -> String {
 /// Format an event summary
 pub fn format_event_summary(event: &ChainEvent) -> String {
     let event_type = style(&event.event_type).yellow();
-    let timestamp = format_timestamp(&event.timestamp);
     let hash = format_hash(&event.hash, true);
 
     format!(
-        "{} at {} (hash: {})",
+        "{} (hash: {}, {} bytes)",
         event_type,
-        style(timestamp).dim(),
-        style(hash).dim()
+        style(hash).dim(),
+        event.data.len()
     )
 }
 

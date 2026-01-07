@@ -4,7 +4,6 @@ pub mod config;
 pub mod error;
 pub mod output;
 pub mod templates;
-pub mod tui;
 pub mod utils;
 
 use clap::{Parser, Subcommand};
@@ -61,10 +60,6 @@ pub enum Commands {
     #[command(name = "events")]
     Events(commands::events::EventsArgs),
 
-    /// Interactively explore actor events with TUI
-    #[command(name = "events-explore")]
-    EventsExplore(commands::events_explore::ExploreArgs),
-
     /// Inspect a running actor (detailed view)
     #[command(name = "inspect")]
     Inspect(commands::inspect::InspectArgs),
@@ -92,6 +87,10 @@ pub enum Commands {
     /// Generate dynamic completions (internal use)
     #[command(name = "dynamic-completion", hide = true)]
     DynamicCompletion(commands::dynamic_completion::DynamicCompletionArgs),
+
+    /// Replay an actor and verify determinism against a recorded event chain
+    #[command(name = "replay")]
+    Replay(commands::replay::ReplayArgs),
 }
 
 /// Run the Theater CLI asynchronously with cancellation support
@@ -133,9 +132,6 @@ pub async fn run(
             Commands::Events(args) => commands::events::execute_async(args, &ctx)
                 .await
                 .map_err(|e| anyhow::Error::from(e)),
-            Commands::EventsExplore(args) => commands::events_explore::execute_async(args, &ctx)
-                .await
-                .map_err(|e| anyhow::Error::from(e)),
             Commands::Inspect(args) => commands::inspect::execute_async(args, &ctx)
                 .await
                 .map_err(|e| anyhow::Error::from(e)),
@@ -169,6 +165,9 @@ pub async fn run(
                     .await
                     .map_err(|e| anyhow::Error::from(e))
             }
+            Commands::Replay(args) => commands::replay::execute_async(args, &ctx)
+                .await
+                .map_err(|e| anyhow::Error::from(e)),
         }
     };
 

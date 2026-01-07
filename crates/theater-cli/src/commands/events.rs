@@ -54,6 +54,10 @@ pub struct EventsArgs {
 
     #[arg(long, short = 'f', default_value = "pretty")]
     pub format: Option<String>,
+
+    /// Save the event chain to a file (JSON format, useful for replay testing)
+    #[arg(long)]
+    pub save: Option<String>,
 }
 
 /// Execute the events command asynchronously with modern patterns
@@ -94,6 +98,13 @@ pub async fn execute_async(args: &EventsArgs, ctx: &CommandContext) -> CliResult
         events = events.into_iter().take(args.limit).collect();
     }
 
+    // Save to file if requested
+    if let Some(save_path) = &args.save {
+        save_chain_to_file(&events, save_path)?;
+        ctx.output
+            .success(&format!("Saved {} events to {}", events.len(), save_path))?;
+    }
+
     // Create formatted output
     let actor_events = ActorEvents {
         actor_id: actor_id.to_string(),
@@ -131,13 +142,6 @@ fn apply_filters(events: &mut Vec<ChainEvent>, args: &EventsArgs) -> CliResult<(
             // Search in event type
             if e.event_type.contains(search_text) {
                 return true;
-            }
-
-            // Search in description
-            if let Some(desc) = &e.description {
-                if desc.contains(search_text) {
-                    return true;
-                }
             }
 
             // Search in data if it's UTF-8 text
@@ -228,6 +232,35 @@ fn parse_time_spec(spec: &str) -> CliResult<u64> {
                 .to_string(),
         }),
     }
+}
+
+/// Save the event chain to a JSON file
+fn save_chain_to_file(events: &[ChainEvent], path: &str) -> CliResult<()> {
+    use std::fs;
+    use std::path::Path;
+
+    // Create parent directories if needed
+    if let Some(parent) = Path::new(path).parent() {
+        if !parent.as_os_str().is_empty() {
+            fs::create_dir_all(parent).map_err(|e| CliError::IoError {
+                operation: format!("create directory '{}'", parent.display()),
+                source: e,
+            })?;
+        }
+    }
+
+    // Serialize the events
+    let json = serde_json::to_string_pretty(events).map_err(|e| CliError::ParseError {
+        message: format!("Failed to serialize events to JSON: {}", e),
+    })?;
+
+    // Write to file
+    fs::write(path, json).map_err(|e| CliError::IoError {
+        operation: format!("write chain to '{}'", path),
+        source: e,
+    })?;
+
+    Ok(())
 }
 
 // Order events by their chain structure (parent-child relationships)

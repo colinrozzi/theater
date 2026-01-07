@@ -23,6 +23,7 @@
 
 # Development
 - [Building Actors](development/building-actors.md)
+- [Testing with Replay](development/testing-with-replay.md)
 - [Building Host Functions](development/building-host-functions.md)
 - [WIT Debugging](development/wit-debugging.md)
 - [Making Changes](development/making-changes.md)
