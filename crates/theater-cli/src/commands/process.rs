@@ -161,8 +161,8 @@ async fn run_actor_process(
 
     let mut actor_started = false;
     let mut actor_result: Option<ActorResult> = None;
-    let startup_timeout = tokio::time::Duration::from_secs(30);
-    let process_timeout = if args.timeout > 0 {
+    let startup_timeout_duration = tokio::time::Duration::from_secs(30);
+    let process_timeout_duration = if args.timeout > 0 {
         Some(tokio::time::Duration::from_secs(args.timeout))
     } else {
         None
@@ -171,7 +171,32 @@ async fn run_actor_process(
 
     debug!("Entering process supervision loop");
 
-    let _start_time = tokio::time::Instant::now();
+    // Set up timeout tracking - compute deadline once, not on every iteration
+    let startup_deadline = tokio::time::Instant::now() + startup_timeout_duration;
+    let startup_sleep = tokio::time::sleep_until(startup_deadline);
+    tokio::pin!(startup_sleep);
+
+    // Process timeout will be set once actor starts
+    // Use a far-future deadline initially (we'll reset it when actor starts)
+    let far_future = tokio::time::Instant::now() + tokio::time::Duration::from_secs(86400 * 365);
+    let process_sleep = tokio::time::sleep_until(far_future);
+    tokio::pin!(process_sleep);
+    let mut process_timeout_active = false;
+
+    // Set up signal handlers ONCE before the loop (not on every iteration)
+    #[cfg(unix)]
+    let mut sigterm = if args.unix_signals {
+        use tokio::signal::unix::{signal, SignalKind};
+        Some(signal(SignalKind::terminate()).ok()).flatten()
+    } else {
+        None
+    };
+
+    #[cfg(not(unix))]
+    let sigterm: Option<()> = None;
+
+    // For ctrl_c, we need to handle it differently since it's a future, not a stream
+    let ctrl_c_enabled = args.unix_signals;
 
     loop {
         tokio::select! {
@@ -183,6 +208,13 @@ async fn run_actor_process(
                             actor_started = true;
                             let id_str = id.to_string();
                             actor_id = Some(id_str.clone());
+
+                            // Set process timeout now that actor has started
+                            if let Some(timeout_duration) = process_timeout_duration {
+                                let deadline = tokio::time::Instant::now() + timeout_duration;
+                                process_sleep.as_mut().reset(deadline);
+                                process_timeout_active = true;
+                            }
 
                             // In process mode, we always show some indication of startup
                             if args.verbose {
@@ -226,10 +258,14 @@ async fn run_actor_process(
                     }
                 }
             }
-            _ = tokio::time::sleep(startup_timeout), if !actor_started => {
-                return Err(CliError::operation_timeout("Actor startup", startup_timeout.as_secs()));
+
+            // Startup timeout - only active before actor starts
+            _ = &mut startup_sleep, if !actor_started => {
+                return Err(CliError::operation_timeout("Actor startup", startup_timeout_duration.as_secs()));
             }
-            _ = tokio::time::sleep(process_timeout.unwrap_or(tokio::time::Duration::MAX)), if process_timeout.is_some() && actor_started => {
+
+            // Process timeout - only active after actor starts and if timeout was specified
+            _ = &mut process_sleep, if process_timeout_active => {
                 eprintln!("Process timeout reached, terminating actor...");
                 if let Some(actor_id) = &actor_id {
                     let _ = client.terminate_actor(actor_id).await;
@@ -237,55 +273,39 @@ async fn run_actor_process(
                 return Err(CliError::operation_timeout("Process execution", args.timeout));
             }
 
-            // Unix signal handling (enabled by default in process mode)
-            signal = async {
+            // Handle Ctrl+C (SIGINT)
+            _ = tokio::signal::ctrl_c(), if ctrl_c_enabled => {
+                if let Some(actor_id) = &actor_id {
+                    debug!("SIGINT received, gracefully stopping actor {}", actor_id);
+                    eprintln!("\nReceived SIGINT, gracefully stopping process...");
+                    let _ = client.stop_actor(actor_id).await;
+                }
+                break;
+            }
+
+            // Handle SIGTERM (Unix only)
+            _ = async {
                 #[cfg(unix)]
                 {
-                    use tokio::signal::unix::{SignalKind, signal};
-
-                    if !args.unix_signals {
-                        futures::future::pending::<&str>().await
+                    if let Some(ref mut sig) = sigterm {
+                        sig.recv().await
                     } else {
-                        tokio::select! {
-                            _ = tokio::signal::ctrl_c() => "SIGINT",
-                            _ = async {
-                                if let Ok(mut sig) = signal(SignalKind::terminate()) {
-                                    sig.recv().await;
-                                }
-                            } => "SIGTERM",
-                        }
+                        futures::future::pending::<Option<()>>().await
                     }
                 }
                 #[cfg(not(unix))]
                 {
-                    if !args.unix_signals {
-                        futures::future::pending::<&str>().await
-                    } else {
-                        tokio::signal::ctrl_c().await.ok();
-                        "SIGINT"
-                    }
+                    futures::future::pending::<()>().await
                 }
             } => {
-                match signal {
-                    "SIGINT" | "SIGTERM" => {
-                        let sig_type = if signal == "SIGINT" { "SIGINT" } else { "SIGTERM" };
-                        if let Some(actor_id) = &actor_id {
-                            debug!("{} received, {} actor {}", sig_type,
-                                  if sig_type == "SIGINT" { "gracefully stopping" } else { "terminating" }, actor_id);
-                            eprintln!("\nReceived {}, {} process...", sig_type,
-                                    if sig_type == "SIGINT" { "gracefully stopping" } else { "terminating" });
-
-                            if sig_type == "SIGINT" {
-                                let _ = client.stop_actor(actor_id).await;
-                            } else {
-                                let _ = client.terminate_actor(actor_id).await;
-                            }
-                        }
-                        break;
-                    }
-                    _ => break,
+                if let Some(actor_id) = &actor_id {
+                    debug!("SIGTERM received, terminating actor {}", actor_id);
+                    eprintln!("\nReceived SIGTERM, terminating process...");
+                    let _ = client.terminate_actor(actor_id).await;
                 }
+                break;
             }
+
             _ = ctx.shutdown_token.cancelled() => {
                 break;
             }
