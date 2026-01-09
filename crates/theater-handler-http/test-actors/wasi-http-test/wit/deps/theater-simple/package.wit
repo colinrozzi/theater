@@ -93,7 +93,7 @@ interface actor {
   /// - If state contains data, the actor should validate and use that state
   /// - The first parameter in the tuple is typically the actor's ID
   /// - Any error returned will cause the actor to fail to start
-  init: func(state: option<list<u8>>, params: tuple<string>) -> result<tuple<option<list<u8>>>, string>;
+  init: func(state: option<list<u8>>) -> result<tuple<option<list<u8>>>, string>;
 }
 
 interface environment {

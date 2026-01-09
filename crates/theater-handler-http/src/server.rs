@@ -3,8 +3,10 @@
 //! This module provides a hyper-based HTTP server that forwards requests
 //! to WebAssembly components that export the wasi:http/incoming-handler interface.
 
-use crate::incoming::{IncomingRequestResource, ResponseOutparam, ResponseOutparamResult};
-use crate::types::{Headers, WasiMethod, WasiScheme};
+use crate::types::{
+    HostIncomingRequest, HostResponseOutparam, HostIncomingBody, HostFields,
+    HostOutgoingResponse, Method, Scheme, ResponseOutparamResult, WasiMethod, WasiScheme
+};
 use crate::events::HttpEventData;
 use theater::handler::SharedActorInstance;
 use theater::events::theater_runtime::TheaterRuntimeEventData;
@@ -111,13 +113,15 @@ async fn handle_request_inner(
 ) -> Result<Response<Full<Bytes>>>
 {
     // Extract request information
-    let method = convert_method(req.method());
-    let scheme = Some(WasiScheme::Http);
+    let wasi_method = convert_method(req.method());
+    let method = Method::from_wasi(&wasi_method);
+    let wasi_scheme = WasiScheme::Http;
+    let scheme = Some(Scheme::from_wasi(&wasi_scheme));
     let authority = req.uri().authority().map(|a| a.to_string());
     let path_with_query = req.uri().path_and_query().map(|pq| pq.to_string());
 
-    // Convert headers
-    let headers = Headers::new();
+    // Convert headers using HostFields (the backing type for WASI)
+    let mut headers = HostFields::new();
     for (name, value) in req.headers() {
         headers.append(name.as_str(), value.as_bytes().to_vec());
     }
@@ -130,23 +134,29 @@ async fn handle_request_inner(
 
     debug!(
         "Handling incoming request: {} {:?}",
-        method_to_string(&method),
+        method.as_str(),
         path_with_query
     );
 
-    // Create the incoming request resource
-    let incoming_request = IncomingRequestResource::new(
-        method.clone(),
+    // Create the incoming request resource using HostIncomingRequest
+    let incoming_request = HostIncomingRequest {
+        method,
         scheme,
         authority,
-        path_with_query.clone(),
+        path_with_query: path_with_query.clone(),
         headers,
-        body_bytes,
-    );
+        body: if body_bytes.is_empty() {
+            None
+        } else {
+            Some(HostIncomingBody::new(body_bytes))
+        },
+    };
 
     // Create a channel for the response
     let (response_tx, response_rx) = oneshot::channel();
-    let response_outparam = ResponseOutparam::new(response_tx);
+    let response_outparam = HostResponseOutparam {
+        sender: Some(response_tx),
+    };
 
     // Get write lock on actor instance and call the handler
     {
@@ -159,12 +169,12 @@ async fn handle_request_inner(
         };
 
         // Push resources to the resource table and get Resource handles
-        let request_resource: Resource<IncomingRequestResource> = {
+        let request_resource: Resource<HostIncomingRequest> = {
             let mut table = actor_instance.actor_component.actor_store.resource_table.lock().unwrap();
             table.push(incoming_request)?
         };
 
-        let outparam_resource: Resource<ResponseOutparam> = {
+        let outparam_resource: Resource<HostResponseOutparam> = {
             let mut table = actor_instance.actor_component.actor_store.resource_table.lock().unwrap();
             table.push(response_outparam)?
         };
@@ -188,16 +198,30 @@ async fn handle_request_inner(
             }
         };
 
-        // Then get the handle function
+        // Then get the handle function export from within the interface
+        let handle_export = actor_instance.instance.get_export(
+            &mut actor_instance.store,
+            Some(&interface_export),
+            "handle",
+        );
+
+        let handle_export = match handle_export {
+            Some(idx) => idx,
+            None => {
+                bail!("Component does not export 'handle' function in wasi:http/incoming-handler@0.2.0");
+            }
+        };
+
+        // Get the Func from the handle export
         let func = actor_instance.instance.get_func(
             &mut actor_instance.store,
-            &interface_export,
+            &handle_export,
         );
 
         let func = match func {
             Some(f) => f,
             None => {
-                bail!("Component does not export 'handle' function in wasi:http/incoming-handler@0.2.0");
+                bail!("Failed to get Func for 'handle' in wasi:http/incoming-handler@0.2.0");
             }
         };
 
@@ -220,38 +244,28 @@ async fn handle_request_inner(
 
     // Convert the response to hyper format
     match response_result {
-        ResponseOutparamResult::Response(response_resource) => {
-            // Get the response from the resource table
-            let guard = shared_instance.write().await;
-            let actor_instance = guard.as_ref().ok_or_else(|| anyhow::anyhow!("Actor instance not available"))?;
+        ResponseOutparamResult::Response(response) => {
+            // Response is directly a HostOutgoingResponse
+            let status = response.status;
+            let response_headers = response.headers;
 
-            let table = actor_instance.actor_component.actor_store.resource_table.lock().unwrap();
-            let response = table.get(&response_resource)?;
-
-            let status = response.status();
-            let response_headers = response.headers().clone();
-
-            // Get body contents
-            let body_contents = {
-                let body_lock = response.body.lock().unwrap();
-                if let Some(body) = &*body_lock {
-                    body.get_contents()
+            // Get body contents from the HostOutgoingBody if present
+            let body_contents = if let Some(body) = &response.body {
+                if let Some(stream) = &body.stream {
+                    stream.get_contents()
                 } else {
                     Vec::new()
                 }
+            } else {
+                Vec::new()
             };
-
-            drop(table);
-            drop(guard);
 
             // Build the hyper response
             let mut builder = Response::builder().status(status);
 
-            for (name, values) in response_headers.entries() {
-                for value in values {
-                    if let Ok(header_value) = hyper::header::HeaderValue::from_bytes(&value) {
-                        builder = builder.header(&name, header_value);
-                    }
+            for (name, value) in response_headers.entries() {
+                if let Ok(header_value) = hyper::header::HeaderValue::from_bytes(&value) {
+                    builder = builder.header(&name, header_value);
                 }
             }
 

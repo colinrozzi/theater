@@ -560,7 +560,7 @@ pub struct HostIncomingResponse {
 }
 
 /// Backing type for wasi:http/types.outgoing-body resource
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct HostOutgoingBody {
     pub stream: Option<OutputStream>,
     pub finished: bool,

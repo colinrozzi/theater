@@ -373,13 +373,14 @@ impl HostOutgoingResponse for ActorStore
         if response.body.is_some() {
             return Ok(Err(()));
         }
+        // Create a single body and clone it - the clone shares the underlying buffer
+        // because OutputStream uses Arc<Mutex<>>
         let body = OutgoingBodyData::new();
+        let body_clone = body.clone();
+        response.body = Some(body_clone);
         drop(table);
 
         let resource = self.resource_table.lock().unwrap().push(body)?;
-        let mut table = self.resource_table.lock().unwrap();
-        let response: &mut OutgoingResponseData = table.get_mut(&self_)?;
-        response.body = Some(OutgoingBodyData::new());
         Ok(Ok(resource))
     }
 
@@ -634,7 +635,7 @@ impl HostResponseOutparam for ActorStore
                     crate::types::ResponseOutparamResult::Response(OutgoingResponseData {
                         status: resp.status,
                         headers: resp.headers.clone_fields(),
-                        body: None, // Body is handled separately
+                        body: resp.body.clone(),
                     })
                 }
                 Err(code) => {

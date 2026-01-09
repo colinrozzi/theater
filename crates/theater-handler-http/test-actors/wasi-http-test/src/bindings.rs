@@ -8471,13 +8471,9 @@ pub mod exports {
                     arg0: i32,
                     arg1: *mut u8,
                     arg2: usize,
-                    arg3: *mut u8,
-                    arg4: usize,
                 ) -> *mut u8 {
                     #[cfg(target_arch = "wasm32")] _rt::run_ctors_once();
-                    let len1 = arg4;
-                    let bytes1 = _rt::Vec::from_raw_parts(arg3.cast(), len1, len1);
-                    let result2 = T::init(
+                    let result1 = T::init(
                         match arg0 {
                             0 => None,
                             1 => {
@@ -8489,51 +8485,50 @@ pub mod exports {
                             }
                             _ => _rt::invalid_enum_discriminant(),
                         },
-                        (_rt::string_lift(bytes1),),
                     );
-                    let ptr3 = (&raw mut _RET_AREA.0).cast::<u8>();
-                    match result2 {
+                    let ptr2 = (&raw mut _RET_AREA.0).cast::<u8>();
+                    match result1 {
                         Ok(e) => {
-                            *ptr3.add(0).cast::<u8>() = (0i32) as u8;
-                            let (t4_0,) = e;
-                            match t4_0 {
+                            *ptr2.add(0).cast::<u8>() = (0i32) as u8;
+                            let (t3_0,) = e;
+                            match t3_0 {
                                 Some(e) => {
-                                    *ptr3
+                                    *ptr2
                                         .add(::core::mem::size_of::<*const u8>())
                                         .cast::<u8>() = (1i32) as u8;
-                                    let vec5 = (e).into_boxed_slice();
-                                    let ptr5 = vec5.as_ptr().cast::<u8>();
-                                    let len5 = vec5.len();
-                                    ::core::mem::forget(vec5);
-                                    *ptr3
+                                    let vec4 = (e).into_boxed_slice();
+                                    let ptr4 = vec4.as_ptr().cast::<u8>();
+                                    let len4 = vec4.len();
+                                    ::core::mem::forget(vec4);
+                                    *ptr2
                                         .add(3 * ::core::mem::size_of::<*const u8>())
-                                        .cast::<usize>() = len5;
-                                    *ptr3
+                                        .cast::<usize>() = len4;
+                                    *ptr2
                                         .add(2 * ::core::mem::size_of::<*const u8>())
-                                        .cast::<*mut u8>() = ptr5.cast_mut();
+                                        .cast::<*mut u8>() = ptr4.cast_mut();
                                 }
                                 None => {
-                                    *ptr3
+                                    *ptr2
                                         .add(::core::mem::size_of::<*const u8>())
                                         .cast::<u8>() = (0i32) as u8;
                                 }
                             };
                         }
                         Err(e) => {
-                            *ptr3.add(0).cast::<u8>() = (1i32) as u8;
-                            let vec6 = (e.into_bytes()).into_boxed_slice();
-                            let ptr6 = vec6.as_ptr().cast::<u8>();
-                            let len6 = vec6.len();
-                            ::core::mem::forget(vec6);
-                            *ptr3
+                            *ptr2.add(0).cast::<u8>() = (1i32) as u8;
+                            let vec5 = (e.into_bytes()).into_boxed_slice();
+                            let ptr5 = vec5.as_ptr().cast::<u8>();
+                            let len5 = vec5.len();
+                            ::core::mem::forget(vec5);
+                            *ptr2
                                 .add(2 * ::core::mem::size_of::<*const u8>())
-                                .cast::<usize>() = len6;
-                            *ptr3
+                                .cast::<usize>() = len5;
+                            *ptr2
                                 .add(::core::mem::size_of::<*const u8>())
-                                .cast::<*mut u8>() = ptr6.cast_mut();
+                                .cast::<*mut u8>() = ptr5.cast_mut();
                         }
                     };
-                    ptr3
+                    ptr2
                 }
                 #[doc(hidden)]
                 #[allow(non_snake_case)]
@@ -8594,7 +8589,6 @@ pub mod exports {
                     /// - Any error returned will cause the actor to fail to start
                     fn init(
                         state: Option<_rt::Vec<u8>>,
-                        params: (_rt::String,),
                     ) -> Result<(Option<_rt::Vec<u8>>,), _rt::String>;
                 }
                 #[doc(hidden)]
@@ -8602,10 +8596,9 @@ pub mod exports {
                     ($ty:ident with_types_in $($path_to_types:tt)*) => {
                         const _ : () = { #[unsafe (export_name =
                         "theater:simple/actor#init")] unsafe extern "C" fn
-                        export_init(arg0 : i32, arg1 : * mut u8, arg2 : usize, arg3 : *
-                        mut u8, arg4 : usize,) -> * mut u8 { unsafe {
-                        $($path_to_types)*:: _export_init_cabi::<$ty > (arg0, arg1, arg2,
-                        arg3, arg4) } } #[unsafe (export_name =
+                        export_init(arg0 : i32, arg1 : * mut u8, arg2 : usize,) -> * mut
+                        u8 { unsafe { $($path_to_types)*:: _export_init_cabi::<$ty >
+                        (arg0, arg1, arg2) } } #[unsafe (export_name =
                         "cabi_post_theater:simple/actor#init")] unsafe extern "C" fn
                         _post_return_init(arg0 : * mut u8,) { unsafe {
                         $($path_to_types)*:: __post_return_init::<$ty > (arg0) } } };
@@ -8927,8 +8920,8 @@ pub(crate) use __export_wasi_http_test_impl as export;
 )]
 #[doc(hidden)]
 #[allow(clippy::octal_escapes)]
-pub static __WIT_BINDGEN_COMPONENT_TYPE: [u8; 6706] = *b"\
-\0asm\x0d\0\x01\0\0\x19\x16wit-component-encoding\x04\0\x07\xad3\x01A\x02\x01A\x1b\
+pub static __WIT_BINDGEN_COMPONENT_TYPE: [u8; 6694] = *b"\
+\0asm\x0d\0\x01\0\0\x19\x16wit-component-encoding\x04\0\x07\xa13\x01A\x02\x01A\x1b\
 \x01B\x0a\x04\0\x08pollable\x03\x01\x01h\0\x01@\x01\x04self\x01\0\x7f\x04\0\x16[\
 method]pollable.ready\x01\x02\x01@\x01\x04self\x01\x01\0\x04\0\x16[method]pollab\
 le.block\x01\x03\x01p\x01\x01py\x01@\x01\x02in\x04\0\x05\x04\0\x04poll\x01\x06\x03\
@@ -9053,15 +9046,15 @@ ions\x02\x03\0\x04\x18future-incoming-response\x02\x03\0\x04\x0aerror-code\x01B\
 nse\x03\0\x04\x02\x03\x02\x01\x0d\x04\0\x0aerror-code\x03\0\x06\x01i\x01\x01i\x03\
 \x01k\x09\x01i\x05\x01j\x01\x0b\x01\x07\x01@\x02\x07request\x08\x07options\x0a\0\
 \x0c\x04\0\x06handle\x01\x0d\x03\0\x20wasi:http/outgoing-handler@0.2.0\x05\x0e\x01\
-B\x07\x01p}\x01k\0\x01o\x01s\x01o\x01\x01\x01j\x01\x03\x01s\x01@\x02\x05state\x01\
-\x06params\x02\0\x04\x04\0\x04init\x01\x05\x04\0\x14theater:simple/actor\x05\x0f\
-\x02\x03\0\x04\x10incoming-request\x02\x03\0\x04\x11response-outparam\x01B\x08\x02\
-\x03\x02\x01\x10\x04\0\x10incoming-request\x03\0\0\x02\x03\x02\x01\x11\x04\0\x11\
-response-outparam\x03\0\x02\x01i\x01\x01i\x03\x01@\x02\x07request\x04\x0crespons\
-e-out\x05\x01\0\x04\0\x06handle\x01\x06\x04\0\x20wasi:http/incoming-handler@0.2.\
-0\x05\x12\x04\0#test:wasi-http/wasi-http-test@0.2.0\x04\0\x0b\x14\x01\0\x0ewasi-\
-http-test\x03\0\0\0G\x09producers\x01\x0cprocessed-by\x02\x0dwit-component\x070.\
-227.1\x10wit-bindgen-rust\x060.41.0";
+B\x06\x01p}\x01k\0\x01o\x01\x01\x01j\x01\x02\x01s\x01@\x01\x05state\x01\0\x03\x04\
+\0\x04init\x01\x04\x04\0\x14theater:simple/actor\x05\x0f\x02\x03\0\x04\x10incomi\
+ng-request\x02\x03\0\x04\x11response-outparam\x01B\x08\x02\x03\x02\x01\x10\x04\0\
+\x10incoming-request\x03\0\0\x02\x03\x02\x01\x11\x04\0\x11response-outparam\x03\0\
+\x02\x01i\x01\x01i\x03\x01@\x02\x07request\x04\x0cresponse-out\x05\x01\0\x04\0\x06\
+handle\x01\x06\x04\0\x20wasi:http/incoming-handler@0.2.0\x05\x12\x04\0#test:wasi\
+-http/wasi-http-test@0.2.0\x04\0\x0b\x14\x01\0\x0ewasi-http-test\x03\0\0\0G\x09p\
+roducers\x01\x0cprocessed-by\x02\x0dwit-component\x070.227.1\x10wit-bindgen-rust\
+\x060.41.0";
 #[inline(never)]
 #[doc(hidden)]
 pub fn __link_custom_section_describing_imports() {
