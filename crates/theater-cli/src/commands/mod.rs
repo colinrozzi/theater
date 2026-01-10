@@ -9,7 +9,6 @@ pub mod list;
 pub mod list_stored;
 pub mod message;
 pub mod process;
-pub mod replay;
 pub mod start;
 pub mod state;
 pub mod stop;

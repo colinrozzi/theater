@@ -80,7 +80,7 @@ impl RandomHandler {
 
 impl Handler for RandomHandler
 {
-    fn create_instance(&self) -> Box<dyn Handler> {
+    fn create_instance(&self, _config: Option<&theater::config::actor_manifest::HandlerConfig>) -> Box<dyn Handler> {
         Box::new(Self::new(self.config.clone(), self.permissions.clone()))
     }
 

@@ -8,7 +8,7 @@ use bindings::wasi::io::poll;
 struct Component;
 
 impl Guest for Component {
-    fn init(_state: Option<Vec<u8>>, _params: (String,)) -> Result<(Option<Vec<u8>>,), String> {
+    fn init(_state: Option<Vec<u8>>) -> Result<(Option<Vec<u8>>,), String> {
         // Test 1: Get current monotonic instant
         let instant1 = monotonic_clock::now();
         assert!(instant1 > 0, "Monotonic clock should return positive value");
@@ -19,7 +19,10 @@ impl Guest for Component {
 
         // Test 3: Verify time progresses
         let instant2 = monotonic_clock::now();
-        assert!(instant2 >= instant1, "Monotonic clock should not go backwards");
+        assert!(
+            instant2 >= instant1,
+            "Monotonic clock should not go backwards"
+        );
 
         // Test 4: subscribe-instant (create a pollable for a future instant)
         let future_instant = instant2 + 100_000_000; // 100ms in the future
@@ -51,12 +54,21 @@ impl Guest for Component {
 
         // Now check if the short pollable is ready
         let is_ready_short = short_pollable.ready();
-        assert!(is_ready_short, "Short duration pollable should be ready after blocking");
+        assert!(
+            is_ready_short,
+            "Short duration pollable should be ready after blocking"
+        );
 
         // Test 9: Use poll with the short pollable
         let ready = poll::poll(&[&short_pollable]);
-        assert!(ready.len() > 0, "Poll should return at least one ready pollable");
-        assert!(ready.contains(&0), "Short pollable (index 0) should be ready");
+        assert!(
+            ready.len() > 0,
+            "Poll should return at least one ready pollable"
+        );
+        assert!(
+            ready.contains(&0),
+            "Short pollable (index 0) should be ready"
+        );
 
         Ok((Some(b"WASI clocks + poll tests passed!".to_vec()),))
     }

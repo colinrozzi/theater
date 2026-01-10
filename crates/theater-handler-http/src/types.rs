@@ -229,6 +229,24 @@ impl Method {
         }
     }
 
+    /// Parse a method from a string (e.g., "GET", "POST", "Method::Get")
+    pub fn from_string(s: &str) -> Self {
+        // Handle both "GET" format and "Method::Get" format
+        let normalized = s.trim();
+        match normalized.to_uppercase().as_str() {
+            "GET" | "METHOD::GET" => Method::Get,
+            "POST" | "METHOD::POST" => Method::Post,
+            "PUT" | "METHOD::PUT" => Method::Put,
+            "DELETE" | "METHOD::DELETE" => Method::Delete,
+            "PATCH" | "METHOD::PATCH" => Method::Patch,
+            "HEAD" | "METHOD::HEAD" => Method::Head,
+            "OPTIONS" | "METHOD::OPTIONS" => Method::Options,
+            "CONNECT" | "METHOD::CONNECT" => Method::Connect,
+            "TRACE" | "METHOD::TRACE" => Method::Trace,
+            _ => Method::Other(normalized.to_string()),
+        }
+    }
+
     pub fn as_str(&self) -> &str {
         match self {
             Method::Get => "GET",
@@ -259,6 +277,15 @@ impl Scheme {
             WasiScheme::Http => Scheme::Http,
             WasiScheme::Https => Scheme::Https,
             WasiScheme::Other(s) => Scheme::Other(s.clone()),
+        }
+    }
+
+    /// Parse a scheme from a string (e.g., "http", "https")
+    pub fn from_string(s: &str) -> Self {
+        match s.to_lowercase().as_str() {
+            "http" => Scheme::Http,
+            "https" => Scheme::Https,
+            _ => Scheme::Other(s.to_string()),
         }
     }
 

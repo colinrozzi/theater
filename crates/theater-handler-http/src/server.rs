@@ -7,10 +7,10 @@ use crate::types::{
     HostIncomingRequest, HostResponseOutparam, HostIncomingBody, HostFields,
     HostOutgoingResponse, Method, Scheme, ResponseOutparamResult, WasiMethod, WasiScheme
 };
-use crate::events::HttpEventData;
+use crate::events::{HttpRequestData, HttpResponseData};
+use base64::Engine;
+use theater::events::{ChainEventData, ChainEventPayload, wasm::WasmEventData};
 use theater::handler::SharedActorInstance;
-use theater::events::theater_runtime::TheaterRuntimeEventData;
-use theater::events::wasm::WasmEventData;
 use theater::shutdown::ShutdownReceiver;
 use anyhow::{Result, bail, Context};
 use bytes::Bytes;
@@ -112,6 +112,9 @@ async fn handle_request_inner(
     shared_instance: Arc<SharedActorInstance>,
 ) -> Result<Response<Full<Bytes>>>
 {
+    info!("handle_request_inner called for path: {:?}", req.uri().path());
+    let b64 = base64::engine::general_purpose::STANDARD;
+
     // Extract request information
     let wasi_method = convert_method(req.method());
     let method = Method::from_wasi(&wasi_method);
@@ -121,9 +124,13 @@ async fn handle_request_inner(
     let path_with_query = req.uri().path_and_query().map(|pq| pq.to_string());
 
     // Convert headers using HostFields (the backing type for WASI)
+    // Also capture for event recording
     let mut headers = HostFields::new();
+    let mut request_headers_for_event: Vec<(String, String)> = Vec::new();
     for (name, value) in req.headers() {
-        headers.append(name.as_str(), value.as_bytes().to_vec());
+        let value_bytes = value.as_bytes().to_vec();
+        headers.append(name.as_str(), value_bytes.clone());
+        request_headers_for_event.push((name.to_string(), b64.encode(&value_bytes)));
     }
 
     // Read the body
@@ -131,6 +138,20 @@ async fn handle_request_inner(
         .context("Failed to read request body")?
         .to_bytes()
         .to_vec();
+
+    // Capture request data for event recording
+    let request_event_data = HttpRequestData {
+        method: method.as_str().to_string(),
+        scheme: Some("http".to_string()),
+        authority: authority.clone(),
+        path_with_query: path_with_query.clone(),
+        headers: request_headers_for_event,
+        body: if body_bytes.is_empty() {
+            None
+        } else {
+            Some(b64.encode(&body_bytes))
+        },
+    };
 
     debug!(
         "Handling incoming request: {} {:?}",
@@ -229,6 +250,15 @@ async fn handle_request_inner(
         let params = [Val::Resource(request_any), Val::Resource(outparam_any)];
         let mut results = [];
 
+        // Record WasmCall BEFORE calling the export (like init does)
+        actor_instance.actor_component.actor_store.record_event(ChainEventData {
+            event_type: "wasm".to_string(),
+            data: ChainEventPayload::Wasm(WasmEventData::WasmCall {
+                function_name: "wasi:http/incoming-handler@0.2.0/handle".to_string(),
+                params: serde_json::to_vec(&request_event_data).unwrap_or_default(),
+            }),
+        });
+
         func.call_async(&mut actor_instance.store, &params, &mut results).await
             .context("Failed to call wasi:http/incoming-handler.handle")?;
 
@@ -242,7 +272,7 @@ async fn handle_request_inner(
     let response_result = response_rx.await
         .context("Response channel closed without response")?;
 
-    // Convert the response to hyper format
+    // Convert the response to hyper format and record the event
     match response_result {
         ResponseOutparamResult::Response(response) => {
             // Response is directly a HostOutgoingResponse
@@ -260,6 +290,42 @@ async fn handle_request_inner(
                 Vec::new()
             };
 
+            // Capture response data for event recording
+            let response_headers_for_event: Vec<(String, String)> = response_headers
+                .entries()
+                .iter()
+                .map(|(name, value)| (name.clone(), b64.encode(value)))
+                .collect();
+
+            let response_event_data = HttpResponseData {
+                status_code: status,
+                headers: response_headers_for_event,
+                body: b64.encode(&body_contents),
+            };
+
+            // Record WasmResult AFTER the export completes (like init does)
+            {
+                info!("Attempting to record HTTP WasmResult event...");
+                let guard = shared_instance.read().await;
+                info!("Got read lock on shared_instance");
+                if let Some(instance) = &*guard {
+                    info!("Found actor instance, recording WasmResult event");
+                    instance.actor_component.actor_store.record_event(ChainEventData {
+                        event_type: "wasm".to_string(),
+                        data: ChainEventPayload::Wasm(WasmEventData::WasmResult {
+                            function_name: "wasi:http/incoming-handler@0.2.0/handle".to_string(),
+                            result: (
+                                Some(serde_json::to_vec(&request_event_data).unwrap_or_default()),
+                                serde_json::to_vec(&response_event_data).unwrap_or_default(),
+                            ),
+                        }),
+                    });
+                    info!("Recorded HTTP WasmResult event");
+                } else {
+                    info!("Actor instance was None, could not record event");
+                }
+            }
+
             // Build the hyper response
             let mut builder = Response::builder().status(status);
 
@@ -273,6 +339,31 @@ async fn handle_request_inner(
         }
         ResponseOutparamResult::Error(error_code) => {
             error!("Component returned error: {:?}", error_code);
+
+            // Record error response event
+            let response_event_data = HttpResponseData {
+                status_code: 500,
+                headers: vec![],
+                body: b64.encode(format!("Error: {:?}", error_code).as_bytes()),
+            };
+
+            // Record WasmResult for error case
+            {
+                let guard = shared_instance.read().await;
+                if let Some(instance) = &*guard {
+                    instance.actor_component.actor_store.record_event(ChainEventData {
+                        event_type: "wasm".to_string(),
+                        data: ChainEventPayload::Wasm(WasmEventData::WasmResult {
+                            function_name: "wasi:http/incoming-handler@0.2.0/handle".to_string(),
+                            result: (
+                                Some(serde_json::to_vec(&request_event_data).unwrap_or_default()),
+                                serde_json::to_vec(&response_event_data).unwrap_or_default(),
+                            ),
+                        }),
+                    });
+                }
+            }
+
             Ok(Response::builder()
                 .status(500)
                 .body(Full::new(Bytes::from(format!("Error: {:?}", error_code))))?)

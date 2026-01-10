@@ -395,7 +395,7 @@ impl ProcessHandler {
 
 impl Handler for ProcessHandler
 {
-    fn create_instance(&self) -> Box<dyn Handler> {
+    fn create_instance(&self, _config: Option<&theater::config::actor_manifest::HandlerConfig>) -> Box<dyn Handler> {
         Box::new(self.clone())
     }
 

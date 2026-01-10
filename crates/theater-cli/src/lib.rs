@@ -87,10 +87,6 @@ pub enum Commands {
     /// Generate dynamic completions (internal use)
     #[command(name = "dynamic-completion", hide = true)]
     DynamicCompletion(commands::dynamic_completion::DynamicCompletionArgs),
-
-    /// Replay an actor and verify determinism against a recorded event chain
-    #[command(name = "replay")]
-    Replay(commands::replay::ReplayArgs),
 }
 
 /// Run the Theater CLI asynchronously with cancellation support
@@ -165,9 +161,6 @@ pub async fn run(
                     .await
                     .map_err(|e| anyhow::Error::from(e))
             }
-            Commands::Replay(args) => commands::replay::execute_async(args, &ctx)
-                .await
-                .map_err(|e| anyhow::Error::from(e)),
         }
     };
 

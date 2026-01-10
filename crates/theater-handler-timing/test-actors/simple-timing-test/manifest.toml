@@ -1,6 +1,6 @@
 name = "simple-timing-test"
 version = "0.1.0"
-component = "/Users/colinrozzi/work/theater/crates/theater-handler-timing/test-actors/simple-timing-test/target/wasm32-wasip1/release/simple_timing_test.wasm"
+component = "/Users/colinrozzi/work/theater/crates/theater-handler-timing/test-actors/simple-timing-test/./target/wasm32-unknown-unknown/release/simple_timing_test.wasm"
 description = "Simple test actor for theater:simple/timing interface"
 save_chain = true
 
@@ -9,3 +9,5 @@ type = "runtime"
 
 [[handler]]
 type = "timing"
+max_sleep_duration = 3600000
+min_sleep_duration = 1

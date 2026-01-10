@@ -8,6 +8,7 @@ use crate::actor::handle::ActorHandle;
 use crate::actor::store::ActorStore;
 use crate::actor::types::ActorError;
 use crate::actor::types::ActorOperation;
+use crate::chain::HttpReplayChain;
 use crate::events::wasm::WasmEventData;
 use crate::events::ChainEventData;
 use crate::handler::Handler;
@@ -185,9 +186,7 @@ impl ActorPhaseManager {
 
     pub async fn wait_for_phase(&self, phase: ActorPhase) {
         let mut rx = self.phase_rx.clone();
-        let _ = rx
-            .wait_for(|current_phase| *current_phase == phase)
-            .await;
+        let _ = rx.wait_for(|current_phase| *current_phase == phase).await;
     }
 }
 
@@ -315,14 +314,24 @@ impl ActorRuntime {
             debug!("Setting up host functions for handler '{}'", handler.name());
             match handler.setup_host_functions(&mut actor_component, &mut handler_ctx) {
                 Ok(()) => {
-                    debug!("Handler '{}' host functions set up successfully", handler.name());
+                    debug!(
+                        "Handler '{}' host functions set up successfully",
+                        handler.name()
+                    );
                 }
                 Err(e) => {
-                    error!("Handler '{}' host functions FAILED: {:?}", handler.name(), e);
+                    error!(
+                        "Handler '{}' host functions FAILED: {:?}",
+                        handler.name(),
+                        e
+                    );
                 }
             }
         }
-        debug!("Handler context satisfied imports: {:?}", handler_ctx.satisfied_imports);
+        debug!(
+            "Handler context satisfied imports: {:?}",
+            handler_ctx.satisfied_imports
+        );
 
         // ----------------- Checkpoint Instantiate Actor -----------------
 
@@ -408,10 +417,7 @@ impl ActorRuntime {
             // TypedComponentFunctionStateOnly handles state directly.
             // init: func(state: option<list<u8>>) -> result<tuple<option<list<u8>>>, string>
             init_actor_handle
-                .call_function::<(), ()>(
-                    "theater:simple/actor.init".to_string(),
-                    (),
-                )
+                .call_function::<(), ()>("theater:simple/actor.init".to_string(), ())
                 .await
                 .map_err(|e| {
                     error!("Failed to call actor.init for actor {}: {}", init_id, e);
@@ -562,8 +568,7 @@ impl ActorRuntime {
             match control {
                 ActorControl::Shutdown { response_tx } => {
                     info!("Shutdown requested");
-                    actor_phase_manager
-                        .set_phase(ActorPhase::ShuttingDown);
+                    actor_phase_manager.set_phase(ActorPhase::ShuttingDown);
 
                     debug!("Signaled shutdown to operation and info loops");
 
@@ -617,20 +622,18 @@ impl ActorRuntime {
                         let _ = response_tx.send(Ok(()));
                     }
                 }
-                ActorControl::Resume { response_tx } => {
-                    match actor_phase_manager.get_phase() {
-                        ActorPhase::Starting | ActorPhase::Running => {
-                            let _ = response_tx.send(Err(ActorError::NotPaused));
-                        }
-                        ActorPhase::ShuttingDown => {
-                            let _ = response_tx.send(Err(ActorError::ShuttingDown));
-                        }
-                        ActorPhase::Paused => {
-                            actor_phase_manager.set_phase(ActorPhase::Running);
-                            let _ = response_tx.send(Ok(()));
-                        }
+                ActorControl::Resume { response_tx } => match actor_phase_manager.get_phase() {
+                    ActorPhase::Starting | ActorPhase::Running => {
+                        let _ = response_tx.send(Err(ActorError::NotPaused));
                     }
-                }
+                    ActorPhase::ShuttingDown => {
+                        let _ = response_tx.send(Err(ActorError::ShuttingDown));
+                    }
+                    ActorPhase::Paused => {
+                        actor_phase_manager.set_phase(ActorPhase::Running);
+                        let _ = response_tx.send(Ok(()));
+                    }
+                },
             }
         }
 
@@ -762,7 +765,8 @@ impl ActorRuntime {
                 // via the SharedActorInstance, not through this operation channel.
                 // If this operation is received, it indicates a configuration error.
                 let err = ActorError::UnexpectedError(
-                    "HandleWasiHttpRequest should be handled by the HTTP handler directly".to_string(),
+                    "HandleWasiHttpRequest should be handled by the HTTP handler directly"
+                        .to_string(),
                 );
                 let _ = response_tx.send(Err(err));
             }
@@ -778,98 +782,98 @@ impl ActorRuntime {
         // Handle info requests
         loop {
             tokio::select! {
-                biased;
+                    biased;
 
-                _ = actor_phase_manager.wait_for_phase(ActorPhase::ShuttingDown) => {
-                    break;
-                }
-
-                Some(info) = info_rx.recv() => {
-                    info!("Received info request: {:?}", info);
-                    match info {
-                ActorInfo::GetStatus { response_tx } => {
-                    let status = actor_phase_manager.get_phase().to_string();
-
-                    if let Err(e) = response_tx.send(Ok(status)) {
-                        error!("Failed to send status response: {:?}", e);
+                    _ = actor_phase_manager.wait_for_phase(ActorPhase::ShuttingDown) => {
+                        break;
                     }
-                }
-                ActorInfo::GetState { response_tx } => {
-                    match &*actor_instance_wrapper.read().await {
-                        Some(instance) => {
-                            let state = instance.store.data().get_state();
-                            if let Err(e) = response_tx.send(Ok(state)) {
-                                error!("Failed to send state response: {:?}", e);
-                            }
-                        }
-                        None => {
-                            let err =
-                                ActorError::UnexpectedError("Actor instance not found".to_string());
-                            if let Err(e) = response_tx.send(Err(err)) {
-                                error!("Failed to send state error response: {:?}", e);
-                            }
+
+                    Some(info) = info_rx.recv() => {
+                        info!("Received info request: {:?}", info);
+                        match info {
+                    ActorInfo::GetStatus { response_tx } => {
+                        let status = actor_phase_manager.get_phase().to_string();
+
+                        if let Err(e) = response_tx.send(Ok(status)) {
+                            error!("Failed to send status response: {:?}", e);
                         }
                     }
-                }
-                ActorInfo::GetChain { response_tx } => {
-                    match &*actor_instance_wrapper.read().await {
-                        None => {
-                            let err =
-                                ActorError::UnexpectedError("Actor instance not found".to_string());
-                            if let Err(e) = response_tx.send(Err(err)) {
-                                error!("Failed to send chain error response: {:?}", e);
-                            }
-                            return;
-                        }
-                        Some(instance) => {
-                            let chain = instance.store.data().get_chain();
-                            if let Err(e) = response_tx.send(Ok(chain)) {
-                                error!("Failed to send chain response: {:?}", e);
-                            }
-                        }
-                    };
-                }
-                ActorInfo::GetMetrics { response_tx } => {
-                    let metrics = metrics.read().await;
-                    let metrics_data = metrics.get_metrics().await;
-                    if let Err(e) = response_tx.send(Ok(metrics_data)) {
-                        error!("Failed to send metrics response: {:?}", e);
-                    }
-                }
-                ActorInfo::SaveChain { response_tx } => {
-                    match &mut *actor_instance_wrapper.write().await {
-                        None => {
-                            let err =
-                                ActorError::UnexpectedError("Actor instance not found".to_string());
-                            if let Err(e) = response_tx.send(Err(err)) {
-                                error!("Failed to send save chain error response: {:?}", e);
-                            }
-                            return;
-                        }
-                        Some(instance) => match instance.save_chain() {
-                            Ok(_) => {
-                                if let Err(e) = response_tx.send(Ok(())) {
-                                    error!("Failed to send save chain response: {:?}", e);
+                    ActorInfo::GetState { response_tx } => {
+                        match &*actor_instance_wrapper.read().await {
+                            Some(instance) => {
+                                let state = instance.store.data().get_state();
+                                if let Err(e) = response_tx.send(Ok(state)) {
+                                    error!("Failed to send state response: {:?}", e);
                                 }
                             }
-                            Err(e) => {
-                                if let Err(send_err) = response_tx
-                                    .send(Err(ActorError::UnexpectedError(e.to_string())))
-                                {
-                                    error!(
-                                        "Failed to send save chain error response: {:?}",
-                                        send_err
-                                    );
+                            None => {
+                                let err =
+                                    ActorError::UnexpectedError("Actor instance not found".to_string());
+                                if let Err(e) = response_tx.send(Err(err)) {
+                                    error!("Failed to send state error response: {:?}", e);
                                 }
                             }
-                        },
-                    };
-                }
-            }  // close match info
-        }  // close Some(info) branch
+                        }
+                    }
+                    ActorInfo::GetChain { response_tx } => {
+                        match &*actor_instance_wrapper.read().await {
+                            None => {
+                                let err =
+                                    ActorError::UnexpectedError("Actor instance not found".to_string());
+                                if let Err(e) = response_tx.send(Err(err)) {
+                                    error!("Failed to send chain error response: {:?}", e);
+                                }
+                                return;
+                            }
+                            Some(instance) => {
+                                let chain = instance.store.data().get_chain();
+                                if let Err(e) = response_tx.send(Ok(chain)) {
+                                    error!("Failed to send chain response: {:?}", e);
+                                }
+                            }
+                        };
+                    }
+                    ActorInfo::GetMetrics { response_tx } => {
+                        let metrics = metrics.read().await;
+                        let metrics_data = metrics.get_metrics().await;
+                        if let Err(e) = response_tx.send(Ok(metrics_data)) {
+                            error!("Failed to send metrics response: {:?}", e);
+                        }
+                    }
+                    ActorInfo::SaveChain { response_tx } => {
+                        match &mut *actor_instance_wrapper.write().await {
+                            None => {
+                                let err =
+                                    ActorError::UnexpectedError("Actor instance not found".to_string());
+                                if let Err(e) = response_tx.send(Err(err)) {
+                                    error!("Failed to send save chain error response: {:?}", e);
+                                }
+                                return;
+                            }
+                            Some(instance) => match instance.save_chain() {
+                                Ok(_) => {
+                                    if let Err(e) = response_tx.send(Ok(())) {
+                                        error!("Failed to send save chain response: {:?}", e);
+                                    }
+                                }
+                                Err(e) => {
+                                    if let Err(send_err) = response_tx
+                                        .send(Err(ActorError::UnexpectedError(e.to_string())))
+                                    {
+                                        error!(
+                                            "Failed to send save chain error response: {:?}",
+                                            send_err
+                                        );
+                                    }
+                                }
+                            },
+                        };
+                    }
+                }  // close match info
+            }  // close Some(info) branch
 
-                else => break,
-            }  // close select!
+                    else => break,
+                } // close select!
         }
     }
 
@@ -920,7 +924,8 @@ impl ActorRuntime {
                 data: WasmEventData::WasmCall {
                     function_name: name.clone(),
                     params: params.clone(),
-                }.into(),
+                }
+                .into(),
             });
 
         // Execute the call
@@ -934,7 +939,8 @@ impl ActorRuntime {
                         data: WasmEventData::WasmResult {
                             function_name: name.clone(),
                             result: result.clone(),
-                        }.into(),
+                        }
+                        .into(),
                     });
                 result
             }
@@ -947,7 +953,8 @@ impl ActorRuntime {
                         data: WasmEventData::WasmError {
                             function_name: name.clone(),
                             message: e.to_string(),
-                        }.into(),
+                        }
+                        .into(),
                     });
 
                 error!("Failed to execute function '{}': {}", name, e);

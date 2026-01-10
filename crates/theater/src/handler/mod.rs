@@ -1,4 +1,6 @@
 use crate::actor::handle::ActorHandle;
+use crate::chain::ChainEvent;
+use crate::config::actor_manifest::HandlerConfig;
 use crate::shutdown::ShutdownReceiver;
 use crate::wasm::{ActorComponent, ActorInstance};
 use anyhow::Result;
@@ -46,13 +48,33 @@ impl HandlerContext {
 
 pub struct HandlerRegistry {
     handlers: Vec<Box<dyn Handler>>,
+    /// Optional replay chain events - set when in replay mode.
+    /// Handlers can use this to replay recorded events instead of running normally.
+    replay_chain: Option<Vec<ChainEvent>>,
 }
 
 impl HandlerRegistry {
     pub fn new() -> Self {
         Self {
             handlers: Vec::new(),
+            replay_chain: None,
         }
+    }
+
+    /// Set the replay chain for this registry.
+    /// When set, handlers can check for this to enable replay mode.
+    pub fn set_replay_chain(&mut self, chain: Vec<ChainEvent>) {
+        self.replay_chain = Some(chain);
+    }
+
+    /// Get the replay chain if set.
+    pub fn replay_chain(&self) -> Option<&Vec<ChainEvent>> {
+        self.replay_chain.as_ref()
+    }
+
+    /// Take ownership of the replay chain (removes it from the registry).
+    pub fn take_replay_chain(&mut self) -> Option<Vec<ChainEvent>> {
+        self.replay_chain.take()
     }
 
     pub fn register<H: Handler>(&mut self, handler: H) {
@@ -140,7 +162,7 @@ impl HandlerRegistry {
             );
 
             if needs_this_handler {
-                active_handlers.push(handler.create_instance());
+                active_handlers.push(handler.create_instance(None));
                 info!("Activated handler '{}'", handler.name());
             }
         }
@@ -157,8 +179,36 @@ impl Clone for HandlerRegistry {
     fn clone(&self) -> Self {
         let mut new_registry = HandlerRegistry::new();
         for handler in &self.handlers {
-            // Each handler creates a fresh instance of itself
-            new_registry.handlers.push(handler.create_instance());
+            // Each handler creates a fresh instance of itself (no config override)
+            new_registry.handlers.push(handler.create_instance(None));
+        }
+        // Preserve replay chain if set
+        if let Some(chain) = &self.replay_chain {
+            new_registry.replay_chain = Some(chain.clone());
+        }
+        new_registry
+    }
+}
+
+impl HandlerRegistry {
+    /// Clone the registry and apply per-actor configs from a manifest.
+    ///
+    /// For each handler config in the list, finds the matching handler by name
+    /// and creates a new instance with that config.
+    pub fn clone_with_configs(&self, configs: &[HandlerConfig]) -> Self {
+        let mut new_registry = HandlerRegistry::new();
+        for handler in &self.handlers {
+            // Check if there's a config for this handler
+            let matching_config = configs
+                .iter()
+                .find(|c| c.handler_name() == handler.name());
+            new_registry
+                .handlers
+                .push(handler.create_instance(matching_config));
+        }
+        // Preserve replay chain if set
+        if let Some(chain) = &self.replay_chain {
+            new_registry.replay_chain = Some(chain.clone());
         }
         new_registry
     }
@@ -169,7 +219,11 @@ impl Clone for HandlerRegistry {
 /// External handler crates can implement this trait and register their handlers
 /// with the Theater runtime without depending on the concrete `Handler` enum.
 pub trait Handler: Send + Sync + 'static {
-    fn create_instance(&self) -> Box<dyn Handler>;
+    /// Create a new instance of this handler, optionally with a config from the manifest.
+    ///
+    /// If `config` is `Some` and matches this handler's type, creates a new instance
+    /// with that config. Otherwise, clones the current instance.
+    fn create_instance(&self, config: Option<&HandlerConfig>) -> Box<dyn Handler>;
 
     fn start(
         &mut self,

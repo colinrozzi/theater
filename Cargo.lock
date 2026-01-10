@@ -3634,12 +3634,14 @@ name = "theater-handler-http"
 version = "0.2.1"
 dependencies = [
  "anyhow",
+ "base64 0.22.1",
  "bytes",
  "http-body-util",
  "hyper 1.6.0",
  "hyper-util",
  "reqwest 0.12.24",
  "serde",
+ "serde_json",
  "theater",
  "theater-handler-io",
  "tokio",

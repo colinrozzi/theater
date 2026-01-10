@@ -120,7 +120,7 @@ impl HttpClientHandler {
 
 impl Handler for HttpClientHandler
 {
-    fn create_instance(&self) -> Box<dyn Handler> {
+    fn create_instance(&self, _config: Option<&theater::config::actor_manifest::HandlerConfig>) -> Box<dyn Handler> {
         Box::new(self.clone())
     }
 

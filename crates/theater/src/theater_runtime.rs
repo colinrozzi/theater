@@ -1115,16 +1115,24 @@ impl TheaterRuntime {
             .collect()
     }
 
-    /// Creates a handler registry for an actor based on its manifest.
+    /// Creates a handler registry for a specific actor based on its manifest.
     ///
-    /// If the manifest contains a replay handler configuration, this method
-    /// will create a new registry with the ReplayHandler included. Otherwise,
-    /// it returns a clone of the runtime's default handler registry.
+    /// This method applies per-actor handler configurations from the manifest.
+    /// Each handler in the registry will receive its matching config (if any)
+    /// when `create_instance` is called.
+    ///
+    /// Special handling for replay: If the manifest contains a replay handler
+    /// configuration, this method will load the chain and prepend a ReplayHandler.
     async fn create_handler_registry_for_manifest(
         &self,
         manifest: &ManifestConfig,
     ) -> Result<HandlerRegistry> {
-        // Check if the manifest has a replay handler config
+        // Clone the registry with per-actor configs applied
+        let mut registry = self
+            .handler_registry
+            .clone_with_configs(&manifest.handlers);
+
+        // Special handling for replay handler - needs to load chain file
         for handler_config in &manifest.handlers {
             if let HandlerConfig::Replay { config } = handler_config {
                 info!(
@@ -1154,17 +1162,17 @@ impl TheaterRuntime {
                     config.chain
                 );
 
-                // Clone the base registry and prepend ReplayHandler
-                // ReplayHandler will intercept imports, other handlers will handle exports
-                let mut registry = self.handler_registry.clone();
-                registry.prepend(ReplayHandler::new(chain_events));
+                // Store the replay chain in the registry for handlers that need it
+                // (e.g., WasiHttpHandler for replaying HTTP events)
+                registry.set_replay_chain(chain_events.clone());
 
-                return Ok(registry);
+                // Prepend ReplayHandler to intercept imports
+                registry.prepend(ReplayHandler::new(chain_events));
+                break;
             }
         }
 
-        // No replay config, use the default registry
-        Ok(self.handler_registry.clone())
+        Ok(registry)
     }
 
     /// Stops the entire runtime and all actors gracefully.

@@ -21,6 +21,7 @@ pub mod events;
 pub mod bindings;
 pub mod host_impl;
 mod server;
+mod replay;
 
 pub use types::*;
 pub use events::HttpEventData;
@@ -29,8 +30,6 @@ use theater::handler::{Handler, HandlerContext, SharedActorInstance};
 use theater::wasm::{ActorComponent, ActorInstance};
 use theater::actor::handle::ActorHandle;
 use theater::shutdown::ShutdownReceiver;
-use theater::events::theater_runtime::TheaterRuntimeEventData;
-use theater::events::wasm::WasmEventData;
 use anyhow::Result;
 use std::future::Future;
 use std::pin::Pin;
@@ -84,7 +83,7 @@ impl WasiHttpHandler {
 
 impl Handler for WasiHttpHandler
 {
-    fn create_instance(&self) -> Box<dyn Handler> {
+    fn create_instance(&self, _config: Option<&theater::config::actor_manifest::HandlerConfig>) -> Box<dyn Handler> {
         Box::new(Self {
             config: self.config.clone(),
         })
@@ -100,6 +99,7 @@ impl Handler for WasiHttpHandler
         let host = self.config.host.clone();
 
         Box::pin(async move {
+            // Start the HTTP server
             // Only start the server if a port is configured
             let Some(port) = port else {
                 debug!("No port configured for WASI HTTP incoming handler, server not started");

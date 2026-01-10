@@ -24,7 +24,7 @@ use std::pin::Pin;
 use tracing::info;
 
 use theater::actor::handle::ActorHandle;
-use theater::config::actor_manifest::FileSystemHandlerConfig;
+use theater::config::actor_manifest::{FileSystemHandlerConfig, HandlerConfig};
 use theater::config::permissions::FileSystemPermissions;
 use theater::handler::{Handler, HandlerContext, SharedActorInstance};
 use theater::shutdown::ShutdownReceiver;
@@ -85,8 +85,13 @@ impl FilesystemHandler {
 
 impl Handler for FilesystemHandler
 {
-    fn create_instance(&self) -> Box<dyn Handler> {
-        Box::new(self.clone())
+    fn create_instance(&self, config: Option<&HandlerConfig>) -> Box<dyn Handler> {
+        match config {
+            Some(HandlerConfig::FileSystem { config }) => {
+                Box::new(FilesystemHandler::new(config.clone(), self.permissions.clone()))
+            }
+            _ => Box::new(self.clone()),
+        }
     }
 
     fn start(

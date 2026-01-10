@@ -52,7 +52,7 @@ impl WasiIoHandler {
 
 impl Handler for WasiIoHandler
 {
-    fn create_instance(&self) -> Box<dyn Handler> {
+    fn create_instance(&self, _config: Option<&theater::config::actor_manifest::HandlerConfig>) -> Box<dyn Handler> {
         Box::new(Self::new())
     }
 

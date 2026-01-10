@@ -188,6 +188,12 @@ impl ActorStore {
         I: serde::Serialize,
         O: serde::Serialize,
     {
+        tracing::debug!(
+            "[RECORD] Host function call: {}/{}",
+            interface,
+            function
+        );
+
         let host_call = HostFunctionCall {
             interface: interface.to_string(),
             function: function.to_string(),

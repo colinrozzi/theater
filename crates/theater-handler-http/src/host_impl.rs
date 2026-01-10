@@ -33,6 +33,15 @@ impl HostFields for ActorStore
     async fn new(&mut self) -> wasmtime::Result<Resource<FieldsData>> {
         let data = FieldsData::new();
         let resource = self.resource_table.lock().unwrap().push(data)?;
+
+        // Record the call for replay
+        self.record_host_function_call(
+            "wasi:http/types@0.2.0",
+            "[constructor]fields",
+            &(),
+            &resource.rep(),
+        );
+
         Ok(resource)
     }
 
@@ -55,9 +64,21 @@ impl HostFields for ActorStore
         self_: Resource<FieldsData>,
         name: String,
     ) -> wasmtime::Result<Vec<Vec<u8>>> {
-        let table = self.resource_table.lock().unwrap();
-        let data: &FieldsData = table.get(&self_)?;
-        Ok(data.get(&name))
+        let result = {
+            let table = self.resource_table.lock().unwrap();
+            let data: &FieldsData = table.get(&self_)?;
+            data.get(&name)
+        };
+
+        // Record the call for replay
+        self.record_host_function_call(
+            "wasi:http/types@0.2.0",
+            "[method]fields.get",
+            &(self_.rep(), &name),
+            &result,
+        );
+
+        Ok(result)
     }
 
     async fn has(&mut self, self_: Resource<FieldsData>, name: String) -> wasmtime::Result<bool> {
@@ -101,6 +122,14 @@ impl HostFields for ActorStore
         name: String,
         value: Vec<u8>,
     ) -> wasmtime::Result<Result<(), HeaderError>> {
+        // Record the call for replay (use bool for success to avoid HeaderError serialization)
+        self.record_host_function_call(
+            "wasi:http/types@0.2.0",
+            "[method]fields.append",
+            &(self_.rep(), &name, &value),
+            &true, // success indicator
+        );
+
         let table = self.resource_table.lock().unwrap();
         let data: &FieldsData = table.get(&self_)?;
         if data.is_immutable() {
@@ -327,6 +356,14 @@ impl HostOutgoingResponse for ActorStore
 
         let data = OutgoingResponseData::new(headers_data);
         let resource = self.resource_table.lock().unwrap().push(data)?;
+
+        self.record_host_function_call(
+            "wasi:http/types@0.2.0",
+            "[constructor]outgoing-response",
+            &headers.rep(),
+            &resource.rep(),
+        );
+
         Ok(resource)
     }
 
@@ -336,7 +373,16 @@ impl HostOutgoingResponse for ActorStore
     ) -> wasmtime::Result<types::StatusCode> {
         let table = self.resource_table.lock().unwrap();
         let response: &OutgoingResponseData = table.get(&self_)?;
-        Ok(response.status)
+        let result = response.status;
+
+        self.record_host_function_call(
+            "wasi:http/types@0.2.0",
+            "[method]outgoing-response.status-code",
+            &self_.rep(),
+            &result,
+        );
+
+        Ok(result)
     }
 
     async fn set_status_code(
@@ -347,6 +393,14 @@ impl HostOutgoingResponse for ActorStore
         let mut table = self.resource_table.lock().unwrap();
         let response: &mut OutgoingResponseData = table.get_mut(&self_)?;
         response.status = status;
+
+        self.record_host_function_call(
+            "wasi:http/types@0.2.0",
+            "[method]outgoing-response.set-status-code",
+            &(self_.rep(), status),
+            &true,
+        );
+
         Ok(Ok(()))
     }
 
@@ -361,6 +415,14 @@ impl HostOutgoingResponse for ActorStore
         };
         let immutable_headers = FieldsData::immutable(headers_clone.entries());
         let resource = self.resource_table.lock().unwrap().push(immutable_headers)?;
+
+        self.record_host_function_call(
+            "wasi:http/types@0.2.0",
+            "[method]outgoing-response.headers",
+            &self_.rep(),
+            &resource.rep(),
+        );
+
         Ok(resource)
     }
 
@@ -381,10 +443,24 @@ impl HostOutgoingResponse for ActorStore
         drop(table);
 
         let resource = self.resource_table.lock().unwrap().push(body)?;
+
+        self.record_host_function_call(
+            "wasi:http/types@0.2.0",
+            "[method]outgoing-response.body",
+            &self_.rep(),
+            &resource.rep(),
+        );
+
         Ok(Ok(resource))
     }
 
     async fn drop(&mut self, rep: Resource<OutgoingResponseData>) -> wasmtime::Result<()> {
+        self.record_host_function_call(
+            "wasi:http/types@0.2.0",
+            "[resource-drop]outgoing-response",
+            &rep.rep(),
+            &(),
+        );
         self.resource_table.lock().unwrap().delete(rep)?;
         Ok(())
     }
@@ -406,22 +482,53 @@ impl HostOutgoingBody for ActorStore
             Some(stream) => {
                 drop(table);
                 let resource = self.resource_table.lock().unwrap().push(stream)?;
+
+                self.record_host_function_call(
+                    "wasi:http/types@0.2.0",
+                    "[method]outgoing-body.write",
+                    &self_.rep(),
+                    &Some(resource.rep()),
+                );
+
                 Ok(Ok(resource))
             }
-            None => Ok(Err(())),
+            None => {
+                self.record_host_function_call(
+                    "wasi:http/types@0.2.0",
+                    "[method]outgoing-body.write",
+                    &self_.rep(),
+                    &None::<u32>,
+                );
+                Ok(Err(()))
+            }
         }
     }
 
     async fn finish(
         &mut self,
         this: Resource<OutgoingBodyData>,
-        _trailers: Option<Resource<FieldsData>>,
+        trailers: Option<Resource<FieldsData>>,
     ) -> wasmtime::Result<Result<(), types::ErrorCode>> {
+        let trailers_rep = trailers.as_ref().map(|t| t.rep());
+
+        self.record_host_function_call(
+            "wasi:http/types@0.2.0",
+            "[static]outgoing-body.finish",
+            &(this.rep(), trailers_rep),
+            &true,
+        );
+
         self.resource_table.lock().unwrap().delete(this)?;
         Ok(Ok(()))
     }
 
     async fn drop(&mut self, rep: Resource<OutgoingBodyData>) -> wasmtime::Result<()> {
+        self.record_host_function_call(
+            "wasi:http/types@0.2.0",
+            "[resource-drop]outgoing-body",
+            &rep.rep(),
+            &(),
+        );
         self.resource_table.lock().unwrap().delete(rep)?;
         Ok(())
     }
@@ -434,51 +541,99 @@ impl HostOutgoingBody for ActorStore
 impl HostIncomingRequest for ActorStore
 {
     async fn method(&mut self, self_: Resource<IncomingRequestData>) -> wasmtime::Result<Method> {
-        let table = self.resource_table.lock().unwrap();
-        let request: &IncomingRequestData = table.get(&self_)?;
-        Ok(match &request.method {
-            crate::types::Method::Get => Method::Get,
-            crate::types::Method::Head => Method::Head,
-            crate::types::Method::Post => Method::Post,
-            crate::types::Method::Put => Method::Put,
-            crate::types::Method::Delete => Method::Delete,
-            crate::types::Method::Connect => Method::Connect,
-            crate::types::Method::Options => Method::Options,
-            crate::types::Method::Trace => Method::Trace,
-            crate::types::Method::Patch => Method::Patch,
-            crate::types::Method::Other(s) => Method::Other(s.clone()),
-        })
+        let result = {
+            let table = self.resource_table.lock().unwrap();
+            let request: &IncomingRequestData = table.get(&self_)?;
+            match &request.method {
+                crate::types::Method::Get => Method::Get,
+                crate::types::Method::Head => Method::Head,
+                crate::types::Method::Post => Method::Post,
+                crate::types::Method::Put => Method::Put,
+                crate::types::Method::Delete => Method::Delete,
+                crate::types::Method::Connect => Method::Connect,
+                crate::types::Method::Options => Method::Options,
+                crate::types::Method::Trace => Method::Trace,
+                crate::types::Method::Patch => Method::Patch,
+                crate::types::Method::Other(s) => Method::Other(s.clone()),
+            }
+        };
+
+        // Record with method as string for serialization
+        let method_str = format!("{:?}", result);
+        self.record_host_function_call(
+            "wasi:http/types@0.2.0",
+            "[method]incoming-request.method",
+            &self_.rep(),
+            &method_str,
+        );
+
+        Ok(result)
     }
 
     async fn path_with_query(
         &mut self,
         self_: Resource<IncomingRequestData>,
     ) -> wasmtime::Result<Option<String>> {
-        let table = self.resource_table.lock().unwrap();
-        let request: &IncomingRequestData = table.get(&self_)?;
-        Ok(request.path_with_query.clone())
+        let result = {
+            let table = self.resource_table.lock().unwrap();
+            let request: &IncomingRequestData = table.get(&self_)?;
+            request.path_with_query.clone()
+        };
+
+        self.record_host_function_call(
+            "wasi:http/types@0.2.0",
+            "[method]incoming-request.path-with-query",
+            &self_.rep(),
+            &result,
+        );
+
+        Ok(result)
     }
 
     async fn scheme(
         &mut self,
         self_: Resource<IncomingRequestData>,
     ) -> wasmtime::Result<Option<Scheme>> {
-        let table = self.resource_table.lock().unwrap();
-        let request: &IncomingRequestData = table.get(&self_)?;
-        Ok(request.scheme.as_ref().map(|s| match s {
-            crate::types::Scheme::Http => Scheme::Http,
-            crate::types::Scheme::Https => Scheme::Https,
-            crate::types::Scheme::Other(o) => Scheme::Other(o.clone()),
-        }))
+        let result = {
+            let table = self.resource_table.lock().unwrap();
+            let request: &IncomingRequestData = table.get(&self_)?;
+            request.scheme.as_ref().map(|s| match s {
+                crate::types::Scheme::Http => Scheme::Http,
+                crate::types::Scheme::Https => Scheme::Https,
+                crate::types::Scheme::Other(o) => Scheme::Other(o.clone()),
+            })
+        };
+
+        // Record with scheme as string for serialization
+        let scheme_str = result.as_ref().map(|s| format!("{:?}", s));
+        self.record_host_function_call(
+            "wasi:http/types@0.2.0",
+            "[method]incoming-request.scheme",
+            &self_.rep(),
+            &scheme_str,
+        );
+
+        Ok(result)
     }
 
     async fn authority(
         &mut self,
         self_: Resource<IncomingRequestData>,
     ) -> wasmtime::Result<Option<String>> {
-        let table = self.resource_table.lock().unwrap();
-        let request: &IncomingRequestData = table.get(&self_)?;
-        Ok(request.authority.clone())
+        let result = {
+            let table = self.resource_table.lock().unwrap();
+            let request: &IncomingRequestData = table.get(&self_)?;
+            request.authority.clone()
+        };
+
+        self.record_host_function_call(
+            "wasi:http/types@0.2.0",
+            "[method]incoming-request.authority",
+            &self_.rep(),
+            &result,
+        );
+
+        Ok(result)
     }
 
     async fn headers(
@@ -492,6 +647,14 @@ impl HostIncomingRequest for ActorStore
         };
         let immutable_headers = FieldsData::immutable(headers_clone.entries());
         let resource = self.resource_table.lock().unwrap().push(immutable_headers)?;
+
+        self.record_host_function_call(
+            "wasi:http/types@0.2.0",
+            "[method]incoming-request.headers",
+            &self_.rep(),
+            &resource.rep(),
+        );
+
         Ok(resource)
     }
 
@@ -501,17 +664,35 @@ impl HostIncomingRequest for ActorStore
     ) -> wasmtime::Result<Result<Resource<IncomingBodyData>, ()>> {
         let mut table = self.resource_table.lock().unwrap();
         let request: &mut IncomingRequestData = table.get_mut(&self_)?;
-        match request.body.take() {
+        let result = match request.body.take() {
             Some(body) => {
                 drop(table);
                 let resource = self.resource_table.lock().unwrap().push(body)?;
-                Ok(Ok(resource))
+                Ok(resource)
             }
-            None => Ok(Err(())),
-        }
+            None => Err(()),
+        };
+
+        // Record with resource rep or error (as Option for serialization)
+        let output: Option<u32> = result.as_ref().map(|r| r.rep()).ok();
+        self.record_host_function_call(
+            "wasi:http/types@0.2.0",
+            "[method]incoming-request.consume",
+            &self_.rep(),
+            &output,
+        );
+
+        Ok(result)
     }
 
     async fn drop(&mut self, rep: Resource<IncomingRequestData>) -> wasmtime::Result<()> {
+        self.record_host_function_call(
+            "wasi:http/types@0.2.0",
+            "[resource-drop]incoming-request",
+            &rep.rep(),
+            &(),
+        );
+
         self.resource_table.lock().unwrap().delete(rep)?;
         Ok(())
     }
@@ -580,29 +761,54 @@ impl HostIncomingBody for ActorStore
     ) -> wasmtime::Result<Result<Resource<InputStream>, ()>> {
         let mut table = self.resource_table.lock().unwrap();
         let body: &mut IncomingBodyData = table.get_mut(&self_)?;
-        match body.take_stream() {
+        let result = match body.take_stream() {
             Some(stream) => {
                 drop(table);
                 let resource = self.resource_table.lock().unwrap().push(stream)?;
-                Ok(Ok(resource))
+                Ok(resource)
             }
-            None => Ok(Err(())),
-        }
+            None => Err(()),
+        };
+
+        let output: Option<u32> = result.as_ref().map(|r| r.rep()).ok();
+        self.record_host_function_call(
+            "wasi:http/types@0.2.0",
+            "[method]incoming-body.stream",
+            &self_.rep(),
+            &output,
+        );
+
+        Ok(result)
     }
 
     async fn finish(
         &mut self,
         this: Resource<IncomingBodyData>,
     ) -> wasmtime::Result<Resource<FutureTrailersData>> {
+        let this_rep = this.rep();
         self.resource_table.lock().unwrap().delete(this)?;
         let trailers = FutureTrailersData {
             trailers: Some(Ok(None)),
         };
         let resource = self.resource_table.lock().unwrap().push(trailers)?;
+
+        self.record_host_function_call(
+            "wasi:http/types@0.2.0",
+            "[static]incoming-body.finish",
+            &this_rep,
+            &resource.rep(),
+        );
+
         Ok(resource)
     }
 
     async fn drop(&mut self, rep: Resource<IncomingBodyData>) -> wasmtime::Result<()> {
+        self.record_host_function_call(
+            "wasi:http/types@0.2.0",
+            "[resource-drop]incoming-body",
+            &rep.rep(),
+            &(),
+        );
         self.resource_table.lock().unwrap().delete(rep)?;
         Ok(())
     }
@@ -619,6 +825,18 @@ impl HostResponseOutparam for ActorStore
         param: Resource<ResponseOutparamData>,
         response: Result<Resource<OutgoingResponseData>, types::ErrorCode>,
     ) -> wasmtime::Result<()> {
+        // Record the call for replay - use resource rep for Ok, error string for Err
+        let response_info: Result<u32, String> = match &response {
+            Ok(r) => Ok(r.rep()),
+            Err(e) => Err(format!("{:?}", e)),
+        };
+        self.record_host_function_call(
+            "wasi:http/types@0.2.0",
+            "[static]response-outparam.set",
+            &(param.rep(), &response_info),
+            &(),
+        );
+
         // Get the outparam and extract the sender
         let sender = {
             let mut table = self.resource_table.lock().unwrap();
@@ -652,6 +870,12 @@ impl HostResponseOutparam for ActorStore
     }
 
     async fn drop(&mut self, rep: Resource<ResponseOutparamData>) -> wasmtime::Result<()> {
+        self.record_host_function_call(
+            "wasi:http/types@0.2.0",
+            "[resource-drop]response-outparam",
+            &rep.rep(),
+            &(),
+        );
         self.resource_table.lock().unwrap().delete(rep)?;
         Ok(())
     }
@@ -1054,9 +1278,24 @@ impl HostInputStream for ActorStore
         self_: Resource<InputStream>,
         len: u64,
     ) -> wasmtime::Result<Result<Vec<u8>, StreamError>> {
-        let table = self.resource_table.lock().unwrap();
-        let stream: &InputStream = table.get(&self_)?;
-        match stream.read(len) {
+        let result = {
+            let table = self.resource_table.lock().unwrap();
+            let stream: &InputStream = table.get(&self_)?;
+            match stream.read(len) {
+                Ok(data) => Ok(data),
+                Err(_) => Err("closed"),
+            }
+        };
+
+        // Record the call for replay (use string error to avoid StreamError serialization)
+        self.record_host_function_call(
+            "wasi:io/streams@0.2.0",
+            "[method]input-stream.read",
+            &(self_.rep(), len),
+            &result,
+        );
+
+        match result {
             Ok(data) => Ok(Ok(data)),
             Err(_) => Ok(Err(StreamError::Closed)),
         }
@@ -1095,6 +1334,12 @@ impl HostInputStream for ActorStore
     }
 
     async fn drop(&mut self, rep: Resource<InputStream>) -> wasmtime::Result<()> {
+        self.record_host_function_call(
+            "wasi:io/streams@0.2.0",
+            "[resource-drop]input-stream",
+            &rep.rep(),
+            &(),
+        );
         self.resource_table.lock().unwrap().delete(rep)?;
         Ok(())
     }
@@ -1106,9 +1351,23 @@ impl HostOutputStream for ActorStore
         &mut self,
         self_: Resource<OutputStream>,
     ) -> wasmtime::Result<Result<u64, StreamError>> {
-        let table = self.resource_table.lock().unwrap();
-        let stream: &OutputStream = table.get(&self_)?;
-        match stream.check_write() {
+        let result = {
+            let table = self.resource_table.lock().unwrap();
+            let stream: &OutputStream = table.get(&self_)?;
+            match stream.check_write() {
+                Ok(available) => Ok(available),
+                Err(_) => Err("closed"),
+            }
+        };
+
+        self.record_host_function_call(
+            "wasi:io/streams@0.2.0",
+            "[method]output-stream.check-write",
+            &self_.rep(),
+            &result,
+        );
+
+        match result {
             Ok(available) => Ok(Ok(available)),
             Err(_) => Ok(Err(StreamError::Closed)),
         }
@@ -1119,9 +1378,23 @@ impl HostOutputStream for ActorStore
         self_: Resource<OutputStream>,
         contents: Vec<u8>,
     ) -> wasmtime::Result<Result<(), StreamError>> {
-        let table = self.resource_table.lock().unwrap();
-        let stream: &OutputStream = table.get(&self_)?;
-        match stream.write(&contents) {
+        let result = {
+            let table = self.resource_table.lock().unwrap();
+            let stream: &OutputStream = table.get(&self_)?;
+            match stream.write(&contents) {
+                Ok(()) => Ok(()),
+                Err(_) => Err("closed"),
+            }
+        };
+
+        self.record_host_function_call(
+            "wasi:io/streams@0.2.0",
+            "[method]output-stream.write",
+            &(self_.rep(), &contents),
+            &result.is_ok(),
+        );
+
+        match result {
             Ok(()) => Ok(Ok(())),
             Err(_) => Ok(Err(StreamError::Closed)),
         }
@@ -1132,13 +1405,27 @@ impl HostOutputStream for ActorStore
         self_: Resource<OutputStream>,
         contents: Vec<u8>,
     ) -> wasmtime::Result<Result<(), StreamError>> {
-        let table = self.resource_table.lock().unwrap();
-        let stream: &OutputStream = table.get(&self_)?;
-        match stream.write(&contents) {
-            Ok(()) => {
-                let _ = stream.flush();
-                Ok(Ok(()))
+        let result = {
+            let table = self.resource_table.lock().unwrap();
+            let stream: &OutputStream = table.get(&self_)?;
+            match stream.write(&contents) {
+                Ok(()) => {
+                    let _ = stream.flush();
+                    Ok(())
+                }
+                Err(_) => Err("closed"),
             }
+        };
+
+        self.record_host_function_call(
+            "wasi:io/streams@0.2.0",
+            "[method]output-stream.blocking-write-and-flush",
+            &(self_.rep(), &contents),
+            &result.is_ok(),
+        );
+
+        match result {
+            Ok(()) => Ok(Ok(())),
             Err(_) => Ok(Err(StreamError::Closed)),
         }
     }
@@ -1147,9 +1434,23 @@ impl HostOutputStream for ActorStore
         &mut self,
         self_: Resource<OutputStream>,
     ) -> wasmtime::Result<Result<(), StreamError>> {
-        let table = self.resource_table.lock().unwrap();
-        let stream: &OutputStream = table.get(&self_)?;
-        match stream.flush() {
+        let result = {
+            let table = self.resource_table.lock().unwrap();
+            let stream: &OutputStream = table.get(&self_)?;
+            match stream.flush() {
+                Ok(()) => Ok(()),
+                Err(_) => Err("closed"),
+            }
+        };
+
+        self.record_host_function_call(
+            "wasi:io/streams@0.2.0",
+            "[method]output-stream.flush",
+            &self_.rep(),
+            &result.is_ok(),
+        );
+
+        match result {
             Ok(()) => Ok(Ok(())),
             Err(_) => Ok(Err(StreamError::Closed)),
         }
@@ -1204,6 +1505,12 @@ impl HostOutputStream for ActorStore
     }
 
     async fn drop(&mut self, rep: Resource<OutputStream>) -> wasmtime::Result<()> {
+        self.record_host_function_call(
+            "wasi:io/streams@0.2.0",
+            "[resource-drop]output-stream",
+            &rep.rep(),
+            &(),
+        );
         self.resource_table.lock().unwrap().delete(rep)?;
         Ok(())
     }

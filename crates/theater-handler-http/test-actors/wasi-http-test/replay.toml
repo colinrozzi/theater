@@ -4,9 +4,5 @@ component = "/Users/colinrozzi/work/theater/crates/theater-handler-http/test-act
 save_chain = true
 
 [[handler]]
-type = "runtime"
-
-[[handler]]
-type = "wasi-http"
-port = 8080
-host = "127.0.0.1"
+type = "replay"
+chain = "/Users/colinrozzi/work/theater/crates/theater-handler-http/test-actors/wasi-http-test/chains/two.json"

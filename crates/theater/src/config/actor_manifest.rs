@@ -161,6 +161,28 @@ pub enum HandlerConfig {
     },
 }
 
+impl HandlerConfig {
+    /// Returns the handler name that this config applies to.
+    /// This matches the handler's `name()` method return value.
+    pub fn handler_name(&self) -> &'static str {
+        match self {
+            HandlerConfig::MessageServer { .. } => "message-server",
+            HandlerConfig::FileSystem { .. } => "filesystem",
+            HandlerConfig::HttpClient { .. } => "http-client",
+            HandlerConfig::HttpFramework { .. } => "http-framework",
+            HandlerConfig::Runtime { .. } => "runtime",
+            HandlerConfig::Supervisor { .. } => "supervisor",
+            HandlerConfig::Store { .. } => "store",
+            HandlerConfig::Timing { .. } => "timing",
+            HandlerConfig::Process { .. } => "process",
+            HandlerConfig::Environment { .. } => "environment",
+            HandlerConfig::Random { .. } => "random",
+            HandlerConfig::WasiHttp { .. } => "wasi-http",
+            HandlerConfig::Replay { .. } => "replay",
+        }
+    }
+}
+
 /// Configuration for the Replay handler
 /// This handler replays an actor from a recorded event chain
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

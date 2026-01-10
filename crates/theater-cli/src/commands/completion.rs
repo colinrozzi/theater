@@ -7,6 +7,9 @@ use crate::error::{CliError, CliResult};
 use crate::CommandContext;
 
 #[derive(Debug, Parser)]
+#[command(
+    long_about = "Generate shell completion scripts.\n\nYou typically only need to re-run this after updating the theater CLI or changing the completion file location."
+)]
 pub struct CompletionArgs {
     /// Shell to generate completions for
     #[arg(value_enum)]
