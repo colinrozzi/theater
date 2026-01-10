@@ -4,7 +4,6 @@
 //! recording all operations in the event chain for replay.
 
 use crate::bindings::{WallClockHost, MonotonicClockHost, PollHost, HostPollable, Datetime};
-use crate::events::TimingEventData;
 use crate::{Pollable, PollableKind};
 use anyhow::Result;
 use chrono::Utc;
@@ -17,21 +16,16 @@ impl WallClockHost for ActorStore {
     async fn now(&mut self) -> Result<Datetime> {
         debug!("wasi:clocks/wall-clock now");
 
-        self.record_handler_event(
-            "wasi:clocks/wall-clock/now".to_string(),
-            TimingEventData::WallClockNowCall,
-            Some("WASI wall-clock: requesting current time".to_string()),
-        );
-
         let now = Utc::now();
         let seconds = now.timestamp() as u64;
         let nanoseconds = now.timestamp_subsec_nanos();
 
-        // CRITICAL: Log the actual time values for replay
-        self.record_handler_event(
-            "wasi:clocks/wall-clock/now".to_string(),
-            TimingEventData::WallClockNowResult { seconds, nanoseconds },
-            Some(format!("WASI wall-clock: {}.{:09}s", seconds, nanoseconds)),
+        // Record for replay - output is (seconds, nanoseconds)
+        self.record_host_function_call(
+            "wasi:clocks/wall-clock@0.2.3",
+            "now",
+            &(),
+            &(seconds, nanoseconds),
         );
 
         Ok(Datetime { seconds, nanoseconds })
@@ -40,20 +34,16 @@ impl WallClockHost for ActorStore {
     async fn resolution(&mut self) -> Result<Datetime> {
         debug!("wasi:clocks/wall-clock resolution");
 
-        self.record_handler_event(
-            "wasi:clocks/wall-clock/resolution".to_string(),
-            TimingEventData::WallClockResolutionCall,
-            Some("WASI wall-clock: requesting resolution".to_string()),
-        );
-
         // Clock resolution: 1 nanosecond
         let seconds = 0u64;
         let nanoseconds = 1u32;
 
-        self.record_handler_event(
-            "wasi:clocks/wall-clock/resolution".to_string(),
-            TimingEventData::WallClockResolutionResult { seconds, nanoseconds },
-            Some(format!("WASI wall-clock resolution: {}.{:09}s", seconds, nanoseconds)),
+        // Record for replay
+        self.record_host_function_call(
+            "wasi:clocks/wall-clock@0.2.3",
+            "resolution",
+            &(),
+            &(seconds, nanoseconds),
         );
 
         Ok(Datetime { seconds, nanoseconds })
@@ -65,21 +55,16 @@ impl MonotonicClockHost for ActorStore {
     async fn now(&mut self) -> Result<u64> {
         debug!("wasi:clocks/monotonic-clock now");
 
-        self.record_handler_event(
-            "wasi:clocks/monotonic-clock/now".to_string(),
-            TimingEventData::MonotonicClockNowCall,
-            Some("WASI monotonic-clock: requesting current instant".to_string()),
-        );
-
         // Use UTC time converted to nanoseconds as an approximation of monotonic time
         let now = Utc::now();
         let instant = (now.timestamp() as u64) * 1_000_000_000 + (now.timestamp_subsec_nanos() as u64);
 
-        // CRITICAL: Log the actual instant for replay
-        self.record_handler_event(
-            "wasi:clocks/monotonic-clock/now".to_string(),
-            TimingEventData::MonotonicClockNowResult { instant },
-            Some(format!("WASI monotonic-clock: {} ns", instant)),
+        // Record for replay
+        self.record_host_function_call(
+            "wasi:clocks/monotonic-clock@0.2.3",
+            "now",
+            &(),
+            &instant,
         );
 
         Ok(instant)
@@ -88,19 +73,15 @@ impl MonotonicClockHost for ActorStore {
     async fn resolution(&mut self) -> Result<u64> {
         debug!("wasi:clocks/monotonic-clock resolution");
 
-        self.record_handler_event(
-            "wasi:clocks/monotonic-clock/resolution".to_string(),
-            TimingEventData::MonotonicClockResolutionCall,
-            Some("WASI monotonic-clock: requesting resolution".to_string()),
-        );
-
         // Clock resolution: 1 nanosecond
         let duration = 1u64;
 
-        self.record_handler_event(
-            "wasi:clocks/monotonic-clock/resolution".to_string(),
-            TimingEventData::MonotonicClockResolutionResult { duration },
-            Some(format!("WASI monotonic-clock resolution: {} ns", duration)),
+        // Record for replay
+        self.record_host_function_call(
+            "wasi:clocks/monotonic-clock@0.2.3",
+            "resolution",
+            &(),
+            &duration,
         );
 
         Ok(duration)
@@ -108,12 +89,6 @@ impl MonotonicClockHost for ActorStore {
 
     async fn subscribe_instant(&mut self, when: u64) -> Result<Resource<Pollable>> {
         debug!("wasi:clocks/monotonic-clock subscribe-instant: {}", when);
-
-        self.record_handler_event(
-            "wasi:clocks/monotonic-clock/subscribe-instant".to_string(),
-            TimingEventData::MonotonicClockSubscribeInstantCall { when },
-            Some(format!("WASI monotonic-clock: subscribing to instant {}", when)),
-        );
 
         // Create a pollable for this instant
         let pollable = Pollable {
@@ -129,10 +104,12 @@ impl MonotonicClockHost for ActorStore {
 
         let pollable_id = pollable_handle.rep();
 
-        self.record_handler_event(
-            "wasi:clocks/monotonic-clock/subscribe-instant".to_string(),
-            TimingEventData::MonotonicClockSubscribeInstantResult { when, pollable_id },
-            Some(format!("WASI monotonic-clock: created pollable {} for instant {}", pollable_id, when)),
+        // Record for replay - input is when, output is pollable_id
+        self.record_host_function_call(
+            "wasi:clocks/monotonic-clock@0.2.3",
+            "subscribe-instant",
+            &when,
+            &pollable_id,
         );
 
         Ok(pollable_handle)
@@ -140,12 +117,6 @@ impl MonotonicClockHost for ActorStore {
 
     async fn subscribe_duration(&mut self, duration: u64) -> Result<Resource<Pollable>> {
         debug!("wasi:clocks/monotonic-clock subscribe-duration: {} ns", duration);
-
-        self.record_handler_event(
-            "wasi:clocks/monotonic-clock/subscribe-duration".to_string(),
-            TimingEventData::MonotonicClockSubscribeDurationCall { duration },
-            Some(format!("WASI monotonic-clock: subscribing to duration {} ns", duration)),
-        );
 
         // Get current instant
         let now = Utc::now();
@@ -168,10 +139,12 @@ impl MonotonicClockHost for ActorStore {
 
         let pollable_id = pollable_handle.rep();
 
-        self.record_handler_event(
-            "wasi:clocks/monotonic-clock/subscribe-duration".to_string(),
-            TimingEventData::MonotonicClockSubscribeDurationResult { duration, deadline, pollable_id },
-            Some(format!("WASI monotonic-clock: created pollable {} for duration {} ns (deadline: {})", pollable_id, duration, deadline)),
+        // Record for replay - input is duration, output includes pollable_id and deadline for reconstruction
+        self.record_host_function_call(
+            "wasi:clocks/monotonic-clock@0.2.3",
+            "subscribe-duration",
+            &duration,
+            &(pollable_id, deadline),
         );
 
         Ok(pollable_handle)
@@ -183,11 +156,8 @@ impl PollHost for ActorStore {
     async fn poll(&mut self, pollables: Vec<Resource<Pollable>>) -> Result<Vec<u32>> {
         debug!("wasi:io/poll poll: {} pollables", pollables.len());
 
-        self.record_handler_event(
-            "wasi:io/poll/poll".to_string(),
-            TimingEventData::PollCall { num_pollables: pollables.len() },
-            Some(format!("WASI poll: polling {} pollables", pollables.len())),
-        );
+        // Extract pollable IDs for recording
+        let pollable_ids: Vec<u32> = pollables.iter().map(|p| p.rep()).collect();
 
         // Get current monotonic time
         let now = Utc::now();
@@ -211,10 +181,12 @@ impl PollHost for ActorStore {
             }
         }
 
-        self.record_handler_event(
-            "wasi:io/poll/poll".to_string(),
-            TimingEventData::PollResult { ready_indices: ready_indices.clone() },
-            Some(format!("WASI poll: {} pollables ready", ready_indices.len())),
+        // Record for replay - input is pollable IDs, output is ready indices
+        self.record_host_function_call(
+            "wasi:io/poll@0.2.3",
+            "poll",
+            &pollable_ids,
+            &ready_indices,
         );
 
         Ok(ready_indices)
@@ -226,12 +198,6 @@ impl HostPollable for ActorStore {
     async fn ready(&mut self, pollable_handle: Resource<Pollable>) -> Result<bool> {
         let pollable_id = pollable_handle.rep();
         debug!("wasi:io/poll pollable.ready: {}", pollable_id);
-
-        self.record_handler_event(
-            "wasi:io/poll/pollable.ready".to_string(),
-            TimingEventData::PollableReadyCall { pollable_id },
-            Some(format!("WASI poll: checking if pollable {} is ready", pollable_id)),
-        );
 
         // Get current monotonic time
         let now = Utc::now();
@@ -246,10 +212,12 @@ impl HostPollable for ActorStore {
             }
         };
 
-        self.record_handler_event(
-            "wasi:io/poll/pollable.ready".to_string(),
-            TimingEventData::PollableReadyResult { pollable_id, is_ready },
-            Some(format!("WASI poll: pollable {} ready={}", pollable_id, is_ready)),
+        // Record for replay - input is pollable_id, output is is_ready
+        self.record_host_function_call(
+            "wasi:io/poll@0.2.3",
+            "[method]pollable.ready",
+            &pollable_id,
+            &is_ready,
         );
 
         Ok(is_ready)
@@ -258,12 +226,6 @@ impl HostPollable for ActorStore {
     async fn block(&mut self, pollable_handle: Resource<Pollable>) -> Result<()> {
         let pollable_id = pollable_handle.rep();
         debug!("wasi:io/poll pollable.block: {}", pollable_id);
-
-        self.record_handler_event(
-            "wasi:io/poll/pollable.block".to_string(),
-            TimingEventData::PollableBlockCall { pollable_id },
-            Some(format!("WASI poll: blocking on pollable {}", pollable_id)),
-        );
 
         // Get the deadline from the pollable
         let deadline = {
@@ -286,10 +248,12 @@ impl HostPollable for ActorStore {
             tokio::time::sleep(sleep_duration).await;
         }
 
-        self.record_handler_event(
-            "wasi:io/poll/pollable.block".to_string(),
-            TimingEventData::PollableBlockResult { pollable_id },
-            Some(format!("WASI poll: pollable {} unblocked", pollable_id)),
+        // Record for replay - input is pollable_id, output is unit
+        self.record_host_function_call(
+            "wasi:io/poll@0.2.3",
+            "[method]pollable.block",
+            &pollable_id,
+            &(),
         );
 
         Ok(())

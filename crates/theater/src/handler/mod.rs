@@ -77,6 +77,11 @@ impl HandlerRegistry {
         self.replay_chain.take()
     }
 
+    /// Check if this registry is in replay mode.
+    pub fn is_replay_mode(&self) -> bool {
+        self.replay_chain.is_some()
+    }
+
     pub fn register<H: Handler>(&mut self, handler: H) {
         self.handlers.push(Box::new(handler));
     }

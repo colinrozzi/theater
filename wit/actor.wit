@@ -12,7 +12,7 @@ package theater:simple;
 // a WebAssembly component can be:
 //
 // - Loaded by the Theater runtime
-// - Initialized with state and parameters
+// - Initialized with state
 // - Managed within the supervision hierarchy
 // - Integrated with the event chain system
 //
@@ -31,11 +31,7 @@ package theater:simple;
 // struct MyActor;
 //
 // impl Guest for MyActor {
-//     fn init(state: State, params: (String,)) -> Result<(State,), String> {
-//         // Parse the initial parameters
-//         let (actor_id,) = params;
-//         println!("Initializing actor with ID: {}", actor_id);
-//         
+//     fn init(state: State) -> Result<(State,), String> {
 //         // Create initial state if none exists
 //         let new_state = match state {
 //             Some(existing) => {
@@ -44,14 +40,14 @@ package theater:simple;
 //             }
 //             None => {
 //                 // Create new initial state
-//                 let initial_data = MyActorState { 
+//                 let initial_data = MyActorState {
 //                     counter: 0,
 //                     last_updated: chrono::Utc::now(),
 //                 };
 //                 serde_json::to_vec(&initial_data).map_err(|e| e.to_string())?
 //             }
 //         };
-//         
+//
 //         // Return the new state
 //         Ok((new_state,))
 //     }
@@ -69,19 +65,17 @@ package theater:simple;
 // - The state parameter is passed as a blob of bytes, typically serialized/deserialized
 //   using formats like JSON, MessagePack, or bincode.
 // - Actors are responsible for managing their own state format and serialization.
-// - The parameters tuple allows for flexible initialization with a variety of data types.
 // - Returning an error string from the init function will cause the actor to fail to start.
 
 interface actor {
     // # Initialize the actor
     //
     // Called when the actor is first started or restarted. This function is responsible
-    // for setting up the actor's initial state and responding to initialization parameters.
+    // for setting up the actor's initial state.
     //
     // ## Parameters
     //
     // * `state` - Current state of the actor, or None if first initialization
-    // * `params` - Tuple of initialization parameters, typically including actor ID
     //
     // ## Returns
     //
@@ -92,7 +86,6 @@ interface actor {
     //
     // - If state is None, the actor should create a new initial state
     // - If state contains data, the actor should validate and use that state
-    // - The first parameter in the tuple is typically the actor's ID
     // - Any error returned will cause the actor to fail to start
-    init: func(state: option<list<u8>>, params: tuple<string>) -> result<tuple<option<list<u8>>>, string>;
+    init: func(state: option<list<u8>>) -> result<tuple<option<list<u8>>>, string>;
 }

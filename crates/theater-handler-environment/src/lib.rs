@@ -31,7 +31,6 @@ pub mod events;
 pub use events::EnvironmentEventData;
 
 use anyhow::Result;
-use chrono::Utc;
 use std::env;
 use std::future::Future;
 use std::pin::Pin;
@@ -148,19 +147,28 @@ impl Handler for EnvironmentHandler
             move |mut ctx: StoreContextMut<'_, ActorStore>,
                   (var_name,): (String,)|
                   -> Result<(Option<String>,)> {
-                let _now = Utc::now().timestamp_millis() as u64;
-
                 // PERMISSION CHECK BEFORE OPERATION
-                if let Err(e) = PermissionChecker::check_env_var_access(&permissions_get, &var_name) {
-                    // Record permission denied event
-                                        return Ok((None,));
+                if let Err(_e) = PermissionChecker::check_env_var_access(&permissions_get, &var_name) {
+                    // Record permission denied - return None
+                    ctx.data_mut().record_host_function_call(
+                        "theater:simple/environment",
+                        "get-var",
+                        &var_name,
+                        &None::<String>,
+                    );
+                    return Ok((None,));
                 }
 
                 let value = env::var(&var_name).ok();
-                let value_found = value.is_some();
 
-                // Record the access attempt
-                
+                // Record the host function call
+                ctx.data_mut().record_host_function_call(
+                    "theater:simple/environment",
+                    "get-var",
+                    &var_name,
+                    &value,
+                );
+
                 Ok((value,))
             },
         )?;
@@ -171,20 +179,30 @@ impl Handler for EnvironmentHandler
             move |mut ctx: StoreContextMut<'_, ActorStore>,
                   (var_name,): (String,)|
                   -> Result<(bool,)> {
-                let _now = Utc::now().timestamp_millis() as u64;
-
                 // PERMISSION CHECK BEFORE OPERATION
-                if let Err(e) =
+                if let Err(_e) =
                     PermissionChecker::check_env_var_access(&permissions_exists, &var_name)
                 {
-                    // Record permission denied event
-                                        return Ok((false,));
+                    // Record permission denied - return false
+                    ctx.data_mut().record_host_function_call(
+                        "theater:simple/environment",
+                        "exists",
+                        &var_name,
+                        &false,
+                    );
+                    return Ok((false,));
                 }
 
                 let exists = env::var(&var_name).is_ok();
 
-                // Record the check
-                
+                // Record the host function call
+                ctx.data_mut().record_host_function_call(
+                    "theater:simple/environment",
+                    "exists",
+                    &var_name,
+                    &exists,
+                );
+
                 Ok((exists,))
             },
         )?;
@@ -195,11 +213,16 @@ impl Handler for EnvironmentHandler
             move |mut ctx: StoreContextMut<'_, ActorStore>,
                   ()|
                   -> Result<(Vec<(String, String)>,)> {
-                let _now = Utc::now().timestamp_millis() as u64;
-
                 if !config_list.allow_list_all {
-                    // Record denied list attempt
-                                        return Ok((Vec::new(),));
+                    // Record denied list attempt - return empty list
+                    let empty: Vec<(String, String)> = Vec::new();
+                    ctx.data_mut().record_host_function_call(
+                        "theater:simple/environment",
+                        "list-vars",
+                        &(),
+                        &empty,
+                    );
+                    return Ok((empty,));
                 }
 
                 let mut accessible_vars = Vec::new();
@@ -210,9 +233,14 @@ impl Handler for EnvironmentHandler
                     }
                 }
 
-                // Record the list operation
-                let count = accessible_vars.len();
-                
+                // Record the host function call
+                ctx.data_mut().record_host_function_call(
+                    "theater:simple/environment",
+                    "list-vars",
+                    &(),
+                    &accessible_vars,
+                );
+
                 Ok((accessible_vars,))
             },
         )?;
@@ -253,7 +281,7 @@ mod tests {
         };
         let handler = EnvironmentHandler::new(config, None);
         assert_eq!(handler.name(), "environment");
-        assert_eq!(handler.imports(), Some("theater:simple/environment".to_string()));
+        assert_eq!(handler.imports(), Some(vec!["theater:simple/environment".to_string()]));
         assert_eq!(handler.exports(), None);
     }
 

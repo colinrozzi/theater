@@ -1,0 +1,6 @@
+package test:environment;
+
+world environment-test {
+    import theater:simple/environment;
+    export theater:simple/actor;
+}

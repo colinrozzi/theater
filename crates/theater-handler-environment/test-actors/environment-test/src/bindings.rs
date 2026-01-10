@@ -5,32 +5,75 @@
 //   * generate_unused_types
 #[rustfmt::skip]
 #[allow(dead_code, clippy::all)]
-pub mod wasi {
-    pub mod random {
-        /// WASI Random is a random data API.
-        ///
-        /// It is intended to be portable at least between Unix-family platforms and
-        /// Windows.
+pub mod theater {
+    pub mod simple {
         #[allow(dead_code, async_fn_in_trait, unused_imports, clippy::all)]
-        pub mod random {
+        pub mod environment {
             #[used]
             #[doc(hidden)]
             static __FORCE_SECTION_REF: fn() = super::super::super::__link_custom_section_describing_imports;
             use super::super::super::_rt;
             #[allow(unused_unsafe, clippy::all)]
-            /// Return `len` cryptographically-secure random or pseudo-random bytes.
-            ///
-            /// This function must produce data at least as cryptographically secure and
-            /// fast as an adequately seeded cryptographically-secure pseudo-random
-            /// number generator (CSPRNG). It must not block, from the perspective of
-            /// the calling program, under any circumstances, including on the first
-            /// request and on requests for numbers of bytes. The returned data must
-            /// always be unpredictable.
-            ///
-            /// This function must always return fresh data. Deterministic environments
-            /// must omit this function, rather than implementing it with deterministic
-            /// data.
-            pub fn get_random_bytes(len: u64) -> _rt::Vec<u8> {
+            /// Get a specific environment variable
+            /// Returns None if the variable doesn't exist or access is denied
+            pub fn get_var(name: &str) -> Option<_rt::String> {
+                unsafe {
+                    #[cfg_attr(target_pointer_width = "64", repr(align(8)))]
+                    #[cfg_attr(target_pointer_width = "32", repr(align(4)))]
+                    struct RetArea(
+                        [::core::mem::MaybeUninit<
+                            u8,
+                        >; 3 * ::core::mem::size_of::<*const u8>()],
+                    );
+                    let mut ret_area = RetArea(
+                        [::core::mem::MaybeUninit::uninit(); 3
+                            * ::core::mem::size_of::<*const u8>()],
+                    );
+                    let vec0 = name;
+                    let ptr0 = vec0.as_ptr().cast::<u8>();
+                    let len0 = vec0.len();
+                    let ptr1 = ret_area.0.as_mut_ptr().cast::<u8>();
+                    #[cfg(target_arch = "wasm32")]
+                    #[link(wasm_import_module = "theater:simple/environment")]
+                    unsafe extern "C" {
+                        #[link_name = "get-var"]
+                        fn wit_import2(_: *mut u8, _: usize, _: *mut u8);
+                    }
+                    #[cfg(not(target_arch = "wasm32"))]
+                    unsafe extern "C" fn wit_import2(_: *mut u8, _: usize, _: *mut u8) {
+                        unreachable!()
+                    }
+                    unsafe { wit_import2(ptr0.cast_mut(), len0, ptr1) };
+                    let l3 = i32::from(*ptr1.add(0).cast::<u8>());
+                    let result7 = match l3 {
+                        0 => None,
+                        1 => {
+                            let e = {
+                                let l4 = *ptr1
+                                    .add(::core::mem::size_of::<*const u8>())
+                                    .cast::<*mut u8>();
+                                let l5 = *ptr1
+                                    .add(2 * ::core::mem::size_of::<*const u8>())
+                                    .cast::<usize>();
+                                let len6 = l5;
+                                let bytes6 = _rt::Vec::from_raw_parts(
+                                    l4.cast(),
+                                    len6,
+                                    len6,
+                                );
+                                _rt::string_lift(bytes6)
+                            };
+                            Some(e)
+                        }
+                        _ => _rt::invalid_enum_discriminant(),
+                    };
+                    result7
+                }
+            }
+            #[allow(unused_unsafe, clippy::all)]
+            /// List all accessible environment variables
+            /// Returns empty list if list_all is not enabled in config
+            pub fn list_vars() -> _rt::Vec<(_rt::String, _rt::String)> {
                 unsafe {
                     #[cfg_attr(target_pointer_width = "64", repr(align(8)))]
                     #[cfg_attr(target_pointer_width = "32", repr(align(4)))]
@@ -45,44 +88,73 @@ pub mod wasi {
                     );
                     let ptr0 = ret_area.0.as_mut_ptr().cast::<u8>();
                     #[cfg(target_arch = "wasm32")]
-                    #[link(wasm_import_module = "wasi:random/random@0.2.3")]
+                    #[link(wasm_import_module = "theater:simple/environment")]
                     unsafe extern "C" {
-                        #[link_name = "get-random-bytes"]
-                        fn wit_import1(_: i64, _: *mut u8);
+                        #[link_name = "list-vars"]
+                        fn wit_import1(_: *mut u8);
                     }
                     #[cfg(not(target_arch = "wasm32"))]
-                    unsafe extern "C" fn wit_import1(_: i64, _: *mut u8) {
+                    unsafe extern "C" fn wit_import1(_: *mut u8) {
                         unreachable!()
                     }
-                    unsafe { wit_import1(_rt::as_i64(&len), ptr0) };
+                    unsafe { wit_import1(ptr0) };
                     let l2 = *ptr0.add(0).cast::<*mut u8>();
                     let l3 = *ptr0
                         .add(::core::mem::size_of::<*const u8>())
                         .cast::<usize>();
-                    let len4 = l3;
-                    let result5 = _rt::Vec::from_raw_parts(l2.cast(), len4, len4);
-                    result5
+                    let base10 = l2;
+                    let len10 = l3;
+                    let mut result10 = _rt::Vec::with_capacity(len10);
+                    for i in 0..len10 {
+                        let base = base10
+                            .add(i * (4 * ::core::mem::size_of::<*const u8>()));
+                        let e10 = {
+                            let l4 = *base.add(0).cast::<*mut u8>();
+                            let l5 = *base
+                                .add(::core::mem::size_of::<*const u8>())
+                                .cast::<usize>();
+                            let len6 = l5;
+                            let bytes6 = _rt::Vec::from_raw_parts(l4.cast(), len6, len6);
+                            let l7 = *base
+                                .add(2 * ::core::mem::size_of::<*const u8>())
+                                .cast::<*mut u8>();
+                            let l8 = *base
+                                .add(3 * ::core::mem::size_of::<*const u8>())
+                                .cast::<usize>();
+                            let len9 = l8;
+                            let bytes9 = _rt::Vec::from_raw_parts(l7.cast(), len9, len9);
+                            (_rt::string_lift(bytes6), _rt::string_lift(bytes9))
+                        };
+                        result10.push(e10);
+                    }
+                    _rt::cabi_dealloc(
+                        base10,
+                        len10 * (4 * ::core::mem::size_of::<*const u8>()),
+                        ::core::mem::size_of::<*const u8>(),
+                    );
+                    let result11 = result10;
+                    result11
                 }
             }
             #[allow(unused_unsafe, clippy::all)]
-            /// Return a cryptographically-secure random or pseudo-random `u64` value.
-            ///
-            /// This function returns the same type of data as `get-random-bytes`,
-            /// represented as a `u64`.
-            pub fn get_random_u64() -> u64 {
+            /// Check if a specific environment variable exists (and is accessible)
+            pub fn exists(name: &str) -> bool {
                 unsafe {
+                    let vec0 = name;
+                    let ptr0 = vec0.as_ptr().cast::<u8>();
+                    let len0 = vec0.len();
                     #[cfg(target_arch = "wasm32")]
-                    #[link(wasm_import_module = "wasi:random/random@0.2.3")]
+                    #[link(wasm_import_module = "theater:simple/environment")]
                     unsafe extern "C" {
-                        #[link_name = "get-random-u64"]
-                        fn wit_import0() -> i64;
+                        #[link_name = "exists"]
+                        fn wit_import1(_: *mut u8, _: usize) -> i32;
                     }
                     #[cfg(not(target_arch = "wasm32"))]
-                    unsafe extern "C" fn wit_import0() -> i64 {
+                    unsafe extern "C" fn wit_import1(_: *mut u8, _: usize) -> i32 {
                         unreachable!()
                     }
-                    let ret = unsafe { wit_import0() };
-                    ret as u64
+                    let ret = unsafe { wit_import1(ptr0.cast_mut(), len0) };
+                    _rt::bool_lift(ret as u8)
                 }
             }
         }
@@ -322,33 +394,14 @@ pub mod exports {
 #[rustfmt::skip]
 mod _rt {
     #![allow(dead_code, clippy::all)]
+    pub use alloc_crate::string::String;
     pub use alloc_crate::vec::Vec;
-    pub fn as_i64<T: AsI64>(t: T) -> i64 {
-        t.as_i64()
-    }
-    pub trait AsI64 {
-        fn as_i64(self) -> i64;
-    }
-    impl<'a, T: Copy + AsI64> AsI64 for &'a T {
-        fn as_i64(self) -> i64 {
-            (*self).as_i64()
+    pub unsafe fn string_lift(bytes: Vec<u8>) -> String {
+        if cfg!(debug_assertions) {
+            String::from_utf8(bytes).unwrap()
+        } else {
+            String::from_utf8_unchecked(bytes)
         }
-    }
-    impl AsI64 for i64 {
-        #[inline]
-        fn as_i64(self) -> i64 {
-            self as i64
-        }
-    }
-    impl AsI64 for u64 {
-        #[inline]
-        fn as_i64(self) -> i64 {
-            self as i64
-        }
-    }
-    #[cfg(target_arch = "wasm32")]
-    pub fn run_ctors_once() {
-        wit_bindgen_rt::run_ctors_once();
     }
     pub unsafe fn invalid_enum_discriminant<T>() -> T {
         if cfg!(debug_assertions) {
@@ -364,7 +417,21 @@ mod _rt {
         let layout = alloc::Layout::from_size_align_unchecked(size, align);
         alloc::dealloc(ptr, layout);
     }
-    pub use alloc_crate::string::String;
+    pub unsafe fn bool_lift(val: u8) -> bool {
+        if cfg!(debug_assertions) {
+            match val {
+                0 => false,
+                1 => true,
+                _ => panic!("invalid bool discriminant"),
+            }
+        } else {
+            val != 0
+        }
+    }
+    #[cfg(target_arch = "wasm32")]
+    pub fn run_ctors_once() {
+        wit_bindgen_rt::run_ctors_once();
+    }
     extern crate alloc as alloc_crate;
     pub use alloc_crate::alloc;
 }
@@ -386,7 +453,7 @@ mod _rt {
 /// ```
 #[allow(unused_macros)]
 #[doc(hidden)]
-macro_rules! __export_wasi_random_test_impl {
+macro_rules! __export_environment_test_impl {
     ($ty:ident) => {
         self::export!($ty with_types_in self);
     };
@@ -397,22 +464,22 @@ macro_rules! __export_wasi_random_test_impl {
     };
 }
 #[doc(inline)]
-pub(crate) use __export_wasi_random_test_impl as export;
+pub(crate) use __export_environment_test_impl as export;
 #[cfg(target_arch = "wasm32")]
 #[unsafe(
-    link_section = "component-type:wit-bindgen:0.41.0:test:wasi-random:wasi-random-test:encoded world"
+    link_section = "component-type:wit-bindgen:0.41.0:test:environment:environment-test:encoded world"
 )]
 #[doc(hidden)]
 #[allow(clippy::octal_escapes)]
-pub static __WIT_BINDGEN_COMPONENT_TYPE: [u8; 334] = *b"\
-\0asm\x0d\0\x01\0\0\x19\x16wit-component-encoding\x04\0\x07\xc7\x01\x01A\x02\x01\
-A\x04\x01B\x05\x01p}\x01@\x01\x03lenw\0\0\x04\0\x10get-random-bytes\x01\x01\x01@\
-\0\0w\x04\0\x0eget-random-u64\x01\x02\x03\0\x18wasi:random/random@0.2.3\x05\0\x01\
-B\x06\x01p}\x01k\0\x01o\x01\x01\x01j\x01\x02\x01s\x01@\x01\x05state\x01\0\x03\x04\
-\0\x04init\x01\x04\x04\0\x14theater:simple/actor\x05\x01\x04\0!test:wasi-random/\
-wasi-random-test\x04\0\x0b\x16\x01\0\x10wasi-random-test\x03\0\0\0G\x09producers\
-\x01\x0cprocessed-by\x02\x0dwit-component\x070.227.1\x10wit-bindgen-rust\x060.41\
-.0";
+pub static __WIT_BINDGEN_COMPONENT_TYPE: [u8; 353] = *b"\
+\0asm\x0d\0\x01\0\0\x19\x16wit-component-encoding\x04\0\x07\xda\x01\x01A\x02\x01\
+A\x04\x01B\x09\x01ks\x01@\x01\x04names\0\0\x04\0\x07get-var\x01\x01\x01o\x02ss\x01\
+p\x02\x01@\0\0\x03\x04\0\x09list-vars\x01\x04\x01@\x01\x04names\0\x7f\x04\0\x06e\
+xists\x01\x05\x03\0\x1atheater:simple/environment\x05\0\x01B\x06\x01p}\x01k\0\x01\
+o\x01\x01\x01j\x01\x02\x01s\x01@\x01\x05state\x01\0\x03\x04\0\x04init\x01\x04\x04\
+\0\x14theater:simple/actor\x05\x01\x04\0!test:environment/environment-test\x04\0\
+\x0b\x16\x01\0\x10environment-test\x03\0\0\0G\x09producers\x01\x0cprocessed-by\x02\
+\x0dwit-component\x070.227.1\x10wit-bindgen-rust\x060.41.0";
 #[inline(never)]
 #[doc(hidden)]
 pub fn __link_custom_section_describing_imports() {

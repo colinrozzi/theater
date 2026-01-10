@@ -24,8 +24,8 @@ use std::pin::Pin;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 
-use tracing::{debug, info, warn};
-use wasmtime::component::types::ComponentItem;
+use tracing::{debug, error, info, warn};
+use wasmtime::component::types::{ComponentItem, Type};
 use wasmtime::component::{Resource, ResourceAny, ResourceType, Val};
 use wasmtime::StoreContextMut;
 
@@ -94,6 +94,8 @@ pub struct ReplayState {
     interfaces: Arc<Vec<String>>,
     /// Resource state for tracking handles during replay
     resource_state: ReplayResourceState,
+    /// Count of hash mismatches detected during replay
+    mismatch_count: Arc<AtomicU32>,
 }
 
 impl ReplayState {
@@ -126,7 +128,18 @@ impl ReplayState {
             position: Arc::new(Mutex::new(0)),
             interfaces: Arc::new(interfaces),
             resource_state: ReplayResourceState::new(),
+            mismatch_count: Arc::new(AtomicU32::new(0)),
         }
+    }
+
+    /// Record a hash mismatch
+    pub fn record_mismatch(&self) {
+        self.mismatch_count.fetch_add(1, Ordering::SeqCst);
+    }
+
+    /// Get the count of mismatches
+    pub fn mismatch_count(&self) -> u32 {
+        self.mismatch_count.load(Ordering::SeqCst)
     }
 
     /// Get the resource state for creating/tracking resources during replay
@@ -357,8 +370,13 @@ fn val_to_json(val: &Val) -> serde_json::Value {
 /// Serialize params to JSON bytes
 fn serialize_params(params: &[Val]) -> Vec<u8> {
     let json_params: Vec<serde_json::Value> = params.iter().map(val_to_json).collect();
-    // For single param, don't wrap in array
-    let json = if json_params.len() == 1 {
+    // Match the serialization format used by handlers:
+    // - 0 params: serialize as "null" (like &() in serde)
+    // - 1 param: serialize the value directly (unwrapped)
+    // - 2+ params: serialize as array
+    let json = if json_params.is_empty() {
+        serde_json::Value::Null
+    } else if json_params.len() == 1 {
         json_params.into_iter().next().unwrap()
     } else {
         serde_json::Value::Array(json_params)
@@ -366,91 +384,212 @@ fn serialize_params(params: &[Val]) -> Vec<u8> {
     serde_json::to_vec(&json).unwrap_or_default()
 }
 
-/// Try to deserialize recorded output bytes back to Val
-/// This handles common patterns from the HTTP host implementation
-fn deserialize_recorded_output(recorded_output: &[u8], results: &mut [Val]) {
-    if results.is_empty() || recorded_output.is_empty() {
+/// Deserialize recorded output bytes back to Val using type information from the function signature.
+/// This uses the expected types to correctly interpret the JSON data.
+fn deserialize_with_type_info(
+    recorded_output: &[u8],
+    results: &mut [Val],
+    expected_types: &[Type],
+) {
+    if results.is_empty() || recorded_output.is_empty() || expected_types.is_empty() {
         return;
     }
 
     // Try to parse as JSON string first
     let output_str = match String::from_utf8(recorded_output.to_vec()) {
         Ok(s) => s,
-        Err(_) => return,
+        Err(_) => {
+            warn!("[REPLAY] Failed to parse output as UTF-8");
+            return;
+        }
     };
 
     // Try parsing as JSON
     let json_value: serde_json::Value = match serde_json::from_str(&output_str) {
         Ok(v) => v,
-        Err(_) => return,
+        Err(e) => {
+            warn!("[REPLAY] Failed to parse output as JSON: {}", e);
+            return;
+        }
     };
 
-    // Handle different patterns based on the JSON structure
-    match &json_value {
-        // Enum/variant pattern: "Type::Variant" -> Val::Enum("variant")
-        serde_json::Value::String(s) if s.contains("::") => {
-            let parts: Vec<&str> = s.split("::").collect();
-            if parts.len() >= 2 {
-                // Extract the variant name (lowercase for component model)
-                let variant_name = parts[parts.len() - 1].to_lowercase();
-                // For simple enums with no payload
-                results[0] = Val::Enum(variant_name);
-                debug!("[REPLAY] Deserialized enum variant: {}", s);
+    // Deserialize each result based on its expected type
+    for (i, expected_type) in expected_types.iter().enumerate() {
+        if i >= results.len() {
+            break;
+        }
+
+        match json_to_val(&json_value, expected_type) {
+            Some(val) => {
+                debug!("[REPLAY] Deserialized result {} as {:?}", i, expected_type);
+                results[i] = val;
+            }
+            None => {
+                warn!(
+                    "[REPLAY] Failed to deserialize result {} with expected type {:?}",
+                    i, expected_type
+                );
             }
         }
-        // Plain string -> could be Val::String or Val::Option(Some(String))
-        serde_json::Value::String(s) => {
-            // Assume it's an Option<String> returning Some
-            results[0] = Val::Option(Some(Box::new(Val::String(s.clone()))));
-            debug!("[REPLAY] Deserialized as Option<String>: {}", s);
+    }
+}
+
+/// Convert a JSON value to a wasmtime Val based on the expected type.
+fn json_to_val(json: &serde_json::Value, expected_type: &Type) -> Option<Val> {
+    match expected_type {
+        // Primitive types
+        Type::Bool => json.as_bool().map(Val::Bool),
+        Type::S8 => json.as_i64().map(|n| Val::S8(n as i8)),
+        Type::U8 => json.as_u64().map(|n| Val::U8(n as u8)),
+        Type::S16 => json.as_i64().map(|n| Val::S16(n as i16)),
+        Type::U16 => json.as_u64().map(|n| Val::U16(n as u16)),
+        Type::S32 => json.as_i64().map(|n| Val::S32(n as i32)),
+        Type::U32 => json.as_u64().map(|n| Val::U32(n as u32)),
+        Type::S64 => json.as_i64().map(Val::S64),
+        Type::U64 => json.as_u64().map(Val::U64),
+        Type::Float32 => json.as_f64().map(|n| Val::Float32(n as f32)),
+        Type::Float64 => json.as_f64().map(Val::Float64),
+        Type::Char => json.as_str().and_then(|s| s.chars().next()).map(Val::Char),
+        Type::String => json.as_str().map(|s| Val::String(s.to_string())),
+
+        // List type - recursively convert elements
+        Type::List(inner_type) => {
+            let arr = json.as_array()?;
+            let inner = inner_type.ty();
+            let vals: Option<Vec<Val>> = arr.iter().map(|v| json_to_val(v, &inner)).collect();
+            vals.map(Val::List)
         }
-        // null -> Val::Option(None)
-        serde_json::Value::Null => {
-            results[0] = Val::Option(None);
-            debug!("[REPLAY] Deserialized as None");
-        }
-        // Array -> could be list of bytes or other list
-        serde_json::Value::Array(arr) => {
-            // Try to convert to list of u8 (common for HTTP bodies)
-            let bytes: Vec<Val> = arr.iter()
-                .filter_map(|v| v.as_u64().map(|n| Val::U8(n as u8)))
+
+        // Tuple type - convert each element with its corresponding type
+        Type::Tuple(tuple_type) => {
+            let arr = json.as_array()?;
+            let types: Vec<Type> = tuple_type.types().collect();
+            if arr.len() != types.len() {
+                return None;
+            }
+            let vals: Option<Vec<Val>> = arr
+                .iter()
+                .zip(types.iter())
+                .map(|(v, t)| json_to_val(v, t))
                 .collect();
-            if bytes.len() == arr.len() {
-                results[0] = Val::List(bytes);
-                debug!("[REPLAY] Deserialized as list of {} bytes", arr.len());
+            vals.map(Val::Tuple)
+        }
+
+        // Option type - handle null as None, otherwise Some
+        Type::Option(inner_type) => {
+            if json.is_null() {
+                Some(Val::Option(None))
+            } else {
+                let inner = inner_type.ty();
+                json_to_val(json, &inner).map(|v| Val::Option(Some(Box::new(v))))
             }
         }
-        // Boolean
-        serde_json::Value::Bool(b) => {
-            results[0] = Val::Bool(*b);
-            debug!("[REPLAY] Deserialized as bool: {}", b);
-        }
-        // Number
-        serde_json::Value::Number(n) => {
-            if let Some(i) = n.as_u64() {
-                results[0] = Val::U32(i as u32);
-                debug!("[REPLAY] Deserialized as u32: {}", i);
+
+        // Result type - look for "ok" or "err" keys
+        Type::Result(result_type) => {
+            if let Some(obj) = json.as_object() {
+                if let Some(ok_val) = obj.get("ok") {
+                    let inner = if ok_val.is_null() {
+                        None
+                    } else if let Some(ok_type) = result_type.ok() {
+                        json_to_val(ok_val, &ok_type).map(Box::new)
+                    } else {
+                        None
+                    };
+                    return Some(Val::Result(Ok(inner)));
+                }
+                if let Some(err_val) = obj.get("err") {
+                    let inner = if err_val.is_null() {
+                        None
+                    } else if let Some(err_type) = result_type.err() {
+                        json_to_val(err_val, &err_type).map(Box::new)
+                    } else {
+                        None
+                    };
+                    return Some(Val::Result(Err(inner)));
+                }
             }
+            None
         }
-        // Result pattern: {"ok": value} or {"err": value}
-        serde_json::Value::Object(map) => {
-            if let Some(ok_val) = map.get("ok") {
-                // Result::Ok
-                let inner = match ok_val {
-                    serde_json::Value::Null => None,
-                    _ => Some(Box::new(Val::String(ok_val.to_string()))),
-                };
-                results[0] = Val::Result(Ok(inner));
-                debug!("[REPLAY] Deserialized as Result::Ok");
-            } else if let Some(err_val) = map.get("err") {
-                // Result::Err
-                let inner = match err_val {
-                    serde_json::Value::Null => None,
-                    _ => Some(Box::new(Val::String(err_val.to_string()))),
-                };
-                results[0] = Val::Result(Err(inner));
-                debug!("[REPLAY] Deserialized as Result::Err");
+
+        // Record type - convert object fields
+        Type::Record(record_type) => {
+            let obj = json.as_object()?;
+            let fields: Option<Vec<(String, Val)>> = record_type
+                .fields()
+                .map(|field| {
+                    let field_val = obj.get(field.name)?;
+                    let val = json_to_val(field_val, &field.ty)?;
+                    Some((field.name.to_string(), val))
+                })
+                .collect();
+            fields.map(Val::Record)
+        }
+
+        // Variant type - look for variant name as key
+        Type::Variant(variant_type) => {
+            if let Some(obj) = json.as_object() {
+                for case in variant_type.cases() {
+                    if let Some(case_val) = obj.get(case.name) {
+                        let inner = if case_val.is_null() {
+                            None
+                        } else if let Some(case_type) = case.ty {
+                            json_to_val(case_val, &case_type).map(Box::new)
+                        } else {
+                            None
+                        };
+                        return Some(Val::Variant(case.name.to_string(), inner));
+                    }
+                }
             }
+            // Try as string for simple variants
+            if let Some(s) = json.as_str() {
+                return Some(Val::Variant(s.to_string(), None));
+            }
+            None
+        }
+
+        // Enum type - just a string
+        Type::Enum(enum_type) => {
+            let s = json.as_str()?;
+            // Verify it's a valid enum case
+            for case in enum_type.names() {
+                if case == s {
+                    return Some(Val::Enum(s.to_string()));
+                }
+            }
+            // Try lowercase comparison
+            let lower = s.to_lowercase();
+            for case in enum_type.names() {
+                if case.to_lowercase() == lower {
+                    return Some(Val::Enum(case.to_string()));
+                }
+            }
+            None
+        }
+
+        // Flags type - array of flag names
+        Type::Flags(flags_type) => {
+            let arr = json.as_array()?;
+            let flags: Option<Vec<String>> = arr
+                .iter()
+                .map(|v| v.as_str().map(|s| s.to_string()))
+                .collect();
+            let flag_vals = flags?;
+            // Verify all flags are valid
+            let valid_flags: Vec<&str> = flags_type.names().collect();
+            for flag in &flag_vals {
+                if !valid_flags.contains(&flag.as_str()) {
+                    return None;
+                }
+            }
+            Some(Val::Flags(flag_vals))
+        }
+
+        // Resource types - these are handled separately (constructor pattern)
+        Type::Own(_) | Type::Borrow(_) => {
+            debug!("[REPLAY] Resource type encountered in json_to_val - should be handled by constructor logic");
+            None
         }
     }
 }
@@ -558,7 +697,7 @@ impl Handler for ReplayHandler {
 
     fn start(
         &mut self,
-        _actor_handle: ActorHandle,
+        actor_handle: ActorHandle,
         actor_instance: SharedActorInstance,
         shutdown_receiver: ShutdownReceiver,
     ) -> Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send>> {
@@ -587,7 +726,8 @@ impl Handler for ReplayHandler {
             // Create channel to receive events
             let (event_tx, mut event_rx) = tokio::sync::mpsc::channel::<Result<ChainEvent, crate::actor::types::ActorError>>(100);
 
-            // Subscribe to actor events
+            // Subscribe to actor events BEFORE calling init
+            // This ensures we receive all events from the beginning
             if let Err(e) = theater_tx.send(crate::messages::TheaterCommand::SubscribeToActor {
                 actor_id: actor_id.clone(),
                 event_tx,
@@ -597,7 +737,19 @@ impl Handler for ReplayHandler {
                 return Ok(());
             }
 
-            info!("Subscribed to actor {} events, starting replay loop", actor_id);
+            info!("Subscribed to actor {} events", actor_id);
+
+            // Now call init - the replay handler drives execution in replay mode
+            // The actor runtime skips automatic init when replay mode is detected
+            info!("Replay handler calling init...");
+            if let Err(e) = actor_handle
+                .call_function::<(), ()>("theater:simple/actor.init".to_string(), ())
+                .await
+            {
+                error!("Replay handler failed to call init: {:?}", e);
+                return Err(anyhow::anyhow!("Failed to call init during replay: {:?}", e));
+            }
+            info!("Replay handler init completed, starting event verification loop");
 
             // Event-driven replay loop
             let mut shutdown_rx = shutdown_receiver.receiver;
@@ -619,17 +771,42 @@ impl Handler for ReplayHandler {
                     event_result = event_rx.recv() => {
                         match event_result {
                             Some(Ok(event)) => {
-                                // Compare event against expected chain
+                                // Find which position this event corresponds to in the expected chain
+                                // Events may arrive in order but stub functions may have already
+                                // processed some positions (for non-wasm events)
+                                let event_hash = &event.hash;
+
+                                // Find the position of this event in the expected chain
+                                let mut found_pos = None;
+                                for (pos, expected) in state.events.iter().enumerate() {
+                                    if &expected.hash == event_hash {
+                                        found_pos = Some(pos);
+                                        break;
+                                    }
+                                }
+
+                                let Some(event_pos) = found_pos else {
+                                    warn!("[REPLAY] Received unexpected event type='{}', hash={} (not in expected chain)",
+                                        event.event_type, hex::encode(&event.hash[..8.min(event.hash.len())]));
+                                    continue;
+                                };
+
                                 let current_pos = state.current_position();
-                                if current_pos >= state.total_events() {
-                                    warn!("Received event beyond chain length: {}", event.event_type);
+
+                                debug!("[REPLAY] Received event type='{}' at chain position {}, current_pos={}",
+                                    event.event_type, event_pos, current_pos);
+
+                                // If this event is at or before current position, it was already
+                                // handled by stub functions - skip it
+                                if event_pos < current_pos {
+                                    debug!("[REPLAY] Event at position {} already processed (current={}), skipping",
+                                        event_pos, current_pos);
                                     continue;
                                 }
 
-                                let expected = &state.events[current_pos];
-
-                                if event.hash == expected.hash {
-                                    debug!("Event {} matches expected (pos {})", event.event_type, current_pos);
+                                // If this event is exactly at current position, verify and advance
+                                if event_pos == current_pos {
+                                    info!("[REPLAY] Event {} verified at position {}", event.event_type, current_pos);
                                     state.advance();
 
                                     // Check if next event is a WasmCall we need to trigger
@@ -652,14 +829,11 @@ impl Handler for ReplayHandler {
                                         }
                                     }
                                 } else {
-                                    warn!(
-                                        "Event hash mismatch at position {}!\n  Expected: {:?}\n  Got: {:?}",
-                                        current_pos,
-                                        hex::encode(&expected.hash[..8.min(expected.hash.len())]),
-                                        hex::encode(&event.hash[..8.min(event.hash.len())])
-                                    );
-                                    // Still advance to keep trying
-                                    state.advance();
+                                    // event_pos > current_pos: event arrived out of order
+                                    // This can happen if events are received before stubs process them
+                                    // Just log and continue - the stub will advance position when it runs
+                                    debug!("[REPLAY] Event at position {} received before current position {} reached, will verify later",
+                                        event_pos, current_pos);
                                 }
                             }
                             Some(Err(e)) => {
@@ -675,10 +849,27 @@ impl Handler for ReplayHandler {
             }
 
             let (current, total) = (state.current_position(), state.total_events());
-            info!(
-                "Replay handler finished. Progress: {}/{} events",
-                current, total
-            );
+
+            // Only record success summary if we completed all events (didn't break due to mismatch)
+            if state.is_complete() {
+                info!("Replay completed successfully: all {} events matched", total);
+
+                let summary = crate::events::replay::ReplaySummary::success(total, current);
+
+                if let Ok(guard) = actor_instance.try_read() {
+                    if let Some(instance) = guard.as_ref() {
+                        instance.actor_component.actor_store.record_event(
+                            crate::events::ChainEventData {
+                                event_type: "replay-summary".to_string(),
+                                data: crate::events::ChainEventPayload::ReplaySummary(summary),
+                            }
+                        );
+                    }
+                }
+            } else {
+                // We exited early (mismatch or shutdown) - summary already recorded in mismatch handler
+                info!("Replay handler exited at position {}/{}", current, total);
+            }
 
             Ok(())
         })
@@ -773,10 +964,14 @@ impl Handler for ReplayHandler {
                         let interface_name = import_name.clone();
                         let func_name_owned = func_name.clone();
 
+                        // Capture return types from the function signature for type-aware deserialization
+                        let return_types: Vec<Type> = func_type.results().collect();
+                        let return_types = Arc::new(return_types);
+
                         // Check if this function returns a resource (constructor pattern)
-                        let returns_resource = func_type
-                            .results()
-                            .any(|r| matches!(r, wasmtime::component::types::Type::Own(_) | wasmtime::component::types::Type::Borrow(_)));
+                        let returns_resource = return_types
+                            .iter()
+                            .any(|r| matches!(r, Type::Own(_) | Type::Borrow(_)));
 
                         // Check if this is a constructor (starts with [constructor])
                         let is_constructor = func_name.starts_with("[constructor]");
@@ -792,6 +987,7 @@ impl Handler for ReplayHandler {
                                 let expected_type = expected_event_type_clone.clone();
                                 let interface = interface_name.clone();
                                 let function = func_name_owned.clone();
+                                let return_types = Arc::clone(&return_types);
 
                                 // Serialize the ACTUAL params from the actor
                                 let actual_input = serialize_params(params);
@@ -859,7 +1055,8 @@ impl Handler for ReplayHandler {
                                         }
                                     } else if !results.is_empty() {
                                         // Handle non-resource return values by deserializing from recorded_output
-                                        deserialize_recorded_output(&recorded_output, results);
+                                        // using the function's type signature for correct type conversion
+                                        deserialize_with_type_info(&recorded_output, results, &return_types);
                                     }
 
                                     Ok(())

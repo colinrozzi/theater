@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 ///
 /// - **HostFunction**: All host function calls (interface, function, input, output)
 /// - **Wasm**: WebAssembly execution events (calls, results, errors)
+/// - **ReplaySummary**: Summary event recorded at the end of a replay
 ///
 /// ## Design Philosophy
 ///
@@ -28,6 +29,9 @@ pub enum ChainEventPayload {
 
     /// WASM execution events (function calls, results, errors)
     Wasm(wasm::WasmEventData),
+
+    /// Replay completion summary
+    ReplaySummary(replay::ReplaySummary),
 }
 
 impl From<HostFunctionCall> for ChainEventPayload {
@@ -39,6 +43,12 @@ impl From<HostFunctionCall> for ChainEventPayload {
 impl From<wasm::WasmEventData> for ChainEventPayload {
     fn from(event: wasm::WasmEventData) -> Self {
         ChainEventPayload::Wasm(event)
+    }
+}
+
+impl From<replay::ReplaySummary> for ChainEventPayload {
+    fn from(event: replay::ReplaySummary) -> Self {
+        ChainEventPayload::ReplaySummary(event)
     }
 }
 
@@ -92,6 +102,7 @@ impl ChainEventData {
     }
 }
 
+pub mod replay;
 pub mod runtime;
 pub mod theater_runtime;
 pub mod wasm;

@@ -1,0 +1,12 @@
+name = "environment-test"
+version = "0.1.0"
+component = "/Users/colinrozzi/work/theater/crates/theater-handler-environment/test-actors/environment-test/./target/wasm32-unknown-unknown/release/environment_test.wasm"
+description = "Environment handler test actor"
+save_chain = true
+
+[[handler]]
+type = "runtime"
+
+[[handler]]
+type = "environment"
+allow_list_all = false

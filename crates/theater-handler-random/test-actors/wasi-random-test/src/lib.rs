@@ -5,10 +5,7 @@ use bindings::wasi::random::random;
 struct Component;
 
 impl bindings::exports::theater::simple::actor::Guest for Component {
-    fn init(
-        _state: Option<Vec<u8>>,
-        _params: (String,),
-    ) -> Result<(Option<Vec<u8>>,), String> {
+    fn init(_state: Option<Vec<u8>>) -> Result<(Option<Vec<u8>>,), String> {
         // Test 1: get-random-bytes with small size
         let bytes_10 = random::get_random_bytes(10);
         assert_eq!(bytes_10.len(), 10, "Should generate exactly 10 bytes");

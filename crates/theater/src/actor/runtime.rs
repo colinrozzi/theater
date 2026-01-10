@@ -409,21 +409,27 @@ impl ActorRuntime {
             });
         }
 
-        let init_actor_handle = actor_handle.clone();
-        let init_id = id.clone();
-        tokio::spawn(async move {
-            // Call init - it's a state-only function that takes state from the store
-            // and returns updated state. The params we pass are ignored since
-            // TypedComponentFunctionStateOnly handles state directly.
-            // init: func(state: option<list<u8>>) -> result<tuple<option<list<u8>>>, string>
-            init_actor_handle
-                .call_function::<(), ()>("theater:simple/actor.init".to_string(), ())
-                .await
-                .map_err(|e| {
-                    error!("Failed to call actor.init for actor {}: {}", init_id, e);
-                    e
-                })
-        });
+        // In replay mode, the replay handler will call init after setting up subscriptions
+        // to avoid race conditions. In normal mode, we spawn init here.
+        if !handler_registry.is_replay_mode() {
+            let init_actor_handle = actor_handle.clone();
+            let init_id = id.clone();
+            tokio::spawn(async move {
+                // Call init - it's a state-only function that takes state from the store
+                // and returns updated state. The params we pass are ignored since
+                // TypedComponentFunctionStateOnly handles state directly.
+                // init: func(state: option<list<u8>>) -> result<tuple<option<list<u8>>>, string>
+                init_actor_handle
+                    .call_function::<(), ()>("theater:simple/actor.init".to_string(), ())
+                    .await
+                    .map_err(|e| {
+                        error!("Failed to call actor.init for actor {}: {}", init_id, e);
+                        e
+                    })
+            });
+        } else {
+            info!("Replay mode: skipping automatic init call (replay handler will drive execution)");
+        }
 
         // Put actor_instance in the shared wrapper
         {

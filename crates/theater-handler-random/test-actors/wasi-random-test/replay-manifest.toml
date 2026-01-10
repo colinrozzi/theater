@@ -1,14 +1,12 @@
-name = "wasi-random-test"
+name = "wasi-random-test-replay"
 version = "0.1.0"
 component = "/Users/colinrozzi/work/theater/crates/theater-handler-random/test-actors/wasi-random-test/./target/wasm32-unknown-unknown/release/wasi_random_test.wasm"
-description = "WASI random interface test actor"
+description = "WASI random interface replay test"
 save_chain = true
 
 [[handler]]
 type = "runtime"
 
 [[handler]]
-type = "random"
-max_bytes = 1048576
-max_int = 9223372036854775807
-allow_crypto_secure = false
+type = "replay"
+chain = "/Users/colinrozzi/work/theater/random-chain.json"

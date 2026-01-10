@@ -6,32 +6,30 @@
 //!
 //! ## Architecture
 //!
-//! This handler uses wasmtime's bindgen to generate type-safe Host traits from
-//! the WASI Random WIT definitions. This ensures compile-time verification that
-//! our implementation matches the WASI specification.
+//! This handler manually implements WASI Random interfaces using `func_wrap` to ensure
+//! proper recording of all host function calls for replay support.
 
 pub mod events;
-pub mod bindings;
-pub mod host_impl;
 
 pub use events::RandomEventData;
-pub use host_impl::set_thread_rng;
 
+use anyhow::Result;
+use rand::prelude::*;
 use rand::SeedableRng;
 use rand_chacha::ChaCha20Rng;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 use tracing::info;
+use wasmtime::StoreContextMut;
 
 use theater::actor::handle::ActorHandle;
+use theater::actor::ActorStore;
 use theater::config::actor_manifest::RandomHandlerConfig;
 use theater::config::permissions::RandomPermissions;
 use theater::handler::{Handler, HandlerContext, SharedActorInstance};
 use theater::shutdown::ShutdownReceiver;
 use theater::wasm::{ActorComponent, ActorInstance};
-
-use crate::events::RandomEventData as HandlerEventData;
 
 /// Host for providing random number generation capabilities to WebAssembly actors
 pub struct RandomHandler {
@@ -73,9 +71,166 @@ impl RandomHandler {
         }
     }
 
-    // Note: The old manual setup_wasi_random method has been replaced by
-    // bindgen-generated add_to_linker calls in setup_host_functions.
-    // The Host trait implementations are in host_impl.rs.
+    fn setup_random_interface(&self, actor_component: &mut ActorComponent) -> Result<()> {
+        let mut interface = actor_component
+            .linker
+            .instance("wasi:random/random@0.2.3")
+            .map_err(|e| anyhow::anyhow!("Could not get wasi:random/random interface: {}", e))?;
+
+        let rng = Arc::clone(&self.rng);
+
+        // get-random-bytes: func(len: u64) -> list<u8>
+        let rng_clone = Arc::clone(&rng);
+        interface
+            .func_wrap(
+                "get-random-bytes",
+                move |mut ctx: StoreContextMut<'_, ActorStore>, (len,): (u64,)| -> Result<(Vec<u8>,)> {
+                    let len = len as usize;
+                    let mut bytes = vec![0u8; len];
+
+                    {
+                        let mut generator = rng_clone.lock().unwrap();
+                        generator.fill_bytes(&mut bytes);
+                    }
+
+                    // Record the call for replay
+                    ctx.data_mut().record_host_function_call(
+                        "wasi:random/random@0.2.3",
+                        "get-random-bytes",
+                        &len,
+                        &bytes,
+                    );
+
+                    Ok((bytes,))
+                },
+            )
+            .map_err(|e| anyhow::anyhow!("Failed to wrap get-random-bytes: {}", e))?;
+
+        // get-random-u64: func() -> u64
+        let rng_clone = Arc::clone(&rng);
+        interface
+            .func_wrap(
+                "get-random-u64",
+                move |mut ctx: StoreContextMut<'_, ActorStore>, ()| -> Result<(u64,)> {
+                    let value: u64 = {
+                        let mut generator = rng_clone.lock().unwrap();
+                        generator.gen()
+                    };
+
+                    // Record the call for replay
+                    ctx.data_mut().record_host_function_call(
+                        "wasi:random/random@0.2.3",
+                        "get-random-u64",
+                        &(),
+                        &value,
+                    );
+
+                    Ok((value,))
+                },
+            )
+            .map_err(|e| anyhow::anyhow!("Failed to wrap get-random-u64: {}", e))?;
+
+        info!("wasi:random/random@0.2.3 interface added");
+        Ok(())
+    }
+
+    fn setup_insecure_interface(&self, actor_component: &mut ActorComponent) -> Result<()> {
+        let mut interface = actor_component
+            .linker
+            .instance("wasi:random/insecure@0.2.3")
+            .map_err(|e| anyhow::anyhow!("Could not get wasi:random/insecure interface: {}", e))?;
+
+        let rng = Arc::clone(&self.rng);
+
+        // get-insecure-random-bytes: func(len: u64) -> list<u8>
+        let rng_clone = Arc::clone(&rng);
+        interface
+            .func_wrap(
+                "get-insecure-random-bytes",
+                move |mut ctx: StoreContextMut<'_, ActorStore>, (len,): (u64,)| -> Result<(Vec<u8>,)> {
+                    let len = len as usize;
+                    let mut bytes = vec![0u8; len];
+
+                    {
+                        let mut generator = rng_clone.lock().unwrap();
+                        generator.fill_bytes(&mut bytes);
+                    }
+
+                    // Record the call for replay
+                    ctx.data_mut().record_host_function_call(
+                        "wasi:random/insecure@0.2.3",
+                        "get-insecure-random-bytes",
+                        &len,
+                        &bytes,
+                    );
+
+                    Ok((bytes,))
+                },
+            )
+            .map_err(|e| anyhow::anyhow!("Failed to wrap get-insecure-random-bytes: {}", e))?;
+
+        // get-insecure-random-u64: func() -> u64
+        let rng_clone = Arc::clone(&rng);
+        interface
+            .func_wrap(
+                "get-insecure-random-u64",
+                move |mut ctx: StoreContextMut<'_, ActorStore>, ()| -> Result<(u64,)> {
+                    let value: u64 = {
+                        let mut generator = rng_clone.lock().unwrap();
+                        generator.gen()
+                    };
+
+                    // Record the call for replay
+                    ctx.data_mut().record_host_function_call(
+                        "wasi:random/insecure@0.2.3",
+                        "get-insecure-random-u64",
+                        &(),
+                        &value,
+                    );
+
+                    Ok((value,))
+                },
+            )
+            .map_err(|e| anyhow::anyhow!("Failed to wrap get-insecure-random-u64: {}", e))?;
+
+        info!("wasi:random/insecure@0.2.3 interface added");
+        Ok(())
+    }
+
+    fn setup_insecure_seed_interface(&self, actor_component: &mut ActorComponent) -> Result<()> {
+        let mut interface = actor_component
+            .linker
+            .instance("wasi:random/insecure-seed@0.2.3")
+            .map_err(|e| anyhow::anyhow!("Could not get wasi:random/insecure-seed interface: {}", e))?;
+
+        let rng = Arc::clone(&self.rng);
+
+        // insecure-seed: func() -> tuple<u64, u64>
+        interface
+            .func_wrap(
+                "insecure-seed",
+                move |mut ctx: StoreContextMut<'_, ActorStore>, ()| -> Result<((u64, u64),)> {
+                    let (seed1, seed2): (u64, u64) = {
+                        let mut generator = rng.lock().unwrap();
+                        (generator.gen(), generator.gen())
+                    };
+
+                    // Record the call for replay
+                    ctx.data_mut().record_host_function_call(
+                        "wasi:random/insecure-seed@0.2.3",
+                        "insecure-seed",
+                        &(),
+                        &(seed1, seed2),
+                    );
+
+                    Ok(((seed1, seed2),))
+                },
+            )
+            .map_err(|e| anyhow::anyhow!("Failed to wrap insecure-seed: {}", e))?;
+
+        info!("wasi:random/insecure-seed@0.2.3 interface added");
+        Ok(())
+    }
 }
 
 impl Handler for RandomHandler
@@ -104,38 +259,39 @@ impl Handler for RandomHandler
     fn setup_host_functions(
         &mut self,
         actor_component: &mut ActorComponent,
-        _ctx: &mut HandlerContext,
+        ctx: &mut HandlerContext,
     ) -> anyhow::Result<()> {
-        use crate::bindings;
-        use theater::actor::ActorStore;
+        // Check if imports are already satisfied (e.g., by replay handler)
+        let random_satisfied = ctx.is_satisfied("wasi:random/random@0.2.3");
+        let insecure_satisfied = ctx.is_satisfied("wasi:random/insecure@0.2.3");
+        let seed_satisfied = ctx.is_satisfied("wasi:random/insecure-seed@0.2.3");
 
-        info!("Setting up WASI random host functions using bindgen-generated add_to_linker");
+        if random_satisfied && insecure_satisfied && seed_satisfied {
+            info!("WASI random interfaces already satisfied (replay mode), skipping setup");
+            return Ok(());
+        }
 
-        // Set up the thread-local RNG for this actor
-        set_thread_rng(Arc::clone(&self.rng));
+        info!("Setting up WASI random host functions with manual func_wrap");
 
-        // Add wasi:random/random interface
-        bindings::wasi::random::random::add_to_linker(
-            &mut actor_component.linker,
-            |state: &mut ActorStore| state,
-        )?;
-        info!("wasi:random/random interface added");
+        // Setup wasi:random/random@0.2.3 interface (if not already satisfied)
+        if !random_satisfied {
+            self.setup_random_interface(actor_component)?;
+            ctx.mark_satisfied("wasi:random/random@0.2.3");
+        }
 
-        // Add wasi:random/insecure interface
-        bindings::wasi::random::insecure::add_to_linker(
-            &mut actor_component.linker,
-            |state: &mut ActorStore| state,
-        )?;
-        info!("wasi:random/insecure interface added");
+        // Setup wasi:random/insecure@0.2.3 interface (if not already satisfied)
+        if !insecure_satisfied {
+            self.setup_insecure_interface(actor_component)?;
+            ctx.mark_satisfied("wasi:random/insecure@0.2.3");
+        }
 
-        // Add wasi:random/insecure-seed interface
-        bindings::wasi::random::insecure_seed::add_to_linker(
-            &mut actor_component.linker,
-            |state: &mut ActorStore| state,
-        )?;
-        info!("wasi:random/insecure-seed interface added");
+        // Setup wasi:random/insecure-seed@0.2.3 interface (if not already satisfied)
+        if !seed_satisfied {
+            self.setup_insecure_seed_interface(actor_component)?;
+            ctx.mark_satisfied("wasi:random/insecure-seed@0.2.3");
+        }
 
-        info!("WASI random host functions setup complete (using bindgen traits)");
+        info!("WASI random host functions setup complete");
         Ok(())
     }
 

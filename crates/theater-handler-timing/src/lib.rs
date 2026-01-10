@@ -332,9 +332,9 @@ impl Handler for TimingHandler
     }
 
     fn imports(&self) -> Option<Vec<String>> {
-        // Handler provides WASI clocks and poll interfaces (version 0.2.3)
-        // Supports: wall-clock, monotonic-clock, and poll
+        // Handler provides both Theater simple timing and WASI clocks interfaces
         Some(vec![
+            "theater:simple/timing".to_string(),
             "wasi:clocks/wall-clock@0.2.3".to_string(),
             "wasi:clocks/monotonic-clock@0.2.3".to_string(),
             "wasi:io/poll@0.2.3".to_string(),

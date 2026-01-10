@@ -5,6 +5,9 @@ description = "WASI clocks and poll interface test actor"
 save_chain = true
 
 [[handler]]
+type = "runtime"
+
+[[handler]]
 type = "timing"
 max_sleep_duration = 3600000
 min_sleep_duration = 1
