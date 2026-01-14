@@ -5,6 +5,7 @@ members = [
     "crates/theater-server",
     "crates/theater-server-cli",
     "crates/theater-client",
+    "crates/val-serde",
     "crates/theater-handler-environment",
     "crates/theater-handler-filesystem",
     "crates/theater-handler-http",

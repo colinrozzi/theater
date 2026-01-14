@@ -4408,6 +4408,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "val-serde"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "wasmtime",
+]
+
+[[package]]
 name = "valuable"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"

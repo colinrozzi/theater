@@ -32,7 +32,7 @@ use wasmtime::StoreContextMut;
 use crate::actor::handle::ActorHandle;
 use crate::actor::store::ActorStore;
 use crate::chain::ChainEvent;
-use crate::events::{ChainEventData, ChainEventPayload, wasm::WasmEventData};
+use crate::events::{wasm::WasmEventData, ChainEventData, ChainEventPayload};
 use crate::handler::{Handler, HandlerContext, SharedActorInstance};
 use crate::shutdown::ShutdownReceiver;
 use crate::wasm::{ActorComponent, ActorInstance};
@@ -66,20 +66,6 @@ impl ReplayResourceState {
     /// Generate a new unique resource handle
     pub fn new_rep(&self) -> u32 {
         self.next_rep.fetch_add(1, Ordering::SeqCst)
-    }
-
-    /// Track a new resource
-    #[allow(dead_code)]
-    pub fn track(&self, resource_type: &str, rep: u32, data: Vec<u8>) {
-        let mut resources = self.resources.lock().unwrap();
-        resources.insert((resource_type.to_string(), rep), data);
-    }
-
-    /// Remove a resource (on drop)
-    #[allow(dead_code)]
-    pub fn remove(&self, resource_type: &str, rep: u32) -> Option<Vec<u8>> {
-        let mut resources = self.resources.lock().unwrap();
-        resources.remove(&(resource_type.to_string(), rep))
     }
 }
 
@@ -333,7 +319,10 @@ fn val_to_json(val: &Val) -> serde_json::Value {
             let mut map = serde_json::Map::new();
             map.insert(
                 name.clone(),
-                value.as_ref().map(|v| val_to_json(v)).unwrap_or(serde_json::Value::Null),
+                value
+                    .as_ref()
+                    .map(|v| val_to_json(v))
+                    .unwrap_or(serde_json::Value::Null),
             );
             serde_json::Value::Object(map)
         }
@@ -347,7 +336,9 @@ fn val_to_json(val: &Val) -> serde_json::Value {
                 let mut map = serde_json::Map::new();
                 map.insert(
                     "ok".to_string(),
-                    v.as_ref().map(|v| val_to_json(v)).unwrap_or(serde_json::Value::Null),
+                    v.as_ref()
+                        .map(|v| val_to_json(v))
+                        .unwrap_or(serde_json::Value::Null),
                 );
                 serde_json::Value::Object(map)
             }
@@ -355,14 +346,19 @@ fn val_to_json(val: &Val) -> serde_json::Value {
                 let mut map = serde_json::Map::new();
                 map.insert(
                     "err".to_string(),
-                    v.as_ref().map(|v| val_to_json(v)).unwrap_or(serde_json::Value::Null),
+                    v.as_ref()
+                        .map(|v| val_to_json(v))
+                        .unwrap_or(serde_json::Value::Null),
                 );
                 serde_json::Value::Object(map)
             }
         },
-        Val::Flags(flags) => {
-            serde_json::Value::Array(flags.iter().map(|f| serde_json::Value::String(f.clone())).collect())
-        }
+        Val::Flags(flags) => serde_json::Value::Array(
+            flags
+                .iter()
+                .map(|f| serde_json::Value::String(f.clone()))
+                .collect(),
+        ),
         Val::Resource(_) => serde_json::Value::String("<resource>".to_string()),
     }
 }
@@ -602,7 +598,11 @@ fn parse_wasm_call(event: &ChainEvent) -> Option<(String, Vec<u8>)> {
 
     let payload: ChainEventPayload = serde_json::from_slice(&event.data).ok()?;
 
-    if let ChainEventPayload::Wasm(WasmEventData::WasmCall { function_name, params }) = payload {
+    if let ChainEventPayload::Wasm(WasmEventData::WasmCall {
+        function_name,
+        params,
+    }) = payload
+    {
         Some((function_name, params))
     } else {
         None
@@ -624,27 +624,31 @@ async fn trigger_export(
     let func_name = parts[0];
     let interface_name = parts[1];
 
-    info!("Triggering export: interface={}, function={}", interface_name, func_name);
+    info!(
+        "Triggering export: interface={}, function={}",
+        interface_name, func_name
+    );
 
     let mut guard = actor_instance.write().await;
-    let instance = guard.as_mut()
+    let instance = guard
+        .as_mut()
         .ok_or_else(|| anyhow::anyhow!("Actor instance not available"))?;
 
     // Get the interface export
-    let interface_export = instance.instance.get_export(
-        &mut instance.store,
-        None,
-        interface_name,
-    ).ok_or_else(|| anyhow::anyhow!("Interface not exported: {}", interface_name))?;
+    let interface_export = instance
+        .instance
+        .get_export(&mut instance.store, None, interface_name)
+        .ok_or_else(|| anyhow::anyhow!("Interface not exported: {}", interface_name))?;
 
     // Get the function from the interface
-    let func_export = instance.instance.get_export(
-        &mut instance.store,
-        Some(&interface_export),
-        func_name,
-    ).ok_or_else(|| anyhow::anyhow!("Function not exported: {}", func_name))?;
+    let func_export = instance
+        .instance
+        .get_export(&mut instance.store, Some(&interface_export), func_name)
+        .ok_or_else(|| anyhow::anyhow!("Function not exported: {}", func_name))?;
 
-    let func = instance.instance.get_func(&mut instance.store, &func_export)
+    let func = instance
+        .instance
+        .get_func(&mut instance.store, &func_export)
         .ok_or_else(|| anyhow::anyhow!("Failed to get Func for {}", func_name))?;
 
     // For exports that take resources (like HTTP handler), we need to create stub resources
@@ -665,19 +669,23 @@ async fn trigger_export(
 
     // Record WasmCall BEFORE calling the export (matching server.rs behavior)
     // This ensures the replay chain matches the original chain structure
-    instance.actor_component.actor_store.record_event(ChainEventData {
-        event_type: "wasm".to_string(),
-        data: ChainEventPayload::Wasm(WasmEventData::WasmCall {
-            function_name: function_name.to_string(),
-            params: recorded_params.to_vec(),
-        }),
-    });
+    instance
+        .actor_component
+        .actor_store
+        .record_event(ChainEventData {
+            event_type: "wasm".to_string(),
+            data: ChainEventPayload::Wasm(WasmEventData::WasmCall {
+                function_name: function_name.to_string(),
+                params: recorded_params.to_vec(),
+            }),
+        });
 
     // Call the export (no return values for HTTP handler)
     let mut results = [];
 
     info!("Calling export {}...", func_name);
-    func.call_async(&mut instance.store, &params, &mut results).await?;
+    func.call_async(&mut instance.store, &params, &mut results)
+        .await?;
 
     // Post-return cleanup
     func.post_return_async(&mut instance.store).await?;
@@ -691,7 +699,10 @@ async fn trigger_export(
 }
 
 impl Handler for ReplayHandler {
-    fn create_instance(&self, _config: Option<&crate::config::actor_manifest::HandlerConfig>) -> Box<dyn Handler> {
+    fn create_instance(
+        &self,
+        _config: Option<&crate::config::actor_manifest::HandlerConfig>,
+    ) -> Box<dyn Handler> {
         Box::new(self.clone())
     }
 
@@ -724,14 +735,19 @@ impl Handler for ReplayHandler {
             };
 
             // Create channel to receive events
-            let (event_tx, mut event_rx) = tokio::sync::mpsc::channel::<Result<ChainEvent, crate::actor::types::ActorError>>(100);
+            let (event_tx, mut event_rx) = tokio::sync::mpsc::channel::<
+                Result<ChainEvent, crate::actor::types::ActorError>,
+            >(100);
 
             // Subscribe to actor events BEFORE calling init
             // This ensures we receive all events from the beginning
-            if let Err(e) = theater_tx.send(crate::messages::TheaterCommand::SubscribeToActor {
-                actor_id: actor_id.clone(),
-                event_tx,
-            }).await {
+            if let Err(e) = theater_tx
+                .send(crate::messages::TheaterCommand::SubscribeToActor {
+                    actor_id: actor_id.clone(),
+                    event_tx,
+                })
+                .await
+            {
                 warn!("Failed to subscribe to actor events: {:?}", e);
                 shutdown_receiver.wait_for_shutdown().await;
                 return Ok(());
@@ -747,7 +763,10 @@ impl Handler for ReplayHandler {
                 .await
             {
                 error!("Replay handler failed to call init: {:?}", e);
-                return Err(anyhow::anyhow!("Failed to call init during replay: {:?}", e));
+                return Err(anyhow::anyhow!(
+                    "Failed to call init during replay: {:?}",
+                    e
+                ));
             }
             info!("Replay handler init completed, starting event verification loop");
 
@@ -852,7 +871,10 @@ impl Handler for ReplayHandler {
 
             // Only record success summary if we completed all events (didn't break due to mismatch)
             if state.is_complete() {
-                info!("Replay completed successfully: all {} events matched", total);
+                info!(
+                    "Replay completed successfully: all {} events matched",
+                    total
+                );
 
                 let summary = crate::events::replay::ReplaySummary::success(total, current);
 
@@ -862,7 +884,7 @@ impl Handler for ReplayHandler {
                             crate::events::ChainEventData {
                                 event_type: "replay-summary".to_string(),
                                 data: crate::events::ChainEventPayload::ReplaySummary(summary),
-                            }
+                            },
                         );
                     }
                 }
@@ -997,42 +1019,52 @@ impl Handler for ReplayHandler {
                                 let is_constructor = is_constructor;
 
                                 Box::new(async move {
-                                    debug!("[REPLAY] {} called, expecting event type: {}", full_name, expected_type);
+                                    debug!(
+                                        "[REPLAY] {} called, expecting event type: {}",
+                                        full_name, expected_type
+                                    );
 
                                     // Expect the next event to match this function call (strict sequential)
-                                    let recorded_output = match state.expect_next_event(&expected_type) {
-                                        Ok(event) => {
-                                            debug!(
-                                                "  Matched event at pos {}: {}",
-                                                state.current_position().saturating_sub(1),
-                                                event.event_type
-                                            );
+                                    let recorded_output =
+                                        match state.expect_next_event(&expected_type) {
+                                            Ok(event) => {
+                                                debug!(
+                                                    "  Matched event at pos {}: {}",
+                                                    state.current_position().saturating_sub(1),
+                                                    event.event_type
+                                                );
 
-                                            // Extract the recorded output from the event
-                                            if let Ok(host_call) = serde_json::from_slice::<HostFunctionCall>(&event.data) {
-                                                host_call.output
-                                            } else {
+                                                // Extract the recorded output from the event
+                                                if let Ok(host_call) =
+                                                    serde_json::from_slice::<HostFunctionCall>(
+                                                        &event.data,
+                                                    )
+                                                {
+                                                    host_call.output
+                                                } else {
+                                                    vec![]
+                                                }
+                                            }
+                                            Err(e) => {
+                                                // Mismatch detected - this is a determinism failure
+                                                warn!("[REPLAY] {}", e);
+                                                // For now, return empty and continue - could make this fatal
                                                 vec![]
                                             }
-                                        }
-                                        Err(e) => {
-                                            // Mismatch detected - this is a determinism failure
-                                            warn!("[REPLAY] {}", e);
-                                            // For now, return empty and continue - could make this fatal
-                                            vec![]
-                                        }
-                                    };
+                                        };
 
                                     // Record a NEW event with the ACTUAL input from the actor
                                     // This allows us to verify the actor is making the same calls
                                     ctx.data_mut().record_event(ChainEventData {
                                         event_type: expected_type,
-                                        data: ChainEventPayload::HostFunction(HostFunctionCall::new(
-                                            interface,
-                                            function,
-                                            actual_input,
-                                            recorded_output.clone(),
-                                        )),
+                                        data: ChainEventPayload::HostFunction(
+                                            HostFunctionCall::new(
+                                                interface,
+                                                function,
+                                                actual_input,
+                                                recorded_output.clone(),
+                                            ),
+                                        ),
                                     });
 
                                     // Handle resource-returning functions (constructors)
@@ -1042,7 +1074,8 @@ impl Handler for ReplayHandler {
                                         debug!("[REPLAY] Creating resource with rep={}", rep);
 
                                         // Create a Resource with this rep
-                                        let resource: Resource<ReplayResourceMarker> = Resource::new_own(rep);
+                                        let resource: Resource<ReplayResourceMarker> =
+                                            Resource::new_own(rep);
 
                                         // Convert to ResourceAny
                                         match ResourceAny::try_from_resource(resource, &mut ctx) {
@@ -1050,13 +1083,20 @@ impl Handler for ReplayHandler {
                                                 results[0] = Val::Resource(any);
                                             }
                                             Err(e) => {
-                                                warn!("[REPLAY] Failed to create ResourceAny: {}", e);
+                                                warn!(
+                                                    "[REPLAY] Failed to create ResourceAny: {}",
+                                                    e
+                                                );
                                             }
                                         }
                                     } else if !results.is_empty() {
                                         // Handle non-resource return values by deserializing from recorded_output
                                         // using the function's type signature for correct type conversion
-                                        deserialize_with_type_info(&recorded_output, results, &return_types);
+                                        deserialize_with_type_info(
+                                            &recorded_output,
+                                            results,
+                                            &return_types,
+                                        );
                                     }
 
                                     Ok(())
