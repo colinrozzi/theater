@@ -22,6 +22,7 @@ use crate::types::{
 
 use theater::actor::ActorStore;
 use theater_handler_io::{InputStream, IoError, OutputStream};
+use val_serde::IntoSerializableVal;
 use wasmtime::component::Resource;
 
 // ============================================================================
@@ -38,8 +39,8 @@ impl HostFields for ActorStore
         self.record_host_function_call(
             "wasi:http/types@0.2.0",
             "[constructor]fields",
-            &(),
-            &resource.rep(),
+            ().into_serializable_val(),
+            resource.rep().into_serializable_val(),
         );
 
         Ok(resource)
@@ -74,8 +75,11 @@ impl HostFields for ActorStore
         self.record_host_function_call(
             "wasi:http/types@0.2.0",
             "[method]fields.get",
-            &(self_.rep(), &name),
-            &result,
+            val_serde::SerializableVal::Tuple(vec![
+                self_.rep().into_serializable_val(),
+                name.clone().into_serializable_val(),
+            ]),
+            result.clone().into_serializable_val(),
         );
 
         Ok(result)
@@ -126,8 +130,12 @@ impl HostFields for ActorStore
         self.record_host_function_call(
             "wasi:http/types@0.2.0",
             "[method]fields.append",
-            &(self_.rep(), &name, &value),
-            &true, // success indicator
+            val_serde::SerializableVal::Tuple(vec![
+                self_.rep().into_serializable_val(),
+                name.clone().into_serializable_val(),
+                value.clone().into_serializable_val(),
+            ]),
+            true.into_serializable_val(),
         );
 
         let table = self.resource_table.lock().unwrap();
@@ -360,8 +368,8 @@ impl HostOutgoingResponse for ActorStore
         self.record_host_function_call(
             "wasi:http/types@0.2.0",
             "[constructor]outgoing-response",
-            &headers.rep(),
-            &resource.rep(),
+            headers.rep().into_serializable_val(),
+            resource.rep().into_serializable_val(),
         );
 
         Ok(resource)
@@ -378,8 +386,8 @@ impl HostOutgoingResponse for ActorStore
         self.record_host_function_call(
             "wasi:http/types@0.2.0",
             "[method]outgoing-response.status-code",
-            &self_.rep(),
-            &result,
+            self_.rep().into_serializable_val(),
+            result.into_serializable_val(),
         );
 
         Ok(result)
@@ -397,8 +405,11 @@ impl HostOutgoingResponse for ActorStore
         self.record_host_function_call(
             "wasi:http/types@0.2.0",
             "[method]outgoing-response.set-status-code",
-            &(self_.rep(), status),
-            &true,
+            val_serde::SerializableVal::Tuple(vec![
+                self_.rep().into_serializable_val(),
+                status.into_serializable_val(),
+            ]),
+            true.into_serializable_val(),
         );
 
         Ok(Ok(()))
@@ -419,8 +430,8 @@ impl HostOutgoingResponse for ActorStore
         self.record_host_function_call(
             "wasi:http/types@0.2.0",
             "[method]outgoing-response.headers",
-            &self_.rep(),
-            &resource.rep(),
+            self_.rep().into_serializable_val(),
+            resource.rep().into_serializable_val(),
         );
 
         Ok(resource)
@@ -447,8 +458,8 @@ impl HostOutgoingResponse for ActorStore
         self.record_host_function_call(
             "wasi:http/types@0.2.0",
             "[method]outgoing-response.body",
-            &self_.rep(),
-            &resource.rep(),
+            self_.rep().into_serializable_val(),
+            resource.rep().into_serializable_val(),
         );
 
         Ok(Ok(resource))
@@ -458,8 +469,8 @@ impl HostOutgoingResponse for ActorStore
         self.record_host_function_call(
             "wasi:http/types@0.2.0",
             "[resource-drop]outgoing-response",
-            &rep.rep(),
-            &(),
+            rep.rep().into_serializable_val(),
+            ().into_serializable_val(),
         );
         self.resource_table.lock().unwrap().delete(rep)?;
         Ok(())
@@ -486,8 +497,8 @@ impl HostOutgoingBody for ActorStore
                 self.record_host_function_call(
                     "wasi:http/types@0.2.0",
                     "[method]outgoing-body.write",
-                    &self_.rep(),
-                    &Some(resource.rep()),
+                    self_.rep().into_serializable_val(),
+                    Some(resource.rep()).into_serializable_val(),
                 );
 
                 Ok(Ok(resource))
@@ -496,8 +507,8 @@ impl HostOutgoingBody for ActorStore
                 self.record_host_function_call(
                     "wasi:http/types@0.2.0",
                     "[method]outgoing-body.write",
-                    &self_.rep(),
-                    &None::<u32>,
+                    self_.rep().into_serializable_val(),
+                    None::<u32>.into_serializable_val(),
                 );
                 Ok(Err(()))
             }
@@ -514,8 +525,11 @@ impl HostOutgoingBody for ActorStore
         self.record_host_function_call(
             "wasi:http/types@0.2.0",
             "[static]outgoing-body.finish",
-            &(this.rep(), trailers_rep),
-            &true,
+            val_serde::SerializableVal::Tuple(vec![
+                this.rep().into_serializable_val(),
+                trailers_rep.into_serializable_val(),
+            ]),
+            true.into_serializable_val(),
         );
 
         self.resource_table.lock().unwrap().delete(this)?;
@@ -526,8 +540,8 @@ impl HostOutgoingBody for ActorStore
         self.record_host_function_call(
             "wasi:http/types@0.2.0",
             "[resource-drop]outgoing-body",
-            &rep.rep(),
-            &(),
+            rep.rep().into_serializable_val(),
+            ().into_serializable_val(),
         );
         self.resource_table.lock().unwrap().delete(rep)?;
         Ok(())
@@ -563,8 +577,8 @@ impl HostIncomingRequest for ActorStore
         self.record_host_function_call(
             "wasi:http/types@0.2.0",
             "[method]incoming-request.method",
-            &self_.rep(),
-            &method_str,
+            self_.rep().into_serializable_val(),
+            method_str.into_serializable_val(),
         );
 
         Ok(result)
@@ -583,8 +597,8 @@ impl HostIncomingRequest for ActorStore
         self.record_host_function_call(
             "wasi:http/types@0.2.0",
             "[method]incoming-request.path-with-query",
-            &self_.rep(),
-            &result,
+            self_.rep().into_serializable_val(),
+            result.clone().into_serializable_val(),
         );
 
         Ok(result)
@@ -609,8 +623,8 @@ impl HostIncomingRequest for ActorStore
         self.record_host_function_call(
             "wasi:http/types@0.2.0",
             "[method]incoming-request.scheme",
-            &self_.rep(),
-            &scheme_str,
+            self_.rep().into_serializable_val(),
+            scheme_str.into_serializable_val(),
         );
 
         Ok(result)
@@ -629,8 +643,8 @@ impl HostIncomingRequest for ActorStore
         self.record_host_function_call(
             "wasi:http/types@0.2.0",
             "[method]incoming-request.authority",
-            &self_.rep(),
-            &result,
+            self_.rep().into_serializable_val(),
+            result.clone().into_serializable_val(),
         );
 
         Ok(result)
@@ -651,8 +665,8 @@ impl HostIncomingRequest for ActorStore
         self.record_host_function_call(
             "wasi:http/types@0.2.0",
             "[method]incoming-request.headers",
-            &self_.rep(),
-            &resource.rep(),
+            self_.rep().into_serializable_val(),
+            resource.rep().into_serializable_val(),
         );
 
         Ok(resource)
@@ -678,8 +692,8 @@ impl HostIncomingRequest for ActorStore
         self.record_host_function_call(
             "wasi:http/types@0.2.0",
             "[method]incoming-request.consume",
-            &self_.rep(),
-            &output,
+            self_.rep().into_serializable_val(),
+            output.into_serializable_val(),
         );
 
         Ok(result)
@@ -689,8 +703,8 @@ impl HostIncomingRequest for ActorStore
         self.record_host_function_call(
             "wasi:http/types@0.2.0",
             "[resource-drop]incoming-request",
-            &rep.rep(),
-            &(),
+            rep.rep().into_serializable_val(),
+            ().into_serializable_val(),
         );
 
         self.resource_table.lock().unwrap().delete(rep)?;
@@ -774,8 +788,8 @@ impl HostIncomingBody for ActorStore
         self.record_host_function_call(
             "wasi:http/types@0.2.0",
             "[method]incoming-body.stream",
-            &self_.rep(),
-            &output,
+            self_.rep().into_serializable_val(),
+            output.into_serializable_val(),
         );
 
         Ok(result)
@@ -795,8 +809,8 @@ impl HostIncomingBody for ActorStore
         self.record_host_function_call(
             "wasi:http/types@0.2.0",
             "[static]incoming-body.finish",
-            &this_rep,
-            &resource.rep(),
+            this_rep.into_serializable_val(),
+            resource.rep().into_serializable_val(),
         );
 
         Ok(resource)
@@ -806,8 +820,8 @@ impl HostIncomingBody for ActorStore
         self.record_host_function_call(
             "wasi:http/types@0.2.0",
             "[resource-drop]incoming-body",
-            &rep.rep(),
-            &(),
+            rep.rep().into_serializable_val(),
+            ().into_serializable_val(),
         );
         self.resource_table.lock().unwrap().delete(rep)?;
         Ok(())
@@ -833,8 +847,11 @@ impl HostResponseOutparam for ActorStore
         self.record_host_function_call(
             "wasi:http/types@0.2.0",
             "[static]response-outparam.set",
-            &(param.rep(), &response_info),
-            &(),
+            val_serde::SerializableVal::Tuple(vec![
+                param.rep().into_serializable_val(),
+                response_info.clone().into_serializable_val(),
+            ]),
+            ().into_serializable_val(),
         );
 
         // Get the outparam and extract the sender
@@ -873,8 +890,8 @@ impl HostResponseOutparam for ActorStore
         self.record_host_function_call(
             "wasi:http/types@0.2.0",
             "[resource-drop]response-outparam",
-            &rep.rep(),
-            &(),
+            rep.rep().into_serializable_val(),
+            ().into_serializable_val(),
         );
         self.resource_table.lock().unwrap().delete(rep)?;
         Ok(())
@@ -1291,8 +1308,11 @@ impl HostInputStream for ActorStore
         self.record_host_function_call(
             "wasi:io/streams@0.2.0",
             "[method]input-stream.read",
-            &(self_.rep(), len),
-            &result,
+            val_serde::SerializableVal::Tuple(vec![
+                self_.rep().into_serializable_val(),
+                len.into_serializable_val(),
+            ]),
+            result.clone().into_serializable_val(),
         );
 
         match result {
@@ -1337,8 +1357,8 @@ impl HostInputStream for ActorStore
         self.record_host_function_call(
             "wasi:io/streams@0.2.0",
             "[resource-drop]input-stream",
-            &rep.rep(),
-            &(),
+            rep.rep().into_serializable_val(),
+            ().into_serializable_val(),
         );
         self.resource_table.lock().unwrap().delete(rep)?;
         Ok(())
@@ -1363,8 +1383,8 @@ impl HostOutputStream for ActorStore
         self.record_host_function_call(
             "wasi:io/streams@0.2.0",
             "[method]output-stream.check-write",
-            &self_.rep(),
-            &result,
+            self_.rep().into_serializable_val(),
+            result.clone().into_serializable_val(),
         );
 
         match result {
@@ -1390,8 +1410,11 @@ impl HostOutputStream for ActorStore
         self.record_host_function_call(
             "wasi:io/streams@0.2.0",
             "[method]output-stream.write",
-            &(self_.rep(), &contents),
-            &result.is_ok(),
+            val_serde::SerializableVal::Tuple(vec![
+                self_.rep().into_serializable_val(),
+                contents.clone().into_serializable_val(),
+            ]),
+            result.is_ok().into_serializable_val(),
         );
 
         match result {
@@ -1420,8 +1443,11 @@ impl HostOutputStream for ActorStore
         self.record_host_function_call(
             "wasi:io/streams@0.2.0",
             "[method]output-stream.blocking-write-and-flush",
-            &(self_.rep(), &contents),
-            &result.is_ok(),
+            val_serde::SerializableVal::Tuple(vec![
+                self_.rep().into_serializable_val(),
+                contents.clone().into_serializable_val(),
+            ]),
+            result.is_ok().into_serializable_val(),
         );
 
         match result {
@@ -1446,8 +1472,8 @@ impl HostOutputStream for ActorStore
         self.record_host_function_call(
             "wasi:io/streams@0.2.0",
             "[method]output-stream.flush",
-            &self_.rep(),
-            &result.is_ok(),
+            self_.rep().into_serializable_val(),
+            result.is_ok().into_serializable_val(),
         );
 
         match result {
@@ -1508,8 +1534,8 @@ impl HostOutputStream for ActorStore
         self.record_host_function_call(
             "wasi:io/streams@0.2.0",
             "[resource-drop]output-stream",
-            &rep.rep(),
-            &(),
+            rep.rep().into_serializable_val(),
+            ().into_serializable_val(),
         );
         self.resource_table.lock().unwrap().delete(rep)?;
         Ok(())

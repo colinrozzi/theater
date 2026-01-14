@@ -1,6 +1,9 @@
-use crate::chain::ChainEvent;
 use crate::replay::HostFunctionCall;
 use serde::{Deserialize, Serialize};
+
+// Import ChainEvent - note: this creates a circular dependency that we handle
+// by having ChainEvent import ChainEventPayload from this module
+use crate::chain::ChainEvent;
 
 /// # Chain Event Payload
 ///

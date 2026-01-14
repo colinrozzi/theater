@@ -3,19 +3,21 @@
 //! This module provides types and handlers for recording and replaying actor executions.
 //! The key insight is that the chain + component binary contain everything needed for replay:
 //!
-//! - **Chain**: Records which functions were called and their I/O (serialized bytes)
-//! - **Component**: Contains the type definitions (extracted at replay time)
+//! - **Chain**: Records which functions were called and their I/O with full type information
+//! - **Component**: The WebAssembly component to replay
 //!
 //! ## Recording
 //!
 //! During normal execution, handlers record host function calls using `HostFunctionCall`:
 //!
 //! ```ignore
+//! use val_serde::IntoSerializableVal;
+//!
 //! ctx.data_mut().record_host_function_call(
 //!     "theater:simple/timing",
 //!     "now",
-//!     &(),      // input
-//!     &result,  // output
+//!     ().into_serializable_val(),      // input
+//!     result.into_serializable_val(),  // output
 //! );
 //! ```
 //!
@@ -34,25 +36,26 @@ mod handler;
 pub use handler::{ReplayHandler, ReplayState};
 
 use serde::{Deserialize, Serialize};
+use val_serde::SerializableVal;
 
-/// A recorded host function call with full I/O.
+/// A recorded host function call with full I/O and type information.
 ///
 /// This is the standardized event type for all handler host function calls.
 /// It captures everything needed to replay the call: what function was called,
 /// what inputs were provided, and what output was returned.
 ///
-/// The type information comes from the component at replay time, so we only
-/// need to store the serialized bytes here.
+/// Type information is preserved in the `SerializableVal` format, making
+/// the chain self-describing and independent of the component for replay.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HostFunctionCall {
     /// The interface name (e.g., "theater:simple/timing", "wasi:clocks/wall-clock")
     pub interface: String,
     /// The function name (e.g., "now", "sleep")
     pub function: String,
-    /// Serialized input parameters (JSON bytes)
-    pub input: Vec<u8>,
-    /// Serialized output/return value (JSON bytes)
-    pub output: Vec<u8>,
+    /// Input parameters with full type information
+    pub input: SerializableVal,
+    /// Output/return value with full type information
+    pub output: SerializableVal,
 }
 
 impl HostFunctionCall {
@@ -60,8 +63,8 @@ impl HostFunctionCall {
     pub fn new(
         interface: impl Into<String>,
         function: impl Into<String>,
-        input: Vec<u8>,
-        output: Vec<u8>,
+        input: SerializableVal,
+        output: SerializableVal,
     ) -> Self {
         Self {
             interface: interface.into(),
@@ -71,42 +74,28 @@ impl HostFunctionCall {
         }
     }
 
-    /// Create a HostFunctionCall with no input parameters.
+    /// Create a HostFunctionCall with no input parameters (empty tuple).
     pub fn no_input(
         interface: impl Into<String>,
         function: impl Into<String>,
-        output: Vec<u8>,
+        output: SerializableVal,
     ) -> Self {
-        Self::new(interface, function, vec![], output)
-    }
-
-    /// Create a HostFunctionCall by serializing input and output as JSON.
-    pub fn from_io<I: Serialize, O: Serialize>(
-        interface: impl Into<String>,
-        function: impl Into<String>,
-        input: &I,
-        output: &O,
-    ) -> Result<Self, serde_json::Error> {
-        Ok(Self {
-            interface: interface.into(),
-            function: function.into(),
-            input: serde_json::to_vec(input)?,
-            output: serde_json::to_vec(output)?,
-        })
+        Self::new(interface, function, SerializableVal::Tuple(vec![]), output)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use val_serde::IntoSerializableVal;
 
     #[test]
     fn test_host_function_call_serialization() {
         let call = HostFunctionCall::new(
             "theater:simple/timing",
             "now",
-            vec![],
-            serde_json::to_vec(&1234567890u64).unwrap(),
+            ().into_serializable_val(),
+            1234567890u64.into_serializable_val(),
         );
 
         let json = serde_json::to_string(&call).unwrap();
@@ -119,20 +108,28 @@ mod tests {
     }
 
     #[test]
-    fn test_from_io() {
-        let call = HostFunctionCall::from_io(
+    fn test_type_preserved_in_json() {
+        let call = HostFunctionCall::new(
+            "wasi:random/random@0.2.3",
+            "get-random-u64",
+            ().into_serializable_val(),
+            42u64.into_serializable_val(),
+        );
+
+        let json = serde_json::to_string(&call).unwrap();
+
+        // The output should contain {"U64": 42} not just 42
+        assert!(json.contains(r#""U64""#), "Type tag should be in JSON: {}", json);
+    }
+
+    #[test]
+    fn test_no_input() {
+        let call = HostFunctionCall::no_input(
             "theater:simple/timing",
-            "sleep",
-            &1000u64,  // input: duration
-            &(),       // output: unit (success)
-        )
-        .unwrap();
+            "now",
+            999u64.into_serializable_val(),
+        );
 
-        assert_eq!(call.interface, "theater:simple/timing");
-        assert_eq!(call.function, "sleep");
-
-        // Verify we can deserialize the I/O
-        let input: u64 = serde_json::from_slice(&call.input).unwrap();
-        assert_eq!(input, 1000);
+        assert_eq!(call.input, SerializableVal::Tuple(vec![]));
     }
 }

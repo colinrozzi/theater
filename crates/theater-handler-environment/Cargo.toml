@@ -13,6 +13,7 @@ description = "Environment variable handler for Theater WebAssembly actors"
 
 [dependencies]
 theater = { workspace = true }
+val-serde = { path = "../val-serde" }
 anyhow.workspace = true
 chrono = { version = "0.4", features = ["serde"] }
 serde.workspace = true

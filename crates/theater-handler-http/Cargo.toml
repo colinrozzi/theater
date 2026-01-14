@@ -9,6 +9,7 @@ description = "WASI HTTP handler for Theater - provides incoming and outgoing HT
 anyhow = "1.0"
 theater = { path = "../theater" }
 theater-handler-io = { path = "../theater-handler-io" }
+val-serde = { path = "../val-serde" }
 tokio = { version = "1.43", features = ["sync", "rt", "time"] }
 tracing = "0.1"
 wasmtime = { version = "31.0.0", features = ["component-model", "async"] }

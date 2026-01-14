@@ -17,6 +17,7 @@ use theater::handler::SharedActorInstance;
 use theater::replay::HostFunctionCall;
 use tokio::sync::oneshot;
 use tracing::{debug, error, info, warn};
+use val_serde::SerializableVal;
 use wasmtime::component::{Resource, ResourceAny, Val};
 
 /// Replay all HTTP events from the chain to the component.
@@ -46,10 +47,18 @@ pub async fn replay_http_events(
         let host_call: HostFunctionCall = serde_json::from_slice(&event.data)
             .context("Failed to parse HTTP event data as HostFunctionCall")?;
 
-        // Parse request and response from the host call
-        let request_data: HttpRequestData = serde_json::from_slice(&host_call.input)
+        // Parse request and response from the host call (stored as JSON strings in SerializableVal)
+        let request_json = match &host_call.input {
+            SerializableVal::String(s) => s.as_str(),
+            _ => bail!("Expected HTTP request data as SerializableVal::String"),
+        };
+        let response_json = match &host_call.output {
+            SerializableVal::String(s) => s.as_str(),
+            _ => bail!("Expected HTTP response data as SerializableVal::String"),
+        };
+        let request_data: HttpRequestData = serde_json::from_str(request_json)
             .context("Failed to parse HTTP request data")?;
-        let expected_response: HttpResponseData = serde_json::from_slice(&host_call.output)
+        let expected_response: HttpResponseData = serde_json::from_str(response_json)
             .context("Failed to parse HTTP response data")?;
 
         debug!(
@@ -258,14 +267,17 @@ async fn replay_single_request(
                         body: b64.encode(&actual_body),
                     };
 
+                    // Serialize structs to JSON strings for recording
+                    let request_json = serde_json::to_string(&request_data).unwrap_or_default();
+                    let response_json = serde_json::to_string(&actual_response_data).unwrap_or_default();
                     instance
                         .actor_component
                         .actor_store
                         .record_host_function_call(
                             "wasi:http/incoming-handler@0.2.0",
                             "handle",
-                            request_data,
-                            &actual_response_data,
+                            SerializableVal::String(request_json),
+                            SerializableVal::String(response_json),
                         );
                 }
             }

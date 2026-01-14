@@ -23,6 +23,8 @@ use tokio::time::{sleep, Duration};
 use tracing::{info, error};
 use wasmtime::StoreContextMut;
 
+use val_serde::IntoSerializableVal;
+
 use theater::actor::handle::ActorHandle;
 use theater::actor::types::ActorError;
 use theater::config::actor_manifest::TimingHostConfig;
@@ -122,8 +124,8 @@ impl TimingHandler {
                     ctx.data_mut().record_host_function_call(
                         "theater:simple/timing",
                         "now",
-                        &(),   // no input
-                        &now,  // output: timestamp
+                        ().into_serializable_val(),
+                        now.into_serializable_val(),
                     );
 
                     Ok((now,))
@@ -152,8 +154,8 @@ impl TimingHandler {
                         ctx.data_mut().record_host_function_call(
                             "theater:simple/timing",
                             "sleep",
-                            &duration,
-                            &result,
+                            duration.into_serializable_val(),
+                            result.clone().into_serializable_val(),
                         );
 
                         return Box::new(futures::future::ready(Ok((result,))));
@@ -172,8 +174,8 @@ impl TimingHandler {
                         ctx.data_mut().record_host_function_call(
                             "theater:simple/timing",
                             "sleep",
-                            &duration_clone,
-                            &result,
+                            duration_clone.into_serializable_val(),
+                            result.clone().into_serializable_val(),
                         );
 
                         Ok((result,))
@@ -200,8 +202,8 @@ impl TimingHandler {
                         ctx.data_mut().record_host_function_call(
                             "theater:simple/timing",
                             "deadline",
-                            &timestamp,
-                            &result,
+                            timestamp.into_serializable_val(),
+                            result.clone().into_serializable_val(),
                         );
 
                         return Box::new(futures::future::ready(Ok((result,))));
@@ -219,8 +221,8 @@ impl TimingHandler {
                         ctx.data_mut().record_host_function_call(
                             "theater:simple/timing",
                             "deadline",
-                            &timestamp,
-                            &result,
+                            timestamp.into_serializable_val(),
+                            result.clone().into_serializable_val(),
                         );
 
                         return Box::new(futures::future::ready(Ok((result,))));
@@ -237,8 +239,8 @@ impl TimingHandler {
                         ctx.data_mut().record_host_function_call(
                             "theater:simple/timing",
                             "deadline",
-                            &timestamp_clone,
-                            &result,
+                            timestamp_clone.into_serializable_val(),
+                            result.clone().into_serializable_val(),
                         );
 
                         Ok((result,))

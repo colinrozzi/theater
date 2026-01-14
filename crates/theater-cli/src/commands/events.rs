@@ -144,8 +144,8 @@ fn apply_filters(events: &mut Vec<ChainEvent>, args: &EventsArgs) -> CliResult<(
                 return true;
             }
 
-            // Search in data if it's UTF-8 text
-            if let Ok(data_str) = std::str::from_utf8(&e.data) {
+            // Search in data by serializing to JSON string
+            if let Ok(data_str) = serde_json::to_string(&e.data) {
                 if data_str.contains(search_text) {
                     return true;
                 }

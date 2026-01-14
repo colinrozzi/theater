@@ -156,50 +156,43 @@ impl ActorStore {
     /// Record a host function call with full I/O for replay.
     ///
     /// This is the standardized way to record handler host function calls.
-    /// The event captures the interface name, function name, and serialized
-    /// input/output, which is everything needed to replay the call.
+    /// The event captures the interface name, function name, and typed
+    /// input/output values, which is everything needed to replay the call.
     ///
     /// ## Parameters
     ///
     /// * `interface` - The WIT interface name (e.g., "theater:simple/timing")
     /// * `function` - The function name (e.g., "now")
-    /// * `input` - Serialized input parameters
-    /// * `output` - Serialized output/return value
+    /// * `input` - Input parameters as SerializableVal (use `.into_serializable_val()`)
+    /// * `output` - Output/return value as SerializableVal (use `.into_serializable_val()`)
     ///
     /// ## Example
     ///
     /// ```rust,ignore
+    /// use val_serde::IntoSerializableVal;
+    ///
     /// // Record a timing "now" call
     /// ctx.data_mut().record_host_function_call(
     ///     "theater:simple/timing",
     ///     "now",
-    ///     &(),           // no input
-    ///     &timestamp,    // output
+    ///     ().into_serializable_val(),           // no input
+    ///     timestamp.into_serializable_val(),    // output
     /// );
     /// ```
-    pub fn record_host_function_call<I, O>(
+    pub fn record_host_function_call(
         &self,
         interface: &str,
         function: &str,
-        input: &I,
-        output: &O,
-    ) -> ChainEvent
-    where
-        I: serde::Serialize,
-        O: serde::Serialize,
-    {
+        input: val_serde::SerializableVal,
+        output: val_serde::SerializableVal,
+    ) -> ChainEvent {
         tracing::debug!(
             "[RECORD] Host function call: {}/{}",
             interface,
             function
         );
 
-        let host_call = HostFunctionCall {
-            interface: interface.to_string(),
-            function: function.to_string(),
-            input: serde_json::to_vec(input).unwrap_or_default(),
-            output: serde_json::to_vec(output).unwrap_or_default(),
-        };
+        let host_call = HostFunctionCall::new(interface, function, input, output);
 
         self.record_event(ChainEventData {
             event_type: format!("{}/{}", interface, function),

@@ -7,6 +7,7 @@ use crate::bindings::{WallClockHost, MonotonicClockHost, PollHost, HostPollable,
 use crate::{Pollable, PollableKind};
 use anyhow::Result;
 use chrono::Utc;
+use val_serde::IntoSerializableVal;
 use wasmtime::component::Resource;
 use theater::actor::ActorStore;
 use tracing::debug;
@@ -24,8 +25,11 @@ impl WallClockHost for ActorStore {
         self.record_host_function_call(
             "wasi:clocks/wall-clock@0.2.3",
             "now",
-            &(),
-            &(seconds, nanoseconds),
+            ().into_serializable_val(),
+            val_serde::SerializableVal::Tuple(vec![
+                seconds.into_serializable_val(),
+                nanoseconds.into_serializable_val(),
+            ]),
         );
 
         Ok(Datetime { seconds, nanoseconds })
@@ -42,8 +46,11 @@ impl WallClockHost for ActorStore {
         self.record_host_function_call(
             "wasi:clocks/wall-clock@0.2.3",
             "resolution",
-            &(),
-            &(seconds, nanoseconds),
+            ().into_serializable_val(),
+            val_serde::SerializableVal::Tuple(vec![
+                seconds.into_serializable_val(),
+                nanoseconds.into_serializable_val(),
+            ]),
         );
 
         Ok(Datetime { seconds, nanoseconds })
@@ -63,8 +70,8 @@ impl MonotonicClockHost for ActorStore {
         self.record_host_function_call(
             "wasi:clocks/monotonic-clock@0.2.3",
             "now",
-            &(),
-            &instant,
+            ().into_serializable_val(),
+            instant.into_serializable_val(),
         );
 
         Ok(instant)
@@ -80,8 +87,8 @@ impl MonotonicClockHost for ActorStore {
         self.record_host_function_call(
             "wasi:clocks/monotonic-clock@0.2.3",
             "resolution",
-            &(),
-            &duration,
+            ().into_serializable_val(),
+            duration.into_serializable_val(),
         );
 
         Ok(duration)
@@ -108,8 +115,8 @@ impl MonotonicClockHost for ActorStore {
         self.record_host_function_call(
             "wasi:clocks/monotonic-clock@0.2.3",
             "subscribe-instant",
-            &when,
-            &pollable_id,
+            when.into_serializable_val(),
+            pollable_id.into_serializable_val(),
         );
 
         Ok(pollable_handle)
@@ -143,8 +150,11 @@ impl MonotonicClockHost for ActorStore {
         self.record_host_function_call(
             "wasi:clocks/monotonic-clock@0.2.3",
             "subscribe-duration",
-            &duration,
-            &(pollable_id, deadline),
+            duration.into_serializable_val(),
+            val_serde::SerializableVal::Tuple(vec![
+                pollable_id.into_serializable_val(),
+                deadline.into_serializable_val(),
+            ]),
         );
 
         Ok(pollable_handle)
@@ -185,8 +195,8 @@ impl PollHost for ActorStore {
         self.record_host_function_call(
             "wasi:io/poll@0.2.3",
             "poll",
-            &pollable_ids,
-            &ready_indices,
+            pollable_ids.into_serializable_val(),
+            ready_indices.clone().into_serializable_val(),
         );
 
         Ok(ready_indices)
@@ -216,8 +226,8 @@ impl HostPollable for ActorStore {
         self.record_host_function_call(
             "wasi:io/poll@0.2.3",
             "[method]pollable.ready",
-            &pollable_id,
-            &is_ready,
+            pollable_id.into_serializable_val(),
+            is_ready.into_serializable_val(),
         );
 
         Ok(is_ready)
@@ -252,8 +262,8 @@ impl HostPollable for ActorStore {
         self.record_host_function_call(
             "wasi:io/poll@0.2.3",
             "[method]pollable.block",
-            &pollable_id,
-            &(),
+            pollable_id.into_serializable_val(),
+            ().into_serializable_val(),
         );
 
         Ok(())

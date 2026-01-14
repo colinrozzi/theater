@@ -81,12 +81,15 @@ pub fn format_key_value(key: &str, value: &str) -> String {
 pub fn format_event_summary(event: &ChainEvent) -> String {
     let event_type = style(&event.event_type).yellow();
     let hash = format_hash(&event.hash, true);
+    let data_size = serde_json::to_string(&event.data)
+        .map(|s| s.len())
+        .unwrap_or(0);
 
     format!(
         "{} (hash: {}, {} bytes)",
         event_type,
         style(hash).dim(),
-        event.data.len()
+        data_size
     )
 }
 

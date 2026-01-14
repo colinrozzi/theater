@@ -295,6 +295,39 @@ impl IntoSerializableVal for () {
     }
 }
 
+/// 2-tuple implementation
+impl<A: IntoSerializableVal, B: IntoSerializableVal> IntoSerializableVal for (A, B) {
+    fn into_serializable_val(self) -> SerializableVal {
+        SerializableVal::Tuple(vec![
+            self.0.into_serializable_val(),
+            self.1.into_serializable_val(),
+        ])
+    }
+}
+
+/// 3-tuple implementation
+impl<A: IntoSerializableVal, B: IntoSerializableVal, C: IntoSerializableVal> IntoSerializableVal for (A, B, C) {
+    fn into_serializable_val(self) -> SerializableVal {
+        SerializableVal::Tuple(vec![
+            self.0.into_serializable_val(),
+            self.1.into_serializable_val(),
+            self.2.into_serializable_val(),
+        ])
+    }
+}
+
+/// 4-tuple implementation
+impl<A: IntoSerializableVal, B: IntoSerializableVal, C: IntoSerializableVal, D: IntoSerializableVal> IntoSerializableVal for (A, B, C, D) {
+    fn into_serializable_val(self) -> SerializableVal {
+        SerializableVal::Tuple(vec![
+            self.0.into_serializable_val(),
+            self.1.into_serializable_val(),
+            self.2.into_serializable_val(),
+            self.3.into_serializable_val(),
+        ])
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

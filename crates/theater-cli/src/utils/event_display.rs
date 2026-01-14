@@ -116,15 +116,16 @@ pub fn display_single_event(event: &ChainEvent, format: &str) -> Result<()> {
                 _ => style(&event.event_type).white(),
             };
 
-            // Get data preview
-            let data_preview = if let Ok(text) = std::str::from_utf8(&event.data) {
-                if text.len() > 40 {
-                    format!("{}...", &text[0..37])
-                } else {
-                    text.to_string()
+            // Get data preview by serializing to JSON
+            let data_preview = match serde_json::to_string(&event.data) {
+                Ok(text) => {
+                    if text.len() > 40 {
+                        format!("{}...", &text[0..37])
+                    } else {
+                        text
+                    }
                 }
-            } else {
-                format!("{} bytes", event.data.len())
+                Err(_) => format!("{:?}", event.data),
             };
 
             println!(
@@ -143,7 +144,9 @@ pub fn display_single_event(event: &ChainEvent, format: &str) -> Result<()> {
                 .as_ref()
                 .map(|h| hex::encode(h))
                 .unwrap_or_default();
-            let data_size = event.data.len();
+            let data_size = serde_json::to_string(&event.data)
+                .map(|s| s.len())
+                .unwrap_or(0);
 
             println!("{},{},{},{}", event_type, hash, parent_hash, data_size);
         }
@@ -173,15 +176,12 @@ pub fn display_single_event(event: &ChainEvent, format: &str) -> Result<()> {
             );
 
             println!("   Parent Hash: {}", parent_hash);
-            println!("   Data Size: {} bytes", event.data.len());
 
-            if let Ok(text) = std::str::from_utf8(&event.data) {
-                println!("   Data: {}", text);
-            } else {
-                // Print hex dump if binary data
-                println!("\nHex Dump:");
-                print_hex_dump(&event.data, 16);
-            }
+            // Serialize data to JSON for display
+            let data_json = serde_json::to_string_pretty(&event.data)
+                .unwrap_or_else(|_| format!("{:?}", event.data));
+            println!("   Data Size: {} bytes", data_json.len());
+            println!("   Data: {}", data_json);
 
             println!();
         }
@@ -353,22 +353,17 @@ pub fn pretty_stringify_event(event: &ChainEvent, full: bool) -> String {
         output.push_str(&format!("  Parent: {}\n", short_parent));
     }
 
-    if let Ok(text) = std::str::from_utf8(&event.data) {
-        if !full {
-            let max_len = std::cmp::min(text.len(), 57);
-            output.push_str(&format!(
-                "  Data: {}... ({} bytes total)\n",
-                &text[0..max_len],
-                event.data.len()
-            ));
-        } else {
-            output.push_str(&format!("  Data: {}\n", text));
-        }
-    } else if !event.data.is_empty() {
+    // Serialize data to JSON for display
+    let text = serde_json::to_string(&event.data).unwrap_or_else(|_| format!("{:?}", event.data));
+    if !full {
+        let max_len = std::cmp::min(text.len(), 57);
         output.push_str(&format!(
-            "  Data: {} bytes of binary data\n",
-            event.data.len()
+            "  Data: {}... ({} bytes total)\n",
+            &text[0..max_len],
+            text.len()
         ));
+    } else {
+        output.push_str(&format!("  Data: {}\n", text));
     }
 
     output.push('\n');
@@ -444,9 +439,12 @@ pub fn display_structured_event(event: &ChainEvent, fields: &[&str]) -> Result<(
         println!("{}", event.event_type);
     }
 
+    // Serialize data to JSON for size/display
+    let data_json = serde_json::to_string(&event.data).unwrap_or_default();
+
     // Data size (if requested)
     if should_include("data_size") {
-        println!("{}", event.data.len());
+        println!("{}", data_json.len());
     }
 
     // Empty line before data
@@ -454,12 +452,7 @@ pub fn display_structured_event(event: &ChainEvent, fields: &[&str]) -> Result<(
 
     // Data (if requested)
     if should_include("data") {
-        if let Ok(text) = std::str::from_utf8(&event.data) {
-            print!("{}", text);
-        } else if !event.data.is_empty() {
-            // For binary data, output as hex
-            print!("{}", hex::encode(&event.data));
-        }
+        print!("{}", data_json);
     }
 
     // End with separator

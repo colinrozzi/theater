@@ -25,7 +25,8 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 
 use tracing::{debug, error, info, warn};
-use wasmtime::component::types::{ComponentItem, Type};
+use val_serde::SerializableVal;
+use wasmtime::component::types::ComponentItem;
 use wasmtime::component::{Resource, ResourceAny, ResourceType, Val};
 use wasmtime::StoreContextMut;
 
@@ -66,6 +67,12 @@ impl ReplayResourceState {
     /// Generate a new unique resource handle
     pub fn new_rep(&self) -> u32 {
         self.next_rep.fetch_add(1, Ordering::SeqCst)
+    }
+
+    /// Remove a resource from tracking (called when destructor runs)
+    pub fn remove(&self, resource_type: &str, rep: u32) {
+        let mut resources = self.resources.lock().unwrap();
+        resources.remove(&(resource_type.to_string(), rep));
     }
 }
 
@@ -139,14 +146,14 @@ impl ReplayState {
         self.events.get(pos).cloned()
     }
 
-    /// Get the output bytes for the current event.
+    /// Get the output for the current event.
     /// Assumes the event data contains a serialized HostFunctionCall.
-    pub fn current_output(&self) -> Option<Vec<u8>> {
+    pub fn current_output(&self) -> Option<SerializableVal> {
         let event = self.current_event()?;
         if let Ok(call) = serde_json::from_slice::<HostFunctionCall>(&event.data) {
             Some(call.output)
         } else {
-            Some(event.data.clone())
+            None
         }
     }
 
@@ -286,306 +293,35 @@ impl ReplayHandler {
     }
 }
 
-/// Convert a wasmtime Val to a JSON value for serialization
-fn val_to_json(val: &Val) -> serde_json::Value {
-    match val {
-        Val::Bool(b) => serde_json::Value::Bool(*b),
-        Val::S8(n) => serde_json::Value::Number((*n as i64).into()),
-        Val::U8(n) => serde_json::Value::Number((*n as u64).into()),
-        Val::S16(n) => serde_json::Value::Number((*n as i64).into()),
-        Val::U16(n) => serde_json::Value::Number((*n as u64).into()),
-        Val::S32(n) => serde_json::Value::Number((*n as i64).into()),
-        Val::U32(n) => serde_json::Value::Number((*n as u64).into()),
-        Val::S64(n) => serde_json::Value::Number((*n).into()),
-        Val::U64(n) => serde_json::Value::Number((*n).into()),
-        Val::Float32(f) => serde_json::Number::from_f64(*f as f64)
-            .map(serde_json::Value::Number)
-            .unwrap_or(serde_json::Value::Null),
-        Val::Float64(f) => serde_json::Number::from_f64(*f)
-            .map(serde_json::Value::Number)
-            .unwrap_or(serde_json::Value::Null),
-        Val::Char(c) => serde_json::Value::String(c.to_string()),
-        Val::String(s) => serde_json::Value::String(s.clone()),
-        Val::List(items) => serde_json::Value::Array(items.iter().map(val_to_json).collect()),
-        Val::Record(fields) => {
-            let map: serde_json::Map<String, serde_json::Value> = fields
-                .iter()
-                .map(|(k, v)| (k.clone(), val_to_json(v)))
-                .collect();
-            serde_json::Value::Object(map)
-        }
-        Val::Tuple(items) => serde_json::Value::Array(items.iter().map(val_to_json).collect()),
-        Val::Variant(name, value) => {
-            let mut map = serde_json::Map::new();
-            map.insert(
-                name.clone(),
-                value
-                    .as_ref()
-                    .map(|v| val_to_json(v))
-                    .unwrap_or(serde_json::Value::Null),
-            );
-            serde_json::Value::Object(map)
-        }
-        Val::Enum(name) => serde_json::Value::String(name.clone()),
-        Val::Option(opt) => opt
-            .as_ref()
-            .map(|v| val_to_json(v))
-            .unwrap_or(serde_json::Value::Null),
-        Val::Result(res) => match res {
-            Ok(v) => {
-                let mut map = serde_json::Map::new();
-                map.insert(
-                    "ok".to_string(),
-                    v.as_ref()
-                        .map(|v| val_to_json(v))
-                        .unwrap_or(serde_json::Value::Null),
-                );
-                serde_json::Value::Object(map)
-            }
-            Err(v) => {
-                let mut map = serde_json::Map::new();
-                map.insert(
-                    "err".to_string(),
-                    v.as_ref()
-                        .map(|v| val_to_json(v))
-                        .unwrap_or(serde_json::Value::Null),
-                );
-                serde_json::Value::Object(map)
-            }
-        },
-        Val::Flags(flags) => serde_json::Value::Array(
-            flags
-                .iter()
-                .map(|f| serde_json::Value::String(f.clone()))
-                .collect(),
-        ),
-        Val::Resource(_) => serde_json::Value::String("<resource>".to_string()),
+/// Convert params to SerializableVal for recording.
+/// Matches the format used by handlers for consistent serialization.
+fn serialize_params(params: &[Val]) -> SerializableVal {
+    if params.is_empty() {
+        SerializableVal::Tuple(vec![])
+    } else if params.len() == 1 {
+        SerializableVal::from(&params[0])
+    } else {
+        SerializableVal::Tuple(params.iter().map(SerializableVal::from).collect())
     }
 }
 
-/// Serialize params to JSON bytes
-fn serialize_params(params: &[Val]) -> Vec<u8> {
-    let json_params: Vec<serde_json::Value> = params.iter().map(val_to_json).collect();
-    // Match the serialization format used by handlers:
-    // - 0 params: serialize as "null" (like &() in serde)
-    // - 1 param: serialize the value directly (unwrapped)
-    // - 2+ params: serialize as array
-    let json = if json_params.is_empty() {
-        serde_json::Value::Null
-    } else if json_params.len() == 1 {
-        json_params.into_iter().next().unwrap()
-    } else {
-        serde_json::Value::Array(json_params)
-    };
-    serde_json::to_vec(&json).unwrap_or_default()
-}
-
-/// Deserialize recorded output bytes back to Val using type information from the function signature.
-/// This uses the expected types to correctly interpret the JSON data.
-fn deserialize_with_type_info(
-    recorded_output: &[u8],
-    results: &mut [Val],
-    expected_types: &[Type],
-) {
-    if results.is_empty() || recorded_output.is_empty() || expected_types.is_empty() {
+/// Deserialize a SerializableVal back to a wasmtime Val.
+/// This is a simple conversion since SerializableVal preserves type information.
+fn deserialize_output(recorded_output: &SerializableVal, results: &mut [Val]) {
+    if results.is_empty() {
         return;
     }
 
-    // Try to parse as JSON string first
-    let output_str = match String::from_utf8(recorded_output.to_vec()) {
-        Ok(s) => s,
+    // Convert SerializableVal to Val
+    // Note: This will panic for Resource types, which should be handled separately
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        Val::from(recorded_output.clone())
+    })) {
+        Ok(val) => {
+            results[0] = val;
+        }
         Err(_) => {
-            warn!("[REPLAY] Failed to parse output as UTF-8");
-            return;
-        }
-    };
-
-    // Try parsing as JSON
-    let json_value: serde_json::Value = match serde_json::from_str(&output_str) {
-        Ok(v) => v,
-        Err(e) => {
-            warn!("[REPLAY] Failed to parse output as JSON: {}", e);
-            return;
-        }
-    };
-
-    // Deserialize each result based on its expected type
-    for (i, expected_type) in expected_types.iter().enumerate() {
-        if i >= results.len() {
-            break;
-        }
-
-        match json_to_val(&json_value, expected_type) {
-            Some(val) => {
-                debug!("[REPLAY] Deserialized result {} as {:?}", i, expected_type);
-                results[i] = val;
-            }
-            None => {
-                warn!(
-                    "[REPLAY] Failed to deserialize result {} with expected type {:?}",
-                    i, expected_type
-                );
-            }
-        }
-    }
-}
-
-/// Convert a JSON value to a wasmtime Val based on the expected type.
-fn json_to_val(json: &serde_json::Value, expected_type: &Type) -> Option<Val> {
-    match expected_type {
-        // Primitive types
-        Type::Bool => json.as_bool().map(Val::Bool),
-        Type::S8 => json.as_i64().map(|n| Val::S8(n as i8)),
-        Type::U8 => json.as_u64().map(|n| Val::U8(n as u8)),
-        Type::S16 => json.as_i64().map(|n| Val::S16(n as i16)),
-        Type::U16 => json.as_u64().map(|n| Val::U16(n as u16)),
-        Type::S32 => json.as_i64().map(|n| Val::S32(n as i32)),
-        Type::U32 => json.as_u64().map(|n| Val::U32(n as u32)),
-        Type::S64 => json.as_i64().map(Val::S64),
-        Type::U64 => json.as_u64().map(Val::U64),
-        Type::Float32 => json.as_f64().map(|n| Val::Float32(n as f32)),
-        Type::Float64 => json.as_f64().map(Val::Float64),
-        Type::Char => json.as_str().and_then(|s| s.chars().next()).map(Val::Char),
-        Type::String => json.as_str().map(|s| Val::String(s.to_string())),
-
-        // List type - recursively convert elements
-        Type::List(inner_type) => {
-            let arr = json.as_array()?;
-            let inner = inner_type.ty();
-            let vals: Option<Vec<Val>> = arr.iter().map(|v| json_to_val(v, &inner)).collect();
-            vals.map(Val::List)
-        }
-
-        // Tuple type - convert each element with its corresponding type
-        Type::Tuple(tuple_type) => {
-            let arr = json.as_array()?;
-            let types: Vec<Type> = tuple_type.types().collect();
-            if arr.len() != types.len() {
-                return None;
-            }
-            let vals: Option<Vec<Val>> = arr
-                .iter()
-                .zip(types.iter())
-                .map(|(v, t)| json_to_val(v, t))
-                .collect();
-            vals.map(Val::Tuple)
-        }
-
-        // Option type - handle null as None, otherwise Some
-        Type::Option(inner_type) => {
-            if json.is_null() {
-                Some(Val::Option(None))
-            } else {
-                let inner = inner_type.ty();
-                json_to_val(json, &inner).map(|v| Val::Option(Some(Box::new(v))))
-            }
-        }
-
-        // Result type - look for "ok" or "err" keys
-        Type::Result(result_type) => {
-            if let Some(obj) = json.as_object() {
-                if let Some(ok_val) = obj.get("ok") {
-                    let inner = if ok_val.is_null() {
-                        None
-                    } else if let Some(ok_type) = result_type.ok() {
-                        json_to_val(ok_val, &ok_type).map(Box::new)
-                    } else {
-                        None
-                    };
-                    return Some(Val::Result(Ok(inner)));
-                }
-                if let Some(err_val) = obj.get("err") {
-                    let inner = if err_val.is_null() {
-                        None
-                    } else if let Some(err_type) = result_type.err() {
-                        json_to_val(err_val, &err_type).map(Box::new)
-                    } else {
-                        None
-                    };
-                    return Some(Val::Result(Err(inner)));
-                }
-            }
-            None
-        }
-
-        // Record type - convert object fields
-        Type::Record(record_type) => {
-            let obj = json.as_object()?;
-            let fields: Option<Vec<(String, Val)>> = record_type
-                .fields()
-                .map(|field| {
-                    let field_val = obj.get(field.name)?;
-                    let val = json_to_val(field_val, &field.ty)?;
-                    Some((field.name.to_string(), val))
-                })
-                .collect();
-            fields.map(Val::Record)
-        }
-
-        // Variant type - look for variant name as key
-        Type::Variant(variant_type) => {
-            if let Some(obj) = json.as_object() {
-                for case in variant_type.cases() {
-                    if let Some(case_val) = obj.get(case.name) {
-                        let inner = if case_val.is_null() {
-                            None
-                        } else if let Some(case_type) = case.ty {
-                            json_to_val(case_val, &case_type).map(Box::new)
-                        } else {
-                            None
-                        };
-                        return Some(Val::Variant(case.name.to_string(), inner));
-                    }
-                }
-            }
-            // Try as string for simple variants
-            if let Some(s) = json.as_str() {
-                return Some(Val::Variant(s.to_string(), None));
-            }
-            None
-        }
-
-        // Enum type - just a string
-        Type::Enum(enum_type) => {
-            let s = json.as_str()?;
-            // Verify it's a valid enum case
-            for case in enum_type.names() {
-                if case == s {
-                    return Some(Val::Enum(s.to_string()));
-                }
-            }
-            // Try lowercase comparison
-            let lower = s.to_lowercase();
-            for case in enum_type.names() {
-                if case.to_lowercase() == lower {
-                    return Some(Val::Enum(case.to_string()));
-                }
-            }
-            None
-        }
-
-        // Flags type - array of flag names
-        Type::Flags(flags_type) => {
-            let arr = json.as_array()?;
-            let flags: Option<Vec<String>> = arr
-                .iter()
-                .map(|v| v.as_str().map(|s| s.to_string()))
-                .collect();
-            let flag_vals = flags?;
-            // Verify all flags are valid
-            let valid_flags: Vec<&str> = flags_type.names().collect();
-            for flag in &flag_vals {
-                if !valid_flags.contains(&flag.as_str()) {
-                    return None;
-                }
-            }
-            Some(Val::Flags(flag_vals))
-        }
-
-        // Resource types - these are handled separately (constructor pattern)
-        Type::Own(_) | Type::Borrow(_) => {
-            debug!("[REPLAY] Resource type encountered in json_to_val - should be handled by constructor logic");
-            None
+            warn!("[REPLAY] Failed to convert SerializableVal to Val (possibly a resource type)");
         }
     }
 }
@@ -986,14 +722,10 @@ impl Handler for ReplayHandler {
                         let interface_name = import_name.clone();
                         let func_name_owned = func_name.clone();
 
-                        // Capture return types from the function signature for type-aware deserialization
-                        let return_types: Vec<Type> = func_type.results().collect();
-                        let return_types = Arc::new(return_types);
-
                         // Check if this function returns a resource (constructor pattern)
-                        let returns_resource = return_types
-                            .iter()
-                            .any(|r| matches!(r, Type::Own(_) | Type::Borrow(_)));
+                        let returns_resource = func_type
+                            .results()
+                            .any(|r| matches!(r, wasmtime::component::types::Type::Own(_) | wasmtime::component::types::Type::Borrow(_)));
 
                         // Check if this is a constructor (starts with [constructor])
                         let is_constructor = func_name.starts_with("[constructor]");
@@ -1009,9 +741,8 @@ impl Handler for ReplayHandler {
                                 let expected_type = expected_event_type_clone.clone();
                                 let interface = interface_name.clone();
                                 let function = func_name_owned.clone();
-                                let return_types = Arc::clone(&return_types);
 
-                                // Serialize the ACTUAL params from the actor
+                                // Serialize the ACTUAL params from the actor as SerializableVal
                                 let actual_input = serialize_params(params);
 
                                 // Clone values we need in the async block
@@ -1025,7 +756,7 @@ impl Handler for ReplayHandler {
                                     );
 
                                     // Expect the next event to match this function call (strict sequential)
-                                    let recorded_output =
+                                    let recorded_output: Option<SerializableVal> =
                                         match state.expect_next_event(&expected_type) {
                                             Ok(event) => {
                                                 debug!(
@@ -1035,23 +766,28 @@ impl Handler for ReplayHandler {
                                                 );
 
                                                 // Extract the recorded output from the event
+                                                // The event.data contains a serialized HostFunctionCall
                                                 if let Ok(host_call) =
                                                     serde_json::from_slice::<HostFunctionCall>(
                                                         &event.data,
                                                     )
                                                 {
-                                                    host_call.output
+                                                    Some(host_call.output)
                                                 } else {
-                                                    vec![]
+                                                    None
                                                 }
                                             }
                                             Err(e) => {
                                                 // Mismatch detected - this is a determinism failure
                                                 warn!("[REPLAY] {}", e);
-                                                // For now, return empty and continue - could make this fatal
-                                                vec![]
+                                                None
                                             }
                                         };
+
+                                    // Get the output for recording (use empty tuple if none)
+                                    let output_for_recording = recorded_output
+                                        .clone()
+                                        .unwrap_or_else(|| SerializableVal::Tuple(vec![]));
 
                                     // Record a NEW event with the ACTUAL input from the actor
                                     // This allows us to verify the actor is making the same calls
@@ -1062,7 +798,7 @@ impl Handler for ReplayHandler {
                                                 interface,
                                                 function,
                                                 actual_input,
-                                                recorded_output.clone(),
+                                                output_for_recording,
                                             ),
                                         ),
                                     });
@@ -1091,12 +827,10 @@ impl Handler for ReplayHandler {
                                         }
                                     } else if !results.is_empty() {
                                         // Handle non-resource return values by deserializing from recorded_output
-                                        // using the function's type signature for correct type conversion
-                                        deserialize_with_type_info(
-                                            &recorded_output,
-                                            results,
-                                            &return_types,
-                                        );
+                                        // SerializableVal preserves type info, so conversion is straightforward
+                                        if let Some(output) = recorded_output {
+                                            deserialize_output(&output, results);
+                                        }
                                     }
 
                                     Ok(())

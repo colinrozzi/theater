@@ -6,6 +6,7 @@
 use std::future::Future;
 use std::pin::Pin;
 use tracing::info;
+use val_serde::IntoSerializableVal;
 use wasmtime::StoreContextMut;
 
 use theater::actor::handle::ActorHandle;
@@ -111,8 +112,8 @@ impl Handler for RuntimeHandler {
                     ctx.data_mut().record_host_function_call(
                         "theater:simple/runtime",
                         "log",
-                        &msg,
-                        &(),
+                        msg.clone().into_serializable_val(),
+                        ().into_serializable_val(),
                     );
 
                     info!("[ACTOR] [{}] [{}] {}", id, name1, msg);
@@ -160,8 +161,8 @@ impl Handler for RuntimeHandler {
                     ctx.data_mut().record_host_function_call(
                         "theater:simple/runtime",
                         "get-chain",
-                        &(),
-                        &chain_events.len(),
+                        ().into_serializable_val(),
+                        (chain_events.len() as u64).into_serializable_val(),
                     );
 
                     // Return as chain record: (events,)
@@ -201,8 +202,8 @@ impl Handler for RuntimeHandler {
                         ctx.data_mut().record_host_function_call(
                             "theater:simple/runtime",
                             "shutdown",
-                            &data_clone,
-                            &result.is_ok(),
+                            data_clone.clone().into_serializable_val(),
+                            result.is_ok().into_serializable_val(),
                         );
 
                         Ok((result,))

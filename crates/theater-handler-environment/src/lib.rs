@@ -36,6 +36,7 @@ use std::future::Future;
 use std::pin::Pin;
 use thiserror::Error;
 use tracing::info;
+use val_serde::IntoSerializableVal;
 use wasmtime::StoreContextMut;
 
 use theater::actor::handle::ActorHandle;
@@ -153,8 +154,8 @@ impl Handler for EnvironmentHandler
                     ctx.data_mut().record_host_function_call(
                         "theater:simple/environment",
                         "get-var",
-                        &var_name,
-                        &None::<String>,
+                        var_name.clone().into_serializable_val(),
+                        None::<String>.into_serializable_val(),
                     );
                     return Ok((None,));
                 }
@@ -165,8 +166,8 @@ impl Handler for EnvironmentHandler
                 ctx.data_mut().record_host_function_call(
                     "theater:simple/environment",
                     "get-var",
-                    &var_name,
-                    &value,
+                    var_name.into_serializable_val(),
+                    value.clone().into_serializable_val(),
                 );
 
                 Ok((value,))
@@ -187,8 +188,8 @@ impl Handler for EnvironmentHandler
                     ctx.data_mut().record_host_function_call(
                         "theater:simple/environment",
                         "exists",
-                        &var_name,
-                        &false,
+                        var_name.clone().into_serializable_val(),
+                        false.into_serializable_val(),
                     );
                     return Ok((false,));
                 }
@@ -199,8 +200,8 @@ impl Handler for EnvironmentHandler
                 ctx.data_mut().record_host_function_call(
                     "theater:simple/environment",
                     "exists",
-                    &var_name,
-                    &exists,
+                    var_name.into_serializable_val(),
+                    exists.into_serializable_val(),
                 );
 
                 Ok((exists,))
@@ -219,8 +220,8 @@ impl Handler for EnvironmentHandler
                     ctx.data_mut().record_host_function_call(
                         "theater:simple/environment",
                         "list-vars",
-                        &(),
-                        &empty,
+                        ().into_serializable_val(),
+                        empty.clone().into_serializable_val(),
                     );
                     return Ok((empty,));
                 }
@@ -237,8 +238,8 @@ impl Handler for EnvironmentHandler
                 ctx.data_mut().record_host_function_call(
                     "theater:simple/environment",
                     "list-vars",
-                    &(),
-                    &accessible_vars,
+                    ().into_serializable_val(),
+                    accessible_vars.clone().into_serializable_val(),
                 );
 
                 Ok((accessible_vars,))

@@ -105,10 +105,13 @@ impl OutputFormat for ActorEvents {
             .iter()
             .enumerate()
             .map(|(idx, event)| {
+                let data_size = serde_json::to_string(&event.data)
+                    .map(|s| s.len())
+                    .unwrap_or(0);
                 vec![
                     format!("{}", idx),
                     event.event_type.clone(),
-                    format!("{} bytes", event.data.len()),
+                    format!("{} bytes", data_size),
                 ]
             })
             .collect();
@@ -793,7 +796,8 @@ impl OutputFormat for ActorLogs {
             println!("  No logs found.");
         } else {
             for (i, event) in self.events.iter().enumerate() {
-                if let Ok(json_data) = serde_json::from_slice::<serde_json::Value>(&event.data) {
+                // Convert ChainEventPayload to JSON Value for log extraction
+                if let Ok(json_data) = serde_json::to_value(&event.data) {
                     if let Some(message) = json_data.get("message").and_then(|m| m.as_str()) {
                         println!("[{}] {}", i + 1, message);
                     }
@@ -823,7 +827,8 @@ impl OutputFormat for ActorLogs {
             println!("No logs found.");
         } else {
             for (i, event) in self.events.iter().enumerate() {
-                if let Ok(json_data) = serde_json::from_slice::<serde_json::Value>(&event.data) {
+                // Convert ChainEventPayload to JSON Value for log extraction
+                if let Ok(json_data) = serde_json::to_value(&event.data) {
                     if let Some(message) = json_data.get("message").and_then(|m| m.as_str()) {
                         println!(
                             "{} {}",
@@ -855,7 +860,8 @@ impl OutputFormat for ActorLogs {
             .iter()
             .enumerate()
             .filter_map(|(i, event)| {
-                serde_json::from_slice::<serde_json::Value>(&event.data)
+                // Convert ChainEventPayload to JSON Value for log extraction
+                serde_json::to_value(&event.data)
                     .ok()
                     .and_then(|json_data| {
                         json_data

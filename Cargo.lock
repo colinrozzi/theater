@@ -3511,6 +3511,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "uuid",
+ "val-serde",
  "wasmtime",
  "wit-bindgen",
 ]
@@ -3536,7 +3537,6 @@ dependencies = [
  "toml",
  "tracing",
  "wasmtime",
- "wit-bindgen",
 ]
 
 [[package]]
@@ -3605,6 +3605,7 @@ dependencies = [
  "theater",
  "thiserror 1.0.69",
  "tracing",
+ "val-serde",
  "wasmtime",
 ]
 
@@ -3646,6 +3647,7 @@ dependencies = [
  "theater-handler-io",
  "tokio",
  "tracing",
+ "val-serde",
  "wasmtime",
  "wasmtime-wasi-http",
 ]
@@ -3759,6 +3761,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "uuid",
+ "val-serde",
  "wasmtime",
 ]
 
@@ -3781,6 +3784,7 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
+ "val-serde",
  "wasmtime",
 ]
 
@@ -3851,6 +3855,7 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
+ "val-serde",
  "wasmtime",
 ]
 

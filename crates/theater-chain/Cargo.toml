@@ -15,7 +15,6 @@ tracing.workspace = true
 
 # WebAssembly runtime
 wasmtime = { version = "31.0", features = ["component-model", "async"] }
-wit-bindgen = "0.36.0"
 
 # Additional core deps
 chrono = { version = "0.4", features = ["serde"] }

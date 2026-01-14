@@ -113,7 +113,7 @@ pub struct ChainEvent {
     /// Common types include "state_change", "message", "http_request", etc.
     #[component(name = "event-type")]
     pub event_type: String,
-    /// The actual payload of the event, typically serialized structured data.
+    /// The actual payload of the event, serialized as JSON bytes.
     pub data: Vec<u8>,
 }
 
@@ -150,10 +150,8 @@ impl fmt::Display for ChainEvent {
         let content = if let Ok(text) = std::str::from_utf8(&self.data) {
             if let Ok(json) = serde_json::from_str::<serde_json::Value>(text) {
                 if json.is_object() && text.len() < 100 {
-                    // For small JSON objects, inline them
                     serde_json::to_string(&json).unwrap_or_else(|_| text.to_string())
                 } else {
-                    // For larger JSON, just show a preview
                     let preview = if text.len() > 30 {
                         format!("{}...", &text[0..27])
                     } else {
@@ -162,7 +160,6 @@ impl fmt::Display for ChainEvent {
                     format!("'{}'", preview)
                 }
             } else {
-                // Not JSON, just show text preview
                 let preview = if text.len() > 30 {
                     format!("{}...", &text[0..27])
                 } else {
@@ -171,7 +168,6 @@ impl fmt::Display for ChainEvent {
                 format!("'{}'", preview)
             }
         } else {
-            // Binary data
             format!("{} bytes of binary data", self.data.len())
         };
 

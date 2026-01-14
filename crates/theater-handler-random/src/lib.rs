@@ -21,6 +21,7 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 use tracing::info;
+use val_serde::IntoSerializableVal;
 use wasmtime::StoreContextMut;
 
 use theater::actor::handle::ActorHandle;
@@ -85,20 +86,20 @@ impl RandomHandler {
             .func_wrap(
                 "get-random-bytes",
                 move |mut ctx: StoreContextMut<'_, ActorStore>, (len,): (u64,)| -> Result<(Vec<u8>,)> {
-                    let len = len as usize;
-                    let mut bytes = vec![0u8; len];
+                    let len_usize = len as usize;
+                    let mut bytes = vec![0u8; len_usize];
 
                     {
                         let mut generator = rng_clone.lock().unwrap();
                         generator.fill_bytes(&mut bytes);
                     }
 
-                    // Record the call for replay
+                    // Record the call for replay using SerializableVal
                     ctx.data_mut().record_host_function_call(
                         "wasi:random/random@0.2.3",
                         "get-random-bytes",
-                        &len,
-                        &bytes,
+                        len.into_serializable_val(),
+                        bytes.clone().into_serializable_val(),
                     );
 
                     Ok((bytes,))
@@ -117,12 +118,12 @@ impl RandomHandler {
                         generator.gen()
                     };
 
-                    // Record the call for replay
+                    // Record the call for replay using SerializableVal
                     ctx.data_mut().record_host_function_call(
                         "wasi:random/random@0.2.3",
                         "get-random-u64",
-                        &(),
-                        &value,
+                        ().into_serializable_val(),
+                        value.into_serializable_val(),
                     );
 
                     Ok((value,))
@@ -148,20 +149,20 @@ impl RandomHandler {
             .func_wrap(
                 "get-insecure-random-bytes",
                 move |mut ctx: StoreContextMut<'_, ActorStore>, (len,): (u64,)| -> Result<(Vec<u8>,)> {
-                    let len = len as usize;
-                    let mut bytes = vec![0u8; len];
+                    let len_usize = len as usize;
+                    let mut bytes = vec![0u8; len_usize];
 
                     {
                         let mut generator = rng_clone.lock().unwrap();
                         generator.fill_bytes(&mut bytes);
                     }
 
-                    // Record the call for replay
+                    // Record the call for replay using SerializableVal
                     ctx.data_mut().record_host_function_call(
                         "wasi:random/insecure@0.2.3",
                         "get-insecure-random-bytes",
-                        &len,
-                        &bytes,
+                        len.into_serializable_val(),
+                        bytes.clone().into_serializable_val(),
                     );
 
                     Ok((bytes,))
@@ -180,12 +181,12 @@ impl RandomHandler {
                         generator.gen()
                     };
 
-                    // Record the call for replay
+                    // Record the call for replay using SerializableVal
                     ctx.data_mut().record_host_function_call(
                         "wasi:random/insecure@0.2.3",
                         "get-insecure-random-u64",
-                        &(),
-                        &value,
+                        ().into_serializable_val(),
+                        value.into_serializable_val(),
                     );
 
                     Ok((value,))
@@ -215,12 +216,16 @@ impl RandomHandler {
                         (generator.gen(), generator.gen())
                     };
 
-                    // Record the call for replay
+                    // Record the call for replay using SerializableVal
+                    // Tuple of u64s is serialized as a Tuple variant
                     ctx.data_mut().record_host_function_call(
                         "wasi:random/insecure-seed@0.2.3",
                         "insecure-seed",
-                        &(),
-                        &(seed1, seed2),
+                        ().into_serializable_val(),
+                        val_serde::SerializableVal::Tuple(vec![
+                            seed1.into_serializable_val(),
+                            seed2.into_serializable_val(),
+                        ]),
                     );
 
                     Ok(((seed1, seed2),))
