@@ -1,34 +1,35 @@
 //! # Timing Handler
 //!
-//! Provides timing capabilities to WebAssembly actors in the Theater system.
-//! This handler allows actors to get the current time, sleep for durations,
-//! and wait until specific deadlines.
+//! Provides WASI-compliant timing capabilities to WebAssembly actors in the Theater system.
+//! This handler implements the WASI clocks and poll interfaces for time-related operations.
+//!
+//! ## Interfaces Provided
+//!
+//! - `wasi:clocks/wall-clock@0.2.3` - Wall clock time (real-world time)
+//! - `wasi:clocks/monotonic-clock@0.2.3` - Monotonic clock for measuring durations
+//! - `wasi:io/poll@0.2.3` - Polling interface for async operations
 //!
 //! ## Architecture
 //!
-//! This handler uses wasmtime's bindgen to generate type-safe Host traits from
-//! the WASI Clocks WIT definitions. This ensures compile-time verification that
-//! our implementation matches the WASI specification.
+//! This handler manually implements WASI interfaces using `func_wrap` to ensure
+//! proper recording of all host function calls for replay support.
 
 pub mod events;
-pub mod bindings;
-pub mod host_impl;
 
 use anyhow::Result;
 use chrono::Utc;
 use std::future::Future;
 use std::pin::Pin;
 use thiserror::Error;
-use tokio::time::{sleep, Duration};
-use tracing::{info, error};
-use wasmtime::StoreContextMut;
-
+use tracing::{debug, info};
 use val_serde::IntoSerializableVal;
+use wasmtime::component::{Resource, ResourceType};
+use wasmtime::StoreContextMut;
 
 use theater::actor::handle::ActorHandle;
 use theater::actor::types::ActorError;
+use theater::actor::ActorStore;
 use theater::config::actor_manifest::TimingHostConfig;
-use theater::config::enforcement::PermissionChecker;
 use theater::config::permissions::TimingPermissions;
 use theater::handler::{Handler, HandlerContext, SharedActorInstance};
 use theater::shutdown::ShutdownReceiver;
@@ -37,33 +38,17 @@ use theater::wasm::{ActorComponent, ActorInstance};
 pub use events::TimingEventData;
 
 /// Represents a pollable resource for timing operations
-///
-/// Pollables are used in the Component Model to represent async events.
-/// For timing, they represent events that become "ready" when a specific
-/// time is reached or a duration has elapsed.
 #[derive(Debug, Clone)]
 pub struct Pollable {
     /// The monotonic clock instant (in nanoseconds) when this pollable becomes ready
     pub deadline: u64,
-
-    /// The kind of pollable (instant or duration-based)
-    pub kind: PollableKind,
-}
-
-/// The kind of timing pollable
-#[derive(Debug, Clone)]
-pub enum PollableKind {
-    /// Becomes ready at a specific monotonic instant
-    MonotonicInstant(u64),
-
-    /// Becomes ready after a duration from creation time
-    MonotonicDuration { duration: u64, created_at: u64 },
 }
 
 #[derive(Clone)]
 pub struct TimingHandler {
     #[allow(dead_code)]
     config: TimingHostConfig,
+    #[allow(dead_code)]
     permissions: Option<TimingPermissions>,
 }
 
@@ -71,15 +56,6 @@ pub struct TimingHandler {
 pub enum TimingError {
     #[error("Timing error: {0}")]
     TimingError(String),
-
-    #[error("Duration too long: {duration} ms exceeds maximum of {max} ms")]
-    DurationTooLong { duration: u64, max: u64 },
-
-    #[error("Duration too short: {duration} ms is below minimum of {min} ms")]
-    DurationTooShort { duration: u64, min: u64 },
-
-    #[error("Invalid deadline: {timestamp} is in the past")]
-    InvalidDeadline { timestamp: u64 },
 
     #[error("Actor error: {0}")]
     ActorError(#[from] ActorError),
@@ -93,240 +69,420 @@ impl TimingHandler {
         }
     }
 
-    // Note: The old manual setup_wasi_wall_clock, setup_wasi_monotonic_clock, and setup_wasi_poll
-    // methods have been replaced by bindgen-generated add_to_linker calls in setup_host_functions_impl.
-    // The Host trait implementations are in host_impl.rs.
-
-    fn setup_host_functions_impl(&mut self, actor_component: &mut ActorComponent) -> Result<()> {
-
-        info!("Setting up timing host functions");
-
-        let mut interface = match actor_component.linker.instance("theater:simple/timing") {
-            Ok(interface) => {                interface
-            }
-            Err(e) => {                return Err(anyhow::anyhow!(
-                    "Could not instantiate theater:simple/timing: {}",
-                    e
-                ));
+    fn setup_wall_clock(&self, actor_component: &mut ActorComponent) -> Result<()> {
+        let mut interface = match actor_component
+            .linker
+            .instance("wasi:clocks/wall-clock@0.2.3")
+        {
+            Ok(i) => i,
+            Err(_) => {
+                debug!("wasi:clocks/wall-clock@0.2.3 not imported by component, skipping");
+                return Ok(());
             }
         };
 
-        let permissions = self.permissions.clone();
+        // now: func() -> datetime
+        interface
+            .func_wrap(
+                "now",
+                move |mut ctx: StoreContextMut<'_, ActorStore>, ()| -> Result<((u64, u32),)> {
+                    debug!("wasi:clocks/wall-clock now");
+                    let now = Utc::now();
+                    let seconds = now.timestamp() as u64;
+                    let nanoseconds = now.timestamp_subsec_nanos();
 
-        // Implementation of the now() function
-        let _ = interface
+                    ctx.data_mut().record_host_function_call(
+                        "wasi:clocks/wall-clock@0.2.3",
+                        "now",
+                        ().into_serializable_val(),
+                        val_serde::SerializableVal::Tuple(vec![
+                            seconds.into_serializable_val(),
+                            nanoseconds.into_serializable_val(),
+                        ]),
+                    );
+
+                    Ok(((seconds, nanoseconds),))
+                },
+            )
+            .map_err(|e| anyhow::anyhow!("Failed to wrap wall-clock now: {}", e))?;
+
+        // resolution: func() -> datetime
+        interface
+            .func_wrap(
+                "resolution",
+                move |mut ctx: StoreContextMut<'_, ActorStore>, ()| -> Result<((u64, u32),)> {
+                    debug!("wasi:clocks/wall-clock resolution");
+                    let seconds = 0u64;
+                    let nanoseconds = 1u32;
+
+                    ctx.data_mut().record_host_function_call(
+                        "wasi:clocks/wall-clock@0.2.3",
+                        "resolution",
+                        ().into_serializable_val(),
+                        val_serde::SerializableVal::Tuple(vec![
+                            seconds.into_serializable_val(),
+                            nanoseconds.into_serializable_val(),
+                        ]),
+                    );
+
+                    Ok(((seconds, nanoseconds),))
+                },
+            )
+            .map_err(|e| anyhow::anyhow!("Failed to wrap wall-clock resolution: {}", e))?;
+
+        info!("wasi:clocks/wall-clock@0.2.3 interface added");
+        Ok(())
+    }
+
+    fn setup_monotonic_clock(&self, actor_component: &mut ActorComponent) -> Result<()> {
+        let mut interface = match actor_component
+            .linker
+            .instance("wasi:clocks/monotonic-clock@0.2.3")
+        {
+            Ok(i) => i,
+            Err(_) => {
+                debug!("wasi:clocks/monotonic-clock@0.2.3 not imported by component, skipping");
+                return Ok(());
+            }
+        };
+
+        // now: func() -> instant (u64 nanoseconds)
+        interface
             .func_wrap(
                 "now",
                 move |mut ctx: StoreContextMut<'_, ActorStore>, ()| -> Result<(u64,)> {
-                    let now = Utc::now().timestamp_millis() as u64;
+                    debug!("wasi:clocks/monotonic-clock now");
+                    let now = Utc::now();
+                    let instant = (now.timestamp() as u64) * 1_000_000_000 + (now.timestamp_subsec_nanos() as u64);
 
-                    // Record with standardized HostFunctionCall format for replay
                     ctx.data_mut().record_host_function_call(
-                        "theater:simple/timing",
+                        "wasi:clocks/monotonic-clock@0.2.3",
                         "now",
                         ().into_serializable_val(),
-                        now.into_serializable_val(),
+                        instant.into_serializable_val(),
                     );
 
-                    Ok((now,))
+                    Ok((instant,))
                 },
             )
-            .map_err(|e| {                anyhow::anyhow!("Failed to wrap now function: {}", e)
-            })?;
+            .map_err(|e| anyhow::anyhow!("Failed to wrap monotonic-clock now: {}", e))?;
 
-        // Implementation of the sleep() function
-        let permissions_clone = permissions.clone();
-        let _ = interface
-            .func_wrap_async(
-                "sleep",
-                move |mut ctx: StoreContextMut<'_, ActorStore>,
-                      (duration,): (u64,)|
-                      -> Box<dyn Future<Output = Result<(Result<(), String>,)>> + Send> {
+        // resolution: func() -> duration (u64 nanoseconds)
+        interface
+            .func_wrap(
+                "resolution",
+                move |mut ctx: StoreContextMut<'_, ActorStore>, ()| -> Result<(u64,)> {
+                    debug!("wasi:clocks/monotonic-clock resolution");
+                    let duration = 1u64; // 1 nanosecond resolution
 
-                    if let Err(e) = PermissionChecker::check_timing_operation(
-                        &permissions_clone,
-                        "sleep",
-                        duration,
-                    ) {
-                        let result: Result<(), String> = Err(format!("Permission denied: {}", e));
+                    ctx.data_mut().record_host_function_call(
+                        "wasi:clocks/monotonic-clock@0.2.3",
+                        "resolution",
+                        ().into_serializable_val(),
+                        duration.into_serializable_val(),
+                    );
 
-                        // Record the call with error result for replay
-                        ctx.data_mut().record_host_function_call(
-                            "theater:simple/timing",
-                            "sleep",
-                            duration.into_serializable_val(),
-                            result.clone().into_serializable_val(),
-                        );
+                    Ok((duration,))
+                },
+            )
+            .map_err(|e| anyhow::anyhow!("Failed to wrap monotonic-clock resolution: {}", e))?;
 
-                        return Box::new(futures::future::ready(Ok((result,))));
+        // subscribe-instant: func(when: instant) -> pollable
+        interface
+            .func_wrap(
+                "subscribe-instant",
+                move |mut ctx: StoreContextMut<'_, ActorStore>, (when,): (u64,)| -> Result<(Resource<Pollable>,)> {
+                    debug!("wasi:clocks/monotonic-clock subscribe-instant: {}", when);
+
+                    let pollable = Pollable { deadline: when };
+                    let pollable_handle = {
+                        let mut table = ctx.data_mut().resource_table.lock().unwrap();
+                        table.push(pollable)?
+                    };
+                    let pollable_id = pollable_handle.rep();
+
+                    ctx.data_mut().record_host_function_call(
+                        "wasi:clocks/monotonic-clock@0.2.3",
+                        "subscribe-instant",
+                        when.into_serializable_val(),
+                        pollable_id.into_serializable_val(),
+                    );
+
+                    Ok((pollable_handle,))
+                },
+            )
+            .map_err(|e| anyhow::anyhow!("Failed to wrap monotonic-clock subscribe-instant: {}", e))?;
+
+        // subscribe-duration: func(when: duration) -> pollable
+        interface
+            .func_wrap(
+                "subscribe-duration",
+                move |mut ctx: StoreContextMut<'_, ActorStore>, (duration,): (u64,)| -> Result<(Resource<Pollable>,)> {
+                    debug!("wasi:clocks/monotonic-clock subscribe-duration: {} ns", duration);
+
+                    let now = Utc::now();
+                    let created_at = (now.timestamp() as u64) * 1_000_000_000 + (now.timestamp_subsec_nanos() as u64);
+                    let deadline = created_at + duration;
+
+                    let pollable = Pollable { deadline };
+                    let pollable_handle = {
+                        let mut table = ctx.data_mut().resource_table.lock().unwrap();
+                        table.push(pollable)?
+                    };
+                    let pollable_id = pollable_handle.rep();
+
+                    ctx.data_mut().record_host_function_call(
+                        "wasi:clocks/monotonic-clock@0.2.3",
+                        "subscribe-duration",
+                        duration.into_serializable_val(),
+                        val_serde::SerializableVal::Tuple(vec![
+                            pollable_id.into_serializable_val(),
+                            deadline.into_serializable_val(),
+                        ]),
+                    );
+
+                    Ok((pollable_handle,))
+                },
+            )
+            .map_err(|e| anyhow::anyhow!("Failed to wrap monotonic-clock subscribe-duration: {}", e))?;
+
+        info!("wasi:clocks/monotonic-clock@0.2.3 interface added");
+        Ok(())
+    }
+
+    fn setup_poll(&self, actor_component: &mut ActorComponent) -> Result<()> {
+        let mut interface = match actor_component
+            .linker
+            .instance("wasi:io/poll@0.2.3")
+        {
+            Ok(i) => i,
+            Err(_) => {
+                debug!("wasi:io/poll@0.2.3 not imported by component, skipping");
+                return Ok(());
+            }
+        };
+
+        // Register the pollable resource type
+        interface
+            .resource(
+                "pollable",
+                ResourceType::host::<Pollable>(),
+                |mut ctx: StoreContextMut<'_, ActorStore>, rep: u32| {
+                    debug!("wasi:io/poll pollable destructor called for rep={}", rep);
+                    // Resource cleanup happens through [resource-drop]pollable
+                    // This destructor is called by wasmtime when owned resources are dropped
+                    Ok(())
+                },
+            )
+            .map_err(|e| anyhow::anyhow!("Failed to register pollable resource: {}", e))?;
+
+        // poll: func(in: list<borrow<pollable>>) -> list<u32>
+        interface
+            .func_wrap(
+                "poll",
+                move |mut ctx: StoreContextMut<'_, ActorStore>, (pollables,): (Vec<Resource<Pollable>>,)| -> Result<(Vec<u32>,)> {
+                    debug!("wasi:io/poll poll: {} pollables", pollables.len());
+
+                    let pollable_ids: Vec<u32> = pollables.iter().map(|p| p.rep()).collect();
+
+                    let now = Utc::now();
+                    let current_instant = (now.timestamp() as u64) * 1_000_000_000 + (now.timestamp_subsec_nanos() as u64);
+
+                    let mut ready_indices = Vec::new();
+                    for (idx, pollable_handle) in pollables.iter().enumerate() {
+                        let is_ready = {
+                            let table = ctx.data_mut().resource_table.lock().unwrap();
+                            if let Ok(pollable) = table.get(pollable_handle) {
+                                current_instant >= pollable.deadline
+                            } else {
+                                false
+                            }
+                        };
+                        if is_ready {
+                            ready_indices.push(idx as u32);
+                        }
                     }
 
-                    let duration_clone = duration;
+                    ctx.data_mut().record_host_function_call(
+                        "wasi:io/poll@0.2.3",
+                        "poll",
+                        pollable_ids.into_serializable_val(),
+                        ready_indices.clone().into_serializable_val(),
+                    );
+
+                    Ok((ready_indices,))
+                },
+            )
+            .map_err(|e| anyhow::anyhow!("Failed to wrap poll: {}", e))?;
+
+        // [method]pollable.ready: func() -> bool
+        interface
+            .func_wrap(
+                "[method]pollable.ready",
+                move |mut ctx: StoreContextMut<'_, ActorStore>, (pollable_handle,): (Resource<Pollable>,)| -> Result<(bool,)> {
+                    let pollable_id = pollable_handle.rep();
+                    debug!("wasi:io/poll pollable.ready: {}", pollable_id);
+
+                    let now = Utc::now();
+                    let current_instant = (now.timestamp() as u64) * 1_000_000_000 + (now.timestamp_subsec_nanos() as u64);
+
+                    let is_ready = {
+                        let table = ctx.data_mut().resource_table.lock().unwrap();
+                        if let Ok(pollable) = table.get(&pollable_handle) {
+                            current_instant >= pollable.deadline
+                        } else {
+                            false
+                        }
+                    };
+
+                    ctx.data_mut().record_host_function_call(
+                        "wasi:io/poll@0.2.3",
+                        "[method]pollable.ready",
+                        pollable_id.into_serializable_val(),
+                        is_ready.into_serializable_val(),
+                    );
+
+                    Ok((is_ready,))
+                },
+            )
+            .map_err(|e| anyhow::anyhow!("Failed to wrap pollable.ready: {}", e))?;
+
+        // [method]pollable.block: func()
+        interface
+            .func_wrap_async(
+                "[method]pollable.block",
+                move |mut ctx: StoreContextMut<'_, ActorStore>, (pollable_handle,): (Resource<Pollable>,)| {
+                    let pollable_id = pollable_handle.rep();
+                    debug!("wasi:io/poll pollable.block: {}", pollable_id);
 
                     Box::new(async move {
-                        if duration_clone > 0 {
-                            sleep(Duration::from_millis(duration_clone)).await;
+                        let deadline = {
+                            let table = ctx.data_mut().resource_table.lock().unwrap();
+                            if let Ok(pollable) = table.get(&pollable_handle) {
+                                pollable.deadline
+                            } else {
+                                return Ok(());
+                            }
+                        };
+
+                        let now = Utc::now();
+                        let current_instant = (now.timestamp() as u64) * 1_000_000_000 + (now.timestamp_subsec_nanos() as u64);
+
+                        if current_instant < deadline {
+                            let sleep_nanos = deadline - current_instant;
+                            let sleep_duration = std::time::Duration::from_nanos(sleep_nanos);
+                            tokio::time::sleep(sleep_duration).await;
                         }
 
-                        let result: Result<(), String> = Ok(());
-
-                        // Record with standardized HostFunctionCall format for replay
                         ctx.data_mut().record_host_function_call(
-                            "theater:simple/timing",
-                            "sleep",
-                            duration_clone.into_serializable_val(),
-                            result.clone().into_serializable_val(),
+                            "wasi:io/poll@0.2.3",
+                            "[method]pollable.block",
+                            pollable_id.into_serializable_val(),
+                            ().into_serializable_val(),
                         );
 
-                        Ok((result,))
+                        Ok(())
                     })
                 },
             )
-            .map_err(|e| {                anyhow::anyhow!("Failed to wrap sleep function: {}", e)
-            })?;
+            .map_err(|e| anyhow::anyhow!("Failed to wrap pollable.block: {}", e))?;
 
-        // Implementation of the deadline() function
-        let permissions_clone2 = permissions.clone();
-        let _ = interface
-            .func_wrap_async(
-                "deadline",
-                move |mut ctx: StoreContextMut<'_, ActorStore>,
-                      (timestamp,): (u64,)|
-                      -> Box<dyn Future<Output = Result<(Result<(), String>,)>> + Send> {
-                    let now = Utc::now().timestamp_millis() as u64;
+        // [resource-drop]pollable: func(self: pollable)
+        interface
+            .func_wrap(
+                "[resource-drop]pollable",
+                move |mut ctx: StoreContextMut<'_, ActorStore>, (pollable_handle,): (Resource<Pollable>,)| -> Result<()> {
+                    let pollable_id = pollable_handle.rep();
+                    debug!("wasi:io/poll [resource-drop]pollable: {}", pollable_id);
 
-                    if timestamp <= now {
-                        let result: Result<(), String> = Ok(());
-
-                        // Record immediately - deadline already passed
-                        ctx.data_mut().record_host_function_call(
-                            "theater:simple/timing",
-                            "deadline",
-                            timestamp.into_serializable_val(),
-                            result.clone().into_serializable_val(),
-                        );
-
-                        return Box::new(futures::future::ready(Ok((result,))));
+                    // Remove from resource table
+                    {
+                        let mut table = ctx.data_mut().resource_table.lock().unwrap();
+                        let _ = table.delete(pollable_handle);
                     }
 
-                    let duration = timestamp - now;
+                    ctx.data_mut().record_host_function_call(
+                        "wasi:io/poll@0.2.3",
+                        "[resource-drop]pollable",
+                        pollable_id.into_serializable_val(),
+                        ().into_serializable_val(),
+                    );
 
-                    if let Err(e) = PermissionChecker::check_timing_operation(
-                        &permissions_clone2,
-                        "deadline",
-                        duration,
-                    ) {
-                        let result: Result<(), String> = Err(format!("Permission denied: {}", e));
-
-                        ctx.data_mut().record_host_function_call(
-                            "theater:simple/timing",
-                            "deadline",
-                            timestamp.into_serializable_val(),
-                            result.clone().into_serializable_val(),
-                        );
-
-                        return Box::new(futures::future::ready(Ok((result,))));
-                    }
-
-                    let timestamp_clone = timestamp;
-
-                    Box::new(async move {
-                        sleep(Duration::from_millis(duration)).await;
-
-                        let result: Result<(), String> = Ok(());
-
-                        // Record with standardized HostFunctionCall format for replay
-                        ctx.data_mut().record_host_function_call(
-                            "theater:simple/timing",
-                            "deadline",
-                            timestamp_clone.into_serializable_val(),
-                            result.clone().into_serializable_val(),
-                        );
-
-                        Ok((result,))
-                    })
+                    Ok(())
                 },
             )
-            .map_err(|e| {                anyhow::anyhow!("Failed to wrap deadline function: {}", e)
-            })?;
-        info!("Theater timing host functions added successfully");
+            .map_err(|e| anyhow::anyhow!("Failed to wrap [resource-drop]pollable: {}", e))?;
 
-        // Setup WASI-compliant clock and poll interfaces using bindgen-generated add_to_linker
-        info!("Setting up WASI clocks/poll interfaces using bindgen");
-
-        use crate::bindings;
-        use theater::actor::ActorStore;
-
-        // Add wasi:clocks/wall-clock interface
-        bindings::wasi::clocks::wall_clock::add_to_linker(
-            &mut actor_component.linker,
-            |state: &mut ActorStore| state,
-        )?;
-        info!("wasi:clocks/wall-clock interface added");
-
-        // Add wasi:clocks/monotonic-clock interface
-        bindings::wasi::clocks::monotonic_clock::add_to_linker(
-            &mut actor_component.linker,
-            |state: &mut ActorStore| state,
-        )?;
-        info!("wasi:clocks/monotonic-clock interface added");
-
-        // Add wasi:io/poll interface
-        bindings::wasi::io::poll::add_to_linker(
-            &mut actor_component.linker,
-            |state: &mut ActorStore| state,
-        )?;
-        info!("wasi:io/poll interface added");
-
-        info!("WASI clock/poll interfaces setup complete (using bindgen traits)");
-
-        Ok(())
-    }
-
-    fn add_export_functions_impl(&self, _actor_instance: &mut ActorInstance) -> Result<()> {
-        info!("No export functions needed for timing handler");
-        Ok(())
-    }
-
-    async fn start_impl(
-        &self,
-        _actor_handle: ActorHandle,
-        _shutdown_receiver: ShutdownReceiver,
-    ) -> Result<()> {
-        info!("Starting timing handler");
+        info!("wasi:io/poll@0.2.3 interface added");
         Ok(())
     }
 }
 
-impl Handler for TimingHandler
-{
+impl Handler for TimingHandler {
     fn create_instance(&self, _config: Option<&theater::config::actor_manifest::HandlerConfig>) -> Box<dyn Handler> {
         Box::new(self.clone())
     }
 
     fn start(
         &mut self,
-        actor_handle: ActorHandle,
+        _actor_handle: ActorHandle,
         _actor_instance: SharedActorInstance,
         shutdown_receiver: ShutdownReceiver,
     ) -> Pin<Box<dyn Future<Output = Result<()>> + Send>> {
-        let handler = self.clone();
-        Box::pin(async move { handler.start_impl(actor_handle, shutdown_receiver).await })
+        info!("Starting timing handler");
+        Box::pin(async move {
+            shutdown_receiver.wait_for_shutdown().await;
+            info!("Timing handler received shutdown signal");
+            Ok(())
+        })
     }
 
     fn setup_host_functions(
         &mut self,
         actor_component: &mut ActorComponent,
-        _ctx: &mut HandlerContext,
+        ctx: &mut HandlerContext,
     ) -> Result<()> {
-        self.setup_host_functions_impl(actor_component)
+        // Check if imports are already satisfied (e.g., by replay handler)
+        let wall_clock_satisfied = ctx.is_satisfied("wasi:clocks/wall-clock@0.2.3");
+        let monotonic_satisfied = ctx.is_satisfied("wasi:clocks/monotonic-clock@0.2.3");
+        let poll_satisfied = ctx.is_satisfied("wasi:io/poll@0.2.3");
+
+        info!(
+            "Timing handler setup_host_functions called. Satisfied: wall={}, mono={}, poll={}",
+            wall_clock_satisfied, monotonic_satisfied, poll_satisfied
+        );
+
+        if wall_clock_satisfied && monotonic_satisfied && poll_satisfied {
+            info!("WASI clocks interfaces already satisfied (replay mode), skipping setup");
+            return Ok(());
+        }
+
+        info!("Setting up WASI clocks host functions with manual func_wrap");
+
+        if !wall_clock_satisfied {
+            self.setup_wall_clock(actor_component)?;
+            ctx.mark_satisfied("wasi:clocks/wall-clock@0.2.3");
+        }
+
+        if !monotonic_satisfied {
+            self.setup_monotonic_clock(actor_component)?;
+            ctx.mark_satisfied("wasi:clocks/monotonic-clock@0.2.3");
+        }
+
+        if !poll_satisfied {
+            self.setup_poll(actor_component)?;
+            ctx.mark_satisfied("wasi:io/poll@0.2.3");
+        }
+
+        info!("WASI clocks host functions setup complete");
+        Ok(())
     }
 
     fn add_export_functions(
         &self,
-        actor_instance: &mut ActorInstance,
+        _actor_instance: &mut ActorInstance,
     ) -> Result<()> {
-        self.add_export_functions_impl(actor_instance)
+        Ok(())
     }
 
     fn name(&self) -> &str {
@@ -334,9 +490,7 @@ impl Handler for TimingHandler
     }
 
     fn imports(&self) -> Option<Vec<String>> {
-        // Handler provides both Theater simple timing and WASI clocks interfaces
         Some(vec![
-            "theater:simple/timing".to_string(),
             "wasi:clocks/wall-clock@0.2.3".to_string(),
             "wasi:clocks/monotonic-clock@0.2.3".to_string(),
             "wasi:io/poll@0.2.3".to_string(),

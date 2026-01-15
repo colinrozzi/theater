@@ -14,8 +14,8 @@
 //! use val_serde::IntoSerializableVal;
 //!
 //! ctx.data_mut().record_host_function_call(
-//!     "theater:simple/timing",
-//!     "now",
+//!     "wasi:random/random@0.2.3",
+//!     "get-random-u64",
 //!     ().into_serializable_val(),      // input
 //!     result.into_serializable_val(),  // output
 //! );
@@ -48,7 +48,7 @@ use val_serde::SerializableVal;
 /// the chain self-describing and independent of the component for replay.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HostFunctionCall {
-    /// The interface name (e.g., "theater:simple/timing", "wasi:clocks/wall-clock")
+    /// The interface name (e.g., "wasi:clocks/wall-clock@0.2.3", "wasi:random/random@0.2.3")
     pub interface: String,
     /// The function name (e.g., "now", "sleep")
     pub function: String,
@@ -92,7 +92,7 @@ mod tests {
     #[test]
     fn test_host_function_call_serialization() {
         let call = HostFunctionCall::new(
-            "theater:simple/timing",
+            "wasi:clocks/wall-clock@0.2.3",
             "now",
             ().into_serializable_val(),
             1234567890u64.into_serializable_val(),
@@ -125,7 +125,7 @@ mod tests {
     #[test]
     fn test_no_input() {
         let call = HostFunctionCall::no_input(
-            "theater:simple/timing",
+            "wasi:clocks/wall-clock@0.2.3",
             "now",
             999u64.into_serializable_val(),
         );

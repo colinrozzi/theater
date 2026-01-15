@@ -1,7 +1,0 @@
-package test:simple-timing;
-
-world simple-timing-test {
-    import theater:simple/runtime;
-    import theater:simple/timing;
-    export theater:simple/actor;
-}

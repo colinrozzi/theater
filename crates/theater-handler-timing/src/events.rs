@@ -1,19 +1,15 @@
-//! Timing handler event types
+//! Timing handler event types for WASI clocks interfaces
 
 use serde::{Deserialize, Serialize};
 
+/// Event types for the WASI clocks handler.
+///
+/// This handler provides:
+/// - `wasi:clocks/wall-clock@0.2.3` - Real-world wall clock time
+/// - `wasi:clocks/monotonic-clock@0.2.3` - Monotonic time for measuring durations
+/// - `wasi:io/poll@0.2.3` - Polling interface for async operations
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum TimingEventData {
-    // Theater simple/timing events
-    NowCall {},
-    NowResult { timestamp: u64 },
-    SleepCall { duration: u64 },
-    SleepResult { duration: u64, success: bool },
-    DeadlineCall { timestamp: u64 },
-    DeadlineResult { timestamp: u64, success: bool },
-    Error { operation: String, message: String },
-    PermissionDenied { operation: String, reason: String },
-
     // WASI wall-clock events
     WallClockNowCall,
     WallClockNowResult { seconds: u64, nanoseconds: u32 },
@@ -37,12 +33,4 @@ pub enum TimingEventData {
     PollableReadyResult { pollable_id: u32, is_ready: bool },
     PollableBlockCall { pollable_id: u32 },
     PollableBlockResult { pollable_id: u32 },
-
-    // Handler setup events
-    HandlerSetupStart,
-    HandlerSetupSuccess,
-    HandlerSetupError { error: String, step: String },
-    LinkerInstanceSuccess,
-    FunctionSetupStart { function_name: String },
-    FunctionSetupSuccess { function_name: String },
 }

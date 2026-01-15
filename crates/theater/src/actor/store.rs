@@ -161,7 +161,7 @@ impl ActorStore {
     ///
     /// ## Parameters
     ///
-    /// * `interface` - The WIT interface name (e.g., "theater:simple/timing")
+    /// * `interface` - The WIT interface name (e.g., "wasi:clocks/wall-clock@0.2.3")
     /// * `function` - The function name (e.g., "now")
     /// * `input` - Input parameters as SerializableVal (use `.into_serializable_val()`)
     /// * `output` - Output/return value as SerializableVal (use `.into_serializable_val()`)
@@ -171,12 +171,12 @@ impl ActorStore {
     /// ```rust,ignore
     /// use val_serde::IntoSerializableVal;
     ///
-    /// // Record a timing "now" call
+    /// // Record a random "get-random-u64" call
     /// ctx.data_mut().record_host_function_call(
-    ///     "theater:simple/timing",
-    ///     "now",
+    ///     "wasi:random/random@0.2.3",
+    ///     "get-random-u64",
     ///     ().into_serializable_val(),           // no input
-    ///     timestamp.into_serializable_val(),    // output
+    ///     value.into_serializable_val(),        // output
     /// );
     /// ```
     pub fn record_host_function_call(

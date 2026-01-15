@@ -17,6 +17,33 @@
 //! // Run the actor - it will replay using recorded outputs
 //! let runtime = TheaterRuntime::new(..., registry);
 //! ```
+//!
+//! ## Known Limitations
+//!
+//! ### Resource-Based WASI Interfaces
+//!
+//! The replay handler has limitations when replaying WASI interfaces that use resources
+//! (pollables, file descriptors, streams, sockets, etc.). The wasmtime component model
+//! requires strict lifecycle tracking for resources that our dynamic approach cannot
+//! properly implement.
+//!
+//! **Interfaces that work well with replay:**
+//! - `theater:simple/runtime` (logging, chain access, shutdown)
+//! - `theater:simple/environment` (environment variables)
+//! - `wasi:random/random` (random number generation)
+//! - Any interface that only returns simple values (integers, strings, tuples)
+//!
+//! **Interfaces with replay limitations:**
+//! - `wasi:clocks/monotonic-clock` (uses pollable resources)
+//! - `wasi:io/poll` (defines pollable resources)
+//! - `wasi:filesystem/*` (uses file descriptor resources)
+//! - `wasi:sockets/*` (uses socket resources)
+//! - `wasi:http/*` (uses stream and future resources)
+//!
+//! For resource-based interfaces, consider implementing replay-aware handlers that:
+//! 1. Create real resources using the handler's normal implementation
+//! 2. Override return values (timestamps, data, etc.) from the recorded chain
+//! 3. Properly manage resource lifecycle
 
 use std::collections::{HashMap, HashSet};
 use std::future::Future;
@@ -54,13 +81,30 @@ pub struct ReplayResourceState {
     /// For most resources during replay, we don't need actual state - just the handle
     #[allow(dead_code)]
     resources: Arc<Mutex<HashMap<(String, u32), Vec<u8>>>>,
+    /// Set of resource names that have already been registered with the linker
+    /// Used to avoid registering the same resource type multiple times
+    registered_resources: Arc<Mutex<HashSet<String>>>,
 }
 
 impl ReplayResourceState {
     pub fn new() -> Self {
         Self {
-            next_rep: Arc::new(AtomicU32::new(1)), // Start at 1, 0 often means null
+            next_rep: Arc::new(AtomicU32::new(0)), // Start at 0 to match recorded chain
             resources: Arc::new(Mutex::new(HashMap::new())),
+            registered_resources: Arc::new(Mutex::new(HashSet::new())),
+        }
+    }
+
+    /// Check if a resource name has been registered, and if not, mark it as registered
+    /// Returns true if the resource was NOT previously registered (and is now marked)
+    /// Returns false if it was already registered
+    pub fn try_register(&self, resource_name: &str) -> bool {
+        let mut registered = self.registered_resources.lock().unwrap();
+        if registered.contains(resource_name) {
+            false
+        } else {
+            registered.insert(resource_name.to_string());
+            true
         }
     }
 
@@ -676,14 +720,23 @@ impl Handler for ReplayHandler {
                 let exports: Vec<_> = instance_type.exports(engine).collect();
 
                 // First pass: Register all resource types
+                // Track which resources we've registered to avoid duplicates
+                // (e.g., pollable is defined in wasi:io/poll but used by wasi:clocks)
                 for (item_name, export_item) in &exports {
                     if let ComponentItem::Resource(_resource_type) = export_item {
                         let resource_name = item_name.to_string();
+
+                        // Skip if this resource type was already registered on another interface
+                        if !self.state.resource_state.try_register(&resource_name) {
+                            debug!("Skipping duplicate resource type: {}::{} (already registered)", import_name, resource_name);
+                            continue;
+                        }
+
                         let resource_state = self.state.resource_state.clone();
                         let interface_name = import_name.clone();
                         let resource_name_for_dtor = resource_name.clone();
 
-                        debug!("  Registering resource type: {}", resource_name);
+                        debug!("  Registering resource type: {}::{}", import_name, resource_name);
 
                         // Define the resource using our marker type
                         // The destructor is called when the guest drops an owned resource
@@ -692,10 +745,37 @@ impl Handler for ReplayHandler {
                             ResourceType::host::<ReplayResourceMarker>(),
                             move |_store: StoreContextMut<'_, ActorStore>, rep: u32| {
                                 debug!(
-                                    "[REPLAY] Resource {}::{} dropped (rep={})",
+                                    "Resource destructor: {}::{} dropped (rep={})",
                                     interface_name, resource_name_for_dtor, rep
                                 );
                                 resource_state.remove(&resource_name_for_dtor, rep);
+                                Ok(())
+                            },
+                        )?;
+
+                        // Also register the [resource-drop] function for this resource
+                        // This is required because WASM imports it as a separate function
+                        let drop_func_name = format!("[resource-drop]{}", resource_name);
+                        let interface_name_for_drop = import_name.clone();
+                        let resource_name_for_drop = resource_name.clone();
+
+                        debug!("  Registering resource-drop function: {}::{}", import_name, drop_func_name);
+
+                        interface.func_wrap(
+                            &drop_func_name,
+                            move |mut ctx: StoreContextMut<'_, ActorStore>,
+                                  (resource_handle,): (Resource<ReplayResourceMarker>,)| -> anyhow::Result<()> {
+                                let rep = resource_handle.rep();
+                                debug!(
+                                    "[resource-drop] {}::{} called (rep={})",
+                                    interface_name_for_drop, resource_name_for_drop, rep
+                                );
+
+                                // Remove from resource table if it's there
+                                if let Ok(mut table) = ctx.data_mut().resource_table.lock() {
+                                    let _ = table.delete(resource_handle);
+                                }
+
                                 Ok(())
                             },
                         )?;
@@ -711,7 +791,7 @@ impl Handler for ReplayHandler {
                         let state = self.state.clone();
                         let full_name_clone = full_name.clone();
 
-                        debug!("  Registering stub for {}", func_name);
+                        debug!("  Registering stub for {}", full_name);
 
                         // The expected event type for this function
                         // Format: "interface/function" e.g., "theater:simple/runtime/log"
@@ -730,8 +810,9 @@ impl Handler for ReplayHandler {
                         // Check if this is a constructor (starts with [constructor])
                         let is_constructor = func_name.starts_with("[constructor]");
 
-                        // Register an async stub function
-                        interface.func_new_async(
+                        // Register a synchronous stub function
+                        // Using func_new instead of func_new_async for simpler return value handling
+                        interface.func_new(
                             &func_name,
                             move |mut ctx: StoreContextMut<'_, ActorStore>,
                                   params: &[Val],
@@ -745,96 +826,104 @@ impl Handler for ReplayHandler {
                                 // Serialize the ACTUAL params from the actor as SerializableVal
                                 let actual_input = serialize_params(params);
 
-                                // Clone values we need in the async block
+                                // Clone values we need
                                 let returns_resource = returns_resource;
                                 let is_constructor = is_constructor;
 
-                                Box::new(async move {
-                                    debug!(
-                                        "[REPLAY] {} called, expecting event type: {}",
-                                        full_name, expected_type
-                                    );
+                                debug!(
+                                    "[REPLAY] {} called, expecting event type: {}",
+                                    full_name, expected_type
+                                );
 
-                                    // Expect the next event to match this function call (strict sequential)
-                                    let recorded_output: Option<SerializableVal> =
-                                        match state.expect_next_event(&expected_type) {
-                                            Ok(event) => {
-                                                debug!(
-                                                    "  Matched event at pos {}: {}",
-                                                    state.current_position().saturating_sub(1),
-                                                    event.event_type
-                                                );
+                                // Expect the next event to match this function call (strict sequential)
+                                let (recorded_input, recorded_output): (Option<SerializableVal>, Option<SerializableVal>) =
+                                    match state.expect_next_event(&expected_type) {
+                                        Ok(event) => {
+                                            debug!(
+                                                "  Matched event at pos {}: {}",
+                                                state.current_position().saturating_sub(1),
+                                                event.event_type
+                                            );
 
-                                                // Extract the recorded output from the event
-                                                // The event.data contains a serialized HostFunctionCall
-                                                if let Ok(host_call) =
-                                                    serde_json::from_slice::<HostFunctionCall>(
-                                                        &event.data,
-                                                    )
-                                                {
-                                                    Some(host_call.output)
-                                                } else {
-                                                    None
-                                                }
-                                            }
-                                            Err(e) => {
-                                                // Mismatch detected - this is a determinism failure
-                                                warn!("[REPLAY] {}", e);
-                                                None
-                                            }
-                                        };
-
-                                    // Get the output for recording (use empty tuple if none)
-                                    let output_for_recording = recorded_output
-                                        .clone()
-                                        .unwrap_or_else(|| SerializableVal::Tuple(vec![]));
-
-                                    // Record a NEW event with the ACTUAL input from the actor
-                                    // This allows us to verify the actor is making the same calls
-                                    ctx.data_mut().record_event(ChainEventData {
-                                        event_type: expected_type,
-                                        data: ChainEventPayload::HostFunction(
-                                            HostFunctionCall::new(
-                                                interface,
-                                                function,
-                                                actual_input,
-                                                output_for_recording,
-                                            ),
-                                        ),
-                                    });
-
-                                    // Handle resource-returning functions (constructors)
-                                    if (returns_resource || is_constructor) && !results.is_empty() {
-                                        // Create a new resource handle
-                                        let rep = state.resource_state().new_rep();
-                                        debug!("[REPLAY] Creating resource with rep={}", rep);
-
-                                        // Create a Resource with this rep
-                                        let resource: Resource<ReplayResourceMarker> =
-                                            Resource::new_own(rep);
-
-                                        // Convert to ResourceAny
-                                        match ResourceAny::try_from_resource(resource, &mut ctx) {
-                                            Ok(any) => {
-                                                results[0] = Val::Resource(any);
-                                            }
-                                            Err(e) => {
-                                                warn!(
-                                                    "[REPLAY] Failed to create ResourceAny: {}",
-                                                    e
-                                                );
+                                            // Extract the recorded input and output from the event
+                                            // The event.data contains a serialized HostFunctionCall
+                                            if let Ok(host_call) =
+                                                serde_json::from_slice::<HostFunctionCall>(
+                                                    &event.data,
+                                                )
+                                            {
+                                                (Some(host_call.input), Some(host_call.output))
+                                            } else {
+                                                (None, None)
                                             }
                                         }
-                                    } else if !results.is_empty() {
-                                        // Handle non-resource return values by deserializing from recorded_output
-                                        // SerializableVal preserves type info, so conversion is straightforward
-                                        if let Some(output) = recorded_output {
-                                            deserialize_output(&output, results);
+                                        Err(e) => {
+                                            // Mismatch detected - this is a determinism failure
+                                            warn!("[REPLAY] {}", e);
+                                            (None, None)
+                                        }
+                                    };
+
+                                // Get values for recording (use actual/empty if none recorded)
+                                let input_for_recording = recorded_input
+                                    .unwrap_or_else(|| actual_input.clone());
+                                let output_for_recording = recorded_output
+                                    .clone()
+                                    .unwrap_or_else(|| SerializableVal::Tuple(vec![]));
+
+                                // Record the event using the RECORDED input to produce identical hashes
+                                // This ensures the replay chain matches the original chain exactly
+                                ctx.data_mut().record_event(ChainEventData {
+                                    event_type: expected_type,
+                                    data: ChainEventPayload::HostFunction(
+                                        HostFunctionCall::new(
+                                            interface,
+                                            function,
+                                            input_for_recording,
+                                            output_for_recording,
+                                        ),
+                                    ),
+                                });
+
+                                // Handle resource-returning functions (constructors)
+                                // NOTE: Resource-based replay has limitations. The component model's
+                                // resource lifecycle tracking doesn't work correctly with our dynamic
+                                // resource creation approach. See wasmtime docs on ResourceAny.
+                                if (returns_resource || is_constructor) && !results.is_empty() {
+                                    // Create a resource handle with a unique rep value
+                                    let rep = state.resource_state().new_rep();
+                                    debug!("{} creating resource with rep={}", full_name, rep);
+
+                                    // Create a Resource handle
+                                    let resource: Resource<ReplayResourceMarker> = Resource::new_own(rep);
+
+                                    // Convert to ResourceAny
+                                    match ResourceAny::try_from_resource(resource, &mut ctx) {
+                                        Ok(any) => {
+                                            debug!("{} created ResourceAny: {:?}", full_name, any);
+                                            results[0] = Val::Resource(any);
+                                        }
+                                        Err(e) => {
+                                            warn!(
+                                                "[REPLAY] Failed to create ResourceAny for {}: {}",
+                                                full_name, e
+                                            );
                                         }
                                     }
+                                } else if !results.is_empty() {
+                                    // Handle non-resource return values by deserializing from recorded_output
+                                    if let Some(ref output) = recorded_output {
+                                        debug!(
+                                            "[REPLAY] Deserializing output for {}: {:?}",
+                                            full_name, output
+                                        );
+                                        deserialize_output(output, results);
+                                    } else {
+                                        warn!("[REPLAY] No recorded output for {}", full_name);
+                                    }
+                                }
 
-                                    Ok(())
-                                })
+                                Ok(())
                             },
                         )?;
                     }

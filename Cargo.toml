@@ -21,7 +21,6 @@ members = [
     "crates/theater-handler-supervisor",
     "crates/theater-handler-timing",
     "crates/theater-replay-experimenting",
-    "examples/type-safe-events",
 ]
 resolver = "2"
 

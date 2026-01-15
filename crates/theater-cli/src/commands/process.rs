@@ -201,13 +201,16 @@ async fn run_actor_process(
     loop {
         tokio::select! {
             data = client.next_response() => {
-                if let Ok(data) = data {
-                    match data {
-                        ManagementResponse::ActorStarted { id } => {
-                            debug!("Actor process started: {}", id);
-                            actor_started = true;
-                            let id_str = id.to_string();
-                            actor_id = Some(id_str.clone());
+                let data = data.map_err(|err| {
+                    eprintln!("Process connection error while waiting for events: {}", err);
+                    err
+                })?;
+                match data {
+                    ManagementResponse::ActorStarted { id } => {
+                        debug!("Actor process started: {}", id);
+                        actor_started = true;
+                        let id_str = id.to_string();
+                        actor_id = Some(id_str.clone());
 
                             // Set process timeout now that actor has started
                             if let Some(timeout_duration) = process_timeout_duration {
@@ -230,32 +233,31 @@ async fn run_actor_process(
                             } else {
                                 println!("Process started: {}", id_str);
                             }
+                    }
+                    ManagementResponse::ActorEvent { event } => {
+                        if subscribe {
+                            display_structured_event(&event, &event_fields)
+                                .map_err(|e| CliError::invalid_input("event_display", "event", e.to_string()))?;
+                            if event.event_type == "shutdown" {
+                                break;
+                            }
                         }
-                        ManagementResponse::ActorEvent { event } => {
-                            if subscribe {
-                                display_structured_event(&event, &event_fields)
-                                    .map_err(|e| CliError::invalid_input("event_display", "event", e.to_string()))?;
-                                if event.event_type == "shutdown" {
+                    }
+                    ManagementResponse::ActorResult(result) => {
+                        if parent {
+                            match subscribe {
+                                true => actor_result = Some(result),
+                                false => {
+                                    write_actor_result(result);
                                     break;
                                 }
                             }
                         }
-                        ManagementResponse::ActorResult(result) => {
-                            if parent {
-                                match subscribe {
-                                    true => actor_result = Some(result),
-                                    false => {
-                                        write_actor_result(result);
-                                        break;
-                                    }
-                                }
-                            }
-                        }
-                        ManagementResponse::Error { error } => {
-                            return Err(CliError::management_error(error));
-                        }
-                        _ => {}
                     }
+                    ManagementResponse::Error { error } => {
+                        return Err(CliError::management_error(error));
+                    }
+                    _ => {}
                 }
             }
 

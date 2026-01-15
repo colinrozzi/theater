@@ -9,4 +9,4 @@ type = "runtime"
 
 [[handler]]
 type = "replay"
-chain = "/Users/colinrozzi/work/theater/random-chain.json"
+chain = "/Users/colinrozzi/work/theater/crates/theater-handler-random/test-actors/wasi-random-test/chain.json"
