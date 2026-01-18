@@ -137,12 +137,17 @@ async fn replay_single_request(
     // Call the component's handler
     {
         let mut guard = shared_instance.write().await;
-        let actor_instance = match &mut *guard {
+        let unified_instance = match &mut *guard {
             Some(instance) => instance,
             None => {
                 bail!("Actor instance not available for replay");
             }
         };
+
+        // HTTP replay handler only supports wasmtime instances
+        let actor_instance = unified_instance
+            .as_wasmtime_mut()
+            .ok_or_else(|| anyhow::anyhow!("HTTP replay handler does not support Composite instances"))?;
 
         // Push resources to the resource table
         let request_resource: Resource<HostIncomingRequest> = {
@@ -253,32 +258,34 @@ async fn replay_single_request(
             // Record the replay event
             {
                 let guard = shared_instance.read().await;
-                if let Some(instance) = &*guard {
-                    let response_headers: Vec<(String, String)> = response
-                        .headers
-                        .entries()
-                        .iter()
-                        .map(|(name, value)| (name.clone(), b64.encode(value)))
-                        .collect();
+                if let Some(unified_instance) = &*guard {
+                    if let Some(instance) = unified_instance.as_wasmtime() {
+                        let response_headers: Vec<(String, String)> = response
+                            .headers
+                            .entries()
+                            .iter()
+                            .map(|(name, value)| (name.clone(), b64.encode(value)))
+                            .collect();
 
-                    let actual_response_data = HttpResponseData {
-                        status_code: actual_status,
-                        headers: response_headers,
-                        body: b64.encode(&actual_body),
-                    };
+                        let actual_response_data = HttpResponseData {
+                            status_code: actual_status,
+                            headers: response_headers,
+                            body: b64.encode(&actual_body),
+                        };
 
-                    // Serialize structs to JSON strings for recording
-                    let request_json = serde_json::to_string(&request_data).unwrap_or_default();
-                    let response_json = serde_json::to_string(&actual_response_data).unwrap_or_default();
-                    instance
-                        .actor_component
-                        .actor_store
-                        .record_host_function_call(
-                            "wasi:http/incoming-handler@0.2.0",
-                            "handle",
-                            SerializableVal::String(request_json),
-                            SerializableVal::String(response_json),
-                        );
+                        // Serialize structs to JSON strings for recording
+                        let request_json = serde_json::to_string(&request_data).unwrap_or_default();
+                        let response_json = serde_json::to_string(&actual_response_data).unwrap_or_default();
+                        instance
+                            .actor_component
+                            .actor_store
+                            .record_host_function_call(
+                                "wasi:http/incoming-handler@0.2.0",
+                                "handle",
+                                SerializableVal::String(request_json),
+                                SerializableVal::String(response_json),
+                            );
+                    }
                 }
             }
 

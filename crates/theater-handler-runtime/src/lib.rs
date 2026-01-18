@@ -19,6 +19,11 @@ use theater::shutdown::ShutdownReceiver;
 use theater::wasm::{ActorComponent, ActorInstance};
 use tokio::sync::mpsc::Sender;
 
+// Composite integration
+use theater::composite_bridge::{
+    AsyncCtx, CompositeInstance, Ctx, HostLinkerBuilder, LinkerError, Value,
+};
+
 /// Handler for providing runtime information and control to WebAssembly actors
 #[derive(Clone)]
 pub struct RuntimeHandler {
@@ -222,6 +227,162 @@ impl Handler for RuntimeHandler {
         // init: func(state: option<list<u8>>) -> result<tuple<option<list<u8>>>, string>
         // This is a state-only function - it takes only state and returns state
         actor_instance.register_function_state_only("theater:simple/actor", "init")
+    }
+
+    // =========================================================================
+    // Composite Integration
+    // =========================================================================
+
+    fn setup_host_functions_composite(
+        &mut self,
+        builder: &mut HostLinkerBuilder<'_, ActorStore>,
+        ctx: &mut HandlerContext,
+    ) -> Result<(), LinkerError> {
+        info!("Setting up runtime host functions (Composite)");
+
+        // Check if the interface is already satisfied by another handler
+        if ctx.is_satisfied("theater:simple/runtime") {
+            info!("theater:simple/runtime already satisfied by another handler, skipping");
+            return Ok(());
+        }
+
+        let theater_tx = self.theater_tx.clone();
+
+        builder
+            .interface("theater:simple/runtime")?
+            // Log function: log(msg: string)
+            .func_typed("log", |ctx: &mut Ctx<'_, ActorStore>, input: Value| {
+                // Extract string from Value
+                let msg = match input {
+                    Value::String(s) => s,
+                    _ => format!("{:?}", input),
+                };
+
+                let store = ctx.data();
+                let id = store.id.clone();
+
+                // Record host function call
+                store.record_host_function_call(
+                    "theater:simple/runtime",
+                    "log",
+                    msg.clone().into_serializable_val(),
+                    ().into_serializable_val(),
+                );
+
+                info!("[ACTOR] [{}] {}", id, msg);
+
+                // Return unit (empty tuple)
+                Value::Tuple(vec![])
+            })?
+            // Get chain function: get-chain() -> chain
+            .func_typed(
+                "get-chain",
+                |ctx: &mut Ctx<'_, ActorStore>, _input: Value| {
+                    let store = ctx.data();
+                    let events = store.get_all_events();
+
+                    // Convert to WIT format: list<meta-event>
+                    // meta-event = { hash: u64, event: event }
+                    // event = { event-type: string, parent: option<u64>, data: list<u8> }
+                    let chain_events: Vec<Value> = events
+                        .iter()
+                        .enumerate()
+                        .map(|(i, e)| {
+                            let hash = Value::U64(i as u64);
+                            let parent = if i > 0 {
+                                Value::Option(Some(Box::new(Value::U64((i - 1) as u64))))
+                            } else {
+                                Value::Option(None)
+                            };
+                            let event_type = Value::String(e.event_type.clone());
+                            let data = Value::List(e.data.iter().map(|b| Value::U8(*b)).collect());
+
+                            // meta-event record: (hash, (event-type, parent, data))
+                            Value::Tuple(vec![
+                                hash,
+                                Value::Tuple(vec![event_type, parent, data]),
+                            ])
+                        })
+                        .collect();
+
+                    // Record host function call
+                    store.record_host_function_call(
+                        "theater:simple/runtime",
+                        "get-chain",
+                        ().into_serializable_val(),
+                        (chain_events.len() as u64).into_serializable_val(),
+                    );
+
+                    // Return as chain record: (events,)
+                    Value::Tuple(vec![Value::List(chain_events)])
+                },
+            )?
+            // Shutdown function: shutdown(data: option<list<u8>>) -> result<(), string>
+            .func_async_result(
+                "shutdown",
+                move |ctx: AsyncCtx<ActorStore>, input: Value| {
+                    let theater_tx = theater_tx.clone();
+
+                    async move {
+                        // Parse input: option<list<u8>>
+                        let data: Option<Vec<u8>> = match input {
+                            Value::Option(Some(inner)) => match *inner {
+                                Value::List(bytes) => {
+                                    let result: Result<Vec<u8>, _> = bytes
+                                        .into_iter()
+                                        .map(|v| match v {
+                                            Value::U8(b) => Ok(b),
+                                            _ => Err("expected u8"),
+                                        })
+                                        .collect();
+                                    result.ok()
+                                }
+                                _ => None,
+                            },
+                            Value::Option(None) => None,
+                            _ => None,
+                        };
+
+                        let store = ctx.data();
+                        let actor_id = store.id.clone();
+
+                        info!("[ACTOR] [{}] Shutdown requested: {:?}", actor_id, data);
+
+                        // Record host function call
+                        store.record_host_function_call(
+                            "theater:simple/runtime",
+                            "shutdown",
+                            data.clone().into_serializable_val(),
+                            true.into_serializable_val(),
+                        );
+
+                        // Send shutdown command
+                        match theater_tx
+                            .send(TheaterCommand::ShuttingDown {
+                                actor_id,
+                                data,
+                            })
+                            .await
+                        {
+                            Ok(_) => Ok(Value::Tuple(vec![])),
+                            Err(e) => Err(Value::String(e.to_string())),
+                        }
+                    }
+                },
+            )?;
+
+        ctx.mark_satisfied("theater:simple/runtime");
+        Ok(())
+    }
+
+    fn register_exports_composite(&self, instance: &mut CompositeInstance) -> anyhow::Result<()> {
+        // Register the init export function
+        instance.register_export("theater:simple/actor", "init");
+        Ok(())
+    }
+
+    fn supports_composite(&self) -> bool {
+        true
     }
 
     fn name(&self) -> &str {

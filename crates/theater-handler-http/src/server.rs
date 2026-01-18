@@ -182,12 +182,17 @@ async fn handle_request_inner(
     // Get write lock on actor instance and call the handler
     {
         let mut guard = shared_instance.write().await;
-        let actor_instance = match &mut *guard {
+        let unified_instance = match &mut *guard {
             Some(instance) => instance,
             None => {
                 bail!("Actor instance not available");
             }
         };
+
+        // HTTP handler only supports wasmtime instances
+        let actor_instance = unified_instance
+            .as_wasmtime_mut()
+            .ok_or_else(|| anyhow::anyhow!("HTTP handler does not support Composite instances"))?;
 
         // Push resources to the resource table and get Resource handles
         let request_resource: Resource<HostIncomingRequest> = {
@@ -310,7 +315,7 @@ async fn handle_request_inner(
                 info!("Got read lock on shared_instance");
                 if let Some(instance) = &*guard {
                     info!("Found actor instance, recording WasmResult event");
-                    instance.actor_component.actor_store.record_event(ChainEventData {
+                    instance.record_event(ChainEventData {
                         event_type: "wasm".to_string(),
                         data: ChainEventPayload::Wasm(WasmEventData::WasmResult {
                             function_name: "wasi:http/incoming-handler@0.2.0/handle".to_string(),
@@ -351,7 +356,7 @@ async fn handle_request_inner(
             {
                 let guard = shared_instance.read().await;
                 if let Some(instance) = &*guard {
-                    instance.actor_component.actor_store.record_event(ChainEventData {
+                    instance.record_event(ChainEventData {
                         event_type: "wasm".to_string(),
                         data: ChainEventPayload::Wasm(WasmEventData::WasmResult {
                             function_name: "wasi:http/incoming-handler@0.2.0/handle".to_string(),

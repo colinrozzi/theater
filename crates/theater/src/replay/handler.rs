@@ -410,9 +410,14 @@ async fn trigger_export(
     );
 
     let mut guard = actor_instance.write().await;
-    let instance = guard
+    let unified_instance = guard
         .as_mut()
         .ok_or_else(|| anyhow::anyhow!("Actor instance not available"))?;
+
+    // Replay handler only supports wasmtime instances for now
+    let instance = unified_instance
+        .as_wasmtime_mut()
+        .ok_or_else(|| anyhow::anyhow!("Replay handler does not support Composite instances yet"))?;
 
     // Get the interface export
     let interface_export = instance
@@ -501,10 +506,21 @@ impl Handler for ReplayHandler {
             let (actor_id, theater_tx) = {
                 let guard = actor_instance.read().await;
                 match &*guard {
-                    Some(instance) => {
-                        let id = instance.actor_component.actor_store.id.clone();
-                        let tx = instance.actor_component.actor_store.theater_tx.clone();
-                        (id, tx)
+                    Some(unified_instance) => {
+                        // Get ID and tx from wasmtime instance
+                        match unified_instance.as_wasmtime() {
+                            Some(instance) => {
+                                let id = instance.actor_component.actor_store.id.clone();
+                                let tx = instance.actor_component.actor_store.theater_tx.clone();
+                                (id, tx)
+                            }
+                            None => {
+                                error!("Replay handler does not support Composite instances yet");
+                                return Err(anyhow::anyhow!(
+                                    "Replay handler does not support Composite instances yet"
+                                ));
+                            }
+                        }
                     }
                     None => {
                         warn!("Actor instance not available for replay subscription");
@@ -659,8 +675,8 @@ impl Handler for ReplayHandler {
                 let summary = crate::events::replay::ReplaySummary::success(total, current);
 
                 if let Ok(guard) = actor_instance.try_read() {
-                    if let Some(instance) = guard.as_ref() {
-                        instance.actor_component.actor_store.record_event(
+                    if let Some(unified_instance) = guard.as_ref() {
+                        unified_instance.record_event(
                             crate::events::ChainEventData {
                                 event_type: "replay-summary".to_string(),
                                 data: crate::events::ChainEventPayload::ReplaySummary(summary),

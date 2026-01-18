@@ -1,5 +1,7 @@
 use crate::actor::handle::ActorHandle;
+use crate::actor::store::ActorStore;
 use crate::chain::ChainEvent;
+use crate::composite_bridge::{CompositeInstance, HostLinkerBuilder, LinkerError};
 use crate::config::actor_manifest::HandlerConfig;
 use crate::shutdown::ShutdownReceiver;
 use crate::wasm::{ActorComponent, ActorInstance};
@@ -12,7 +14,7 @@ use tokio::sync::RwLock;
 use tracing::{debug, info};
 
 /// Shared reference to an actor instance for handlers that need direct store access
-pub type SharedActorInstance = Arc<RwLock<Option<ActorInstance>>>;
+pub type SharedActorInstance = Arc<RwLock<Option<crate::composite_bridge::UnifiedInstance>>>;
 
 /// Context passed to handlers during setup, tracking which imports are already satisfied
 #[derive(Debug, Clone, Default)]
@@ -223,6 +225,14 @@ impl HandlerRegistry {
 ///
 /// External handler crates can implement this trait and register their handlers
 /// with the Theater runtime without depending on the concrete `Handler` enum.
+///
+/// ## Composite Migration
+///
+/// For handlers migrating to Composite's Graph ABI runtime, implement these methods:
+/// - `setup_host_functions_composite()` - Register host functions using `HostLinkerBuilder`
+/// - `register_exports_composite()` - Register export function metadata
+///
+/// These have default implementations that do nothing, allowing gradual migration.
 pub trait Handler: Send + Sync + 'static {
     /// Create a new instance of this handler, optionally with a config from the manifest.
     ///
@@ -237,7 +247,9 @@ pub trait Handler: Send + Sync + 'static {
         shutdown_receiver: ShutdownReceiver,
     ) -> Pin<Box<dyn Future<Output = Result<()>> + Send>>;
 
-    /// Set up host functions for this handler.
+    /// Set up host functions for this handler (wasmtime Component Model).
+    ///
+    /// **DEPRECATED**: Use `setup_host_functions_composite()` for new handlers.
     ///
     /// The `ctx` parameter provides information about which imports have already been
     /// satisfied by other handlers. Handlers should check `ctx.is_satisfied(import)`
@@ -249,7 +261,57 @@ pub trait Handler: Send + Sync + 'static {
         ctx: &mut HandlerContext,
     ) -> Result<()>;
 
+    /// Set up host functions for this handler (Composite Graph ABI runtime).
+    ///
+    /// This is the new method for Composite integration. Handlers should register
+    /// their host functions using the `HostLinkerBuilder`:
+    ///
+    /// ```ignore
+    /// fn setup_host_functions_composite(
+    ///     &mut self,
+    ///     builder: &mut HostLinkerBuilder<'_, ActorStore>,
+    ///     ctx: &mut HandlerContext,
+    /// ) -> Result<(), LinkerError> {
+    ///     if ctx.is_satisfied("my:interface") {
+    ///         return Ok(());
+    ///     }
+    ///
+    ///     builder.interface("my:interface")?
+    ///         .func_typed("my_function", |ctx: &mut Ctx<'_, ActorStore>, input: String| {
+    ///             // handle the call
+    ///             "result".to_string()
+    ///         })?;
+    ///
+    ///     ctx.mark_satisfied("my:interface");
+    ///     Ok(())
+    /// }
+    /// ```
+    ///
+    /// Default implementation does nothing, allowing gradual migration.
+    fn setup_host_functions_composite(
+        &mut self,
+        _builder: &mut HostLinkerBuilder<'_, ActorStore>,
+        _ctx: &mut HandlerContext,
+    ) -> Result<(), LinkerError> {
+        // Default: do nothing - handlers opt-in by overriding
+        Ok(())
+    }
+
+    /// Register export functions (wasmtime Component Model).
+    ///
+    /// **DEPRECATED**: Use `register_exports_composite()` for new handlers.
     fn add_export_functions(&self, actor_instance: &mut ActorInstance) -> Result<()>;
+
+    /// Register export function metadata for Composite instances.
+    ///
+    /// This records which export functions this handler expects from the actor.
+    /// The actual function calls are made through `CompositeInstance::call_function()`.
+    ///
+    /// Default implementation does nothing, allowing gradual migration.
+    fn register_exports_composite(&self, _instance: &mut CompositeInstance) -> Result<()> {
+        // Default: do nothing - handlers opt-in by overriding
+        Ok(())
+    }
 
     fn name(&self) -> &str;
 
@@ -260,4 +322,13 @@ pub trait Handler: Send + Sync + 'static {
     /// Returns the list of exports this handler expects from the component.
     /// Used for matching handlers to components that export these interfaces.
     fn exports(&self) -> Option<Vec<String>>;
+
+    /// Returns true if this handler supports Composite's Graph ABI runtime.
+    ///
+    /// Handlers that override `setup_host_functions_composite()` should
+    /// return `true` here. This is used by ActorRuntime to determine
+    /// which runtime to use.
+    fn supports_composite(&self) -> bool {
+        false
+    }
 }

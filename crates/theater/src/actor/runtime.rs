@@ -8,7 +8,7 @@ use crate::actor::handle::ActorHandle;
 use crate::actor::store::ActorStore;
 use crate::actor::types::ActorError;
 use crate::actor::types::ActorOperation;
-use crate::chain::HttpReplayChain;
+use crate::composite_bridge::{AsyncRuntime, CompositeInstance, UnifiedInstance};
 use crate::events::wasm::WasmEventData;
 use crate::events::ChainEventData;
 use crate::handler::Handler;
@@ -203,7 +203,7 @@ impl ActorRuntime {
         info_tx: Sender<ActorInfo>,
         control_tx: Sender<ActorControl>,
         actor_phase_manager: ActorPhaseManager,
-        actor_instance_wrapper: Arc<RwLock<Option<ActorInstance>>>,
+        actor_instance_wrapper: Arc<RwLock<Option<UnifiedInstance>>>,
     ) -> Result<(ShutdownController, Vec<JoinHandle<()>>), ActorRuntimeError> {
         // ---------------- Checkpoint Setup Initial ----------------
 
@@ -434,7 +434,7 @@ impl ActorRuntime {
         // Put actor_instance in the shared wrapper
         {
             let mut instance_guard = actor_instance_wrapper.write().await;
-            *instance_guard = Some(actor_instance);
+            *instance_guard = Some(UnifiedInstance::Wasmtime(actor_instance));
         }
 
         // Start the handlers
@@ -484,7 +484,7 @@ impl ActorRuntime {
         let actor_phase_manager = ActorPhaseManager::new();
 
         // These will be set once setup completes
-        let actor_instance_wrapper: Arc<RwLock<Option<ActorInstance>>> =
+        let actor_instance_wrapper: Arc<RwLock<Option<UnifiedInstance>>> =
             Arc::new(RwLock::new(None));
         let metrics: Arc<RwLock<MetricsCollector>> = Arc::new(RwLock::new(MetricsCollector::new()));
         let handler_tasks: Arc<RwLock<Vec<JoinHandle<()>>>> = Arc::new(RwLock::new(vec![]));
@@ -667,7 +667,7 @@ impl ActorRuntime {
 
     async fn operation_loop(
         mut operation_rx: Receiver<ActorOperation>,
-        actor_instance_wrapper: Arc<RwLock<Option<ActorInstance>>>,
+        actor_instance_wrapper: Arc<RwLock<Option<UnifiedInstance>>>,
         metrics: Arc<RwLock<MetricsCollector>>,
         theater_tx: Sender<TheaterCommand>,
         actor_phase_manager: ActorPhaseManager,
@@ -701,7 +701,7 @@ impl ActorRuntime {
 
     async fn process_operation(
         op: ActorOperation,
-        actor_instance_wrapper: &Arc<RwLock<Option<ActorInstance>>>,
+        actor_instance_wrapper: &Arc<RwLock<Option<UnifiedInstance>>>,
         metrics: &Arc<RwLock<MetricsCollector>>,
         theater_tx: &Sender<TheaterCommand>,
         actor_phase_manager: ActorPhaseManager,
@@ -781,7 +781,7 @@ impl ActorRuntime {
 
     async fn info_loop(
         mut info_rx: Receiver<ActorInfo>,
-        actor_instance_wrapper: Arc<RwLock<Option<ActorInstance>>>,
+        actor_instance_wrapper: Arc<RwLock<Option<UnifiedInstance>>>,
         metrics: Arc<RwLock<MetricsCollector>>,
         actor_phase_manager: ActorPhaseManager,
     ) {
@@ -807,7 +807,7 @@ impl ActorRuntime {
                     ActorInfo::GetState { response_tx } => {
                         match &*actor_instance_wrapper.read().await {
                             Some(instance) => {
-                                let state = instance.store.data().get_state();
+                                let state = instance.get_state();
                                 if let Err(e) = response_tx.send(Ok(state)) {
                                     error!("Failed to send state response: {:?}", e);
                                 }
@@ -832,7 +832,7 @@ impl ActorRuntime {
                                 return;
                             }
                             Some(instance) => {
-                                let chain = instance.store.data().get_chain();
+                                let chain = instance.get_chain();
                                 if let Err(e) = response_tx.send(Ok(chain)) {
                                     error!("Failed to send chain response: {:?}", e);
                                 }
@@ -901,67 +901,58 @@ impl ActorRuntime {
     /// * `Ok(Vec<u8>)` - Serialized result of the function call
     /// * `Err(ActorError)` - Error that occurred during execution
     async fn execute_call(
-        actor_instance: &mut ActorInstance,
+        actor_instance: &mut UnifiedInstance,
         name: &String,
         params: Vec<u8>,
         _theater_tx: &mpsc::Sender<TheaterCommand>,
         metrics: &MetricsCollector,
     ) -> Result<Vec<u8>, ActorError> {
         // Validate the function exists
-        if !actor_instance.has_function(&name) {
+        if !actor_instance.has_function(name) {
             error!("Function '{}' not found in actor", name);
             return Err(ActorError::FunctionNotFound(name.to_string()));
         }
 
         let start = Instant::now();
 
-        let state = actor_instance.store.data().get_state();
+        let state = actor_instance.get_state();
         debug!(
             "Executing call to function '{}' with state size: {:?}",
             name,
             state.as_ref().map(|s| s.len()).unwrap_or(0)
         );
 
-        actor_instance
-            .store
-            .data_mut()
-            .record_event(ChainEventData {
-                event_type: "wasm".to_string(),
-                data: WasmEventData::WasmCall {
-                    function_name: name.clone(),
-                    params: params.clone(),
-                }
-                .into(),
-            });
+        actor_instance.record_event(ChainEventData {
+            event_type: "wasm".to_string(),
+            data: WasmEventData::WasmCall {
+                function_name: name.clone(),
+                params: params.clone(),
+            }
+            .into(),
+        });
 
         // Execute the call
-        let (new_state, results) = match actor_instance.call_function(&name, state, params).await {
+        let (new_state, results) = match actor_instance.call_function(name, state, params).await {
             Ok(result) => {
-                actor_instance
-                    .store
-                    .data_mut()
-                    .record_event(ChainEventData {
-                        event_type: "wasm".to_string(),
-                        data: WasmEventData::WasmResult {
-                            function_name: name.clone(),
-                            result: result.clone(),
-                        }
-                        .into(),
-                    });
+                actor_instance.record_event(ChainEventData {
+                    event_type: "wasm".to_string(),
+                    data: WasmEventData::WasmResult {
+                        function_name: name.clone(),
+                        result: result.clone(),
+                    }
+                    .into(),
+                });
                 result
             }
             Err(e) => {
-                let event = actor_instance
-                    .store
-                    .data_mut()
-                    .record_event(ChainEventData {
-                        event_type: "wasm".to_string(),
-                        data: WasmEventData::WasmError {
-                            function_name: name.clone(),
-                            message: e.to_string(),
-                        }
-                        .into(),
-                    });
+                let event = actor_instance.record_event(ChainEventData {
+                    event_type: "wasm".to_string(),
+                    data: WasmEventData::WasmError {
+                        function_name: name.clone(),
+                        message: e.to_string(),
+                    }
+                    .into(),
+                });
 
                 error!("Failed to execute function '{}': {}", name, e);
                 return Err(ActorError::Internal(event));
@@ -973,7 +964,7 @@ impl ActorRuntime {
             name,
             new_state.as_ref().map(|s| s.len()).unwrap_or(0)
         );
-        actor_instance.store.data_mut().set_state(new_state);
+        actor_instance.set_state(new_state);
 
         // Record metrics
         let duration = start.elapsed();

@@ -34,6 +34,7 @@ use anyhow::Result;
 
 pub mod actor;
 pub mod chain;
+pub mod composite_bridge;
 pub mod config;
 pub mod errors;
 pub mod events;
@@ -74,3 +75,9 @@ pub use replay::{HostFunctionCall, ReplayHandler, ReplayState};
 pub use store::{ContentRef, ContentStore, Label};
 pub use theater_runtime::TheaterRuntime;
 pub use wasm::{ActorComponent, ActorInstance, MemoryStats, WasmError};
+
+// Composite integration
+pub use composite_bridge::{
+    AsyncCtx, AsyncRuntime, CompositeInstance, Ctx, HostLinkerBuilder, IntoValue, LinkerError,
+    UnifiedInstance, Value,
+};

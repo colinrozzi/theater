@@ -61,3 +61,7 @@ theater-handler-sockets = { version = "0.2.1", path = "crates/theater-handler-so
 theater-handler-store = { version = "0.2.1", path = "crates/theater-handler-store" }
 theater-handler-supervisor = { version = "0.2.1", path = "crates/theater-handler-supervisor" }
 theater-handler-timing = { version = "0.2.1", path = "crates/theater-handler-timing" }
+
+# Composite runtime integration
+composite = { path = "../composite" }
+composite-abi = { path = "../composite/crates/composite-abi" }
