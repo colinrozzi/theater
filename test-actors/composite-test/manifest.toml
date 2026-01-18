@@ -1,0 +1,6 @@
+[actor]
+name = "composite-test"
+component = "./target/wasm32-unknown-unknown/release/composite_test_actor.wasm"
+
+[handlers]
+runtime = {}
