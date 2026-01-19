@@ -25,4 +25,7 @@ world test-actor {
         ok(actor-state),
         err(string),
     }
+
+    // Export the theater:simple/actor interface
+    export theater:simple/actor
 }

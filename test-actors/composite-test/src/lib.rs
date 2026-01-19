@@ -21,8 +21,8 @@ composite_guest::setup_guest!();
 // This generates: Message, Sexpr, ActorState, InitResult
 wit!();
 
-// Import the log function from the host
-#[import(module = "theater:simple/runtime")]
+// Import the log function from the host using WIT path
+#[import(wit = "theater:simple/runtime.log")]
 fn log(msg: String);
 
 /// Test that the generated types work correctly
@@ -69,7 +69,8 @@ fn test_generated_types() {
 /// Output format: Variant (Result)
 ///   - tag 0 (Ok): Tuple(Option<List<u8>>, any_result)
 ///   - tag 1 (Err): String error message
-#[export(name = "theater:simple/actor.init")]
+// Using full path - the export name is automatically derived from WIT
+#[export(wit = "theater:simple/actor.init")]
 fn init(input: Value) -> Value {
     log(String::from("Composite test actor: init called!"));
 
