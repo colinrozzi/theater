@@ -1,0 +1,28 @@
+// WIT+ definition for the test actor
+// This demonstrates type generation including recursive types
+
+world test-actor {
+    // A simple message type
+    record message {
+        content: string,
+        timestamp: u64,
+    }
+
+    // An S-expression type for recursive data
+    variant sexpr {
+        atom(string),
+        list(list<self>),
+    }
+
+    // State can be either initialized or empty
+    variant actor-state {
+        empty,
+        initialized(message),
+    }
+
+    // Result type for init
+    variant init-result {
+        ok(actor-state),
+        err(string),
+    }
+}

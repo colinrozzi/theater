@@ -3,7 +3,7 @@
 //! This actor:
 //! 1. Exports `init` function for the theater:simple/actor interface
 //! 2. Imports `log` function from theater:simple/runtime interface
-//! 3. Demonstrates basic state handling
+//! 3. Demonstrates basic state handling with WIT+-generated types
 
 #![no_std]
 
@@ -12,40 +12,52 @@ extern crate alloc;
 use alloc::string::String;
 use alloc::vec::Vec;
 use alloc::boxed::Box;
-use composite_guest::{export, Value, encode};
+use composite_guest::{export, import, wit, Value};
 
 // Set up allocator and panic handler
 composite_guest::setup_guest!();
 
+// Generate types from WIT+ files in the wit/ directory
+// This generates: Message, Sexpr, ActorState, InitResult
+wit!();
+
 // Import the log function from the host
-// In Composite, we need to declare external functions that match the Graph ABI signature
-#[link(wasm_import_module = "theater:simple/runtime")]
-extern "C" {
-    #[link_name = "log"]
-    fn host_log(in_ptr: i32, in_len: i32, out_ptr: i32, out_cap: i32) -> i32;
-}
+#[import(module = "theater:simple/runtime")]
+fn log(msg: String);
 
-/// Call the host's log function with a message
-fn log(msg: &str) {
-    // Encode the message as a Value::String
-    let input = Value::String(String::from(msg));
-    let input_bytes = match encode(&input) {
-        Ok(b) => b,
-        Err(_) => return,
+/// Test that the generated types work correctly
+fn test_generated_types() {
+    // Test Message record
+    let msg = Message {
+        content: String::from("Hello, World!"),
+        timestamp: 12345,
     };
+    let _msg_value: Value = msg.clone().into();
 
-    // Prepare output buffer (log returns unit, so small buffer is fine)
-    let mut output_buf = [0u8; 64];
+    // Test Sexpr variant with recursive self type
+    let atom = Sexpr::Atom(String::from("hello"));
+    let _atom_value: Value = atom.clone().into();
 
-    // Call the host function
-    let _result = unsafe {
-        host_log(
-            input_bytes.as_ptr() as i32,
-            input_bytes.len() as i32,
-            output_buf.as_mut_ptr() as i32,
-            output_buf.len() as i32,
-        )
-    };
+    // Test nested Sexpr (list of self)
+    let nested = Sexpr::List(alloc::vec![
+        Box::new(Sexpr::Atom(String::from("a"))),
+        Box::new(Sexpr::Atom(String::from("b"))),
+    ]);
+    let _nested_value: Value = nested.into();
+
+    // Test ActorState
+    let empty_state = ActorState::Empty;
+    let _: Value = empty_state.into();
+
+    let initialized_state = ActorState::Initialized(msg);
+    let _: Value = initialized_state.into();
+
+    // Test InitResult
+    let ok_result = InitResult::Ok(ActorState::Empty);
+    let _: Value = ok_result.into();
+
+    let err_result = InitResult::Err(String::from("Error!"));
+    let _: Value = err_result.into();
 }
 
 /// The init function for theater:simple/actor interface.
@@ -59,7 +71,11 @@ fn log(msg: &str) {
 ///   - tag 1 (Err): String error message
 #[export(name = "theater:simple/actor.init")]
 fn init(input: Value) -> Value {
-    log("Composite test actor: init called!");
+    log(String::from("Composite test actor: init called!"));
+
+    // Test the generated types
+    test_generated_types();
+    log(String::from("Generated types test passed!"));
 
     // Parse input: Tuple(state, params)
     let (state, _params) = match input {
@@ -69,7 +85,7 @@ fn init(input: Value) -> Value {
             (state, params)
         }
         _ => {
-            log("Composite test actor: unexpected input format");
+            log(String::from("Composite test actor: unexpected input format"));
             // Return error
             return Value::Variant {
                 tag: 1,
@@ -78,12 +94,12 @@ fn init(input: Value) -> Value {
         }
     };
 
-    log("Composite test actor: processing state...");
+    log(String::from("Composite test actor: processing state..."));
 
     // Just pass through the state unchanged for this simple test
     let new_state = state;
 
-    log("Composite test actor: init completed successfully!");
+    log(String::from("Composite test actor: init completed successfully!"));
 
     // Return Ok variant: Variant { tag: 0, payload: Tuple(new_state, result) }
     // The result is just unit for init
