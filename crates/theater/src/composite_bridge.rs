@@ -140,13 +140,14 @@ impl CompositeInstance {
     /// Call an export function with the given state and parameters.
     ///
     /// This is the primary way to invoke actor functions. It:
-    /// 1. Encodes the input as a Graph ABI value
-    /// 2. Calls the function
-    /// 3. Decodes the output
+    /// 1. Validates the function is registered
+    /// 2. Encodes the input as a Graph ABI value
+    /// 3. Calls the function using the full qualified name
+    /// 4. Decodes the output
     ///
     /// ## Parameters
     ///
-    /// * `function_name` - The function to call (e.g., "init")
+    /// * `function_name` - The function name (e.g., "theater:simple/actor.init")
     /// * `state` - Current actor state (optional)
     /// * `params` - Parameters encoded as bytes (will be decoded and re-encoded as Value)
     ///
@@ -159,12 +160,17 @@ impl CompositeInstance {
         state: Option<Vec<u8>>,
         params: Vec<u8>,
     ) -> Result<(Option<Vec<u8>>, Vec<u8>)> {
+        // Validate the function is registered
+        if !self.export_functions.contains_key(function_name) {
+            return Err(anyhow::anyhow!("Function '{}' not registered", function_name));
+        }
+
         // Build input value: tuple of (state, params)
         let state_value = state_to_value(state);
         let params_value = bytes_to_value(&params);
         let input = Value::Tuple(vec![state_value, params_value]);
 
-        // Call the function
+        // Call the function using the full name (Composite exports use the #[export(name = "...")] syntax)
         let output = self
             .instance
             .call_with_value_async(function_name, &input, 0)

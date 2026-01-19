@@ -285,7 +285,7 @@ fn list_children() -> Result<Vec<String>, String> {
 // Actor export: init
 // ============================================================================
 
-#[export]
+#[export(name = "theater:simple/actor.init")]
 fn init(input: Value) -> Value {
     log("=== Multi-handler test actor starting ===");
 

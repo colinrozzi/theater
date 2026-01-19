@@ -124,6 +124,48 @@ impl ActorHandle {
         }
     }
 
+    /// Call a function on the actor without expecting a return value.
+    ///
+    /// This is useful for Composite runtime where results are in Graph ABI format,
+    /// not JSON. The function call succeeds if no error is returned.
+    pub async fn call_function_void(&self, name: String, params: Vec<u8>) -> Result<(), ActorError> {
+        let (tx, rx) = oneshot::channel();
+
+        self.operation_tx
+            .send(ActorOperation::CallFunction {
+                name: name.clone(),
+                params,
+                response_tx: tx,
+            })
+            .await
+            .map_err(|e| {
+                error!("Failed to send operation: {}", e);
+                ActorError::ChannelClosed
+            })?;
+
+        match timeout(DEFAULT_OPERATION_TIMEOUT, rx).await {
+            Ok(result) => match result {
+                Ok(inner_result) => match inner_result {
+                    Ok(_) => Ok(()),
+                    Err(e) => {
+                        error!("Function call '{}' failed: {:?}", name, e);
+                        Err(e)
+                    }
+                },
+                Err(_) => {
+                    error!("Channel closed while waiting for function call '{}'", name);
+                    Err(ActorError::ChannelClosed)
+                }
+            },
+            Err(_) => {
+                error!("Operation timed out after {:?}", DEFAULT_OPERATION_TIMEOUT);
+                Err(ActorError::OperationTimeout(
+                    DEFAULT_OPERATION_TIMEOUT.as_secs(),
+                ))
+            }
+        }
+    }
+
     /// Handle a WASI HTTP incoming request.
     ///
     /// ## Purpose

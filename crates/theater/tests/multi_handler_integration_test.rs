@@ -122,7 +122,10 @@ async fn test_multi_handler_composite() {
     info!("Calling init function to test all handlers...");
     info!("========================================");
 
-    let result = instance.call_function("init", state, params).await;
+    // Use the full key format: "{interface}.{function}"
+    let result = instance
+        .call_function("theater:simple/actor.init", state, params)
+        .await;
 
     info!("========================================");
 

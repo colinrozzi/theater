@@ -57,7 +57,7 @@ fn log(msg: &str) {
 /// Output format: Variant (Result)
 ///   - tag 0 (Ok): Tuple(Option<List<u8>>, any_result)
 ///   - tag 1 (Err): String error message
-#[export]
+#[export(name = "theater:simple/actor.init")]
 fn init(input: Value) -> Value {
     log("Composite test actor: init called!");
 

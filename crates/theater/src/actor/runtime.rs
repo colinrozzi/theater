@@ -430,7 +430,7 @@ impl ActorRuntime {
                 // and returns updated state.
                 // init: func(state: option<list<u8>>) -> result<tuple<option<list<u8>>>, string>
                 init_actor_handle
-                    .call_function::<(), ()>("theater:simple/actor.init".to_string(), ())
+                    .call_function_void("theater:simple/actor.init".to_string(), vec![])
                     .await
                     .map_err(|e| {
                         error!("Failed to call actor.init for actor {}: {}", init_id, e);
