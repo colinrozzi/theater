@@ -16,6 +16,11 @@ use theater::shutdown::ShutdownReceiver;
 use theater::wasm::{ActorComponent, ActorInstance};
 use theater::ChainEvent;
 
+// Composite integration
+use theater::composite_bridge::{
+    AsyncCtx, CompositeInstance, HostLinkerBuilder, LinkerError, Value,
+};
+
 use anyhow::Result;
 use std::future::Future;
 use std::pin::Pin;
@@ -644,6 +649,362 @@ impl Handler for SupervisorHandler
         Ok(())
     }
 
+    // =========================================================================
+    // Composite Integration
+    // =========================================================================
+
+    fn setup_host_functions_composite(
+        &mut self,
+        builder: &mut HostLinkerBuilder<'_, ActorStore>,
+        ctx: &mut HandlerContext,
+    ) -> Result<(), LinkerError> {
+        info!("Setting up supervisor host functions (Composite)");
+
+        // Check if already satisfied
+        if ctx.is_satisfied("theater:simple/supervisor") {
+            info!("theater:simple/supervisor already satisfied by another handler, skipping");
+            return Ok(());
+        }
+
+        let supervisor_tx = self.channel_tx.clone();
+
+        builder.interface("theater:simple/supervisor")?
+            // spawn: func(manifest: string, init-bytes: option<list<u8>>) -> result<string, string>
+            .func_async_result("spawn", {
+                let supervisor_tx = supervisor_tx.clone();
+                move |ctx: AsyncCtx<ActorStore>, input: Value| {
+                    let supervisor_tx = supervisor_tx.clone();
+                    async move {
+                        // Parse input: (string, option<list<u8>>)
+                        let (manifest, init_bytes) = match input {
+                            Value::Tuple(args) if args.len() == 2 => {
+                                let manifest = match &args[0] {
+                                    Value::String(s) => s.clone(),
+                                    _ => return Err(Value::String("Invalid manifest argument".to_string())),
+                                };
+                                let init_bytes = match &args[1] {
+                                    Value::Option(Some(inner)) => {
+                                        if let Value::List(bytes) = inner.as_ref() {
+                                            Some(bytes.iter().filter_map(|v| {
+                                                if let Value::U8(b) = v { Some(*b) } else { None }
+                                            }).collect::<Vec<u8>>())
+                                        } else {
+                                            None
+                                        }
+                                    }
+                                    Value::Option(None) => None,
+                                    _ => None,
+                                };
+                                (manifest, init_bytes)
+                            }
+                            _ => return Err(Value::String("Invalid spawn arguments".to_string())),
+                        };
+
+                        let store = ctx.data();
+                        let theater_tx = store.theater_tx.clone();
+                        let parent_id = store.id.clone();
+
+                        let (response_tx, response_rx) = oneshot::channel();
+                        let cmd = TheaterCommand::SpawnActor {
+                            manifest_path: manifest,
+                            init_bytes,
+                            response_tx,
+                            parent_id: Some(parent_id),
+                            supervisor_tx: Some(supervisor_tx),
+                            subscription_tx: None,
+                        };
+
+                        if let Err(e) = theater_tx.send(cmd).await {
+                            return Err(Value::String(format!("Failed to send spawn command: {}", e)));
+                        }
+
+                        match response_rx.await {
+                            Ok(Ok(actor_id)) => Ok(Value::String(actor_id.to_string())),
+                            Ok(Err(e)) => Err(Value::String(e.to_string())),
+                            Err(e) => Err(Value::String(format!("Failed to receive response: {}", e))),
+                        }
+                    }
+                }
+            })?
+            // resume: func(manifest: string, state-bytes: option<list<u8>>) -> result<string, string>
+            .func_async_result("resume", {
+                let supervisor_tx = supervisor_tx.clone();
+                move |ctx: AsyncCtx<ActorStore>, input: Value| {
+                    let supervisor_tx = supervisor_tx.clone();
+                    async move {
+                        let (manifest, state_bytes) = match input {
+                            Value::Tuple(args) if args.len() == 2 => {
+                                let manifest = match &args[0] {
+                                    Value::String(s) => s.clone(),
+                                    _ => return Err(Value::String("Invalid manifest argument".to_string())),
+                                };
+                                let state_bytes = match &args[1] {
+                                    Value::Option(Some(inner)) => {
+                                        if let Value::List(bytes) = inner.as_ref() {
+                                            Some(bytes.iter().filter_map(|v| {
+                                                if let Value::U8(b) = v { Some(*b) } else { None }
+                                            }).collect::<Vec<u8>>())
+                                        } else {
+                                            None
+                                        }
+                                    }
+                                    Value::Option(None) => None,
+                                    _ => None,
+                                };
+                                (manifest, state_bytes)
+                            }
+                            _ => return Err(Value::String("Invalid resume arguments".to_string())),
+                        };
+
+                        let store = ctx.data();
+                        let theater_tx = store.theater_tx.clone();
+                        let parent_id = store.id.clone();
+
+                        let (response_tx, response_rx) = oneshot::channel();
+                        let cmd = TheaterCommand::ResumeActor {
+                            manifest_path: manifest,
+                            state_bytes,
+                            response_tx,
+                            parent_id: Some(parent_id),
+                            supervisor_tx: Some(supervisor_tx),
+                            subscription_tx: None,
+                        };
+
+                        if let Err(e) = theater_tx.send(cmd).await {
+                            return Err(Value::String(format!("Failed to send resume command: {}", e)));
+                        }
+
+                        match response_rx.await {
+                            Ok(Ok(actor_id)) => Ok(Value::String(actor_id.to_string())),
+                            Ok(Err(e)) => Err(Value::String(e.to_string())),
+                            Err(e) => Err(Value::String(format!("Failed to receive response: {}", e))),
+                        }
+                    }
+                }
+            })?
+            // list-children: func() -> list<string>
+            .func_async_result("list-children", move |ctx: AsyncCtx<ActorStore>, _input: Value| {
+                async move {
+                    let store = ctx.data();
+                    let theater_tx = store.theater_tx.clone();
+                    let parent_id = store.id.clone();
+
+                    let (response_tx, response_rx) = oneshot::channel();
+                    let cmd = TheaterCommand::ListChildren {
+                        parent_id,
+                        response_tx,
+                    };
+
+                    if let Err(e) = theater_tx.send(cmd).await {
+                        return Err(Value::String(format!("Failed to send list-children command: {}", e)));
+                    }
+
+                    match response_rx.await {
+                        Ok(children) => {
+                            let children_values: Vec<Value> = children
+                                .into_iter()
+                                .map(|id| Value::String(id.to_string()))
+                                .collect();
+                            Ok(Value::List(children_values))
+                        }
+                        Err(e) => Err(Value::String(format!("Failed to receive children list: {}", e))),
+                    }
+                }
+            })?
+            // restart-child: func(child-id: string) -> result<(), string>
+            .func_async_result("restart-child", move |ctx: AsyncCtx<ActorStore>, input: Value| {
+                async move {
+                    let child_id_str = match input {
+                        Value::String(s) => s,
+                        Value::Tuple(args) if args.len() == 1 => {
+                            match &args[0] {
+                                Value::String(s) => s.clone(),
+                                _ => return Err(Value::String("Invalid child-id argument".to_string())),
+                            }
+                        }
+                        _ => return Err(Value::String("Invalid restart-child argument".to_string())),
+                    };
+
+                    let child_id = match child_id_str.parse() {
+                        Ok(id) => id,
+                        Err(e) => return Err(Value::String(format!("Invalid child ID: {}", e))),
+                    };
+
+                    let store = ctx.data();
+                    let theater_tx = store.theater_tx.clone();
+
+                    let (response_tx, response_rx) = oneshot::channel();
+                    let cmd = TheaterCommand::RestartActor {
+                        actor_id: child_id,
+                        response_tx,
+                    };
+
+                    if let Err(e) = theater_tx.send(cmd).await {
+                        return Err(Value::String(format!("Failed to send restart command: {}", e)));
+                    }
+
+                    match response_rx.await {
+                        Ok(Ok(())) => Ok(Value::Tuple(vec![])),
+                        Ok(Err(e)) => Err(Value::String(e.to_string())),
+                        Err(e) => Err(Value::String(format!("Failed to receive restart response: {}", e))),
+                    }
+                }
+            })?
+            // stop-child: func(child-id: string) -> result<(), string>
+            .func_async_result("stop-child", move |ctx: AsyncCtx<ActorStore>, input: Value| {
+                async move {
+                    let child_id_str = match input {
+                        Value::String(s) => s,
+                        Value::Tuple(args) if args.len() == 1 => {
+                            match &args[0] {
+                                Value::String(s) => s.clone(),
+                                _ => return Err(Value::String("Invalid child-id argument".to_string())),
+                            }
+                        }
+                        _ => return Err(Value::String("Invalid stop-child argument".to_string())),
+                    };
+
+                    let child_id = match child_id_str.parse() {
+                        Ok(id) => id,
+                        Err(e) => return Err(Value::String(format!("Invalid child ID: {}", e))),
+                    };
+
+                    let store = ctx.data();
+                    let theater_tx = store.theater_tx.clone();
+
+                    let (response_tx, response_rx) = oneshot::channel();
+                    let cmd = TheaterCommand::StopActor {
+                        actor_id: child_id,
+                        response_tx,
+                    };
+
+                    if let Err(e) = theater_tx.send(cmd).await {
+                        return Err(Value::String(format!("Failed to send stop command: {}", e)));
+                    }
+
+                    match response_rx.await {
+                        Ok(Ok(())) => Ok(Value::Tuple(vec![])),
+                        Ok(Err(e)) => Err(Value::String(e.to_string())),
+                        Err(e) => Err(Value::String(format!("Failed to receive stop response: {}", e))),
+                    }
+                }
+            })?
+            // get-child-state: func(child-id: string) -> result<option<list<u8>>, string>
+            .func_async_result("get-child-state", move |ctx: AsyncCtx<ActorStore>, input: Value| {
+                async move {
+                    let child_id_str = match input {
+                        Value::String(s) => s,
+                        Value::Tuple(args) if args.len() == 1 => {
+                            match &args[0] {
+                                Value::String(s) => s.clone(),
+                                _ => return Err(Value::String("Invalid child-id argument".to_string())),
+                            }
+                        }
+                        _ => return Err(Value::String("Invalid get-child-state argument".to_string())),
+                    };
+
+                    let child_id = match child_id_str.parse() {
+                        Ok(id) => id,
+                        Err(e) => return Err(Value::String(format!("Invalid child ID: {}", e))),
+                    };
+
+                    let store = ctx.data();
+                    let theater_tx = store.theater_tx.clone();
+
+                    let (response_tx, response_rx) = oneshot::channel();
+                    let cmd = TheaterCommand::GetActorState {
+                        actor_id: child_id,
+                        response_tx,
+                    };
+
+                    if let Err(e) = theater_tx.send(cmd).await {
+                        return Err(Value::String(format!("Failed to send get-state command: {}", e)));
+                    }
+
+                    match response_rx.await {
+                        Ok(Ok(state)) => {
+                            let state_value = match state {
+                                Some(bytes) => Value::Option(Some(Box::new(Value::List(
+                                    bytes.into_iter().map(Value::U8).collect()
+                                )))),
+                                None => Value::Option(None),
+                            };
+                            Ok(state_value)
+                        }
+                        Ok(Err(e)) => Err(Value::String(e.to_string())),
+                        Err(e) => Err(Value::String(format!("Failed to receive state: {}", e))),
+                    }
+                }
+            })?
+            // get-child-events: func(child-id: string) -> result<list<chain-event>, string>
+            .func_async_result("get-child-events", move |ctx: AsyncCtx<ActorStore>, input: Value| {
+                async move {
+                    let child_id_str = match input {
+                        Value::String(s) => s,
+                        Value::Tuple(args) if args.len() == 1 => {
+                            match &args[0] {
+                                Value::String(s) => s.clone(),
+                                _ => return Err(Value::String("Invalid child-id argument".to_string())),
+                            }
+                        }
+                        _ => return Err(Value::String("Invalid get-child-events argument".to_string())),
+                    };
+
+                    let child_id = match child_id_str.parse() {
+                        Ok(id) => id,
+                        Err(e) => return Err(Value::String(format!("Invalid child ID: {}", e))),
+                    };
+
+                    let store = ctx.data();
+                    let theater_tx = store.theater_tx.clone();
+
+                    let (response_tx, response_rx) = oneshot::channel();
+                    let cmd = TheaterCommand::GetActorEvents {
+                        actor_id: child_id,
+                        response_tx,
+                    };
+
+                    if let Err(e) = theater_tx.send(cmd).await {
+                        return Err(Value::String(format!("Failed to send get-events command: {}", e)));
+                    }
+
+                    match response_rx.await {
+                        Ok(Ok(events)) => {
+                            // Convert ChainEvents to Value list
+                            let events_values: Vec<Value> = events
+                                .iter()
+                                .map(|e| {
+                                    // ChainEvent as a record: { event-type: string, data: list<u8> }
+                                    Value::Tuple(vec![
+                                        Value::String(e.event_type.clone()),
+                                        Value::List(e.data.iter().map(|b| Value::U8(*b)).collect()),
+                                    ])
+                                })
+                                .collect();
+                            Ok(Value::List(events_values))
+                        }
+                        Ok(Err(e)) => Err(Value::String(e.to_string())),
+                        Err(e) => Err(Value::String(format!("Failed to receive events: {}", e))),
+                    }
+                }
+            })?;
+
+        ctx.mark_satisfied("theater:simple/supervisor");
+        Ok(())
+    }
+
+    fn register_exports_composite(&self, instance: &mut CompositeInstance) -> Result<()> {
+        // Register supervisor callback export functions
+        instance.register_export("theater:simple/supervisor-handlers", "handle-child-error");
+        instance.register_export("theater:simple/supervisor-handlers", "handle-child-exit");
+        instance.register_export("theater:simple/supervisor-handlers", "handle-child-external-stop");
+        Ok(())
+    }
+
+    fn supports_composite(&self) -> bool {
+        true
+    }
+
     fn start(
         &mut self,
         actor_handle: ActorHandle,
@@ -705,7 +1066,7 @@ mod tests {
     fn test_supervisor_handler_clone() {
         let config = SupervisorHostConfig {};
         let handler = SupervisorHandler::new(config, None);
-        let cloned = handler.create_instance();
+        let cloned = handler.create_instance(None);
         assert_eq!(cloned.name(), "supervisor");
     }
 }

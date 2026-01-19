@@ -7,6 +7,7 @@
 use crate::actor::runtime::ActorRuntime;
 use crate::actor::types::{ActorControl, ActorError, ActorInfo, ActorOperation};
 use crate::chain::ChainEvent;
+use crate::composite_bridge::AsyncRuntime;
 use crate::config::actor_manifest::HandlerConfig;
 use crate::handler::HandlerRegistry;
 use crate::id::TheaterId;
@@ -104,8 +105,8 @@ pub struct TheaterRuntime {
     /// Optional channel to send channel events back to the server
     #[allow(dead_code)]
     channel_events_tx: Option<Sender<crate::messages::ChannelEvent>>,
-    /// wasm engine
-    wasm_engine: wasmtime::Engine,
+    /// Composite async runtime for WASM execution
+    composite_runtime: AsyncRuntime,
     /// Handler registry
     pub handler_registry: HandlerRegistry,
 }
@@ -188,8 +189,8 @@ impl TheaterRuntime {
         channel_events_tx: Option<Sender<crate::messages::ChannelEvent>>,
         handler_registry: HandlerRegistry,
     ) -> Result<Self> {
-        info!("Theater runtime initializing");
-        let engine = wasmtime::Engine::new(wasmtime::Config::new().async_support(true))?;
+        info!("Theater runtime initializing with Composite runtime");
+        let composite_runtime = AsyncRuntime::new();
 
         Ok(Self {
             theater_tx,
@@ -199,7 +200,7 @@ impl TheaterRuntime {
             subscriptions: HashMap::new(),
             channels: HashMap::new(),
             channel_events_tx,
-            wasm_engine: engine,
+            composite_runtime,
             handler_registry,
         })
     }
@@ -605,16 +606,17 @@ impl TheaterRuntime {
         let handler_registry = self.create_handler_registry_for_manifest(&manifest).await?;
 
         // Start the actor in a detached task
+        // Each actor gets its own AsyncRuntime for isolation
         let actor_id_for_task = actor_id.clone();
         let actor_name = manifest.name.clone();
         let manifest_clone = manifest.clone();
-        let engine = self.wasm_engine.clone();
+        let composite_runtime = AsyncRuntime::new();
         let actor_runtime_process = tokio::spawn(async move {
             let _actor_runtime = ActorRuntime::start(
                 actor_id_for_task.clone(),
                 &manifest_clone,
                 init_value,
-                engine,
+                composite_runtime,
                 chain,
                 handler_registry,
                 theater_tx,

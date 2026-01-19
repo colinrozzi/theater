@@ -1,4 +1,14 @@
-//! # WebAssembly Integration for Theater
+//! # WebAssembly Integration for Theater (DEPRECATED)
+//!
+//! **NOTE**: This module is deprecated. Theater now uses the Composite runtime
+//! (via `composite_bridge` module) as the primary WebAssembly execution engine.
+//! The types in this module (`ActorComponent`, `ActorInstance`) are kept for
+//! backwards compatibility with existing handlers but are no longer used by
+//! the active runtime. New handlers should implement the Composite-based methods:
+//! - `setup_host_functions_composite()` instead of `setup_host_functions()`
+//! - `register_exports_composite()` instead of `add_export_functions()`
+//!
+//! ---
 //!
 //! The `wasm` module provides the foundation for Theater's WebAssembly component integration,
 //! enabling secure execution of actor code in isolated sandboxes. This module handles the

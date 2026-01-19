@@ -56,6 +56,11 @@ use uuid::Uuid;
 use wasmtime::component::{ComponentType, Lift, Lower};
 use wasmtime::StoreContextMut;
 
+// Composite integration
+use theater::composite_bridge::{
+    AsyncCtx, CompositeInstance, Ctx, HostLinkerBuilder, LinkerError, Value,
+};
+
 /// Errors that can occur during message server operations
 #[derive(Error, Debug)]
 pub enum MessageServerError {
@@ -1041,14 +1046,334 @@ impl Handler for MessageServerHandler
             Ok(())
         })
     }
+
+    // =========================================================================
+    // Composite Integration
+    // =========================================================================
+
+    fn setup_host_functions_composite(
+        &mut self,
+        builder: &mut HostLinkerBuilder<'_, ActorStore>,
+        ctx: &mut HandlerContext,
+    ) -> Result<(), LinkerError> {
+        info!("Setting up message server host functions (Composite)");
+
+        // Check if already satisfied
+        if ctx.is_satisfied("theater:simple/message-server-host") {
+            info!("theater:simple/message-server-host already satisfied, skipping");
+            return Ok(());
+        }
+
+        let router = self.router.clone();
+        let router2 = self.router.clone();
+        let router3 = self.router.clone();
+        let router4 = self.router.clone();
+        let router5 = self.router.clone();
+        let outstanding_requests = self.outstanding_requests.clone();
+        let outstanding_requests2 = self.outstanding_requests.clone();
+        let outstanding_requests3 = self.outstanding_requests.clone();
+
+        builder
+            .interface("theater:simple/message-server-host")?
+            // send(address: string, msg: list<u8>) -> result<_, string>
+            .func_async_result("send", move |ctx: AsyncCtx<ActorStore>, input: Value| {
+                let router = router.clone();
+                async move {
+                    let (address, msg) = parse_address_and_message(&input)?;
+
+                    let target_id = match TheaterId::parse(&address) {
+                        Ok(id) => id,
+                        Err(e) => return Err(Value::String(format!("Failed to parse actor ID: {}", e))),
+                    };
+
+                    let (response_tx, response_rx) = tokio::sync::oneshot::channel();
+                    let command = MessageCommand::SendMessage {
+                        target_id,
+                        message: ActorMessage::Send(ActorSend { data: msg }),
+                        response_tx,
+                    };
+
+                    if let Err(e) = router.route_message(command).await {
+                        return Err(Value::String(e.to_string()));
+                    }
+
+                    match response_rx.await {
+                        Ok(Ok(())) => Ok(Value::Tuple(vec![])),
+                        Ok(Err(e)) => Err(Value::String(e.to_string())),
+                        Err(e) => Err(Value::String(e.to_string())),
+                    }
+                }
+            })?
+            // request(address: string, msg: list<u8>) -> result<list<u8>, string>
+            .func_async_result("request", move |ctx: AsyncCtx<ActorStore>, input: Value| {
+                let router = router2.clone();
+                async move {
+                    let (address, msg) = parse_address_and_message(&input)?;
+
+                    let target_id = match TheaterId::parse(&address) {
+                        Ok(id) => id,
+                        Err(e) => return Err(Value::String(format!("Failed to parse actor ID: {}", e))),
+                    };
+
+                    let (response_tx, response_rx) = tokio::sync::oneshot::channel();
+                    let (cmd_response_tx, cmd_response_rx) = tokio::sync::oneshot::channel();
+
+                    let command = MessageCommand::SendMessage {
+                        target_id,
+                        message: ActorMessage::Request(ActorRequest {
+                            data: msg,
+                            response_tx,
+                        }),
+                        response_tx: cmd_response_tx,
+                    };
+
+                    if let Err(e) = router.route_message(command).await {
+                        return Err(Value::String(e.to_string()));
+                    }
+
+                    match cmd_response_rx.await {
+                        Ok(Ok(())) => {
+                            match response_rx.await {
+                                Ok(response) => Ok(Value::List(response.into_iter().map(Value::U8).collect())),
+                                Err(e) => Err(Value::String(e.to_string())),
+                            }
+                        }
+                        Ok(Err(e)) => Err(Value::String(e.to_string())),
+                        Err(e) => Err(Value::String(e.to_string())),
+                    }
+                }
+            })?
+            // list-outstanding-requests() -> list<string>
+            .func_typed("list-outstanding-requests", move |_ctx: &mut Ctx<'_, ActorStore>, _input: Value| {
+                let requests = outstanding_requests.lock().unwrap();
+                let ids: Vec<Value> = requests.keys().map(|k| Value::String(k.clone())).collect();
+                Value::List(ids)
+            })?
+            // respond-to-request(request-id: string, response: list<u8>) -> result<_, string>
+            .func_async_result("respond-to-request", move |_ctx: AsyncCtx<ActorStore>, input: Value| {
+                let outstanding = outstanding_requests2.clone();
+                async move {
+                    let (request_id, response_data) = parse_request_id_and_data(&input)?;
+
+                    let mut requests = outstanding.lock().unwrap();
+                    if let Some(sender) = requests.remove(&request_id) {
+                        match sender.send(response_data) {
+                            Ok(_) => Ok(Value::Tuple(vec![])),
+                            Err(e) => Err(Value::String(format!("Failed to send response: {:?}", e))),
+                        }
+                    } else {
+                        Err(Value::String(format!("Request ID not found: {}", request_id)))
+                    }
+                }
+            })?
+            // cancel-request(request-id: string) -> result<_, string>
+            .func_async_result("cancel-request", move |_ctx: AsyncCtx<ActorStore>, input: Value| {
+                let outstanding = outstanding_requests3.clone();
+                async move {
+                    let request_id = parse_string(&input)?;
+
+                    let mut requests = outstanding.lock().unwrap();
+                    if requests.remove(&request_id).is_some() {
+                        Ok(Value::Tuple(vec![]))
+                    } else {
+                        Err(Value::String(format!("Request ID not found: {}", request_id)))
+                    }
+                }
+            })?
+            // open-channel(address: string, initial-msg: list<u8>) -> result<string, string>
+            .func_async_result("open-channel", move |ctx: AsyncCtx<ActorStore>, input: Value| {
+                let router = router3.clone();
+                async move {
+                    let (address, initial_msg) = parse_address_and_message(&input)?;
+                    let current_actor_id = ctx.data().id.clone();
+
+                    let target_id = match TheaterId::parse(&address) {
+                        Ok(id) => ChannelParticipant::Actor(id),
+                        Err(e) => return Err(Value::String(format!("Failed to parse actor ID: {}", e))),
+                    };
+
+                    let channel_id = ChannelId::new(
+                        &ChannelParticipant::Actor(current_actor_id.clone()),
+                        &target_id,
+                    );
+                    let channel_id_str = channel_id.as_str().to_string();
+
+                    let (response_tx, response_rx) = tokio::sync::oneshot::channel();
+                    let command = MessageCommand::OpenChannel {
+                        initiator_id: ChannelParticipant::Actor(current_actor_id),
+                        target_id,
+                        channel_id,
+                        initial_message: initial_msg,
+                        response_tx,
+                    };
+
+                    if let Err(e) = router.route_message(command).await {
+                        return Err(Value::String(format!("Failed to send command: {}", e)));
+                    }
+
+                    match response_rx.await {
+                        Ok(Ok(accepted)) => {
+                            if accepted {
+                                Ok(Value::String(channel_id_str))
+                            } else {
+                                Err(Value::String("Channel request rejected".to_string()))
+                            }
+                        }
+                        Ok(Err(e)) => Err(Value::String(format!("Error opening channel: {}", e))),
+                        Err(e) => Err(Value::String(format!("Failed to receive response: {}", e))),
+                    }
+                }
+            })?
+            // send-on-channel(channel-id: string, msg: list<u8>) -> result<_, string>
+            .func_async_result("send-on-channel", move |ctx: AsyncCtx<ActorStore>, input: Value| {
+                let router = router4.clone();
+                async move {
+                    let (channel_id_str, msg) = parse_address_and_message(&input)?;
+                    let sender_actor_id = ctx.data().id.clone();
+
+                    let channel_id = match ChannelId::parse(&channel_id_str) {
+                        Ok(id) => id,
+                        Err(e) => return Err(Value::String(format!("Failed to parse channel ID: {}", e))),
+                    };
+
+                    let (response_tx, response_rx) = tokio::sync::oneshot::channel();
+                    let command = MessageCommand::ChannelMessage {
+                        channel_id,
+                        sender_id: ChannelParticipant::Actor(sender_actor_id),
+                        message: msg,
+                        response_tx,
+                    };
+
+                    if let Err(e) = router.route_message(command).await {
+                        return Err(Value::String(e.to_string()));
+                    }
+
+                    match response_rx.await {
+                        Ok(Ok(())) => Ok(Value::Tuple(vec![])),
+                        Ok(Err(e)) => Err(Value::String(e.to_string())),
+                        Err(e) => Err(Value::String(e.to_string())),
+                    }
+                }
+            })?
+            // close-channel(channel-id: string) -> result<_, string>
+            .func_async_result("close-channel", move |ctx: AsyncCtx<ActorStore>, input: Value| {
+                let router = router5.clone();
+                async move {
+                    let channel_id_str = parse_string(&input)?;
+                    let sender_actor_id = ctx.data().id.clone();
+
+                    let channel_id = match ChannelId::parse(&channel_id_str) {
+                        Ok(id) => id,
+                        Err(e) => return Err(Value::String(format!("Failed to parse channel ID: {}", e))),
+                    };
+
+                    let (response_tx, response_rx) = tokio::sync::oneshot::channel();
+                    let command = MessageCommand::ChannelClose {
+                        channel_id,
+                        sender_id: ChannelParticipant::Actor(sender_actor_id),
+                        response_tx,
+                    };
+
+                    if let Err(e) = router.route_message(command).await {
+                        return Err(Value::String(e.to_string()));
+                    }
+
+                    match response_rx.await {
+                        Ok(Ok(())) => Ok(Value::Tuple(vec![])),
+                        Ok(Err(e)) => Err(Value::String(e.to_string())),
+                        Err(e) => Err(Value::String(e.to_string())),
+                    }
+                }
+            })?;
+
+        ctx.mark_satisfied("theater:simple/message-server-host");
+        info!("Message server host functions (Composite) set up successfully");
+        Ok(())
+    }
+
+    fn register_exports_composite(&self, instance: &mut CompositeInstance) -> anyhow::Result<()> {
+        info!("Registering message server exports (Composite)");
+
+        // Register all export functions
+        instance.register_export("theater:simple/message-server-client", "handle-send");
+        instance.register_export("theater:simple/message-server-client", "handle-request");
+        instance.register_export("theater:simple/message-server-client", "handle-channel-open");
+        instance.register_export("theater:simple/message-server-client", "handle-channel-message");
+        instance.register_export("theater:simple/message-server-client", "handle-channel-close");
+
+        Ok(())
+    }
+
+    fn supports_composite(&self) -> bool {
+        true
+    }
+}
+
+// Helper functions for parsing Composite Value inputs
+
+fn parse_string(input: &Value) -> Result<String, Value> {
+    match input {
+        Value::String(s) => Ok(s.clone()),
+        Value::Tuple(fields) if fields.len() == 1 => {
+            match &fields[0] {
+                Value::String(s) => Ok(s.clone()),
+                _ => Err(Value::String("Expected string".to_string())),
+            }
+        }
+        _ => Err(Value::String("Expected string".to_string())),
+    }
+}
+
+fn parse_address_and_message(input: &Value) -> Result<(String, Vec<u8>), Value> {
+    match input {
+        Value::Tuple(fields) if fields.len() == 2 => {
+            let address = match &fields[0] {
+                Value::String(s) => s.clone(),
+                _ => return Err(Value::String("Expected string for address".to_string())),
+            };
+            let msg = match &fields[1] {
+                Value::List(bytes) => {
+                    bytes.iter().filter_map(|v| match v {
+                        Value::U8(b) => Some(*b),
+                        _ => None,
+                    }).collect::<Vec<u8>>()
+                }
+                _ => return Err(Value::String("Expected list<u8> for message".to_string())),
+            };
+            Ok((address, msg))
+        }
+        _ => Err(Value::String("Expected tuple (address, message)".to_string())),
+    }
+}
+
+fn parse_request_id_and_data(input: &Value) -> Result<(String, Vec<u8>), Value> {
+    match input {
+        Value::Tuple(fields) if fields.len() == 2 => {
+            let request_id = match &fields[0] {
+                Value::String(s) => s.clone(),
+                _ => return Err(Value::String("Expected string for request_id".to_string())),
+            };
+            let data = match &fields[1] {
+                Value::List(bytes) => {
+                    bytes.iter().filter_map(|v| match v {
+                        Value::U8(b) => Some(*b),
+                        _ => None,
+                    }).collect::<Vec<u8>>()
+                }
+                _ => return Err(Value::String("Expected list<u8> for data".to_string())),
+            };
+            Ok((request_id, data))
+        }
+        _ => Err(Value::String("Expected tuple (request_id, data)".to_string())),
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    #[test]
-    fn test_message_server_handler_creation() {
+    #[tokio::test]
+    async fn test_message_server_handler_creation() {
         let router = MessageRouter::new();
         let handler = MessageServerHandler::new(None, router);
 
@@ -1063,12 +1388,12 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_message_server_handler_clone() {
+    #[tokio::test]
+    async fn test_message_server_handler_clone() {
         let router = MessageRouter::new();
         let handler = MessageServerHandler::new(None, router);
 
-        let cloned = handler.create_instance();
+        let cloned = handler.create_instance(None);
         assert_eq!(cloned.name(), "message-server");
     }
 }

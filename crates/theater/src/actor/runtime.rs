@@ -8,7 +8,7 @@ use crate::actor::handle::ActorHandle;
 use crate::actor::store::ActorStore;
 use crate::actor::types::ActorError;
 use crate::actor::types::ActorOperation;
-use crate::composite_bridge::{AsyncRuntime, CompositeInstance, UnifiedInstance};
+use crate::composite_bridge::{AsyncRuntime, CompositeInstance, HostLinkerBuilder, LinkerError};
 use crate::events::wasm::WasmEventData;
 use crate::events::ChainEventData;
 use crate::handler::Handler;
@@ -18,7 +18,7 @@ use crate::id::TheaterId;
 use crate::messages::TheaterCommand;
 use crate::metrics::MetricsCollector;
 use crate::store::ContentStore;
-use crate::wasm::{ActorComponent, ActorInstance};
+use crate::utils::resolve_reference;
 use crate::ManifestConfig;
 
 use crate::Result;
@@ -33,7 +33,6 @@ use tokio::sync::RwLock;
 use tokio::task::JoinHandle;
 use tokio::time::Instant;
 use tracing::{debug, error, info, warn};
-use wasmtime::Engine;
 
 use super::types::ActorControl;
 use super::types::ActorInfo;
@@ -49,13 +48,16 @@ const SHUTDOWN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 /// `ActorRuntime` manages the various components that make up an actor's execution environment,
 /// including handlers and communication channels. It's responsible for starting the actor,
 /// setting up its capabilities via handlers, executing operations, and ensuring proper shutdown.
+///
+/// Note: The struct fields are currently unused as the runtime is driven by the
+/// `start()` and `build_actor_resources()` functions which manage the instance
+/// through shared wrappers.
 #[allow(dead_code)]
 pub struct ActorRuntime {
     /// Unique identifier for this actor
     pub id: TheaterId,
     config: ManifestConfig,
     handlers: Vec<Box<dyn Handler>>,
-    actor_instance: ActorInstance,
     metrics: MetricsCollector,
     operation_rx: Receiver<ActorOperation>,
     info_rx: Receiver<ActorInfo>,
@@ -195,7 +197,7 @@ impl ActorRuntime {
         id: TheaterId,
         config: &ManifestConfig,
         initial_state: Option<Value>,
-        engine: Engine,
+        composite_runtime: AsyncRuntime,
         chain: Arc<SyncRwLock<StateChain>>,
         mut handler_registry: HandlerRegistry,
         theater_tx: Sender<TheaterCommand>,
@@ -203,7 +205,7 @@ impl ActorRuntime {
         info_tx: Sender<ActorInfo>,
         control_tx: Sender<ActorControl>,
         actor_phase_manager: ActorPhaseManager,
-        actor_instance_wrapper: Arc<RwLock<Option<UnifiedInstance>>>,
+        actor_instance_wrapper: Arc<RwLock<Option<CompositeInstance>>>,
     ) -> Result<(ShutdownController, Vec<JoinHandle<()>>), ActorRuntimeError> {
         // ---------------- Checkpoint Setup Initial ----------------
 
@@ -250,128 +252,131 @@ impl ActorRuntime {
             )
             .await;
 
-        // ----------------- Checkpoint Create Handlers -----------------
+        // ----------------- Checkpoint Load Component -----------------
 
         if !actor_phase_manager.is_phase(ActorPhase::Starting) {
             let curr_phase = actor_phase_manager.get_phase();
             return Err(ActorRuntimeError::ActorPhaseError {
                 expected: ActorPhase::Starting,
                 found: curr_phase,
-                message: "phase error found at setup task Checkpoint Create Handlers".into(),
+                message: "phase error found at setup task Checkpoint Load Component".into(),
             });
         }
 
-        debug!("Creating handlers");
+        debug!("Loading component: {}", config.component);
 
-        let mut actor_component = ActorComponent::new(
-            config.name.clone(),
-            config.component.clone(),
-            actor_store,
-            engine,
-        )
-        .await
-        .map_err(|e| {
+        // Load the WASM component bytes
+        let wasm_bytes = resolve_reference(&config.component).await.map_err(|e| {
             let error_message = format!(
-                "Failed to create actor component for actor {}: {}",
+                "Failed to load component for actor {}: {}",
                 config.name, e
             );
             error!("{}", error_message);
-            <anyhow::Error as Into<ActorRuntimeError>>::into(e)
+            ActorRuntimeError::SetupError {
+                message: error_message,
+            }
         })?;
 
-        // ----------------- Checkpoint Setup Handlers -----------------
+        // ----------------- Checkpoint Get Handlers -----------------
 
-        debug!("Setting up handlers");
-
-        if !actor_phase_manager.is_phase(ActorPhase::Starting) {
-            let curr_phase = actor_phase_manager.get_phase();
-            return Err(ActorRuntimeError::ActorPhaseError {
-                expected: ActorPhase::Starting,
-                found: curr_phase,
-                message: "phase error found at setup task Checkpoint Setup Handlers".into(),
-            });
-        }
-
-        let mut handlers = handler_registry.setup_handlers(&mut actor_component);
-        debug!("setup_handlers returned {} handlers", handlers.len());
-
-        // ----------------- Checkpoint Setup Host Functions -----------------
-
-        debug!("Setting up host functions");
+        debug!("Getting handlers from registry");
 
         if !actor_phase_manager.is_phase(ActorPhase::Starting) {
             let curr_phase = actor_phase_manager.get_phase();
             return Err(ActorRuntimeError::ActorPhaseError {
                 expected: ActorPhase::Starting,
                 found: curr_phase,
-                message: "phase error found at setup task Checkpoint Setup Host Functions".into(),
+                message: "phase error found at setup task Checkpoint Get Handlers".into(),
             });
         }
 
-        debug!("Setting up host functions for {} handlers", handlers.len());
+        // Get all handlers from the registry
+        let mut handlers = handler_registry.get_handlers();
+        debug!("Got {} handlers from registry", handlers.len());
+
+        // ----------------- Checkpoint Instantiate with Host Functions -----------------
+
+        debug!("Creating CompositeInstance with host functions");
+
+        if !actor_phase_manager.is_phase(ActorPhase::Starting) {
+            let curr_phase = actor_phase_manager.get_phase();
+            return Err(ActorRuntimeError::ActorPhaseError {
+                expected: ActorPhase::Starting,
+                found: curr_phase,
+                message: "phase error found at setup task Checkpoint Instantiate".into(),
+            });
+        }
+
+        // Create a closure that sets up all handler host functions
         let mut handler_ctx = HandlerContext::new();
-        for handler in handlers.iter_mut() {
-            debug!("Setting up host functions for handler '{}'", handler.name());
-            match handler.setup_host_functions(&mut actor_component, &mut handler_ctx) {
-                Ok(()) => {
-                    debug!(
-                        "Handler '{}' host functions set up successfully",
-                        handler.name()
-                    );
+        let handlers_for_setup = &mut handlers;
+
+        let mut actor_instance = CompositeInstance::new(
+            config.name.clone(),
+            &wasm_bytes,
+            &composite_runtime,
+            actor_store,
+            |builder: &mut HostLinkerBuilder<'_, ActorStore>| {
+                // Set up host functions for each handler
+                for handler in handlers_for_setup.iter_mut() {
+                    debug!("Setting up Composite host functions for handler '{}'", handler.name());
+                    match handler.setup_host_functions_composite(builder, &mut handler_ctx) {
+                        Ok(()) => {
+                            debug!(
+                                "Handler '{}' Composite host functions set up successfully",
+                                handler.name()
+                            );
+                        }
+                        Err(e) => {
+                            error!(
+                                "Handler '{}' Composite host functions FAILED: {:?}",
+                                handler.name(),
+                                e
+                            );
+                            return Err(e);
+                        }
+                    }
                 }
-                Err(e) => {
-                    error!(
-                        "Handler '{}' host functions FAILED: {:?}",
-                        handler.name(),
-                        e
-                    );
-                }
-            }
-        }
-        debug!(
-            "Handler context satisfied imports: {:?}",
-            handler_ctx.satisfied_imports
-        );
-
-        // ----------------- Checkpoint Instantiate Actor -----------------
-
-        debug!("Instantiating component");
-
-        if !actor_phase_manager.is_phase(ActorPhase::Starting) {
-            let curr_phase = actor_phase_manager.get_phase();
-            return Err(ActorRuntimeError::ActorPhaseError {
-                expected: ActorPhase::Starting,
-                found: curr_phase,
-                message: "phase error found at setup task Checkpoint Instantiate Actor".into(),
-            });
-        }
-
-        debug!("About to instantiate actor component");
-        let mut actor_instance = actor_component.instantiate().await.map_err(|e| {
+                Ok(())
+            },
+        )
+        .await
+        .map_err(|e| {
             let error_message = format!("Failed to instantiate actor {}: {}", id, e);
             error!("{}", error_message);
             ActorRuntimeError::SetupError {
                 message: error_message,
             }
         })?;
-        debug!("Actor component instantiated successfully");
 
-        // ----------------- Checkpoint Add Export Functions -----------------
+        debug!("CompositeInstance created successfully");
+        debug!(
+            "Handler context satisfied imports: {:?}",
+            handler_ctx.satisfied_imports
+        );
 
-        debug!("Adding export functions");
+        // ----------------- Checkpoint Register Exports -----------------
+
+        debug!("Registering export functions");
 
         if !actor_phase_manager.is_phase(ActorPhase::Starting) {
             let curr_phase = actor_phase_manager.get_phase();
             return Err(ActorRuntimeError::ActorPhaseError {
                 expected: ActorPhase::Starting,
                 found: curr_phase,
-                message: "phase error found at setup task Checkpoint Add Export Functions".into(),
+                message: "phase error found at setup task Checkpoint Register Exports".into(),
             });
         }
 
-        handlers.iter_mut().for_each(|handler| {
-            let _ = handler.add_export_functions(&mut actor_instance);
-        });
+        // Register standard Theater actor exports
+        actor_instance.register_export("theater:simple/actor", "init");
+
+        // Let handlers register their exports
+        for handler in handlers.iter() {
+            if let Err(e) = handler.register_exports_composite(&mut actor_instance) {
+                warn!("Handler '{}' failed to register exports: {:?}", handler.name(), e);
+            }
+        }
 
         // ----------------- Checkpoint Initialize State -----------------
 
@@ -394,7 +399,7 @@ impl ActorRuntime {
             None => None,
         };
 
-        actor_instance.store.data_mut().set_state(init_state);
+        actor_instance.actor_store.set_state(init_state);
 
         // ----------------- Checkpoint Finalize Setup -----------------
 
@@ -409,6 +414,12 @@ impl ActorRuntime {
             });
         }
 
+        // Put actor_instance in the shared wrapper BEFORE spawning init
+        {
+            let mut instance_guard = actor_instance_wrapper.write().await;
+            *instance_guard = Some(actor_instance);
+        }
+
         // In replay mode, the replay handler will call init after setting up subscriptions
         // to avoid race conditions. In normal mode, we spawn init here.
         if !handler_registry.is_replay_mode() {
@@ -416,8 +427,7 @@ impl ActorRuntime {
             let init_id = id.clone();
             tokio::spawn(async move {
                 // Call init - it's a state-only function that takes state from the store
-                // and returns updated state. The params we pass are ignored since
-                // TypedComponentFunctionStateOnly handles state directly.
+                // and returns updated state.
                 // init: func(state: option<list<u8>>) -> result<tuple<option<list<u8>>>, string>
                 init_actor_handle
                     .call_function::<(), ()>("theater:simple/actor.init".to_string(), ())
@@ -429,12 +439,6 @@ impl ActorRuntime {
             });
         } else {
             info!("Replay mode: skipping automatic init call (replay handler will drive execution)");
-        }
-
-        // Put actor_instance in the shared wrapper
-        {
-            let mut instance_guard = actor_instance_wrapper.write().await;
-            *instance_guard = Some(UnifiedInstance::Wasmtime(actor_instance));
         }
 
         // Start the handlers
@@ -469,7 +473,7 @@ impl ActorRuntime {
         id: TheaterId,
         config: &ManifestConfig,
         initial_state: Option<Value>,
-        engine: Engine,
+        composite_runtime: AsyncRuntime,
         chain: Arc<SyncRwLock<StateChain>>,
         handler_registry: HandlerRegistry,
         theater_tx: Sender<TheaterCommand>,
@@ -484,7 +488,7 @@ impl ActorRuntime {
         let actor_phase_manager = ActorPhaseManager::new();
 
         // These will be set once setup completes
-        let actor_instance_wrapper: Arc<RwLock<Option<UnifiedInstance>>> =
+        let actor_instance_wrapper: Arc<RwLock<Option<CompositeInstance>>> =
             Arc::new(RwLock::new(None));
         let metrics: Arc<RwLock<MetricsCollector>> = Arc::new(RwLock::new(MetricsCollector::new()));
         let handler_tasks: Arc<RwLock<Vec<JoinHandle<()>>>> = Arc::new(RwLock::new(vec![]));
@@ -507,7 +511,7 @@ impl ActorRuntime {
                     id,
                     &config,
                     initial_state,
-                    engine,
+                    composite_runtime,
                     chain,
                     handler_registry,
                     theater_tx,
@@ -667,7 +671,7 @@ impl ActorRuntime {
 
     async fn operation_loop(
         mut operation_rx: Receiver<ActorOperation>,
-        actor_instance_wrapper: Arc<RwLock<Option<UnifiedInstance>>>,
+        actor_instance_wrapper: Arc<RwLock<Option<CompositeInstance>>>,
         metrics: Arc<RwLock<MetricsCollector>>,
         theater_tx: Sender<TheaterCommand>,
         actor_phase_manager: ActorPhaseManager,
@@ -701,7 +705,7 @@ impl ActorRuntime {
 
     async fn process_operation(
         op: ActorOperation,
-        actor_instance_wrapper: &Arc<RwLock<Option<UnifiedInstance>>>,
+        actor_instance_wrapper: &Arc<RwLock<Option<CompositeInstance>>>,
         metrics: &Arc<RwLock<MetricsCollector>>,
         theater_tx: &Sender<TheaterCommand>,
         actor_phase_manager: ActorPhaseManager,
@@ -781,7 +785,7 @@ impl ActorRuntime {
 
     async fn info_loop(
         mut info_rx: Receiver<ActorInfo>,
-        actor_instance_wrapper: Arc<RwLock<Option<UnifiedInstance>>>,
+        actor_instance_wrapper: Arc<RwLock<Option<CompositeInstance>>>,
         metrics: Arc<RwLock<MetricsCollector>>,
         actor_phase_manager: ActorPhaseManager,
     ) {
@@ -807,7 +811,7 @@ impl ActorRuntime {
                     ActorInfo::GetState { response_tx } => {
                         match &*actor_instance_wrapper.read().await {
                             Some(instance) => {
-                                let state = instance.get_state();
+                                let state = instance.actor_store.get_state();
                                 if let Err(e) = response_tx.send(Ok(state)) {
                                     error!("Failed to send state response: {:?}", e);
                                 }
@@ -832,7 +836,7 @@ impl ActorRuntime {
                                 return;
                             }
                             Some(instance) => {
-                                let chain = instance.get_chain();
+                                let chain = instance.actor_store.get_chain();
                                 if let Err(e) = response_tx.send(Ok(chain)) {
                                     error!("Failed to send chain response: {:?}", e);
                                 }
@@ -847,7 +851,7 @@ impl ActorRuntime {
                         }
                     }
                     ActorInfo::SaveChain { response_tx } => {
-                        match &mut *actor_instance_wrapper.write().await {
+                        match &*actor_instance_wrapper.read().await {
                             None => {
                                 let err =
                                     ActorError::UnexpectedError("Actor instance not found".to_string());
@@ -856,7 +860,7 @@ impl ActorRuntime {
                                 }
                                 return;
                             }
-                            Some(instance) => match instance.save_chain() {
+                            Some(instance) => match instance.actor_store.save_chain() {
                                 Ok(_) => {
                                     if let Err(e) = response_tx.send(Ok(())) {
                                         error!("Failed to send save chain response: {:?}", e);
@@ -890,7 +894,7 @@ impl ActorRuntime {
     ///
     /// ## Parameters
     ///
-    /// * `actor_instance` - The WebAssembly actor instance
+    /// * `actor_instance` - The Composite actor instance
     /// * `name` - Name of the function to call
     /// * `params` - Serialized parameters for the function
     /// * `theater_tx` - Channel for sending commands to the Theater runtime
@@ -901,7 +905,7 @@ impl ActorRuntime {
     /// * `Ok(Vec<u8>)` - Serialized result of the function call
     /// * `Err(ActorError)` - Error that occurred during execution
     async fn execute_call(
-        actor_instance: &mut UnifiedInstance,
+        actor_instance: &mut CompositeInstance,
         name: &String,
         params: Vec<u8>,
         _theater_tx: &mpsc::Sender<TheaterCommand>,
@@ -915,14 +919,14 @@ impl ActorRuntime {
 
         let start = Instant::now();
 
-        let state = actor_instance.get_state();
+        let state = actor_instance.actor_store.get_state();
         debug!(
             "Executing call to function '{}' with state size: {:?}",
             name,
             state.as_ref().map(|s| s.len()).unwrap_or(0)
         );
 
-        actor_instance.record_event(ChainEventData {
+        actor_instance.actor_store.record_event(ChainEventData {
             event_type: "wasm".to_string(),
             data: WasmEventData::WasmCall {
                 function_name: name.clone(),
@@ -934,7 +938,7 @@ impl ActorRuntime {
         // Execute the call
         let (new_state, results) = match actor_instance.call_function(name, state, params).await {
             Ok(result) => {
-                actor_instance.record_event(ChainEventData {
+                actor_instance.actor_store.record_event(ChainEventData {
                     event_type: "wasm".to_string(),
                     data: WasmEventData::WasmResult {
                         function_name: name.clone(),
@@ -945,7 +949,7 @@ impl ActorRuntime {
                 result
             }
             Err(e) => {
-                let event = actor_instance.record_event(ChainEventData {
+                let event = actor_instance.actor_store.record_event(ChainEventData {
                     event_type: "wasm".to_string(),
                     data: WasmEventData::WasmError {
                         function_name: name.clone(),
@@ -964,7 +968,7 @@ impl ActorRuntime {
             name,
             new_state.as_ref().map(|s| s.len()).unwrap_or(0)
         );
-        actor_instance.set_state(new_state);
+        actor_instance.actor_store.set_state(new_state);
 
         // Record metrics
         let duration = start.elapsed();

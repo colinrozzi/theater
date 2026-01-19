@@ -414,7 +414,10 @@ mod tests {
 
         let handler = RuntimeHandler::new(config, tx, None);
         assert_eq!(handler.name(), "runtime");
-        assert_eq!(handler.imports(), Some(vec!["theater:simple/runtime".to_string()]));
+        assert_eq!(handler.imports(), Some(vec![
+            "theater:simple/runtime".to_string(),
+            "theater:simple/types".to_string(),
+        ]));
         assert_eq!(handler.exports(), Some(vec!["theater:simple/actor".to_string()]));
     }
 }

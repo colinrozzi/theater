@@ -390,10 +390,13 @@ fn parse_wasm_call(event: &ChainEvent) -> Option<(String, Vec<u8>)> {
 }
 
 /// Trigger an export function on the component
+///
+/// NOTE: This function currently only supports wasmtime-based replay.
+/// Composite runtime replay support is not yet implemented.
 async fn trigger_export(
     actor_instance: &SharedActorInstance,
     function_name: &str,
-    recorded_params: &[u8],
+    _recorded_params: &[u8],
 ) -> anyhow::Result<()> {
     // Parse interface and function from function_name
     // Format: "wasi:http/incoming-handler@0.2.0/handle" -> interface="wasi:http/incoming-handler@0.2.0", func="handle"
@@ -409,78 +412,23 @@ async fn trigger_export(
         interface_name, func_name
     );
 
-    let mut guard = actor_instance.write().await;
-    let unified_instance = guard
-        .as_mut()
+    let guard = actor_instance.read().await;
+    let _instance = guard
+        .as_ref()
         .ok_or_else(|| anyhow::anyhow!("Actor instance not available"))?;
 
-    // Replay handler only supports wasmtime instances for now
-    let instance = unified_instance
-        .as_wasmtime_mut()
-        .ok_or_else(|| anyhow::anyhow!("Replay handler does not support Composite instances yet"))?;
+    // Replay handler does not yet support Composite runtime
+    // The wasmtime-specific replay logic has been preserved in git history
+    // and will be reimplemented for Composite runtime later.
+    warn!(
+        "Replay trigger_export not yet supported for Composite runtime: {}",
+        function_name
+    );
+    anyhow::bail!("Replay trigger_export not yet supported for Composite runtime");
 
-    // Get the interface export
-    let interface_export = instance
-        .instance
-        .get_export(&mut instance.store, None, interface_name)
-        .ok_or_else(|| anyhow::anyhow!("Interface not exported: {}", interface_name))?;
-
-    // Get the function from the interface
-    let func_export = instance
-        .instance
-        .get_export(&mut instance.store, Some(&interface_export), func_name)
-        .ok_or_else(|| anyhow::anyhow!("Function not exported: {}", func_name))?;
-
-    let func = instance
-        .instance
-        .get_func(&mut instance.store, &func_export)
-        .ok_or_else(|| anyhow::anyhow!("Failed to get Func for {}", func_name))?;
-
-    // For exports that take resources (like HTTP handler), we need to create stub resources
-    // HTTP handler takes 2 resource parameters: incoming-request and response-outparam
-    // The stub functions will return recorded data when the component calls methods on them
-    let mut params: Vec<Val> = Vec::new();
-
-    // Create stub resources for each expected parameter
-    // For HTTP: param 0 = incoming-request (borrow), param 1 = response-outparam (own)
-    // The rep values are used to identify resources - we use simple incrementing values
-    for i in 0..2 {
-        let rep = i as u32;
-        let resource = Resource::<ReplayResourceMarker>::new_own(rep);
-        let resource_any = ResourceAny::try_from_resource(resource, &mut instance.store)?;
-        params.push(Val::Resource(resource_any));
-        debug!("Created stub resource for param {} (rep={})", i, rep);
-    }
-
-    // Record WasmCall BEFORE calling the export (matching server.rs behavior)
-    // This ensures the replay chain matches the original chain structure
-    instance
-        .actor_component
-        .actor_store
-        .record_event(ChainEventData {
-            event_type: "wasm".to_string(),
-            data: ChainEventPayload::Wasm(WasmEventData::WasmCall {
-                function_name: function_name.to_string(),
-                params: recorded_params.to_vec(),
-            }),
-        });
-
-    // Call the export (no return values for HTTP handler)
-    let mut results = [];
-
-    info!("Calling export {}...", func_name);
-    func.call_async(&mut instance.store, &params, &mut results)
-        .await?;
-
-    // Post-return cleanup
-    func.post_return_async(&mut instance.store).await?;
-
-    info!("Export {} completed", func_name);
-
-    // Note: WasmResult will be recorded by the stub functions when response-outparam.set is called
-    // or we could record it here based on the expected chain
-
-    Ok(())
+    // NOTE: The wasmtime-specific replay logic has been removed.
+    // The original implementation is preserved in git history for reference
+    // when reimplementing replay support for Composite runtime.
 }
 
 impl Handler for ReplayHandler {
@@ -506,21 +454,11 @@ impl Handler for ReplayHandler {
             let (actor_id, theater_tx) = {
                 let guard = actor_instance.read().await;
                 match &*guard {
-                    Some(unified_instance) => {
-                        // Get ID and tx from wasmtime instance
-                        match unified_instance.as_wasmtime() {
-                            Some(instance) => {
-                                let id = instance.actor_component.actor_store.id.clone();
-                                let tx = instance.actor_component.actor_store.theater_tx.clone();
-                                (id, tx)
-                            }
-                            None => {
-                                error!("Replay handler does not support Composite instances yet");
-                                return Err(anyhow::anyhow!(
-                                    "Replay handler does not support Composite instances yet"
-                                ));
-                            }
-                        }
+                    Some(instance) => {
+                        // Get ID and tx from the actor store
+                        let id = instance.actor_store.id.clone();
+                        let tx = instance.actor_store.theater_tx.clone();
+                        (id, tx)
                     }
                     None => {
                         warn!("Actor instance not available for replay subscription");
@@ -675,8 +613,8 @@ impl Handler for ReplayHandler {
                 let summary = crate::events::replay::ReplaySummary::success(total, current);
 
                 if let Ok(guard) = actor_instance.try_read() {
-                    if let Some(unified_instance) = guard.as_ref() {
-                        unified_instance.record_event(
+                    if let Some(instance) = guard.as_ref() {
+                        instance.actor_store.record_event(
                             crate::events::ChainEventData {
                                 event_type: "replay-summary".to_string(),
                                 data: crate::events::ChainEventPayload::ReplaySummary(summary),

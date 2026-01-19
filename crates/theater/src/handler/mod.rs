@@ -14,7 +14,7 @@ use tokio::sync::RwLock;
 use tracing::{debug, info};
 
 /// Shared reference to an actor instance for handlers that need direct store access
-pub type SharedActorInstance = Arc<RwLock<Option<crate::composite_bridge::UnifiedInstance>>>;
+pub type SharedActorInstance = Arc<RwLock<Option<CompositeInstance>>>;
 
 /// Context passed to handlers during setup, tracking which imports are already satisfied
 #[derive(Debug, Clone, Default)]
@@ -198,6 +198,18 @@ impl Clone for HandlerRegistry {
 }
 
 impl HandlerRegistry {
+    /// Get all handlers for Composite instantiation.
+    ///
+    /// Unlike `setup_handlers` which filters based on wasmtime component metadata,
+    /// this returns all registered handlers. Composite will fail at instantiation
+    /// if required imports aren't satisfied.
+    pub fn get_handlers(&self) -> Vec<Box<dyn Handler>> {
+        self.handlers
+            .iter()
+            .map(|h| h.create_instance(None))
+            .collect()
+    }
+
     /// Clone the registry and apply per-actor configs from a manifest.
     ///
     /// For each handler config in the list, finds the matching handler by name
