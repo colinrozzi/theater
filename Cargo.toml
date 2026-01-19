@@ -5,23 +5,27 @@ members = [
     "crates/theater-server",
     "crates/theater-server-cli",
     "crates/theater-client",
+    "crates/theater-chain",
     "crates/val-serde",
-    "crates/theater-handler-environment",
-    "crates/theater-handler-filesystem",
-    "crates/theater-handler-http",
-    "crates/theater-handler-http-client",
-    "crates/theater-handler-http-framework",
-    "crates/theater-handler-io",
+    # Theater-specific handlers (to be migrated to Composite)
     "crates/theater-handler-message-server",
-    "crates/theater-handler-process",
-    "crates/theater-handler-random",
     "crates/theater-handler-runtime",
-    "crates/theater-handler-sockets",
     "crates/theater-handler-store",
     "crates/theater-handler-supervisor",
-    "crates/theater-handler-timing",
     "crates/theater-replay-experimenting",
 ]
+# DEPRECATED: WASI handlers moved to crates/deprecated/
+# These use wasmtime Component Model and will be redesigned for Composite later
+# - theater-handler-environment
+# - theater-handler-filesystem
+# - theater-handler-http
+# - theater-handler-http-client
+# - theater-handler-http-framework
+# - theater-handler-io
+# - theater-handler-process
+# - theater-handler-random
+# - theater-handler-sockets
+# - theater-handler-timing
 resolver = "2"
 
 [workspace.package]
@@ -47,20 +51,22 @@ uuid = { version = "1.6", features = ["v4", "serde"] }
 theater = { version = "0.2.1", path = "crates/theater" }
 theater-client = { version = "0.2.1", path = "crates/theater-client" }
 theater-server = { version = "0.2.1", path = "crates/theater-server" }
-theater-handler-environment = { version = "0.2.1", path = "crates/theater-handler-environment" }
-theater-handler-filesystem = { version = "0.2.1", path = "crates/theater-handler-filesystem" }
-theater-handler-http = { version = "0.2.1", path = "crates/theater-handler-http" }
-theater-handler-http-client = { version = "0.2.1", path = "crates/theater-handler-http-client" }
-theater-handler-http-framework = { version = "0.2.1", path = "crates/theater-handler-http-framework" }
-theater-handler-io = { version = "0.2.1", path = "crates/theater-handler-io" }
+# Theater-specific handlers
 theater-handler-message-server = { version = "0.2.1", path = "crates/theater-handler-message-server" }
-theater-handler-process = { version = "0.2.1", path = "crates/theater-handler-process" }
-theater-handler-random = { version = "0.2.1", path = "crates/theater-handler-random" }
 theater-handler-runtime = { version = "0.2.1", path = "crates/theater-handler-runtime" }
-theater-handler-sockets = { version = "0.2.1", path = "crates/theater-handler-sockets" }
 theater-handler-store = { version = "0.2.1", path = "crates/theater-handler-store" }
 theater-handler-supervisor = { version = "0.2.1", path = "crates/theater-handler-supervisor" }
-theater-handler-timing = { version = "0.2.1", path = "crates/theater-handler-timing" }
+# DEPRECATED: WASI handlers (moved to crates/deprecated/)
+# theater-handler-environment = { version = "0.2.1", path = "crates/deprecated/theater-handler-environment" }
+# theater-handler-filesystem = { version = "0.2.1", path = "crates/deprecated/theater-handler-filesystem" }
+# theater-handler-http = { version = "0.2.1", path = "crates/deprecated/theater-handler-http" }
+# theater-handler-http-client = { version = "0.2.1", path = "crates/deprecated/theater-handler-http-client" }
+# theater-handler-http-framework = { version = "0.2.1", path = "crates/deprecated/theater-handler-http-framework" }
+# theater-handler-io = { version = "0.2.1", path = "crates/deprecated/theater-handler-io" }
+# theater-handler-process = { version = "0.2.1", path = "crates/deprecated/theater-handler-process" }
+# theater-handler-random = { version = "0.2.1", path = "crates/deprecated/theater-handler-random" }
+# theater-handler-sockets = { version = "0.2.1", path = "crates/deprecated/theater-handler-sockets" }
+# theater-handler-timing = { version = "0.2.1", path = "crates/deprecated/theater-handler-timing" }
 
 # Composite runtime integration
 composite = { path = "../composite" }

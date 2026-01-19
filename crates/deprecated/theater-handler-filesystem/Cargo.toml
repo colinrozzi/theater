@@ -1,5 +1,5 @@
 [package]
-name = "theater-handler-random"
+name = "theater-handler-filesystem"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
@@ -12,8 +12,8 @@ rust-version.workspace = true
 
 [dependencies]
 # Core theater dependencies
-theater = { path = "../theater" }
-val-serde = { path = "../val-serde" }
+theater = { path = "../../theater" }
+theater-handler-io = { path = "../theater-handler-io" }
 
 # WebAssembly runtime
 wasmtime = { version = "31.0", features = ["component-model", "async"] }
@@ -30,25 +30,18 @@ tracing = "0.1"
 
 # Serialization
 serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
 
-# Random number generation
-rand = "0.8.5"
-rand_chacha = "0.3"
+# Path canonicalization
+dunce = "1.0"
 
-# Utilities
+# Random number generation (for temp dir)
+rand = "0.8"
+
+# Time handling
 chrono = "0.4"
-uuid = { version = "1.6", features = ["v4", "serde"] }
 
 [dev-dependencies]
 test-log = "0.2"
 pretty_assertions = "1.4"
 tempfile = "3.8.1"
-theater-handler-runtime = { path = "../theater-handler-runtime" }
-theater-handler-io = { path = "../theater-handler-io" }
-theater-handler-timing = { path = "../theater-handler-timing" }
-theater-handler-filesystem = { path = "../theater-handler-filesystem" }
-tracing-subscriber = "0.3"
-
-[[test]]
-name = "integration_test"
-path = "tests/integration_test.rs"

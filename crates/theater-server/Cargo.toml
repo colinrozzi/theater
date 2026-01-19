@@ -16,21 +16,12 @@ readme = "README.md"
 # Internal dependencies
 theater.workspace = true
 
-# Migrated handler dependencies
-theater-handler-environment.workspace = true
-theater-handler-filesystem.workspace = true
-theater-handler-http.workspace = true
-theater-handler-http-client.workspace = true
-theater-handler-http-framework.workspace = true
-theater-handler-io.workspace = true
+# Theater-specific handlers
 theater-handler-message-server.workspace = true
-theater-handler-process.workspace = true
-theater-handler-random.workspace = true
 theater-handler-runtime.workspace = true
-theater-handler-sockets.workspace = true
 theater-handler-store.workspace = true
 theater-handler-supervisor.workspace = true
-theater-handler-timing.workspace = true
+# DEPRECATED: WASI handlers removed - see crates/deprecated/
 
 # Core dependencies
 anyhow.workspace = true

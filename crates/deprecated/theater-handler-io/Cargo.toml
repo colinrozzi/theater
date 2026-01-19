@@ -7,7 +7,7 @@ description = "WASI I/O handler for Theater - provides streams, error handling, 
 
 [dependencies]
 anyhow = "1.0"
-theater = { path = "../theater" }
+theater = { path = "../../theater" }
 tokio = { version = "1.43", features = ["sync", "rt"] }
 tracing = "0.1"
 wasmtime = "31.0.0"
@@ -18,7 +18,7 @@ tokio = { version = "1.43", features = ["full"] }
 test-log = "0.2"
 pretty_assertions = "1.4"
 tempfile = "3.8.1"
-theater-handler-runtime = { path = "../theater-handler-runtime" }
+theater-handler-runtime = { path = "../../theater-handler-runtime" }
 theater-handler-random = { path = "../theater-handler-random" }
 theater-handler-timing = { path = "../theater-handler-timing" }
 theater-handler-filesystem = { path = "../theater-handler-filesystem" }

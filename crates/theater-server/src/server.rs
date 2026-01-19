@@ -17,32 +17,20 @@ use tracing::{debug, error, info};
 use uuid::Uuid;
 
 use theater::config::actor_manifest::{
-    EnvironmentHandlerConfig, FileSystemHandlerConfig, HttpClientHandlerConfig,
-    ProcessHostConfig, RandomHandlerConfig, RuntimeHostConfig, StoreHandlerConfig,
-    SupervisorHostConfig, TimingHostConfig,
+    RuntimeHostConfig, StoreHandlerConfig, SupervisorHostConfig,
 };
-use theater::config::permissions::HttpClientPermissions;
 use theater::handler::HandlerRegistry;
 use theater::id::TheaterId;
 use theater::messages::{ChannelId, TheaterCommand};
 use theater::theater_runtime::TheaterRuntime;
 use theater::TheaterRuntimeError;
 
-// Import all migrated handlers
-use theater_handler_environment::EnvironmentHandler;
-use theater_handler_filesystem::FilesystemHandler;
-use theater_handler_http::WasiHttpHandler;
-use theater_handler_http_client::HttpClientHandler;
-use theater_handler_http_framework::HttpFrameworkHandler;
-use theater_handler_io::WasiIoHandler;
+// Import Theater-specific handlers only
+// DEPRECATED: WASI handlers (environment, filesystem, http, io, etc.) moved to crates/deprecated/
 use theater_handler_message_server::MessageServerHandler;
-use theater_handler_process::ProcessHandler;
-use theater_handler_random::RandomHandler;
 use theater_handler_runtime::RuntimeHandler;
-use theater_handler_sockets::WasiSocketsHandler;
 use theater_handler_store::StoreHandler;
 use theater_handler_supervisor::SupervisorHandler;
-use theater_handler_timing::TimingHandler;
 
 use crate::fragmenting_codec::FragmentingCodec;
 
@@ -314,10 +302,11 @@ struct ChannelSubscription {
     client_tx: mpsc::Sender<ManagementResponse>,
 }
 
-/// Creates a HandlerRegistry with all migrated handlers using root permissions.
+/// Creates a HandlerRegistry with Theater-specific handlers.
 ///
-/// This provides full, unrestricted access to all handler capabilities,
-/// suitable for a server environment.
+/// NOTE: WASI handlers (environment, filesystem, http, io, sockets, timing, random, process)
+/// have been deprecated and moved to crates/deprecated/. They will be redesigned for
+/// Composite runtime support later.
 ///
 /// Returns both the HandlerRegistry and the MessageRouter, allowing the server
 /// to use the MessageRouter for external client messaging.
@@ -326,87 +315,26 @@ fn create_root_handler_registry(
 ) -> (HandlerRegistry, theater_handler_message_server::MessageRouter) {
     let mut registry = HandlerRegistry::new();
 
-    info!("Initializing Theater server with all migrated handlers...");
+    info!("Initializing Theater server with Theater-specific handlers...");
 
-    // Phase 1: Simple Handlers
-    let env_config = EnvironmentHandlerConfig {
-        allowed_vars: None,              // Allow all environment variables
-        denied_vars: None,               // No denied vars (root access)
-        allow_list_all: true,            // Allow listing all vars
-        allowed_prefixes: None,          // No restrictions
-    };
-    registry.register(EnvironmentHandler::new(env_config, None));
-
-    let random_config = RandomHandlerConfig {
-        seed: None,                      // OS entropy
-        max_bytes: usize::MAX,          // No limit
-        max_int: u64::MAX,              // No limit
-        allow_crypto_secure: true,      // Allow crypto-secure random
-    };
-    registry.register(RandomHandler::new(random_config, None));
-
-    let timing_config = TimingHostConfig {
-        max_sleep_duration: u64::MAX,    // No limit
-        min_sleep_duration: 0,           // No minimum
-    };
-    registry.register(TimingHandler::new(timing_config, None));
-
+    // Runtime handler - provides actor runtime information and control
     let runtime_config = RuntimeHostConfig {};
     registry.register(RuntimeHandler::new(runtime_config, theater_tx.clone(), None));
 
-    // Phase 2: Medium Complexity Handlers
-    let http_client_config = HttpClientHandlerConfig {};
-    // TEMPORARY: Use permissive permissions for testing (no restrictions)
-    // TODO: Apply per-actor permissions from manifests
-    let permissive_perms = Some(HttpClientPermissions {
-        allowed_methods: None,  // No restrictions
-        allowed_hosts: None,    // No restrictions
-        max_redirects: None,
-        timeout: None,
-    });
-    registry.register(HttpClientHandler::new(http_client_config, permissive_perms));
-
-    let filesystem_config = FileSystemHandlerConfig {
-        path: None,                      // No path restrictions (root access)
-        new_dir: Some(true),            // Allow creating directories
-        allowed_commands: None,          // All commands allowed
-    };
-    registry.register(FilesystemHandler::new(filesystem_config, None));
-
-    // WASI I/O handler for streams and polling
-    // WASI Sockets handler for TCP/UDP networking
-    // Register BEFORE io handler so sockets can provide io interfaces with compatible types
-    registry.register(WasiSocketsHandler::new());
-
-    registry.register(WasiIoHandler::new());
-
-    // WASI HTTP handler for both incoming (server) and outgoing (client) requests
-    // Port 8080 is used for incoming HTTP handler when component exports wasi:http/incoming-handler
-    registry.register(WasiHttpHandler::new().with_port(8080));
-
-    // Phase 3: Complex Handlers
-    let process_config = ProcessHostConfig {
-        max_processes: usize::MAX,       // No limit
-        max_output_buffer: usize::MAX,   // No limit
-        allowed_programs: None,          // All programs allowed
-        allowed_paths: None,             // All paths allowed
-    };
-    registry.register(ProcessHandler::new(process_config, None));
-
+    // Store handler - provides key-value storage for actors
     let store_config = StoreHandlerConfig {};
     registry.register(StoreHandler::new(store_config, None));
 
+    // Supervisor handler - allows actors to spawn and manage child actors
     let supervisor_config = SupervisorHostConfig {};
     registry.register(SupervisorHandler::new(supervisor_config, None));
 
-    // Phase 4: Framework Handlers
-    // Create MessageRouter for inter-actor messaging
+    // Message server handler - provides inter-actor messaging
     let message_router = theater_handler_message_server::MessageRouter::new();
     registry.register(MessageServerHandler::new(None, message_router.clone()));
 
-    registry.register(HttpFrameworkHandler::new(None));
-
-    info!("✓ All 14 handlers registered successfully");
+    info!("✓ 4 Theater-specific handlers registered");
+    info!("NOTE: WASI handlers are deprecated - see crates/deprecated/");
 
     (registry, message_router)
 }
