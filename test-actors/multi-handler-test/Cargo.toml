@@ -1,0 +1,16 @@
+[package]
+name = "multi-handler-test-actor"
+version = "0.1.0"
+edition = "2021"
+
+[workspace]
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+composite-guest = { path = "../../../composite/crates/composite-guest" }
+
+[profile.release]
+opt-level = "s"
+lto = true
