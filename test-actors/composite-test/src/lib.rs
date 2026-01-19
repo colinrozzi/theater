@@ -4,6 +4,7 @@
 //! 1. Exports `init` function for the theater:simple/actor interface
 //! 2. Imports `log` function from theater:simple/runtime interface
 //! 3. Demonstrates basic state handling with WIT+-generated types
+//! 4. Uses typed function parameters (not raw Value)
 
 #![no_std]
 
@@ -62,38 +63,20 @@ fn test_generated_types() {
 
 /// The init function for theater:simple/actor interface.
 ///
-/// Input format: Tuple(Option<List<u8>>, List<u8>)
-///   - First element: current state (Option of byte list)
-///   - Second element: params (byte list, currently unused)
+/// Now using typed parameters thanks to the export macro!
+/// The WIT signature is:
+///   init: func(state: option<list<u8>>) -> result<tuple<option<list<u8>>>, string>;
 ///
-/// Output format: Variant (Result)
-///   - tag 0 (Ok): Tuple(Option<List<u8>>, any_result)
-///   - tag 1 (Err): String error message
-// Using full path - the export name is automatically derived from WIT
+/// The macro automatically:
+/// - Extracts `state` from the input Value
+/// - Wraps the Result return value back to Value
 #[export(wit = "theater:simple/actor.init")]
-fn init(input: Value) -> Value {
-    log(String::from("Composite test actor: init called!"));
+fn init(state: Option<Vec<u8>>) -> Result<(Option<Vec<u8>>,), String> {
+    log(String::from("Composite test actor: init called with typed params!"));
 
     // Test the generated types
     test_generated_types();
     log(String::from("Generated types test passed!"));
-
-    // Parse input: Tuple(state, params)
-    let (state, _params) = match input {
-        Value::Tuple(items) if items.len() >= 2 => {
-            let state = items.into_iter().next().unwrap();
-            let params = Value::Tuple(Vec::new()); // Ignore params for now
-            (state, params)
-        }
-        _ => {
-            log(String::from("Composite test actor: unexpected input format"));
-            // Return error
-            return Value::Variant {
-                tag: 1,
-                payload: Some(Box::new(Value::String(String::from("Invalid input format")))),
-            };
-        }
-    };
 
     log(String::from("Composite test actor: processing state..."));
 
@@ -102,13 +85,7 @@ fn init(input: Value) -> Value {
 
     log(String::from("Composite test actor: init completed successfully!"));
 
-    // Return Ok variant: Variant { tag: 0, payload: Tuple(new_state, result) }
-    // The result is just unit for init
-    Value::Variant {
-        tag: 0,
-        payload: Some(Box::new(Value::Tuple(alloc::vec![
-            new_state,
-            Value::Tuple(Vec::new()), // Unit result
-        ]))),
-    }
+    // Return the new state wrapped in Ok
+    // The type is Result<(Option<Vec<u8>>,), String> matching the WIT signature
+    Ok((new_state,))
 }
