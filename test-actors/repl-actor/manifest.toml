@@ -1,0 +1,7 @@
+name = "repl"
+version = "0.1.0"
+component = "/Users/colinrozzi/work/theater/test-actors/repl-actor/target/wasm32-unknown-unknown/release/repl_actor.wasm"
+description = "Interactive REPL actor for S-expression evaluation"
+
+[[handler]]
+type = "runtime"

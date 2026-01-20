@@ -1,0 +1,43 @@
+// WIT+ definition for the REPL actor
+// Provides an eval interface for interactive S-expression evaluation
+
+// S-expression type - the core data structure
+// Using WIT+ recursive types via list<self>
+variant sexpr {
+    // A symbol (variable name, function name)
+    sym(string),
+    // An integer
+    num(s64),
+    // A floating point number
+    flt(f64),
+    // A string literal
+    str(string),
+    // A list of S-expressions
+    list(list<self>),
+    // Nil / empty
+    nil,
+}
+
+// Evaluation result - either a value or an error message
+variant eval-result {
+    ok(sexpr),
+    err(string),
+}
+
+// The main REPL interface - defined outside the world
+interface repl {
+    // Evaluate a string input and return the result
+    // The string is parsed into an S-expression and evaluated
+    eval: func(input: string) -> eval-result;
+}
+
+world repl-actor {
+    // Export the REPL interface
+    export repl
+
+    // Also export theater:simple/actor for lifecycle
+    export theater:simple/actor
+
+    // Import runtime for logging
+    import theater:simple/runtime
+}
