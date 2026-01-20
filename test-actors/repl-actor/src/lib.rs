@@ -27,8 +27,12 @@ use composite_guest::{export, import, Value};
 use crate::parse::parse;
 use crate::eval::eval;
 
-// Set up allocator (1MB for complex expressions) and panic handler
-composite_guest::setup_guest!(1024 * 1024);
+// Use dlmalloc for proper memory management (supports deallocation)
+#[global_allocator]
+static ALLOC: dlmalloc::GlobalDlmalloc = dlmalloc::GlobalDlmalloc;
+
+// Set up panic handler (but NOT the bump allocator)
+composite_guest::panic_handler!();
 
 // Import the log function from theater runtime
 #[import(wit = "theater:simple/runtime.log")]

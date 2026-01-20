@@ -10,6 +10,7 @@ crate-type = ["cdylib"]
 
 [dependencies]
 composite-guest = { path = "../../../composite/crates/composite-guest" }
+dlmalloc = { version = "0.2", features = ["global"] }
 
 [profile.release]
 opt-level = "s"

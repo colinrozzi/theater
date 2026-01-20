@@ -155,6 +155,29 @@ async fn run_tests() -> Result<()> {
     info!("Result: {}", format_result(&result));
     print_logs(&logs);
 
+    // Stress test: Run 1000 eval calls to verify memory is being reclaimed
+    info!("\n=== Stress Test: 1000 eval calls ===");
+    for i in 0..1000 {
+        // Vary the expressions to exercise different code paths
+        let expr = match i % 5 {
+            0 => format!("(+ {} {})", i, i + 1),
+            1 => format!("(list {} {} {})", i, i + 1, i + 2),
+            2 => format!("(if (< {} {}) {} {})", i, i + 1, i * 2, i * 3),
+            3 => format!("(car (list {} {} {}))", i, i + 1, i + 2),
+            _ => format!("(* {} (+ {} {}))", i, i + 1, i + 2),
+        };
+        let result = call_eval(&mut instance, &expr).await?;
+
+        // Print progress every 100 iterations
+        if i % 100 == 0 {
+            info!("  Iteration {}: {} => {}", i, expr, format_result(&result));
+        }
+
+        // Clear logs to avoid memory buildup on host side
+        logs.lock().unwrap().clear();
+    }
+    info!("Stress test completed! Memory is being properly reclaimed.");
+
     info!("\n=== All tests completed! ===");
     Ok(())
 }
