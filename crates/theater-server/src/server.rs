@@ -82,9 +82,9 @@ pub enum ManagementCommand {
     GetActorMetrics {
         id: TheaterId,
     },
-    UpdateActorComponent {
+    UpdateActorPackage {
         id: TheaterId,
-        component: String,
+        package: String,
     },
     // Channel management commands
     OpenChannel {
@@ -158,7 +158,7 @@ pub enum ManagementResponse {
         id: TheaterId,
         metrics: serde_json::Value,
     },
-    ActorComponentUpdated {
+    ActorPackageUpdated {
         id: TheaterId,
     },
     // Channel management responses
@@ -1063,11 +1063,11 @@ impl TheaterServer {
                         metrics: serde_json::to_value(metrics?)?,
                     }
                 }
-                ManagementCommand::UpdateActorComponent { id: _, component: _ } => {
-                    // TODO: Re-implement actor component updates
+                ManagementCommand::UpdateActorPackage { id: _, package: _ } => {
+                    // TODO: Re-implement actor package updates
                     ManagementResponse::Error {
                         error: ManagementError::RuntimeError(
-                            "UpdateActorComponent not yet implemented".to_string()
+                            "UpdateActorPackage not yet implemented".to_string()
                         ),
                     }
                 }

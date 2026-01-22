@@ -91,7 +91,7 @@ fn create_test_manifest_content() -> String {
     format!(
         r#"name = "runtime-test"
 version = "0.1.0"
-component = "{}"
+package = "{}"
 description = "Test actor for runtime handler"
 save_chain = true
 

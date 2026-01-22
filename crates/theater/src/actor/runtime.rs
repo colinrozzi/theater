@@ -259,16 +259,16 @@ impl ActorRuntime {
             return Err(ActorRuntimeError::ActorPhaseError {
                 expected: ActorPhase::Starting,
                 found: curr_phase,
-                message: "phase error found at setup task Checkpoint Load Component".into(),
+                message: "phase error found at setup task Checkpoint Load Package".into(),
             });
         }
 
-        debug!("Loading component: {}", config.component);
+        debug!("Loading package: {}", config.package);
 
-        // Load the WASM component bytes
-        let wasm_bytes = resolve_reference(&config.component).await.map_err(|e| {
+        // Load the WASM package bytes
+        let wasm_bytes = resolve_reference(&config.package).await.map_err(|e| {
             let error_message = format!(
-                "Failed to load component for actor {}: {}",
+                "Failed to load package for actor {}: {}",
                 config.name, e
             );
             error!("{}", error_message);

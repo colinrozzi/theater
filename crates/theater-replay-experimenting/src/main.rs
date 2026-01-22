@@ -107,7 +107,7 @@ pub fn create_recording_manifest(wasm_path: &PathBuf) -> String {
     format!(
         r#"name = "runtime-test"
 version = "0.1.0"
-component = "{}"
+package = "{}"
 description = "Test actor for replay handler - recording mode"
 save_chain = true
 
@@ -126,7 +126,7 @@ pub fn create_replay_manifest(wasm_path: &PathBuf, chain_path: &str) -> String {
     format!(
         r#"name = "runtime-test-replay"
 version = "0.1.0"
-component = "{}"
+package = "{}"
 description = "Test actor for replay handler - replay mode"
 save_chain = true
 

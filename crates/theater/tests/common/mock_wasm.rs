@@ -124,7 +124,7 @@ impl MockActorComponentFactory {
     pub async fn create_basic_component(store: ActorStore) -> Result<MockActorComponent> {
         let config = ManifestConfig {
             name: "test-actor".to_string(),
-            component: "test-component.wasm".to_string(),
+            package: "test-package.wasm".to_string(),
             version: "1.0.0".to_string(),
             handlers: Vec::new(),
             description: None,

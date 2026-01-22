@@ -1,6 +1,6 @@
 name = "wasi-http-test"
 version = "0.1.0"
-component = "/Users/colinrozzi/work/theater/crates/theater-handler-http/test-actors/wasi-http-test/./target/wasm32-unknown-unknown/release/wasi_http_test.wasm"
+package = "/Users/colinrozzi/work/theater/crates/theater-handler-http/test-actors/wasi-http-test/./target/wasm32-unknown-unknown/release/wasi_http_test.wasm"
 save_chain = true
 
 [[handler]]

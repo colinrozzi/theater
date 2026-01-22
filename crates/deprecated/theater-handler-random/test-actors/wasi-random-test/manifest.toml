@@ -1,6 +1,6 @@
 name = "wasi-random-test"
 version = "0.1.0"
-component = "/Users/colinrozzi/work/theater/crates/theater-handler-random/test-actors/wasi-random-test/target/wasm32-unknown-unknown/release/wasi_random_test.wasm"
+package = "/Users/colinrozzi/work/theater/crates/theater-handler-random/test-actors/wasi-random-test/target/wasm32-unknown-unknown/release/wasi_random_test.wasm"
 description = "WASI random interface test actor"
 save_chain = true
 

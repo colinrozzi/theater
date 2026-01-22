@@ -18,7 +18,7 @@ async fn test_manifest_loading_with_substitution() {
             "version": "1.0.0"
         },
         "build": {
-            "component_path": "./processor.wasm"
+            "package_path": "./processor.wasm"
         },
         "server": {
             "port": 8080
@@ -37,7 +37,7 @@ async fn test_manifest_loading_with_substitution() {
     let manifest_content = format!(r#"
 name = "${{app.name}}"
 version = "${{app.version}}"
-component = "${{build.component_path}}"
+package = "${{build.package_path}}"
 description = "Test processor for ${{app.name}}"
 save_chain = ${{features.debug}}
 init_state = "{}"
@@ -60,7 +60,7 @@ port = ${{server.port}}
     // Verify substitutions worked
     assert_eq!(config.name, "test-processor");
     assert_eq!(config.version, "1.0.0");
-    assert_eq!(config.component, "./processor.wasm");
+    assert_eq!(config.package, "./processor.wasm");
     assert_eq!(config.description, Some("Test processor for test-processor".to_string()));
     assert_eq!(config.save_chain, Some(true));
     
@@ -90,7 +90,7 @@ async fn test_manifest_with_override_state() {
     // Create manifest with variables
     let manifest_content = format!(r#"
 name = "${{app.name}}"
-component = "test.wasm"
+package = "test.wasm"
 version = "1.0.0"
 init_state = "{}"
 
@@ -124,7 +124,7 @@ async fn test_manifest_without_variables() {
     let manifest_content = r#"
 name = "static-app"
 version = "1.0.0"
-component = "static.wasm"
+package = "static.wasm"
 description = "A static app"
 
 [[handler]]
@@ -143,7 +143,7 @@ path = "/static/path"
     // Both should be identical
     assert_eq!(config1.name, config2.name);
     assert_eq!(config1.version, config2.version);
-    assert_eq!(config1.component, config2.component);
+    assert_eq!(config1.package, config2.package);
     assert_eq!(config1.description, config2.description);
     assert_eq!(config1.handlers.len(), config2.handlers.len());
 }
@@ -153,7 +153,7 @@ async fn test_manifest_missing_variable_error() {
     let manifest_content = r#"
 name = "${missing.variable}"
 version = "1.0.0"
-component = "test.wasm"
+package = "test.wasm"
 "#;
     
     let result = ManifestConfig::from_str_with_substitution(manifest_content, None).await;
@@ -168,7 +168,7 @@ async fn test_manifest_with_defaults() {
     let manifest_content = r#"
 name = "${app.name:default-app}"
 version = "1.0.0"
-component = "test.wasm"
+package = "test.wasm"
 save_chain = ${logging.enabled:false}
 
 [[handler]]
@@ -191,7 +191,7 @@ async fn test_backward_compatibility() {
     let manifest_content = r#"
 name = "compat-test"
 version = "1.0.0"
-component = "test.wasm"
+package = "test.wasm"
 
 [[handler]]
 type = "filesystem"
@@ -209,5 +209,5 @@ path = "/tmp"
     // Should be identical
     assert_eq!(config1.name, config2.name);
     assert_eq!(config1.version, config2.version);
-    assert_eq!(config1.component, config2.component);
+    assert_eq!(config1.package, config2.package);
 }

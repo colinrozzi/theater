@@ -15,7 +15,7 @@ use tokio::time::timeout;
 fn create_test_manifest() -> ManifestConfig {
     let mut config = ManifestConfig {
         name: "test-actor".to_string(),
-        component_path: "test-component-path".to_string(),
+        package: "test-package-path".to_string(),
         ..Default::default()
     };
     

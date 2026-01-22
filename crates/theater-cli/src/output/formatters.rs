@@ -213,7 +213,7 @@ impl OutputFormat for BuildResult {
             output.success("Build completed successfully")?;
             if let Some(wasm_path) = &self.wasm_path {
                 println!(
-                    "  Component: {}",
+                    "  Package: {}",
                     output.theme().accent().apply_to(wasm_path.display())
                 );
             }
@@ -245,7 +245,7 @@ impl OutputFormat for BuildResult {
 
             if let Some(wasm_path) = &self.wasm_path {
                 println!(
-                    "Component: {}",
+                    "Package: {}",
                     output.theme().accent().apply_to(wasm_path.display())
                 );
             }
@@ -265,7 +265,7 @@ impl OutputFormat for BuildResult {
                 );
                 if let Some(wasm_path) = &self.wasm_path {
                     println!(
-                        "Create one to deploy: theater create-manifest --component-path {}",
+                        "Create one to deploy: theater create-manifest --package-path {}",
                         output.theme().muted().apply_to(wasm_path.display())
                     );
                 }
@@ -314,7 +314,7 @@ impl OutputFormat for BuildResult {
 
         if let Some(wasm_path) = &self.wasm_path {
             rows.push(vec![
-                "Component".to_string(),
+                "Package".to_string(),
                 wasm_path.display().to_string(),
             ]);
         }
@@ -446,23 +446,23 @@ impl OutputFormat for ActorAction {
     }
 }
 
-/// Component update result formatter
+/// Package update result formatter
 #[derive(Debug, serde::Serialize)]
-pub struct ComponentUpdate {
+pub struct PackageUpdate {
     pub actor_id: String,
-    pub component: String,
+    pub package: String,
     pub success: bool,
     pub message: Option<String>,
 }
 
-impl OutputFormat for ComponentUpdate {
+impl OutputFormat for PackageUpdate {
     fn format_compact(&self, output: &OutputManager) -> CliResult<()> {
         if self.success {
             println!(
-                "{} Updated actor: {} with component: {}",
+                "{} Updated actor: {} with package: {}",
                 output.theme().success_icon(),
                 output.theme().accent().apply_to(&self.actor_id),
-                output.theme().accent().apply_to(&self.component)
+                output.theme().accent().apply_to(&self.package)
             );
         } else {
             println!(
@@ -485,15 +485,15 @@ impl OutputFormat for ComponentUpdate {
                 output
                     .theme()
                     .highlight()
-                    .apply_to("Component Updated Successfully")
+                    .apply_to("Package Updated Successfully")
             );
             println!(
                 "Actor ID: {}",
                 output.theme().accent().apply_to(&self.actor_id)
             );
             println!(
-                "New Component: {}",
-                output.theme().accent().apply_to(&self.component)
+                "New Package: {}",
+                output.theme().accent().apply_to(&self.package)
             );
         } else {
             println!(
@@ -502,15 +502,15 @@ impl OutputFormat for ComponentUpdate {
                 output
                     .theme()
                     .error()
-                    .apply_to("Failed to Update Component")
+                    .apply_to("Failed to Update Package")
             );
             println!(
                 "Actor ID: {}",
                 output.theme().accent().apply_to(&self.actor_id)
             );
             println!(
-                "Component: {}",
-                output.theme().accent().apply_to(&self.component)
+                "Package: {}",
+                output.theme().accent().apply_to(&self.package)
             );
             if let Some(msg) = &self.message {
                 println!("Error: {}", msg);
@@ -523,7 +523,7 @@ impl OutputFormat for ComponentUpdate {
         let headers = vec!["Property", "Value"];
         let mut rows = vec![
             vec!["Actor ID".to_string(), self.actor_id.clone()],
-            vec!["Component".to_string(), self.component.clone()],
+            vec!["Package".to_string(), self.package.clone()],
             vec![
                 "Status".to_string(),
                 if self.success {

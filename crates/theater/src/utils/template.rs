@@ -162,7 +162,7 @@ count = {{config.max_items}}
         let toml = r#"
 name = "{{app.name}}"
 version = "{{app.version}}"
-component = "{{build.component_path}}"
+package = "{{build.package_path}}"
 description = "Processor for {{workspace.name}}"
 save_chain = {{logging.save_events}}
 
@@ -183,7 +183,7 @@ timeout = {{default api.timeout_ms "5000"}}
                 "version": "0.1.0"
             },
             "build": {
-                "component_path": "./dist/processor.wasm"
+                "package_path": "./dist/processor.wasm"
             },
             "workspace": {
                 "name": "production-workspace",
@@ -208,7 +208,7 @@ timeout = {{default api.timeout_ms "5000"}}
         // Verify key substitutions
         assert!(result.contains(r#"name = "dynamic-processor""#));
         assert!(result.contains(r#"version = "0.1.0""#));
-        assert!(result.contains(r#"component = "./dist/processor.wasm""#));
+        assert!(result.contains(r#"package = "./dist/processor.wasm""#));
         assert!(result.contains(r#"description = "Processor for production-workspace""#));
         assert!(result.contains("save_chain = true"));
         assert!(result.contains(r#"path = "/var/data/workspace-prod""#));

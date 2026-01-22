@@ -1,6 +1,6 @@
 name = "{{project_name}}"
 version = "0.1.0"
-component = "./target/wasm32-unknown-unknown/release/{{project_name_snake}}.wasm"
+package = "./target/wasm32-unknown-unknown/release/{{project_name_snake}}.wasm"
 description = "A basic HTTP server built with Theater WebAssembly actors"
 
 [[handler]]

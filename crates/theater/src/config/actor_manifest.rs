@@ -11,16 +11,16 @@ use super::inheritance::{is_default_permission_policy, HandlerPermissionPolicy};
 use super::permissions::HandlerPermission;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ComponentConfig {
+pub struct PackageConfig {
     pub name: String,
-    pub component_path: PathBuf,
+    pub package_path: PathBuf,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ManifestConfig {
     pub name: String,
     pub version: String,
-    pub component: String,
+    pub package: String,
     pub description: Option<String>,
     pub long_description: Option<String>,
     pub save_chain: Option<bool>,
@@ -36,10 +36,10 @@ impl Display for ManifestConfig {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "ManifestConfig(name: {}, version: {}, component: {}, description: {:?}, long_description: {:?}, save_chain: {:?}, permission_policy: {:?}, init_state: {:?}, handlers: {:?})",
+            "ManifestConfig(name: {}, version: {}, package: {}, description: {:?}, long_description: {:?}, save_chain: {:?}, permission_policy: {:?}, init_state: {:?}, handlers: {:?})",
             self.name,
             self.version,
-            self.component,
+            self.package,
             self.description,
             self.long_description,
             self.save_chain,
@@ -535,7 +535,7 @@ impl ManifestConfig {
     /// fn example() -> anyhow::Result<()> {
     ///     let toml_content = r#"
     ///         name = "example-actor"
-    ///         component_path = "./example.wasm"
+    ///         package = "./example.wasm"
     ///     "#;
     ///     
     ///     let config = ManifestConfig::from_str(toml_content)?;
@@ -739,7 +739,7 @@ mod tests {
         let toml_content = r#"
             name = "test-actor"
             version = "0.1.0"
-            component = "test.wasm"
+            package = "test.wasm"
             
             [permission_policy.file_system]
             type = "restrict"
@@ -770,7 +770,7 @@ mod tests {
         let toml_content = r#"
             name = "test-actor"
             version = "0.1.0"
-            component = "test.wasm"
+            package = "test.wasm"
             
             [permissions.file_system]
             read = true

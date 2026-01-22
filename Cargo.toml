@@ -37,7 +37,7 @@ repository = "https://github.com/colinrozzi/theater"
 homepage = "https://colinrozzi.github.io/theater"
 keywords = ["wasm", "actor", "ai", "agents", "webassembly"]
 categories = ["wasm", "concurrency", "development-tools"]
-rust-version = "1.81.0"
+rust-version = "1.83.0"
 
 [workspace.dependencies]
 anyhow = "1.0"
@@ -71,3 +71,7 @@ theater-handler-supervisor = { version = "0.2.1", path = "crates/theater-handler
 # Composite runtime integration
 composite = { path = "../composite" }
 composite-abi = { path = "../composite/crates/composite-abi" }
+
+# Metadata for Nix crane builds
+[workspace.metadata.crane]
+name = "theater"

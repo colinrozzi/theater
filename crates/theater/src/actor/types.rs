@@ -68,10 +68,10 @@ pub enum ActorError {
     #[component(name = "serialization-error")]
     SerializationError,
 
-    /// Failed to update the actor's WebAssembly component
-    #[error("Failed to update component: {0}")]
-    #[component(name = "update-component-error")]
-    UpdateComponentError(String),
+    /// Failed to update the actor's WebAssembly package
+    #[error("Failed to update package: {0}")]
+    #[component(name = "update-package-error")]
+    UpdatePackageError(String),
 
     /// Actor is paused
     #[error("Actor is paused")]
@@ -117,8 +117,8 @@ pub enum WitErrorType {
     Internal,
     #[component(name = "serialization-error")]
     SerializationError,
-    #[component(name = "update-component-error")]
-    UpdateComponentError,
+    #[component(name = "update-package-error")]
+    UpdatePackageError,
     #[component(name = "paused")]
     Paused,
     //#[component(name = "update-error")]
@@ -143,8 +143,8 @@ impl From<ActorError> for WitActorError {
                 Some(serde_json::to_vec(&data).unwrap()),
             ),
             ActorError::SerializationError => (WitErrorType::SerializationError, None),
-            ActorError::UpdateComponentError(data) => {
-                (WitErrorType::UpdateComponentError, Some(data.into_bytes()))
+            ActorError::UpdatePackageError(data) => {
+                (WitErrorType::UpdatePackageError, Some(data.into_bytes()))
             }
             ActorError::Paused => (WitErrorType::Paused, None),
             ActorError::NotPaused => (WitErrorType::Paused, None),

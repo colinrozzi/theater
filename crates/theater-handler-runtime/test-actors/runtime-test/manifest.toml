@@ -1,6 +1,6 @@
 name = "runtime-test"
 version = "0.1.0"
-component = "/Users/colinrozzi/work/theater/crates/theater-handler-runtime/test-actors/runtime-test/target/wasm32-unknown-unknown/release/runtime_test.wasm"
+package = "/Users/colinrozzi/work/theater/crates/theater-handler-runtime/test-actors/runtime-test/target/wasm32-unknown-unknown/release/runtime_test.wasm"
 description = "Test actor for the Theater runtime handler"
 save_chain = true
 

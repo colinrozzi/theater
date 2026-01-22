@@ -101,9 +101,8 @@ fn io_error_to_error_code(e: std::io::Error) -> ErrorCode {
         std::io::ErrorKind::IsADirectory => ErrorCode::IsDirectory,
         std::io::ErrorKind::DirectoryNotEmpty => ErrorCode::NotEmpty,
         std::io::ErrorKind::ReadOnlyFilesystem => ErrorCode::ReadOnly,
-        std::io::ErrorKind::CrossesDevices => ErrorCode::CrossDevice,
+        // CrossesDevices and InvalidFilename are unstable in Rust 1.83
         std::io::ErrorKind::TooManyLinks => ErrorCode::TooManyLinks,
-        std::io::ErrorKind::InvalidFilename => ErrorCode::NameTooLong,
         std::io::ErrorKind::FileTooLarge => ErrorCode::FileTooLarge,
         std::io::ErrorKind::StorageFull => ErrorCode::InsufficientSpace,
         _ => ErrorCode::Io,

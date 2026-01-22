@@ -31,7 +31,7 @@ async fn test_handler_creation_permission_validation() {
     // Create a manifest that requests these handlers
     let _manifest = ManifestConfig {
         name: "test-actor".to_string(),
-        component: "test.wasm".to_string(),
+        package: "test.wasm".to_string(),
         handlers: vec![
             HandlerConfig::FileSystem {
                 config: FileSystemHandlerConfig {

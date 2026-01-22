@@ -1,6 +1,6 @@
 [actor]
 name = "multi-handler-test"
-component = "./target/wasm32-unknown-unknown/release/multi_handler_test_actor.wasm"
+package = "./target/wasm32-unknown-unknown/release/multi_handler_test_actor.wasm"
 
 [handlers]
 runtime = {}

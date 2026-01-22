@@ -432,22 +432,22 @@ impl TheaterClient {
         .await
     }
 
-    /// Update actor component
-    pub async fn update_actor_component(&self, actor_id: &str, component: String) -> CliResult<()> {
+    /// Update actor package
+    pub async fn update_actor_package(&self, actor_id: &str, package: String) -> CliResult<()> {
         self.with_cancellation(|| async {
             let mut conn = self.connection.lock().await;
             let theater_id = actor_id
                 .parse()
                 .map_err(|_| CliError::invalid_actor_id(actor_id))?;
             let response = conn
-                .send_and_receive(ManagementCommand::UpdateActorComponent {
+                .send_and_receive(ManagementCommand::UpdateActorPackage {
                     id: theater_id,
-                    component,
+                    package,
                 })
                 .await?;
 
             match response {
-                ManagementResponse::ActorComponentUpdated { id: _ } => Ok(()),
+                ManagementResponse::ActorPackageUpdated { id: _ } => Ok(()),
                 ManagementResponse::Error { error } => {
                     let error_str = format!("{:?}", error);
                     if error_str.contains("not found") {

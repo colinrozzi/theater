@@ -22,25 +22,25 @@ pub enum TheaterRuntimeEventData {
         /// The permissions being validated
         permissions: HandlerPermission,
     },
-    CreatingComponent,
+    CreatingPackage,
     CreatingHandlers,
 
-    /// Event indicating an actor component update has started
+    /// Event indicating an actor package update has started
     ActorUpdateStart {
-        /// Address of the new component
-        new_component_address: String,
+        /// Address of the new package
+        new_package_address: String,
     },
 
-    /// Event indicating an actor component update has completed successfully
+    /// Event indicating an actor package update has completed successfully
     ActorUpdateComplete {
-        /// Address of the new component
-        new_component_address: String,
+        /// Address of the new package
+        new_package_address: String,
     },
 
-    /// Event indicating an actor component update has failed
+    /// Event indicating an actor package update has failed
     ActorUpdateError {
-        /// Address of the component that failed to update
-        new_component_address: String,
+        /// Address of the package that failed to update
+        new_package_address: String,
         /// Error message describing the failure
         error: String,
     },

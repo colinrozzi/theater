@@ -274,14 +274,14 @@ impl ActorComponent {
     /// the component model specification and doesn't contain prohibited instructions.
     pub async fn new(
         name: String,
-        component_path: String,
+        package_path: String,
         actor_store: ActorStore,
         engine: Engine,
     ) -> Result<Self> {
         // Load WASM component
         //        let engine = Engine::new(wasmtime::Config::new().async_support(true))?;
-        info!("Loading WASM component from: {}", component_path);
-        let _wasm_bytes = match resolve_reference(&component_path).await {
+        info!("Loading WASM package from: {}", package_path);
+        let _wasm_bytes = match resolve_reference(&package_path).await {
             Ok(bytes) => bytes,
             Err(e) => {
                 error!("Failed to resolve component reference: {}", e);
@@ -292,13 +292,13 @@ impl ActorComponent {
                     },
                 );
                 return Err(WasmError::WasmError {
-                    context: "resolving component reference",
+                    context: "resolving package reference",
                     message: e.to_string(),
                 }
                 .into());
             }
         };
-        let wasm_bytes = match Self::get_wasm_component_bytes(component_path).await {
+        let wasm_bytes = match Self::get_wasm_package_bytes(package_path).await {
             Ok(bytes) => bytes,
             Err(e) => {
                 error!("Failed to load WASM component bytes: {}", e);
@@ -309,7 +309,7 @@ impl ActorComponent {
                     },
                 );
                 return Err(WasmError::WasmError {
-                    context: "loading component",
+                    context: "loading package",
                     message: e.to_string(),
                 }
                 .into());
@@ -330,7 +330,7 @@ impl ActorComponent {
                     },
                 );
                 return Err(WasmError::WasmError {
-                    context: "creating component",
+                    context: "creating package",
                     message: e.to_string(),
                 }
                 .into());
@@ -362,7 +362,7 @@ impl ActorComponent {
     }
 
     /// Retrieves the raw WebAssembly component bytes from the specified path.
-    pub async fn get_wasm_component_bytes(component_path: String) -> Result<Vec<u8>, WasmError> {
+    pub async fn get_wasm_package_bytes(component_path: String) -> Result<Vec<u8>, WasmError> {
         // IF the component path starts with https, check if we have it cached.
 
         let is_https =
@@ -370,11 +370,11 @@ impl ActorComponent {
 
         if is_https {
             // check if we have stored the component bytes in the actor store
-            let component_label = store::Label::new(component_path.clone());
+            let package_label = store::Label::new(component_path.clone());
             let component_store = store::ContentStore::new_named_store("wasm_component");
 
             let component_exists = component_store
-                .label_exists(component_label.clone())
+                .label_exists(package_label.clone())
                 .await
                 .map_err(|e| {
                     error!("Failed to check component existence: {}", e);
@@ -387,10 +387,10 @@ impl ActorComponent {
             if component_exists {
                 info!(
                     "[CACHE HIT] Component bytes found in store for label: {}",
-                    component_label
+                    package_label
                 );
                 let bytes = component_store
-                    .get_content_by_label(&component_label)
+                    .get_content_by_label(&package_label)
                     .await
                     .map_err(|e| {
                         error!("Failed to get component bytes: {}", e);
@@ -409,16 +409,16 @@ impl ActorComponent {
                     resolve_reference(&component_path)
                         .await
                         .map_err(|e| WasmError::WasmError {
-                            context: "resolving component reference",
+                            context: "resolving package reference",
                             message: e.to_string(),
                         })?;
-                info!("Component bytes loaded from path: {}", component_path);
+                info!("Package bytes loaded from path: {}", component_path);
                 // Store the component bytes in the content store for future use
                 let bytes_ref = component_store.store(bytes.clone()).await;
 
                 // Label the stored bytes for future retrieval
                 component_store
-                    .label(&component_label, &bytes_ref)
+                    .label(&package_label, &bytes_ref)
                     .await
                     .map_err(|e| WasmError::WasmError {
                         context: "labeling component bytes",
@@ -430,7 +430,7 @@ impl ActorComponent {
             resolve_reference(&component_path)
                 .await
                 .map_err(|e| WasmError::WasmError {
-                    context: "resolving component reference",
+                    context: "resolving package reference",
                     message: e.to_string(),
                 })
         }

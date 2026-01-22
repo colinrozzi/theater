@@ -134,8 +134,8 @@ pub async fn execute_async(args: &BuildArgs, ctx: &CommandContext) -> Result<(),
             CliError::invalid_manifest(format!("Failed to parse manifest.toml: {}", e))
         })?;
 
-        // Update the component path - use absolute path to the wasm file
-        manifest.component = wasm_path.to_string_lossy().to_string();
+        // Update the package path - use absolute path to the wasm file
+        manifest.package = wasm_path.to_string_lossy().to_string();
 
         // Write the updated manifest
         let updated_manifest = toml::to_string(&manifest).map_err(|e| {

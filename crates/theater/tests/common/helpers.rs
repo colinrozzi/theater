@@ -24,7 +24,7 @@ pub fn create_test_manifest(name: &str) -> ManifestConfig {
     let mut config = ManifestConfig {
         name: name.to_string(),
         version: "1.0.0".to_string(),
-        component: format!("{}.wasm", name),
+        package: format!("{}.wasm", name),
         description: None,
         long_description: None,
         save_chain: None,

@@ -1,6 +1,6 @@
 name = "wasi-filesystem-test"
 version = "0.1.0"
-component = "./target/wasm32-unknown-unknown/release/wasi_filesystem_test.wasm"
+package = "./target/wasm32-unknown-unknown/release/wasi_filesystem_test.wasm"
 description = "WASI filesystem interface test actor"
 save_chain = true
 
