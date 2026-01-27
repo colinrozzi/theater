@@ -282,6 +282,7 @@ impl Handler for RuntimeHandler {
                     let events = store.get_all_events();
 
                     // Convert to WIT format: list<meta-event>
+                    use theater::ValueType;
                     // meta-event = { hash: u64, event: event }
                     // event = { event-type: string, parent: option<u64>, data: list<u8> }
                     let chain_events: Vec<Value> = events
@@ -290,12 +291,21 @@ impl Handler for RuntimeHandler {
                         .map(|(i, e)| {
                             let hash = Value::U64(i as u64);
                             let parent = if i > 0 {
-                                Value::Option(Some(Box::new(Value::U64((i - 1) as u64))))
+                                Value::Option {
+                                    inner_type: ValueType::U64,
+                                    value: Some(Box::new(Value::U64((i - 1) as u64))),
+                                }
                             } else {
-                                Value::Option(None)
+                                Value::Option {
+                                    inner_type: ValueType::U64,
+                                    value: None,
+                                }
                             };
                             let event_type = Value::String(e.event_type.clone());
-                            let data = Value::List(e.data.iter().map(|b| Value::U8(*b)).collect());
+                            let data = Value::List {
+                                elem_type: ValueType::U8,
+                                items: e.data.iter().map(|b| Value::U8(*b)).collect(),
+                            };
 
                             // meta-event record: (hash, (event-type, parent, data))
                             Value::Tuple(vec![
@@ -314,7 +324,10 @@ impl Handler for RuntimeHandler {
                     );
 
                     // Return as chain record: (events,)
-                    Value::Tuple(vec![Value::List(chain_events)])
+                    Value::Tuple(vec![Value::List {
+                        elem_type: ValueType::Tuple(vec![ValueType::U64, ValueType::Tuple(vec![ValueType::String, ValueType::Option(Box::new(ValueType::U64)), ValueType::List(Box::new(ValueType::U8))])]),
+                        items: chain_events,
+                    }])
                 },
             )?
             // Shutdown function: shutdown(data: option<list<u8>>) -> result<(), string>
@@ -326,9 +339,9 @@ impl Handler for RuntimeHandler {
                     async move {
                         // Parse input: option<list<u8>>
                         let data: Option<Vec<u8>> = match input {
-                            Value::Option(Some(inner)) => match *inner {
-                                Value::List(bytes) => {
-                                    let result: Result<Vec<u8>, _> = bytes
+                            Value::Option { value: Some(inner), .. } => match *inner {
+                                Value::List { items, .. } => {
+                                    let result: Result<Vec<u8>, _> = items
                                         .into_iter()
                                         .map(|v| match v {
                                             Value::U8(b) => Ok(b),
@@ -339,7 +352,7 @@ impl Handler for RuntimeHandler {
                                 }
                                 _ => None,
                             },
-                            Value::Option(None) => None,
+                            Value::Option { value: None, .. } => None,
                             _ => None,
                         };
 

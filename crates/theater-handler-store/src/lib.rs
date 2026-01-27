@@ -80,7 +80,7 @@ impl StoreHandler {
 
 fn parse_content_ref(value: &Value) -> Result<ContentRef, Value> {
     match value {
-        Value::Record(fields) => {
+        Value::Record { fields, .. } => {
             for (name, val) in fields {
                 if name == "hash" {
                     if let Value::String(hash) = val {
@@ -168,8 +168,8 @@ fn parse_store_label_content(input: &Value) -> Result<(String, String, Vec<u8>),
                 _ => return Err(Value::String("Expected string for label".to_string())),
             };
             let content = match &fields[2] {
-                Value::List(bytes) => {
-                    bytes.iter().filter_map(|v| match v {
+                Value::List { items, .. } => {
+                    items.iter().filter_map(|v| match v {
                         Value::U8(b) => Some(*b),
                         _ => None,
                     }).collect::<Vec<u8>>()
@@ -663,8 +663,10 @@ impl Handler for StoreHandler
                 let store = ContentStore::new();
                 // Return Ok(store_id) as Variant with tag 0
                 Value::Variant {
+                    type_name: String::from("result"),
+                    case_name: String::from("ok"),
                     tag: 0, // ok
-                    payload: Some(Box::new(Value::String(store.id().to_string()))),
+                    payload: vec![Value::String(store.id().to_string())],
                 }
             })?
             // store(store-id: string, content: list<u8>) -> result<content-ref, string>
@@ -678,8 +680,8 @@ impl Handler for StoreHandler
                                 _ => return Err(Value::String("Expected string for store_id".to_string())),
                             };
                             let content = match &fields[1] {
-                                Value::List(bytes) => {
-                                    bytes.iter().filter_map(|v| match v {
+                                Value::List { items, .. } => {
+                                    items.iter().filter_map(|v| match v {
                                         Value::U8(b) => Some(*b),
                                         _ => None,
                                     }).collect::<Vec<u8>>()
@@ -696,9 +698,12 @@ impl Handler for StoreHandler
                     debug!("Content stored successfully: {}", content_ref.hash());
 
                     // Return content-ref record
-                    Ok(Value::Record(vec![
-                        ("hash".to_string(), Value::String(content_ref.hash().to_string()))
-                    ]))
+                    Ok(Value::Record {
+                        type_name: String::from("content-ref"),
+                        fields: vec![
+                            ("hash".to_string(), Value::String(content_ref.hash().to_string()))
+                        ],
+                    })
                 }
             })?
             // get(store-id: string, content-ref: content-ref) -> result<list<u8>, string>
@@ -709,8 +714,12 @@ impl Handler for StoreHandler
 
                     match store.get(&content_ref).await {
                         Ok(content) => {
+                            use theater::ValueType;
                             debug!("Content retrieved successfully");
-                            Ok(Value::List(content.into_iter().map(Value::U8).collect()))
+                            Ok(Value::List {
+                                elem_type: ValueType::U8,
+                                items: content.into_iter().map(Value::U8).collect(),
+                            })
                         }
                         Err(e) => {
                             error!("Error retrieving content: {}", e);
@@ -758,12 +767,20 @@ impl Handler for StoreHandler
 
                     match store.get_by_label(&label).await {
                         Ok(content_ref_opt) => {
+                            use theater::ValueType;
                             debug!("Content reference by label retrieved successfully");
                             match content_ref_opt {
-                                Some(cr) => Ok(Value::Option(Some(Box::new(
-                                    Value::Record(vec![("hash".to_string(), Value::String(cr.hash().to_string()))])
-                                )))),
-                                None => Ok(Value::Option(None)),
+                                Some(cr) => Ok(Value::Option {
+                                    inner_type: ValueType::Record(String::from("content-ref")),
+                                    value: Some(Box::new(Value::Record {
+                                        type_name: String::from("content-ref"),
+                                        fields: vec![("hash".to_string(), Value::String(cr.hash().to_string()))],
+                                    })),
+                                }),
+                                None => Ok(Value::Option {
+                                    inner_type: ValueType::Record(String::from("content-ref")),
+                                    value: None,
+                                }),
                             }
                         }
                         Err(e) => {
@@ -802,9 +819,12 @@ impl Handler for StoreHandler
                     match store.store_at_label(&label, content).await {
                         Ok(content_ref) => {
                             debug!("Content stored at label successfully");
-                            Ok(Value::Record(vec![
-                                ("hash".to_string(), Value::String(content_ref.hash().to_string()))
-                            ]))
+                            Ok(Value::Record {
+                                type_name: String::from("content-ref"),
+                                fields: vec![
+                                    ("hash".to_string(), Value::String(content_ref.hash().to_string()))
+                                ],
+                            })
                         }
                         Err(e) => {
                             error!("Error storing content at label: {}", e);
@@ -823,9 +843,12 @@ impl Handler for StoreHandler
                     match store.replace_content_at_label(&label, content).await {
                         Ok(content_ref) => {
                             debug!("Content at label replaced successfully");
-                            Ok(Value::Record(vec![
-                                ("hash".to_string(), Value::String(content_ref.hash().to_string()))
-                            ]))
+                            Ok(Value::Record {
+                                type_name: String::from("content-ref"),
+                                fields: vec![
+                                    ("hash".to_string(), Value::String(content_ref.hash().to_string()))
+                                ],
+                            })
                         }
                         Err(e) => {
                             error!("Error replacing content at label: {}", e);
@@ -861,14 +884,21 @@ impl Handler for StoreHandler
 
                     match store.list_all_content().await {
                         Ok(content_refs) => {
+                            use theater::ValueType;
                             debug!("All content references listed successfully");
                             let refs: Vec<Value> = content_refs
                                 .into_iter()
-                                .map(|cr| Value::Record(vec![
-                                    ("hash".to_string(), Value::String(cr.hash().to_string()))
-                                ]))
+                                .map(|cr| Value::Record {
+                                    type_name: String::from("content-ref"),
+                                    fields: vec![
+                                        ("hash".to_string(), Value::String(cr.hash().to_string()))
+                                    ],
+                                })
                                 .collect();
-                            Ok(Value::List(refs))
+                            Ok(Value::List {
+                                elem_type: ValueType::Record(String::from("content-ref")),
+                                items: refs,
+                            })
                         }
                         Err(e) => {
                             error!("Error listing all content: {}", e);
@@ -903,12 +933,16 @@ impl Handler for StoreHandler
 
                     match store.list_labels().await {
                         Ok(labels) => {
+                            use theater::ValueType;
                             debug!("Labels listed successfully");
                             let label_values: Vec<Value> = labels
                                 .into_iter()
                                 .map(Value::String)
                                 .collect();
-                            Ok(Value::List(label_values))
+                            Ok(Value::List {
+                                elem_type: ValueType::String,
+                                items: label_values,
+                            })
                         }
                         Err(e) => {
                             error!("Error listing labels: {}", e);

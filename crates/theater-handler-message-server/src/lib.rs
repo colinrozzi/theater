@@ -1133,8 +1133,12 @@ impl Handler for MessageServerHandler
 
                     match cmd_response_rx.await {
                         Ok(Ok(())) => {
+                            use theater::ValueType;
                             match response_rx.await {
-                                Ok(response) => Ok(Value::List(response.into_iter().map(Value::U8).collect())),
+                                Ok(response) => Ok(Value::List {
+                                    elem_type: ValueType::U8,
+                                    items: response.into_iter().map(Value::U8).collect(),
+                                }),
                                 Err(e) => Err(Value::String(e.to_string())),
                             }
                         }
@@ -1145,9 +1149,13 @@ impl Handler for MessageServerHandler
             })?
             // list-outstanding-requests() -> list<string>
             .func_typed("list-outstanding-requests", move |_ctx: &mut Ctx<'_, ActorStore>, _input: Value| {
+                use theater::ValueType;
                 let requests = outstanding_requests.lock().unwrap();
                 let ids: Vec<Value> = requests.keys().map(|k| Value::String(k.clone())).collect();
-                Value::List(ids)
+                Value::List {
+                    elem_type: ValueType::String,
+                    items: ids,
+                }
             })?
             // respond-to-request(request-id: string, response: list<u8>) -> result<_, string>
             .func_async_result("respond-to-request", move |_ctx: AsyncCtx<ActorStore>, input: Value| {
@@ -1332,8 +1340,8 @@ fn parse_address_and_message(input: &Value) -> Result<(String, Vec<u8>), Value> 
                 _ => return Err(Value::String("Expected string for address".to_string())),
             };
             let msg = match &fields[1] {
-                Value::List(bytes) => {
-                    bytes.iter().filter_map(|v| match v {
+                Value::List { items, .. } => {
+                    items.iter().filter_map(|v| match v {
                         Value::U8(b) => Some(*b),
                         _ => None,
                     }).collect::<Vec<u8>>()
@@ -1354,8 +1362,8 @@ fn parse_request_id_and_data(input: &Value) -> Result<(String, Vec<u8>), Value> 
                 _ => return Err(Value::String("Expected string for request_id".to_string())),
             };
             let data = match &fields[1] {
-                Value::List(bytes) => {
-                    bytes.iter().filter_map(|v| match v {
+                Value::List { items, .. } => {
+                    items.iter().filter_map(|v| match v {
                         Value::U8(b) => Some(*b),
                         _ => None,
                     }).collect::<Vec<u8>>()

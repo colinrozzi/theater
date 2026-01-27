@@ -79,5 +79,5 @@ pub use wasm::{ActorComponent, ActorInstance, MemoryStats, WasmError};
 // Composite integration
 pub use composite_bridge::{
     AsyncCtx, AsyncRuntime, CompositeInstance, Ctx, HostLinkerBuilder, IntoValue, LinkerError,
-    UnifiedInstance, Value,
+    UnifiedInstance, Value, ValueType,
 };

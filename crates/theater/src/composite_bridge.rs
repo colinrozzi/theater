@@ -17,7 +17,7 @@ use std::collections::HashMap;
 // Re-export Composite types for convenient use throughout Theater
 // Note: We use composite's internal abi module, not composite_abi crate directly,
 // because that's what the runtime functions return.
-pub use composite::abi::Value;
+pub use composite::abi::{Value, ValueType};
 pub use composite::{
     AsyncCtx, AsyncInstance, AsyncRuntime, Ctx, HostFunctionProvider, HostLinkerBuilder,
     InterfaceBuilder, LinkerError,
@@ -198,23 +198,35 @@ impl CompositeInstance {
 
 /// Convert actor state to a Value.
 fn state_to_value(state: Option<Vec<u8>>) -> Value {
+    use composite::abi::ValueType;
     match state {
-        Some(bytes) => Value::Option(Some(Box::new(Value::List(
-            bytes.into_iter().map(Value::U8).collect(),
-        )))),
-        None => Value::Option(None),
+        Some(bytes) => Value::Option {
+            inner_type: ValueType::List(Box::new(ValueType::U8)),
+            value: Some(Box::new(Value::List {
+                elem_type: ValueType::U8,
+                items: bytes.into_iter().map(Value::U8).collect(),
+            })),
+        },
+        None => Value::Option {
+            inner_type: ValueType::List(Box::new(ValueType::U8)),
+            value: None,
+        },
     }
 }
 
 /// Convert bytes to a Value (as a list of u8).
 fn bytes_to_value(bytes: &[u8]) -> Value {
-    Value::List(bytes.iter().copied().map(Value::U8).collect())
+    use composite::abi::ValueType;
+    Value::List {
+        elem_type: ValueType::U8,
+        items: bytes.iter().copied().map(Value::U8).collect(),
+    }
 }
 
 /// Convert a Value (list of u8) back to bytes.
 fn value_to_bytes(value: Value) -> Result<Vec<u8>> {
     match value {
-        Value::List(items) => {
+        Value::List { items, .. } => {
             let mut bytes = Vec::with_capacity(items.len());
             for item in items {
                 match item {
@@ -249,15 +261,16 @@ fn decode_function_result(value: Value) -> Result<(Option<Vec<u8>>, Vec<u8>)> {
         // Result variant: tag 0 = Ok, tag 1 = Err
         Value::Variant {
             tag: 0,
-            payload: Some(inner),
-        } => {
+            payload,
+            ..
+        } if !payload.is_empty() => {
             // Ok case - payload is tuple<option<list<u8>>, R>
-            match *inner {
+            match payload.into_iter().next().unwrap() {
                 Value::Tuple(items) if !items.is_empty() => {
                     // First element is state
                     let new_state = match &items[0] {
-                        Value::Option(Some(inner)) => Some(value_to_bytes((**inner).clone())?),
-                        Value::Option(None) => None,
+                        Value::Option { value: Some(inner), .. } => Some(value_to_bytes((**inner).clone())?),
+                        Value::Option { value: None, .. } => None,
                         other => {
                             return Err(anyhow::anyhow!(
                                 "Expected Option for state, got {:?}",
@@ -283,22 +296,23 @@ fn decode_function_result(value: Value) -> Result<(Option<Vec<u8>>, Vec<u8>)> {
                 }
             }
         }
-        Value::Variant { tag: 0, payload: None } => {
+        Value::Variant { tag: 0, payload, .. } if payload.is_empty() => {
             // Ok with no payload
             Ok((None, vec![]))
         }
         Value::Variant {
             tag: 1,
-            payload: Some(inner),
-        } => {
+            payload,
+            ..
+        } if !payload.is_empty() => {
             // Err case - payload is the error message
-            let error_msg = match *inner {
+            let error_msg = match payload.into_iter().next().unwrap() {
                 Value::String(s) => s,
                 other => format!("{:?}", other),
             };
             Err(anyhow::anyhow!("Function returned error: {}", error_msg))
         }
-        Value::Variant { tag: 1, payload: None } => {
+        Value::Variant { tag: 1, payload, .. } if payload.is_empty() => {
             Err(anyhow::anyhow!("Function returned error (no message)"))
         }
         Value::Variant { tag, .. } => {
@@ -348,12 +362,16 @@ impl<T: IntoValue, E: IntoValue> IntoValue for Result<T, E> {
     fn into_value(self) -> Value {
         match self {
             Ok(v) => Value::Variant {
+                type_name: String::from("result"),
+                case_name: String::from("ok"),
                 tag: 0,
-                payload: Some(Box::new(v.into_value())),
+                payload: vec![v.into_value()],
             },
             Err(e) => Value::Variant {
+                type_name: String::from("result"),
+                case_name: String::from("err"),
                 tag: 1,
-                payload: Some(Box::new(e.into_value())),
+                payload: vec![e.into_value()],
             },
         }
     }
@@ -392,19 +410,40 @@ impl IntoValue for u64 {
 
 impl IntoValue for Vec<u8> {
     fn into_value(self) -> Value {
-        Value::List(self.into_iter().map(Value::U8).collect())
+        use composite::abi::ValueType;
+        Value::List {
+            elem_type: ValueType::U8,
+            items: self.into_iter().map(Value::U8).collect(),
+        }
     }
 }
 
 impl<T: IntoValue> IntoValue for Option<T> {
     fn into_value(self) -> Value {
-        Value::Option(self.map(|v| Box::new(v.into_value())))
+        let (inner_type, value) = match self {
+            Some(v) => {
+                let val = v.into_value();
+                let ty = val.infer_type();
+                (ty, Some(Box::new(val)))
+            }
+            None => {
+                // For None, we don't have a value to infer from, use a placeholder
+                use composite::abi::ValueType;
+                (ValueType::Bool, None)
+            }
+        };
+        Value::Option { inner_type, value }
     }
 }
 
 impl<T: IntoValue> IntoValue for Vec<T> {
     fn into_value(self) -> Value {
-        Value::List(self.into_iter().map(|v| v.into_value()).collect())
+        let items: Vec<Value> = self.into_iter().map(|v| v.into_value()).collect();
+        let elem_type = items.first().map(|v| v.infer_type()).unwrap_or_else(|| {
+            use composite::abi::ValueType;
+            ValueType::Bool // placeholder for empty lists
+        });
+        Value::List { elem_type, items }
     }
 }
 

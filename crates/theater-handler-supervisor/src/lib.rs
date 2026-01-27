@@ -683,16 +683,16 @@ impl Handler for SupervisorHandler
                                     _ => return Err(Value::String("Invalid manifest argument".to_string())),
                                 };
                                 let init_bytes = match &args[1] {
-                                    Value::Option(Some(inner)) => {
-                                        if let Value::List(bytes) = inner.as_ref() {
-                                            Some(bytes.iter().filter_map(|v| {
+                                    Value::Option { value: Some(inner), .. } => {
+                                        if let Value::List { items, .. } = inner.as_ref() {
+                                            Some(items.iter().filter_map(|v| {
                                                 if let Value::U8(b) = v { Some(*b) } else { None }
                                             }).collect::<Vec<u8>>())
                                         } else {
                                             None
                                         }
                                     }
-                                    Value::Option(None) => None,
+                                    Value::Option { value: None, .. } => None,
                                     _ => None,
                                 };
                                 (manifest, init_bytes)
@@ -739,16 +739,16 @@ impl Handler for SupervisorHandler
                                     _ => return Err(Value::String("Invalid manifest argument".to_string())),
                                 };
                                 let state_bytes = match &args[1] {
-                                    Value::Option(Some(inner)) => {
-                                        if let Value::List(bytes) = inner.as_ref() {
-                                            Some(bytes.iter().filter_map(|v| {
+                                    Value::Option { value: Some(inner), .. } => {
+                                        if let Value::List { items, .. } = inner.as_ref() {
+                                            Some(items.iter().filter_map(|v| {
                                                 if let Value::U8(b) = v { Some(*b) } else { None }
                                             }).collect::<Vec<u8>>())
                                         } else {
                                             None
                                         }
                                     }
-                                    Value::Option(None) => None,
+                                    Value::Option { value: None, .. } => None,
                                     _ => None,
                                 };
                                 (manifest, state_bytes)
@@ -801,11 +801,15 @@ impl Handler for SupervisorHandler
 
                     match response_rx.await {
                         Ok(children) => {
+                            use theater::ValueType;
                             let children_values: Vec<Value> = children
                                 .into_iter()
                                 .map(|id| Value::String(id.to_string()))
                                 .collect();
-                            Ok(Value::List(children_values))
+                            Ok(Value::List {
+                                elem_type: ValueType::String,
+                                items: children_values,
+                            })
                         }
                         Err(e) => Err(Value::String(format!("Failed to receive children list: {}", e))),
                     }
@@ -923,11 +927,19 @@ impl Handler for SupervisorHandler
 
                     match response_rx.await {
                         Ok(Ok(state)) => {
+                            use theater::ValueType;
                             let state_value = match state {
-                                Some(bytes) => Value::Option(Some(Box::new(Value::List(
-                                    bytes.into_iter().map(Value::U8).collect()
-                                )))),
-                                None => Value::Option(None),
+                                Some(bytes) => Value::Option {
+                                    inner_type: ValueType::List(Box::new(ValueType::U8)),
+                                    value: Some(Box::new(Value::List {
+                                        elem_type: ValueType::U8,
+                                        items: bytes.into_iter().map(Value::U8).collect(),
+                                    })),
+                                },
+                                None => Value::Option {
+                                    inner_type: ValueType::List(Box::new(ValueType::U8)),
+                                    value: None,
+                                },
                             };
                             Ok(state_value)
                         }
@@ -970,6 +982,7 @@ impl Handler for SupervisorHandler
 
                     match response_rx.await {
                         Ok(Ok(events)) => {
+                            use theater::ValueType;
                             // Convert ChainEvents to Value list
                             let events_values: Vec<Value> = events
                                 .iter()
@@ -977,11 +990,17 @@ impl Handler for SupervisorHandler
                                     // ChainEvent as a record: { event-type: string, data: list<u8> }
                                     Value::Tuple(vec![
                                         Value::String(e.event_type.clone()),
-                                        Value::List(e.data.iter().map(|b| Value::U8(*b)).collect()),
+                                        Value::List {
+                                            elem_type: ValueType::U8,
+                                            items: e.data.iter().map(|b| Value::U8(*b)).collect(),
+                                        },
                                     ])
                                 })
                                 .collect();
-                            Ok(Value::List(events_values))
+                            Ok(Value::List {
+                                elem_type: ValueType::Tuple(vec![ValueType::String, ValueType::List(Box::new(ValueType::U8))]),
+                                items: events_values,
+                            })
                         }
                         Ok(Err(e)) => Err(Value::String(e.to_string())),
                         Err(e) => Err(Value::String(format!("Failed to receive events: {}", e))),
