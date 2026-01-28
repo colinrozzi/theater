@@ -24,9 +24,9 @@ pub struct CreateArgs {
     #[arg(long)]
     pub skip_deps: bool,
 
-    /// Skip automatic cargo component check
+    /// Skip automatic build check
     #[arg(long)]
-    pub skip_component_check: bool,
+    pub skip_build_check: bool,
 
     /// Initialize a git repository and make the first commit
     #[arg(long)]
@@ -95,25 +95,20 @@ pub async fn execute_async(args: &CreateArgs, ctx: &CommandContext) -> Result<()
     })?;
     println!("✅ Project created from '{}' template", args.template);
 
-    // Step 2: Check for required tools
-    if !args.skip_component_check {
-        check_cargo_component()?;
-    }
-
-    // Step 3: Fetch WIT dependencies
+    // Step 2: Fetch WIT dependencies
     if !args.skip_deps {
         println!("\nFetching WIT dependencies...");
         fetch_wit_dependencies(&project_path)?;
     }
 
-    // Step 4: Try to build the project to validate everything works
-    if !args.skip_deps && !args.skip_component_check {
+    // Step 3: Try to build the project to validate everything works
+    if !args.skip_deps && !args.skip_build_check {
         println!("\nBuilding project...");
         match build_project(&project_path) {
             Ok(_) => println!("✅ Build successful"),
             Err(e) => {
                 warn!("⚠️  Project created but initial build failed: {}", e);
-                warn!("You may need to run 'cargo component build' manually");
+                warn!("You may need to run 'cargo build --target wasm32-unknown-unknown --release' manually");
             }
         }
     }
@@ -141,7 +136,7 @@ pub async fn execute_async(args: &CreateArgs, ctx: &CommandContext) -> Result<()
     }
 
     build_instructions.extend(vec![
-        "cargo component build --release".to_string(),
+        "cargo build --target wasm32-unknown-unknown --release".to_string(),
         "theater start manifest.toml".to_string(),
     ]);
 
@@ -163,29 +158,6 @@ pub async fn execute_async(args: &CreateArgs, ctx: &CommandContext) -> Result<()
     Ok(())
 }
 
-/// Check if cargo component is installed
-fn check_cargo_component() -> Result<(), CliError> {
-    debug!("Checking for cargo component...");
-
-    let output = Command::new("cargo")
-        .args(&["component", "--version"])
-        .output()
-        .map_err(|_e| CliError::MissingTool {
-            tool: "cargo component".to_string(),
-            install_command: "cargo install cargo-component".to_string(),
-        })?;
-
-    if !output.status.success() {
-        return Err(CliError::MissingTool {
-            tool: "cargo component".to_string(),
-            install_command: "cargo install cargo-component".to_string(),
-        });
-    }
-
-    let version = String::from_utf8_lossy(&output.stdout);
-    info!("✅ cargo component found: {}", version.trim());
-    Ok(())
-}
 
 /// Fetch WIT dependencies using wkg
 fn fetch_wit_dependencies(project_path: &PathBuf) -> Result<(), CliError> {
@@ -234,7 +206,6 @@ fn build_project(project_path: &PathBuf) -> Result<(), CliError> {
 
     let mut child = Command::new("cargo")
         .args(&[
-            "component",
             "build",
             "--target",
             "wasm32-unknown-unknown",
@@ -243,11 +214,11 @@ fn build_project(project_path: &PathBuf) -> Result<(), CliError> {
         .current_dir(project_path)
         .spawn()
         .map_err(|e| CliError::BuildFailed {
-            output: format!("Failed to execute cargo component build: {}", e),
+            output: format!("Failed to execute cargo build: {}", e),
         })?;
 
     let status = child.wait().map_err(|e| CliError::BuildFailed {
-        output: format!("Failed to wait for cargo component build: {}", e),
+        output: format!("Failed to wait for cargo build: {}", e),
     })?;
 
     if !status.success() {

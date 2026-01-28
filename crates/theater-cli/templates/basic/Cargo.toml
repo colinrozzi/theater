@@ -7,16 +7,14 @@ edition = "2021"
 crate-type = ["cdylib"]
 
 [dependencies]
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
-wit-bindgen-rt = { version = "0.43.0", features = ["bitflags"] }
+# Pack guest library for WASM actor interfaces
+# NOTE: pack-guest is not yet on crates.io. Use one of:
+#   1. Path to local pack clone: pack-guest = { path = "../pack/crates/pack-guest" }
+#   2. Git dependency: pack-guest = { git = "https://github.com/colinrozzi/pack" }
+pack-guest = { git = "https://github.com/colinrozzi/pack" }
 
-[package.metadata.component]
-package = "component:{{project_name}}"
-
-[package.metadata.component.target.dependencies]
-"theater:simple" = { path = "./wit/deps/theater-simple" }
-
-[package.metadata.component.bindings]
-derives = ["serde::Serialize", "serde::Deserialize", "PartialEq"]
-generate_unused_types = true
+[profile.release]
+# Optimize for small WASM size
+lto = true
+opt-level = "z"
+strip = true

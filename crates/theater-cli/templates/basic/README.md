@@ -1,31 +1,36 @@
 # {{project_name}}
 
-A basic Theater actor created from the template.
+A Theater actor using the Pack runtime.
 
 ## Building
 
-To build the actor:
+Build the actor to WebAssembly:
 
 ```bash
-cargo component build --release
+# Fetch WIT dependencies (first time only)
+wkg wit fetch
+
+# Build the actor
+cargo build --target wasm32-unknown-unknown --release
 ```
+
+The output will be at `target/wasm32-unknown-unknown/release/{{project_name_snake}}.wasm`.
 
 ## Running
 
-To run the actor with Theater:
+Run the actor with Theater:
 
 ```bash
 theater start manifest.toml
 ```
 
-## Features
-
-This basic actor supports:
-
-- State management with serialization
-- Initialization logging
-- Runtime integration
-
 ## Development
 
-The actor implements the `theater:simple/actor` interface and can be extended with additional capabilities.
+This actor uses Pack's import/export macros for type-safe WASM interfaces:
+
+- `#[import(wit = "...")]` - Import host functions
+- `#[export(wit = "...")]` - Export actor functions
+
+The actor implements `theater:simple/actor` and imports `theater:simple/runtime`.
+
+See the [Pack documentation](https://github.com/colinrozzi/pack) for more details.

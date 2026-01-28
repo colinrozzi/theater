@@ -54,13 +54,6 @@ pub async fn execute_async(args: &BuildArgs, ctx: &CommandContext) -> Result<(),
     let manifest_path = project_dir.join("manifest.toml");
     let manifest_exists = manifest_path.exists();
 
-    // Check if cargo-component is installed
-    if !is_cargo_component_installed() {
-        return Err(CliError::build_failed(
-            "cargo-component is not installed. Please install it with 'cargo install cargo-component'."
-        ));
-    }
-
     // Perform cleaning if requested
     if args.clean {
         debug!("Cleaning build artifacts...");
@@ -73,15 +66,15 @@ pub async fn execute_async(args: &BuildArgs, ctx: &CommandContext) -> Result<(),
         }
     }
 
-    // Build the WebAssembly component using cargo-component
+    // Build the WebAssembly module
     debug!(
-        "Building WebAssembly component for actor in {}...",
+        "Building WebAssembly module for actor in {}...",
         project_dir.display()
     );
 
-    // Execute cargo component build
+    // Execute cargo build with WASM target
     let mut build_cmd = Command::new("cargo");
-    build_cmd.args(["component", "build", "--target", "wasm32-unknown-unknown"]);
+    build_cmd.args(["build", "--target", "wasm32-unknown-unknown"]);
 
     if args.release {
         build_cmd.arg("--release");
@@ -92,14 +85,14 @@ pub async fn execute_async(args: &BuildArgs, ctx: &CommandContext) -> Result<(),
     // Run the build command and capture output
     let (status, stdout, stderr) =
         run_command_with_output(&mut build_cmd, ctx.verbose).map_err(|e| {
-            CliError::build_failed(format!("Failed to execute cargo component build: {}", e))
+            CliError::build_failed(format!("Failed to execute cargo build: {}", e))
         })?;
 
     // Handle build failures
     if !status.success() {
         let error_details = if stderr.is_empty() { stdout } else { stderr };
         return Err(CliError::build_failed(format!(
-            "Cargo component build failed:\\n{}",
+            "Cargo build failed:\\n{}",
             error_details
         )));
     }
@@ -204,19 +197,6 @@ fn run_command_with_output(
         let stderr = String::from_utf8_lossy(&output.stderr).to_string();
 
         Ok((output.status, stdout, stderr))
-    }
-}
-
-/// Check if cargo-component is installed
-fn is_cargo_component_installed() -> bool {
-    let output = Command::new("cargo").args(["--list"]).output();
-
-    match output {
-        Ok(output) => {
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            stdout.contains("component")
-        }
-        Err(_) => false,
     }
 }
 
