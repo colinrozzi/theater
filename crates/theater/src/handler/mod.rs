@@ -1,7 +1,7 @@
 use crate::actor::handle::ActorHandle;
 use crate::actor::store::ActorStore;
 use crate::chain::ChainEvent;
-use crate::composite_bridge::{CompositeInstance, HostLinkerBuilder, LinkerError};
+use crate::pack_bridge::{HostLinkerBuilder, LinkerError, PackInstance};
 use crate::config::actor_manifest::HandlerConfig;
 use crate::shutdown::ShutdownReceiver;
 use anyhow::Result;
@@ -12,7 +12,7 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 
 /// Shared reference to an actor instance for handlers that need direct store access
-pub type SharedActorInstance = Arc<RwLock<Option<CompositeInstance>>>;
+pub type SharedActorInstance = Arc<RwLock<Option<PackInstance>>>;
 
 /// Context passed to handlers during setup, tracking which imports are already satisfied
 #[derive(Debug, Clone, Default)]
@@ -210,10 +210,10 @@ pub trait Handler: Send + Sync + 'static {
     /// Register export function metadata for Composite instances.
     ///
     /// This records which export functions this handler expects from the actor.
-    /// The actual function calls are made through `CompositeInstance::call_function()`.
+    /// The actual function calls are made through `PackInstance::call_function()`.
     ///
     /// Default implementation does nothing, allowing gradual migration.
-    fn register_exports_composite(&self, _instance: &mut CompositeInstance) -> Result<()> {
+    fn register_exports_composite(&self, _instance: &mut PackInstance) -> Result<()> {
         // Default: do nothing - handlers opt-in by overriding
         Ok(())
     }

@@ -8,7 +8,7 @@ use crate::actor::handle::ActorHandle;
 use crate::actor::store::ActorStore;
 use crate::actor::types::ActorError;
 use crate::actor::types::ActorOperation;
-use crate::composite_bridge::{AsyncRuntime, CompositeInstance, HostLinkerBuilder, LinkerError};
+use crate::pack_bridge::{AsyncRuntime, HostLinkerBuilder, LinkerError, PackInstance};
 use crate::events::wasm::WasmEventData;
 use crate::events::ChainEventData;
 use crate::handler::Handler;
@@ -197,7 +197,7 @@ impl ActorRuntime {
         id: TheaterId,
         config: &ManifestConfig,
         initial_state: Option<Value>,
-        composite_runtime: AsyncRuntime,
+        pack_runtime: AsyncRuntime,
         chain: Arc<SyncRwLock<StateChain>>,
         mut handler_registry: HandlerRegistry,
         theater_tx: Sender<TheaterCommand>,
@@ -205,7 +205,7 @@ impl ActorRuntime {
         info_tx: Sender<ActorInfo>,
         control_tx: Sender<ActorControl>,
         actor_phase_manager: ActorPhaseManager,
-        actor_instance_wrapper: Arc<RwLock<Option<CompositeInstance>>>,
+        actor_instance_wrapper: Arc<RwLock<Option<PackInstance>>>,
     ) -> Result<(ShutdownController, Vec<JoinHandle<()>>), ActorRuntimeError> {
         // ---------------- Checkpoint Setup Initial ----------------
 
@@ -296,7 +296,7 @@ impl ActorRuntime {
 
         // ----------------- Checkpoint Instantiate with Host Functions -----------------
 
-        debug!("Creating CompositeInstance with host functions");
+        debug!("Creating PackInstance with host functions");
 
         if !actor_phase_manager.is_phase(ActorPhase::Starting) {
             let curr_phase = actor_phase_manager.get_phase();
@@ -311,10 +311,10 @@ impl ActorRuntime {
         let mut handler_ctx = HandlerContext::new();
         let handlers_for_setup = &mut handlers;
 
-        let mut actor_instance = CompositeInstance::new(
+        let mut actor_instance = PackInstance::new(
             config.name.clone(),
             &wasm_bytes,
-            &composite_runtime,
+            &pack_runtime,
             actor_store,
             |builder: &mut HostLinkerBuilder<'_, ActorStore>| {
                 // Set up host functions for each handler
@@ -349,7 +349,7 @@ impl ActorRuntime {
             }
         })?;
 
-        debug!("CompositeInstance created successfully");
+        debug!("PackInstance created successfully");
         debug!(
             "Handler context satisfied imports: {:?}",
             handler_ctx.satisfied_imports
@@ -473,7 +473,7 @@ impl ActorRuntime {
         id: TheaterId,
         config: &ManifestConfig,
         initial_state: Option<Value>,
-        composite_runtime: AsyncRuntime,
+        pack_runtime: AsyncRuntime,
         chain: Arc<SyncRwLock<StateChain>>,
         handler_registry: HandlerRegistry,
         theater_tx: Sender<TheaterCommand>,
@@ -488,7 +488,7 @@ impl ActorRuntime {
         let actor_phase_manager = ActorPhaseManager::new();
 
         // These will be set once setup completes
-        let actor_instance_wrapper: Arc<RwLock<Option<CompositeInstance>>> =
+        let actor_instance_wrapper: Arc<RwLock<Option<PackInstance>>> =
             Arc::new(RwLock::new(None));
         let metrics: Arc<RwLock<MetricsCollector>> = Arc::new(RwLock::new(MetricsCollector::new()));
         let handler_tasks: Arc<RwLock<Vec<JoinHandle<()>>>> = Arc::new(RwLock::new(vec![]));
@@ -511,7 +511,7 @@ impl ActorRuntime {
                     id,
                     &config,
                     initial_state,
-                    composite_runtime,
+                    pack_runtime,
                     chain,
                     handler_registry,
                     theater_tx,
@@ -671,7 +671,7 @@ impl ActorRuntime {
 
     async fn operation_loop(
         mut operation_rx: Receiver<ActorOperation>,
-        actor_instance_wrapper: Arc<RwLock<Option<CompositeInstance>>>,
+        actor_instance_wrapper: Arc<RwLock<Option<PackInstance>>>,
         metrics: Arc<RwLock<MetricsCollector>>,
         theater_tx: Sender<TheaterCommand>,
         actor_phase_manager: ActorPhaseManager,
@@ -705,7 +705,7 @@ impl ActorRuntime {
 
     async fn process_operation(
         op: ActorOperation,
-        actor_instance_wrapper: &Arc<RwLock<Option<CompositeInstance>>>,
+        actor_instance_wrapper: &Arc<RwLock<Option<PackInstance>>>,
         metrics: &Arc<RwLock<MetricsCollector>>,
         theater_tx: &Sender<TheaterCommand>,
         actor_phase_manager: ActorPhaseManager,
@@ -785,7 +785,7 @@ impl ActorRuntime {
 
     async fn info_loop(
         mut info_rx: Receiver<ActorInfo>,
-        actor_instance_wrapper: Arc<RwLock<Option<CompositeInstance>>>,
+        actor_instance_wrapper: Arc<RwLock<Option<PackInstance>>>,
         metrics: Arc<RwLock<MetricsCollector>>,
         actor_phase_manager: ActorPhaseManager,
     ) {
@@ -905,7 +905,7 @@ impl ActorRuntime {
     /// * `Ok(Vec<u8>)` - Serialized result of the function call
     /// * `Err(ActorError)` - Error that occurred during execution
     async fn execute_call(
-        actor_instance: &mut CompositeInstance,
+        actor_instance: &mut PackInstance,
         name: &String,
         params: Vec<u8>,
         _theater_tx: &mpsc::Sender<TheaterCommand>,

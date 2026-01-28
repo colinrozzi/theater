@@ -10,7 +10,7 @@ use std::sync::RwLock as SyncRwLock;
 use theater::actor::handle::ActorHandle;
 use theater::actor::store::ActorStore;
 use theater::chain::StateChain;
-use theater::composite_bridge::{AsyncRuntime, CompositeInstance, Ctx, Value};
+use theater::pack_bridge::{AsyncRuntime, PackInstance, Ctx, Value};
 use theater::config::actor_manifest::{StoreHandlerConfig, SupervisorHostConfig};
 use theater::handler::{Handler, HandlerContext};
 use theater::id::TheaterId;
@@ -73,8 +73,8 @@ async fn test_multi_handler_composite() {
     // Create handler context for tracking satisfied imports
     let mut handler_ctx = HandlerContext::new();
 
-    // Create the CompositeInstance with all handlers
-    let result = CompositeInstance::new(
+    // Create the PackInstance with all handlers
+    let result = PackInstance::new(
         "multi-handler-test",
         &wasm_bytes,
         &runtime,
@@ -106,11 +106,11 @@ async fn test_multi_handler_composite() {
     let mut instance = match result {
         Ok(inst) => inst,
         Err(e) => {
-            panic!("Failed to create CompositeInstance: {}", e);
+            panic!("Failed to create PackInstance: {}", e);
         }
     };
 
-    info!("CompositeInstance created with multiple handlers");
+    info!("PackInstance created with multiple handlers");
 
     // Register the init export
     instance.register_export("theater:simple/actor", "init");

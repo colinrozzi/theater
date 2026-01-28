@@ -39,10 +39,6 @@ chrono = "0.4"
 test-log = "0.2"
 pretty_assertions = "1.4"
 tempfile = "3.8.1"
-# DEPRECATED: WASI handlers for tests - point to deprecated directory
-theater-handler-io = { path = "../deprecated/theater-handler-io" }
-theater-handler-timing = { path = "../deprecated/theater-handler-timing" }
-theater-handler-filesystem = { path = "../deprecated/theater-handler-filesystem" }
 tracing-subscriber = "0.3"
 serde_json = "1.0"
 

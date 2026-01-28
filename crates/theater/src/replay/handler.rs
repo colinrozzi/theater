@@ -33,7 +33,7 @@ use tracing::{info, warn};
 use crate::actor::handle::ActorHandle;
 use crate::actor::store::ActorStore;
 use crate::chain::ChainEvent;
-use crate::composite_bridge::{CompositeInstance, HostLinkerBuilder, LinkerError};
+use crate::pack_bridge::{HostLinkerBuilder, LinkerError, PackInstance};
 use crate::handler::{Handler, HandlerContext, SharedActorInstance};
 use crate::shutdown::ShutdownReceiver;
 
@@ -219,7 +219,7 @@ impl Handler for ReplayHandler {
         Ok(())
     }
 
-    fn register_exports_composite(&self, _instance: &mut CompositeInstance) -> anyhow::Result<()> {
+    fn register_exports_composite(&self, _instance: &mut PackInstance) -> anyhow::Result<()> {
         // Replay handler doesn't add export functions
         Ok(())
     }

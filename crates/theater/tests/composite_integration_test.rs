@@ -1,7 +1,7 @@
 //! Integration test for Composite runtime with Theater.
 //!
 //! This test verifies that:
-//! 1. CompositeInstance can load a WASM module
+//! 1. PackInstance can load a WASM module
 //! 2. Host functions (like log) can be called from the actor
 //! 3. Export functions (like init) can be called from the host
 
@@ -10,7 +10,7 @@ use std::sync::RwLock as SyncRwLock;
 use theater::actor::handle::ActorHandle;
 use theater::actor::store::ActorStore;
 use theater::chain::StateChain;
-use theater::composite_bridge::{AsyncRuntime, CompositeInstance, Ctx, Value};
+use theater::pack_bridge::{AsyncRuntime, PackInstance, Ctx, Value};
 use theater::id::TheaterId;
 use theater::messages::TheaterCommand;
 use tokio::sync::mpsc;
@@ -62,8 +62,8 @@ async fn test_composite_instance_basic() {
         chain,
     );
 
-    // Create the CompositeInstance with host functions
-    let result = CompositeInstance::new(
+    // Create the PackInstance with host functions
+    let result = PackInstance::new(
         "composite-test",
         &wasm_bytes,
         &runtime,
@@ -90,11 +90,11 @@ async fn test_composite_instance_basic() {
     let mut instance = match result {
         Ok(inst) => inst,
         Err(e) => {
-            panic!("Failed to create CompositeInstance: {}", e);
+            panic!("Failed to create PackInstance: {}", e);
         }
     };
 
-    info!("CompositeInstance created successfully");
+    info!("PackInstance created successfully");
 
     // Register the init export
     instance.register_export("theater:simple/actor", "init");

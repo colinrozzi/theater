@@ -7,7 +7,7 @@
 use crate::actor::runtime::ActorRuntime;
 use crate::actor::types::{ActorControl, ActorError, ActorInfo, ActorOperation};
 use crate::chain::ChainEvent;
-use crate::composite_bridge::AsyncRuntime;
+use crate::pack_bridge::AsyncRuntime;
 use crate::config::actor_manifest::HandlerConfig;
 use crate::handler::HandlerRegistry;
 use crate::id::TheaterId;
@@ -106,7 +106,7 @@ pub struct TheaterRuntime {
     #[allow(dead_code)]
     channel_events_tx: Option<Sender<crate::messages::ChannelEvent>>,
     /// Composite async runtime for WASM execution
-    composite_runtime: AsyncRuntime,
+    pack_runtime: AsyncRuntime,
     /// Handler registry
     pub handler_registry: HandlerRegistry,
 }
@@ -190,7 +190,7 @@ impl TheaterRuntime {
         handler_registry: HandlerRegistry,
     ) -> Result<Self> {
         info!("Theater runtime initializing with Composite runtime");
-        let composite_runtime = AsyncRuntime::new();
+        let pack_runtime = AsyncRuntime::new();
 
         Ok(Self {
             theater_tx,
@@ -200,7 +200,7 @@ impl TheaterRuntime {
             subscriptions: HashMap::new(),
             channels: HashMap::new(),
             channel_events_tx,
-            composite_runtime,
+            pack_runtime,
             handler_registry,
         })
     }
@@ -610,13 +610,13 @@ impl TheaterRuntime {
         let actor_id_for_task = actor_id.clone();
         let actor_name = manifest.name.clone();
         let manifest_clone = manifest.clone();
-        let composite_runtime = AsyncRuntime::new();
+        let pack_runtime = AsyncRuntime::new();
         let actor_runtime_process = tokio::spawn(async move {
             let _actor_runtime = ActorRuntime::start(
                 actor_id_for_task.clone(),
                 &manifest_clone,
                 init_value,
-                composite_runtime,
+                pack_runtime,
                 chain,
                 handler_registry,
                 theater_tx,

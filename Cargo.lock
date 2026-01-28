@@ -482,24 +482,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5b63caa9aa9397e2d9480a9b13673856c78d8ac123288526c37d7839f2a86990"
 
 [[package]]
-name = "composite"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "serde",
- "serde_json",
- "thiserror 1.0.69",
- "wasmtime 27.0.0",
-]
-
-[[package]]
-name = "composite-abi"
-version = "0.1.0"
-dependencies = [
- "hashbrown 0.14.5",
-]
-
-[[package]]
 name = "console"
 version = "0.15.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2301,6 +2283,24 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b15813163c1d831bf4a13c3610c05c0d03b39feb07f7e09fa234dac9b15aaf39"
 
 [[package]]
+name = "pack"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+ "wasmtime 27.0.0",
+]
+
+[[package]]
+name = "pack-abi"
+version = "0.1.0"
+dependencies = [
+ "hashbrown 0.14.5",
+]
+
+[[package]]
 name = "parking_lot"
 version = "0.12.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3371,8 +3371,6 @@ dependencies = [
  "base64 0.21.7",
  "bytes",
  "chrono",
- "composite",
- "composite-abi",
  "console",
  "dunce",
  "futures",
@@ -3382,6 +3380,8 @@ dependencies = [
  "libc",
  "md5",
  "mockall",
+ "pack",
+ "pack-abi",
  "pin-utils",
  "pretty_assertions",
  "rand 0.8.5",
@@ -3492,47 +3492,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "theater-handler-filesystem"
-version = "0.2.1"
-dependencies = [
- "anyhow",
- "chrono",
- "dunce",
- "pretty_assertions",
- "rand 0.8.5",
- "serde",
- "serde_json",
- "tempfile",
- "test-log",
- "theater",
- "theater-handler-io",
- "thiserror 1.0.69",
- "tokio",
- "tracing",
- "wasmtime 31.0.0",
-]
-
-[[package]]
-name = "theater-handler-io"
-version = "0.2.1"
-dependencies = [
- "anyhow",
- "pretty_assertions",
- "serde",
- "tempfile",
- "test-log",
- "theater",
- "theater-handler-filesystem",
- "theater-handler-random",
- "theater-handler-runtime",
- "theater-handler-timing",
- "tokio",
- "tracing",
- "tracing-subscriber",
- "wasmtime 31.0.0",
-]
-
-[[package]]
 name = "theater-handler-message-server"
 version = "0.2.1"
 dependencies = [
@@ -3549,32 +3508,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "theater-handler-random"
-version = "0.2.1"
-dependencies = [
- "anyhow",
- "chrono",
- "pretty_assertions",
- "rand 0.8.5",
- "rand_chacha 0.3.1",
- "serde",
- "tempfile",
- "test-log",
- "theater",
- "theater-handler-filesystem",
- "theater-handler-io",
- "theater-handler-runtime",
- "theater-handler-timing",
- "thiserror 1.0.69",
- "tokio",
- "tracing",
- "tracing-subscriber",
- "uuid",
- "val-serde",
- "wasmtime 31.0.0",
-]
-
-[[package]]
 name = "theater-handler-runtime"
 version = "0.2.1"
 dependencies = [
@@ -3586,9 +3519,6 @@ dependencies = [
  "tempfile",
  "test-log",
  "theater",
- "theater-handler-filesystem",
- "theater-handler-io",
- "theater-handler-timing",
  "thiserror 1.0.69",
  "tokio",
  "tracing",
@@ -3624,30 +3554,6 @@ dependencies = [
  "thiserror 2.0.12",
  "tokio",
  "tracing",
- "wasmtime 31.0.0",
-]
-
-[[package]]
-name = "theater-handler-timing"
-version = "0.2.1"
-dependencies = [
- "anyhow",
- "chrono",
- "futures",
- "pretty_assertions",
- "serde",
- "tempfile",
- "test-log",
- "theater",
- "theater-handler-filesystem",
- "theater-handler-io",
- "theater-handler-random",
- "theater-handler-runtime",
- "thiserror 1.0.69",
- "tokio",
- "tracing",
- "tracing-subscriber",
- "val-serde",
  "wasmtime 31.0.0",
 ]
 
