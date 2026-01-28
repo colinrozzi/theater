@@ -1,24 +1,24 @@
-//! # Composite Bridge Module
+//! # Pack Bridge Module
 //!
-//! This module provides the integration layer between Theater and Composite.
+//! This module provides the integration layer between Theater and Pack.
 //! It includes type conversions, wrapper types, and utilities for using
-//! Composite's Graph ABI-based runtime within Theater's actor system.
+//! Pack's Graph ABI-based runtime within Theater's actor system.
 //!
 //! ## Key Components
 //!
-//! - **Re-exports**: Common Composite types for use throughout Theater
-//! - **CompositeInstance**: Wrapper around a Composite instance with Theater integration
+//! - **Re-exports**: Common Pack types for use throughout Theater
+//! - **PackInstance**: Wrapper around a Pack instance with Theater integration
 //! - **Value conversions**: Traits and implementations for converting between
-//!   Composite's `Value` type and Theater's types
+//!   Pack's `Value` type and Theater's types
 
 use anyhow::{Context, Result};
 use std::collections::HashMap;
 
-// Re-export Composite types for convenient use throughout Theater
+// Re-export Pack types for convenient use throughout Theater
 // Note: We use composite's internal abi module, not composite_abi crate directly,
 // because that's what the runtime functions return.
-pub use composite::abi::{Value, ValueType};
-pub use composite::{
+pub use pack::abi::{Value, ValueType};
+pub use pack::{
     AsyncCtx, AsyncInstance, AsyncRuntime, Ctx, HostFunctionProvider, HostLinkerBuilder,
     InterfaceBuilder, LinkerError,
 };
@@ -35,18 +35,18 @@ pub struct ExportFunction {
     pub function: String,
 }
 
-/// An instantiated Composite component with Theater integration.
+/// An instantiated Pack component with Theater integration.
 ///
-/// This wraps Composite's `AsyncInstance` and provides methods for
+/// This wraps Pack's `AsyncInstance` and provides methods for
 /// calling functions and managing actor state.
 ///
 /// ## Creation
 ///
-/// Use `CompositeInstance::new()` to create an instance from WASM bytes:
+/// Use `PackInstance::new()` to create an instance from WASM bytes:
 ///
 /// ```ignore
 /// let runtime = AsyncRuntime::new();
-/// let instance = CompositeInstance::new(
+/// let instance = PackInstance::new(
 ///     "my-actor",
 ///     &wasm_bytes,
 ///     &runtime,
@@ -58,10 +58,10 @@ pub struct ExportFunction {
 ///     }
 /// ).await?;
 /// ```
-pub struct CompositeInstance {
+pub struct PackInstance {
     /// The actor name
     pub name: String,
-    /// The underlying Composite instance
+    /// The underlying Pack instance
     pub instance: AsyncInstance<ActorStore>,
     /// The actor store
     pub actor_store: ActorStore,
@@ -69,8 +69,8 @@ pub struct CompositeInstance {
     pub export_functions: HashMap<String, ExportFunction>,
 }
 
-impl CompositeInstance {
-    /// Create a new Composite instance from WASM bytes.
+impl PackInstance {
+    /// Create a new Pack instance from WASM bytes.
     ///
     /// This loads and instantiates the module in one step, configuring
     /// host functions via the provided closure.
@@ -85,7 +85,7 @@ impl CompositeInstance {
     ///
     /// ## Returns
     ///
-    /// A `CompositeInstance` ready for function calls.
+    /// A `PackInstance` ready for function calls.
     pub async fn new<F>(
         name: impl Into<String>,
         wasm_bytes: &[u8],
@@ -98,12 +98,12 @@ impl CompositeInstance {
     {
         let module = runtime
             .load_module(wasm_bytes)
-            .context("Failed to load WASM module with Composite runtime")?;
+            .context("Failed to load WASM module with Pack runtime")?;
 
         let instance = module
             .instantiate_with_host_async(actor_store.clone(), configure)
             .await
-            .context("Failed to instantiate Composite module")?;
+            .context("Failed to instantiate Pack module")?;
 
         Ok(Self {
             name: name.into(),
@@ -170,7 +170,7 @@ impl CompositeInstance {
         let params_value = bytes_to_value(&params);
         let input = Value::Tuple(vec![state_value, params_value]);
 
-        // Call the function using the full name (Composite exports use the #[export(name = "...")] syntax)
+        // Call the function using the full name (Pack exports use the #[export(name = "...")] syntax)
         let output = self
             .instance
             .call_with_value_async(function_name, &input, 0)
@@ -198,7 +198,7 @@ impl CompositeInstance {
 
 /// Convert actor state to a Value.
 fn state_to_value(state: Option<Vec<u8>>) -> Value {
-    use composite::abi::ValueType;
+    use pack::abi::ValueType;
     match state {
         Some(bytes) => Value::Option {
             inner_type: ValueType::List(Box::new(ValueType::U8)),
@@ -216,7 +216,7 @@ fn state_to_value(state: Option<Vec<u8>>) -> Value {
 
 /// Convert bytes to a Value (as a list of u8).
 fn bytes_to_value(bytes: &[u8]) -> Value {
-    use composite::abi::ValueType;
+    use pack::abi::ValueType;
     Value::List {
         elem_type: ValueType::U8,
         items: bytes.iter().copied().map(Value::U8).collect(),
@@ -244,12 +244,12 @@ fn value_to_bytes(value: Value) -> Result<Vec<u8>> {
 
 /// Encode a Value to bytes using the Graph ABI.
 pub fn encode_value(value: &Value) -> Result<Vec<u8>> {
-    composite::encode(value).map_err(|e| anyhow::anyhow!("Failed to encode value: {:?}", e))
+    pack::encode(value).map_err(|e| anyhow::anyhow!("Failed to encode value: {:?}", e))
 }
 
 /// Decode bytes to a Value using the Graph ABI.
 pub fn decode_value(bytes: &[u8]) -> Result<Value> {
-    composite::decode(bytes).map_err(|e| anyhow::anyhow!("Failed to decode value: {:?}", e))
+    pack::decode(bytes).map_err(|e| anyhow::anyhow!("Failed to decode value: {:?}", e))
 }
 
 /// Decode a function result in the standard format.
@@ -330,12 +330,12 @@ fn decode_function_result(value: Value) -> Result<(Option<Vec<u8>>, Vec<u8>)> {
 // Trait Implementations for Theater Types
 // =============================================================================
 
-/// Trait for converting Theater types to Composite Values.
+/// Trait for converting Theater types to Pack Values.
 pub trait IntoValue {
     fn into_value(self) -> Value;
 }
 
-/// Trait for converting Composite Values to Theater types.
+/// Trait for converting Pack Values to Theater types.
 pub trait FromValue: Sized {
     fn from_value(value: Value) -> Result<Self>;
 }
@@ -410,7 +410,7 @@ impl IntoValue for u64 {
 
 impl IntoValue for Vec<u8> {
     fn into_value(self) -> Value {
-        use composite::abi::ValueType;
+        use pack::abi::ValueType;
         Value::List {
             elem_type: ValueType::U8,
             items: self.into_iter().map(Value::U8).collect(),
@@ -428,7 +428,7 @@ impl<T: IntoValue> IntoValue for Option<T> {
             }
             None => {
                 // For None, we don't have a value to infer from, use a placeholder
-                use composite::abi::ValueType;
+                use pack::abi::ValueType;
                 (ValueType::Bool, None)
             }
         };
@@ -440,139 +440,10 @@ impl<T: IntoValue> IntoValue for Vec<T> {
     fn into_value(self) -> Value {
         let items: Vec<Value> = self.into_iter().map(|v| v.into_value()).collect();
         let elem_type = items.first().map(|v| v.infer_type()).unwrap_or_else(|| {
-            use composite::abi::ValueType;
+            use pack::abi::ValueType;
             ValueType::Bool // placeholder for empty lists
         });
         Value::List { elem_type, items }
-    }
-}
-
-// =============================================================================
-// Unified Instance Abstraction
-// =============================================================================
-
-/// Abstraction over different WASM runtime instances.
-///
-/// This enum allows ActorRuntime to work with either wasmtime (legacy)
-/// or Composite (new) instances transparently.
-pub enum UnifiedInstance {
-    /// Legacy wasmtime Component Model instance
-    Wasmtime(crate::wasm::ActorInstance),
-    /// New Composite Graph ABI instance
-    Composite(CompositeInstance),
-}
-
-impl UnifiedInstance {
-    /// Get the actor ID from the underlying instance.
-    pub fn id(&self) -> crate::id::TheaterId {
-        match self {
-            UnifiedInstance::Wasmtime(instance) => instance.id(),
-            UnifiedInstance::Composite(instance) => instance.id(),
-        }
-    }
-
-    /// Check if a function is registered.
-    pub fn has_function(&self, name: &str) -> bool {
-        match self {
-            UnifiedInstance::Wasmtime(instance) => instance.has_function(name),
-            UnifiedInstance::Composite(instance) => instance.has_function(name),
-        }
-    }
-
-    /// Call a function on the instance.
-    pub async fn call_function(
-        &mut self,
-        name: &str,
-        state: Option<Vec<u8>>,
-        params: Vec<u8>,
-    ) -> Result<(Option<Vec<u8>>, Vec<u8>)> {
-        match self {
-            UnifiedInstance::Wasmtime(instance) => instance.call_function(name, state, params).await,
-            UnifiedInstance::Composite(instance) => {
-                instance.call_function(name, state, params).await
-            }
-        }
-    }
-
-    /// Get state from the store.
-    pub fn get_state(&self) -> Option<Vec<u8>> {
-        match self {
-            UnifiedInstance::Wasmtime(instance) => instance.store.data().get_state(),
-            UnifiedInstance::Composite(instance) => instance.actor_store.get_state(),
-        }
-    }
-
-    /// Set state in the store.
-    pub fn set_state(&mut self, state: Option<Vec<u8>>) {
-        match self {
-            UnifiedInstance::Wasmtime(instance) => instance.store.data_mut().set_state(state),
-            UnifiedInstance::Composite(instance) => instance.actor_store.set_state(state),
-        }
-    }
-
-    /// Get the event chain.
-    pub fn get_chain(&self) -> Vec<crate::chain::ChainEvent> {
-        match self {
-            UnifiedInstance::Wasmtime(instance) => instance.store.data().get_chain(),
-            UnifiedInstance::Composite(instance) => instance.actor_store.get_chain(),
-        }
-    }
-
-    /// Save the event chain.
-    pub fn save_chain(&self) -> Result<()> {
-        match self {
-            UnifiedInstance::Wasmtime(instance) => instance.save_chain(),
-            UnifiedInstance::Composite(instance) => instance.actor_store.save_chain(),
-        }
-    }
-
-    /// Record an event in the chain.
-    pub fn record_event(
-        &self,
-        event_data: crate::events::ChainEventData,
-    ) -> crate::chain::ChainEvent {
-        match self {
-            UnifiedInstance::Wasmtime(instance) => instance.store.data().record_event(event_data),
-            UnifiedInstance::Composite(instance) => instance.actor_store.record_event(event_data),
-        }
-    }
-
-    /// Get the underlying wasmtime ActorInstance if this is a wasmtime instance.
-    ///
-    /// This is for legacy code that needs direct access to wasmtime internals.
-    /// New code should use the UnifiedInstance methods instead.
-    pub fn as_wasmtime(&self) -> Option<&crate::wasm::ActorInstance> {
-        match self {
-            UnifiedInstance::Wasmtime(instance) => Some(instance),
-            UnifiedInstance::Composite(_) => None,
-        }
-    }
-
-    /// Get mutable access to the underlying wasmtime ActorInstance if this is a wasmtime instance.
-    ///
-    /// This is for legacy code that needs direct access to wasmtime internals.
-    /// New code should use the UnifiedInstance methods instead.
-    pub fn as_wasmtime_mut(&mut self) -> Option<&mut crate::wasm::ActorInstance> {
-        match self {
-            UnifiedInstance::Wasmtime(instance) => Some(instance),
-            UnifiedInstance::Composite(_) => None,
-        }
-    }
-
-    /// Get the underlying CompositeInstance if this is a composite instance.
-    pub fn as_composite(&self) -> Option<&CompositeInstance> {
-        match self {
-            UnifiedInstance::Wasmtime(_) => None,
-            UnifiedInstance::Composite(instance) => Some(instance),
-        }
-    }
-
-    /// Get mutable access to the underlying CompositeInstance if this is a composite instance.
-    pub fn as_composite_mut(&mut self) -> Option<&mut CompositeInstance> {
-        match self {
-            UnifiedInstance::Wasmtime(_) => None,
-            UnifiedInstance::Composite(instance) => Some(instance),
-        }
     }
 }
 

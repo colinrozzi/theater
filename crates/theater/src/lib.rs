@@ -40,7 +40,6 @@ pub mod errors;
 pub mod events;
 pub mod handler;
 
-pub mod host;
 pub mod id;
 pub mod logging;
 pub mod messages;
@@ -50,7 +49,6 @@ pub mod shutdown;
 pub mod store;
 pub mod theater_runtime;
 pub mod utils;
-pub mod wasm;
 
 pub use actor::ActorError;
 
@@ -74,10 +72,9 @@ pub use shutdown::{ShutdownController, ShutdownReceiver, ShutdownSignal, Shutdow
 pub use replay::{HostFunctionCall, ReplayHandler, ReplayState};
 pub use store::{ContentRef, ContentStore, Label};
 pub use theater_runtime::TheaterRuntime;
-pub use wasm::{ActorComponent, ActorInstance, MemoryStats, WasmError};
 
 // Composite integration
 pub use composite_bridge::{
     AsyncCtx, AsyncRuntime, CompositeInstance, Ctx, HostLinkerBuilder, IntoValue, LinkerError,
-    UnifiedInstance, Value, ValueType,
+    Value, ValueType,
 };

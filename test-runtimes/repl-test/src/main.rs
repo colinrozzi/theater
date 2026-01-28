@@ -1,11 +1,11 @@
 //! REPL Actor Integration Test
 //!
-//! This program tests the REPL actor by loading it with the Composite runtime
+//! This program tests the REPL actor by loading it with the Pack runtime
 //! and sending eval requests.
 
 use anyhow::{Context, Result};
-use composite::abi::Value;
-use composite::{AsyncRuntime, HostLinkerBuilder, LinkerError};
+use pack::abi::Value;
+use pack::{AsyncRuntime, HostLinkerBuilder, LinkerError};
 use std::sync::{Arc, Mutex};
 use tracing::{info, Level};
 use tracing_subscriber::FmtSubscriber;
@@ -41,7 +41,7 @@ async fn run_tests() -> Result<()> {
 
     info!("WASM loaded: {} bytes", wasm_bytes.len());
 
-    // Create the Composite runtime
+    // Create the Pack runtime
     let runtime = AsyncRuntime::new();
 
     // Load and instantiate the module
@@ -188,18 +188,18 @@ fn setup_host_functions(
 ) -> Result<(), LinkerError> {
     builder
         .interface("theater:simple/runtime")?
-        .func_typed("log", |ctx: &mut composite::Ctx<'_, TestStore>, input: Value| {
+        .func_typed("log", |ctx: &mut pack::Ctx<'_, TestStore>, input: Value| {
             if let Value::String(msg) = input {
                 println!("  [ACTOR LOG] {}", msg);
                 ctx.data().logs.lock().unwrap().push(msg);
             }
             Value::Tuple(vec![])
         })?
-        .func_typed("get-chain", |_ctx: &mut composite::Ctx<'_, TestStore>, _input: Value| {
+        .func_typed("get-chain", |_ctx: &mut pack::Ctx<'_, TestStore>, _input: Value| {
             // Return empty chain for testing
             Value::Record(vec![("events".to_string(), Value::List(vec![]))])
         })?
-        .func_typed("shutdown", |_ctx: &mut composite::Ctx<'_, TestStore>, _input: Value| {
+        .func_typed("shutdown", |_ctx: &mut pack::Ctx<'_, TestStore>, _input: Value| {
             // Return Ok(())
             Value::Variant {
                 tag: 0,
@@ -212,7 +212,7 @@ fn setup_host_functions(
 
 /// Call the eval function with a string input
 async fn call_eval(
-    instance: &mut composite::AsyncInstance<TestStore>,
+    instance: &mut pack::AsyncInstance<TestStore>,
     input: &str,
 ) -> Result<Value> {
     let input_value = Value::String(input.to_string());

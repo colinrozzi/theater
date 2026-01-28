@@ -68,9 +68,9 @@ theater-handler-supervisor = { version = "0.2.1", path = "crates/theater-handler
 # theater-handler-sockets = { version = "0.2.1", path = "crates/deprecated/theater-handler-sockets" }
 # theater-handler-timing = { version = "0.2.1", path = "crates/deprecated/theater-handler-timing" }
 
-# Composite runtime integration
-composite = { path = "../composite" }
-composite-abi = { path = "../composite/crates/composite-abi" }
+# Pack runtime integration (Graph ABI-based WASM runtime)
+pack = { path = "../pack" }
+pack-abi = { path = "../pack/crates/pack-abi" }
 
 # Metadata for Nix crane builds
 [workspace.metadata.crane]

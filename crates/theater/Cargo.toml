@@ -28,9 +28,9 @@ val-serde = { path = "../val-serde" }
 wasmtime = { version = "31.0", features = ["component-model", "async"] }
 wit-bindgen = "0.36.0"
 
-# Composite runtime (Graph ABI-based WASM runtime)
-composite.workspace = true
-composite-abi.workspace = true
+# Pack runtime (Graph ABI-based WASM runtime)
+pack.workspace = true
+pack-abi.workspace = true
 
 # Additional core deps
 chrono = { version = "0.4", features = ["serde"] }

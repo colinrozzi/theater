@@ -4,14 +4,12 @@ use crate::chain::ChainEvent;
 use crate::composite_bridge::{CompositeInstance, HostLinkerBuilder, LinkerError};
 use crate::config::actor_manifest::HandlerConfig;
 use crate::shutdown::ShutdownReceiver;
-use crate::wasm::{ActorComponent, ActorInstance};
 use anyhow::Result;
 use std::collections::HashSet;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tracing::{debug, info};
 
 /// Shared reference to an actor instance for handlers that need direct store access
 pub type SharedActorInstance = Arc<RwLock<Option<CompositeInstance>>>;
@@ -94,92 +92,6 @@ impl HandlerRegistry {
     pub fn prepend<H: Handler>(&mut self, handler: H) {
         self.handlers.insert(0, Box::new(handler));
     }
-
-    pub fn setup_handlers(
-        &mut self,
-        actor_component: &mut ActorComponent,
-    ) -> Vec<Box<dyn Handler>> {
-        let component_imports: HashSet<String> = actor_component
-            .import_types
-            .iter()
-            .map(|(name, _)| name.clone())
-            .collect();
-        let component_exports: HashSet<String> = actor_component
-            .export_types
-            .iter()
-            .map(|(name, _)| name.clone())
-            .collect();
-
-        debug!("setup_handlers called");
-        debug!("Component imports: {:?}", component_imports);
-        debug!("Component exports: {:?}", component_exports);
-        debug!("Number of registered handlers: {}", self.handlers.len());
-
-        let mut active_handlers = Vec::new();
-
-        for handler in &self.handlers {
-            let handler_imports = handler.imports();
-            let handler_exports = handler.exports();
-
-            debug!(
-                "Checking handler '{}' - imports: {:?}, exports: {:?}",
-                handler.name(),
-                handler_imports,
-                handler_exports
-            );
-
-            // Check if any of handler's imports match component's imports
-            // None means "match all imports" (useful for catch-all handlers like ReplayHandler)
-            let imports_match = match handler_imports.as_ref() {
-                None => {
-                    debug!("Handler '{}' has None imports - matches all", handler.name());
-                    true
-                }
-                Some(imports) => imports.iter().any(|import| {
-                    let matches = component_imports.contains(import);
-                    debug!(
-                        "Checking import '{}' against component imports: {}",
-                        import, matches
-                    );
-                    matches
-                }),
-            };
-
-            // Check if any of handler's exports match component's exports
-            let exports_match = handler_exports
-                .as_ref()
-                .map_or(false, |exports| {
-                    exports.iter().any(|export| {
-                        let matches = component_exports.contains(export);
-                        debug!(
-                            "Checking export '{}' against component exports: {}",
-                            export, matches
-                        );
-                        matches
-                    })
-                });
-
-            let needs_this_handler = imports_match || exports_match;
-            debug!(
-                "Handler '{}': imports_match={}, exports_match={}, needs_this_handler={}",
-                handler.name(),
-                imports_match,
-                exports_match,
-                needs_this_handler
-            );
-
-            if needs_this_handler {
-                active_handlers.push(handler.create_instance(None));
-                info!("Activated handler '{}'", handler.name());
-            }
-        }
-
-        debug!(
-            "setup_handlers returning {} handlers",
-            active_handlers.len()
-        );
-        active_handlers
-    }
 }
 
 impl Clone for HandlerRegistry {
@@ -259,20 +171,6 @@ pub trait Handler: Send + Sync + 'static {
         shutdown_receiver: ShutdownReceiver,
     ) -> Pin<Box<dyn Future<Output = Result<()>> + Send>>;
 
-    /// Set up host functions for this handler (wasmtime Component Model).
-    ///
-    /// **DEPRECATED**: Use `setup_host_functions_composite()` for new handlers.
-    ///
-    /// The `ctx` parameter provides information about which imports have already been
-    /// satisfied by other handlers. Handlers should check `ctx.is_satisfied(import)`
-    /// before registering an interface, and call `ctx.mark_satisfied(import)` after
-    /// successfully registering one.
-    fn setup_host_functions(
-        &mut self,
-        actor_component: &mut ActorComponent,
-        ctx: &mut HandlerContext,
-    ) -> Result<()>;
-
     /// Set up host functions for this handler (Composite Graph ABI runtime).
     ///
     /// This is the new method for Composite integration. Handlers should register
@@ -308,11 +206,6 @@ pub trait Handler: Send + Sync + 'static {
         // Default: do nothing - handlers opt-in by overriding
         Ok(())
     }
-
-    /// Register export functions (wasmtime Component Model).
-    ///
-    /// **DEPRECATED**: Use `register_exports_composite()` for new handlers.
-    fn add_export_functions(&self, actor_instance: &mut ActorInstance) -> Result<()>;
 
     /// Register export function metadata for Composite instances.
     ///
