@@ -1,15 +1,5 @@
 pub mod build;
-pub mod channel;
 pub mod completion;
 pub mod create;
 pub mod dynamic_completion;
-pub mod events;
-pub mod inspect;
-pub mod list;
-pub mod list_stored;
-pub mod message;
-pub mod process;
 pub mod start;
-pub mod state;
-pub mod stop;
-pub mod subscribe;

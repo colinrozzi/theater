@@ -31,9 +31,12 @@ pub async fn execute_async(args: &CompletionArgs, ctx: &CommandContext) -> CliRe
         Some(output_path) => {
             debug!("Writing completion to file: {:?}", output_path);
 
-            let mut file = std::fs::File::create(output_path).map_err(|e| CliError::IoError {
-                operation: format!("create completion file: {}", output_path.display()),
-                source: e,
+            let mut file = std::fs::File::create(output_path).map_err(|e| {
+                CliError::file_operation_failed(
+                    "create completion file",
+                    output_path.display().to_string(),
+                    e,
+                )
             })?;
 
             generate(args.shell, &mut app, &app_name, &mut file);

@@ -173,7 +173,7 @@ impl PackInstance {
         // Call the function using the full name (Pack exports use the #[export(name = "...")] syntax)
         let output = self
             .instance
-            .call_with_value_async(function_name, &input, 0)
+            .call_with_value_async(function_name, &input)
             .await
             .context(format!("Failed to call function '{}'", function_name))?;
 
@@ -186,7 +186,7 @@ impl PackInstance {
     /// This is useful for functions that don't follow the state pattern.
     pub async fn call_value(&mut self, function_name: &str, input: &Value) -> Result<Value> {
         self.instance
-            .call_with_value_async(function_name, input, 0)
+            .call_with_value_async(function_name, input)
             .await
             .context(format!("Failed to call function '{}'", function_name))
     }

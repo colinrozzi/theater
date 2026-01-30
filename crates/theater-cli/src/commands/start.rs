@@ -1,62 +1,66 @@
 use anyhow::Result;
 use clap::Parser;
-use std::net::SocketAddr;
+use tokio::sync::mpsc;
+use tracing::{debug, error, info};
 
-use tracing::debug;
-
-use crate::client::ManagementResponse;
-use crate::utils::event_display::{display_structured_event, parse_event_fields};
-use crate::{error::CliError, output::formatters::ActorStarted, CommandContext};
-use theater::messages::ActorResult;
+use crate::{error::CliError, CommandContext};
+use theater::config::actor_manifest::{
+    RuntimeHostConfig, StoreHandlerConfig, SupervisorHostConfig,
+};
+use theater::handler::HandlerRegistry;
+use theater::messages::TheaterCommand;
+use theater::theater_runtime::TheaterRuntime;
 use theater::utils::resolve_reference;
+use theater_handler_message_server::{MessageRouter, MessageServerHandler};
+use theater_handler_runtime::RuntimeHandler;
+use theater_handler_store::StoreHandler;
+use theater_handler_supervisor::SupervisorHandler;
 
 #[derive(Debug, Parser)]
 pub struct StartArgs {
     /// Path or URL to the actor manifest file
-    #[arg(required = true)]
+    #[arg(default_value = "manifest.toml")]
     pub manifest: String,
-
-    /// Address of the theater server
-    #[arg(short, long)]
-    pub address: Option<SocketAddr>,
 
     /// Initial state as JSON string or path to JSON file
     #[arg(short, long)]
     pub initial_state: Option<String>,
 
-    /// Subscribe to actor events
-    #[arg(short, long, default_value_t = false)]
-    pub subscribe: bool,
-
-    /// Act as the actor's parent
-    #[arg(short, long, default_value_t = false)]
-    pub parent: bool,
-
-    /// Enable Unix-style signal handling (SIGINT/SIGKILL)
-    #[arg(short, long, default_value_t = false)]
-    pub unix_signals: bool,
-
-    /// Show detailed startup information instead of just actor ID
+    /// Show verbose output
     #[arg(long)]
     pub verbose: bool,
-
-    /// Event fields to include (comma-separated: hash,parent,type,timestamp,description,data,data_size)
-    #[arg(
-        long,
-        default_value = "hash,parent,type,timestamp,description,data_size,data"
-    )]
-    pub event_fields: String,
 }
 
-/// Execute the start command with variable substitution support
+/// Create a handler registry with all Theater handlers
+fn create_handler_registry(
+    theater_tx: mpsc::Sender<TheaterCommand>,
+) -> HandlerRegistry {
+    let mut registry = HandlerRegistry::new();
+
+    // Runtime handler - provides log, get-chain, shutdown
+    let runtime_config = RuntimeHostConfig {};
+    registry.register(RuntimeHandler::new(runtime_config, theater_tx.clone(), None));
+
+    // Store handler - provides content storage
+    let store_config = StoreHandlerConfig {};
+    registry.register(StoreHandler::new(store_config, None));
+
+    // Supervisor handler - allows spawning/managing child actors
+    let supervisor_config = SupervisorHostConfig {};
+    registry.register(SupervisorHandler::new(supervisor_config, None));
+
+    // Message server handler - inter-actor messaging
+    let message_router = MessageRouter::new();
+    registry.register(MessageServerHandler::new(None, message_router.clone()));
+
+    registry
+}
+
+/// Execute the start command - spin up a local runtime and run the actor
 pub async fn execute_async(args: &StartArgs, ctx: &CommandContext) -> Result<(), CliError> {
     debug!("Starting actor from manifest: {}", args.manifest);
 
-    // Get server address from args or config
-    let address = ctx.server_address(args.address);
-    debug!("Connecting to server at: {}", address);
-
-    // Resolve the manifest reference (could be file path, URL, or store path)
+    // Resolve the manifest reference (file path, URL, or store path)
     let manifest_bytes = resolve_reference(&args.manifest).await.map_err(|e| {
         CliError::invalid_manifest(format!(
             "Failed to resolve manifest reference '{}': {}",
@@ -64,12 +68,11 @@ pub async fn execute_async(args: &StartArgs, ctx: &CommandContext) -> Result<(),
         ))
     })?;
 
-    // Convert bytes to string
     let manifest_content = String::from_utf8(manifest_bytes).map_err(|e| {
         CliError::invalid_manifest(format!("Manifest content is not valid UTF-8: {}", e))
     })?;
 
-    // Handle the initial state parameter
+    // Handle initial state
     let initial_state = if let Some(state_str) = &args.initial_state {
         match resolve_reference(state_str).await {
             Ok(bytes) => Some(bytes),
@@ -79,225 +82,169 @@ pub async fn execute_async(args: &StartArgs, ctx: &CommandContext) -> Result<(),
         None
     };
 
-    // Create client and connect
-    let client = ctx.create_client();
-    client
-        .connect()
-        .await
-        .map_err(|e| CliError::connection_failed(address, e))?;
+    // Create the TheaterRuntime in-process
+    let (theater_tx, theater_rx) = mpsc::channel::<TheaterCommand>(32);
+    let handler_registry = create_handler_registry(theater_tx.clone());
 
-    // Start the actor with the processed manifest
-    client
-        .start_actor(manifest_content, initial_state, args.parent, args.subscribe)
-        .await
-        .map_err(|e| CliError::actor_not_found(format!("Failed to start actor: {}", e)))?;
+    let mut runtime = TheaterRuntime::new(
+        theater_tx.clone(),
+        theater_rx,
+        None, // no channel events forwarding needed
+        handler_registry,
+    )
+    .await
+    .map_err(|e| CliError::server_error(format!("Failed to create runtime: {}", e)))?;
 
-    // Parse event fields
-    let event_fields = if args.subscribe {
-        parse_event_fields(&args.event_fields)
-    } else {
-        vec![]
+    // Spawn the runtime event loop in a background task
+    let runtime_handle = tokio::spawn(async move {
+        if let Err(e) = runtime.run().await {
+            error!("Theater runtime error: {}", e);
+        }
+    });
+
+    // Spawn the actor
+    let (response_tx, response_rx) = tokio::sync::oneshot::channel();
+
+    // Set up a supervisor channel so we get notified when the actor exits
+    let (supervisor_tx, mut supervisor_rx) = mpsc::channel(32);
+
+    // Set up an event subscription channel for logging
+    let (subscription_tx, mut subscription_rx) = mpsc::channel(32);
+
+    theater_tx
+        .send(TheaterCommand::SpawnActor {
+            manifest_path: manifest_content,
+            init_bytes: initial_state,
+            response_tx,
+            parent_id: None,
+            supervisor_tx: Some(supervisor_tx),
+            subscription_tx: Some(subscription_tx),
+        })
+        .await
+        .map_err(|e| CliError::server_error(format!("Failed to send spawn command: {}", e)))?;
+
+    // Wait for the actor to start
+    let actor_id = match response_rx.await {
+        Ok(Ok(id)) => {
+            info!("Actor started: {}", id);
+            if args.verbose {
+                eprintln!("Actor started: {}", id);
+            }
+            id
+        }
+        Ok(Err(e)) => {
+            return Err(CliError::server_error(format!(
+                "Failed to start actor: {}",
+                e
+            )));
+        }
+        Err(e) => {
+            return Err(CliError::server_error(format!(
+                "Failed to receive spawn response: {}",
+                e
+            )));
+        }
     };
 
-    let mut actor_started = false;
-    let mut actor_result: Option<ActorResult> = None;
-    let timeout_duration = tokio::time::Duration::from_secs(30);
-    let mut actor_id: Option<String> = None;
+    println!("{}", actor_id);
 
-    debug!("Entering response loop");
-
+    // Now wait for either:
+    // - The actor to exit (supervisor notification)
+    // - Ctrl+C
+    // - Shutdown token cancellation
+    //
+    // Forward events to stderr if verbose
     loop {
         tokio::select! {
-            data = client.next_response() => {
-                debug!("Received response: {:?}", data);
-                if let Ok(data) = data {
-                    match data {
-                        ManagementResponse::ActorStarted { id } => {
-                            debug!("Actor started: {}", id);
-                            actor_started = true;
-                            let id_str = id.to_string();
-                            actor_id = Some(id_str.clone());
-
-                            if !(args.subscribe || args.parent) {
-                                println!("{}", id);
-                            }
-
-                            if args.verbose {
-                                let result = ActorStarted {
-                                    actor_id: id_str.clone(),
-                                    manifest_path: args.manifest.clone(),
-                                    address: address.to_string(),
-                                    subscribing: args.subscribe,
-                                    acting_as_parent: args.parent,
-                                    unix_signals: args.unix_signals,
-                                };
-                                ctx.output.output(&result, None)?;
-                            }
-
-                            if !(args.subscribe || args.parent) {
-                                debug!("Exiting after startup");
-                                break;
-                            }
-                        }
-                        ManagementResponse::ActorEvent { event } => {
-                            if args.subscribe {
-                                display_structured_event(&event, &event_fields)
-                                    .map_err(|e| CliError::invalid_input("event_display", "event", e.to_string()))?;
-                                if event.event_type == "shutdown" {
-                                    break;
+            // Actor result (exit/error)
+            result = supervisor_rx.recv() => {
+                match result {
+                    Some(actor_result) => {
+                        debug!("Actor exited: {:?}", actor_result);
+                        match actor_result {
+                            theater::messages::ActorResult::Success(success) => {
+                                if let Some(output) = success.result {
+                                    use std::io::Write;
+                                    let _ = std::io::stdout().write_all(&output);
+                                    let _ = std::io::stdout().flush();
                                 }
                             }
-                        }
-                        ManagementResponse::ActorResult(result) => {
-                            if args.parent {
-                                match args.subscribe {
-                                    true => actor_result = Some(result),
-                                    false => write_actor_result(result),
-                                }
+                            theater::messages::ActorResult::Error(err) => {
+                                eprintln!("Actor error: {}", err.error);
+                                std::process::exit(1);
                             }
-                        }
-                        ManagementResponse::Error { error } => {
-                            return Err(CliError::management_error(error));
-                        }
-                        _ => {}
-                    }
-                }
-            }
-            _ = tokio::time::sleep(timeout_duration) => {
-                if !actor_started {
-                    return Err(CliError::operation_timeout("Actor startup", timeout_duration.as_secs()));
-                }
-            }
-
-            // Unix signal handling - conditional signal handling
-            signal = async {
-                #[cfg(unix)]
-                {
-                    use tokio::signal::unix::{SignalKind, signal};
-
-                    // Initialize signals once
-                    static mut SIGINT_HANDLE: Option<tokio::signal::unix::Signal> = None;
-                    static mut SIGTERM_HANDLE: Option<tokio::signal::unix::Signal> = None;
-                    static INIT: std::sync::Once = std::sync::Once::new();
-
-                    INIT.call_once(|| {
-                        if let Ok(sig) = signal(SignalKind::interrupt()) {
-                            unsafe { SIGINT_HANDLE = Some(sig) };
-                        }
-                        if let Ok(sig) = signal(SignalKind::terminate()) {
-                            unsafe { SIGTERM_HANDLE = Some(sig) };
-                        }
-                    });
-
-                    unsafe {
-                        let mut sigint = std::ptr::addr_of_mut!(SIGINT_HANDLE).read().take();
-                        let mut sigterm = std::ptr::addr_of_mut!(SIGTERM_HANDLE).read().take();
-
-                        let sigint_recv = async {
-                            if let Some(s) = sigint.as_mut() {
-                                s.recv().await
-                            } else {
-                                futures::future::pending::<Option<()>>().await
-                            }
-                        };
-                        let sigterm_recv = async {
-                            if let Some(s) = sigterm.as_mut() {
-                                s.recv().await
-                            } else {
-                                futures::future::pending::<Option<()>>().await
-                            }
-                        };
-
-                        tokio::select! {
-                            _ = sigint_recv => "SIGINT",
-                            _ = sigterm_recv => "SIGTERM",
-                            _ = tokio::signal::ctrl_c() => "SIGINT",
-                        }
-                    }
-                }
-                #[cfg(not(unix))]
-                {
-                    "SIGINT"
-                }
-            } => {
-                match signal {
-                    "SIGINT" | "SIGTERM" => {
-                        let sig_type = if signal == "SIGINT" { "SIGINT" } else { "SIGTERM" };
-                        if let Some(actor_id) = &actor_id {
-                            debug!("{} received, {} actor {}", sig_type,
-                                  if sig_type == "SIGINT" { "gracefully stopping" } else { "terminating" }, actor_id);
-                            eprintln!("\nReceived {}, {} actor...", sig_type,
-                                    if sig_type == "SIGINT" { "gracefully stopping" } else { "terminating" });
-
-                            if sig_type == "SIGINT" {
-                                let _ = client.stop_actor(actor_id).await;
-                            } else {
-                                let _ = client.terminate_actor(actor_id).await;
+                            theater::messages::ActorResult::ExternalStop(_) => {
+                                debug!("Actor stopped externally");
                             }
                         }
                         break;
                     }
-                    _ => break,
+                    None => {
+                        // Supervisor channel closed, actor is done
+                        debug!("Supervisor channel closed");
+                        break;
+                    }
                 }
             }
+
+            // Event subscription (for verbose logging)
+            event = subscription_rx.recv() => {
+                if let Some(event) = event {
+                    match event {
+                        Ok(chain_event) => {
+                            if args.verbose {
+                                eprintln!("[{}]", chain_event.event_type);
+                            }
+                            if chain_event.event_type == "shutdown" {
+                                break;
+                            }
+                        }
+                        Err(e) => {
+                            debug!("Actor error event: {:?}", e);
+                        }
+                    }
+                }
+            }
+
+            // Ctrl+C
             _ = tokio::signal::ctrl_c() => {
-                debug!("Received Ctrl-C, stopping");
-                if args.verbose {
-                    eprintln!("Interrupted by user");
+                debug!("Received Ctrl+C, stopping actor {}", actor_id);
+                eprintln!("\nStopping actor...");
+
+                let (stop_tx, stop_rx) = tokio::sync::oneshot::channel();
+                let _ = theater_tx.send(TheaterCommand::StopActor {
+                    actor_id: actor_id.clone(),
+                    response_tx: stop_tx,
+                }).await;
+
+                // Wait briefly for graceful shutdown
+                match tokio::time::timeout(
+                    tokio::time::Duration::from_secs(5),
+                    stop_rx,
+                ).await {
+                    Ok(Ok(Ok(()))) => debug!("Actor stopped gracefully"),
+                    _ => debug!("Actor stop timed out or failed"),
                 }
                 break;
             }
+
+            // Shutdown token
             _ = ctx.shutdown_token.cancelled() => {
+                debug!("Shutdown token cancelled");
                 break;
             }
         }
     }
 
-    if args.parent && args.subscribe {
-        match actor_result {
-            Some(result) => {
-                debug!("Actor result received");
-                println!("OUTPUT");
-                write_actor_result(result);
-            }
-            None => {
-                eprintln!("No actor result received");
-                std::process::exit(1);
-            }
-        }
-    }
+    // Drop the theater_tx to signal the runtime to stop
+    drop(theater_tx);
+
+    // Wait for runtime to finish (with timeout)
+    let _ = tokio::time::timeout(
+        tokio::time::Duration::from_secs(5),
+        runtime_handle,
+    )
+    .await;
 
     Ok(())
-}
-
-/// Check if the manifest content contains variable references
-#[allow(dead_code)]
-fn has_variables(content: &str) -> bool {
-    content.contains("{{") && content.contains("}}")
-}
-
-/// Write actor result to stdout
-fn write_actor_result(actor_result: ActorResult) {
-    use std::io::{self, Write};
-
-    match actor_result {
-        ActorResult::Success(result) => {
-            if let Some(output) = result.result {
-                let _ = io::stdout().write_all(&output);
-                let _ = io::stdout().flush();
-                std::process::exit(0);
-            }
-        }
-        ActorResult::Error(error) => {
-            let error_message = format!("Error: {}", error.error);
-            let _ = io::stdout().write_all(error_message.as_bytes());
-            let _ = io::stdout().flush();
-            std::process::exit(1);
-        }
-        ActorResult::ExternalStop(_) => {
-            let _ = io::stdout().write_all(b"Actor stopped externally");
-            let _ = io::stdout().flush();
-            std::process::exit(1);
-        }
-    }
 }
