@@ -3443,6 +3443,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "theater-handler-tcp"
+version = "0.2.1"
+dependencies = [
+ "anyhow",
+ "serde_json",
+ "theater",
+ "theater-handler-runtime",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "theater-replay-experimenting"
 version = "0.1.0"
 dependencies = [
@@ -3474,6 +3487,7 @@ dependencies = [
  "theater-handler-runtime",
  "theater-handler-store",
  "theater-handler-supervisor",
+ "theater-handler-tcp",
  "tokio",
  "tokio-util",
  "tower-http",

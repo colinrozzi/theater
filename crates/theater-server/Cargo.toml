@@ -21,6 +21,7 @@ theater-handler-message-server.workspace = true
 theater-handler-runtime.workspace = true
 theater-handler-store.workspace = true
 theater-handler-supervisor.workspace = true
+theater-handler-tcp.workspace = true
 # DEPRECATED: WASI handlers removed - see crates/deprecated/
 
 # Core dependencies

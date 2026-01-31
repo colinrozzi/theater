@@ -118,6 +118,10 @@ pub fn validate_manifest_permissions(
                 // Replay handler is always allowed - it's for debugging/testing
                 // The replay handler replays recorded event chains
             }
+            HandlerConfig::Tcp { .. } => {
+                // TCP handler is allowed by default
+                // Fine-grained permission enforcement can be added later
+            }
         }
     }
     Ok(())

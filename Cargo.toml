@@ -11,6 +11,7 @@ members = [
     "crates/theater-handler-runtime",
     "crates/theater-handler-store",
     "crates/theater-handler-supervisor",
+    "crates/theater-handler-tcp",
     "crates/theater-replay-experimenting",
 ]
 # DEPRECATED: WASI handlers moved to crates/deprecated/
@@ -55,6 +56,7 @@ theater-handler-message-server = { version = "0.2.1", path = "crates/theater-han
 theater-handler-runtime = { version = "0.2.1", path = "crates/theater-handler-runtime" }
 theater-handler-store = { version = "0.2.1", path = "crates/theater-handler-store" }
 theater-handler-supervisor = { version = "0.2.1", path = "crates/theater-handler-supervisor" }
+theater-handler-tcp = { version = "0.2.1", path = "crates/theater-handler-tcp" }
 # DEPRECATED: WASI handlers (moved to crates/deprecated/)
 # theater-handler-environment = { version = "0.2.1", path = "crates/deprecated/theater-handler-environment" }
 # theater-handler-filesystem = { version = "0.2.1", path = "crates/deprecated/theater-handler-filesystem" }

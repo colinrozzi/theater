@@ -1,0 +1,9 @@
+[actor]
+name = "tcp-echo"
+package = "./target/wasm32-unknown-unknown/release/tcp_echo_actor.wasm"
+
+[handlers]
+runtime = {}
+
+[handlers.tcp]
+listen = "0.0.0.0:9000"

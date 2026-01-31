@@ -1,0 +1,47 @@
+package theater:simple;
+
+/// Raw TCP networking for actors.
+///
+/// Provides connect, listen, accept, send, receive, and close operations.
+/// All protocol complexity (framing, routing, addressing) is left to actor-space code.
+interface tcp {
+    /// Connect to a remote TCP address.
+    ///
+    /// Returns a connection ID on success.
+    connect: func(address: string) -> result<string, string>;
+
+    /// Start listening on the given address.
+    ///
+    /// Returns a listener ID on success.
+    listen: func(address: string) -> result<string, string>;
+
+    /// Accept a connection from a listener.
+    ///
+    /// Blocks until a connection arrives. Returns a connection ID.
+    accept: func(listener-id: string) -> result<string, string>;
+
+    /// Send data on a connection.
+    ///
+    /// Returns the number of bytes written.
+    send: func(connection-id: string, data: list<u8>) -> result<u64, string>;
+
+    /// Receive up to max-bytes from a connection.
+    ///
+    /// Returns the bytes read. An empty list means EOF.
+    receive: func(connection-id: string, max-bytes: u32) -> result<list<u8>, string>;
+
+    /// Close a connection.
+    close: func(connection-id: string) -> result<_, string>;
+
+    /// Close a listener.
+    close-listener: func(listener-id: string) -> result<_, string>;
+}
+
+/// Optional export for actors that want to handle incoming connections
+/// from a configured listener.
+interface tcp-client {
+    /// Called when a new connection is accepted on the configured listener.
+    ///
+    /// The connection-id can be used with send/receive/close from the tcp import.
+    handle-connection: func(state: option<list<u8>>, params: tuple<string>) -> result<tuple<option<list<u8>>>, string>;
+}

@@ -1,0 +1,15 @@
+/// WIT world for the TCP Handler
+///
+/// This world defines what the host provides to actors that import
+/// the theater:simple/tcp interface for raw TCP networking.
+
+package theater:tcp-handler;
+
+world tcp-handler-host {
+    /// Theater simple TCP interface
+    /// Provides raw TCP connect, listen, accept, send, receive, close
+    import theater:simple/tcp;
+
+    /// Actor may export handler for incoming connections
+    export theater:simple/tcp-client;
+}

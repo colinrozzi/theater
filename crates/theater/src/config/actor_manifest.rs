@@ -159,6 +159,11 @@ pub enum HandlerConfig {
         #[serde(flatten)]
         config: ReplayHandlerConfig,
     },
+    #[serde(rename = "tcp")]
+    Tcp {
+        #[serde(flatten)]
+        config: TcpHandlerConfig,
+    },
 }
 
 impl HandlerConfig {
@@ -179,6 +184,7 @@ impl HandlerConfig {
             HandlerConfig::Random { .. } => "random",
             HandlerConfig::WasiHttp { .. } => "wasi-http",
             HandlerConfig::Replay { .. } => "replay",
+            HandlerConfig::Tcp { .. } => "tcp",
         }
     }
 }
@@ -189,6 +195,14 @@ impl HandlerConfig {
 pub struct ReplayHandlerConfig {
     /// Path to the JSON file containing the recorded event chain
     pub chain: PathBuf,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct TcpHandlerConfig {
+    #[serde(default)]
+    pub listen: Option<String>,
+    #[serde(default)]
+    pub max_connections: Option<u32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

@@ -17,7 +17,7 @@ use tracing::{debug, error, info};
 use uuid::Uuid;
 
 use theater::config::actor_manifest::{
-    RuntimeHostConfig, StoreHandlerConfig, SupervisorHostConfig,
+    RuntimeHostConfig, StoreHandlerConfig, SupervisorHostConfig, TcpHandlerConfig,
 };
 use theater::handler::HandlerRegistry;
 use theater::id::TheaterId;
@@ -31,6 +31,7 @@ use theater_handler_message_server::MessageServerHandler;
 use theater_handler_runtime::RuntimeHandler;
 use theater_handler_store::StoreHandler;
 use theater_handler_supervisor::SupervisorHandler;
+use theater_handler_tcp::TcpHandler;
 
 use crate::fragmenting_codec::FragmentingCodec;
 
@@ -333,7 +334,14 @@ fn create_root_handler_registry(
     let message_router = theater_handler_message_server::MessageRouter::new();
     registry.register(MessageServerHandler::new(None, message_router.clone()));
 
-    info!("✓ 4 Theater-specific handlers registered");
+    // TCP handler - provides raw TCP networking for actors
+    let tcp_config = TcpHandlerConfig {
+        listen: None,
+        max_connections: None,
+    };
+    registry.register(TcpHandler::new(tcp_config));
+
+    info!("✓ 5 Theater-specific handlers registered");
     info!("NOTE: WASI handlers are deprecated - see crates/deprecated/");
 
     (registry, message_router)
