@@ -79,4 +79,4 @@ pub use pack_bridge::{
     AsyncCtx, AsyncRuntime, CallInterceptor, Ctx, HostLinkerBuilder, IntoValue, LinkerError,
     PackInstance, Value, ValueType,
 };
-pub use interceptor::{RecordingInterceptor, ReplayInterceptor};
+pub use interceptor::{RecordingInterceptor, ReplayRecordingInterceptor};

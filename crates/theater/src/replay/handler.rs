@@ -1,25 +1,29 @@
 //! # Replay Handler
 //!
-//! The ReplayHandler is a special handler that replays actors from recorded event chains.
+//! The ReplayHandler drives full actor lifecycle replay from a recorded event chain.
 //!
-//! ## Status: Needs Reimplementation for Composite Runtime
+//! Given an expected chain (from a previous run), the ReplayHandler:
+//! 1. Walks the expected chain and finds all WasmCall events
+//! 2. For each WasmCall, calls the function via the actor handle with recorded params
+//! 3. WASM code runs for real, calling host functions
+//! 4. The ReplayRecordingInterceptor returns recorded outputs for host calls AND records
+//!    them to a new chain
+//! 5. execute_call records WasmCall/WasmResult events to the new chain
+//! 6. After each function call completes, compares new chain hashes against expected
+//! 7. If any hash mismatches, errors out immediately
 //!
-//! This handler was originally implemented for the wasmtime Component Model runtime.
-//! It needs to be reimplemented for the Composite (Graph ABI) runtime.
-//!
-//! The wasmtime-specific implementation is preserved in git history for reference.
-//!
-//! ## Usage (once reimplemented)
+//! ## Usage
 //!
 //! ```ignore
 //! // Load the expected chain from a previous run
 //! let expected_chain = load_chain("actor_chain.json")?;
 //!
-//! // Create a handler registry with just the replay handler
+//! // Create a handler registry with the replay handler and chain
 //! let mut registry = HandlerRegistry::new();
+//! registry.set_replay_chain(expected_chain.clone());
 //! registry.register(ReplayHandler::new(expected_chain));
 //!
-//! // Run the actor - it will replay using recorded outputs
+//! // Run the actor - it will replay and verify hashes match
 //! let runtime = TheaterRuntime::new(..., registry);
 //! ```
 
@@ -28,11 +32,13 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 
-use tracing::warn;
+use tracing::{info, warn};
 
 use crate::actor::handle::ActorHandle;
 use crate::actor::store::ActorStore;
 use crate::chain::ChainEvent;
+use crate::events::ChainEventPayload;
+use crate::events::wasm::WasmEventData;
 use crate::pack_bridge::{HostLinkerBuilder, LinkerError, PackInstance};
 use crate::handler::{Handler, HandlerContext, SharedActorInstance};
 use crate::shutdown::ShutdownReceiver;
@@ -146,17 +152,11 @@ impl ReplayState {
     }
 }
 
-/// Handler that replays actors from recorded event chains.
+/// Handler that drives full actor lifecycle replay from a recorded event chain.
 ///
-/// ## Status: Needs Reimplementation
-///
-/// This handler needs to be reimplemented for the Composite (Graph ABI) runtime.
-/// The wasmtime-specific implementation is preserved in git history.
-///
-/// When reimplemented, the ReplayHandler will:
-/// - Satisfy all component imports by registering stub functions
-/// - Return recorded outputs from a previous run
-/// - Enable verification, debugging, and testing without real external dependencies
+/// The ReplayHandler walks the expected chain, calls each recorded WasmCall function,
+/// and verifies that the new chain's hashes match the expected chain's hashes after
+/// each call. Host function outputs are provided by the ReplayRecordingInterceptor.
 #[derive(Clone)]
 pub struct ReplayHandler {
     /// Replay state shared across all stub functions
@@ -195,15 +195,77 @@ impl Handler for ReplayHandler {
 
     fn start(
         &mut self,
-        _actor_handle: ActorHandle,
+        actor_handle: ActorHandle,
         _actor_instance: SharedActorInstance,
         shutdown_receiver: ShutdownReceiver,
     ) -> Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send>> {
-        warn!("ReplayHandler::start() - Replay not yet implemented for Composite runtime");
+        let expected_events = (*self.state.events).clone();
 
         Box::pin(async move {
-            // Just wait for shutdown since replay isn't implemented yet
-            shutdown_receiver.wait_for_shutdown().await;
+            let mut verified_position = 0usize;
+            let total_expected = expected_events.len();
+            let mut shutdown_rx = shutdown_receiver.receiver;
+
+            // Collect WasmCall events to replay
+            let calls_to_replay: Vec<(usize, String, Vec<u8>)> = expected_events.iter()
+                .enumerate()
+                .filter_map(|(idx, event)| {
+                    let payload: ChainEventPayload = serde_json::from_slice(&event.data).ok()?;
+                    match payload {
+                        ChainEventPayload::Wasm(WasmEventData::WasmCall { function_name, params }) => {
+                            Some((idx, function_name, params))
+                        }
+                        _ => None,
+                    }
+                })
+                .collect();
+
+            info!("Replay: found {} WasmCall events to replay out of {} total events",
+                  calls_to_replay.len(), total_expected);
+
+            for (idx, function_name, params) in calls_to_replay {
+                info!("Replay: calling {} (expected event {})", function_name, idx);
+
+                let call_result = tokio::select! {
+                    result = actor_handle.call_function_void(function_name.clone(), params) => result,
+                    _ = &mut shutdown_rx => {
+                        info!("Replay: shutdown received, stopping");
+                        return Ok(());
+                    }
+                };
+
+                if let Err(e) = call_result {
+                    return Err(anyhow::anyhow!("Replay failed at {}: {:?}", function_name, e));
+                }
+
+                // After each call, verify new chain hashes against expected
+                let new_chain = actor_handle.get_chain().await
+                    .map_err(|e| anyhow::anyhow!("Failed to get chain: {:?}", e))?;
+
+                for pos in verified_position..new_chain.len() {
+                    if pos >= total_expected {
+                        return Err(anyhow::anyhow!(
+                            "Replay produced more events than expected ({} > {})",
+                            new_chain.len(), total_expected
+                        ));
+                    }
+                    if new_chain[pos].hash != expected_events[pos].hash {
+                        return Err(anyhow::anyhow!(
+                            "Hash mismatch at event {}: expected {}, got {}",
+                            pos,
+                            hex::encode(&expected_events[pos].hash),
+                            hex::encode(&new_chain[pos].hash),
+                        ));
+                    }
+                }
+                verified_position = new_chain.len();
+            }
+
+            if verified_position != total_expected {
+                warn!("Replay: verified {}/{} events", verified_position, total_expected);
+            }
+
+            info!("Replay complete: {}/{} events verified", verified_position, total_expected);
             Ok(())
         })
     }
@@ -213,9 +275,8 @@ impl Handler for ReplayHandler {
         _builder: &mut HostLinkerBuilder<'_, ActorStore>,
         _ctx: &mut HandlerContext,
     ) -> Result<(), LinkerError> {
-        // TODO: Implement replay for Composite runtime
-        // This should register stub functions that return recorded outputs
-        warn!("ReplayHandler::setup_host_functions_composite() - Not yet implemented for Composite runtime");
+        // Host function interception is handled by ReplayRecordingInterceptor at the Pack level.
+        // No stub functions needed here.
         Ok(())
     }
 

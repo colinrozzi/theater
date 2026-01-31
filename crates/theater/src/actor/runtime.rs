@@ -8,7 +8,7 @@ use crate::actor::handle::ActorHandle;
 use crate::actor::store::ActorStore;
 use crate::actor::types::ActorError;
 use crate::actor::types::ActorOperation;
-use crate::interceptor::{RecordingInterceptor, ReplayInterceptor};
+use crate::interceptor::{RecordingInterceptor, ReplayRecordingInterceptor};
 use crate::pack_bridge::{AsyncRuntime, CallInterceptor, HostLinkerBuilder, PackInstance};
 use crate::events::wasm::WasmEventData;
 use crate::events::ChainEventData;
@@ -310,13 +310,12 @@ impl ActorRuntime {
 
         // Create the appropriate interceptor based on mode
         let interceptor: Option<Arc<dyn CallInterceptor>> = if handler_registry.is_replay_mode() {
-            // In replay mode, we need the chain events to create a ReplayInterceptor.
-            // The replay handler will have the events - for now we extract them from the chain.
-            let chain_events = {
-                let chain_guard = chain.read().unwrap();
-                chain_guard.get_events().to_vec()
-            };
-            Some(Arc::new(ReplayInterceptor::new(chain_events)))
+            // In replay mode, use the expected chain from the registry to look up
+            // recorded host function outputs, and record new events to the actor's chain.
+            let expected_events = handler_registry.replay_chain()
+                .expect("Replay mode set but no replay chain provided")
+                .clone();
+            Some(Arc::new(ReplayRecordingInterceptor::new(expected_events, chain.clone())))
         } else {
             Some(Arc::new(RecordingInterceptor::new(chain.clone())))
         };

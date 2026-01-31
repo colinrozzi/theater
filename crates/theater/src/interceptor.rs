@@ -8,11 +8,11 @@
 //! Used during normal execution. Allows all calls to proceed normally and records
 //! input/output to the actor's chain after each call completes.
 //!
-//! ## ReplayInterceptor
+//! ## ReplayRecordingInterceptor
 //!
-//! Used during replay execution. Short-circuits host function calls by returning
-//! previously recorded output values from the chain, without executing the real
-//! host function.
+//! Used during replay execution. Combines replay and recording: returns previously
+//! recorded output values from the expected chain (so WASM runs deterministically),
+//! and also records those calls to a new chain (so hashes can be compared).
 
 use std::sync::{Arc, Mutex, RwLock};
 
@@ -68,55 +68,48 @@ impl CallInterceptor for RecordingInterceptor {
     }
 }
 
-/// Interceptor that replays host function calls from a recorded chain.
+/// Combined interceptor that replays host function calls AND records them to a new chain.
 ///
 /// During replay execution, this interceptor:
-/// - Returns recorded output from `before_import` (skipping real execution)
-/// - Advances through the chain events sequentially
-pub struct ReplayInterceptor {
-    /// The chain events containing recorded host function calls
-    events: Vec<crate::chain::ChainEvent>,
-    /// Current position in the events list
+/// - Returns recorded output from `before_import` (skipping real host function execution)
+/// - Records the call to the new chain in `after_import` (so hashes can be compared)
+///
+/// This is needed because during replay we must:
+/// 1. Return recorded outputs so WASM runs deterministically
+/// 2. Record those same calls to the new chain so we can compare hashes
+pub struct ReplayRecordingInterceptor {
+    /// Expected chain events (for looking up recorded host function outputs)
+    expected_events: Vec<crate::chain::ChainEvent>,
+    /// Position in expected events (for sequential host call lookup)
     position: Mutex<usize>,
+    /// The new chain being built during replay (for recording)
+    chain: Arc<RwLock<StateChain>>,
 }
 
-impl ReplayInterceptor {
-    /// Create a new ReplayInterceptor from recorded chain events.
+impl ReplayRecordingInterceptor {
+    /// Create a new ReplayRecordingInterceptor.
     ///
-    /// Only HostFunction events are used; other event types are skipped
-    /// during replay.
-    pub fn new(events: Vec<crate::chain::ChainEvent>) -> Self {
+    /// `expected_events` are the events from the original chain (used to look up
+    /// recorded host function outputs). `chain` is the new chain being built
+    /// during replay (used to record events for hash comparison).
+    pub fn new(expected_events: Vec<crate::chain::ChainEvent>, chain: Arc<RwLock<StateChain>>) -> Self {
         Self {
-            events,
+            expected_events,
             position: Mutex::new(0),
+            chain,
         }
     }
 
-    /// Get current replay position.
-    pub fn position(&self) -> usize {
-        *self.position.lock().unwrap()
-    }
-
-    /// Get total number of events.
-    pub fn total_events(&self) -> usize {
-        self.events.len()
-    }
-
-    /// Check if replay is complete.
-    pub fn is_complete(&self) -> bool {
-        self.position() >= self.events.len()
-    }
-
     /// Find the next HostFunction event at or after the current position,
-    /// optionally matching interface/function name.
+    /// matching interface/function name.
     fn find_next_host_call(
         &self,
         interface: &str,
         function: &str,
     ) -> Option<HostFunctionCall> {
         let mut pos = self.position.lock().unwrap();
-        while *pos < self.events.len() {
-            let event = &self.events[*pos];
+        while *pos < self.expected_events.len() {
+            let event = &self.expected_events[*pos];
 
             // Try to deserialize the event data as a ChainEventPayload
             if let Ok(payload) = serde_json::from_slice::<ChainEventPayload>(&event.data) {
@@ -143,15 +136,27 @@ impl ReplayInterceptor {
     }
 }
 
-impl CallInterceptor for ReplayInterceptor {
+impl CallInterceptor for ReplayRecordingInterceptor {
     fn before_import(&self, interface: &str, function: &str, _input: &Value) -> Option<Value> {
         // Find the next matching host function call and return its recorded output
         self.find_next_host_call(interface, function)
             .map(|call| call.output)
     }
 
-    fn after_import(&self, _interface: &str, _function: &str, _input: &Value, _output: &Value) {
-        // Nothing to do during replay - the call was already handled by before_import
+    fn after_import(&self, interface: &str, function: &str, input: &Value, output: &Value) {
+        // Record to the new chain (same as RecordingInterceptor)
+        let call = HostFunctionCall::new(
+            interface,
+            function,
+            input.clone(),
+            output.clone(),
+        );
+
+        let mut chain = self.chain.write().unwrap();
+        let _ = chain.add_typed_event(ChainEventData {
+            event_type: format!("{}/{}", interface, function),
+            data: ChainEventPayload::HostFunction(call),
+        });
     }
 
     fn before_export(&self, _function: &str, _input: &Value) -> Option<Value> {
@@ -159,6 +164,6 @@ impl CallInterceptor for ReplayInterceptor {
     }
 
     fn after_export(&self, _function: &str, _input: &Value, _output: &Value) {
-        // Nothing to do during replay
+        // Export recording is handled by execute_call
     }
 }
