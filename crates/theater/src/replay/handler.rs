@@ -8,7 +8,7 @@
 //! 3. WASM code runs for real, calling host functions
 //! 4. The ReplayRecordingInterceptor returns recorded outputs for host calls AND records
 //!    them to a new chain
-//! 5. execute_call records WasmCall/WasmResult events to the new chain
+//! 5. execute_call_pack records WasmCall/WasmResult events to the new chain
 //! 6. After each function call completes, compares new chain hashes against expected
 //! 7. If any hash mismatches, errors out immediately
 //!
@@ -227,7 +227,7 @@ impl Handler for ReplayHandler {
                 info!("Replay: calling {} (expected event {})", function_name, idx);
 
                 let call_result = tokio::select! {
-                    result = actor_handle.call_function_void(function_name.clone(), params) => result,
+                    result = actor_handle.call_function_pack_void(function_name.clone(), params) => result,
                     _ = &mut shutdown_rx => {
                         info!("Replay: shutdown received, stopping");
                         return Ok(());

@@ -322,6 +322,7 @@ impl ActorRuntime {
 
         // Create a closure that sets up all handler host functions
         let mut handler_ctx = HandlerContext::new();
+        handler_ctx.actor_id = Some(id.clone());
         let handlers_for_setup = &mut handlers;
 
         let mut actor_instance = PackInstance::new_with_interceptor(
@@ -444,8 +445,12 @@ impl ActorRuntime {
                 // and returns updated state.
                 // init: func(state: option<list<u8>>) -> result<tuple<option<list<u8>>>, string>
                 init_actor_handle
-                    .call_function_void("theater:simple/actor.init".to_string(), vec![])
+                    .call_function(
+                        "theater:simple/actor.init".to_string(),
+                        crate::pack_bridge::Value::Tuple(vec![]),
+                    )
                     .await
+                    .map(|_| ())
                     .map_err(|e| {
                         error!("Failed to call actor.init for actor {}: {}", init_id, e);
                         e
@@ -725,12 +730,12 @@ impl ActorRuntime {
         actor_phase_manager: ActorPhaseManager,
     ) -> () {
         match op {
-            ActorOperation::CallFunction {
+            ActorOperation::CallFunctionPack {
                 name,
                 params,
                 response_tx,
             } => {
-                info!("Processing function call: {}", name);
+                info!("Processing pack function call: {}", name);
                 let mut actor_instance_guard = actor_instance_wrapper.write().await;
                 let actor_instance = match &mut *actor_instance_guard {
                     Some(instance) => instance,
@@ -756,7 +761,8 @@ impl ActorRuntime {
                     }
                 };
                 let metrics = metrics.write().await;
-                match Self::execute_call(actor_instance, &name, params, &theater_tx, &metrics).await
+                match Self::execute_call_pack(actor_instance, &name, params, &theater_tx, &metrics)
+                    .await
                 {
                     Ok(result) => {
                         if let Err(e) = response_tx.send(Ok(result)) {
@@ -901,31 +907,17 @@ impl ActorRuntime {
         }
     }
 
+    /// Execute a function call using Pack-native Value encoding.
     ///
-    /// Calls a function in the WebAssembly actor with the given parameters,
-    /// updates the actor's state based on the result, and records the
-    /// operation in the actor's chain.
-    ///
-    /// ## Parameters
-    ///
-    /// * `actor_instance` - The Composite actor instance
-    /// * `name` - Name of the function to call
-    /// * `params` - Serialized parameters for the function
-    /// * `theater_tx` - Channel for sending commands to the Theater runtime
-    /// * `metrics` - Collector for performance metrics
-    ///
-    /// ## Returns
-    ///
-    /// * `Ok(Vec<u8>)` - Serialized result of the function call
-    /// * `Err(ActorError)` - Error that occurred during execution
-    async fn execute_call(
+    /// Decodes params from Pack ABI bytes to a structured `Value`,
+    /// then calls `call_function_with_value` which preserves type information.
+    async fn execute_call_pack(
         actor_instance: &mut PackInstance,
         name: &String,
         params: Vec<u8>,
         _theater_tx: &mpsc::Sender<TheaterCommand>,
         metrics: &MetricsCollector,
     ) -> Result<Vec<u8>, ActorError> {
-        // Validate the function exists
         if !actor_instance.has_function(name) {
             error!("Function '{}' not found in actor", name);
             return Err(ActorError::FunctionNotFound(name.to_string()));
@@ -935,10 +927,15 @@ impl ActorRuntime {
 
         let state = actor_instance.actor_store.get_state();
         debug!(
-            "Executing call to function '{}' with state size: {:?}",
+            "Executing pack call to function '{}' with state size: {:?}",
             name,
             state.as_ref().map(|s| s.len()).unwrap_or(0)
         );
+
+        let params_value = crate::pack_bridge::decode_value(&params).map_err(|e| {
+            error!("Failed to decode pack params: {}", e);
+            ActorError::SerializationError
+        })?;
 
         actor_instance.actor_store.record_event(ChainEventData {
             event_type: "wasm".to_string(),
@@ -949,8 +946,10 @@ impl ActorRuntime {
             .into(),
         });
 
-        // Execute the call
-        let (new_state, results) = match actor_instance.call_function(name, state, params).await {
+        let (new_state, results) = match actor_instance
+            .call_function_with_value(name, state, params_value)
+            .await
+        {
             Ok(result) => {
                 actor_instance.actor_store.record_event(ChainEventData {
                     event_type: "wasm".to_string(),
@@ -978,13 +977,12 @@ impl ActorRuntime {
         };
 
         debug!(
-            "Call to '{}' completed, new state size: {:?}",
+            "Pack call to '{}' completed, new state size: {:?}",
             name,
             new_state.as_ref().map(|s| s.len()).unwrap_or(0)
         );
         actor_instance.actor_store.set_state(new_state);
 
-        // Record metrics
         let duration = start.elapsed();
         metrics.record_operation(duration, true).await;
 

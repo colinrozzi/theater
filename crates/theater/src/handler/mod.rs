@@ -1,6 +1,7 @@
 use crate::actor::handle::ActorHandle;
 use crate::actor::store::ActorStore;
 use crate::chain::ChainEvent;
+use crate::id::TheaterId;
 use crate::pack_bridge::{HostLinkerBuilder, LinkerError, PackInstance};
 use crate::config::actor_manifest::HandlerConfig;
 use crate::shutdown::ShutdownReceiver;
@@ -19,12 +20,15 @@ pub type SharedActorInstance = Arc<RwLock<Option<PackInstance>>>;
 pub struct HandlerContext {
     /// Set of imports that have already been registered by other handlers
     pub satisfied_imports: HashSet<String>,
+    /// The actor ID for the actor being set up
+    pub actor_id: Option<TheaterId>,
 }
 
 impl HandlerContext {
     pub fn new() -> Self {
         Self {
             satisfied_imports: HashSet::new(),
+            actor_id: None,
         }
     }
 

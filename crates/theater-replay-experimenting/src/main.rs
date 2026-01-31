@@ -8,7 +8,7 @@
 //!
 //! ```bash
 //! # Build the test actor first
-//! cd crates/theater-handler-runtime/test-actors/runtime-test && cargo component build --release
+//! cd test-actors/replay-test && cargo build --release
 //!
 //! # Run the replay experiment
 //! cargo run -p theater-replay-experimenting
@@ -26,7 +26,7 @@ use tokio::time::timeout;
 use theater::chain::ChainEvent;
 use theater::config::actor_manifest::RuntimeHostConfig;
 use theater::handler::HandlerRegistry;
-use theater::messages::{ActorMessage, ActorSend, MessageCommand, TheaterCommand};
+use theater::messages::{ActorMessage, ActorRequest, ActorSend, MessageCommand, TheaterCommand};
 use theater::theater_runtime::TheaterRuntime;
 use theater::ActorError;
 
@@ -135,18 +135,28 @@ chain = "{}"
 
 [[handler]]
 type = "runtime"
+
+[[handler]]
+type = "message-server"
 "#,
         wasm_path.display(),
         chain_path
     )
 }
 
-/// Creates a handler registry with RuntimeHandler
-pub fn create_base_registry(theater_tx: mpsc::Sender<TheaterCommand>) -> HandlerRegistry {
+/// Creates a handler registry with RuntimeHandler and MessageServerHandler.
+/// Returns both the registry and the MessageRouter for sending messages.
+pub fn create_base_registry(
+    theater_tx: mpsc::Sender<TheaterCommand>,
+) -> (HandlerRegistry, MessageRouter) {
     let mut registry = HandlerRegistry::new();
     let runtime_config = RuntimeHostConfig {};
     registry.register(RuntimeHandler::new(runtime_config, theater_tx, None));
-    registry
+
+    let message_router = MessageRouter::new();
+    registry.register(MessageServerHandler::new(None, message_router.clone()));
+
+    (registry, message_router)
 }
 
 /// Collect events from a channel with timeout
@@ -205,7 +215,7 @@ pub async fn run_replay_verification(
     let recording_manifest = create_recording_manifest(&wasm_path);
 
     let (theater_tx, theater_rx) = mpsc::channel::<TheaterCommand>(32);
-    let handler_registry = create_base_registry(theater_tx.clone());
+    let (handler_registry, message_router) = create_base_registry(theater_tx.clone());
 
     let mut runtime =
         TheaterRuntime::new(theater_tx.clone(), theater_rx, None, handler_registry).await?;
@@ -235,13 +245,44 @@ pub async fn run_replay_verification(
         println!("Recorded run - Actor ID: {}", actor_id);
     }
 
-    // Collect events
-    let recorded_chain = collect_events(
+    // Collect init events (short idle timeout so we move on quickly)
+    let mut recorded_chain = collect_events(
         &mut event_rx,
-        Duration::from_secs(2),
+        Duration::from_millis(500),
         Duration::from_secs(10),
     )
     .await;
+
+    if verbose {
+        println!(
+            "After init: {} events recorded, sending messages...",
+            recorded_chain.len()
+        );
+    }
+
+    // Send two messages to the actor via the message router
+    for i in 0..2 {
+        let msg_data = format!("test message {}", i).into_bytes();
+        let (response_tx, response_rx) = tokio::sync::oneshot::channel();
+        message_router
+            .route_message(MessageCommand::SendMessage {
+                target_id: actor_id.clone(),
+                message: ActorMessage::Send(ActorSend { data: msg_data }),
+                response_tx,
+            })
+            .await?;
+        // Wait for routing to complete
+        let _ = timeout(Duration::from_secs(5), response_rx).await;
+    }
+
+    // Collect message-handling events
+    let msg_events = collect_events(
+        &mut event_rx,
+        Duration::from_millis(500),
+        Duration::from_secs(10),
+    )
+    .await;
+    recorded_chain.extend(msg_events);
 
     if verbose {
         println!("Recorded chain has {} events", recorded_chain.len());
@@ -365,6 +406,262 @@ pub async fn run_replay_verification(
     })
 }
 
+/// Run a replay verification test that exercises handle-request (with response).
+///
+/// This function:
+/// 1. Records an actor run with a Send message followed by a Request message
+/// 2. Verifies the request response contains "response:" + original data
+/// 3. Replays the actor using the recorded chain
+/// 4. Compares event hashes for determinism
+pub async fn run_request_replay_verification(
+    chain_path: &str,
+    verbose: bool,
+) -> Result<ReplayVerificationResult> {
+    let wasm_path = get_test_wasm_path();
+    if !wasm_path.exists() {
+        return Err(anyhow::anyhow!(
+            "WASM file not found at {:?}. Build with: cd test-actors/replay-test && cargo build --release",
+            wasm_path
+        ));
+    }
+
+    if verbose {
+        println!("\n=== Phase 1: Recording (with request) ===\n");
+    }
+
+    // --- Phase 1: Record a run ---
+    let recording_manifest = create_recording_manifest(&wasm_path);
+
+    let (theater_tx, theater_rx) = mpsc::channel::<TheaterCommand>(32);
+    let (handler_registry, message_router) = create_base_registry(theater_tx.clone());
+
+    let mut runtime =
+        TheaterRuntime::new(theater_tx.clone(), theater_rx, None, handler_registry).await?;
+
+    let runtime_handle = tokio::spawn(async move { runtime.run().await });
+
+    let (event_tx, mut event_rx) = mpsc::channel(100);
+
+    let (response_tx, response_rx) = tokio::sync::oneshot::channel();
+    theater_tx
+        .send(TheaterCommand::SpawnActor {
+            manifest_path: recording_manifest,
+            init_bytes: None,
+            parent_id: None,
+            response_tx,
+            supervisor_tx: None,
+            subscription_tx: Some(event_tx),
+        })
+        .await?;
+
+    let spawn_result = timeout(Duration::from_secs(10), response_rx).await??;
+    let actor_id = spawn_result?;
+
+    if verbose {
+        println!("Recorded run - Actor ID: {}", actor_id);
+    }
+
+    // Collect init events
+    let mut recorded_chain = collect_events(
+        &mut event_rx,
+        Duration::from_millis(500),
+        Duration::from_secs(10),
+    )
+    .await;
+
+    if verbose {
+        println!(
+            "After init: {} events recorded, sending messages...",
+            recorded_chain.len()
+        );
+    }
+
+    // Send one Send message
+    {
+        let msg_data = b"hello from send".to_vec();
+        let (response_tx, response_rx) = tokio::sync::oneshot::channel();
+        message_router
+            .route_message(MessageCommand::SendMessage {
+                target_id: actor_id.clone(),
+                message: ActorMessage::Send(ActorSend { data: msg_data }),
+                response_tx,
+            })
+            .await?;
+        let _ = timeout(Duration::from_secs(5), response_rx).await;
+    }
+
+    // Collect send-handling events
+    let send_events = collect_events(
+        &mut event_rx,
+        Duration::from_millis(500),
+        Duration::from_secs(10),
+    )
+    .await;
+    recorded_chain.extend(send_events);
+
+    // Send one Request message and verify the response
+    let request_data = b"test request data".to_vec();
+    let expected_response = b"response:test request data".to_vec();
+    {
+        let (actor_response_tx, actor_response_rx) = tokio::sync::oneshot::channel();
+        let (cmd_response_tx, cmd_response_rx) = tokio::sync::oneshot::channel();
+        message_router
+            .route_message(MessageCommand::SendMessage {
+                target_id: actor_id.clone(),
+                message: ActorMessage::Request(ActorRequest {
+                    data: request_data,
+                    response_tx: actor_response_tx,
+                }),
+                response_tx: cmd_response_tx,
+            })
+            .await?;
+        // Wait for routing
+        let _ = timeout(Duration::from_secs(5), cmd_response_rx).await;
+        // Wait for the actual response from the actor
+        let response = timeout(Duration::from_secs(5), actor_response_rx).await??;
+
+        if verbose {
+            println!(
+                "Request response: {:?}",
+                String::from_utf8_lossy(&response)
+            );
+        }
+
+        assert_eq!(
+            response, expected_response,
+            "Request response should be 'response:' + original data"
+        );
+    }
+
+    // Collect request-handling events
+    let req_events = collect_events(
+        &mut event_rx,
+        Duration::from_millis(500),
+        Duration::from_secs(10),
+    )
+    .await;
+    recorded_chain.extend(req_events);
+
+    if verbose {
+        println!("Recorded chain has {} events", recorded_chain.len());
+        for (i, event) in recorded_chain.iter().enumerate() {
+            println!(
+                "  Event {}: type={}, hash={}",
+                i,
+                event.event_type,
+                hex::encode(&event.hash[..8.min(event.hash.len())])
+            );
+        }
+    }
+
+    // Save chain to file for replay
+    let chain_json = serde_json::to_string_pretty(&recorded_chain)?;
+    std::fs::write(chain_path, &chain_json)?;
+
+    if verbose {
+        println!("Saved chain to {}", chain_path);
+    }
+
+    // Stop the first actor
+    let (stop_tx, stop_rx) = tokio::sync::oneshot::channel();
+    theater_tx
+        .send(TheaterCommand::StopActor {
+            actor_id: actor_id.clone(),
+            response_tx: stop_tx,
+        })
+        .await?;
+    let _ = timeout(Duration::from_secs(5), stop_rx).await;
+
+    if recorded_chain.is_empty() {
+        drop(theater_tx);
+        let _ = timeout(Duration::from_secs(5), runtime_handle).await;
+        return Err(anyhow::anyhow!("No events recorded"));
+    }
+
+    if verbose {
+        println!("\n=== Phase 2: Replay (with request) ===\n");
+    }
+
+    // --- Phase 2: Replay ---
+    let replay_manifest = create_replay_manifest(&wasm_path, chain_path);
+
+    let (replay_event_tx, mut replay_event_rx) = mpsc::channel(100);
+
+    let (response_tx2, response_rx2) = tokio::sync::oneshot::channel();
+    theater_tx
+        .send(TheaterCommand::SpawnActor {
+            manifest_path: replay_manifest,
+            init_bytes: None,
+            parent_id: None,
+            response_tx: response_tx2,
+            supervisor_tx: None,
+            subscription_tx: Some(replay_event_tx),
+        })
+        .await?;
+
+    let spawn_result2 = timeout(Duration::from_secs(10), response_rx2).await??;
+    let replay_actor_id = spawn_result2?;
+
+    if verbose {
+        println!("Replay run - Actor ID: {}", replay_actor_id);
+    }
+
+    // Collect replay events
+    let replay_chain = collect_events(
+        &mut replay_event_rx,
+        Duration::from_secs(2),
+        Duration::from_secs(10),
+    )
+    .await;
+
+    if verbose {
+        println!("Replay chain has {} events", replay_chain.len());
+        for (i, event) in replay_chain.iter().enumerate() {
+            println!(
+                "  Replay Event {}: type={}, hash={}",
+                i,
+                event.event_type,
+                hex::encode(&event.hash[..8.min(event.hash.len())])
+            );
+        }
+    }
+
+    // Stop the replay actor
+    let (stop_tx2, stop_rx2) = tokio::sync::oneshot::channel();
+    let _ = theater_tx
+        .send(TheaterCommand::StopActor {
+            actor_id: replay_actor_id,
+            response_tx: stop_tx2,
+        })
+        .await;
+    let _ = timeout(Duration::from_secs(5), stop_rx2).await;
+
+    // Shutdown the runtime
+    drop(theater_tx);
+    let _ = timeout(Duration::from_secs(5), runtime_handle).await;
+
+    // Compare chains
+    let mut mismatches = 0;
+    let max_len = recorded_chain.len().max(replay_chain.len());
+    for i in 0..max_len {
+        let orig_hash = recorded_chain.get(i).map(|e| &e.hash);
+        let replay_hash = replay_chain.get(i).map(|e| &e.hash);
+        if orig_hash != replay_hash {
+            mismatches += 1;
+        }
+    }
+
+    let same_length = recorded_chain.len() == replay_chain.len();
+    let passed = mismatches == 0 && same_length;
+
+    Ok(ReplayVerificationResult {
+        original_chain: recorded_chain,
+        replay_chain,
+        mismatches,
+        passed,
+    })
+}
+
 /// Format event data as readable string
 fn format_event_data(event: &ChainEvent) -> String {
     if event.data.is_empty() {
@@ -388,6 +685,7 @@ async fn main() -> Result<()> {
         .init();
 
     let chain_path = "/tmp/recorded_chain.json";
+    let request_chain_path = "/tmp/recorded_request_chain.json";
     let verbose = true;
 
     let result = run_replay_verification(chain_path, verbose).await?;
@@ -488,7 +786,31 @@ async fn main() -> Result<()> {
         ));
     }
 
-    println!("\n=== Experiment Complete ===");
+    println!("\n=== Send Experiment Complete ===");
+
+    // --- Request replay verification ---
+    println!("\n\n{}", "=".repeat(60));
+    println!("=== Request Replay Verification ===\n");
+
+    let request_result =
+        run_request_replay_verification(request_chain_path, verbose).await?;
+
+    println!("\n=== Request Comparison ===\n");
+    println!("Original events: {}", request_result.original_chain.len());
+    println!("Replay events:   {}", request_result.replay_chain.len());
+
+    if request_result.passed {
+        println!("\n🎉 REQUEST REPLAY VERIFICATION PASSED! 🎉");
+    } else {
+        println!("\n❌ REQUEST REPLAY VERIFICATION FAILED ❌");
+        println!("{}", request_result.comparison_details());
+        return Err(anyhow::anyhow!(
+            "Request replay verification failed: {} mismatches",
+            request_result.mismatches
+        ));
+    }
+
+    println!("\n=== All Experiments Complete ===");
     Ok(())
 }
 
@@ -537,6 +859,51 @@ mod tests {
         assert!(
             result.passed,
             "Replay verification should pass. Details:\n{}",
+            result.comparison_details()
+        );
+    }
+
+    /// Test that request replay produces identical chain hashes
+    ///
+    /// This test exercises handle-request (with a non-trivial return value)
+    /// to validate the call_function(Value) -> Value path:
+    /// 1. Runs an actor, sends a Send + Request message, verifies the response
+    /// 2. Replays the actor using the recorded chain
+    /// 3. Verifies that all event hashes match
+    #[tokio::test]
+    async fn test_request_replay_verification() {
+        let chain_path = format!("/tmp/test_request_replay_chain_{}.json", std::process::id());
+
+        let result = run_request_replay_verification(&chain_path, false)
+            .await
+            .expect("Request replay verification should complete");
+
+        // Clean up temp file
+        let _ = std::fs::remove_file(&chain_path);
+
+        // Assertions
+        assert!(
+            !result.original_chain.is_empty(),
+            "Original chain should have events"
+        );
+        assert!(
+            !result.replay_chain.is_empty(),
+            "Replay chain should have events"
+        );
+        assert!(
+            result.same_length(),
+            "Chain lengths should match: original={}, replay={}",
+            result.original_chain.len(),
+            result.replay_chain.len()
+        );
+        assert_eq!(
+            result.mismatches, 0,
+            "All hashes should match. Comparison:\n{}",
+            result.comparison_details()
+        );
+        assert!(
+            result.passed,
+            "Request replay verification should pass. Details:\n{}",
             result.comparison_details()
         );
     }

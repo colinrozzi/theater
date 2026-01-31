@@ -4,7 +4,6 @@
 //! for interacting with actors in the Theater system.
 
 use anyhow::Result;
-use wasmtime::component::{ComponentNamedList, ComponentType, Lift, Lower};
 
 use tokio::sync::{mpsc, oneshot};
 use tokio::time::timeout;
@@ -13,6 +12,7 @@ use tracing::error;
 use crate::actor::types::{ActorError, ActorOperation, WasiHttpResponse, DEFAULT_OPERATION_TIMEOUT};
 use crate::chain::ChainEvent;
 use crate::metrics::ActorMetrics;
+use crate::pack_bridge::{self, Value};
 
 use super::types::{ActorControl, ActorInfo};
 
@@ -54,45 +54,29 @@ impl ActorHandle {
         }
     }
 
-    /// Calls a function on the actor with the given name and parameters.
-    ///
-    /// ## Purpose
-    ///
-    /// This method allows calling exported functions on the WebAssembly actor with
-    /// type-safe parameters and return values.
+    /// Calls a function on the actor with Pack-native Value params and return.
     ///
     /// ## Parameters
     ///
     /// * `name` - The name of the function to call on the actor.
-    /// * `params` - The parameters to pass to the function, must be compatible with the
-    ///   function's signature and serializable.
+    /// * `params` - The parameters as a Pack `Value` (preserves structured type info).
     ///
     /// ## Returns
     ///
-    /// * `Ok(R)` - The return value from the function call, deserialized to the expected type.
+    /// * `Ok(Value)` - The return value from the function call as a Pack `Value`.
     /// * `Err(ActorError)` - An error occurred during the function call.
-    pub async fn call_function<P, R>(&self, name: String, params: P) -> Result<R, ActorError>
-    where
-        P: ComponentType + Lower + ComponentNamedList + Send + Sync + 'static + serde::Serialize,
-        R: ComponentType
-            + Lift
-            + ComponentNamedList
-            + Send
-            + Sync
-            + 'static
-            + serde::de::DeserializeOwned,
-    {
+    pub async fn call_function(&self, name: String, params: Value) -> Result<Value, ActorError> {
         let (tx, rx) = oneshot::channel();
 
-        let params = serde_json::to_vec(&params).map_err(|e| {
-            error!("Failed to serialize params: {}", e);
+        let params_bytes = pack_bridge::encode_value(&params).map_err(|e| {
+            error!("Failed to encode params: {}", e);
             ActorError::SerializationError
         })?;
 
         self.operation_tx
-            .send(ActorOperation::CallFunction {
+            .send(ActorOperation::CallFunctionPack {
                 name,
-                params,
+                params: params_bytes,
                 response_tx: tx,
             })
             .await
@@ -103,16 +87,16 @@ impl ActorHandle {
 
         match timeout(DEFAULT_OPERATION_TIMEOUT, rx).await {
             Ok(result) => match result {
-                Ok(result) => {
-                    let res = serde_json::from_slice::<R>(&result.unwrap()).map_err(|e| {
-                        error!("Failed to deserialize response: {}", e);
+                Ok(inner) => {
+                    let result_bytes = inner?;
+                    pack_bridge::decode_value(&result_bytes).map_err(|e| {
+                        error!("Failed to decode result: {}", e);
                         ActorError::SerializationError
-                    })?;
-                    Ok(res)
+                    })
                 }
                 Err(e) => {
                     error!("Channel closed while waiting for response: {:?}", e);
-                    return Err(ActorError::ChannelClosed);
+                    Err(ActorError::ChannelClosed)
                 }
             },
             Err(_) => {
@@ -124,15 +108,15 @@ impl ActorHandle {
         }
     }
 
-    /// Call a function on the actor without expecting a return value.
+    /// Call a function with pre-encoded Pack ABI params, discarding the return value.
     ///
-    /// This is useful for Composite runtime where results are in Graph ABI format,
-    /// not JSON. The function call succeeds if no error is returned.
-    pub async fn call_function_void(&self, name: String, params: Vec<u8>) -> Result<(), ActorError> {
+    /// Routes through `CallFunctionPack` which decodes the Pack ABI bytes back to
+    /// a structured Value before passing to the wasm module.
+    pub async fn call_function_pack_void(&self, name: String, params: Vec<u8>) -> Result<(), ActorError> {
         let (tx, rx) = oneshot::channel();
 
         self.operation_tx
-            .send(ActorOperation::CallFunction {
+            .send(ActorOperation::CallFunctionPack {
                 name: name.clone(),
                 params,
                 response_tx: tx,

@@ -205,6 +205,33 @@ impl PackInstance {
         decode_function_result(output)
     }
 
+    /// Call an export function with structured Value params (no bytes_to_value flattening).
+    ///
+    /// Unlike `call_function` which converts raw bytes to a flat list of u8,
+    /// this method takes a structured `Value` directly, preserving the type
+    /// information needed for Pack's Graph ABI encoding.
+    pub async fn call_function_with_value(
+        &mut self,
+        function_name: &str,
+        state: Option<Vec<u8>>,
+        params: Value,
+    ) -> Result<(Option<Vec<u8>>, Vec<u8>)> {
+        if !self.export_functions.contains_key(function_name) {
+            return Err(anyhow::anyhow!("Function '{}' not registered", function_name));
+        }
+
+        let state_value = state_to_value(state);
+        let input = Value::Tuple(vec![state_value, params]);
+
+        let output = self
+            .instance
+            .call_with_value_async(function_name, &input)
+            .await
+            .context(format!("Failed to call function '{}'", function_name))?;
+
+        decode_function_result(output)
+    }
+
     /// Call a simple function that takes and returns a Value directly.
     ///
     /// This is useful for functions that don't follow the state pattern.

@@ -3393,7 +3393,6 @@ dependencies = [
  "tokio",
  "tracing",
  "uuid",
- "wasmtime 31.0.0",
 ]
 
 [[package]]
@@ -3412,7 +3411,6 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
- "wasmtime 31.0.0",
 ]
 
 [[package]]
@@ -3442,7 +3440,6 @@ dependencies = [
  "thiserror 2.0.12",
  "tokio",
  "tracing",
- "wasmtime 31.0.0",
 ]
 
 [[package]]
@@ -3453,6 +3450,7 @@ dependencies = [
  "hex",
  "serde_json",
  "theater",
+ "theater-handler-message-server",
  "theater-handler-runtime",
  "tokio",
  "tracing",

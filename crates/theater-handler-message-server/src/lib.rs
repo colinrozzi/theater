@@ -52,11 +52,10 @@ use thiserror::Error;
 use tokio::sync::mpsc::{Receiver, Sender};
 use tracing::{error, info};
 use uuid::Uuid;
-use wasmtime::component::{ComponentType, Lift, Lower};
 
 // Pack integration
 use theater::pack_bridge::{
-    AsyncCtx, PackInstance, Ctx, HostLinkerBuilder, LinkerError, Value,
+    AsyncCtx, PackInstance, Ctx, HostLinkerBuilder, LinkerError, Value, ValueType,
 };
 
 /// Errors that can occur during message server operations
@@ -73,8 +72,7 @@ pub enum MessageServerError {
 }
 
 /// Channel acceptance response
-#[derive(Debug, Deserialize, Serialize, ComponentType, Lift, Lower)]
-#[component(record)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct ChannelAccept {
     pub accepted: bool,
     pub message: Option<Vec<u8>>,
@@ -357,11 +355,8 @@ pub struct MessageServerHandler {
     // Reference to the global message router (external service)
     router: MessageRouter,
 
-    // This actor's ID (set in setup_host_functions)
+    // This actor's ID (set in setup_host_functions_composite via HandlerContext)
     actor_id: Option<TheaterId>,
-
-    // This actor's mailbox receiver (set in setup_host_functions, consumed in start)
-    mailbox_rx: Arc<Mutex<Option<Receiver<ActorMessage>>>>,
 
     // Request-response tracking for this actor
     outstanding_requests: Arc<Mutex<HashMap<String, tokio::sync::oneshot::Sender<Vec<u8>>>>>,
@@ -383,7 +378,6 @@ impl MessageServerHandler {
         Self {
             router,
             actor_id: None,
-            mailbox_rx: Arc::new(Mutex::new(None)),
             outstanding_requests: Arc::new(Mutex::new(HashMap::new())),
             permissions,
         }
@@ -397,22 +391,30 @@ impl MessageServerHandler {
     ) -> Result<(), MessageServerError> {
         match msg {
             ActorMessage::Send(ActorSend { data }) => {
+                // handle-send(state, params: tuple<list<u8>>)
+                let params = Value::Tuple(vec![bytes_to_value(data)]);
                 actor_handle
-                    .call_function::<(Vec<u8>,), ()>(
+                    .call_function(
                         "theater:simple/message-server-client.handle-send".to_string(),
-                        (data,),
+                        params,
                     )
                     .await?;
             }
             ActorMessage::Request(ActorRequest { response_tx, data }) => {
+                // handle-request(state, params: tuple<string, list<u8>>)
                 let request_id = Uuid::new_v4().to_string();
-                let response = actor_handle
-                    .call_function::<(String, Vec<u8>), (Option<Vec<u8>>,)>(
+                let params = Value::Tuple(vec![
+                    Value::String(request_id),
+                    bytes_to_value(data),
+                ]);
+                let result = actor_handle
+                    .call_function(
                         "theater:simple/message-server-client.handle-request".to_string(),
-                        (request_id, data),
+                        params,
                     )
                     .await?;
-                if let Some(response_data) = response.0 {
+                // Result is tuple<option<list<u8>>> - extract the optional response
+                if let Some(response_data) = parse_option_bytes_from_tuple(&result) {
                     let _ = response_tx.send(response_data);
                 }
             }
@@ -422,27 +424,41 @@ impl MessageServerHandler {
                 response_tx,
                 initial_msg,
             }) => {
-                let accept = actor_handle
-                    .call_function::<(String, Vec<u8>), (ChannelAccept,)>(
+                // handle-channel-open(state, params: tuple<string, list<u8>>)
+                let params = Value::Tuple(vec![
+                    Value::String(channel_id.to_string()),
+                    bytes_to_value(initial_msg),
+                ]);
+                let result = actor_handle
+                    .call_function(
                         "theater:simple/message-server-client.handle-channel-open".to_string(),
-                        (channel_id.to_string(), initial_msg),
+                        params,
                     )
                     .await?;
-                let _ = response_tx.send(Ok(accept.0.accepted));
+                // Result is tuple<channel-accept> where channel-accept is record {accepted: bool, message: option<list<u8>>}
+                let accepted = parse_channel_accept(&result);
+                let _ = response_tx.send(Ok(accepted));
             }
             ActorMessage::ChannelMessage(ActorChannelMessage { channel_id, msg }) => {
+                // handle-channel-message(state, params: tuple<channel-id, list<u8>>)
+                let params = Value::Tuple(vec![
+                    Value::String(channel_id.to_string()),
+                    bytes_to_value(msg),
+                ]);
                 actor_handle
-                    .call_function::<(String, Vec<u8>), ()>(
+                    .call_function(
                         "theater:simple/message-server-client.handle-channel-message".to_string(),
-                        (channel_id.to_string(), msg),
+                        params,
                     )
                     .await?;
             }
             ActorMessage::ChannelClose(ActorChannelClose { channel_id }) => {
+                // handle-channel-close(state, params: tuple<channel-id>)
+                let params = Value::Tuple(vec![Value::String(channel_id.to_string())]);
                 actor_handle
-                    .call_function::<(String,), ()>(
+                    .call_function(
                         "theater:simple/message-server-client.handle-channel-close".to_string(),
-                        (channel_id.to_string(),),
+                        params,
                     )
                     .await?;
             }
@@ -480,25 +496,20 @@ impl Handler for MessageServerHandler
     ) -> Pin<Box<dyn Future<Output = Result<()>> + Send>> {
         info!("Starting message server handler for actor");
 
-        // Take the mailbox receiver
-        let mailbox_rx_opt = self.mailbox_rx.lock().unwrap().take();
-
         // Clone what we need for the async block
         let actor_id = self.actor_id.clone();
         let router = self.router.clone();
         let outstanding_requests = self.outstanding_requests.clone();
 
         Box::pin(async move {
-            // If we don't have a receiver (cloned instance), just return
-            let Some(mut mailbox_rx) = mailbox_rx_opt else {
-                info!("Message server has no mailbox receiver (cloned instance), not starting");
-                return Ok(());
-            };
-
             let Some(actor_id) = actor_id else {
                 error!("Message server handler has no actor_id - setup_host_functions not called?");
                 return Ok(());
             };
+
+            // Create mailbox channel and register with the router
+            let (mailbox_tx, mut mailbox_rx) = tokio::sync::mpsc::channel(100);
+            router.register_actor(actor_id.clone(), mailbox_tx).await?;
 
             info!("Message server handler consuming mailbox for actor {}", actor_id);
 
@@ -540,6 +551,11 @@ impl Handler for MessageServerHandler
         ctx: &mut HandlerContext,
     ) -> Result<(), LinkerError> {
         info!("Setting up message server host functions (Pack)");
+
+        // Store the actor_id from context for use in start()
+        if let Some(ref actor_id) = ctx.actor_id {
+            self.actor_id = Some(actor_id.clone());
+        }
 
         // Check if already satisfied
         if ctx.is_satisfied("theater:simple/message-server-host") {
@@ -616,7 +632,7 @@ impl Handler for MessageServerHandler
 
                     match cmd_response_rx.await {
                         Ok(Ok(())) => {
-                            use theater::ValueType;
+
                             match response_rx.await {
                                 Ok(response) => Ok(Value::List {
                                     elem_type: ValueType::U8,
@@ -632,7 +648,6 @@ impl Handler for MessageServerHandler
             })?
             // list-outstanding-requests() -> list<string>
             .func_typed("list-outstanding-requests", move |_ctx: &mut Ctx<'_, ActorStore>, _input: Value| {
-                use theater::ValueType;
                 let requests = outstanding_requests.lock().unwrap();
                 let ids: Vec<Value> = requests.keys().map(|k| Value::String(k.clone())).collect();
                 Value::List {
@@ -800,7 +815,74 @@ impl Handler for MessageServerHandler
     }
 }
 
-// Helper functions for parsing Composite Value inputs
+// Helper functions for building Value params for export calls
+
+/// Convert a Vec<u8> to a Value::List of U8
+fn bytes_to_value(data: Vec<u8>) -> Value {
+    Value::List {
+        elem_type: ValueType::U8,
+        items: data.into_iter().map(Value::U8).collect(),
+    }
+}
+
+/// Parse an option<list<u8>> from a result tuple.
+/// The result from handle-request is tuple<option<list<u8>>>.
+fn parse_option_bytes_from_tuple(value: &Value) -> Option<Vec<u8>> {
+    // Result is tuple<option<list<u8>>>
+    let inner = match value {
+        Value::Tuple(items) if !items.is_empty() => &items[0],
+        _ => return None,
+    };
+    parse_option_bytes(inner)
+}
+
+/// Parse an option<list<u8>> Value into Option<Vec<u8>>
+fn parse_option_bytes(value: &Value) -> Option<Vec<u8>> {
+    match value {
+        Value::Option { value: Some(inner), .. } => {
+            match inner.as_ref() {
+                Value::List { items, .. } => {
+                    Some(items.iter().filter_map(|v| match v {
+                        Value::U8(b) => Some(*b),
+                        _ => None,
+                    }).collect())
+                }
+                _ => None,
+            }
+        }
+        _ => None,
+    }
+}
+
+/// Parse a channel-accept record from the result Value.
+/// The result is tuple<channel-accept> where channel-accept is
+/// record { accepted: bool, message: option<list<u8>> }.
+/// Records are encoded as Tuples in Pack's Graph ABI.
+fn parse_channel_accept(value: &Value) -> bool {
+    // Result is tuple<channel-accept>
+    let accept_value = match value {
+        Value::Tuple(items) if !items.is_empty() => &items[0],
+        _ => return false,
+    };
+    // channel-accept as Tuple: [bool, option<list<u8>>]
+    match accept_value {
+        Value::Tuple(fields) if !fields.is_empty() => {
+            matches!(&fields[0], Value::Bool(true))
+        }
+        // channel-accept as Record
+        Value::Record { fields, .. } => {
+            for (name, val) in fields {
+                if name == "accepted" {
+                    return matches!(val, Value::Bool(true));
+                }
+            }
+            false
+        }
+        _ => false,
+    }
+}
+
+// Helper functions for parsing Composite Value inputs (host function params)
 
 fn parse_string(input: &Value) -> Result<String, Value> {
     match input {

@@ -7,17 +7,16 @@ pub mod events;
 
 use theater::actor::handle::ActorHandle;
 use theater::actor::store::ActorStore;
-use theater::actor::types::{ActorError, WitActorError};
+use theater::actor::types::ActorError;
 use theater::config::actor_manifest::SupervisorHostConfig;
 use theater::config::permissions::SupervisorPermissions;
 use theater::handler::{Handler, HandlerContext, SharedActorInstance};
 use theater::messages::{ActorResult, TheaterCommand};
 use theater::shutdown::ShutdownReceiver;
-use theater::ChainEvent;
 
 // Pack integration
 use theater::pack_bridge::{
-    AsyncCtx, PackInstance, HostLinkerBuilder, LinkerError, Value,
+    AsyncCtx, PackInstance, HostLinkerBuilder, LinkerError, Value, ValueType,
 };
 
 use anyhow::Result;
@@ -98,32 +97,43 @@ impl SupervisorHandler {
 
         match actor_result {
             ActorResult::Error(child_error) => {
+                // handle-child-error(state, params: tuple<string, wit-actor-error>)
+                let params = Value::Tuple(vec![
+                    Value::String(child_error.actor_id.to_string()),
+                    actor_error_to_value(child_error.error),
+                ]);
                 actor_handle
-                    .call_function::<(String, WitActorError), ()>(
+                    .call_function(
                         "theater:simple/supervisor-handlers.handle-child-error".to_string(),
-                        (child_error.actor_id.to_string(), child_error.error.into()),
+                        params,
                     )
                     .await?;
             }
             ActorResult::Success(child_result) => {
+                // handle-child-exit(state, params: tuple<string, option<list<u8>>>)
                 info!("Child result: {:?}", child_result);
+                let params = Value::Tuple(vec![
+                    Value::String(child_result.actor_id.to_string()),
+                    option_bytes_to_value(child_result.result.into()),
+                ]);
                 actor_handle
-                    .call_function::<(String, Option<Vec<u8>>), ()>(
+                    .call_function(
                         "theater:simple/supervisor-handlers.handle-child-exit".to_string(),
-                        (
-                            child_result.actor_id.to_string(),
-                            child_result.result.into(),
-                        ),
+                        params,
                     )
                     .await?;
             }
             ActorResult::ExternalStop(stop_data) => {
+                // handle-child-external-stop(state, params: tuple<string>)
                 info!("External stop received for actor: {}", stop_data.actor_id);
+                let params = Value::Tuple(vec![
+                    Value::String(stop_data.actor_id.to_string()),
+                ]);
                 actor_handle
-                    .call_function::<(String,), ()>(
+                    .call_function(
                         "theater:simple/supervisor-handlers.handle-child-external-stop"
                             .to_string(),
-                        (stop_data.actor_id.to_string(),),
+                        params,
                     )
                     .await?;
             }
@@ -299,7 +309,7 @@ impl Handler for SupervisorHandler
 
                     match response_rx.await {
                         Ok(children) => {
-                            use theater::ValueType;
+
                             let children_values: Vec<Value> = children
                                 .into_iter()
                                 .map(|id| Value::String(id.to_string()))
@@ -425,7 +435,7 @@ impl Handler for SupervisorHandler
 
                     match response_rx.await {
                         Ok(Ok(state)) => {
-                            use theater::ValueType;
+
                             let state_value = match state {
                                 Some(bytes) => Value::Option {
                                     inner_type: ValueType::List(Box::new(ValueType::U8)),
@@ -480,7 +490,7 @@ impl Handler for SupervisorHandler
 
                     match response_rx.await {
                         Ok(Ok(events)) => {
-                            use theater::ValueType;
+
                             // Convert ChainEvents to Value list
                             let events_values: Vec<Value> = events
                                 .iter()
@@ -556,6 +566,64 @@ impl Handler for SupervisorHandler
             info!("Supervisor handler shut down complete");
             Ok(())
         })
+    }
+}
+
+/// Convert an ActorError to a Pack Value matching the WIT wit-actor-error record.
+///
+/// WIT: record wit-actor-error { error-type: wit-error-type, data: option<list<u8>> }
+/// WIT enum wit-error-type has cases: operation-timeout(0), channel-closed(1),
+/// shutting-down(2), function-not-found(3), type-mismatch(4), internal(5),
+/// serialization-error(6), update-component-error(7), paused(8)
+fn actor_error_to_value(error: ActorError) -> Value {
+    let (tag, case_name) = match &error {
+        ActorError::OperationTimeout(_) => (0, "operation-timeout"),
+        ActorError::ChannelClosed => (1, "channel-closed"),
+        ActorError::ShuttingDown => (2, "shutting-down"),
+        ActorError::FunctionNotFound(_) => (3, "function-not-found"),
+        ActorError::TypeMismatch(_) => (4, "type-mismatch"),
+        ActorError::Internal(_) => (5, "internal"),
+        ActorError::SerializationError => (6, "serialization-error"),
+        ActorError::UpdatePackageError(_) => (7, "update-component-error"),
+        ActorError::Paused => (8, "paused"),
+        _ => (5, "internal"), // fallback
+    };
+
+    let error_type_value = Value::Variant {
+        type_name: "wit-error-type".to_string(),
+        case_name: case_name.to_string(),
+        tag,
+        payload: vec![],
+    };
+
+    // Encode error message as optional data bytes
+    let error_msg = format!("{}", error);
+    let data_value = Value::Option {
+        inner_type: ValueType::List(Box::new(ValueType::U8)),
+        value: Some(Box::new(Value::List {
+            elem_type: ValueType::U8,
+            items: error_msg.into_bytes().into_iter().map(Value::U8).collect(),
+        })),
+    };
+
+    // Record encoded as Tuple: [error-type, data]
+    Value::Tuple(vec![error_type_value, data_value])
+}
+
+/// Convert Option<Vec<u8>> to a Pack Value matching option<list<u8>>
+fn option_bytes_to_value(data: Option<Vec<u8>>) -> Value {
+    match data {
+        Some(bytes) => Value::Option {
+            inner_type: ValueType::List(Box::new(ValueType::U8)),
+            value: Some(Box::new(Value::List {
+                elem_type: ValueType::U8,
+                items: bytes.into_iter().map(Value::U8).collect(),
+            })),
+        },
+        None => Value::Option {
+            inner_type: ValueType::List(Box::new(ValueType::U8)),
+            value: None,
+        },
     }
 }
 

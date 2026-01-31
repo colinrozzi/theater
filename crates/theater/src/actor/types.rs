@@ -165,11 +165,14 @@ impl From<ActorError> for WitActorError {
 /// and a oneshot channel sender for returning the result.
 #[derive(Debug)]
 pub enum ActorOperation {
-    /// Call a WebAssembly function in the actor
-    CallFunction {
+    /// Call a WebAssembly function using Pack-native Value encoding.
+    ///
+    /// Params and result are Pack ABI encoded bytes (encode_value/decode_value).
+    /// Preserves structured type information through the call boundary.
+    CallFunctionPack {
         /// Name of the function to call
         name: String,
-        /// Serialized parameters for the function
+        /// Pack ABI encoded params (encode_value(Value) bytes)
         params: Vec<u8>,
         /// Channel to send the result back to the caller
         response_tx: oneshot::Sender<Result<Vec<u8>, ActorError>>,
