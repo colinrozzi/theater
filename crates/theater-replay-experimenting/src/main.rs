@@ -26,10 +26,11 @@ use tokio::time::timeout;
 use theater::chain::ChainEvent;
 use theater::config::actor_manifest::RuntimeHostConfig;
 use theater::handler::HandlerRegistry;
-use theater::messages::TheaterCommand;
+use theater::messages::{ActorMessage, ActorSend, MessageCommand, TheaterCommand};
 use theater::theater_runtime::TheaterRuntime;
 use theater::ActorError;
 
+use theater_handler_message_server::{MessageRouter, MessageServerHandler};
 use theater_handler_runtime::RuntimeHandler;
 
 /// Result of replay verification
@@ -96,26 +97,25 @@ impl ReplayVerificationResult {
     }
 }
 
-/// Get the path to the test actor's WASM component
+/// Get the path to the test actor's WASM package (Pack/Graph ABI)
 pub fn get_test_wasm_path() -> PathBuf {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    manifest_dir.join("../theater-handler-runtime/test-actors/runtime-test/target/wasm32-unknown-unknown/release/runtime_test.wasm")
+    manifest_dir.join("../../test-actors/replay-test/target/wasm32-unknown-unknown/release/replay_test_actor.wasm")
 }
 
 /// Create a manifest for recording mode
 pub fn create_recording_manifest(wasm_path: &PathBuf) -> String {
     format!(
-        r#"name = "runtime-test"
+        r#"name = "replay-test"
 version = "0.1.0"
 package = "{}"
-description = "Test actor for replay handler - recording mode"
-save_chain = true
+description = "Test actor for replay - recording mode"
 
 [[handler]]
 type = "runtime"
 
 [[handler]]
-type = "environment"
+type = "message-server"
 "#,
         wasm_path.display()
     )
@@ -124,11 +124,10 @@ type = "environment"
 /// Create a manifest for replay mode using the recorded chain
 pub fn create_replay_manifest(wasm_path: &PathBuf, chain_path: &str) -> String {
     format!(
-        r#"name = "runtime-test-replay"
+        r#"name = "replay-test-replay"
 version = "0.1.0"
 package = "{}"
-description = "Test actor for replay handler - replay mode"
-save_chain = true
+description = "Test actor for replay - replay mode"
 
 [[handler]]
 type = "replay"
@@ -136,9 +135,6 @@ chain = "{}"
 
 [[handler]]
 type = "runtime"
-
-[[handler]]
-type = "environment"
 "#,
         wasm_path.display(),
         chain_path
@@ -196,7 +192,7 @@ pub async fn run_replay_verification(
     let wasm_path = get_test_wasm_path();
     if !wasm_path.exists() {
         return Err(anyhow::anyhow!(
-            "WASM file not found at {:?}. Build with: cd crates/theater-handler-runtime/test-actors/runtime-test && cargo component build --release",
+            "WASM file not found at {:?}. Build with: cd test-actors/replay-test && cargo build --release",
             wasm_path
         ));
     }

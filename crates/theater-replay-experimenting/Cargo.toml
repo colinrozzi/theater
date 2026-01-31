@@ -6,6 +6,7 @@ edition = "2021"
 [dependencies]
 theater = { path = "../theater" }
 theater-handler-runtime = { path = "../theater-handler-runtime" }
+theater-handler-message-server = { path = "../theater-handler-message-server" }
 anyhow = "1.0"
 tokio = { version = "1.0", features = ["full"] }
 serde_json = "1.0"
