@@ -183,13 +183,13 @@ async fn test_permission_denial_events() {
     // This test verifies the permission check structure works correctly
     use theater::events::ChainEventPayload;
     use theater::replay::HostFunctionCall;
-    use val_serde::SerializableVal;
+    use theater::Value;
 
     let denial_event = ChainEventPayload::HostFunction(HostFunctionCall {
         interface: "theater:simple/filesystem".to_string(),
         function: "write".to_string(),
-        input: SerializableVal::String("/tmp/forbidden/file.txt".to_string()),
-        output: SerializableVal::String("Permission denied: Write operation not permitted".to_string()),
+        input: Value::String("/tmp/forbidden/file.txt".to_string()),
+        output: Value::String("Permission denied: Write operation not permitted".to_string()),
     });
 
     // Verify the event can be serialized (important for the event chain)

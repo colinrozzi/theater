@@ -8,7 +8,8 @@ use crate::actor::handle::ActorHandle;
 use crate::actor::store::ActorStore;
 use crate::actor::types::ActorError;
 use crate::actor::types::ActorOperation;
-use crate::pack_bridge::{AsyncRuntime, HostLinkerBuilder, LinkerError, PackInstance};
+use crate::interceptor::{RecordingInterceptor, ReplayInterceptor};
+use crate::pack_bridge::{AsyncRuntime, CallInterceptor, HostLinkerBuilder, PackInstance};
 use crate::events::wasm::WasmEventData;
 use crate::events::ChainEventData;
 use crate::handler::Handler;
@@ -199,7 +200,7 @@ impl ActorRuntime {
         initial_state: Option<Value>,
         pack_runtime: AsyncRuntime,
         chain: Arc<SyncRwLock<StateChain>>,
-        mut handler_registry: HandlerRegistry,
+        handler_registry: HandlerRegistry,
         theater_tx: Sender<TheaterCommand>,
         operation_tx: Sender<ActorOperation>,
         info_tx: Sender<ActorInfo>,
@@ -223,7 +224,7 @@ impl ActorRuntime {
         let handle_operation_tx = operation_tx.clone();
         let actor_handle = ActorHandle::new(handle_operation_tx, info_tx, control_tx);
         let actor_store =
-            ActorStore::new(id.clone(), theater_tx.clone(), actor_handle.clone(), chain);
+            ActorStore::new(id.clone(), theater_tx.clone(), actor_handle.clone(), chain.clone());
 
         // ----------------- Checkpoint Store Manifest ----------------
 
@@ -307,15 +308,29 @@ impl ActorRuntime {
             });
         }
 
+        // Create the appropriate interceptor based on mode
+        let interceptor: Option<Arc<dyn CallInterceptor>> = if handler_registry.is_replay_mode() {
+            // In replay mode, we need the chain events to create a ReplayInterceptor.
+            // The replay handler will have the events - for now we extract them from the chain.
+            let chain_events = {
+                let chain_guard = chain.read().unwrap();
+                chain_guard.get_events().to_vec()
+            };
+            Some(Arc::new(ReplayInterceptor::new(chain_events)))
+        } else {
+            Some(Arc::new(RecordingInterceptor::new(chain.clone())))
+        };
+
         // Create a closure that sets up all handler host functions
         let mut handler_ctx = HandlerContext::new();
         let handlers_for_setup = &mut handlers;
 
-        let mut actor_instance = PackInstance::new(
+        let mut actor_instance = PackInstance::new_with_interceptor(
             config.name.clone(),
             &wasm_bytes,
             &pack_runtime,
             actor_store,
+            interceptor,
             |builder: &mut HostLinkerBuilder<'_, ActorStore>| {
                 // Set up host functions for each handler
                 for handler in handlers_for_setup.iter_mut() {

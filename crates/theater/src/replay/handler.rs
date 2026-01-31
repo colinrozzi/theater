@@ -28,7 +28,7 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 
-use tracing::{info, warn};
+use tracing::warn;
 
 use crate::actor::handle::ActorHandle;
 use crate::actor::store::ActorStore;
@@ -90,7 +90,7 @@ impl ReplayState {
 
     /// Get the output for the current event.
     /// Assumes the event data contains a serialized HostFunctionCall.
-    pub fn current_output(&self) -> Option<val_serde::SerializableVal> {
+    pub fn current_output(&self) -> Option<pack::abi::Value> {
         let event = self.current_event()?;
         if let Ok(call) = serde_json::from_slice::<HostFunctionCall>(&event.data) {
             Some(call.output)

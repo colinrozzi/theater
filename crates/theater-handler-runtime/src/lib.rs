@@ -6,7 +6,6 @@
 use std::future::Future;
 use std::pin::Pin;
 use tracing::info;
-use val_serde::IntoSerializableVal;
 
 use theater::actor::handle::ActorHandle;
 use theater::actor::store::ActorStore;
@@ -96,14 +95,6 @@ impl Handler for RuntimeHandler {
                 let store = ctx.data();
                 let id = store.id.clone();
 
-                // Record host function call
-                store.record_host_function_call(
-                    "theater:simple/runtime",
-                    "log",
-                    msg.clone().into_serializable_val(),
-                    ().into_serializable_val(),
-                );
-
                 info!("[ACTOR] [{}] {}", id, msg);
 
                 // Return unit (empty tuple)
@@ -150,14 +141,6 @@ impl Handler for RuntimeHandler {
                         })
                         .collect();
 
-                    // Record host function call
-                    store.record_host_function_call(
-                        "theater:simple/runtime",
-                        "get-chain",
-                        ().into_serializable_val(),
-                        (chain_events.len() as u64).into_serializable_val(),
-                    );
-
                     // Return as chain record: (events,)
                     Value::Tuple(vec![Value::List {
                         elem_type: ValueType::Tuple(vec![ValueType::U64, ValueType::Tuple(vec![ValueType::String, ValueType::Option(Box::new(ValueType::U64)), ValueType::List(Box::new(ValueType::U8))])]),
@@ -195,14 +178,6 @@ impl Handler for RuntimeHandler {
                         let actor_id = store.id.clone();
 
                         info!("[ACTOR] [{}] Shutdown requested: {:?}", actor_id, data);
-
-                        // Record host function call
-                        store.record_host_function_call(
-                            "theater:simple/runtime",
-                            "shutdown",
-                            data.clone().into_serializable_val(),
-                            true.into_serializable_val(),
-                        );
 
                         // Send shutdown command
                         match theater_tx

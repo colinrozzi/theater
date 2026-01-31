@@ -22,7 +22,6 @@ tracing.workspace = true
 uuid.workspace = true
 
 theater-chain = { path = "../theater-chain" }
-val-serde = { path = "../val-serde" }
 
 # WebAssembly runtime
 wasmtime = { version = "31.0", features = ["component-model", "async"] }

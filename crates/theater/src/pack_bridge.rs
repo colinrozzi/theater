@@ -13,14 +13,15 @@
 
 use anyhow::{Context, Result};
 use std::collections::HashMap;
+use std::sync::Arc;
 
 // Re-export Pack types for convenient use throughout Theater
 // Note: We use composite's internal abi module, not composite_abi crate directly,
 // because that's what the runtime functions return.
 pub use pack::abi::{Value, ValueType};
 pub use pack::{
-    AsyncCtx, AsyncInstance, AsyncRuntime, Ctx, HostFunctionProvider, HostLinkerBuilder,
-    InterfaceBuilder, LinkerError,
+    AsyncCtx, AsyncInstance, AsyncRuntime, CallInterceptor, Ctx, HostFunctionProvider,
+    HostLinkerBuilder, InterfaceBuilder, LinkerError,
 };
 
 use crate::actor::store::ActorStore;
@@ -96,12 +97,35 @@ impl PackInstance {
     where
         F: FnOnce(&mut HostLinkerBuilder<'_, ActorStore>) -> Result<(), LinkerError>,
     {
+        Self::new_with_interceptor(name, wasm_bytes, runtime, actor_store, None, configure).await
+    }
+
+    /// Create a new Pack instance with an optional call interceptor.
+    ///
+    /// The interceptor is set on both the `HostLinkerBuilder` (to intercept
+    /// import/host function calls) and on the resulting `AsyncInstance`
+    /// (to intercept export/WASM function calls).
+    pub async fn new_with_interceptor<F>(
+        name: impl Into<String>,
+        wasm_bytes: &[u8],
+        runtime: &AsyncRuntime,
+        actor_store: ActorStore,
+        interceptor: Option<Arc<dyn CallInterceptor>>,
+        configure: F,
+    ) -> Result<Self>
+    where
+        F: FnOnce(&mut HostLinkerBuilder<'_, ActorStore>) -> Result<(), LinkerError>,
+    {
         let module = runtime
             .load_module(wasm_bytes)
             .context("Failed to load WASM module with Pack runtime")?;
 
         let instance = module
-            .instantiate_with_host_async(actor_store.clone(), configure)
+            .instantiate_with_host_and_interceptor_async(
+                actor_store.clone(),
+                interceptor,
+                configure,
+            )
             .await
             .context("Failed to instantiate Pack module")?;
 
@@ -457,8 +481,8 @@ mod tests {
         let value = state_to_value(state);
 
         match value {
-            Value::Option(Some(inner)) => match *inner {
-                Value::List(items) => {
+            Value::Option { value: Some(inner), .. } => match *inner {
+                Value::List { items, .. } => {
                     assert_eq!(items.len(), 3);
                 }
                 _ => panic!("Expected List"),
@@ -469,7 +493,11 @@ mod tests {
 
     #[test]
     fn test_value_to_bytes() {
-        let value = Value::List(vec![Value::U8(1), Value::U8(2), Value::U8(3)]);
+        use pack::abi::ValueType;
+        let value = Value::List {
+            elem_type: ValueType::U8,
+            items: vec![Value::U8(1), Value::U8(2), Value::U8(3)],
+        };
         let bytes = value_to_bytes(value).unwrap();
         assert_eq!(bytes, vec![1, 2, 3]);
     }
@@ -482,10 +510,13 @@ mod tests {
         match value {
             Value::Variant {
                 tag: 0,
-                payload: Some(inner),
-            } => match *inner {
-                Value::String(s) => assert_eq!(s, "success"),
-                _ => panic!("Expected String"),
+                ref payload,
+                ..
+            } if !payload.is_empty() => {
+                match &payload[0] {
+                    Value::String(s) => assert_eq!(s, "success"),
+                    _ => panic!("Expected String"),
+                }
             },
             _ => panic!("Expected Ok variant"),
         }

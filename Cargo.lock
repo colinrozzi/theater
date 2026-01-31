@@ -3302,7 +3302,6 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "uuid",
- "val-serde",
  "wasmtime 31.0.0",
  "wit-bindgen",
 ]
@@ -3413,7 +3412,6 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
- "val-serde",
  "wasmtime 31.0.0",
 ]
 
@@ -3944,15 +3942,6 @@ dependencies = [
  "js-sys",
  "serde",
  "wasm-bindgen",
-]
-
-[[package]]
-name = "val-serde"
-version = "0.1.0"
-dependencies = [
- "serde",
- "serde_json",
- "wasmtime 31.0.0",
 ]
 
 [[package]]

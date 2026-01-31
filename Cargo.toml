@@ -6,7 +6,6 @@ members = [
     "crates/theater-server-cli",
     "crates/theater-client",
     "crates/theater-chain",
-    "crates/val-serde",
     # Theater-specific handlers (to be migrated to Composite)
     "crates/theater-handler-message-server",
     "crates/theater-handler-runtime",

@@ -9,7 +9,6 @@ use crate::chain::{ChainEvent, StateChain};
 use crate::events::{ChainEventData, ChainEventPayload};
 use crate::id::TheaterId;
 use crate::messages::TheaterCommand;
-use crate::replay::HostFunctionCall;
 use std::any::{Any, TypeId};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, RwLock};
@@ -153,53 +152,6 @@ impl ActorStore {
             .expect("Failed to record event")
     }
 
-    /// Record a host function call with full I/O for replay.
-    ///
-    /// This is the standardized way to record handler host function calls.
-    /// The event captures the interface name, function name, and typed
-    /// input/output values, which is everything needed to replay the call.
-    ///
-    /// ## Parameters
-    ///
-    /// * `interface` - The WIT interface name (e.g., "wasi:clocks/wall-clock@0.2.3")
-    /// * `function` - The function name (e.g., "now")
-    /// * `input` - Input parameters as SerializableVal (use `.into_serializable_val()`)
-    /// * `output` - Output/return value as SerializableVal (use `.into_serializable_val()`)
-    ///
-    /// ## Example
-    ///
-    /// ```rust,ignore
-    /// use val_serde::IntoSerializableVal;
-    ///
-    /// // Record a random "get-random-u64" call
-    /// ctx.data_mut().record_host_function_call(
-    ///     "wasi:random/random@0.2.3",
-    ///     "get-random-u64",
-    ///     ().into_serializable_val(),           // no input
-    ///     value.into_serializable_val(),        // output
-    /// );
-    /// ```
-    pub fn record_host_function_call(
-        &self,
-        interface: &str,
-        function: &str,
-        input: val_serde::SerializableVal,
-        output: val_serde::SerializableVal,
-    ) -> ChainEvent {
-        tracing::debug!(
-            "[RECORD] Host function call: {}/{}",
-            interface,
-            function
-        );
-
-        let host_call = HostFunctionCall::new(interface, function, input, output);
-
-        self.record_event(ChainEventData {
-            event_type: format!("{}/{}", interface, function),
-            data: ChainEventPayload::HostFunction(host_call),
-        })
-    }
-
     /// Record a WebAssembly execution event.
     ///
     /// This is used for recording WASM function calls, results, and errors.
@@ -243,21 +195,6 @@ impl ActorStore {
             event_type: format!("theater-runtime/{}", event_type),
             data: ChainEventPayload::Wasm(wasm_data),
         })
-    }
-
-    /// DEPRECATED: Legacy method for backward compatibility with handlers.
-    ///
-    /// This method is a no-op stub that allows existing handler code to compile.
-    /// Handlers should migrate to using `record_host_function_call` instead.
-    ///
-    /// TODO: Remove this once all handlers are updated to use the new event system.
-    pub fn record_handler_event<T: serde::Serialize>(
-        &self,
-        _event_type: String,
-        _data: T,
-        _description: Option<String>,
-    ) {
-        // No-op for backwards compatibility
     }
 
     /// # Verify the integrity of the event chain

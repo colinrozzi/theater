@@ -8,18 +8,9 @@
 //!
 //! ## Recording
 //!
-//! During normal execution, handlers record host function calls using `HostFunctionCall`:
-//!
-//! ```ignore
-//! use val_serde::IntoSerializableVal;
-//!
-//! ctx.data_mut().record_host_function_call(
-//!     "wasi:random/random@0.2.3",
-//!     "get-random-u64",
-//!     ().into_serializable_val(),      // input
-//!     result.into_serializable_val(),  // output
-//! );
-//! ```
+//! Recording now happens automatically via the `CallInterceptor` at the Pack runtime level.
+//! All host function calls are intercepted and recorded to the actor's chain without
+//! handlers needing manual recording code.
 //!
 //! ## Replaying
 //!
@@ -35,8 +26,8 @@ mod handler;
 
 pub use handler::{ReplayHandler, ReplayState};
 
+use pack::abi::Value;
 use serde::{Deserialize, Serialize};
-use val_serde::SerializableVal;
 
 /// A recorded host function call with full I/O and type information.
 ///
@@ -44,18 +35,18 @@ use val_serde::SerializableVal;
 /// It captures everything needed to replay the call: what function was called,
 /// what inputs were provided, and what output was returned.
 ///
-/// Type information is preserved in the `SerializableVal` format, making
-/// the chain self-describing and independent of the component for replay.
+/// Type information is preserved in Pack's `Value` format, which derives
+/// Serialize/Deserialize and is self-describing.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HostFunctionCall {
     /// The interface name (e.g., "wasi:clocks/wall-clock@0.2.3", "wasi:random/random@0.2.3")
     pub interface: String,
     /// The function name (e.g., "now", "sleep")
     pub function: String,
-    /// Input parameters with full type information
-    pub input: SerializableVal,
-    /// Output/return value with full type information
-    pub output: SerializableVal,
+    /// Input parameters as a Pack Value
+    pub input: Value,
+    /// Output/return value as a Pack Value
+    pub output: Value,
 }
 
 impl HostFunctionCall {
@@ -63,8 +54,8 @@ impl HostFunctionCall {
     pub fn new(
         interface: impl Into<String>,
         function: impl Into<String>,
-        input: SerializableVal,
-        output: SerializableVal,
+        input: Value,
+        output: Value,
     ) -> Self {
         Self {
             interface: interface.into(),
@@ -78,24 +69,23 @@ impl HostFunctionCall {
     pub fn no_input(
         interface: impl Into<String>,
         function: impl Into<String>,
-        output: SerializableVal,
+        output: Value,
     ) -> Self {
-        Self::new(interface, function, SerializableVal::Tuple(vec![]), output)
+        Self::new(interface, function, Value::Tuple(vec![]), output)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use val_serde::IntoSerializableVal;
 
     #[test]
     fn test_host_function_call_serialization() {
         let call = HostFunctionCall::new(
             "wasi:clocks/wall-clock@0.2.3",
             "now",
-            ().into_serializable_val(),
-            1234567890u64.into_serializable_val(),
+            Value::Tuple(vec![]),
+            Value::U64(1234567890),
         );
 
         let json = serde_json::to_string(&call).unwrap();
@@ -112,14 +102,14 @@ mod tests {
         let call = HostFunctionCall::new(
             "wasi:random/random@0.2.3",
             "get-random-u64",
-            ().into_serializable_val(),
-            42u64.into_serializable_val(),
+            Value::Tuple(vec![]),
+            Value::U64(42),
         );
 
         let json = serde_json::to_string(&call).unwrap();
 
-        // The output should contain {"U64": 42} not just 42
-        assert!(json.contains(r#""U64""#), "Type tag should be in JSON: {}", json);
+        // The output should contain "U64" type tag
+        assert!(json.contains("U64"), "Type tag should be in JSON: {}", json);
     }
 
     #[test]
@@ -127,9 +117,9 @@ mod tests {
         let call = HostFunctionCall::no_input(
             "wasi:clocks/wall-clock@0.2.3",
             "now",
-            999u64.into_serializable_val(),
+            Value::U64(999),
         );
 
-        assert_eq!(call.input, SerializableVal::Tuple(vec![]));
+        assert_eq!(call.input, Value::Tuple(vec![]));
     }
 }

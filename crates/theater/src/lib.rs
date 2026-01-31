@@ -39,6 +39,7 @@ pub mod config;
 pub mod errors;
 pub mod events;
 pub mod handler;
+pub mod interceptor;
 
 pub mod id;
 pub mod logging;
@@ -75,6 +76,7 @@ pub use theater_runtime::TheaterRuntime;
 
 // Pack integration
 pub use pack_bridge::{
-    AsyncCtx, AsyncRuntime, Ctx, HostLinkerBuilder, IntoValue, LinkerError, PackInstance, Value,
-    ValueType,
+    AsyncCtx, AsyncRuntime, CallInterceptor, Ctx, HostLinkerBuilder, IntoValue, LinkerError,
+    PackInstance, Value, ValueType,
 };
+pub use interceptor::{RecordingInterceptor, ReplayInterceptor};
