@@ -2,6 +2,8 @@
 
 Theater is built on three fundamental pillars that work together to create a system that is secure, reliable, and transparent. This section explains what Theater is and the key concepts that make it the ideal infrastructure for AI agent systems.
 
+Before diving into the pillars, read [The Deterministic Boundary](./the-boundary.md) — it articulates the foundational insight that connects all three: WASM as a deterministic box in a non-deterministic world, the chain as the record of what crosses the boundary, and why this framing makes the rest of the architecture make sense.
+
 ## The Three Pillars of Theater
 
 ### [WebAssembly Components & Sandboxing](./wasm-components.md)

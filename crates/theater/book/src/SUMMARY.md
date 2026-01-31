@@ -8,6 +8,7 @@
 
 # Core Concepts
 - [Overview](core-concepts/README.md)
+- [The Deterministic Boundary](core-concepts/the-boundary.md)
 - [WebAssembly Components & Sandboxing](core-concepts/wasm-components.md)
 - [Actor Model & Supervision](core-concepts/actor-model.md)
 - [Traceability & Verification](core-concepts/traceability.md)
