@@ -3452,6 +3452,7 @@ dependencies = [
  "theater",
  "theater-handler-message-server",
  "theater-handler-runtime",
+ "theater-handler-supervisor",
  "tokio",
  "tracing",
  "tracing-subscriber",

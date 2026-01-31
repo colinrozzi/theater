@@ -24,7 +24,7 @@ use tokio::sync::mpsc;
 use tokio::time::timeout;
 
 use theater::chain::ChainEvent;
-use theater::config::actor_manifest::RuntimeHostConfig;
+use theater::config::actor_manifest::{RuntimeHostConfig, SupervisorHostConfig};
 use theater::handler::HandlerRegistry;
 use theater::messages::{ActorMessage, ActorRequest, ActorSend, MessageCommand, TheaterCommand};
 use theater::theater_runtime::TheaterRuntime;
@@ -32,6 +32,7 @@ use theater::ActorError;
 
 use theater_handler_message_server::{MessageRouter, MessageServerHandler};
 use theater_handler_runtime::RuntimeHandler;
+use theater_handler_supervisor::SupervisorHandler;
 
 /// Result of replay verification
 #[derive(Debug)]
@@ -155,6 +156,88 @@ pub fn create_base_registry(
 
     let message_router = MessageRouter::new();
     registry.register(MessageServerHandler::new(None, message_router.clone()));
+
+    (registry, message_router)
+}
+
+/// Get the path to the supervisor test actor's WASM package
+pub fn get_supervisor_test_wasm_path() -> PathBuf {
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    manifest_dir.join("../../test-actors/supervisor-replay-test/target/wasm32-unknown-unknown/release/supervisor_replay_test_actor.wasm")
+}
+
+/// Create a manifest for the child actor (runtime only)
+pub fn create_child_manifest(child_wasm_path: &PathBuf) -> String {
+    format!(
+        r#"name = "replay-test-child"
+version = "0.1.0"
+package = "{}"
+
+[[handler]]
+type = "runtime"
+"#,
+        child_wasm_path.display()
+    )
+}
+
+/// Create a recording manifest with runtime + message-server + supervisor
+pub fn create_supervisor_recording_manifest(wasm_path: &PathBuf) -> String {
+    format!(
+        r#"name = "supervisor-replay-test"
+version = "0.1.0"
+package = "{}"
+
+[[handler]]
+type = "runtime"
+
+[[handler]]
+type = "message-server"
+
+[[handler]]
+type = "supervisor"
+"#,
+        wasm_path.display()
+    )
+}
+
+/// Create a replay manifest with supervisor
+pub fn create_supervisor_replay_manifest(wasm_path: &PathBuf, chain_path: &str) -> String {
+    format!(
+        r#"name = "supervisor-replay-test-replay"
+version = "0.1.0"
+package = "{}"
+
+[[handler]]
+type = "replay"
+chain = "{}"
+
+[[handler]]
+type = "runtime"
+
+[[handler]]
+type = "message-server"
+
+[[handler]]
+type = "supervisor"
+"#,
+        wasm_path.display(),
+        chain_path
+    )
+}
+
+/// Creates a handler registry with RuntimeHandler, MessageServerHandler, and SupervisorHandler.
+pub fn create_supervisor_registry(
+    theater_tx: mpsc::Sender<TheaterCommand>,
+) -> (HandlerRegistry, MessageRouter) {
+    let mut registry = HandlerRegistry::new();
+    let runtime_config = RuntimeHostConfig {};
+    registry.register(RuntimeHandler::new(runtime_config, theater_tx, None));
+
+    let message_router = MessageRouter::new();
+    registry.register(MessageServerHandler::new(None, message_router.clone()));
+
+    let supervisor_config = SupervisorHostConfig {};
+    registry.register(SupervisorHandler::new(supervisor_config, None));
 
     (registry, message_router)
 }
@@ -662,6 +745,299 @@ pub async fn run_request_replay_verification(
     })
 }
 
+/// Run a supervisor replay verification test.
+///
+/// This function:
+/// 1. Spawns a parent supervisor actor
+/// 2. Sends spawn, list, stop commands and waits for the external-stop callback
+/// 3. Records the event chain
+/// 4. Replays and verifies hash determinism
+pub async fn run_supervisor_replay_verification(
+    chain_path: &str,
+    verbose: bool,
+) -> Result<ReplayVerificationResult> {
+    let wasm_path = get_supervisor_test_wasm_path();
+    if !wasm_path.exists() {
+        return Err(anyhow::anyhow!(
+            "Supervisor test WASM not found at {:?}. Build with: cd test-actors/supervisor-replay-test && cargo build --release",
+            wasm_path
+        ));
+    }
+
+    let child_wasm_path = get_test_wasm_path();
+    if !child_wasm_path.exists() {
+        return Err(anyhow::anyhow!(
+            "Child test WASM not found at {:?}. Build with: cd test-actors/replay-test && cargo build --release",
+            child_wasm_path
+        ));
+    }
+
+    // Canonicalize so the child manifest has an absolute path
+    let child_wasm_path = child_wasm_path.canonicalize()?;
+
+    // Write child manifest to a temp file
+    let child_manifest_path = format!(
+        "/tmp/supervisor_test_child_manifest_{}.toml",
+        std::process::id()
+    );
+    let child_manifest_content = create_child_manifest(&child_wasm_path);
+    std::fs::write(&child_manifest_path, &child_manifest_content)?;
+
+    if verbose {
+        println!("\n=== Supervisor Phase 1: Recording ===\n");
+        println!("Child manifest written to: {}", child_manifest_path);
+    }
+
+    // --- Phase 1: Record ---
+    let recording_manifest = create_supervisor_recording_manifest(&wasm_path);
+
+    let (theater_tx, theater_rx) = mpsc::channel::<TheaterCommand>(32);
+    let (handler_registry, message_router) = create_supervisor_registry(theater_tx.clone());
+
+    let mut runtime =
+        TheaterRuntime::new(theater_tx.clone(), theater_rx, None, handler_registry).await?;
+    let runtime_handle = tokio::spawn(async move { runtime.run().await });
+
+    let (event_tx, mut event_rx) = mpsc::channel(100);
+
+    // Spawn the parent supervisor actor
+    let (response_tx, response_rx) = tokio::sync::oneshot::channel();
+    theater_tx
+        .send(TheaterCommand::SpawnActor {
+            manifest_path: recording_manifest,
+            init_bytes: None,
+            parent_id: None,
+            response_tx,
+            supervisor_tx: None,
+            subscription_tx: Some(event_tx),
+        })
+        .await?;
+
+    let spawn_result = timeout(Duration::from_secs(10), response_rx).await??;
+    let actor_id = spawn_result?;
+
+    if verbose {
+        println!("Parent actor ID: {}", actor_id);
+    }
+
+    // Collect init events
+    let mut recorded_chain = collect_events(
+        &mut event_rx,
+        Duration::from_millis(500),
+        Duration::from_secs(10),
+    )
+    .await;
+
+    if verbose {
+        println!("After init: {} events", recorded_chain.len());
+    }
+
+    // Send "spawn:<child_manifest_path>"
+    {
+        let msg = format!("spawn:{}", child_manifest_path);
+        let (response_tx, response_rx) = tokio::sync::oneshot::channel();
+        message_router
+            .route_message(MessageCommand::SendMessage {
+                target_id: actor_id.clone(),
+                message: ActorMessage::Send(ActorSend {
+                    data: msg.into_bytes(),
+                }),
+                response_tx,
+            })
+            .await?;
+        let _ = timeout(Duration::from_secs(5), response_rx).await;
+    }
+
+    let spawn_events = collect_events(
+        &mut event_rx,
+        Duration::from_millis(500),
+        Duration::from_secs(10),
+    )
+    .await;
+    recorded_chain.extend(spawn_events);
+
+    if verbose {
+        println!("After spawn: {} total events", recorded_chain.len());
+    }
+
+    // Send "list"
+    {
+        let (response_tx, response_rx) = tokio::sync::oneshot::channel();
+        message_router
+            .route_message(MessageCommand::SendMessage {
+                target_id: actor_id.clone(),
+                message: ActorMessage::Send(ActorSend {
+                    data: b"list".to_vec(),
+                }),
+                response_tx,
+            })
+            .await?;
+        let _ = timeout(Duration::from_secs(5), response_rx).await;
+    }
+
+    let list_events = collect_events(
+        &mut event_rx,
+        Duration::from_millis(500),
+        Duration::from_secs(10),
+    )
+    .await;
+    recorded_chain.extend(list_events);
+
+    if verbose {
+        println!("After list: {} total events", recorded_chain.len());
+    }
+
+    // Send "stop"
+    {
+        let (response_tx, response_rx) = tokio::sync::oneshot::channel();
+        message_router
+            .route_message(MessageCommand::SendMessage {
+                target_id: actor_id.clone(),
+                message: ActorMessage::Send(ActorSend {
+                    data: b"stop".to_vec(),
+                }),
+                response_tx,
+            })
+            .await?;
+        let _ = timeout(Duration::from_secs(5), response_rx).await;
+    }
+
+    // Wait longer for the callback event (handle-child-external-stop)
+    let stop_events = collect_events(
+        &mut event_rx,
+        Duration::from_secs(2),
+        Duration::from_secs(15),
+    )
+    .await;
+    recorded_chain.extend(stop_events);
+
+    if verbose {
+        println!(
+            "After stop (incl. callback): {} total events",
+            recorded_chain.len()
+        );
+        for (i, event) in recorded_chain.iter().enumerate() {
+            println!(
+                "  Event {}: type={}, hash={}",
+                i,
+                event.event_type,
+                hex::encode(&event.hash[..8.min(event.hash.len())])
+            );
+        }
+    }
+
+    // Save chain
+    let chain_json = serde_json::to_string_pretty(&recorded_chain)?;
+    std::fs::write(chain_path, &chain_json)?;
+
+    if verbose {
+        println!("Saved chain to {}", chain_path);
+    }
+
+    // Stop the parent actor
+    let (stop_tx, stop_rx) = tokio::sync::oneshot::channel();
+    theater_tx
+        .send(TheaterCommand::StopActor {
+            actor_id: actor_id.clone(),
+            response_tx: stop_tx,
+        })
+        .await?;
+    let _ = timeout(Duration::from_secs(5), stop_rx).await;
+
+    if recorded_chain.is_empty() {
+        drop(theater_tx);
+        let _ = timeout(Duration::from_secs(5), runtime_handle).await;
+        let _ = std::fs::remove_file(&child_manifest_path);
+        return Err(anyhow::anyhow!("No events recorded"));
+    }
+
+    if verbose {
+        println!("\n=== Supervisor Phase 2: Replay ===\n");
+    }
+
+    // --- Phase 2: Replay ---
+    let replay_manifest = create_supervisor_replay_manifest(&wasm_path, chain_path);
+
+    let (replay_event_tx, mut replay_event_rx) = mpsc::channel(100);
+
+    let (response_tx2, response_rx2) = tokio::sync::oneshot::channel();
+    theater_tx
+        .send(TheaterCommand::SpawnActor {
+            manifest_path: replay_manifest,
+            init_bytes: None,
+            parent_id: None,
+            response_tx: response_tx2,
+            supervisor_tx: None,
+            subscription_tx: Some(replay_event_tx),
+        })
+        .await?;
+
+    let spawn_result2 = timeout(Duration::from_secs(10), response_rx2).await??;
+    let replay_actor_id = spawn_result2?;
+
+    if verbose {
+        println!("Replay actor ID: {}", replay_actor_id);
+    }
+
+    // Collect replay events
+    let replay_chain = collect_events(
+        &mut replay_event_rx,
+        Duration::from_secs(2),
+        Duration::from_secs(15),
+    )
+    .await;
+
+    if verbose {
+        println!("Replay chain has {} events", replay_chain.len());
+        for (i, event) in replay_chain.iter().enumerate() {
+            println!(
+                "  Replay Event {}: type={}, hash={}",
+                i,
+                event.event_type,
+                hex::encode(&event.hash[..8.min(event.hash.len())])
+            );
+        }
+    }
+
+    // Stop replay actor
+    let (stop_tx2, stop_rx2) = tokio::sync::oneshot::channel();
+    let _ = theater_tx
+        .send(TheaterCommand::StopActor {
+            actor_id: replay_actor_id,
+            response_tx: stop_tx2,
+        })
+        .await;
+    let _ = timeout(Duration::from_secs(5), stop_rx2).await;
+
+    // Shutdown runtime
+    drop(theater_tx);
+    let _ = timeout(Duration::from_secs(5), runtime_handle).await;
+
+    // Clean up temp file
+    let _ = std::fs::remove_file(&child_manifest_path);
+
+    // Compare chains
+    let mut mismatches = 0;
+    let max_len = recorded_chain.len().max(replay_chain.len());
+    for i in 0..max_len {
+        let orig_hash = recorded_chain.get(i).map(|e| &e.hash);
+        let replay_hash = replay_chain.get(i).map(|e| &e.hash);
+        if orig_hash != replay_hash {
+            mismatches += 1;
+        }
+    }
+
+    let same_length = recorded_chain.len() == replay_chain.len();
+    let passed = mismatches == 0 && same_length;
+
+    Ok(ReplayVerificationResult {
+        original_chain: recorded_chain,
+        replay_chain,
+        mismatches,
+        passed,
+    })
+}
+
 /// Format event data as readable string
 fn format_event_data(event: &ChainEvent) -> String {
     if event.data.is_empty() {
@@ -810,6 +1186,32 @@ async fn main() -> Result<()> {
         ));
     }
 
+    // --- Supervisor replay verification ---
+    println!("\n\n{}", "=".repeat(60));
+    println!("=== Supervisor Replay Verification ===\n");
+
+    let supervisor_chain_path = "/tmp/recorded_supervisor_chain.json";
+    let supervisor_result =
+        run_supervisor_replay_verification(supervisor_chain_path, verbose).await?;
+
+    println!("\n=== Supervisor Comparison ===\n");
+    println!(
+        "Original events: {}",
+        supervisor_result.original_chain.len()
+    );
+    println!("Replay events:   {}", supervisor_result.replay_chain.len());
+
+    if supervisor_result.passed {
+        println!("\n🎉 SUPERVISOR REPLAY VERIFICATION PASSED! 🎉");
+    } else {
+        println!("\n❌ SUPERVISOR REPLAY VERIFICATION FAILED ❌");
+        println!("{}", supervisor_result.comparison_details());
+        return Err(anyhow::anyhow!(
+            "Supervisor replay verification failed: {} mismatches",
+            supervisor_result.mismatches
+        ));
+    }
+
     println!("\n=== All Experiments Complete ===");
     Ok(())
 }
@@ -937,6 +1339,54 @@ mod tests {
                 .iter()
                 .any(|t| t.contains("theater:simple/runtime/log")),
             "Should have runtime/log events"
+        );
+    }
+
+    /// Test that supervisor replay produces identical chain hashes
+    ///
+    /// This test:
+    /// 1. Spawns a supervisor actor, sends spawn/list/stop commands
+    /// 2. Waits for the handle-child-external-stop callback
+    /// 3. Replays the actor using the recorded chain
+    /// 4. Verifies that all event hashes match
+    #[tokio::test]
+    async fn test_supervisor_replay_verification() {
+        let chain_path = format!(
+            "/tmp/test_supervisor_replay_chain_{}.json",
+            std::process::id()
+        );
+
+        let result = run_supervisor_replay_verification(&chain_path, false)
+            .await
+            .expect("Supervisor replay verification should complete");
+
+        // Clean up temp file
+        let _ = std::fs::remove_file(&chain_path);
+
+        // Assertions
+        assert!(
+            !result.original_chain.is_empty(),
+            "Original chain should have events"
+        );
+        assert!(
+            !result.replay_chain.is_empty(),
+            "Replay chain should have events"
+        );
+        assert!(
+            result.same_length(),
+            "Chain lengths should match: original={}, replay={}",
+            result.original_chain.len(),
+            result.replay_chain.len()
+        );
+        assert_eq!(
+            result.mismatches, 0,
+            "All hashes should match. Comparison:\n{}",
+            result.comparison_details()
+        );
+        assert!(
+            result.passed,
+            "Supervisor replay verification should pass. Details:\n{}",
+            result.comparison_details()
         );
     }
 }
