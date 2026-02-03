@@ -22,8 +22,8 @@
           inherit system overlays;
         };
 
-        # Updated to Rust 1.81.0 for cranelift-entity
-        rustToolchain = pkgs.rust-bin.stable."1.82.0".default.override {
+        # Rust 1.85.0 for edition 2024 compatibility
+        rustToolchain = pkgs.rust-bin.stable."1.85.0".default.override {
           extensions = [ 
             "rust-src"
             "rust-analyzer"

@@ -30,7 +30,7 @@
         };
 
         # Rust toolchain matching workspace rust-version
-        rustToolchain = pkgs.rust-bin.stable."1.83.0".default.override {
+        rustToolchain = pkgs.rust-bin.stable."1.85.0".default.override {
           extensions = [
             "rust-src"
             "rust-analyzer"

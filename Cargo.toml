@@ -37,7 +37,7 @@ repository = "https://github.com/colinrozzi/theater"
 homepage = "https://colinrozzi.github.io/theater"
 keywords = ["wasm", "actor", "ai", "agents", "webassembly"]
 categories = ["wasm", "concurrency", "development-tools"]
-rust-version = "1.83.0"
+rust-version = "1.85.0"
 
 [workspace.dependencies]
 anyhow = "1.0"
