@@ -25,6 +25,7 @@ use crate::actor::ActorRuntimeError;
 ///     let (tx, rx) = oneshot::channel();
 ///     let spawn_cmd = TheaterCommand::SpawnActor {
 ///         manifest_path: "actor_manifest.toml".to_string(),
+///         wasm_bytes: None, // Load from manifest.package path
 ///         init_bytes: None,
 ///         response_tx: tx,
 ///         parent_id: None,
@@ -122,11 +123,13 @@ pub enum TheaterCommand {
     /// ## Parameters
     ///
     /// * `manifest_path` - Path to the actor's manifest file
+    /// * `wasm_bytes` - Optional pre-loaded WASM bytes. If None, bytes are resolved from manifest.package
     /// * `init_bytes` - Optional initialization data to pass to the actor
     /// * `response_tx` - Channel to receive the result (actor ID or error)
     /// * `parent_id` - Optional parent actor ID for supervision hierarchy
     SpawnActor {
         manifest_path: String,
+        wasm_bytes: Option<Vec<u8>>,
         init_bytes: Option<Vec<u8>>,
         response_tx: oneshot::Sender<Result<TheaterId>>,
         parent_id: Option<TheaterId>,
@@ -141,11 +144,13 @@ pub enum TheaterCommand {
     /// ## Parameters
     ///
     /// * `manifest_path` - Path to the actor's manifest file
+    /// * `wasm_bytes` - Optional pre-loaded WASM bytes. If None, bytes are resolved from manifest.package
     /// * `state_bytes` - Optional state data to restore
     /// * `response_tx` - Channel to receive the result (actor ID or error)
     /// * `parent_id` - Optional parent actor ID for supervision hierarchy
     ResumeActor {
         manifest_path: String,
+        wasm_bytes: Option<Vec<u8>>,
         state_bytes: Option<Vec<u8>>,
         response_tx: oneshot::Sender<Result<TheaterId>>,
         parent_id: Option<TheaterId>,

@@ -285,6 +285,7 @@ impl TheaterRuntime {
                 }
                 TheaterCommand::SpawnActor {
                     manifest_path,
+                    wasm_bytes,
                     init_bytes,
                     parent_id,
                     response_tx,
@@ -298,6 +299,7 @@ impl TheaterRuntime {
                     match self
                         .spawn_actor(
                             manifest_path.clone(),
+                            wasm_bytes,
                             init_bytes,
                             parent_id,
                             true,
@@ -325,6 +327,7 @@ impl TheaterRuntime {
                 }
                 TheaterCommand::ResumeActor {
                     manifest_path,
+                    wasm_bytes,
                     state_bytes,
                     response_tx,
                     parent_id,
@@ -338,6 +341,7 @@ impl TheaterRuntime {
                     match self
                         .spawn_actor(
                             manifest_path.clone(),
+                            wasm_bytes,
                             state_bytes,
                             parent_id,
                             false,
@@ -503,6 +507,7 @@ impl TheaterRuntime {
     /// ## Parameters
     ///
     /// * `manifest_path` - Path to the actor's manifest file or manifest content
+    /// * `wasm_bytes` - Optional pre-loaded WASM bytes. If None, bytes are resolved from manifest.package
     /// * `init_bytes` - Optional initialization data for the actor
     /// * `parent_id` - Optional ID of the parent actor
     /// * `init` - Whether to initialize the actor (true) or resume it (false)
@@ -516,6 +521,7 @@ impl TheaterRuntime {
     ///
     /// This method handles the entire process of spawning a new actor, including:
     /// - Loading and parsing the manifest
+    /// - Resolving WASM bytes (if not provided)
     /// - Creating communication channels
     /// - Spawning the actor runtime in a new task
     /// - Registering the actor with the runtime
@@ -523,6 +529,7 @@ impl TheaterRuntime {
     async fn spawn_actor(
         &mut self,
         manifest_path: String,
+        wasm_bytes: Option<Vec<u8>>,
         init_bytes: Option<Vec<u8>>,
         parent_id: Option<TheaterId>,
         _init: bool,
@@ -571,6 +578,24 @@ impl TheaterRuntime {
                     ))
                 })?;
 
+        // Resolve WASM bytes: use provided bytes or load from manifest.package
+        let wasm_bytes = match wasm_bytes {
+            Some(bytes) => {
+                debug!("Using pre-loaded WASM bytes ({} bytes)", bytes.len());
+                bytes
+            }
+            None => {
+                debug!("Resolving WASM from manifest.package: {}", manifest.package);
+                resolve_reference(&manifest.package).await.map_err(|e| {
+                    TheaterRuntimeError::ActorInitializationError(format!(
+                        "Failed to load WASM package for actor {}: {}",
+                        manifest.name, e
+                    ))
+                })?
+            }
+        };
+        debug!("WASM bytes resolved ({} bytes)", wasm_bytes.len());
+
         // Create a shutdown controller for this specific actor
         let mut shutdown_controller = ShutdownController::new();
         let (mailbox_tx, _mailbox_rx) = mpsc::channel(100);
@@ -615,6 +640,7 @@ impl TheaterRuntime {
             let _actor_runtime = ActorRuntime::start(
                 actor_id_for_task.clone(),
                 &manifest_clone,
+                wasm_bytes,
                 init_value,
                 pack_runtime,
                 chain,

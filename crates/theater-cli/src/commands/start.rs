@@ -114,6 +114,7 @@ pub async fn execute_async(args: &StartArgs, ctx: &CommandContext) -> Result<(),
     theater_tx
         .send(TheaterCommand::SpawnActor {
             manifest_path: manifest_content,
+            wasm_bytes: None,
             init_bytes: initial_state,
             response_tx,
             parent_id: None,

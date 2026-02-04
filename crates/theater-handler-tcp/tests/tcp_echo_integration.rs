@@ -101,6 +101,7 @@ async fn test_tcp_echo_and_chain() {
     theater_tx
         .send(TheaterCommand::SpawnActor {
             manifest_path: manifest,
+            wasm_bytes: None,
             init_bytes: None,
             response_tx,
             parent_id: None,

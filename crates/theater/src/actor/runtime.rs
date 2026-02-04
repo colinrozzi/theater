@@ -19,7 +19,6 @@ use crate::id::TheaterId;
 use crate::messages::TheaterCommand;
 use crate::metrics::MetricsCollector;
 use crate::store::ContentStore;
-use crate::utils::resolve_reference;
 use crate::ManifestConfig;
 
 use crate::Result;
@@ -197,6 +196,7 @@ impl ActorRuntime {
     pub async fn build_actor_resources(
         id: TheaterId,
         config: &ManifestConfig,
+        wasm_bytes: Vec<u8>,
         initial_state: Option<Value>,
         pack_runtime: AsyncRuntime,
         chain: Arc<SyncRwLock<StateChain>>,
@@ -264,19 +264,15 @@ impl ActorRuntime {
             });
         }
 
-        debug!("Loading package: {}", config.package);
+        debug!(
+            "Using pre-resolved WASM bytes for package {} ({} bytes)",
+            config.package,
+            wasm_bytes.len()
+        );
 
-        // Load the WASM package bytes
-        let wasm_bytes = resolve_reference(&config.package).await.map_err(|e| {
-            let error_message = format!(
-                "Failed to load package for actor {}: {}",
-                config.name, e
-            );
-            error!("{}", error_message);
-            ActorRuntimeError::SetupError {
-                message: error_message,
-            }
-        })?;
+        // WASM bytes are now passed in directly from spawn_actor()
+        // This allows callers to provide pre-compiled WASM or for the
+        // theater runtime to resolve the package reference early.
 
         // ----------------- Checkpoint Get Handlers -----------------
 
@@ -491,6 +487,7 @@ impl ActorRuntime {
     pub async fn start(
         id: TheaterId,
         config: &ManifestConfig,
+        wasm_bytes: Vec<u8>,
         initial_state: Option<Value>,
         pack_runtime: AsyncRuntime,
         chain: Arc<SyncRwLock<StateChain>>,
@@ -529,6 +526,7 @@ impl ActorRuntime {
                 match Self::build_actor_resources(
                     id,
                     &config,
+                    wasm_bytes,
                     initial_state,
                     pack_runtime,
                     chain,

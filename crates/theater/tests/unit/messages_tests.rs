@@ -66,6 +66,7 @@ async fn test_theater_command_spawn_actor() {
 
     let command = TheaterCommand::SpawnActor {
         manifest_path: manifest_path.clone(),
+        wasm_bytes: None,
         init_bytes: None,
         response_tx: tx,
         parent_id: Some(parent_id.clone()),

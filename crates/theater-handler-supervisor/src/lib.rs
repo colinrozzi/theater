@@ -215,6 +215,7 @@ impl Handler for SupervisorHandler
                         let (response_tx, response_rx) = oneshot::channel();
                         let cmd = TheaterCommand::SpawnActor {
                             manifest_path: manifest,
+                            wasm_bytes: None,
                             init_bytes,
                             response_tx,
                             parent_id: Some(parent_id),
@@ -271,6 +272,7 @@ impl Handler for SupervisorHandler
                         let (response_tx, response_rx) = oneshot::channel();
                         let cmd = TheaterCommand::ResumeActor {
                             manifest_path: manifest,
+                            wasm_bytes: None,
                             state_bytes,
                             response_tx,
                             parent_id: Some(parent_id),

@@ -201,6 +201,7 @@ async fn test_random_handler_with_test_actor() -> Result<()> {
     theater_tx
         .send(TheaterCommand::SpawnActor {
             manifest_path: manifest_content,
+            wasm_bytes: None,
             init_bytes: None,
             parent_id: None,
             response_tx,
