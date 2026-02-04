@@ -2217,6 +2217,8 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 1.0.69",
+ "wasm-encoder 0.219.2",
+ "wasmparser 0.219.2",
  "wasmtime 27.0.0",
 ]
 
@@ -3378,6 +3380,19 @@ dependencies = [
  "tokio-util",
  "tracing",
  "uuid",
+]
+
+[[package]]
+name = "theater-handler-assembler"
+version = "0.2.1"
+dependencies = [
+ "anyhow",
+ "test-log",
+ "theater",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "wat",
 ]
 
 [[package]]

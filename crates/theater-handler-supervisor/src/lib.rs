@@ -23,9 +23,10 @@ use anyhow::Result;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 use thiserror::Error;
-use tokio::sync::oneshot;
-use tracing::{error, info};
+use tokio::sync::{mpsc, oneshot};
+use tracing::{debug, error, info};
 
 /// Errors that can occur during supervisor operations
 #[derive(Error, Debug)]
@@ -177,36 +178,32 @@ impl Handler for SupervisorHandler
         let supervisor_tx = self.channel_tx.clone();
 
         builder.interface("theater:simple/supervisor")?
-            // spawn: func(manifest: string, init-bytes: option<list<u8>>) -> result<string, string>
+            // spawn: func(manifest: string, init-bytes: option<list<u8>>, wasm-bytes: option<list<u8>>) -> result<string, string>
+            // Spawns a child actor. If wasm-bytes is provided, uses those bytes instead of loading from manifest.package.
             .func_async_result("spawn", {
                 let supervisor_tx = supervisor_tx.clone();
                 move |ctx: AsyncCtx<ActorStore>, input: Value| {
                     let supervisor_tx = supervisor_tx.clone();
                     async move {
-                        // Parse input: (string, option<list<u8>>)
-                        let (manifest, init_bytes) = match input {
-                            Value::Tuple(args) if args.len() == 2 => {
+                        // Parse input: (string, option<list<u8>>, option<list<u8>>)
+                        let (manifest, init_bytes, wasm_bytes) = match input {
+                            Value::Tuple(args) if args.len() == 3 => {
                                 let manifest = match &args[0] {
                                     Value::String(s) => s.clone(),
                                     _ => return Err(Value::String("Invalid manifest argument".to_string())),
                                 };
-                                let init_bytes = match &args[1] {
-                                    Value::Option { value: Some(inner), .. } => {
-                                        if let Value::List { items, .. } = inner.as_ref() {
-                                            Some(items.iter().filter_map(|v| {
-                                                if let Value::U8(b) = v { Some(*b) } else { None }
-                                            }).collect::<Vec<u8>>())
-                                        } else {
-                                            None
-                                        }
-                                    }
-                                    Value::Option { value: None, .. } => None,
-                                    _ => None,
-                                };
-                                (manifest, init_bytes)
+                                let init_bytes = parse_optional_bytes(&args[1]);
+                                let wasm_bytes = parse_optional_bytes(&args[2]);
+                                (manifest, init_bytes, wasm_bytes)
                             }
-                            _ => return Err(Value::String("Invalid spawn arguments".to_string())),
+                            _ => return Err(Value::String("Invalid spawn arguments: expected (string, option<list<u8>>, option<list<u8>>)".to_string())),
                         };
+
+                        if let Some(ref bytes) = wasm_bytes {
+                            debug!("spawn: manifest={}, wasm_bytes={} bytes", manifest, bytes.len());
+                        } else {
+                            debug!("spawn: manifest={}, wasm_bytes=None (will load from manifest.package)", manifest);
+                        }
 
                         let store = ctx.data();
                         let theater_tx = store.theater_tx.clone();
@@ -215,7 +212,7 @@ impl Handler for SupervisorHandler
                         let (response_tx, response_rx) = oneshot::channel();
                         let cmd = TheaterCommand::SpawnActor {
                             manifest_path: manifest,
-                            wasm_bytes: None,
+                            wasm_bytes,
                             init_bytes,
                             response_tx,
                             parent_id: Some(parent_id),
@@ -235,34 +232,114 @@ impl Handler for SupervisorHandler
                     }
                 }
             })?
-            // resume: func(manifest: string, state-bytes: option<list<u8>>) -> result<string, string>
+            // spawn-and-wait: func(manifest: string, init-bytes: option<list<u8>>, wasm-bytes: option<list<u8>>, timeout-ms: option<u64>) -> result<option<list<u8>>, string>
+            // Spawns a child actor and waits for it to complete. Returns the child's final result.
+            // If timeout-ms is provided, returns an error if the child doesn't complete within that time.
+            .func_async_result("spawn-and-wait", {
+                move |ctx: AsyncCtx<ActorStore>, input: Value| {
+                    async move {
+                        // Parse input: (string, option<list<u8>>, option<list<u8>>, option<u64>)
+                        let (manifest, init_bytes, wasm_bytes, timeout_ms) = match input {
+                            Value::Tuple(args) if args.len() == 4 => {
+                                let manifest = match &args[0] {
+                                    Value::String(s) => s.clone(),
+                                    _ => return Err(Value::String("Invalid manifest argument".to_string())),
+                                };
+                                let init_bytes = parse_optional_bytes(&args[1]);
+                                let wasm_bytes = parse_optional_bytes(&args[2]);
+                                let timeout_ms = parse_optional_u64(&args[3]);
+                                (manifest, init_bytes, wasm_bytes, timeout_ms)
+                            }
+                            _ => return Err(Value::String("Invalid spawn-and-wait arguments: expected (string, option<list<u8>>, option<list<u8>>, option<u64>)".to_string())),
+                        };
+
+                        debug!("spawn-and-wait: manifest={}, timeout={:?}ms", manifest, timeout_ms);
+
+                        let store = ctx.data();
+                        let theater_tx = store.theater_tx.clone();
+                        let parent_id = store.id.clone();
+
+                        // Create a dedicated channel for this spawn to receive the child's result
+                        let (result_tx, mut result_rx) = mpsc::channel::<ActorResult>(1);
+
+                        let (response_tx, response_rx) = oneshot::channel();
+                        let cmd = TheaterCommand::SpawnActor {
+                            manifest_path: manifest.clone(),
+                            wasm_bytes,
+                            init_bytes,
+                            response_tx,
+                            parent_id: Some(parent_id),
+                            supervisor_tx: Some(result_tx),
+                            subscription_tx: None,
+                        };
+
+                        if let Err(e) = theater_tx.send(cmd).await {
+                            return Err(Value::String(format!("Failed to send spawn command: {}", e)));
+                        }
+
+                        // Wait for the actor to spawn
+                        let actor_id = match response_rx.await {
+                            Ok(Ok(id)) => id,
+                            Ok(Err(e)) => return Err(Value::String(format!("Failed to spawn actor: {}", e))),
+                            Err(e) => return Err(Value::String(format!("Failed to receive spawn response: {}", e))),
+                        };
+
+                        debug!("spawn-and-wait: child {} spawned, waiting for completion", actor_id);
+
+                        // Wait for the child to complete
+                        let wait_result = if let Some(ms) = timeout_ms {
+                            tokio::time::timeout(Duration::from_millis(ms), result_rx.recv()).await
+                        } else {
+                            // No timeout - wait indefinitely
+                            Ok(result_rx.recv().await)
+                        };
+
+                        match wait_result {
+                            Ok(Some(ActorResult::Success(child_result))) => {
+                                debug!("spawn-and-wait: child {} completed successfully", actor_id);
+                                Ok(option_bytes_to_value(child_result.result))
+                            }
+                            Ok(Some(ActorResult::Error(child_error))) => {
+                                Err(Value::String(format!("Child actor {} failed: {}", child_error.actor_id, child_error.error)))
+                            }
+                            Ok(Some(ActorResult::ExternalStop(stop))) => {
+                                Err(Value::String(format!("Child actor {} was stopped externally", stop.actor_id)))
+                            }
+                            Ok(None) => {
+                                Err(Value::String(format!("Child actor {} result channel closed unexpectedly", actor_id)))
+                            }
+                            Err(_) => {
+                                // Timeout - stop the child actor
+                                debug!("spawn-and-wait: timeout waiting for child {}, stopping it", actor_id);
+                                let (stop_tx, _) = oneshot::channel();
+                                let _ = theater_tx.send(TheaterCommand::StopActor {
+                                    actor_id: actor_id.clone(),
+                                    response_tx: stop_tx,
+                                }).await;
+                                Err(Value::String(format!("Timeout waiting for child actor {} to complete", actor_id)))
+                            }
+                        }
+                    }
+                }
+            })?
+            // resume: func(manifest: string, state-bytes: option<list<u8>>, wasm-bytes: option<list<u8>>) -> result<string, string>
+            // Resumes an actor from saved state. If wasm-bytes is provided, uses those bytes instead of loading from manifest.package.
             .func_async_result("resume", {
                 let supervisor_tx = supervisor_tx.clone();
                 move |ctx: AsyncCtx<ActorStore>, input: Value| {
                     let supervisor_tx = supervisor_tx.clone();
                     async move {
-                        let (manifest, state_bytes) = match input {
-                            Value::Tuple(args) if args.len() == 2 => {
+                        let (manifest, state_bytes, wasm_bytes) = match input {
+                            Value::Tuple(args) if args.len() == 3 => {
                                 let manifest = match &args[0] {
                                     Value::String(s) => s.clone(),
                                     _ => return Err(Value::String("Invalid manifest argument".to_string())),
                                 };
-                                let state_bytes = match &args[1] {
-                                    Value::Option { value: Some(inner), .. } => {
-                                        if let Value::List { items, .. } = inner.as_ref() {
-                                            Some(items.iter().filter_map(|v| {
-                                                if let Value::U8(b) = v { Some(*b) } else { None }
-                                            }).collect::<Vec<u8>>())
-                                        } else {
-                                            None
-                                        }
-                                    }
-                                    Value::Option { value: None, .. } => None,
-                                    _ => None,
-                                };
-                                (manifest, state_bytes)
+                                let state_bytes = parse_optional_bytes(&args[1]);
+                                let wasm_bytes = parse_optional_bytes(&args[2]);
+                                (manifest, state_bytes, wasm_bytes)
                             }
-                            _ => return Err(Value::String("Invalid resume arguments".to_string())),
+                            _ => return Err(Value::String("Invalid resume arguments: expected (string, option<list<u8>>, option<list<u8>>)".to_string())),
                         };
 
                         let store = ctx.data();
@@ -272,7 +349,7 @@ impl Handler for SupervisorHandler
                         let (response_tx, response_rx) = oneshot::channel();
                         let cmd = TheaterCommand::ResumeActor {
                             manifest_path: manifest,
-                            wasm_bytes: None,
+                            wasm_bytes,
                             state_bytes,
                             response_tx,
                             parent_id: Some(parent_id),
@@ -626,6 +703,37 @@ fn option_bytes_to_value(data: Option<Vec<u8>>) -> Value {
             inner_type: ValueType::List(Box::new(ValueType::U8)),
             value: None,
         },
+    }
+}
+
+/// Parse an optional byte list from a Pack Value
+fn parse_optional_bytes(value: &Value) -> Option<Vec<u8>> {
+    match value {
+        Value::Option { value: Some(inner), .. } => {
+            if let Value::List { items, .. } = inner.as_ref() {
+                Some(items.iter().filter_map(|v| {
+                    if let Value::U8(b) = v { Some(*b) } else { None }
+                }).collect())
+            } else {
+                None
+            }
+        }
+        Value::Option { value: None, .. } => None,
+        _ => None,
+    }
+}
+
+/// Parse an optional u64 from a Pack Value
+fn parse_optional_u64(value: &Value) -> Option<u64> {
+    match value {
+        Value::Option { value: Some(inner), .. } => {
+            match inner.as_ref() {
+                Value::U64(n) => Some(*n),
+                _ => None,
+            }
+        }
+        Value::Option { value: None, .. } => None,
+        _ => None,
     }
 }
 

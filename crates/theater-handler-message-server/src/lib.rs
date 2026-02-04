@@ -413,7 +413,8 @@ impl MessageServerHandler {
                         params,
                     )
                     .await?;
-                // Result is tuple<option<list<u8>>> - extract the optional response
+                // Result is result<tuple<option<list<u8>>, tuple<option<list<u8>>>>, string>
+                // Extract the optional response
                 if let Some(response_data) = parse_option_bytes_from_tuple(&result) {
                     let _ = response_tx.send(response_data);
                 }
@@ -825,15 +826,42 @@ fn bytes_to_value(data: Vec<u8>) -> Value {
     }
 }
 
-/// Parse an option<list<u8>> from a result tuple.
-/// The result from handle-request is tuple<option<list<u8>>>.
+/// Parse an option<list<u8>> from a handle-request result.
+/// The actual return type is:
+///   result<tuple<option<list<u8>>, tuple<option<list<u8>>>>, string>
+/// We need to:
+/// 1. Unwrap the Result (if Ok)
+/// 2. Get element 1 of the outer tuple (the response tuple)
+/// 3. Get element 0 of that tuple (the option<list<u8>>)
 fn parse_option_bytes_from_tuple(value: &Value) -> Option<Vec<u8>> {
-    // Result is tuple<option<list<u8>>>
-    let inner = match value {
+    // First, unwrap the Result if present
+    let inner_tuple = match value {
+        Value::Result { value: Ok(inner), .. } => inner.as_ref(),
+        Value::Result { value: Err(_), .. } => return None,
+        // Fallback for simple tuple (backward compat)
+        Value::Tuple(_) => value,
+        _ => return None,
+    };
+
+    // Now we have tuple<option<list<u8>>, tuple<option<list<u8>>>>
+    // Element 0 is the new state, element 1 is the response tuple
+    let response_tuple = match inner_tuple {
+        Value::Tuple(items) if items.len() >= 2 => &items[1],
+        // Fallback for old format: tuple<option<list<u8>>>
+        Value::Tuple(items) if !items.is_empty() => {
+            return parse_option_bytes(&items[0]);
+        }
+        _ => return None,
+    };
+
+    // response_tuple is tuple<option<list<u8>>>
+    // Get element 0 which is the option<list<u8>>
+    let response_option = match response_tuple {
         Value::Tuple(items) if !items.is_empty() => &items[0],
         _ => return None,
     };
-    parse_option_bytes(inner)
+
+    parse_option_bytes(response_option)
 }
 
 /// Parse an option<list<u8>> Value into Option<Vec<u8>>

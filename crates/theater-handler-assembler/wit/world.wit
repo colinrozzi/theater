@@ -1,0 +1,12 @@
+/// WIT world for the Assembler Handler
+///
+/// This world defines what the host provides to actors that import
+/// the wisp:assembler/runtime interface for converting WAT to WASM.
+
+package wisp:assembler-handler;
+
+world assembler-handler-host {
+    /// Wisp assembler interface
+    /// Provides WAT to WASM conversion functionality
+    import wisp:assembler/runtime;
+}
