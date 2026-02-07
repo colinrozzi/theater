@@ -1,9 +1,15 @@
 use anyhow::Result;
-use clap::Parser;
+use clap::{Parser, ValueEnum};
+use std::collections::HashMap;
+use std::fs::{self, OpenOptions};
+use std::io::Write;
+use std::path::PathBuf;
 use tokio::sync::mpsc;
-use tracing::{debug, error, info};
+use tracing::{debug, error};
+use tracing_subscriber::EnvFilter;
 
 use crate::{error::CliError, CommandContext};
+use theater::chain::ChainEvent;
 use theater::config::actor_manifest::{
     RuntimeHostConfig, StoreHandlerConfig, SupervisorHostConfig,
 };
@@ -11,10 +17,39 @@ use theater::handler::HandlerRegistry;
 use theater::messages::TheaterCommand;
 use theater::theater_runtime::TheaterRuntime;
 use theater::utils::resolve_reference;
+use theater::TheaterId;
 use theater_handler_message_server::{MessageRouter, MessageServerHandler};
 use theater_handler_runtime::RuntimeHandler;
 use theater_handler_store::StoreHandler;
 use theater_handler_supervisor::SupervisorHandler;
+
+/// Log level for runtime/system logs
+#[derive(Debug, Clone, Copy, ValueEnum, Default)]
+pub enum LogLevel {
+    /// Show error logs only
+    Error,
+    /// Show warning and error logs
+    Warn,
+    /// Show info, warning, and error logs
+    #[default]
+    Info,
+    /// Show debug and above
+    Debug,
+    /// Show all logs including trace
+    Trace,
+}
+
+impl std::fmt::Display for LogLevel {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            LogLevel::Error => write!(f, "error"),
+            LogLevel::Warn => write!(f, "warn"),
+            LogLevel::Info => write!(f, "info"),
+            LogLevel::Debug => write!(f, "debug"),
+            LogLevel::Trace => write!(f, "trace"),
+        }
+    }
+}
 
 #[derive(Debug, Parser)]
 pub struct StartArgs {
@@ -26,9 +61,127 @@ pub struct StartArgs {
     #[arg(short, long)]
     pub initial_state: Option<String>,
 
-    /// Show verbose output
+    /// Output all chain events as JSON (not just logs)
     #[arg(long)]
+    pub events: bool,
+
+    /// Directory to persist chain events (one file per actor)
+    #[arg(long)]
+    pub chain_dir: Option<PathBuf>,
+
+    /// Runtime log level (for system/tracing logs)
+    #[arg(long, value_enum)]
+    pub log_level: Option<LogLevel>,
+
+    /// Show verbose output (deprecated, use --events or --log-level)
+    #[arg(long, hide = true)]
     pub verbose: bool,
+}
+
+/// Extract log message from a chain event if it's a runtime log event
+fn extract_log_message(event: &ChainEvent) -> Option<String> {
+    if event.event_type != "theater:simple/runtime/log" {
+        return None;
+    }
+
+    // Parse the event data to extract the log message
+    // The data is a serialized ChainEventPayload::HostFunction(HostFunctionCall)
+    // where input contains the log message
+    let data_str = std::str::from_utf8(&event.data).ok()?;
+    let payload: serde_json::Value = serde_json::from_str(data_str).ok()?;
+
+    // Navigate to the input field which contains the log message
+    // Structure: {"category":"HostFunction","interface":"...","function":"log","input":{"String":"message"},...}
+    let input = payload.get("input")?;
+
+    // The input is a Pack Value, which for a string is {"String": "the message"}
+    if let Some(msg) = input.get("String") {
+        return msg.as_str().map(|s| s.to_string());
+    }
+
+    // Fallback: try to get it as a direct string
+    input.as_str().map(|s| s.to_string())
+}
+
+/// Format a chain event in the custom block format for file persistence
+fn format_event_block(event: &ChainEvent) -> String {
+    let hash_hex = hex::encode(&event.hash);
+    let parent_hex = event
+        .parent_hash
+        .as_ref()
+        .map(|h| hex::encode(h))
+        .unwrap_or_else(|| "0000000000000000000000000000000000000000".to_string());
+
+    let data_str = String::from_utf8_lossy(&event.data);
+
+    format!(
+        "EVENT {}\n{}\n{}\n{}\n\n{}\n\n",
+        hash_hex,
+        parent_hex,
+        event.event_type,
+        event.data.len(),
+        data_str
+    )
+}
+
+/// Format a chain event as JSON for stdout
+fn format_event_json(event: &ChainEvent, actor_id: &TheaterId) -> String {
+    let json = serde_json::json!({
+        "actor_id": actor_id.to_string(),
+        "hash": hex::encode(&event.hash),
+        "parent_hash": event.parent_hash.as_ref().map(hex::encode),
+        "event_type": event.event_type,
+        "data": serde_json::from_slice::<serde_json::Value>(&event.data).ok()
+    });
+    serde_json::to_string(&json).unwrap_or_else(|_| "{}".to_string())
+}
+
+/// Short actor ID for display (first 8 chars)
+fn short_id(id: &TheaterId) -> String {
+    let s = id.to_string();
+    if s.len() > 8 {
+        s[..8].to_string()
+    } else {
+        s
+    }
+}
+
+/// Manages chain file writers for multiple actors
+struct ChainFileManager {
+    dir: PathBuf,
+    files: HashMap<TheaterId, std::fs::File>,
+}
+
+impl ChainFileManager {
+    fn new(dir: PathBuf) -> Result<Self, CliError> {
+        fs::create_dir_all(&dir).map_err(|e| {
+            CliError::file_operation_failed("create directory", dir.display().to_string(), e)
+        })?;
+        Ok(Self {
+            dir,
+            files: HashMap::new(),
+        })
+    }
+
+    fn write_event(&mut self, actor_id: &TheaterId, event: &ChainEvent) -> Result<(), CliError> {
+        let file = self.files.entry(actor_id.clone()).or_insert_with(|| {
+            let path = self.dir.join(format!("{}.chain", actor_id));
+            OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&path)
+                .expect("Failed to open chain file")
+        });
+
+        let block = format_event_block(event);
+        file.write_all(block.as_bytes()).map_err(|e| {
+            CliError::file_operation_failed("write event", format!("{}.chain", actor_id), e)
+        })?;
+        file.flush().map_err(|e| {
+            CliError::file_operation_failed("flush", format!("{}.chain", actor_id), e)
+        })?;
+        Ok(())
+    }
 }
 
 /// Create a handler registry with all Theater handlers
@@ -58,6 +211,18 @@ fn create_handler_registry(
 
 /// Execute the start command - spin up a local runtime and run the actor
 pub async fn execute_async(args: &StartArgs, ctx: &CommandContext) -> Result<(), CliError> {
+    // Set up tracing based on --log-level
+    if let Some(level) = &args.log_level {
+        let filter = EnvFilter::try_new(format!("theater={},theater_handler={}", level, level))
+            .unwrap_or_else(|_| EnvFilter::new("info"));
+        let subscriber = tracing_subscriber::fmt()
+            .with_env_filter(filter)
+            .with_target(true)
+            .with_writer(std::io::stderr)
+            .finish();
+        let _ = tracing::subscriber::set_global_default(subscriber);
+    }
+
     debug!("Starting actor from manifest: {}", args.manifest);
 
     // Resolve the manifest reference (file path, URL, or store path)
@@ -78,6 +243,13 @@ pub async fn execute_async(args: &StartArgs, ctx: &CommandContext) -> Result<(),
             Ok(bytes) => Some(bytes),
             Err(_) => Some(state_str.as_bytes().to_vec()),
         }
+    } else {
+        None
+    };
+
+    // Set up chain file manager if --chain-dir is specified
+    let mut chain_file_manager = if let Some(ref dir) = args.chain_dir {
+        Some(ChainFileManager::new(dir.clone())?)
     } else {
         None
     };
@@ -127,10 +299,7 @@ pub async fn execute_async(args: &StartArgs, ctx: &CommandContext) -> Result<(),
     // Wait for the actor to start
     let actor_id = match response_rx.await {
         Ok(Ok(id)) => {
-            info!("Actor started: {}", id);
-            if args.verbose {
-                eprintln!("Actor started: {}", id);
-            }
+            debug!("Actor started: {}", id);
             id
         }
         Ok(Err(e)) => {
@@ -147,14 +316,15 @@ pub async fn execute_async(args: &StartArgs, ctx: &CommandContext) -> Result<(),
         }
     };
 
-    println!("{}", actor_id);
-
     // Now wait for either:
     // - The actor to exit (supervisor notification)
     // - Ctrl+C
     // - Shutdown token cancellation
     //
-    // Forward events to stderr if verbose
+    // Output modes:
+    // - Default: print only log messages as [actor-id] message
+    // - --events: print all chain events as JSON
+    // - --chain-dir: also persist events to files
     loop {
         tokio::select! {
             // Actor result (exit/error)
@@ -165,7 +335,7 @@ pub async fn execute_async(args: &StartArgs, ctx: &CommandContext) -> Result<(),
                         match actor_result {
                             theater::messages::ActorResult::Success(success) => {
                                 if let Some(output) = success.result {
-                                    use std::io::Write;
+                                    // Write actor result to stdout
                                     let _ = std::io::stdout().write_all(&output);
                                     let _ = std::io::stdout().flush();
                                 }
@@ -188,14 +358,29 @@ pub async fn execute_async(args: &StartArgs, ctx: &CommandContext) -> Result<(),
                 }
             }
 
-            // Event subscription (for verbose logging)
+            // Event subscription
             event = subscription_rx.recv() => {
                 if let Some(event) = event {
                     match event {
                         Ok(chain_event) => {
-                            if args.verbose {
-                                eprintln!("[{}]", chain_event.event_type);
+                            // Persist to chain file if enabled
+                            if let Some(ref mut manager) = chain_file_manager {
+                                if let Err(e) = manager.write_event(&actor_id, &chain_event) {
+                                    eprintln!("Warning: failed to write chain event: {}", e);
+                                }
                             }
+
+                            // Output to stdout based on mode
+                            if args.events {
+                                // JSON mode: output all events as JSON
+                                println!("{}", format_event_json(&chain_event, &actor_id));
+                            } else {
+                                // Default mode: only show log messages
+                                if let Some(msg) = extract_log_message(&chain_event) {
+                                    println!("[{}] {}", short_id(&actor_id), msg);
+                                }
+                            }
+
                             if chain_event.event_type == "shutdown" {
                                 break;
                             }

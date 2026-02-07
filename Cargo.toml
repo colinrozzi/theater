@@ -15,6 +15,9 @@ members = [
     "crates/theater-handler-assembler",
     "crates/theater-replay-experimenting",
 ]
+exclude = [
+    "crates/theater-handler-tcp/examples/tcp-echo",
+]
 # DEPRECATED: WASI handlers moved to crates/deprecated/
 # These use wasmtime Component Model and will be redesigned for Composite later
 # - theater-handler-environment

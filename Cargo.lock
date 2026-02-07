@@ -3344,6 +3344,7 @@ dependencies = [
  "dialoguer",
  "dirs 5.0.1",
  "handlebars",
+ "hex",
  "indicatif",
  "serde",
  "serde_json",
