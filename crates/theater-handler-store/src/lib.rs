@@ -41,7 +41,7 @@ use theater::store::{ContentRef, ContentStore, Label};
 
 // Pack integration
 use theater::pack_bridge::{
-    AsyncCtx, PackInstance, Ctx, HostLinkerBuilder, LinkerError, Value,
+    AsyncCtx, Ctx, HostLinkerBuilder, LinkerError, Value,
 };
 
 /// Errors that can occur during store operations
@@ -528,12 +528,6 @@ impl Handler for StoreHandler
 
         ctx.mark_satisfied("theater:simple/store");
         info!("Store host functions (Pack) set up successfully");
-        Ok(())
-    }
-
-    fn register_exports_composite(&self, _instance: &mut PackInstance) -> anyhow::Result<()> {
-        // Store handler has no exports
-        info!("No export functions needed for store handler (Pack)");
         Ok(())
     }
 

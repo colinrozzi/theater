@@ -16,7 +16,7 @@ use theater::shutdown::ShutdownReceiver;
 
 // Pack integration
 use theater::pack_bridge::{
-    AsyncCtx, PackInstance, HostLinkerBuilder, LinkerError, Value, ValueType,
+    AsyncCtx, HostLinkerBuilder, LinkerError, Value, ValueType,
 };
 
 use anyhow::Result;
@@ -596,14 +596,6 @@ impl Handler for SupervisorHandler
             })?;
 
         ctx.mark_satisfied("theater:simple/supervisor");
-        Ok(())
-    }
-
-    fn register_exports_composite(&self, instance: &mut PackInstance) -> Result<()> {
-        // Register supervisor callback export functions
-        instance.register_export("theater:simple/supervisor-handlers", "handle-child-error");
-        instance.register_export("theater:simple/supervisor-handlers", "handle-child-exit");
-        instance.register_export("theater:simple/supervisor-handlers", "handle-child-external-stop");
         Ok(())
     }
 

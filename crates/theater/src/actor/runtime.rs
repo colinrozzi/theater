@@ -366,28 +366,8 @@ impl ActorRuntime {
             handler_ctx.satisfied_imports
         );
 
-        // ----------------- Checkpoint Register Exports -----------------
-
-        debug!("Registering export functions");
-
-        if !actor_phase_manager.is_phase(ActorPhase::Starting) {
-            let curr_phase = actor_phase_manager.get_phase();
-            return Err(ActorRuntimeError::ActorPhaseError {
-                expected: ActorPhase::Starting,
-                found: curr_phase,
-                message: "phase error found at setup task Checkpoint Register Exports".into(),
-            });
-        }
-
-        // Register standard Theater actor exports
-        actor_instance.register_export("theater:simple/actor", "init");
-
-        // Let handlers register their exports
-        for handler in handlers.iter() {
-            if let Err(e) = handler.register_exports_composite(&mut actor_instance) {
-                warn!("Handler '{}' failed to register exports: {:?}", handler.name(), e);
-            }
-        }
+        // Note: Export discovery is now automatic via Pack's embedded __pack_types metadata.
+        // No manual export registration is needed.
 
         // ----------------- Checkpoint Initialize State -----------------
 
@@ -916,11 +896,6 @@ impl ActorRuntime {
         _theater_tx: &mpsc::Sender<TheaterCommand>,
         metrics: &MetricsCollector,
     ) -> Result<Vec<u8>, ActorError> {
-        if !actor_instance.has_function(name) {
-            error!("Function '{}' not found in actor", name);
-            return Err(ActorError::FunctionNotFound(name.to_string()));
-        }
-
         let start = Instant::now();
 
         let state = actor_instance.actor_store.get_state();

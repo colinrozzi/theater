@@ -96,9 +96,6 @@ async fn test_composite_instance_basic() {
 
     info!("PackInstance created successfully");
 
-    // Register the init export
-    instance.register_export("theater:simple/actor", "init");
-
     // Call the init function
     // The init function expects: Tuple(Option<List<u8>>, List<u8>)
     let state: Option<Vec<u8>> = None;

@@ -18,7 +18,7 @@ use tokio::sync::mpsc::Sender;
 
 // Pack integration
 use theater::pack_bridge::{
-    AsyncCtx, PackInstance, Ctx, HostLinkerBuilder, LinkerError, Value,
+    AsyncCtx, Ctx, HostLinkerBuilder, LinkerError, Value,
 };
 
 /// Handler for providing runtime information and control to WebAssembly actors
@@ -195,12 +195,6 @@ impl Handler for RuntimeHandler {
             )?;
 
         ctx.mark_satisfied("theater:simple/runtime");
-        Ok(())
-    }
-
-    fn register_exports_composite(&self, instance: &mut PackInstance) -> anyhow::Result<()> {
-        // Register the init export function
-        instance.register_export("theater:simple/actor", "init");
         Ok(())
     }
 

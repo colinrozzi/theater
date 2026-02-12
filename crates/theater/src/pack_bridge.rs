@@ -12,7 +12,6 @@
 //!   Pack's `Value` type and Theater's types
 
 use anyhow::{Context, Result};
-use std::collections::HashMap;
 use std::sync::Arc;
 
 // Re-export Pack types for convenient use throughout Theater
@@ -23,18 +22,13 @@ pub use pack::{
     AsyncCtx, AsyncInstance, AsyncRuntime, CallInterceptor, Ctx, HostFunctionProvider,
     HostLinkerBuilder, InterfaceBuilder, LinkerError,
 };
+// Re-export metadata types for querying actor exports/imports
+pub use pack::{
+    FunctionSignature, MetadataError, PackageMetadata, ParamSignature, TypeDesc,
+};
 
 use crate::actor::store::ActorStore;
 use crate::id::TheaterId;
-
-/// Metadata about an export function.
-#[derive(Debug, Clone)]
-pub struct ExportFunction {
-    /// The interface name (e.g., "theater:simple/actor")
-    pub interface: String,
-    /// The function name (e.g., "init")
-    pub function: String,
-}
 
 /// An instantiated Pack component with Theater integration.
 ///
@@ -59,6 +53,12 @@ pub struct ExportFunction {
 ///     }
 /// ).await?;
 /// ```
+///
+/// ## Export Discovery
+///
+/// Pack packages embed type metadata accessible via `get_metadata()`.
+/// This provides full type signatures for all imports and exports,
+/// eliminating the need for manual export registration.
 pub struct PackInstance {
     /// The actor name
     pub name: String,
@@ -66,8 +66,6 @@ pub struct PackInstance {
     pub instance: AsyncInstance<ActorStore>,
     /// The actor store
     pub actor_store: ActorStore,
-    /// Registered export functions for this instance
-    pub export_functions: HashMap<String, ExportFunction>,
 }
 
 impl PackInstance {
@@ -133,7 +131,6 @@ impl PackInstance {
             name: name.into(),
             instance,
             actor_store,
-            export_functions: HashMap::new(),
         })
     }
 
@@ -142,32 +139,44 @@ impl PackInstance {
         self.actor_store.id.clone()
     }
 
-    /// Register an export function for later calling.
+    /// Get the package metadata describing imports and exports.
     ///
-    /// This records metadata about an expected export function.
-    pub fn register_export(&mut self, interface: &str, function: &str) {
-        let key = format!("{}.{}", interface, function);
-        self.export_functions.insert(
-            key,
-            ExportFunction {
-                interface: interface.to_string(),
-                function: function.to_string(),
-            },
-        );
+    /// This calls the `__pack_types` export embedded in the WASM module
+    /// to retrieve full type signatures for all imports and exports.
+    /// Returns `Err(MetadataError::NotFound)` if the package doesn't
+    /// export `__pack_types`.
+    pub async fn get_metadata(&mut self) -> Result<PackageMetadata, MetadataError> {
+        self.instance.types().await
     }
 
-    /// Check if a function is registered.
-    pub fn has_function(&self, name: &str) -> bool {
-        self.export_functions.contains_key(name)
+    /// Check if the package exports a function with the given name.
+    ///
+    /// This queries the embedded package metadata to check for the export.
+    pub async fn has_export(&mut self, interface: &str, function: &str) -> Result<bool, MetadataError> {
+        let metadata = self.get_metadata().await?;
+        Ok(metadata.exports.iter().any(|f| {
+            f.interface == interface && f.name == function
+        }))
+    }
+
+    /// Get the list of exported functions with their full type signatures.
+    pub async fn get_exports(&mut self) -> Result<Vec<FunctionSignature>, MetadataError> {
+        let metadata = self.get_metadata().await?;
+        Ok(metadata.exports)
+    }
+
+    /// Get the list of imported functions with their full type signatures.
+    pub async fn get_imports(&mut self) -> Result<Vec<FunctionSignature>, MetadataError> {
+        let metadata = self.get_metadata().await?;
+        Ok(metadata.imports)
     }
 
     /// Call an export function with the given state and parameters.
     ///
     /// This is the primary way to invoke actor functions. It:
-    /// 1. Validates the function is registered
-    /// 2. Encodes the input as a Graph ABI value
-    /// 3. Calls the function using the full qualified name
-    /// 4. Decodes the output
+    /// 1. Encodes the input as a Graph ABI value
+    /// 2. Calls the function using the full qualified name
+    /// 3. Decodes the output
     ///
     /// ## Parameters
     ///
@@ -184,11 +193,6 @@ impl PackInstance {
         state: Option<Vec<u8>>,
         params: Vec<u8>,
     ) -> Result<(Option<Vec<u8>>, Vec<u8>)> {
-        // Validate the function is registered
-        if !self.export_functions.contains_key(function_name) {
-            return Err(anyhow::anyhow!("Function '{}' not registered", function_name));
-        }
-
         // Build input value: tuple of (state, params)
         let state_value = state_to_value(state);
         let params_value = bytes_to_value(&params);
@@ -216,10 +220,6 @@ impl PackInstance {
         state: Option<Vec<u8>>,
         params: Value,
     ) -> Result<(Option<Vec<u8>>, Vec<u8>)> {
-        if !self.export_functions.contains_key(function_name) {
-            return Err(anyhow::anyhow!("Function '{}' not registered", function_name));
-        }
-
         let state_value = state_to_value(state);
         let input = Value::Tuple(vec![state_value, params]);
 

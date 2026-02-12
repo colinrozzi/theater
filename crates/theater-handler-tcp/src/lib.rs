@@ -21,7 +21,7 @@ use theater::handler::{Handler, HandlerContext, SharedActorInstance};
 use theater::shutdown::ShutdownReceiver;
 
 use theater::pack_bridge::{
-    AsyncCtx, HostLinkerBuilder, LinkerError, PackInstance, Value, ValueType,
+    AsyncCtx, HostLinkerBuilder, LinkerError, Value, ValueType,
 };
 
 /// Shared TCP state between host function closures and the start() accept loop.
@@ -426,11 +426,6 @@ impl Handler for TcpHandler {
 
         ctx.mark_satisfied("theater:simple/tcp");
         info!("TCP host functions (Pack) set up successfully");
-        Ok(())
-    }
-
-    fn register_exports_composite(&self, instance: &mut PackInstance) -> anyhow::Result<()> {
-        instance.register_export("theater:simple/tcp-client", "handle-connection");
         Ok(())
     }
 

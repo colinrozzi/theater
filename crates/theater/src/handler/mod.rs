@@ -156,11 +156,11 @@ impl HandlerRegistry {
 ///
 /// ## Composite Migration
 ///
-/// For handlers migrating to Composite's Graph ABI runtime, implement these methods:
+/// For handlers migrating to Composite's Graph ABI runtime, implement:
 /// - `setup_host_functions_composite()` - Register host functions using `HostLinkerBuilder`
-/// - `register_exports_composite()` - Register export function metadata
 ///
-/// These have default implementations that do nothing, allowing gradual migration.
+/// Export discovery is automatic via Pack's embedded `__pack_types` metadata,
+/// so handlers no longer need to manually register exports.
 pub trait Handler: Send + Sync + 'static {
     /// Create a new instance of this handler, optionally with a config from the manifest.
     ///
@@ -207,17 +207,6 @@ pub trait Handler: Send + Sync + 'static {
         _builder: &mut HostLinkerBuilder<'_, ActorStore>,
         _ctx: &mut HandlerContext,
     ) -> Result<(), LinkerError> {
-        // Default: do nothing - handlers opt-in by overriding
-        Ok(())
-    }
-
-    /// Register export function metadata for Composite instances.
-    ///
-    /// This records which export functions this handler expects from the actor.
-    /// The actual function calls are made through `PackInstance::call_function()`.
-    ///
-    /// Default implementation does nothing, allowing gradual migration.
-    fn register_exports_composite(&self, _instance: &mut PackInstance) -> Result<()> {
         // Default: do nothing - handlers opt-in by overriding
         Ok(())
     }

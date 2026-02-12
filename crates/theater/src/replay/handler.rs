@@ -39,7 +39,7 @@ use crate::actor::store::ActorStore;
 use crate::chain::ChainEvent;
 use crate::events::ChainEventPayload;
 use crate::events::wasm::WasmEventData;
-use crate::pack_bridge::{HostLinkerBuilder, LinkerError, PackInstance};
+use crate::pack_bridge::{HostLinkerBuilder, LinkerError};
 use crate::handler::{Handler, HandlerContext, SharedActorInstance};
 use crate::shutdown::ShutdownReceiver;
 
@@ -277,11 +277,6 @@ impl Handler for ReplayHandler {
     ) -> Result<(), LinkerError> {
         // Host function interception is handled by ReplayRecordingInterceptor at the Pack level.
         // No stub functions needed here.
-        Ok(())
-    }
-
-    fn register_exports_composite(&self, _instance: &mut PackInstance) -> anyhow::Result<()> {
-        // Replay handler doesn't add export functions
         Ok(())
     }
 

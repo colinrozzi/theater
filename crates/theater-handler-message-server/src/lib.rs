@@ -55,7 +55,7 @@ use uuid::Uuid;
 
 // Pack integration
 use theater::pack_bridge::{
-    AsyncCtx, PackInstance, Ctx, HostLinkerBuilder, LinkerError, Value, ValueType,
+    AsyncCtx, Ctx, HostLinkerBuilder, LinkerError, Value, ValueType,
 };
 
 /// Errors that can occur during message server operations
@@ -795,19 +795,6 @@ impl Handler for MessageServerHandler
 
         ctx.mark_satisfied("theater:simple/message-server-host");
         info!("Message server host functions (Pack) set up successfully");
-        Ok(())
-    }
-
-    fn register_exports_composite(&self, instance: &mut PackInstance) -> anyhow::Result<()> {
-        info!("Registering message server exports (Pack)");
-
-        // Register all export functions
-        instance.register_export("theater:simple/message-server-client", "handle-send");
-        instance.register_export("theater:simple/message-server-client", "handle-request");
-        instance.register_export("theater:simple/message-server-client", "handle-channel-open");
-        instance.register_export("theater:simple/message-server-client", "handle-channel-message");
-        instance.register_export("theater:simple/message-server-client", "handle-channel-close");
-
         Ok(())
     }
 
