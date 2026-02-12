@@ -26,9 +26,46 @@ pub use pack::{
 pub use pack::{
     FunctionSignature, MetadataError, PackageMetadata, ParamSignature, TypeDesc,
 };
+// Re-export interface implementation types for handler interface declarations
+pub use pack::{
+    FuncSignature, InterfaceImpl, PackParams, PackType, TypeHash,
+};
 
 use crate::actor::store::ActorStore;
 use crate::id::TheaterId;
+
+/// Extract functions from an Arena by finding a child arena with the given name.
+///
+/// The Arena structure from `decode_metadata` is:
+/// ```text
+/// Arena("package")
+/// ├── Arena("imports")
+/// │   ├── Arena("interface1") → functions
+/// │   └── Arena("interface2") → functions
+/// └── Arena("exports")
+///     ├── Arena("interface1") → functions
+///     └── Arena("interface2") → functions
+/// ```
+///
+/// Returns tuples of (interface_name, function).
+fn extract_functions_from_arena(arena: &PackageMetadata, section: &str) -> Vec<(String, FunctionSignature)> {
+    let mut result = Vec::new();
+
+    // Find the child arena with the given name (e.g., "imports" or "exports")
+    for child in &arena.children {
+        if child.name == section {
+            // Each child of this arena is an interface
+            for interface_arena in &child.children {
+                let interface_name = &interface_arena.name;
+                for func in &interface_arena.functions {
+                    result.push((interface_name.clone(), func.clone()));
+                }
+            }
+        }
+    }
+
+    result
+}
 
 /// An instantiated Pack component with Theater integration.
 ///
@@ -153,22 +190,26 @@ impl PackInstance {
     ///
     /// This queries the embedded package metadata to check for the export.
     pub async fn has_export(&mut self, interface: &str, function: &str) -> Result<bool, MetadataError> {
-        let metadata = self.get_metadata().await?;
-        Ok(metadata.exports.iter().any(|f| {
-            f.interface == interface && f.name == function
+        let exports = self.get_exports().await?;
+        Ok(exports.iter().any(|(iface, func)| {
+            iface == interface && func.name == function
         }))
     }
 
     /// Get the list of exported functions with their full type signatures.
-    pub async fn get_exports(&mut self) -> Result<Vec<FunctionSignature>, MetadataError> {
+    ///
+    /// Returns tuples of (interface_name, function).
+    pub async fn get_exports(&mut self) -> Result<Vec<(String, FunctionSignature)>, MetadataError> {
         let metadata = self.get_metadata().await?;
-        Ok(metadata.exports)
+        Ok(extract_functions_from_arena(&metadata, "exports"))
     }
 
     /// Get the list of imported functions with their full type signatures.
-    pub async fn get_imports(&mut self) -> Result<Vec<FunctionSignature>, MetadataError> {
+    ///
+    /// Returns tuples of (interface_name, function).
+    pub async fn get_imports(&mut self) -> Result<Vec<(String, FunctionSignature)>, MetadataError> {
         let metadata = self.get_metadata().await?;
-        Ok(metadata.imports)
+        Ok(extract_functions_from_arena(&metadata, "imports"))
     }
 
     /// Call an export function with the given state and parameters.

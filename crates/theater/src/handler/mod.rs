@@ -2,7 +2,7 @@ use crate::actor::handle::ActorHandle;
 use crate::actor::store::ActorStore;
 use crate::chain::ChainEvent;
 use crate::id::TheaterId;
-use crate::pack_bridge::{HostLinkerBuilder, LinkerError, PackInstance};
+use crate::pack_bridge::{HostLinkerBuilder, LinkerError, PackInstance, TypeHash};
 use crate::config::actor_manifest::HandlerConfig;
 use crate::shutdown::ShutdownReceiver;
 use anyhow::Result;
@@ -220,6 +220,28 @@ pub trait Handler: Send + Sync + 'static {
     /// Returns the list of exports this handler expects from the component.
     /// Used for matching handlers to components that export these interfaces.
     fn exports(&self) -> Option<Vec<String>>;
+
+    /// Returns the interface hashes for each interface this handler provides.
+    ///
+    /// Interface hashes enable O(1) compatibility checking between handlers and
+    /// components. Two interfaces are compatible if their hashes match.
+    ///
+    /// Handlers can compute these hashes using `InterfaceImpl`:
+    ///
+    /// ```ignore
+    /// use pack::{InterfaceImpl, TypeHash};
+    ///
+    /// fn interface_hashes(&self) -> Vec<(String, TypeHash)> {
+    ///     let interface = InterfaceImpl::new("my:interface")
+    ///         .func("greet", |name: String| -> String { String::new() })
+    ///         .func("add", |a: i32, b: i32| -> i32 { 0 });
+    ///
+    ///     vec![(interface.name().to_string(), interface.hash())]
+    /// }
+    /// ```
+    fn interface_hashes(&self) -> Vec<(String, TypeHash)> {
+        vec![]
+    }
 
     /// Returns true if this handler supports Composite's Graph ABI runtime.
     ///

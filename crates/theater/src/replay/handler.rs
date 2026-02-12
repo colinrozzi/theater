@@ -39,7 +39,7 @@ use crate::actor::store::ActorStore;
 use crate::chain::ChainEvent;
 use crate::events::ChainEventPayload;
 use crate::events::wasm::WasmEventData;
-use crate::pack_bridge::{HostLinkerBuilder, LinkerError};
+use crate::pack_bridge::{HostLinkerBuilder, InterfaceImpl, LinkerError, TypeHash};
 use crate::handler::{Handler, HandlerContext, SharedActorInstance};
 use crate::shutdown::ShutdownReceiver;
 
@@ -183,6 +183,14 @@ impl ReplayHandler {
     pub fn progress(&self) -> (usize, usize) {
         (self.state.current_position(), self.state.total_events())
     }
+
+    /// Get the interface declarations for this handler.
+    ///
+    /// ReplayHandler doesn't provide specific interfaces - it intercepts
+    /// calls dynamically based on the recorded chain. Returns empty vec.
+    pub fn interfaces(&self) -> Vec<InterfaceImpl> {
+        vec![]
+    }
 }
 
 impl Handler for ReplayHandler {
@@ -295,6 +303,11 @@ impl Handler for ReplayHandler {
         None
     }
 
+    fn interface_hashes(&self) -> Vec<(String, TypeHash)> {
+        // ReplayHandler intercepts calls dynamically, no specific interfaces
+        vec![]
+    }
+
     fn supports_composite(&self) -> bool {
         // Mark as supporting composite even though implementation is pending
         // This allows the handler to be registered and will log warnings when used
@@ -367,5 +380,24 @@ mod tests {
         let (current, total) = handler.progress();
         assert_eq!(current, 0);
         assert_eq!(total, 1);
+    }
+
+    #[test]
+    fn test_replay_handler_interface_hashes() {
+        let events = vec![ChainEvent {
+            hash: vec![1, 2, 3, 4],
+            parent_hash: None,
+            event_type: "theater:simple/runtime/log".to_string(),
+            data: vec![],
+        }];
+
+        let handler = ReplayHandler::new(events);
+
+        // ReplayHandler has no specific interfaces
+        let hashes = handler.interface_hashes();
+        assert!(hashes.is_empty());
+
+        // interfaces() should also be empty
+        assert!(handler.interfaces().is_empty());
     }
 }

@@ -14,7 +14,20 @@ use theater::handler::{Handler, HandlerContext, SharedActorInstance};
 use theater::shutdown::ShutdownReceiver;
 
 // Pack integration
-use theater::pack_bridge::{Ctx, HostLinkerBuilder, LinkerError, Value, ValueType};
+use theater::pack_bridge::{Ctx, HostLinkerBuilder, InterfaceImpl, LinkerError, TypeHash, Value, ValueType};
+
+// ============================================================================
+// Interface Declarations
+// ============================================================================
+
+/// Declare the wisp:assembler/runtime interface.
+///
+/// Functions:
+/// - wat-to-wasm(wat: string) -> result<list<u8>, string>
+fn assembler_interface() -> InterfaceImpl {
+    InterfaceImpl::new("wisp:assembler/runtime")
+        .func("wat-to-wasm", |_: String| -> Result<Vec<u8>, String> { Ok(vec![]) })
+}
 
 /// Handler for providing WAT to WASM assembly capabilities
 #[derive(Clone, Default)]
@@ -23,6 +36,11 @@ pub struct AssemblerHandler;
 impl AssemblerHandler {
     pub fn new() -> Self {
         Self
+    }
+
+    /// Get the interface declarations for this handler.
+    pub fn interfaces(&self) -> Vec<InterfaceImpl> {
+        vec![assembler_interface()]
     }
 }
 
@@ -110,11 +128,18 @@ impl Handler for AssemblerHandler {
     }
 
     fn imports(&self) -> Option<Vec<String>> {
-        Some(vec!["wisp:assembler/runtime".to_string()])
+        Some(self.interfaces().iter().map(|i| i.name().to_string()).collect())
     }
 
     fn exports(&self) -> Option<Vec<String>> {
         None
+    }
+
+    fn interface_hashes(&self) -> Vec<(String, TypeHash)> {
+        self.interfaces()
+            .iter()
+            .map(|i| (i.name().to_string(), i.hash()))
+            .collect()
     }
 }
 
@@ -155,5 +180,24 @@ mod tests {
         let result = wat::parse_str(wat);
         assert!(result.is_ok());
         assert!(result.unwrap().len() > 0);
+    }
+
+    #[test]
+    fn test_assembler_interface_hash_determinism() {
+        let interface1 = assembler_interface();
+        let interface2 = assembler_interface();
+        assert_eq!(interface1.hash(), interface2.hash());
+    }
+
+    #[test]
+    fn test_assembler_handler_interface_hashes() {
+        let handler = AssemblerHandler::new();
+
+        let hashes = handler.interface_hashes();
+        assert_eq!(hashes.len(), 1);
+        assert_eq!(hashes[0].0, "wisp:assembler/runtime");
+
+        // Hash should be non-zero
+        assert!(!hashes[0].1.as_bytes().iter().all(|&b| b == 0));
     }
 }

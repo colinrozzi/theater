@@ -16,7 +16,7 @@ use theater::shutdown::ShutdownReceiver;
 
 // Pack integration
 use theater::pack_bridge::{
-    AsyncCtx, HostLinkerBuilder, LinkerError, Value, ValueType,
+    AsyncCtx, HostLinkerBuilder, InterfaceImpl, LinkerError, TypeHash, Value, ValueType,
 };
 
 use anyhow::Result;
@@ -27,6 +27,42 @@ use std::time::Duration;
 use thiserror::Error;
 use tokio::sync::{mpsc, oneshot};
 use tracing::{debug, error, info};
+
+// ============================================================================
+// Interface Declarations
+// ============================================================================
+
+/// Declare the theater:simple/supervisor interface.
+///
+/// Functions for spawning and managing child actors:
+/// - spawn(manifest: string, init-bytes: option<list<u8>>, wasm-bytes: option<list<u8>>) -> result<string, string>
+/// - spawn-and-wait(manifest: string, init-bytes: option<list<u8>>, wasm-bytes: option<list<u8>>, timeout-ms: option<u64>) -> result<option<list<u8>>, string>
+/// - resume(manifest: string, state-bytes: option<list<u8>>, wasm-bytes: option<list<u8>>) -> result<string, string>
+/// - list-children() -> list<string>
+/// - restart-child(child-id: string) -> result<(), string>
+/// - stop-child(child-id: string) -> result<(), string>
+/// - get-child-state(child-id: string) -> result<option<list<u8>>, string>
+/// - get-child-events(child-id: string) -> result<list<chain-event>, string>
+///
+/// Note: chain-event is approximated as Vec<u8> (serialized) for signature hashing.
+fn supervisor_interface() -> InterfaceImpl {
+    InterfaceImpl::new("theater:simple/supervisor")
+        .func("spawn", |_: String, _: Option<Vec<u8>>, _: Option<Vec<u8>>| -> Result<String, String> {
+            Ok(String::new())
+        })
+        .func("spawn-and-wait", |_: String, _: Option<Vec<u8>>, _: Option<Vec<u8>>, _: Option<u64>| -> Result<Option<Vec<u8>>, String> {
+            Ok(None)
+        })
+        .func("resume", |_: String, _: Option<Vec<u8>>, _: Option<Vec<u8>>| -> Result<String, String> {
+            Ok(String::new())
+        })
+        .func("list-children", || -> Vec<String> { vec![] })
+        .func("restart-child", |_: String| -> Result<(), String> { Ok(()) })
+        .func("stop-child", |_: String| -> Result<(), String> { Ok(()) })
+        .func("get-child-state", |_: String| -> Result<Option<Vec<u8>>, String> { Ok(None) })
+        // chain-event approximated as Vec<u8>
+        .func("get-child-events", |_: String| -> Result<Vec<Vec<u8>>, String> { Ok(vec![]) })
+}
 
 /// Errors that can occur during supervisor operations
 #[derive(Error, Debug)]
@@ -85,6 +121,11 @@ impl SupervisorHandler {
     /// can receive notifications about child lifecycle events.
     pub fn get_sender(&self) -> tokio::sync::mpsc::Sender<ActorResult> {
         self.channel_tx.clone()
+    }
+
+    /// Get the interface declarations for this handler.
+    pub fn interfaces(&self) -> Vec<InterfaceImpl> {
+        vec![supervisor_interface()]
     }
 
     /// Process child actor results received via the channel
@@ -155,11 +196,18 @@ impl Handler for SupervisorHandler
     }
 
     fn imports(&self) -> Option<Vec<String>> {
-        Some(vec!["theater:simple/supervisor".to_string()])
+        Some(self.interfaces().iter().map(|i| i.name().to_string()).collect())
     }
 
     fn exports(&self) -> Option<Vec<String>> {
         Some(vec!["theater:simple/supervisor-handlers".to_string()])
+    }
+
+    fn interface_hashes(&self) -> Vec<(String, TypeHash)> {
+        self.interfaces()
+            .iter()
+            .map(|i| (i.name().to_string(), i.hash()))
+            .collect()
     }
 
     fn setup_host_functions_composite(
@@ -755,5 +803,25 @@ mod tests {
         let handler = SupervisorHandler::new(config, None);
         let cloned = handler.create_instance(None);
         assert_eq!(cloned.name(), "supervisor");
+    }
+
+    #[test]
+    fn test_supervisor_interface_hash_determinism() {
+        let interface1 = supervisor_interface();
+        let interface2 = supervisor_interface();
+        assert_eq!(interface1.hash(), interface2.hash());
+    }
+
+    #[test]
+    fn test_supervisor_handler_interface_hashes() {
+        let config = SupervisorHostConfig {};
+        let handler = SupervisorHandler::new(config, None);
+
+        let hashes = handler.interface_hashes();
+        assert_eq!(hashes.len(), 1);
+        assert_eq!(hashes[0].0, "theater:simple/supervisor");
+
+        // Hash should be non-zero
+        assert!(!hashes[0].1.as_bytes().iter().all(|&b| b == 0));
     }
 }

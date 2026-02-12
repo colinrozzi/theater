@@ -21,8 +21,33 @@ use theater::handler::{Handler, HandlerContext, SharedActorInstance};
 use theater::shutdown::ShutdownReceiver;
 
 use theater::pack_bridge::{
-    AsyncCtx, HostLinkerBuilder, LinkerError, Value, ValueType,
+    AsyncCtx, HostLinkerBuilder, InterfaceImpl, LinkerError, TypeHash, Value, ValueType,
 };
+
+// ============================================================================
+// Interface Declarations
+// ============================================================================
+
+/// Declare the theater:simple/tcp interface.
+///
+/// Functions for raw TCP networking:
+/// - connect(address: string) -> result<string, string>
+/// - listen(address: string) -> result<string, string>
+/// - accept(listener-id: string) -> result<string, string>
+/// - send(connection-id: string, data: list<u8>) -> result<u64, string>
+/// - receive(connection-id: string, max-bytes: u32) -> result<list<u8>, string>
+/// - close(connection-id: string) -> result<(), string>
+/// - close-listener(listener-id: string) -> result<(), string>
+fn tcp_interface() -> InterfaceImpl {
+    InterfaceImpl::new("theater:simple/tcp")
+        .func("connect", |_: String| -> Result<String, String> { Ok(String::new()) })
+        .func("listen", |_: String| -> Result<String, String> { Ok(String::new()) })
+        .func("accept", |_: String| -> Result<String, String> { Ok(String::new()) })
+        .func("send", |_: String, _: Vec<u8>| -> Result<u64, String> { Ok(0) })
+        .func("receive", |_: String, _: u32| -> Result<Vec<u8>, String> { Ok(vec![]) })
+        .func("close", |_: String| -> Result<(), String> { Ok(()) })
+        .func("close-listener", |_: String| -> Result<(), String> { Ok(()) })
+}
 
 /// Shared TCP state between host function closures and the start() accept loop.
 #[derive(Clone)]
@@ -74,6 +99,11 @@ impl TcpHandler {
             config,
             state: None,
         }
+    }
+
+    /// Get the interface declarations for this handler.
+    pub fn interfaces(&self) -> Vec<InterfaceImpl> {
+        vec![tcp_interface()]
     }
 }
 
@@ -159,11 +189,18 @@ impl Handler for TcpHandler {
     }
 
     fn imports(&self) -> Option<Vec<String>> {
-        Some(vec!["theater:simple/tcp".to_string()])
+        Some(self.interfaces().iter().map(|i| i.name().to_string()).collect())
     }
 
     fn exports(&self) -> Option<Vec<String>> {
         Some(vec!["theater:simple/tcp-client".to_string()])
+    }
+
+    fn interface_hashes(&self) -> Vec<(String, TypeHash)> {
+        self.interfaces()
+            .iter()
+            .map(|i| (i.name().to_string(), i.hash()))
+            .collect()
     }
 
     fn start(
@@ -467,5 +504,28 @@ mod tests {
         let cloned = handler.create_instance(None);
 
         assert_eq!(cloned.name(), "tcp");
+    }
+
+    #[test]
+    fn test_tcp_interface_hash_determinism() {
+        let interface1 = tcp_interface();
+        let interface2 = tcp_interface();
+        assert_eq!(interface1.hash(), interface2.hash());
+    }
+
+    #[test]
+    fn test_tcp_handler_interface_hashes() {
+        let config = TcpHandlerConfig {
+            listen: None,
+            max_connections: None,
+        };
+        let handler = TcpHandler::new(config);
+
+        let hashes = handler.interface_hashes();
+        assert_eq!(hashes.len(), 1);
+        assert_eq!(hashes[0].0, "theater:simple/tcp");
+
+        // Hash should be non-zero
+        assert!(!hashes[0].1.as_bytes().iter().all(|&b| b == 0));
     }
 }

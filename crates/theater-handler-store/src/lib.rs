@@ -41,8 +41,47 @@ use theater::store::{ContentRef, ContentStore, Label};
 
 // Pack integration
 use theater::pack_bridge::{
-    AsyncCtx, Ctx, HostLinkerBuilder, LinkerError, Value,
+    AsyncCtx, Ctx, HostLinkerBuilder, InterfaceImpl, LinkerError, TypeHash, Value,
 };
+
+// ============================================================================
+// Interface Declarations
+// ============================================================================
+
+/// Declare the theater:simple/store interface.
+///
+/// Functions for content-addressed storage:
+/// - new() -> result<string, string>
+/// - store(store-id: string, content: list<u8>) -> result<content-ref, string>
+/// - get(store-id: string, content-ref: content-ref) -> result<list<u8>, string>
+/// - exists(store-id: string, content-ref: content-ref) -> result<bool, string>
+/// - label(store-id: string, label: string, content-ref: content-ref) -> result<(), string>
+/// - get-by-label(store-id: string, label: string) -> result<option<content-ref>, string>
+/// - remove-label(store-id: string, label: string) -> result<(), string>
+/// - store-at-label(store-id: string, label: string, content: list<u8>) -> result<content-ref, string>
+/// - replace-content-at-label(store-id: string, label: string, content: list<u8>) -> result<content-ref, string>
+/// - replace-at-label(store-id: string, label: string, content-ref: content-ref) -> result<(), string>
+/// - list-all-content(store-id: string) -> result<list<content-ref>, string>
+/// - calculate-total-size(store-id: string) -> result<u64, string>
+/// - list-labels(store-id: string) -> result<list<string>, string>
+///
+/// Note: content-ref is approximated as String (the hash) for signature hashing.
+fn store_interface() -> InterfaceImpl {
+    InterfaceImpl::new("theater:simple/store")
+        .func("new", || -> Result<String, String> { Ok(String::new()) })
+        .func("store", |_: String, _: Vec<u8>| -> Result<String, String> { Ok(String::new()) })
+        .func("get", |_: String, _: String| -> Result<Vec<u8>, String> { Ok(vec![]) })
+        .func("exists", |_: String, _: String| -> Result<bool, String> { Ok(false) })
+        .func("label", |_: String, _: String, _: String| -> Result<(), String> { Ok(()) })
+        .func("get-by-label", |_: String, _: String| -> Result<Option<String>, String> { Ok(None) })
+        .func("remove-label", |_: String, _: String| -> Result<(), String> { Ok(()) })
+        .func("store-at-label", |_: String, _: String, _: Vec<u8>| -> Result<String, String> { Ok(String::new()) })
+        .func("replace-content-at-label", |_: String, _: String, _: Vec<u8>| -> Result<String, String> { Ok(String::new()) })
+        .func("replace-at-label", |_: String, _: String, _: String| -> Result<(), String> { Ok(()) })
+        .func("list-all-content", |_: String| -> Result<Vec<String>, String> { Ok(vec![]) })
+        .func("calculate-total-size", |_: String| -> Result<u64, String> { Ok(0) })
+        .func("list-labels", |_: String| -> Result<Vec<String>, String> { Ok(vec![]) })
+}
 
 /// Errors that can occur during store operations
 #[derive(Error, Debug)]
@@ -71,6 +110,11 @@ impl StoreHandler {
         permissions: Option<StorePermissions>,
     ) -> Self {
         Self { permissions }
+    }
+
+    /// Get the interface declarations for this handler.
+    pub fn interfaces(&self) -> Vec<InterfaceImpl> {
+        vec![store_interface()]
     }
 }
 
@@ -206,11 +250,18 @@ impl Handler for StoreHandler
     }
 
     fn imports(&self) -> Option<Vec<String>> {
-        Some(vec!["theater:simple/store".to_string()])
+        Some(self.interfaces().iter().map(|i| i.name().to_string()).collect())
     }
 
     fn exports(&self) -> Option<Vec<String>> {
         None
+    }
+
+    fn interface_hashes(&self) -> Vec<(String, TypeHash)> {
+        self.interfaces()
+            .iter()
+            .map(|i| (i.name().to_string(), i.hash()))
+            .collect()
     }
 
     // =========================================================================
@@ -557,5 +608,25 @@ mod tests {
         let cloned = handler.create_instance(None);
 
         assert_eq!(cloned.name(), "store");
+    }
+
+    #[test]
+    fn test_store_interface_hash_determinism() {
+        let interface1 = store_interface();
+        let interface2 = store_interface();
+        assert_eq!(interface1.hash(), interface2.hash());
+    }
+
+    #[test]
+    fn test_store_handler_interface_hashes() {
+        let config = StoreHandlerConfig {};
+        let handler = StoreHandler::new(config, None);
+
+        let hashes = handler.interface_hashes();
+        assert_eq!(hashes.len(), 1);
+        assert_eq!(hashes[0].0, "theater:simple/store");
+
+        // Hash should be non-zero
+        assert!(!hashes[0].1.as_bytes().iter().all(|&b| b == 0));
     }
 }

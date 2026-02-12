@@ -2216,6 +2216,7 @@ dependencies = [
  "anyhow",
  "serde",
  "serde_json",
+ "sha2",
  "thiserror 1.0.69",
  "wasm-encoder 0.219.2",
  "wasmparser 0.219.2",
@@ -2227,6 +2228,7 @@ name = "pack-abi"
 version = "0.1.0"
 dependencies = [
  "hashbrown 0.14.5",
+ "sha2",
 ]
 
 [[package]]

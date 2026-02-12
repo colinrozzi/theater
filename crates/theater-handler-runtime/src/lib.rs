@@ -18,8 +18,26 @@ use tokio::sync::mpsc::Sender;
 
 // Pack integration
 use theater::pack_bridge::{
-    AsyncCtx, Ctx, HostLinkerBuilder, LinkerError, Value,
+    AsyncCtx, Ctx, HostLinkerBuilder, InterfaceImpl, LinkerError, TypeHash, Value,
 };
+
+// ============================================================================
+// Interface Declarations
+// ============================================================================
+
+/// Declare the theater:simple/runtime interface.
+///
+/// Functions:
+/// - log(msg: string) -> ()
+/// - get-chain() -> chain (approximated as Vec<u8> for hashing)
+/// - shutdown(data: option<list<u8>>) -> result<(), string>
+fn runtime_interface() -> InterfaceImpl {
+    InterfaceImpl::new("theater:simple/runtime")
+        .func("log", |_: String| {})
+        // get-chain returns a complex record type, approximate with Vec<u8>
+        .func("get-chain", || -> Vec<u8> { vec![] })
+        .func("shutdown", |_: Option<Vec<u8>>| -> Result<(), String> { Ok(()) })
+}
 
 /// Handler for providing runtime information and control to WebAssembly actors
 #[derive(Clone)]
@@ -42,6 +60,11 @@ impl RuntimeHandler {
             theater_tx,
             permissions,
         }
+    }
+
+    /// Get the interface declarations for this handler.
+    pub fn interfaces(&self) -> Vec<InterfaceImpl> {
+        vec![runtime_interface()]
     }
 }
 
@@ -207,14 +230,21 @@ impl Handler for RuntimeHandler {
     }
 
     fn imports(&self) -> Option<Vec<String>> {
-        Some(vec![
-            "theater:simple/runtime".to_string(),
-            "theater:simple/types".to_string(),
-        ])
+        let mut imports: Vec<String> = self.interfaces().iter().map(|i| i.name().to_string()).collect();
+        // Add additional interface dependencies
+        imports.push("theater:simple/types".to_string());
+        Some(imports)
     }
 
     fn exports(&self) -> Option<Vec<String>> {
         Some(vec!["theater:simple/actor".to_string()])
+    }
+
+    fn interface_hashes(&self) -> Vec<(String, TypeHash)> {
+        self.interfaces()
+            .iter()
+            .map(|i| (i.name().to_string(), i.hash()))
+            .collect()
     }
 }
 
@@ -231,10 +261,33 @@ mod tests {
 
         let handler = RuntimeHandler::new(config, tx, None);
         assert_eq!(handler.name(), "runtime");
-        assert_eq!(handler.imports(), Some(vec![
-            "theater:simple/runtime".to_string(),
-            "theater:simple/types".to_string(),
-        ]));
+
+        let imports = handler.imports().unwrap();
+        assert!(imports.contains(&"theater:simple/runtime".to_string()));
+        assert!(imports.contains(&"theater:simple/types".to_string()));
+
         assert_eq!(handler.exports(), Some(vec!["theater:simple/actor".to_string()]));
+    }
+
+    #[test]
+    fn test_runtime_interface_hash_determinism() {
+        // Creating the interface twice should produce the same hash
+        let interface1 = runtime_interface();
+        let interface2 = runtime_interface();
+        assert_eq!(interface1.hash(), interface2.hash());
+    }
+
+    #[test]
+    fn test_runtime_handler_interface_hashes() {
+        let config = RuntimeHostConfig {};
+        let (tx, _rx) = mpsc::channel(100);
+        let handler = RuntimeHandler::new(config, tx, None);
+
+        let hashes = handler.interface_hashes();
+        assert_eq!(hashes.len(), 1);
+        assert_eq!(hashes[0].0, "theater:simple/runtime");
+
+        // Hash should be non-zero
+        assert!(!hashes[0].1.as_bytes().iter().all(|&b| b == 0));
     }
 }

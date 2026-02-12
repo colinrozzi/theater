@@ -55,7 +55,7 @@ use uuid::Uuid;
 
 // Pack integration
 use theater::pack_bridge::{
-    AsyncCtx, Ctx, HostLinkerBuilder, LinkerError, Value, ValueType,
+    AsyncCtx, Ctx, HostLinkerBuilder, InterfaceImpl, LinkerError, TypeHash, Value, ValueType,
 };
 
 /// Errors that can occur during message server operations
@@ -69,6 +69,33 @@ pub enum MessageServerError {
 
     #[error("Serialization error: {0}")]
     SerializationError(#[from] serde_json::Error),
+}
+
+// ============================================================================
+// Interface Declarations
+// ============================================================================
+
+/// Declare the theater:simple/message-server-host interface.
+///
+/// Functions for actor-to-actor messaging:
+/// - send(address: string, msg: list<u8>) -> result<(), string>
+/// - request(address: string, msg: list<u8>) -> result<list<u8>, string>
+/// - list-outstanding-requests() -> list<string>
+/// - respond-to-request(request-id: string, response: list<u8>) -> result<(), string>
+/// - cancel-request(request-id: string) -> result<(), string>
+/// - open-channel(address: string, initial-msg: list<u8>) -> result<string, string>
+/// - send-on-channel(channel-id: string, msg: list<u8>) -> result<(), string>
+/// - close-channel(channel-id: string) -> result<(), string>
+fn message_server_interface() -> InterfaceImpl {
+    InterfaceImpl::new("theater:simple/message-server-host")
+        .func("send", |_: String, _: Vec<u8>| -> Result<(), String> { Ok(()) })
+        .func("request", |_: String, _: Vec<u8>| -> Result<Vec<u8>, String> { Ok(vec![]) })
+        .func("list-outstanding-requests", || -> Vec<String> { vec![] })
+        .func("respond-to-request", |_: String, _: Vec<u8>| -> Result<(), String> { Ok(()) })
+        .func("cancel-request", |_: String| -> Result<(), String> { Ok(()) })
+        .func("open-channel", |_: String, _: Vec<u8>| -> Result<String, String> { Ok(String::new()) })
+        .func("send-on-channel", |_: String, _: Vec<u8>| -> Result<(), String> { Ok(()) })
+        .func("close-channel", |_: String| -> Result<(), String> { Ok(()) })
 }
 
 /// Channel acceptance response
@@ -383,6 +410,11 @@ impl MessageServerHandler {
         }
     }
 
+    /// Get the interface declarations for this handler.
+    pub fn interfaces(&self) -> Vec<InterfaceImpl> {
+        vec![message_server_interface()]
+    }
+
     /// Process a message for this actor
     async fn process_actor_message(
         msg: ActorMessage,
@@ -482,11 +514,18 @@ impl Handler for MessageServerHandler
     }
 
     fn imports(&self) -> Option<Vec<String>> {
-        Some(vec!["theater:simple/message-server-host".to_string()])
+        Some(self.interfaces().iter().map(|i| i.name().to_string()).collect())
     }
 
     fn exports(&self) -> Option<Vec<String>> {
         Some(vec!["theater:simple/message-server-client".to_string()])
+    }
+
+    fn interface_hashes(&self) -> Vec<(String, TypeHash)> {
+        self.interfaces()
+            .iter()
+            .map(|i| (i.name().to_string(), i.hash()))
+            .collect()
     }
 
     fn start(
@@ -983,5 +1022,25 @@ mod tests {
 
         let cloned = handler.create_instance(None);
         assert_eq!(cloned.name(), "message-server");
+    }
+
+    #[test]
+    fn test_message_server_interface_hash_determinism() {
+        let interface1 = message_server_interface();
+        let interface2 = message_server_interface();
+        assert_eq!(interface1.hash(), interface2.hash());
+    }
+
+    #[tokio::test]
+    async fn test_message_server_handler_interface_hashes() {
+        let router = MessageRouter::new();
+        let handler = MessageServerHandler::new(None, router);
+
+        let hashes = handler.interface_hashes();
+        assert_eq!(hashes.len(), 1);
+        assert_eq!(hashes[0].0, "theater:simple/message-server-host");
+
+        // Hash should be non-zero
+        assert!(!hashes[0].1.as_bytes().iter().all(|&b| b == 0));
     }
 }
