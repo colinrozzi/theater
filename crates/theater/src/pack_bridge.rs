@@ -24,7 +24,9 @@ pub use pack::{
 };
 // Re-export metadata types for querying actor exports/imports
 pub use pack::{
-    FunctionSignature, MetadataError, PackageMetadata, ParamSignature, TypeDesc,
+    FunctionSignature, MetadataError, MetadataWithHashes, PackageMetadata, ParamSignature, TypeDesc,
+    InterfaceHash, compute_interface_hash, compute_interface_hashes, hash_type,
+    decode_metadata_with_hashes,
 };
 // Re-export interface implementation types for handler interface declarations
 pub use pack::{
@@ -210,6 +212,30 @@ impl PackInstance {
     pub async fn get_imports(&mut self) -> Result<Vec<(String, FunctionSignature)>, MetadataError> {
         let metadata = self.get_metadata().await?;
         Ok(extract_functions_from_arena(&metadata, "imports"))
+    }
+
+    /// Get metadata with interface hashes for compatibility checking.
+    ///
+    /// Returns the full metadata along with computed Merkle-tree hashes
+    /// for each imported and exported interface. These hashes enable
+    /// O(1) compatibility checking between components and handlers.
+    pub async fn get_metadata_with_hashes(&mut self) -> Result<MetadataWithHashes, MetadataError> {
+        self.instance.types_with_hashes().await
+    }
+
+    /// Get interface hashes for all imported interfaces.
+    ///
+    /// Returns a list of (interface_name, hash) pairs that can be compared
+    /// against handler interface hashes for compatibility checking.
+    pub async fn get_import_hashes(&mut self) -> Result<Vec<InterfaceHash>, MetadataError> {
+        let metadata = self.get_metadata_with_hashes().await?;
+        Ok(metadata.import_hashes)
+    }
+
+    /// Get interface hashes for all exported interfaces.
+    pub async fn get_export_hashes(&mut self) -> Result<Vec<InterfaceHash>, MetadataError> {
+        let metadata = self.get_metadata_with_hashes().await?;
+        Ok(metadata.export_hashes)
     }
 
     /// Call an export function with the given state and parameters.
