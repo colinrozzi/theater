@@ -1,0 +1,7 @@
+[actor]
+name = "rpc-caller"
+package = "./target/wasm32-unknown-unknown/release/rpc_caller_actor.wasm"
+
+[handlers]
+runtime = {}
+rpc = {}

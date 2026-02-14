@@ -2214,6 +2214,7 @@ name = "pack"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "clap",
  "serde",
  "serde_json",
  "sha2",
@@ -3411,6 +3412,22 @@ dependencies = [
  "tokio",
  "tracing",
  "uuid",
+]
+
+[[package]]
+name = "theater-handler-rpc"
+version = "0.2.1"
+dependencies = [
+ "anyhow",
+ "serde",
+ "serde_json",
+ "test-log",
+ "theater",
+ "theater-handler-runtime",
+ "thiserror 1.0.69",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]

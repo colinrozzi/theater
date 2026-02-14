@@ -4,6 +4,7 @@
 //! actor system. It manages actor lifecycle, message passing, and event handling across
 //! the entire system.
 
+use crate::actor::handle::ActorHandle;
 use crate::actor::runtime::ActorRuntime;
 use crate::actor::types::{ActorControl, ActorError, ActorInfo, ActorOperation};
 use crate::chain::ChainEvent;
@@ -495,6 +496,45 @@ impl TheaterRuntime {
                     debug!("Creating new content store");
                     let store_id = crate::store::ContentStore::new();
                     let _ = response_tx.send(Ok(store_id));
+                }
+                TheaterCommand::GetActorHandle {
+                    actor_id,
+                    response_tx,
+                } => {
+                    debug!("Getting actor handle for: {:?}", actor_id);
+                    let handle = self.actors.get(&actor_id).map(|proc| {
+                        ActorHandle::new(
+                            proc.operation_tx.clone(),
+                            proc.info_tx.clone(),
+                            proc.control_tx.clone(),
+                        )
+                    });
+                    let _ = response_tx.send(handle);
+                }
+                TheaterCommand::GetActorExportHashes {
+                    actor_id,
+                    response_tx,
+                } => {
+                    debug!("Getting export hashes for actor: {:?}", actor_id);
+                    if let Some(proc) = self.actors.get(&actor_id) {
+                        let handle = ActorHandle::new(
+                            proc.operation_tx.clone(),
+                            proc.info_tx.clone(),
+                            proc.control_tx.clone(),
+                        );
+                        // Query the actor for its export hashes
+                        match handle.get_export_hashes().await {
+                            Ok(hashes) => {
+                                let _ = response_tx.send(Some(hashes));
+                            }
+                            Err(e) => {
+                                error!("Failed to get export hashes: {:?}", e);
+                                let _ = response_tx.send(None);
+                            }
+                        }
+                    } else {
+                        let _ = response_tx.send(None);
+                    }
                 }
             };
         }

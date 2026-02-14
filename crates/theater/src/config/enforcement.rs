@@ -122,6 +122,10 @@ pub fn validate_manifest_permissions(
                 // TCP handler is allowed by default
                 // Fine-grained permission enforcement can be added later
             }
+            HandlerConfig::Rpc { .. } => {
+                // RPC handler is allowed by default
+                // It enables actor-to-actor function calls
+            }
         }
     }
     Ok(())

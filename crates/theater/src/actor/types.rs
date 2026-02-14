@@ -5,6 +5,7 @@
 //! the actor system to function.
 
 use crate::metrics::ActorMetrics;
+use crate::pack_bridge::InterfaceHash;
 use crate::ChainEvent;
 use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
@@ -257,5 +258,10 @@ pub enum ActorInfo {
     GetStatus {
         /// Channel to send processing state back to the caller
         response_tx: oneshot::Sender<Result<String, ActorError>>,
+    },
+    /// Retrieve the actor's exported interface hashes
+    GetExportHashes {
+        /// Channel to send export hashes back to the caller
+        response_tx: oneshot::Sender<Result<Vec<InterfaceHash>, ActorError>>,
     },
 }

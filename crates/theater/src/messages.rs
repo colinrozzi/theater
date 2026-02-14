@@ -1,5 +1,7 @@
+use crate::actor::handle::ActorHandle;
 use crate::actor::ActorError;
 use crate::actor::ActorRuntimeError;
+use crate::pack_bridge::InterfaceHash;
 /// # Theater Message System
 ///
 /// Defines the message types used for communication between different components
@@ -358,6 +360,34 @@ pub enum TheaterCommand {
     NewStore {
         response_tx: oneshot::Sender<Result<ContentStore>>,
     },
+
+    /// # Get an actor handle
+    ///
+    /// Retrieves a handle for an actor, allowing direct function calls.
+    /// Used by the RPC handler for actor-to-actor communication.
+    ///
+    /// ## Parameters
+    ///
+    /// * `actor_id` - ID of the actor to get a handle for
+    /// * `response_tx` - Channel to receive the handle (or None if actor not found)
+    GetActorHandle {
+        actor_id: TheaterId,
+        response_tx: oneshot::Sender<Option<ActorHandle>>,
+    },
+
+    /// # Get actor export hashes
+    ///
+    /// Retrieves the interface hashes for all interfaces exported by an actor.
+    /// Used by the RPC handler for interface compatibility checking.
+    ///
+    /// ## Parameters
+    ///
+    /// * `actor_id` - ID of the actor to query
+    /// * `response_tx` - Channel to receive the export hashes (or None if actor not found)
+    GetActorExportHashes {
+        actor_id: TheaterId,
+        response_tx: oneshot::Sender<Option<Vec<InterfaceHash>>>,
+    },
 }
 
 impl TheaterCommand {
@@ -422,6 +452,12 @@ impl TheaterCommand {
                 format!("SubscribeToActor: {:?}", actor_id)
             }
             TheaterCommand::NewStore { .. } => "NewStore".to_string(),
+            TheaterCommand::GetActorHandle { actor_id, .. } => {
+                format!("GetActorHandle: {:?}", actor_id)
+            }
+            TheaterCommand::GetActorExportHashes { actor_id, .. } => {
+                format!("GetActorExportHashes: {:?}", actor_id)
+            }
         }
     }
 }

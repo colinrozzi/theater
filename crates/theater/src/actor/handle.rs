@@ -12,7 +12,7 @@ use tracing::error;
 use crate::actor::types::{ActorError, ActorOperation, WasiHttpResponse, DEFAULT_OPERATION_TIMEOUT};
 use crate::chain::ChainEvent;
 use crate::metrics::ActorMetrics;
-use crate::pack_bridge::{self, Value};
+use crate::pack_bridge::{self, InterfaceHash, Value};
 
 use super::types::{ActorControl, ActorInfo};
 
@@ -378,6 +378,49 @@ impl ActorHandle {
             Err(_) => {
                 error!(
                     "Shutdown operation timed out after {:?}",
+                    DEFAULT_OPERATION_TIMEOUT
+                );
+                Err(ActorError::OperationTimeout(
+                    DEFAULT_OPERATION_TIMEOUT.as_secs(),
+                ))
+            }
+        }
+    }
+
+    /// Retrieves the interface hashes for all exported interfaces.
+    ///
+    /// ## Purpose
+    ///
+    /// This method queries the actor's Pack metadata to get the interface hashes
+    /// for all exported interfaces. These hashes can be used for O(1) compatibility
+    /// checking between actors.
+    ///
+    /// ## Returns
+    ///
+    /// * `Ok(Vec<InterfaceHash>)` - The list of exported interface hashes.
+    /// * `Err(ActorError)` - An error occurred while retrieving the hashes.
+    pub async fn get_export_hashes(&self) -> Result<Vec<InterfaceHash>, ActorError> {
+        let (tx, rx) = oneshot::channel();
+
+        self.info_tx
+            .send(ActorInfo::GetExportHashes { response_tx: tx })
+            .await
+            .map_err(|e| {
+                error!("Failed to send GetExportHashes operation: {}", e);
+                ActorError::ChannelClosed
+            })?;
+
+        match timeout(DEFAULT_OPERATION_TIMEOUT, rx).await {
+            Ok(result) => result.map_err(|e| {
+                error!(
+                    "Channel closed while waiting for GetExportHashes response: {:?}",
+                    e
+                );
+                ActorError::ChannelClosed
+            })?,
+            Err(_) => {
+                error!(
+                    "GetExportHashes operation timed out after {:?}",
                     DEFAULT_OPERATION_TIMEOUT
                 );
                 Err(ActorError::OperationTimeout(

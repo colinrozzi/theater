@@ -164,6 +164,11 @@ pub enum HandlerConfig {
         #[serde(flatten)]
         config: TcpHandlerConfig,
     },
+    #[serde(rename = "rpc")]
+    Rpc {
+        #[serde(flatten)]
+        config: RpcHandlerConfig,
+    },
 }
 
 impl HandlerConfig {
@@ -185,6 +190,7 @@ impl HandlerConfig {
             HandlerConfig::WasiHttp { .. } => "wasi-http",
             HandlerConfig::Replay { .. } => "replay",
             HandlerConfig::Tcp { .. } => "tcp",
+            HandlerConfig::Rpc { .. } => "rpc",
         }
     }
 }
@@ -204,6 +210,11 @@ pub struct TcpHandlerConfig {
     #[serde(default)]
     pub max_connections: Option<u32>,
 }
+
+/// Configuration for the RPC handler
+/// This handler enables direct actor-to-actor function calls
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+pub struct RpcHandlerConfig {}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct SupervisorHostConfig {}
