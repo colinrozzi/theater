@@ -314,7 +314,6 @@ pub async fn run_replay_verification(
         .send(TheaterCommand::SpawnActor {
             manifest_path: recording_manifest,
             wasm_bytes: None,
-            init_bytes: None,
             parent_id: None,
             response_tx,
             supervisor_tx: None,
@@ -420,7 +419,6 @@ pub async fn run_replay_verification(
         .send(TheaterCommand::SpawnActor {
             manifest_path: replay_manifest,
             wasm_bytes: None,
-            init_bytes: None,
             parent_id: None,
             response_tx: response_tx2,
             supervisor_tx: None,
@@ -532,7 +530,6 @@ pub async fn run_request_replay_verification(
         .send(TheaterCommand::SpawnActor {
             manifest_path: recording_manifest,
             wasm_bytes: None,
-            init_bytes: None,
             parent_id: None,
             response_tx,
             supervisor_tx: None,
@@ -678,7 +675,6 @@ pub async fn run_request_replay_verification(
         .send(TheaterCommand::SpawnActor {
             manifest_path: replay_manifest,
             wasm_bytes: None,
-            init_bytes: None,
             parent_id: None,
             response_tx: response_tx2,
             supervisor_tx: None,
@@ -810,7 +806,6 @@ pub async fn run_supervisor_replay_verification(
         .send(TheaterCommand::SpawnActor {
             manifest_path: recording_manifest,
             wasm_bytes: None,
-            init_bytes: None,
             parent_id: None,
             response_tx,
             supervisor_tx: None,
@@ -970,7 +965,6 @@ pub async fn run_supervisor_replay_verification(
         .send(TheaterCommand::SpawnActor {
             manifest_path: replay_manifest,
             wasm_bytes: None,
-            init_bytes: None,
             parent_id: None,
             response_tx: response_tx2,
             supervisor_tx: None,

@@ -237,16 +237,6 @@ pub async fn execute_async(args: &StartArgs, ctx: &CommandContext) -> Result<(),
         CliError::invalid_manifest(format!("Manifest content is not valid UTF-8: {}", e))
     })?;
 
-    // Handle initial state
-    let initial_state = if let Some(state_str) = &args.initial_state {
-        match resolve_reference(state_str).await {
-            Ok(bytes) => Some(bytes),
-            Err(_) => Some(state_str.as_bytes().to_vec()),
-        }
-    } else {
-        None
-    };
-
     // Set up chain file manager if --chain-dir is specified
     let mut chain_file_manager = if let Some(ref dir) = args.chain_dir {
         Some(ChainFileManager::new(dir.clone())?)
@@ -287,7 +277,6 @@ pub async fn execute_async(args: &StartArgs, ctx: &CommandContext) -> Result<(),
         .send(TheaterCommand::SpawnActor {
             manifest_path: manifest_content,
             wasm_bytes: None,
-            init_bytes: initial_state,
             response_tx,
             parent_id: None,
             supervisor_tx: Some(supervisor_tx),

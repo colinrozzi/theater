@@ -23,7 +23,6 @@ use crate::utils::{self, resolve_reference};
 use crate::Result;
 use crate::TheaterRuntimeError;
 use crate::{ManifestConfig, StateChain};
-use serde_json::Value;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -287,7 +286,6 @@ impl TheaterRuntime {
                 TheaterCommand::SpawnActor {
                     manifest_path,
                     wasm_bytes,
-                    init_bytes,
                     parent_id,
                     response_tx,
                     supervisor_tx,
@@ -301,9 +299,7 @@ impl TheaterRuntime {
                         .spawn_actor(
                             manifest_path.clone(),
                             wasm_bytes,
-                            init_bytes,
                             parent_id,
-                            true,
                             supervisor_tx,
                             subscription_tx,
                         )
@@ -329,7 +325,6 @@ impl TheaterRuntime {
                 TheaterCommand::ResumeActor {
                     manifest_path,
                     wasm_bytes,
-                    state_bytes,
                     response_tx,
                     parent_id,
                     supervisor_tx,
@@ -339,13 +334,13 @@ impl TheaterRuntime {
                         "Processing ResumeActor command for manifest: {:?}",
                         manifest_path
                     );
+                    // ResumeActor now just spawns the actor - state restoration
+                    // happens via replay handler configured in the manifest
                     match self
                         .spawn_actor(
                             manifest_path.clone(),
                             wasm_bytes,
-                            state_bytes,
                             parent_id,
-                            false,
                             supervisor_tx,
                             subscription_tx,
                         )
@@ -542,15 +537,13 @@ impl TheaterRuntime {
         Ok(())
     }
 
-    /// Spawns a new actor from a manifest with optional initialization data.
+    /// Spawns a new actor from a manifest.
     ///
     /// ## Parameters
     ///
     /// * `manifest_path` - Path to the actor's manifest file or manifest content
     /// * `wasm_bytes` - Optional pre-loaded WASM bytes. If None, bytes are resolved from manifest.package
-    /// * `init_bytes` - Optional initialization data for the actor
     /// * `parent_id` - Optional ID of the parent actor
-    /// * `init` - Whether to initialize the actor (true) or resume it (false)
     ///
     /// ## Returns
     ///
@@ -570,9 +563,7 @@ impl TheaterRuntime {
         &mut self,
         manifest_path: String,
         wasm_bytes: Option<Vec<u8>>,
-        init_bytes: Option<Vec<u8>>,
         parent_id: Option<TheaterId>,
-        _init: bool,
         supervisor_tx: Option<Sender<ActorResult>>,
         subscription_tx: Option<Sender<Result<ChainEvent, ActorError>>>,
     ) -> Result<TheaterId> {
@@ -599,24 +590,13 @@ impl TheaterRuntime {
             manifest_str = manifest_path.clone();
         }
 
-        let init_value = if let Some(bytes) = init_bytes {
-            Some(
-                serde_json::from_slice::<Value>(&bytes)
-                    .map_err(|e| TheaterRuntimeError::ActorInitializationError(e.to_string()))?,
-            )
-        } else {
-            None
-        };
-
-        let (manifest, init_value) =
-            ManifestConfig::resolve_starting_info(&manifest_str, init_value)
-                .await
-                .map_err(|e| {
-                    TheaterRuntimeError::ActorInitializationError(format!(
-                        "Failed to resolve manifest: {}",
-                        e
-                    ))
-                })?;
+        let manifest = ManifestConfig::from_toml_str(&manifest_str)
+            .map_err(|e| {
+                TheaterRuntimeError::ActorInitializationError(format!(
+                    "Failed to parse manifest: {}",
+                    e
+                ))
+            })?;
 
         // Resolve WASM bytes: use provided bytes or load from manifest.package
         let wasm_bytes = match wasm_bytes {
@@ -681,7 +661,6 @@ impl TheaterRuntime {
                 actor_id_for_task.clone(),
                 &manifest_clone,
                 wasm_bytes,
-                init_value,
                 pack_runtime,
                 chain,
                 handler_registry,

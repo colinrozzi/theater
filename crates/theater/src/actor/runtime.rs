@@ -25,7 +25,6 @@ use crate::Result;
 use crate::ShutdownController;
 use crate::ShutdownType;
 use crate::StateChain;
-use serde_json::Value;
 use std::sync::Arc;
 use std::sync::RwLock as SyncRwLock;
 use tokio::sync::mpsc::{self, Receiver, Sender};
@@ -197,7 +196,6 @@ impl ActorRuntime {
         id: TheaterId,
         config: &ManifestConfig,
         wasm_bytes: Vec<u8>,
-        initial_state: Option<Value>,
         pack_runtime: AsyncRuntime,
         chain: Arc<SyncRwLock<StateChain>>,
         handler_registry: HandlerRegistry,
@@ -487,29 +485,6 @@ impl ActorRuntime {
         // Note: Export discovery is now automatic via Pack's embedded __pack_types metadata.
         // No manual export registration is needed.
 
-        // ----------------- Checkpoint Initialize State -----------------
-
-        debug!("Initializing state");
-
-        if !actor_phase_manager.is_phase(ActorPhase::Starting) {
-            let curr_phase = actor_phase_manager.get_phase();
-            return Err(ActorRuntimeError::ActorPhaseError {
-                expected: ActorPhase::Starting,
-                found: curr_phase,
-                message: "phase error found at setup task Checkpoint Initialize State".into(),
-            });
-        }
-
-        // Initialize state if needed
-        let init_state = match initial_state {
-            Some(state) => Some(serde_json::to_vec(&state).map_err(|e| {
-                ActorError::UnexpectedError(format!("Failed to serialize initial state: {}", e))
-            })?),
-            None => None,
-        };
-
-        actor_instance.actor_store.set_state(init_state);
-
         // ----------------- Checkpoint Finalize Setup -----------------
 
         debug!("Ready");
@@ -523,35 +498,10 @@ impl ActorRuntime {
             });
         }
 
-        // Put actor_instance in the shared wrapper BEFORE spawning init
+        // Put actor_instance in the shared wrapper
         {
             let mut instance_guard = actor_instance_wrapper.write().await;
             *instance_guard = Some(actor_instance);
-        }
-
-        // In replay mode, the replay handler will call init after setting up subscriptions
-        // to avoid race conditions. In normal mode, we spawn init here.
-        if !handler_registry.is_replay_mode() {
-            let init_actor_handle = actor_handle.clone();
-            let init_id = id.clone();
-            tokio::spawn(async move {
-                // Call init - it's a state-only function that takes state from the store
-                // and returns updated state.
-                // init: func(state: option<list<u8>>) -> result<tuple<option<list<u8>>>, string>
-                init_actor_handle
-                    .call_function(
-                        "theater:simple/actor.init".to_string(),
-                        crate::pack_bridge::Value::Tuple(vec![]),
-                    )
-                    .await
-                    .map(|_| ())
-                    .map_err(|e| {
-                        error!("Failed to call actor.init for actor {}: {}", init_id, e);
-                        e
-                    })
-            });
-        } else {
-            info!("Replay mode: skipping automatic init call (replay handler will drive execution)");
         }
 
         // Start the handlers
@@ -586,7 +536,6 @@ impl ActorRuntime {
         id: TheaterId,
         config: &ManifestConfig,
         wasm_bytes: Vec<u8>,
-        initial_state: Option<Value>,
         pack_runtime: AsyncRuntime,
         chain: Arc<SyncRwLock<StateChain>>,
         handler_registry: HandlerRegistry,
@@ -625,7 +574,6 @@ impl ActorRuntime {
                     id,
                     &config,
                     wasm_bytes,
-                    initial_state,
                     pack_runtime,
                     chain,
                     handler_registry,

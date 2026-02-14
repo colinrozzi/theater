@@ -28,7 +28,6 @@ use crate::pack_bridge::InterfaceHash;
 ///     let spawn_cmd = TheaterCommand::SpawnActor {
 ///         manifest_path: "actor_manifest.toml".to_string(),
 ///         wasm_bytes: None, // Load from manifest.package path
-///         init_bytes: None,
 ///         response_tx: tx,
 ///         parent_id: None,
 ///         supervisor_tx: None,
@@ -120,19 +119,22 @@ use tokio::sync::oneshot;
 pub enum TheaterCommand {
     /// # Spawn a new actor
     ///
-    /// Creates a new actor from a manifest file and optional initialization data.
+    /// Creates a new actor from a manifest file.
     ///
     /// ## Parameters
     ///
-    /// * `manifest_path` - Path to the actor's manifest file
+    /// * `manifest_path` - Path to the actor's manifest file or inline manifest TOML
     /// * `wasm_bytes` - Optional pre-loaded WASM bytes. If None, bytes are resolved from manifest.package
-    /// * `init_bytes` - Optional initialization data to pass to the actor
     /// * `response_tx` - Channel to receive the result (actor ID or error)
     /// * `parent_id` - Optional parent actor ID for supervision hierarchy
+    ///
+    /// ## Notes
+    ///
+    /// After spawning, the caller should invoke whatever functions they need on the actor.
+    /// There is no automatic `init` call - actors control their own lifecycle.
     SpawnActor {
         manifest_path: String,
         wasm_bytes: Option<Vec<u8>>,
-        init_bytes: Option<Vec<u8>>,
         response_tx: oneshot::Sender<Result<TheaterId>>,
         parent_id: Option<TheaterId>,
         supervisor_tx: Option<Sender<ActorResult>>,
@@ -141,19 +143,18 @@ pub enum TheaterCommand {
 
     /// # Resume an existing actor
     ///
-    /// Restarts an actor from a manifest and optionally restores its previous state.
+    /// Restarts an actor from a manifest. State restoration happens via the
+    /// replay handler configured in the manifest.
     ///
     /// ## Parameters
     ///
     /// * `manifest_path` - Path to the actor's manifest file
     /// * `wasm_bytes` - Optional pre-loaded WASM bytes. If None, bytes are resolved from manifest.package
-    /// * `state_bytes` - Optional state data to restore
     /// * `response_tx` - Channel to receive the result (actor ID or error)
     /// * `parent_id` - Optional parent actor ID for supervision hierarchy
     ResumeActor {
         manifest_path: String,
         wasm_bytes: Option<Vec<u8>>,
-        state_bytes: Option<Vec<u8>>,
         response_tx: oneshot::Sender<Result<TheaterId>>,
         parent_id: Option<TheaterId>,
         supervisor_tx: Option<Sender<ActorResult>>,

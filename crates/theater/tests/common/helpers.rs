@@ -29,7 +29,6 @@ pub fn create_test_manifest(name: &str) -> ManifestConfig {
         long_description: None,
         save_chain: None,
         permission_policy: Default::default(),
-        init_state: None,
         handlers: Vec::new(),
     };
 

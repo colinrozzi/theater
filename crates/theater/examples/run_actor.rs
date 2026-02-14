@@ -75,7 +75,6 @@ async fn main() -> Result<()> {
         .send(TheaterCommand::SpawnActor {
             manifest_path: manifest_path.to_string_lossy().to_string(),
             wasm_bytes: None,
-            init_bytes: None,
             response_tx,
             parent_id: None,
             supervisor_tx: None,

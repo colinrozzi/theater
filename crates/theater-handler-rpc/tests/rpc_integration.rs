@@ -126,7 +126,6 @@ async fn test_rpc_calculator_demo() {
         .send(TheaterCommand::SpawnActor {
             manifest_path: calc_manifest,
             wasm_bytes: None,
-            init_bytes: None,
             response_tx: calc_response_tx,
             parent_id: None,
             supervisor_tx: None,
@@ -154,7 +153,6 @@ async fn test_rpc_calculator_demo() {
         .send(TheaterCommand::SpawnActor {
             manifest_path: caller_manifest,
             wasm_bytes: None,
-            init_bytes: None,
             response_tx: caller_response_tx,
             parent_id: None,
             supervisor_tx: None,

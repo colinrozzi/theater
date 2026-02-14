@@ -131,7 +131,6 @@ impl MockActorComponentFactory {
             long_description: None,
             save_chain: None,
             permission_policy: Default::default(),
-            init_state: None,
         };
 
         let component = MockActorComponent::new(&config, store).await?;

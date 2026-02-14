@@ -1,11 +1,7 @@
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 use std::fmt::Display;
 use std::path::PathBuf;
 use tracing::debug;
-
-use crate::utils::resolve_reference;
-use crate::utils::template::substitute_variables;
 
 use super::inheritance::{is_default_permission_policy, HandlerPermissionPolicy};
 use super::permissions::HandlerPermission;
@@ -26,8 +22,6 @@ pub struct ManifestConfig {
     pub save_chain: Option<bool>,
     #[serde(default, skip_serializing_if = "is_default_permission_policy")]
     pub permission_policy: HandlerPermissionPolicy,
-    #[serde(default)]
-    pub init_state: Option<String>,
     #[serde(default, rename = "handler")]
     pub handlers: Vec<HandlerConfig>,
 }
@@ -36,7 +30,7 @@ impl Display for ManifestConfig {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "ManifestConfig(name: {}, version: {}, package: {}, description: {:?}, long_description: {:?}, save_chain: {:?}, permission_policy: {:?}, init_state: {:?}, handlers: {:?})",
+            "ManifestConfig(name: {}, version: {}, package: {}, description: {:?}, long_description: {:?}, save_chain: {:?}, permission_policy: {:?}, handlers: {:?})",
             self.name,
             self.version,
             self.package,
@@ -44,7 +38,6 @@ impl Display for ManifestConfig {
             self.long_description,
             self.save_chain,
             self.permission_policy,
-            self.init_state,
             self.handlers
         )
     }
@@ -412,129 +405,6 @@ impl ManifestConfig {
         Ok(config)
     }
 
-    /// Loads a manifest from a string with variable substitution support.
-    ///
-    /// This is the core method that implements the two-stage loading process:
-    /// 1. Extract and resolve the init_state field
-    /// 2. Merge with any override state
-    /// 3. Perform variable substitution on the raw TOML
-    /// 4. Parse the substituted TOML into ManifestConfig
-    ///
-    /// ## Arguments
-    ///
-    /// * `content` - Raw TOML content as string
-    /// * `override_state` - Optional override state to merge with init_state
-    ///
-    /// ## Returns
-    ///
-    /// * `Ok(ManifestConfig)` - The successfully parsed configuration with variables substituted
-    /// * `Err(anyhow::Error)` - If initial state cannot be resolved, variable substitution fails,
-    ///   or the resulting TOML cannot be parsed
-    pub async fn resolve_starting_info(
-        content: &str,
-        override_state: Option<Value>,
-    ) -> anyhow::Result<(Self, Option<Value>)> {
-        debug!("Loading manifest with variable substitution");
-        debug!("Raw manifest content: {}", content);
-        debug!("Override state: {:?}", override_state);
-
-        // Step 1: Extract init_state field from raw TOML
-        let init_state_ref = Self::extract_init_state_reference(content)
-            .map_err(|e| anyhow::anyhow!("Failed to extract init_state reference: {}", e))?;
-
-        // Step 2: Resolve init_state if present
-        let resolved_init_state = if let Some(reference) = init_state_ref {
-            debug!("Resolving init_state reference: {}", reference);
-            let data = resolve_reference(&reference).await.map_err(|e| {
-                anyhow::anyhow!(
-                    "Failed to resolve init_state reference '{}': {}",
-                    reference,
-                    e
-                )
-            })?;
-            let json_value: Value = serde_json::from_slice(&data).map_err(|e| {
-                anyhow::anyhow!(
-                    "Failed to parse init_state JSON from reference '{}': {}",
-                    reference,
-                    e
-                )
-            })?;
-            Some(json_value)
-        } else {
-            None
-        };
-
-        // Step 3: Merge resolved init_state with override_state
-        let final_state = Self::merge_states(resolved_init_state, override_state).map_err(|e| {
-            anyhow::anyhow!("Failed to merge init_state with override_state: {}", e)
-        })?;
-
-        // Step 4: Perform variable substitution if we have state
-        let substituted_content = if let Some(state) = &final_state {
-            debug!("Performing variable substitution");
-            substitute_variables(content, state)
-                .map_err(|e| anyhow::anyhow!("Variable substitution failed: {}", e))?
-        } else {
-            debug!("No state available, skipping variable substitution");
-            content.to_string()
-        };
-
-        // Step 5: Parse the substituted TOML
-        debug!("Parsing substituted manifest TOML");
-        let config: ManifestConfig = toml::from_str(&substituted_content).map_err(|e| {
-            anyhow::anyhow!("Failed to parse manifest TOML after substitution: {}", e)
-        })?;
-
-        debug!("Successfully parsed manifest configuration");
-        debug!("Manifest: {}", config);
-        debug!("Final state after merging: {:?}", final_state);
-        Ok((config, final_state))
-    }
-
-    /// Extract the init_state field value from raw TOML without full parsing.
-    fn extract_init_state_reference(content: &str) -> anyhow::Result<Option<String>> {
-        // Parse as a generic TOML value first
-        let value: toml::Value = toml::from_str(content)?;
-
-        // Extract init_state if present
-        if let Some(init_state_value) = value.get("init_state") {
-            if let Some(reference) = init_state_value.as_str() {
-                Ok(Some(reference.to_string()))
-            } else {
-                Err(anyhow::anyhow!("init_state field must be a string"))
-            }
-        } else {
-            Ok(None)
-        }
-    }
-
-    /// Merge resolved init_state with override state.
-    fn merge_states(
-        init_state: Option<Value>,
-        override_state: Option<Value>,
-    ) -> anyhow::Result<Option<Value>> {
-        match (init_state, override_state) {
-            (None, None) => Ok(None),
-            (Some(state), None) => Ok(Some(state)),
-            (None, Some(ref state)) => Ok(Some(state.clone())),
-            (Some(mut init), Some(ref override_val)) => {
-                if let (Value::Object(ref mut init_map), Value::Object(override_map)) =
-                    (&mut init, override_val)
-                {
-                    // Merge override values into init state
-                    for (key, value) in override_map {
-                        init_map.insert(key.clone(), value.clone());
-                    }
-                    Ok(Some(init))
-                } else {
-                    // If either isn't an object, just use the override
-                    debug!("Either init_state or override_state is not an object, using override");
-                    Ok(Some(override_val.clone()))
-                }
-            }
-        }
-    }
-
     /// Loads a manifest configuration from a TOML string.
     ///
     /// ## Purpose
@@ -652,41 +522,23 @@ impl ManifestConfig {
         &self.name
     }
 
-    /// Loads the initial state data for the actor.
+    /// Loads a manifest configuration from a TOML string (alias for from_str).
     ///
     /// ## Purpose
     ///
-    /// This method reads the initial state data from the file specified in the
-    /// `init_state` field, if present. This data is used to initialize the actor
-    /// when it starts.
+    /// This method parses a string containing TOML data and constructs a ManifestConfig
+    /// instance. This is an alias for `from_str` for API clarity.
+    ///
+    /// ## Parameters
+    ///
+    /// * `content` - TOML string containing the manifest configuration
     ///
     /// ## Returns
     ///
-    /// * `Ok(Some(Vec<u8>))` - The initial state data if specified and successfully loaded
-    /// * `Ok(None)` - If no initial state file is specified
-    /// * `Err(anyhow::Error)` - If the initial state file cannot be read
-    ///
-    /// ## Example
-    ///
-    /// ```rust
-    /// # use theater::ManifestConfig;
-    /// # async fn example(config: &ManifestConfig) -> anyhow::Result<()> {
-    /// if let Some(state_data) = config.load_init_state().await? {
-    ///     println!("Loaded initial state: {} bytes", state_data.len());
-    /// } else {
-    ///     println!("No initial state specified");
-    /// }
-    /// # Ok(())
-    /// # }
-    /// ```
-    pub async fn load_init_state(&self) -> anyhow::Result<Option<Vec<u8>>> {
-        match &self.init_state {
-            Some(reference) => {
-                let data = resolve_reference(reference).await?;
-                Ok(Some(data))
-            }
-            None => Ok(None),
-        }
+    /// * `Ok(ManifestConfig)` - The successfully parsed configuration
+    /// * `Err(anyhow::Error)` - If the string contains invalid TOML
+    pub fn from_toml_str(content: &str) -> anyhow::Result<Self> {
+        Self::from_str(content)
     }
 
     /// Converts the manifest to a fixed byte representation.

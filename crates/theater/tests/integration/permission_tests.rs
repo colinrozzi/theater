@@ -54,7 +54,6 @@ async fn test_handler_creation_permission_validation() {
         long_description: None,
         save_chain: Some(false),
         permission_policy: Default::default(),
-        init_state: None,
     };
 
     // Test case 2: Missing permissions should be detected
