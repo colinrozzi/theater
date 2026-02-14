@@ -366,6 +366,124 @@ impl ActorRuntime {
             handler_ctx.satisfied_imports
         );
 
+        // Verify interface hash compatibility between actor imports and handler interfaces.
+        // This provides O(1) structural compatibility checking using Merkle-tree hashes.
+        // Hash mismatches are FATAL - the actor will not start if signatures don't match.
+        //
+        // PARTIAL INTERFACE MATCHING: An actor may import only a subset of functions
+        // from an interface. For example, an actor might import only `log` from
+        // `theater:simple/runtime` which provides `log`, `get-chain`, and `shutdown`.
+        // In this case, we compute a subset hash from the handler's functions and
+        // compare against the actor's declared interface hash.
+        match actor_instance.get_metadata_with_hashes().await {
+            Ok(metadata) => {
+                let actor_import_hashes = &metadata.import_hashes;
+                info!(
+                    "Verifying interface hashes for actor {} ({} imports)",
+                    id,
+                    actor_import_hashes.len()
+                );
+
+                for actor_import in actor_import_hashes {
+                    let interface_name = &actor_import.name;
+                    let actor_hash = &actor_import.hash;
+
+                    // Get the function names the actor imports from this interface
+                    let actor_function_names = metadata.arena.imported_function_names(interface_name);
+                    let function_name_refs: Vec<&str> = actor_function_names.iter().map(|s| s.as_str()).collect();
+
+                    // Find a handler that provides this interface and satisfies all required functions
+                    let mut interface_verified = false;
+                    let mut last_error: Option<String> = None;
+
+                    for handler in handlers.iter() {
+                        // Get the InterfaceImpl objects from the handler
+                        let handler_interfaces = handler.interfaces();
+                        if let Some(handler_interface) = handler_interfaces.iter().find(|i| i.name() == interface_name) {
+                            // Compute the handler's subset hash for just those functions
+                            match handler_interface.hash_subset(&function_name_refs) {
+                                Some(subset_hash) => {
+                                    if *actor_hash == subset_hash {
+                                        info!(
+                                            "Interface '{}' hash verified via subset matching (handler: {}, functions: {:?})",
+                                            interface_name,
+                                            handler.name(),
+                                            actor_function_names
+                                        );
+                                        interface_verified = true;
+                                        break;
+                                    } else {
+                                        // Check if full interface matches (shouldn't happen, but check)
+                                        if *actor_hash == handler_interface.hash() {
+                                            info!(
+                                                "Interface '{}' hash verified (full interface, handler: {})",
+                                                interface_name,
+                                                handler.name()
+                                            );
+                                            interface_verified = true;
+                                            break;
+                                        }
+
+                                        // Hash mismatch - record error but try other handlers
+                                        last_error = Some(format!(
+                                            "Interface hash mismatch for '{}' (handler: {}). \
+                                            The actor's function signatures don't match the handler's implementation. \
+                                            Actor imports functions: {:?}. \
+                                            Actor hash: {}, Handler subset hash: {}",
+                                            interface_name,
+                                            handler.name(),
+                                            actor_function_names,
+                                            hex::encode(actor_hash.as_bytes()),
+                                            hex::encode(subset_hash.as_bytes())
+                                        ));
+                                    }
+                                }
+                                None => {
+                                    // Handler is missing some functions - try other handlers
+                                    debug!(
+                                        "Handler '{}' is missing function(s) for interface '{}'. \
+                                        Actor imports: {:?}. Checking other handlers.",
+                                        handler.name(),
+                                        interface_name,
+                                        actor_function_names
+                                    );
+                                }
+                            }
+                        }
+                    }
+
+                    if !interface_verified {
+                        // No handler could satisfy this interface
+                        let error_msg = last_error.unwrap_or_else(|| {
+                            format!(
+                                "No handler provides interface '{}' required by actor {}",
+                                interface_name, id
+                            )
+                        });
+                        error!("{}", error_msg);
+                        return Err(ActorRuntimeError::SetupError {
+                            message: error_msg,
+                        });
+                    }
+                }
+
+                info!("All interface hashes verified for actor {}", id);
+            }
+            Err(e) => {
+                // Actor doesn't have __pack_types metadata - FATAL
+                // All Pack actors MUST export __pack_types with interface hashes
+                let error_msg = format!(
+                    "Actor {} has no interface metadata (__pack_types). \
+                    All actors must embed type metadata for interface verification. Error: {:?}",
+                    id, e
+                );
+                error!("{}", error_msg);
+                return Err(ActorRuntimeError::SetupError {
+                    message: error_msg,
+                });
+            }
+        }
+
         // Note: Export discovery is now automatic via Pack's embedded __pack_types metadata.
         // No manual export registration is needed.
 

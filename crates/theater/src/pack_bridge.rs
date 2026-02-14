@@ -26,8 +26,10 @@ pub use pack::{
 pub use pack::{
     FunctionSignature, MetadataError, MetadataWithHashes, PackageMetadata, ParamSignature, TypeDesc,
     InterfaceHash, compute_interface_hash, compute_interface_hashes, hash_type,
-    decode_metadata_with_hashes,
+    decode_metadata_with_hashes, encode_metadata_with_hashes,
 };
+// Re-export type system types for building metadata in tests
+pub use pack::types::{Arena, Function, Param, Type};
 // Re-export interface implementation types for handler interface declarations
 pub use pack::{
     FuncSignature, InterfaceImpl, PackParams, PackType, TypeHash,

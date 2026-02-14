@@ -141,6 +141,10 @@ impl Handler for AssemblerHandler {
             .map(|i| (i.name().to_string(), i.hash()))
             .collect()
     }
+
+    fn interfaces(&self) -> Vec<theater::pack_bridge::InterfaceImpl> {
+        vec![assembler_interface()]
+    }
 }
 
 #[cfg(test)]

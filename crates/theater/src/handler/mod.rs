@@ -243,6 +243,27 @@ pub trait Handler: Send + Sync + 'static {
         vec![]
     }
 
+    /// Returns the InterfaceImpl declarations for each interface this handler provides.
+    ///
+    /// This enables subset hash computation for partial interface matching.
+    /// When an actor imports only some functions from an interface, the runtime
+    /// can compute a subset hash to verify compatibility.
+    ///
+    /// Handlers should return their InterfaceImpl objects:
+    ///
+    /// ```ignore
+    /// fn interfaces(&self) -> Vec<InterfaceImpl> {
+    ///     vec![
+    ///         InterfaceImpl::new("my:interface")
+    ///             .func("greet", |name: String| -> String { String::new() })
+    ///             .func("add", |a: i32, b: i32| -> i32 { 0 })
+    ///     ]
+    /// }
+    /// ```
+    fn interfaces(&self) -> Vec<crate::pack_bridge::InterfaceImpl> {
+        vec![]
+    }
+
     /// Returns true if this handler supports Composite's Graph ABI runtime.
     ///
     /// Handlers that override `setup_host_functions_composite()` should

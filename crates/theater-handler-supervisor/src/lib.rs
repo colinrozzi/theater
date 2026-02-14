@@ -210,6 +210,10 @@ impl Handler for SupervisorHandler
             .collect()
     }
 
+    fn interfaces(&self) -> Vec<theater::pack_bridge::InterfaceImpl> {
+        vec![supervisor_interface()]
+    }
+
     fn setup_host_functions_composite(
         &mut self,
         builder: &mut HostLinkerBuilder<'_, ActorStore>,

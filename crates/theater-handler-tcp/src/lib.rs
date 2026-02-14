@@ -203,6 +203,10 @@ impl Handler for TcpHandler {
             .collect()
     }
 
+    fn interfaces(&self) -> Vec<theater::pack_bridge::InterfaceImpl> {
+        vec![tcp_interface()]
+    }
+
     fn start(
         &mut self,
         actor_handle: ActorHandle,

@@ -264,6 +264,10 @@ impl Handler for StoreHandler
             .collect()
     }
 
+    fn interfaces(&self) -> Vec<theater::pack_bridge::InterfaceImpl> {
+        vec![store_interface()]
+    }
+
     // =========================================================================
     // Composite Integration
     // =========================================================================

@@ -528,6 +528,10 @@ impl Handler for MessageServerHandler
             .collect()
     }
 
+    fn interfaces(&self) -> Vec<theater::pack_bridge::InterfaceImpl> {
+        vec![message_server_interface()]
+    }
+
     fn start(
         &mut self,
         actor_handle: ActorHandle,

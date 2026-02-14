@@ -246,12 +246,20 @@ impl Handler for RuntimeHandler {
             .map(|i| (i.name().to_string(), i.hash()))
             .collect()
     }
+
+    fn interfaces(&self) -> Vec<theater::pack_bridge::InterfaceImpl> {
+        vec![runtime_interface()]
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use theater::config::actor_manifest::RuntimeHostConfig;
+    use theater::pack_bridge::{
+        Arena, Function, Param, Type,
+        decode_metadata_with_hashes, encode_metadata_with_hashes,
+    };
     use tokio::sync::mpsc;
 
     #[test]
@@ -289,5 +297,118 @@ mod tests {
 
         // Hash should be non-zero
         assert!(!hashes[0].1.as_bytes().iter().all(|&b| b == 0));
+    }
+
+    #[test]
+    fn test_hash_matching_between_actor_and_handler() {
+        // Build an Arena representing an actor that imports theater:simple/runtime
+        // with the same function signatures as RuntimeHandler provides
+        let mut package = Arena::new("package");
+
+        // Build imports section
+        let mut imports_section = Arena::new("imports");
+        let mut runtime_interface = Arena::new("theater:simple/runtime");
+
+        // Add functions matching the runtime interface definition
+        runtime_interface.add_function(Function::with_signature(
+            "log",
+            vec![Param::new("msg", Type::String)],
+            vec![], // returns ()
+        ));
+        runtime_interface.add_function(Function::with_signature(
+            "get-chain",
+            vec![],
+            vec![Type::List(Box::new(Type::U8))], // returns Vec<u8>
+        ));
+        runtime_interface.add_function(Function::with_signature(
+            "shutdown",
+            vec![Param::new("data", Type::Option(Box::new(Type::List(Box::new(Type::U8)))))],
+            vec![Type::Result {
+                ok: Box::new(Type::Unit),
+                err: Box::new(Type::String),
+            }],
+        ));
+
+        imports_section.add_child(runtime_interface);
+        package.add_child(imports_section);
+
+        // Add empty exports section
+        let exports_section = Arena::new("exports");
+        package.add_child(exports_section);
+
+        // Encode metadata with hashes
+        let encoded = encode_metadata_with_hashes(&package)
+            .expect("should encode metadata with hashes");
+
+        // Decode and get import hashes
+        let decoded = decode_metadata_with_hashes(&encoded)
+            .expect("should decode metadata with hashes");
+
+        // The decoded import hashes should include theater:simple/runtime
+        assert!(!decoded.import_hashes.is_empty(), "should have import hashes");
+
+        let actor_runtime_hash = decoded.import_hashes
+            .iter()
+            .find(|h| h.name == "theater:simple/runtime")
+            .expect("should have theater:simple/runtime import hash");
+
+        // Get the handler's interface hash
+        let config = RuntimeHostConfig {};
+        let (tx, _rx) = mpsc::channel(100);
+        let handler = RuntimeHandler::new(config, tx, None);
+        let handler_hashes = handler.interface_hashes();
+
+        let handler_runtime_hash = handler_hashes
+            .iter()
+            .find(|(name, _)| name == "theater:simple/runtime")
+            .expect("handler should provide theater:simple/runtime");
+
+        // The hashes should match!
+        assert_eq!(
+            actor_runtime_hash.hash, handler_runtime_hash.1,
+            "Actor's import hash should match handler's interface hash"
+        );
+    }
+
+    #[test]
+    fn test_hash_mismatch_detection() {
+        // Build an Arena with a DIFFERENT function signature
+        // This should produce a different hash, demonstrating mismatch detection
+        let mut package = Arena::new("package");
+
+        let mut imports_section = Arena::new("imports");
+        let mut runtime_interface = Arena::new("theater:simple/runtime");
+
+        // Add a function with WRONG signature (wrong param type)
+        runtime_interface.add_function(Function::with_signature(
+            "log",
+            vec![Param::new("msg", Type::S32)], // WRONG: should be String
+            vec![],
+        ));
+
+        imports_section.add_child(runtime_interface);
+        package.add_child(imports_section);
+        package.add_child(Arena::new("exports"));
+
+        // Encode and decode
+        let encoded = encode_metadata_with_hashes(&package).expect("encode");
+        let decoded = decode_metadata_with_hashes(&encoded).expect("decode");
+
+        let actor_hash = decoded.import_hashes
+            .iter()
+            .find(|h| h.name == "theater:simple/runtime")
+            .expect("should have import hash");
+
+        // Get handler hash
+        let config = RuntimeHostConfig {};
+        let (tx, _rx) = mpsc::channel(100);
+        let handler = RuntimeHandler::new(config, tx, None);
+        let handler_hash = &handler.interface_hashes()[0].1;
+
+        // Hashes should NOT match due to different function signature
+        assert_ne!(
+            actor_hash.hash, *handler_hash,
+            "Mismatched signatures should produce different hashes"
+        );
     }
 }
