@@ -10,6 +10,8 @@ use theater::config::actor_manifest::RuntimeHostConfig;
 use theater::handler::HandlerRegistry;
 use theater::messages::TheaterCommand;
 use theater::theater_runtime::TheaterRuntime;
+use theater::utils::resolve_reference;
+use theater::ManifestConfig;
 use theater_handler_rpc::RpcHandler;
 use theater_handler_runtime::RuntimeHandler;
 
@@ -118,14 +120,21 @@ async fn test_rpc_calculator_demo() {
     });
 
     // ── 2. Spawn the calculator actor ─────────────────────────────────────
-    let calc_manifest = make_calculator_manifest(&calc_wasm);
+    let calc_manifest_str = make_calculator_manifest(&calc_wasm);
+    let calc_manifest = ManifestConfig::from_toml_str(&calc_manifest_str)
+        .expect("Failed to parse calc manifest");
+    let calc_wasm_bytes = resolve_reference(&calc_manifest.package)
+        .await
+        .expect("Failed to load calc wasm");
+
     let (calc_response_tx, calc_response_rx) = oneshot::channel();
     let (calc_subscription_tx, mut calc_subscription_rx) = mpsc::channel(64);
 
     theater_tx
         .send(TheaterCommand::SpawnActor {
-            manifest_path: calc_manifest,
-            wasm_bytes: None,
+            wasm_bytes: calc_wasm_bytes,
+            name: Some(calc_manifest.name.clone()),
+            manifest: Some(calc_manifest),
             response_tx: calc_response_tx,
             parent_id: None,
             supervisor_tx: None,
@@ -145,14 +154,21 @@ async fn test_rpc_calculator_demo() {
     while calc_subscription_rx.try_recv().is_ok() {}
 
     // ── 3. Spawn the caller actor ─────────────────────────────────────────
-    let caller_manifest = make_caller_manifest(&caller_wasm);
+    let caller_manifest_str = make_caller_manifest(&caller_wasm);
+    let caller_manifest = ManifestConfig::from_toml_str(&caller_manifest_str)
+        .expect("Failed to parse caller manifest");
+    let caller_wasm_bytes = resolve_reference(&caller_manifest.package)
+        .await
+        .expect("Failed to load caller wasm");
+
     let (caller_response_tx, caller_response_rx) = oneshot::channel();
     let (caller_subscription_tx, mut caller_subscription_rx) = mpsc::channel(64);
 
     theater_tx
         .send(TheaterCommand::SpawnActor {
-            manifest_path: caller_manifest,
-            wasm_bytes: None,
+            wasm_bytes: caller_wasm_bytes,
+            name: Some(caller_manifest.name.clone()),
+            manifest: Some(caller_manifest),
             response_tx: caller_response_tx,
             parent_id: None,
             supervisor_tx: None,

@@ -11,6 +11,8 @@ use theater::config::actor_manifest::{RuntimeHostConfig, StoreHandlerConfig, Sup
 use theater::handler::HandlerRegistry;
 use theater::messages::TheaterCommand;
 use theater::theater_runtime::TheaterRuntime;
+use theater::utils::resolve_reference;
+use theater::ManifestConfig;
 use theater_handler_message_server::MessageServerHandler;
 use theater_handler_runtime::RuntimeHandler;
 use theater_handler_store::StoreHandler;
@@ -67,14 +69,28 @@ async fn main() -> Result<()> {
     // Give runtime a moment to start
     tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 
+    // Load and parse manifest, then load wasm bytes
+    info!("Loading manifest...");
+    let manifest_bytes = resolve_reference(&manifest_path.to_string_lossy())
+        .await
+        .context("Failed to load manifest")?;
+    let manifest_str = String::from_utf8(manifest_bytes)
+        .context("Manifest is not valid UTF-8")?;
+    let manifest = ManifestConfig::from_toml_str(&manifest_str)
+        .context("Failed to parse manifest")?;
+    let wasm_bytes = resolve_reference(&manifest.package)
+        .await
+        .context("Failed to load WASM package")?;
+
     // Spawn the actor
     info!("Spawning actor...");
     let (response_tx, response_rx) = oneshot::channel();
 
     theater_tx
         .send(TheaterCommand::SpawnActor {
-            manifest_path: manifest_path.to_string_lossy().to_string(),
-            wasm_bytes: None,
+            wasm_bytes,
+            name: Some(manifest.name.clone()),
+            manifest: Some(manifest),
             response_tx,
             parent_id: None,
             supervisor_tx: None,

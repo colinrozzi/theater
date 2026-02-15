@@ -194,7 +194,7 @@ impl ActorPhaseManager {
 impl ActorRuntime {
     pub async fn build_actor_resources(
         id: TheaterId,
-        config: &ManifestConfig,
+        name: String,
         wasm_bytes: Vec<u8>,
         pack_runtime: AsyncRuntime,
         chain: Arc<SyncRwLock<StateChain>>,
@@ -240,16 +240,10 @@ impl ActorRuntime {
 
         // Store manifest (but don't record an event - the manifest hash varies between runs)
         let manifest_store = ContentStore::from_id("manifest");
-        debug!("Storing manifest for actor: {}", id);
-        debug!("Manifest store: {:?}", manifest_store);
-        let _manifest_id = manifest_store
-            .store(
-                config
-                    .clone()
-                    .into_fixed_bytes()
-                    .expect("Failed to serialize manifest"),
-            )
-            .await;
+        // Manifest storage removed - manifests are now optional and stored
+        // at the runtime level if needed, not in the actor's content store.
+        debug!("Actor {} ready (manifest_store available for actor content)", id);
+        let _ = manifest_store; // suppress unused warning
 
         // ----------------- Checkpoint Load Component -----------------
 
@@ -263,8 +257,8 @@ impl ActorRuntime {
         }
 
         debug!(
-            "Using pre-resolved WASM bytes for package {} ({} bytes)",
-            config.package,
+            "Using pre-resolved WASM bytes for actor {} ({} bytes)",
+            name,
             wasm_bytes.len()
         );
 
@@ -320,7 +314,7 @@ impl ActorRuntime {
         let handlers_for_setup = &mut handlers;
 
         let mut actor_instance = PackInstance::new_with_interceptor(
-            config.name.clone(),
+            name.clone(),
             &wasm_bytes,
             &pack_runtime,
             actor_store,
@@ -534,7 +528,7 @@ impl ActorRuntime {
 
     pub async fn start(
         id: TheaterId,
-        config: &ManifestConfig,
+        name: String,
         wasm_bytes: Vec<u8>,
         pack_runtime: AsyncRuntime,
         chain: Arc<SyncRwLock<StateChain>>,
@@ -564,7 +558,7 @@ impl ActorRuntime {
         let setup_handle = {
             let actor_instance_wrapper = actor_instance_wrapper.clone();
             let actor_phase_manager = actor_phase_manager.clone();
-            let config = config.clone();
+            let name = name.clone();
             let theater_tx = theater_tx.clone();
             let handler_tasks = handler_tasks.clone();
             let handlers_shutdown_controller = handlers_shutdown_controller.clone();
@@ -572,7 +566,7 @@ impl ActorRuntime {
             tokio::spawn(async move {
                 match Self::build_actor_resources(
                     id,
-                    &config,
+                    name,
                     wasm_bytes,
                     pack_runtime,
                     chain,

@@ -13,6 +13,8 @@ use theater::config::permissions::SupervisorPermissions;
 use theater::handler::{Handler, HandlerContext, SharedActorInstance};
 use theater::messages::{ActorResult, TheaterCommand};
 use theater::shutdown::ShutdownReceiver;
+use theater::utils::resolve_reference;
+use theater::ManifestConfig;
 
 // Pack integration
 use theater::pack_bridge::{
@@ -238,7 +240,7 @@ impl Handler for SupervisorHandler
                     let supervisor_tx = supervisor_tx.clone();
                     async move {
                         // Parse input: (string, option<list<u8>>)
-                        let (manifest, wasm_bytes) = match input {
+                        let (manifest_path, provided_wasm_bytes) = match input {
                             Value::Tuple(args) if args.len() == 2 => {
                                 let manifest = match &args[0] {
                                     Value::String(s) => s.clone(),
@@ -250,20 +252,47 @@ impl Handler for SupervisorHandler
                             _ => return Err(Value::String("Invalid spawn arguments: expected (string, option<list<u8>>)".to_string())),
                         };
 
-                        if let Some(ref bytes) = wasm_bytes {
-                            debug!("spawn: manifest={}, wasm_bytes={} bytes", manifest, bytes.len());
+                        if let Some(ref bytes) = provided_wasm_bytes {
+                            debug!("spawn: manifest={}, wasm_bytes={} bytes", manifest_path, bytes.len());
                         } else {
-                            debug!("spawn: manifest={}, wasm_bytes=None (will load from manifest.package)", manifest);
+                            debug!("spawn: manifest={}, wasm_bytes=None (will load from manifest.package)", manifest_path);
                         }
+
+                        // Load and parse manifest
+                        let manifest_str = match resolve_reference(&manifest_path).await {
+                            Ok(bytes) => match String::from_utf8(bytes) {
+                                Ok(s) => s,
+                                Err(e) => return Err(Value::String(format!("Invalid manifest encoding: {}", e))),
+                            },
+                            Err(e) => return Err(Value::String(format!("Failed to load manifest: {}", e))),
+                        };
+
+                        let manifest = match ManifestConfig::from_toml_str(&manifest_str) {
+                            Ok(m) => m,
+                            Err(e) => return Err(Value::String(format!("Failed to parse manifest: {}", e))),
+                        };
+
+                        // Resolve wasm bytes
+                        let wasm_bytes = match provided_wasm_bytes {
+                            Some(bytes) => bytes,
+                            None => {
+                                match resolve_reference(&manifest.package).await {
+                                    Ok(bytes) => bytes,
+                                    Err(e) => return Err(Value::String(format!("Failed to load WASM: {}", e))),
+                                }
+                            }
+                        };
 
                         let store = ctx.data();
                         let theater_tx = store.theater_tx.clone();
                         let parent_id = store.id.clone();
 
+                        let name = Some(manifest.name.clone());
                         let (response_tx, response_rx) = oneshot::channel();
                         let cmd = TheaterCommand::SpawnActor {
-                            manifest_path: manifest,
                             wasm_bytes,
+                            name,
+                            manifest: Some(manifest),
                             response_tx,
                             parent_id: Some(parent_id),
                             supervisor_tx: Some(supervisor_tx),
@@ -289,7 +318,7 @@ impl Handler for SupervisorHandler
                 move |ctx: AsyncCtx<ActorStore>, input: Value| {
                     async move {
                         // Parse input: (string, option<list<u8>>, option<u64>)
-                        let (manifest, wasm_bytes, timeout_ms) = match input {
+                        let (manifest_path, provided_wasm_bytes, timeout_ms) = match input {
                             Value::Tuple(args) if args.len() == 3 => {
                                 let manifest = match &args[0] {
                                     Value::String(s) => s.clone(),
@@ -302,7 +331,32 @@ impl Handler for SupervisorHandler
                             _ => return Err(Value::String("Invalid spawn-and-wait arguments: expected (string, option<list<u8>>, option<u64>)".to_string())),
                         };
 
-                        debug!("spawn-and-wait: manifest={}, timeout={:?}ms", manifest, timeout_ms);
+                        debug!("spawn-and-wait: manifest={}, timeout={:?}ms", manifest_path, timeout_ms);
+
+                        // Load and parse manifest
+                        let manifest_str = match resolve_reference(&manifest_path).await {
+                            Ok(bytes) => match String::from_utf8(bytes) {
+                                Ok(s) => s,
+                                Err(e) => return Err(Value::String(format!("Invalid manifest encoding: {}", e))),
+                            },
+                            Err(e) => return Err(Value::String(format!("Failed to load manifest: {}", e))),
+                        };
+
+                        let manifest = match ManifestConfig::from_toml_str(&manifest_str) {
+                            Ok(m) => m,
+                            Err(e) => return Err(Value::String(format!("Failed to parse manifest: {}", e))),
+                        };
+
+                        // Resolve wasm bytes
+                        let wasm_bytes = match provided_wasm_bytes {
+                            Some(bytes) => bytes,
+                            None => {
+                                match resolve_reference(&manifest.package).await {
+                                    Ok(bytes) => bytes,
+                                    Err(e) => return Err(Value::String(format!("Failed to load WASM: {}", e))),
+                                }
+                            }
+                        };
 
                         let store = ctx.data();
                         let theater_tx = store.theater_tx.clone();
@@ -311,10 +365,12 @@ impl Handler for SupervisorHandler
                         // Create a dedicated channel for this spawn to receive the child's result
                         let (result_tx, mut result_rx) = mpsc::channel::<ActorResult>(1);
 
+                        let name = Some(manifest.name.clone());
                         let (response_tx, response_rx) = oneshot::channel();
                         let cmd = TheaterCommand::SpawnActor {
-                            manifest_path: manifest.clone(),
                             wasm_bytes,
+                            name,
+                            manifest: Some(manifest),
                             response_tx,
                             parent_id: Some(parent_id),
                             supervisor_tx: Some(result_tx),

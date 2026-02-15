@@ -144,10 +144,8 @@ pub struct ActorProcess {
     pub children: HashSet<TheaterId>,
     /// Current status of the actor
     pub status: ActorStatus,
-    /// Path to the actor's manifest
-    pub manifest_path: String,
-    /// Actor Manifest
-    pub manifest: ManifestConfig,
+    /// Optional actor manifest (for handler configs, replay, etc.)
+    pub manifest: Option<ManifestConfig>,
     /// Controller for graceful shutdown
     pub shutdown_controller: ShutdownController,
     /// Optional supervisor channel for actor supervision
@@ -284,21 +282,21 @@ impl TheaterRuntime {
                     }
                 }
                 TheaterCommand::SpawnActor {
-                    manifest_path,
                     wasm_bytes,
+                    name,
+                    manifest,
                     parent_id,
                     response_tx,
                     supervisor_tx,
                     subscription_tx,
                 } => {
-                    debug!(
-                        "Processing SpawnActor command for manifest: {:?}",
-                        manifest_path
-                    );
+                    let actor_name = name.clone().unwrap_or_else(|| "<unnamed>".to_string());
+                    debug!("Processing SpawnActor command for: {}", actor_name);
                     match self
                         .spawn_actor(
-                            manifest_path.clone(),
                             wasm_bytes,
+                            name,
+                            manifest,
                             parent_id,
                             supervisor_tx,
                             subscription_tx,
@@ -315,7 +313,7 @@ impl TheaterRuntime {
                             }
                         }
                         Err(e) => {
-                            error!("Failed to spawn actor from {:?}: {}", manifest_path, e);
+                            error!("Failed to spawn actor {}: {}", actor_name, e);
                             if let Err(send_err) = response_tx.send(Err(e)) {
                                 error!("Failed to send error response: {:?}", send_err);
                             }
@@ -334,12 +332,62 @@ impl TheaterRuntime {
                         "Processing ResumeActor command for manifest: {:?}",
                         manifest_path
                     );
-                    // ResumeActor now just spawns the actor - state restoration
-                    // happens via replay handler configured in the manifest
+                    // ResumeActor loads manifest from path for replay config
+                    // Load manifest
+                    let manifest_result: Result<ManifestConfig, TheaterRuntimeError> = async {
+                        let manifest_str = if manifest_path.starts_with("store:")
+                            || manifest_path.starts_with("https:")
+                            || PathBuf::from(&manifest_path).exists()
+                        {
+                            let manifest_bytes = resolve_reference(&manifest_path).await
+                                .map_err(|e| TheaterRuntimeError::ActorInitializationError(
+                                    format!("Failed to load manifest: {}", e)
+                                ))?;
+                            String::from_utf8(manifest_bytes)
+                                .map_err(|e| TheaterRuntimeError::ActorInitializationError(e.to_string()))?
+                        } else {
+                            manifest_path.clone()
+                        };
+
+                        ManifestConfig::from_toml_str(&manifest_str).map_err(|e| {
+                            TheaterRuntimeError::ActorInitializationError(format!(
+                                "Failed to parse manifest: {}",
+                                e
+                            ))
+                        })
+                    }
+                    .await;
+
+                    let manifest = match manifest_result {
+                        Ok(m) => m,
+                        Err(e) => {
+                            error!("Failed to load manifest: {}", e);
+                            let _ = response_tx.send(Err(e.into()));
+                            continue;
+                        }
+                    };
+
+                    // Resolve WASM bytes
+                    let wasm_bytes = match wasm_bytes {
+                        Some(bytes) => bytes,
+                        None => {
+                            match resolve_reference(&manifest.package).await {
+                                Ok(bytes) => bytes,
+                                Err(e) => {
+                                    error!("Failed to load WASM: {}", e);
+                                    let _ = response_tx.send(Err(anyhow::anyhow!("Failed to load WASM: {}", e)));
+                                    continue;
+                                }
+                            }
+                        }
+                    };
+
+                    let name = Some(manifest.name.clone());
                     match self
                         .spawn_actor(
-                            manifest_path.clone(),
                             wasm_bytes,
+                            name,
+                            Some(manifest),
                             parent_id,
                             supervisor_tx,
                             subscription_tx,
@@ -443,9 +491,12 @@ impl TheaterRuntime {
                 } => {
                     debug!("Getting manifest for actor: {:?}", actor_id);
                     if let Some(proc) = self.actors.get(&actor_id) {
-                        let manifest = proc.manifest.clone();
-                        if let Err(e) = response_tx.send(Ok(manifest)) {
-                            error!("Failed to send actor manifest: {:?}", e);
+                        if let Some(manifest) = proc.manifest.clone() {
+                            if let Err(e) = response_tx.send(Ok(manifest)) {
+                                error!("Failed to send actor manifest: {:?}", e);
+                            }
+                        } else {
+                            let _ = response_tx.send(Err(anyhow::anyhow!("Actor has no manifest")));
                         }
                     } else {
                         warn!("Actor {:?} not found", actor_id);
@@ -537,12 +588,13 @@ impl TheaterRuntime {
         Ok(())
     }
 
-    /// Spawns a new actor from a manifest.
+    /// Spawns a new actor from WASM bytes.
     ///
     /// ## Parameters
     ///
-    /// * `manifest_path` - Path to the actor's manifest file or manifest content
-    /// * `wasm_bytes` - Optional pre-loaded WASM bytes. If None, bytes are resolved from manifest.package
+    /// * `wasm_bytes` - The WASM module bytes to instantiate
+    /// * `name` - Optional actor name for debugging/logging
+    /// * `manifest` - Optional manifest for handler configs, replay settings, etc.
     /// * `parent_id` - Optional ID of the parent actor
     ///
     /// ## Returns
@@ -553,68 +605,24 @@ impl TheaterRuntime {
     /// ## Implementation Notes
     ///
     /// This method handles the entire process of spawning a new actor, including:
-    /// - Loading and parsing the manifest
-    /// - Resolving WASM bytes (if not provided)
     /// - Creating communication channels
     /// - Spawning the actor runtime in a new task
     /// - Registering the actor with the runtime
     /// - Setting up parent-child relationships
+    ///
+    /// If no manifest is provided, the actor uses global handler defaults.
     async fn spawn_actor(
         &mut self,
-        manifest_path: String,
-        wasm_bytes: Option<Vec<u8>>,
+        wasm_bytes: Vec<u8>,
+        name: Option<String>,
+        manifest: Option<ManifestConfig>,
         parent_id: Option<TheaterId>,
         supervisor_tx: Option<Sender<ActorResult>>,
         subscription_tx: Option<Sender<Result<ChainEvent, ActorError>>>,
     ) -> Result<TheaterId> {
-        debug!(
-            "Starting actor spawn process from manifest: {:?}",
-            manifest_path
-        );
-
-        // check if the manifest is a valid path OR starts with store:
-        let manifest_str: String;
-
-        if manifest_path.starts_with("store:")
-            || manifest_path.starts_with("https:")
-            || PathBuf::from(&manifest_path).exists()
-        {
-            debug!("Manifest path is a valid store reference or URL");
-            // Resolve the store reference
-            let manifest_bytes = resolve_reference(&manifest_path).await?;
-            // Save as a string
-            manifest_str = String::from_utf8(manifest_bytes.clone())
-                .map_err(|e| TheaterRuntimeError::ActorInitializationError(e.to_string()))?;
-        } else {
-            debug!("Manifest is a string");
-            manifest_str = manifest_path.clone();
-        }
-
-        let manifest = ManifestConfig::from_toml_str(&manifest_str)
-            .map_err(|e| {
-                TheaterRuntimeError::ActorInitializationError(format!(
-                    "Failed to parse manifest: {}",
-                    e
-                ))
-            })?;
-
-        // Resolve WASM bytes: use provided bytes or load from manifest.package
-        let wasm_bytes = match wasm_bytes {
-            Some(bytes) => {
-                debug!("Using pre-loaded WASM bytes ({} bytes)", bytes.len());
-                bytes
-            }
-            None => {
-                debug!("Resolving WASM from manifest.package: {}", manifest.package);
-                resolve_reference(&manifest.package).await.map_err(|e| {
-                    TheaterRuntimeError::ActorInitializationError(format!(
-                        "Failed to load WASM package for actor {}: {}",
-                        manifest.name, e
-                    ))
-                })?
-            }
-        };
-        debug!("WASM bytes resolved ({} bytes)", wasm_bytes.len());
+        let actor_name = name.unwrap_or_else(|| "<unnamed>".to_string());
+        debug!("Starting actor spawn process for: {}", actor_name);
+        debug!("WASM bytes: {} bytes", wasm_bytes.len());
 
         // Create a shutdown controller for this specific actor
         let mut shutdown_controller = ShutdownController::new();
@@ -647,19 +655,23 @@ impl TheaterRuntime {
 
         self.chains.insert(actor_id.clone(), chain.clone());
 
-        // Check if manifest specifies a replay handler and create modified registry if so
-        let handler_registry = self.create_handler_registry_for_manifest(&manifest).await?;
+        // If manifest provided, check for replay handler and create modified registry
+        let handler_registry = if let Some(ref manifest) = manifest {
+            self.create_handler_registry_for_manifest(manifest).await?
+        } else {
+            // No manifest - use global handlers directly
+            self.handler_registry.clone()
+        };
 
         // Start the actor in a detached task
         // Each actor gets its own AsyncRuntime for isolation
         let actor_id_for_task = actor_id.clone();
-        let actor_name = manifest.name.clone();
-        let manifest_clone = manifest.clone();
+        let actor_name_for_task = actor_name.clone();
         let pack_runtime = AsyncRuntime::new();
         let actor_runtime_process = tokio::spawn(async move {
             let _actor_runtime = ActorRuntime::start(
                 actor_id_for_task.clone(),
-                &manifest_clone,
+                actor_name_for_task,
                 wasm_bytes,
                 pack_runtime,
                 chain,
@@ -692,7 +704,6 @@ impl TheaterRuntime {
             control_tx,
             children: HashSet::new(),
             status: ActorStatus::Running,
-            manifest_path: manifest_path.clone(),
             manifest,
             shutdown_controller,
             supervisor_tx,
@@ -891,7 +902,8 @@ impl TheaterRuntime {
                 .expect("Failed to record event");
             debug!("Final event added to chain for actor {:?}", actor_id);
 
-            if proc.manifest.save_chain() {
+            let should_save_chain = proc.manifest.as_ref().map(|m| m.save_chain()).unwrap_or(false);
+            if should_save_chain {
                 debug!("Actor {:?} manifest requires chain saving", actor_id);
                 writable_chain.save_chain().map_err(|e| {
                     error!("Failed to save chain for actor {:?}: {}", actor_id, e);

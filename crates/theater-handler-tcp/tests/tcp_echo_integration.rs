@@ -12,6 +12,8 @@ use theater::config::actor_manifest::{RuntimeHostConfig, TcpHandlerConfig};
 use theater::handler::HandlerRegistry;
 use theater::messages::TheaterCommand;
 use theater::theater_runtime::TheaterRuntime;
+use theater::utils::resolve_reference;
+use theater::ManifestConfig;
 use theater_handler_runtime::RuntimeHandler;
 use theater_handler_tcp::TcpHandler;
 
@@ -94,14 +96,21 @@ async fn test_tcp_echo_and_chain() {
     });
 
     // ── 2. Spawn the tcp-echo actor ──────────────────────────────────────
-    let manifest = make_manifest(&wasm, listen_addr);
+    let manifest_str = make_manifest(&wasm, listen_addr);
+    let manifest = ManifestConfig::from_toml_str(&manifest_str)
+        .expect("Failed to parse manifest");
+    let wasm_bytes = resolve_reference(&manifest.package)
+        .await
+        .expect("Failed to load wasm");
+
     let (response_tx, response_rx) = oneshot::channel();
     let (subscription_tx, mut subscription_rx) = mpsc::channel(64);
 
     theater_tx
         .send(TheaterCommand::SpawnActor {
-            manifest_path: manifest,
-            wasm_bytes: None,
+            wasm_bytes,
+            name: Some(manifest.name.clone()),
+            manifest: Some(manifest),
             response_tx,
             parent_id: None,
             supervisor_tx: None,

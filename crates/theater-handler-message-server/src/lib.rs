@@ -78,6 +78,7 @@ pub enum MessageServerError {
 /// Declare the theater:simple/message-server-host interface.
 ///
 /// Functions for actor-to-actor messaging:
+/// - register() -> result<(), string>  // Register with router and start message consumption
 /// - send(address: string, msg: list<u8>) -> result<(), string>
 /// - request(address: string, msg: list<u8>) -> result<list<u8>, string>
 /// - list-outstanding-requests() -> list<string>
@@ -88,6 +89,7 @@ pub enum MessageServerError {
 /// - close-channel(channel-id: string) -> result<(), string>
 fn message_server_interface() -> InterfaceImpl {
     InterfaceImpl::new("theater:simple/message-server-host")
+        .func("register", || -> Result<(), String> { Ok(()) })
         .func("send", |_: String, _: Vec<u8>| -> Result<(), String> { Ok(()) })
         .func("request", |_: String, _: Vec<u8>| -> Result<Vec<u8>, String> { Ok(vec![]) })
         .func("list-outstanding-requests", || -> Vec<String> { vec![] })
@@ -368,9 +370,9 @@ impl MessageRouter {
 ///
 /// Architecture:
 /// - Each actor gets its own handler instance (via create_instance)
-/// - Handler registers the actor's mailbox with the global MessageRouter
+/// - Actor calls register() to join the message router and start consumption
 /// - Host functions send MessageCommand to the router for routing
-/// - Mailbox consumption happens in start() until shutdown
+/// - Mailbox consumption runs in background task, calling actor exports
 ///
 /// Enables actors to:
 /// - Send one-way messages
@@ -384,6 +386,15 @@ pub struct MessageServerHandler {
 
     // This actor's ID (set in setup_host_functions_composite via HandlerContext)
     actor_id: Option<TheaterId>,
+
+    // Actor handle for calling export functions (set in setup, used by register())
+    actor_handle: Arc<Mutex<Option<ActorHandle>>>,
+
+    // Whether this actor has already registered
+    is_registered: Arc<Mutex<bool>>,
+
+    // Shutdown receiver for the consumption task (set in start(), used by register())
+    shutdown_receiver: Arc<Mutex<Option<ShutdownReceiver>>>,
 
     // Request-response tracking for this actor
     outstanding_requests: Arc<Mutex<HashMap<String, tokio::sync::oneshot::Sender<Vec<u8>>>>>,
@@ -405,6 +416,9 @@ impl MessageServerHandler {
         Self {
             router,
             actor_id: None,
+            actor_handle: Arc::new(Mutex::new(None)),
+            is_registered: Arc::new(Mutex::new(false)),
+            shutdown_receiver: Arc::new(Mutex::new(None)),
             outstanding_requests: Arc::new(Mutex::new(HashMap::new())),
             permissions,
         }
@@ -536,51 +550,24 @@ impl Handler for MessageServerHandler
         &mut self,
         actor_handle: ActorHandle,
         _actor_instance: SharedActorInstance,
-        mut shutdown_receiver: ShutdownReceiver,
+        shutdown_receiver: ShutdownReceiver,
     ) -> Pin<Box<dyn Future<Output = Result<()>> + Send>> {
-        info!("Starting message server handler for actor");
+        info!("Message server handler starting (passive mode)");
 
-        // Clone what we need for the async block
-        let actor_id = self.actor_id.clone();
-        let router = self.router.clone();
-        let outstanding_requests = self.outstanding_requests.clone();
+        // Store the actor_handle and shutdown_receiver for use by register()
+        {
+            let mut handle_guard = self.actor_handle.lock().unwrap();
+            *handle_guard = Some(actor_handle);
+        }
+        {
+            let mut shutdown_guard = self.shutdown_receiver.lock().unwrap();
+            *shutdown_guard = Some(shutdown_receiver);
+        }
 
+        // Handler is now passive - actors call register() to start message consumption
         Box::pin(async move {
-            let Some(actor_id) = actor_id else {
-                error!("Message server handler has no actor_id - setup_host_functions not called?");
-                return Ok(());
-            };
-
-            // Create mailbox channel and register with the router
-            let (mailbox_tx, mut mailbox_rx) = tokio::sync::mpsc::channel(100);
-            router.register_actor(actor_id.clone(), mailbox_tx).await?;
-
-            info!("Message server handler consuming mailbox for actor {}", actor_id);
-
-            // Consume mailbox until shutdown
-            loop {
-                tokio::select! {
-                    _ = &mut shutdown_receiver.receiver => {
-                        info!("Actor {} received shutdown signal", actor_id);
-                        break;
-                    }
-                    Some(msg) = mailbox_rx.recv() => {
-                        if let Err(e) = Self::process_actor_message(msg, &actor_handle, &outstanding_requests).await {
-                            error!("Actor {}: Error processing message: {}", actor_id, e);
-                        }
-                    }
-                    else => {
-                        info!("Actor {} mailbox closed", actor_id);
-                        break;
-                    }
-                }
-            }
-
-            // Unregister from router on shutdown
-            info!("Unregistering actor {} from message router", actor_id);
-            router.unregister_actor(actor_id.clone()).await;
-
-            info!("Message server handler shutdown complete for actor {}", actor_id);
+            // Nothing to do - register() spawns the consumption task
+            // The consumption task handles its own shutdown via the shutdown_receiver
             Ok(())
         })
     }
@@ -607,6 +594,8 @@ impl Handler for MessageServerHandler
             return Ok(());
         }
 
+        // Clone references for host function closures
+        let router_for_register = self.router.clone();
         let router = self.router.clone();
         let router2 = self.router.clone();
         let router3 = self.router.clone();
@@ -616,8 +605,101 @@ impl Handler for MessageServerHandler
         let outstanding_requests2 = self.outstanding_requests.clone();
         let outstanding_requests3 = self.outstanding_requests.clone();
 
+        // For register() host function
+        let actor_id_for_register = self.actor_id.clone();
+        let actor_handle_for_register = self.actor_handle.clone();
+        let is_registered = self.is_registered.clone();
+        let shutdown_receiver_for_register = self.shutdown_receiver.clone();
+        let outstanding_requests_for_register = self.outstanding_requests.clone();
+
         builder
             .interface("theater:simple/message-server-host")?
+            // register() -> result<(), string>
+            // Registers with the message router and starts the consumption loop
+            .func_async_result("register", move |_ctx: AsyncCtx<ActorStore>, _input: Value| {
+                let router = router_for_register.clone();
+                let actor_id = actor_id_for_register.clone();
+                let actor_handle_arc = actor_handle_for_register.clone();
+                let is_registered = is_registered.clone();
+                let shutdown_receiver_arc = shutdown_receiver_for_register.clone();
+                let outstanding_requests = outstanding_requests_for_register.clone();
+
+                async move {
+                    // Check if already registered
+                    {
+                        let mut registered = is_registered.lock().unwrap();
+                        if *registered {
+                            return Err(Value::String("Already registered".to_string()));
+                        }
+                        *registered = true;
+                    }
+
+                    let Some(actor_id) = actor_id else {
+                        return Err(Value::String("No actor ID available".to_string()));
+                    };
+
+                    // Take the actor_handle and shutdown_receiver from storage
+                    let actor_handle = {
+                        let mut guard = actor_handle_arc.lock().unwrap();
+                        guard.take()
+                    };
+                    let shutdown_receiver = {
+                        let mut guard = shutdown_receiver_arc.lock().unwrap();
+                        guard.take()
+                    };
+
+                    let Some(actor_handle) = actor_handle else {
+                        return Err(Value::String("Actor handle not available - start() not called?".to_string()));
+                    };
+                    let Some(mut shutdown_receiver) = shutdown_receiver else {
+                        return Err(Value::String("Shutdown receiver not available".to_string()));
+                    };
+
+                    // Create mailbox channel and register with the router
+                    let (mailbox_tx, mut mailbox_rx) = tokio::sync::mpsc::channel(100);
+                    if let Err(e) = router.register_actor(actor_id.clone(), mailbox_tx).await {
+                        return Err(Value::String(format!("Failed to register with router: {}", e)));
+                    }
+
+                    info!("Actor {} registered with message router", actor_id);
+
+                    // Spawn background task for message consumption
+                    let actor_id_for_task = actor_id.clone();
+                    let router_for_task = router.clone();
+                    tokio::spawn(async move {
+                        info!("Message consumption task started for actor {}", actor_id_for_task);
+
+                        loop {
+                            tokio::select! {
+                                _ = &mut shutdown_receiver.receiver => {
+                                    info!("Actor {} received shutdown signal", actor_id_for_task);
+                                    break;
+                                }
+                                Some(msg) = mailbox_rx.recv() => {
+                                    if let Err(e) = MessageServerHandler::process_actor_message(
+                                        msg,
+                                        &actor_handle,
+                                        &outstanding_requests
+                                    ).await {
+                                        error!("Actor {}: Error processing message: {}", actor_id_for_task, e);
+                                    }
+                                }
+                                else => {
+                                    info!("Actor {} mailbox closed", actor_id_for_task);
+                                    break;
+                                }
+                            }
+                        }
+
+                        // Unregister from router on shutdown
+                        info!("Unregistering actor {} from message router", actor_id_for_task);
+                        router_for_task.unregister_actor(actor_id_for_task.clone()).await;
+                        info!("Message consumption task shutdown complete for actor {}", actor_id_for_task);
+                    });
+
+                    Ok(Value::Tuple(vec![]))
+                }
+            })?
             // send(address: string, msg: list<u8>) -> result<_, string>
             .func_async_result("send", move |ctx: AsyncCtx<ActorStore>, input: Value| {
                 let router = router.clone();

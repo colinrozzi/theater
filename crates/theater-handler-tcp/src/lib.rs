@@ -49,7 +49,7 @@ fn tcp_interface() -> InterfaceImpl {
         .func("close-listener", |_: String| -> Result<(), String> { Ok(()) })
 }
 
-/// Shared TCP state between host function closures and the start() accept loop.
+/// Shared TCP state between host function closures and the accept loop.
 #[derive(Clone)]
 struct TcpState {
     connections: Arc<Mutex<HashMap<u64, TcpStream>>>,
@@ -91,6 +91,10 @@ impl TcpState {
 pub struct TcpHandler {
     config: TcpHandlerConfig,
     state: Option<TcpState>,
+    /// Actor handle for calling export functions (set in start(), used by listen())
+    actor_handle: Arc<std::sync::Mutex<Option<ActorHandle>>>,
+    /// Shutdown receiver for background accept loops
+    shutdown_receiver: Arc<std::sync::Mutex<Option<ShutdownReceiver>>>,
 }
 
 impl TcpHandler {
@@ -98,6 +102,8 @@ impl TcpHandler {
         Self {
             config,
             state: None,
+            actor_handle: Arc::new(std::sync::Mutex::new(None)),
+            shutdown_receiver: Arc::new(std::sync::Mutex::new(None)),
         }
     }
 
@@ -211,69 +217,24 @@ impl Handler for TcpHandler {
         &mut self,
         actor_handle: ActorHandle,
         _actor_instance: SharedActorInstance,
-        mut shutdown_receiver: ShutdownReceiver,
+        shutdown_receiver: ShutdownReceiver,
     ) -> Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send>> {
-        let listen_addr = self.config.listen.clone();
-        let state = self.state.clone();
+        info!("TCP handler starting (passive mode)");
 
+        // Store the actor_handle and shutdown_receiver for use by listen()
+        {
+            let mut handle_guard = self.actor_handle.lock().unwrap();
+            *handle_guard = Some(actor_handle);
+        }
+        {
+            let mut shutdown_guard = self.shutdown_receiver.lock().unwrap();
+            *shutdown_guard = Some(shutdown_receiver);
+        }
+
+        // Handler is now passive - actors call listen() to start the accept loop
         Box::pin(async move {
-            let Some(listen_addr) = listen_addr else {
-                // No listener configured — client-only mode, just wait for shutdown.
-                shutdown_receiver.wait_for_shutdown().await;
-                info!("TCP handler (client-only) received shutdown signal");
-                return Ok(());
-            };
-
-            let Some(state) = state else {
-                error!("TCP handler has no state — setup_host_functions_composite not called?");
-                return Ok(());
-            };
-
-            // Bind the listener and store it for the actor to use via accept().
-            let listener = TcpListener::bind(&listen_addr).await?;
-            info!("TCP handler listening on {}", listen_addr);
-
-            loop {
-                tokio::select! {
-                    _ = &mut shutdown_receiver.receiver => {
-                        info!("TCP handler received shutdown signal");
-                        break;
-                    }
-                    result = listener.accept() => {
-                        match result {
-                            Ok((stream, peer_addr)) => {
-                                if let Some(max) = state.max_connections {
-                                    let count = state.connections.lock().await.len();
-                                    if count >= max as usize {
-                                        info!("TCP handler rejecting connection from {} (limit {}/{})", peer_addr, count, max);
-                                        drop(stream);
-                                        continue;
-                                    }
-                                }
-                                info!("TCP handler accepted connection from {}", peer_addr);
-                                let conn_id = state.next_id();
-                                let conn_id_str = id_to_string(conn_id);
-                                state.connections.lock().await.insert(conn_id, stream);
-
-                                let params = Value::Tuple(vec![Value::String(conn_id_str)]);
-                                if let Err(e) = actor_handle
-                                    .call_function(
-                                        "theater:simple/tcp-client.handle-connection".to_string(),
-                                        params,
-                                    )
-                                    .await
-                                {
-                                    error!("Error calling handle-connection: {}", e);
-                                }
-                            }
-                            Err(e) => {
-                                error!("TCP accept error: {}", e);
-                            }
-                        }
-                    }
-                }
-            }
-
+            // Nothing to do here - listen() spawns background accept tasks
+            // The accept tasks handle their own shutdown via the shutdown_receiver
             Ok(())
         })
     }
@@ -292,6 +253,10 @@ impl Handler for TcpHandler {
 
         let state = TcpState::new(self.config.max_connections);
         self.state = Some(state.clone());
+
+        // Clone handler fields for use in listen() callback
+        let actor_handle_for_listen = self.actor_handle.clone();
+        let shutdown_receiver_for_listen = self.shutdown_receiver.clone();
 
         // Clone state for each closure
         let st_connect = state.clone();
@@ -324,20 +289,128 @@ impl Handler for TcpHandler {
                 },
             )?
             // listen(address: string) -> result<string, string>
+            // Binds a listener and spawns a background accept loop that calls
+            // the actor's handle-connection export for each new connection.
             .func_async_result(
                 "listen",
                 move |_ctx: AsyncCtx<ActorStore>, input: Value| {
                     let st = st_listen.clone();
+                    let actor_handle_arc = actor_handle_for_listen.clone();
+                    let shutdown_receiver_arc = shutdown_receiver_for_listen.clone();
                     async move {
                         let address = parse_string(&input)?;
                         debug!("tcp listen on {}", address);
+
                         let listener = TcpListener::bind(&address)
                             .await
                             .map_err(|e| Value::String(e.to_string()))?;
-                        let id = st.next_id();
-                        st.listeners.lock().await.insert(id, listener);
-                        debug!("tcp listening on {} as listener={}", address, id);
-                        Ok::<Value, Value>(Value::String(id_to_string(id)))
+
+                        let listener_id = st.next_id();
+                        info!("tcp listening on {} as listener={}", address, listener_id);
+
+                        // Take the actor_handle for use in the accept loop
+                        let actor_handle = {
+                            let guard = actor_handle_arc.lock().unwrap();
+                            guard.clone()
+                        };
+                        let Some(actor_handle) = actor_handle else {
+                            return Err(Value::String("Actor handle not available - start() not called?".to_string()));
+                        };
+
+                        // Take the shutdown receiver (only available for the first listener)
+                        let shutdown_receiver = {
+                            let mut guard = shutdown_receiver_arc.lock().unwrap();
+                            guard.take()
+                        };
+
+                        // Clone state for the background task
+                        let st_for_task = st.clone();
+
+                        // Spawn background accept loop
+                        tokio::spawn(async move {
+                            info!("TCP accept loop started for listener={}", listener_id);
+
+                            // If we have a shutdown receiver, use it for graceful shutdown
+                            if let Some(shutdown_rx) = shutdown_receiver {
+                                // Accept loop with shutdown handling
+                                let accept_loop = async {
+                                    loop {
+                                        match listener.accept().await {
+                                            Ok((stream, peer_addr)) => {
+                                                let conn_id = st_for_task.next_id();
+                                                info!("tcp accepted conn={} from {} on listener={}", conn_id, peer_addr, listener_id);
+
+                                                // Store the connection
+                                                st_for_task.connections.lock().await.insert(conn_id, stream);
+
+                                                // Call the actor's handle-connection export
+                                                let conn_id_str = id_to_string(conn_id);
+                                                let params = Value::Tuple(vec![Value::String(conn_id_str)]);
+
+                                                if let Err(e) = actor_handle
+                                                    .call_function(
+                                                        "theater:simple/tcp-client.handle-connection".to_string(),
+                                                        params,
+                                                    )
+                                                    .await
+                                                {
+                                                    error!("Failed to call handle-connection for conn={}: {}", conn_id, e);
+                                                }
+                                            }
+                                            Err(e) => {
+                                                error!("TCP accept error on listener={}: {}", listener_id, e);
+                                                // Continue accepting on transient errors
+                                            }
+                                        }
+                                    }
+                                };
+
+                                tokio::select! {
+                                    _ = shutdown_rx.wait_for_shutdown() => {
+                                        info!("TCP accept loop received shutdown for listener={}", listener_id);
+                                    }
+                                    _ = accept_loop => {
+                                        // Accept loop ended (shouldn't happen normally)
+                                    }
+                                }
+                            } else {
+                                // No shutdown receiver - just accept until error
+                                // This happens for subsequent listen() calls
+                                loop {
+                                    match listener.accept().await {
+                                        Ok((stream, peer_addr)) => {
+                                            let conn_id = st_for_task.next_id();
+                                            info!("tcp accepted conn={} from {} on listener={}", conn_id, peer_addr, listener_id);
+
+                                            // Store the connection
+                                            st_for_task.connections.lock().await.insert(conn_id, stream);
+
+                                            // Call the actor's handle-connection export
+                                            let conn_id_str = id_to_string(conn_id);
+                                            let params = Value::Tuple(vec![Value::String(conn_id_str)]);
+
+                                            if let Err(e) = actor_handle
+                                                .call_function(
+                                                    "theater:simple/tcp-client.handle-connection".to_string(),
+                                                    params,
+                                                )
+                                                .await
+                                            {
+                                                error!("Failed to call handle-connection for conn={}: {}", conn_id, e);
+                                            }
+                                        }
+                                        Err(e) => {
+                                            error!("TCP accept error on listener={}: {}", listener_id, e);
+                                            // Continue accepting on transient errors
+                                        }
+                                    }
+                                }
+                            }
+
+                            info!("TCP accept loop stopped for listener={}", listener_id);
+                        });
+
+                        Ok::<Value, Value>(Value::String(id_to_string(listener_id)))
                     }
                 },
             )?

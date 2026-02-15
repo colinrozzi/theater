@@ -60,13 +60,14 @@ async fn test_theater_command_stop_actor() {
 
 #[tokio::test]
 async fn test_theater_command_spawn_actor() {
-    let manifest_path = "test_manifest.toml".to_string();
+    let actor_name = "test-actor".to_string();
     let parent_id = TheaterId::generate();
     let (tx, _rx) = oneshot::channel();
 
     let command = TheaterCommand::SpawnActor {
-        manifest_path: manifest_path.clone(),
-        wasm_bytes: None,
+        wasm_bytes: vec![0, 1, 2, 3],
+        name: Some(actor_name.clone()),
+        manifest: None,
         response_tx: tx,
         parent_id: Some(parent_id.clone()),
         supervisor_tx: None,
@@ -75,18 +76,18 @@ async fn test_theater_command_spawn_actor() {
 
     match command {
         TheaterCommand::SpawnActor {
-            manifest_path: ref path,
+            name: ref n,
             parent_id: ref parent,
             ..
         } => {
-            assert_eq!(*path, manifest_path);
+            assert_eq!(*n, Some(actor_name.clone()));
             assert_eq!(*parent, Some(parent_id));
         }
         _ => panic!("Wrong command type"),
     }
 
     // Verify logging output
-    assert_eq!(command.to_log(), format!("SpawnActor: {}", manifest_path));
+    assert_eq!(command.to_log(), format!("SpawnActor: {}", actor_name));
 }
 
 #[tokio::test]

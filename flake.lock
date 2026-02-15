@@ -49,11 +49,27 @@
         "type": "github"
       }
     },
+    "pack": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1771107940,
+        "narHash": "sha256-mPZVSSIDfhP3GSq9Q9UE5se4VC1GwANgJTu0rgk/t44=",
+        "rev": "312659ba69d20364573332089b4fd6b50c49f82b",
+        "revCount": 60,
+        "type": "git",
+        "url": "file:../pack"
+      },
+      "original": {
+        "type": "git",
+        "url": "file:../pack"
+      }
+    },
     "root": {
       "inputs": {
         "crane": "crane",
         "flake-utils": "flake-utils",
         "nixpkgs": "nixpkgs",
+        "pack": "pack",
         "rust-overlay": "rust-overlay"
       }
     },

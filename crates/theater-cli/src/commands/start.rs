@@ -18,6 +18,7 @@ use theater::messages::TheaterCommand;
 use theater::theater_runtime::TheaterRuntime;
 use theater::utils::resolve_reference;
 use theater::TheaterId;
+use theater::ManifestConfig;
 use theater_handler_message_server::{MessageRouter, MessageServerHandler};
 use theater_handler_runtime::RuntimeHandler;
 use theater_handler_store::StoreHandler;
@@ -264,6 +265,19 @@ pub async fn execute_async(args: &StartArgs, ctx: &CommandContext) -> Result<(),
         }
     });
 
+    // Parse the manifest
+    let manifest = ManifestConfig::from_toml_str(&manifest_content).map_err(|e| {
+        CliError::invalid_manifest(format!("Failed to parse manifest: {}", e))
+    })?;
+
+    // Load WASM bytes from manifest.package
+    let wasm_bytes = resolve_reference(&manifest.package).await.map_err(|e| {
+        CliError::server_error(format!(
+            "Failed to load WASM from '{}': {}",
+            manifest.package, e
+        ))
+    })?;
+
     // Spawn the actor
     let (response_tx, response_rx) = tokio::sync::oneshot::channel();
 
@@ -275,8 +289,9 @@ pub async fn execute_async(args: &StartArgs, ctx: &CommandContext) -> Result<(),
 
     theater_tx
         .send(TheaterCommand::SpawnActor {
-            manifest_path: manifest_content,
-            wasm_bytes: None,
+            wasm_bytes,
+            name: Some(manifest.name.clone()),
+            manifest: Some(manifest),
             response_tx,
             parent_id: None,
             supervisor_tx: Some(supervisor_tx),

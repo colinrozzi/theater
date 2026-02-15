@@ -23,6 +23,7 @@ use theater::handler::HandlerRegistry;
 use theater::id::TheaterId;
 use theater::messages::{ChannelId, TheaterCommand};
 use theater::theater_runtime::TheaterRuntime;
+use theater::utils::resolve_reference;
 use theater::TheaterRuntimeError;
 
 // Import Theater-specific handlers only
@@ -578,6 +579,63 @@ impl TheaterServer {
                     subscribe,
                 } => {
                     info!("Starting actor from manifest: {:?}", manifest);
+
+                    // Load and parse manifest
+                    let manifest_str = match resolve_reference(&manifest).await {
+                        Ok(bytes) => match String::from_utf8(bytes) {
+                            Ok(s) => s,
+                            Err(e) => {
+                                error!("Invalid manifest encoding: {}", e);
+                                cmd_client_tx.send(ManagementResponse::Error {
+                                    error: ManagementError::ActorInitializationError(format!(
+                                        "Invalid manifest encoding: {}",
+                                        e
+                                    )),
+                                }).await.ok();
+                                continue;
+                            }
+                        },
+                        Err(e) => {
+                            error!("Failed to load manifest: {}", e);
+                            cmd_client_tx.send(ManagementResponse::Error {
+                                error: ManagementError::ActorInitializationError(format!(
+                                    "Failed to load manifest: {}",
+                                    e
+                                )),
+                            }).await.ok();
+                            continue;
+                        }
+                    };
+
+                    let manifest_config = match ManifestConfig::from_toml_str(&manifest_str) {
+                        Ok(m) => m,
+                        Err(e) => {
+                            error!("Failed to parse manifest: {}", e);
+                            cmd_client_tx.send(ManagementResponse::Error {
+                                error: ManagementError::ActorInitializationError(format!(
+                                    "Failed to parse manifest: {}",
+                                    e
+                                )),
+                            }).await.ok();
+                            continue;
+                        }
+                    };
+
+                    // Load wasm bytes
+                    let wasm_bytes = match resolve_reference(&manifest_config.package).await {
+                        Ok(bytes) => bytes,
+                        Err(e) => {
+                            error!("Failed to load WASM: {}", e);
+                            cmd_client_tx.send(ManagementResponse::Error {
+                                error: ManagementError::ActorInitializationError(format!(
+                                    "Failed to load WASM: {}",
+                                    e
+                                )),
+                            }).await.ok();
+                            continue;
+                        }
+                    };
+
                     let (cmd_tx, cmd_rx) = tokio::sync::oneshot::channel();
                     debug!("Sending SpawnActor command to runtime");
                     let supervisor_tx = if parent {
@@ -630,8 +688,9 @@ impl TheaterServer {
                     };
                     match runtime_tx
                         .send(TheaterCommand::SpawnActor {
-                            manifest_path: manifest.clone(),
-                            wasm_bytes: None,
+                            wasm_bytes,
+                            name: Some(manifest_config.name.clone()),
+                            manifest: Some(manifest_config),
                             response_tx: cmd_tx,
                             parent_id: None,
                             supervisor_tx,

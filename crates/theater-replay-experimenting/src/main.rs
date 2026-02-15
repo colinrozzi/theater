@@ -28,7 +28,9 @@ use theater::config::actor_manifest::{RuntimeHostConfig, SupervisorHostConfig};
 use theater::handler::HandlerRegistry;
 use theater::messages::{ActorMessage, ActorRequest, ActorSend, MessageCommand, TheaterCommand};
 use theater::theater_runtime::TheaterRuntime;
+use theater::utils::resolve_reference;
 use theater::ActorError;
+use theater::ManifestConfig;
 
 use theater_handler_message_server::{MessageRouter, MessageServerHandler};
 use theater_handler_runtime::RuntimeHandler;
@@ -143,6 +145,13 @@ type = "message-server"
         wasm_path.display(),
         chain_path
     )
+}
+
+/// Helper to load manifest and wasm bytes from a manifest string
+async fn load_manifest_and_wasm(manifest_str: &str) -> Result<(ManifestConfig, Vec<u8>)> {
+    let manifest = ManifestConfig::from_toml_str(manifest_str)?;
+    let wasm_bytes = resolve_reference(&manifest.package).await?;
+    Ok((manifest, wasm_bytes))
 }
 
 /// Creates a handler registry with RuntimeHandler and MessageServerHandler.
@@ -295,7 +304,8 @@ pub async fn run_replay_verification(
     }
 
     // --- Phase 1: Record a run ---
-    let recording_manifest = create_recording_manifest(&wasm_path);
+    let recording_manifest_str = create_recording_manifest(&wasm_path);
+    let (recording_manifest, wasm_bytes) = load_manifest_and_wasm(&recording_manifest_str).await?;
 
     let (theater_tx, theater_rx) = mpsc::channel::<TheaterCommand>(32);
     let (handler_registry, message_router) = create_base_registry(theater_tx.clone());
@@ -312,8 +322,9 @@ pub async fn run_replay_verification(
     let (response_tx, response_rx) = tokio::sync::oneshot::channel();
     theater_tx
         .send(TheaterCommand::SpawnActor {
-            manifest_path: recording_manifest,
-            wasm_bytes: None,
+            wasm_bytes,
+            name: Some(recording_manifest.name.clone()),
+            manifest: Some(recording_manifest),
             parent_id: None,
             response_tx,
             supervisor_tx: None,
@@ -408,7 +419,8 @@ pub async fn run_replay_verification(
     }
 
     // --- Phase 2: Replay ---
-    let replay_manifest = create_replay_manifest(&wasm_path, chain_path);
+    let replay_manifest_str = create_replay_manifest(&wasm_path, chain_path);
+    let (replay_manifest, replay_wasm_bytes) = load_manifest_and_wasm(&replay_manifest_str).await?;
 
     // Create subscription for replay events
     let (replay_event_tx, mut replay_event_rx) = mpsc::channel(100);
@@ -417,8 +429,9 @@ pub async fn run_replay_verification(
     let (response_tx2, response_rx2) = tokio::sync::oneshot::channel();
     theater_tx
         .send(TheaterCommand::SpawnActor {
-            manifest_path: replay_manifest,
-            wasm_bytes: None,
+            wasm_bytes: replay_wasm_bytes,
+            name: Some(replay_manifest.name.clone()),
+            manifest: Some(replay_manifest),
             parent_id: None,
             response_tx: response_tx2,
             supervisor_tx: None,
@@ -513,7 +526,8 @@ pub async fn run_request_replay_verification(
     }
 
     // --- Phase 1: Record a run ---
-    let recording_manifest = create_recording_manifest(&wasm_path);
+    let recording_manifest_str = create_recording_manifest(&wasm_path);
+    let (recording_manifest, wasm_bytes) = load_manifest_and_wasm(&recording_manifest_str).await?;
 
     let (theater_tx, theater_rx) = mpsc::channel::<TheaterCommand>(32);
     let (handler_registry, message_router) = create_base_registry(theater_tx.clone());
@@ -528,8 +542,9 @@ pub async fn run_request_replay_verification(
     let (response_tx, response_rx) = tokio::sync::oneshot::channel();
     theater_tx
         .send(TheaterCommand::SpawnActor {
-            manifest_path: recording_manifest,
-            wasm_bytes: None,
+            wasm_bytes,
+            name: Some(recording_manifest.name.clone()),
+            manifest: Some(recording_manifest),
             parent_id: None,
             response_tx,
             supervisor_tx: None,
@@ -666,15 +681,17 @@ pub async fn run_request_replay_verification(
     }
 
     // --- Phase 2: Replay ---
-    let replay_manifest = create_replay_manifest(&wasm_path, chain_path);
+    let replay_manifest_str = create_replay_manifest(&wasm_path, chain_path);
+    let (replay_manifest, replay_wasm_bytes) = load_manifest_and_wasm(&replay_manifest_str).await?;
 
     let (replay_event_tx, mut replay_event_rx) = mpsc::channel(100);
 
     let (response_tx2, response_rx2) = tokio::sync::oneshot::channel();
     theater_tx
         .send(TheaterCommand::SpawnActor {
-            manifest_path: replay_manifest,
-            wasm_bytes: None,
+            wasm_bytes: replay_wasm_bytes,
+            name: Some(replay_manifest.name.clone()),
+            manifest: Some(replay_manifest),
             parent_id: None,
             response_tx: response_tx2,
             supervisor_tx: None,
@@ -789,7 +806,8 @@ pub async fn run_supervisor_replay_verification(
     }
 
     // --- Phase 1: Record ---
-    let recording_manifest = create_supervisor_recording_manifest(&wasm_path);
+    let recording_manifest_str = create_supervisor_recording_manifest(&wasm_path);
+    let (recording_manifest, wasm_bytes) = load_manifest_and_wasm(&recording_manifest_str).await?;
 
     let (theater_tx, theater_rx) = mpsc::channel::<TheaterCommand>(32);
     let (handler_registry, message_router) = create_supervisor_registry(theater_tx.clone());
@@ -804,8 +822,9 @@ pub async fn run_supervisor_replay_verification(
     let (response_tx, response_rx) = tokio::sync::oneshot::channel();
     theater_tx
         .send(TheaterCommand::SpawnActor {
-            manifest_path: recording_manifest,
-            wasm_bytes: None,
+            wasm_bytes,
+            name: Some(recording_manifest.name.clone()),
+            manifest: Some(recording_manifest),
             parent_id: None,
             response_tx,
             supervisor_tx: None,
@@ -956,15 +975,17 @@ pub async fn run_supervisor_replay_verification(
     }
 
     // --- Phase 2: Replay ---
-    let replay_manifest = create_supervisor_replay_manifest(&wasm_path, chain_path);
+    let replay_manifest_str = create_supervisor_replay_manifest(&wasm_path, chain_path);
+    let (replay_manifest, replay_wasm_bytes) = load_manifest_and_wasm(&replay_manifest_str).await?;
 
     let (replay_event_tx, mut replay_event_rx) = mpsc::channel(100);
 
     let (response_tx2, response_rx2) = tokio::sync::oneshot::channel();
     theater_tx
         .send(TheaterCommand::SpawnActor {
-            manifest_path: replay_manifest,
-            wasm_bytes: None,
+            wasm_bytes: replay_wasm_bytes,
+            name: Some(replay_manifest.name.clone()),
+            manifest: Some(replay_manifest),
             parent_id: None,
             response_tx: response_tx2,
             supervisor_tx: None,

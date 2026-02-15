@@ -13,6 +13,12 @@
 
     crane.url = "github:ipetkov/crane";
 
+    # Pack runtime dependency (local development - use git+file for local clone)
+    pack = {
+      url = "git+file:../pack";
+      flake = false;
+    };
+
     # TODO: When ready to distribute, uncomment this and remove the local path assumption:
     # composite = {
     #   url = "github:colinrozzi/composite";  # or your actual repo
@@ -21,7 +27,7 @@
     # };
   };
 
-  outputs = { self, nixpkgs, rust-overlay, flake-utils, crane, ... }:
+  outputs = { self, nixpkgs, rust-overlay, flake-utils, crane, pack, ... }:
     flake-utils.lib.eachDefaultSystem (system:
       let
         overlays = [ (import rust-overlay) ];
@@ -44,7 +50,7 @@
         craneLib = (crane.mkLib pkgs).overrideToolchain rustToolchain;
 
         # Source filtering - include Cargo files, Rust sources, and WIT files
-        src = pkgs.lib.cleanSourceWith {
+        theaterSrc = pkgs.lib.cleanSourceWith {
           src = ./.;
           filter = path: type:
             (pkgs.lib.hasSuffix ".wit" path) ||
@@ -52,10 +58,18 @@
             (craneLib.filterCargoSources path type);
         };
 
+        # Use theater source directly, pack will be added during build
+        src = theaterSrc;
+
         # Common build arguments
         commonArgs = {
           inherit src;
           strictDeps = true;
+
+          # Set up pack as sibling directory so ../pack paths resolve
+          postUnpack = ''
+            cp -rL ${pack} pack
+          '';
 
           buildInputs = with pkgs; [
             openssl
@@ -80,8 +94,7 @@
         cargoArtifacts = craneLib.buildDepsOnly (commonArgs // {
           pname = "theater-deps";
           version = "0.2.1";
-          # Note: This requires ../composite to exist for dependency resolution
-          # In CI, you may need to set up the composite dependency first
+          # Note: pack is added via postUnpack from the flake input
         });
 
         # Build the workspace
@@ -92,6 +105,9 @@
 
           # Build all workspace members
           cargoExtraArgs = "--workspace";
+
+          # Skip tests - they require pre-built WASM test actors
+          doCheck = false;
         });
 
         # Clippy check
@@ -195,7 +211,7 @@
             echo "  cargo watch -x check     Watch for changes"
             echo "  nix flake check          Run all checks"
             echo ""
-            echo "Note: Requires ../composite to be present"
+            echo "Note: Requires ../pack to be present"
             echo "========================================"
             echo ""
           '';

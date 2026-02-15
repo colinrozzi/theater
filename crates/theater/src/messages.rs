@@ -119,12 +119,13 @@ use tokio::sync::oneshot;
 pub enum TheaterCommand {
     /// # Spawn a new actor
     ///
-    /// Creates a new actor from a manifest file.
+    /// Creates a new actor from WASM bytes.
     ///
     /// ## Parameters
     ///
-    /// * `manifest_path` - Path to the actor's manifest file or inline manifest TOML
-    /// * `wasm_bytes` - Optional pre-loaded WASM bytes. If None, bytes are resolved from manifest.package
+    /// * `wasm_bytes` - The WASM module bytes to instantiate
+    /// * `name` - Optional actor name for debugging/logging
+    /// * `manifest` - Optional manifest for handler configs, replay settings, etc.
     /// * `response_tx` - Channel to receive the result (actor ID or error)
     /// * `parent_id` - Optional parent actor ID for supervision hierarchy
     ///
@@ -132,9 +133,12 @@ pub enum TheaterCommand {
     ///
     /// After spawning, the caller should invoke whatever functions they need on the actor.
     /// There is no automatic `init` call - actors control their own lifecycle.
+    ///
+    /// If no manifest is provided, the actor uses global handler defaults.
     SpawnActor {
-        manifest_path: String,
-        wasm_bytes: Option<Vec<u8>>,
+        wasm_bytes: Vec<u8>,
+        name: Option<String>,
+        manifest: Option<ManifestConfig>,
         response_tx: oneshot::Sender<Result<TheaterId>>,
         parent_id: Option<TheaterId>,
         supervisor_tx: Option<Sender<ActorResult>>,
@@ -401,8 +405,8 @@ impl TheaterCommand {
     /// A string representation of the command suitable for logging
     pub fn to_log(&self) -> String {
         match self {
-            TheaterCommand::SpawnActor { manifest_path, .. } => {
-                format!("SpawnActor: {}", manifest_path)
+            TheaterCommand::SpawnActor { name, .. } => {
+                format!("SpawnActor: {}", name.as_deref().unwrap_or("<unnamed>"))
             }
             TheaterCommand::ResumeActor { manifest_path, .. } => {
                 format!("ResumeActor: {}", manifest_path)
