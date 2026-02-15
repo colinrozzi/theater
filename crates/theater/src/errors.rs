@@ -1,73 +1,57 @@
 use crate::actor::ActorError;
 use crate::id::TheaterId;
-use std::fmt;
+use thiserror::Error;
 
 /// # Theater Runtime Error
 ///
 /// Represents specific error conditions that can occur in the Theater runtime system.
 /// These structured errors allow for better error handling and provide more context
 /// about what went wrong.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Error)]
 pub enum TheaterRuntimeError {
     /// Actor not found in the runtime
+    #[error("Actor not found: {0}")]
     ActorNotFound(TheaterId),
 
     /// Actor already exists with the given ID
+    #[error("Actor already exists: {0}")]
     ActorAlreadyExists(TheaterId),
 
     /// Actor exists but is not in running state
+    #[error("Actor not running: {0}")]
     ActorNotRunning(TheaterId),
 
     /// Actor operation failed
+    #[error("Actor operation failed: {0}")]
     ActorOperationFailed(String),
 
     /// Error from within an actor
-    ActorError(ActorError),
+    #[error("Actor error: {0}")]
+    ActorError(#[from] ActorError),
 
     /// Error with communication channels
+    #[error("Channel error: {0}")]
     ChannelError(String),
 
     /// Channel not found
+    #[error("Channel not found: {0}")]
     ChannelNotFound(String),
 
     /// Channel rejected by target
+    #[error("Channel rejected by target")]
     ChannelRejected,
 
     /// Error with serialization/deserialization
+    #[error("Serialization error: {0}")]
     SerializationError(String),
 
     /// Error during actor initialization
+    #[error("Actor initialization error: {0}")]
     ActorInitializationError(String),
 
     /// Internal runtime error
+    #[error("Internal error: {0}")]
     InternalError(String),
-}
-
-impl fmt::Display for TheaterRuntimeError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::ActorNotFound(id) => write!(f, "Actor not found: {}", id),
-            Self::ActorAlreadyExists(id) => write!(f, "Actor already exists: {}", id),
-            Self::ActorNotRunning(id) => write!(f, "Actor not running: {}", id),
-            Self::ActorOperationFailed(msg) => write!(f, "Actor operation failed: {}", msg),
-            Self::ActorError(e) => write!(f, "Actor error: {}", e),
-            Self::ChannelError(msg) => write!(f, "Channel error: {}", msg),
-            Self::ChannelNotFound(id) => write!(f, "Channel not found: {}", id),
-            Self::ChannelRejected => write!(f, "Channel rejected by target"),
-            Self::SerializationError(msg) => write!(f, "Serialization error: {}", msg),
-            Self::InternalError(msg) => write!(f, "Internal error: {}", msg),
-            Self::ActorInitializationError(msg) => write!(f, "Actor initialization error: {}", msg),
-        }
-    }
-}
-
-impl std::error::Error for TheaterRuntimeError {}
-
-// Allow converting from ActorError to TheaterRuntimeError
-impl From<ActorError> for TheaterRuntimeError {
-    fn from(error: ActorError) -> Self {
-        Self::ActorError(error)
-    }
 }
 
 // Helper method to convert from other errors

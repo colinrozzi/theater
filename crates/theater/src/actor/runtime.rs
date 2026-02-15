@@ -82,55 +82,26 @@ pub enum StartActorResult {
     Error(String),
 }
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum ActorRuntimeError {
-    SetupError {
-        message: String,
-    },
-    ActorInstanceNotFound {
-        message: String,
-    },
+    #[error("Setup error: {message}")]
+    SetupError { message: String },
+
+    #[error("Actor instance not found: {message}")]
+    ActorInstanceNotFound { message: String },
+
+    #[error("Actor phase error: expected {expected:?}, found {found:?}. {message}")]
     ActorPhaseError {
         expected: ActorPhase,
         found: ActorPhase,
         message: String,
     },
-    ActorError(ActorError),
-    UnknownError(anyhow::Error),
-}
 
-impl From<ActorError> for ActorRuntimeError {
-    fn from(error: ActorError) -> Self {
-        ActorRuntimeError::ActorError(error)
-    }
-}
+    #[error("Actor error: {0}")]
+    ActorError(#[from] ActorError),
 
-impl From<anyhow::Error> for ActorRuntimeError {
-    fn from(error: anyhow::Error) -> Self {
-        ActorRuntimeError::UnknownError(error)
-    }
-}
-
-impl std::fmt::Display for ActorRuntimeError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            ActorRuntimeError::SetupError { message } => write!(f, "Setup Error: {}", message),
-            ActorRuntimeError::ActorInstanceNotFound { message } => {
-                write!(f, "Actor Instance Not Found: {}", message)
-            }
-            ActorRuntimeError::ActorPhaseError {
-                expected,
-                found,
-                message,
-            } => write!(
-                f,
-                "Actor Phase Error: expected {:?}, found {:?}. {}",
-                expected, found, message
-            ),
-            ActorRuntimeError::ActorError(err) => write!(f, "Actor Error: {}", err),
-            ActorRuntimeError::UnknownError(err) => write!(f, "Unknown Error: {}", err),
-        }
-    }
+    #[error(transparent)]
+    UnknownError(#[from] anyhow::Error),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

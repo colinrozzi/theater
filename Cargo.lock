@@ -3357,6 +3357,7 @@ dependencies = [
  "term_size",
  "theater",
  "theater-handler-message-server",
+ "theater-handler-rpc",
  "theater-handler-runtime",
  "theater-handler-store",
  "theater-handler-supervisor",
