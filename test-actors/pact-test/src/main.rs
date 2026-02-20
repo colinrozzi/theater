@@ -5,8 +5,10 @@
 use pack::{generate_rust, parse_pact_dir, PactExport};
 
 fn main() {
-    // Parse the pact directory relative to this package
-    let pact_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("pact");
+    // Parse the pact directory - either from command line or default to local pact/
+    let pact_dir = std::env::args().nth(1)
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("pact"));
 
     println!("Parsing pact directory: {}", pact_dir.display());
     println!();
