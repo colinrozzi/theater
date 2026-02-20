@@ -3,7 +3,7 @@
 interface storage {
     @version: string = "1.0.0"
 
-    type T: Serializable
+    type T
 
     exports {
         get: func(key: string) -> option<T>

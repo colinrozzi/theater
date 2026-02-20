@@ -1,8 +1,8 @@
-//! Test program for Pact parsing
+//! Test program for Pact parsing and code generation
 //!
 //! Run with: cargo run -p pact-test
 
-use pack::{parse_pact_dir, PactExport};
+use pack::{generate_rust, parse_pact_dir, PactExport};
 
 fn main() {
     // Parse the pact directory relative to this package
@@ -104,6 +104,16 @@ fn main() {
                     arena.functions.len(),
                     arena.children.len()
                 );
+            }
+
+            // Generate Rust code
+            println!();
+            println!("=== Code Generation ===");
+            for child in &root.children {
+                println!();
+                println!("--- {}.rs ---", child.name);
+                let code = generate_rust(child);
+                println!("{}", code);
             }
         }
         Err(e) => {
