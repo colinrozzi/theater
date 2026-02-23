@@ -574,7 +574,7 @@ impl TheaterServer {
             let response = match cmd {
                 ManagementCommand::StartActor {
                     manifest,
-                    initial_state,
+                    initial_state: _initial_state,
                     parent,
                     subscribe,
                 } => {

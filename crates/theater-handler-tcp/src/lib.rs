@@ -22,13 +22,17 @@ use theater::shutdown::ShutdownReceiver;
 
 use theater::pack_bridge::{
     AsyncCtx, HostLinkerBuilder, InterfaceImpl, LinkerError, TypeHash, Value, ValueType,
+    parse_pact,
 };
 
 // ============================================================================
 // Interface Declarations
 // ============================================================================
 
-/// Declare the theater:simple/tcp interface.
+/// Embedded tcp.pact file content
+const TCP_PACT: &str = include_str!("../../../pact/tcp.pact");
+
+/// Declare the theater:simple/tcp interface from the pact file.
 ///
 /// Functions for raw TCP networking:
 /// - connect(address: string) -> result<string, string>
@@ -36,17 +40,12 @@ use theater::pack_bridge::{
 /// - accept(listener-id: string) -> result<string, string>
 /// - send(connection-id: string, data: list<u8>) -> result<u64, string>
 /// - receive(connection-id: string, max-bytes: u32) -> result<list<u8>, string>
-/// - close(connection-id: string) -> result<(), string>
-/// - close-listener(listener-id: string) -> result<(), string>
+/// - close(connection-id: string) -> result<_, string>
+/// - close-listener(listener-id: string) -> result<_, string>
 fn tcp_interface() -> InterfaceImpl {
-    InterfaceImpl::new("theater:simple/tcp")
-        .func("connect", |_: String| -> Result<String, String> { Ok(String::new()) })
-        .func("listen", |_: String| -> Result<String, String> { Ok(String::new()) })
-        .func("accept", |_: String| -> Result<String, String> { Ok(String::new()) })
-        .func("send", |_: String, _: Vec<u8>| -> Result<u64, String> { Ok(0) })
-        .func("receive", |_: String, _: u32| -> Result<Vec<u8>, String> { Ok(vec![]) })
-        .func("close", |_: String| -> Result<(), String> { Ok(()) })
-        .func("close-listener", |_: String| -> Result<(), String> { Ok(()) })
+    let pact = parse_pact(TCP_PACT)
+        .expect("embedded tcp.pact should be valid");
+    InterfaceImpl::from_pact(&pact)
 }
 
 /// Shared TCP state between host function closures and the accept loop.

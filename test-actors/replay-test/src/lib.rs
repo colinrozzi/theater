@@ -14,36 +14,39 @@ extern crate alloc;
 
 use alloc::string::String;
 use alloc::vec::Vec;
-use pack_guest::{encode, export, Value, ValueType};
+use pack_guest::{export, import, pack_types, Value, ValueType};
 
 pack_guest::setup_guest!();
+
+// Embed interface metadata for hash verification
+pack_types! {
+    imports {
+        theater:simple/runtime {
+            log: func(msg: string),
+        }
+        theater:simple/message-server-host {
+            register: func() -> result<_, string>,
+        }
+    }
+    exports {
+        theater:simple/actor.init: func(state: option<list<u8>>) -> result<tuple<option<list<u8>>>, string>,
+        theater:simple/message-server-client.handle-send: func(state: option<list<u8>>, params: tuple<string, list<u8>>) -> result<tuple<option<list<u8>>>, string>,
+        theater:simple/message-server-client.handle-request: func(state: option<list<u8>>, params: tuple<string, list<u8>>) -> result<tuple<option<list<u8>>, tuple<option<list<u8>>>>, string>,
+        theater:simple/message-server-client.handle-channel-open: func(state: option<list<u8>>, params: tuple<string, option<list<u8>>>) -> result<tuple<option<list<u8>>, tuple<bool, option<list<u8>>>>, string>,
+        theater:simple/message-server-client.handle-channel-message: func(state: option<list<u8>>, params: tuple<string, list<u8>>) -> result<tuple<option<list<u8>>>, string>,
+        theater:simple/message-server-client.handle-channel-close: func(state: option<list<u8>>, params: tuple<string>) -> result<tuple<option<list<u8>>>, string>,
+    }
+}
 
 // ============================================================================
 // Host imports
 // ============================================================================
 
-#[link(wasm_import_module = "theater:simple/runtime")]
-extern "C" {
-    #[link_name = "log"]
-    fn host_log(in_ptr: i32, in_len: i32, out_ptr: i32, out_cap: i32) -> i32;
-}
+#[import(module = "theater:simple/runtime", name = "log")]
+fn log(msg: String);
 
-fn log(msg: &str) {
-    let input = Value::String(String::from(msg));
-    let input_bytes = match encode(&input) {
-        Ok(b) => b,
-        Err(_) => return,
-    };
-    let mut output_buf = [0u8; 64];
-    unsafe {
-        host_log(
-            input_bytes.as_ptr() as i32,
-            input_bytes.len() as i32,
-            output_buf.as_mut_ptr() as i32,
-            output_buf.len() as i32,
-        );
-    }
-}
+#[import(module = "theater:simple/message-server-host", name = "register")]
+fn message_server_register() -> Result<(), String>;
 
 // ============================================================================
 // Actor export: init
@@ -59,11 +62,19 @@ fn init(input: Value) -> Value {
         }
     };
 
-    log("Replay test actor: init called");
-    log("Replay test actor: message 1");
-    log("Replay test actor: message 2");
-    log("Replay test actor: message 3");
-    log("Replay test actor: init complete");
+    log(String::from("Replay test actor: init called"));
+    log(String::from("Replay test actor: message 1"));
+    log(String::from("Replay test actor: message 2"));
+    log(String::from("Replay test actor: message 3"));
+
+    // Register with message server to receive messages
+    if let Err(e) = message_server_register() {
+        log(alloc::format!("Replay test actor: register failed: {}", e));
+        return err_result("Failed to register with message server");
+    }
+    log(String::from("Replay test actor: registered with message server"));
+
+    log(String::from("Replay test actor: init complete"));
 
     // Return Ok((state,))
     ok_state(state)
@@ -83,8 +94,8 @@ fn handle_send(input: Value) -> Value {
         }
     };
 
-    log("Replay test actor: handle-send called");
-    log("Replay test actor: processing message");
+    log(String::from("Replay test actor: handle-send called"));
+    log(String::from("Replay test actor: processing message"));
 
     // Return Ok((state,))
     ok_state(state)
@@ -108,7 +119,7 @@ fn handle_request(input: Value) -> Value {
         }
     };
 
-    log("Replay test actor: handle-request called");
+    log(String::from("Replay test actor: handle-request called"));
 
     // Extract data from params: tuple<string, list<u8>>
     let data_bytes = match params {
@@ -116,7 +127,7 @@ fn handle_request(input: Value) -> Value {
         _ => alloc::vec![],
     };
 
-    log("Replay test actor: processing request");
+    log(String::from("Replay test actor: processing request"));
 
     // Build response: "response:" + data
     let mut response = alloc::vec::Vec::from(b"response:" as &[u8]);
@@ -155,7 +166,7 @@ fn handle_channel_open(input: Value) -> Value {
         }
     };
 
-    log("Replay test actor: handle-channel-open called");
+    log(String::from("Replay test actor: handle-channel-open called"));
 
     // Return Ok((state, (channel-accept,)))
     // channel-accept record encoded as Tuple([Bool(true), Option(None)])
@@ -191,7 +202,7 @@ fn handle_channel_message(input: Value) -> Value {
         }
     };
 
-    log("Replay test actor: handle-channel-message called");
+    log(String::from("Replay test actor: handle-channel-message called"));
 
     // Return Ok((state,))
     ok_state(state)
@@ -210,7 +221,7 @@ fn handle_channel_close(input: Value) -> Value {
         }
     };
 
-    log("Replay test actor: handle-channel-close called");
+    log(String::from("Replay test actor: handle-channel-close called"));
 
     // Return Ok((state,))
     ok_state(state)
@@ -234,21 +245,21 @@ fn extract_bytes(value: Value) -> Vec<u8> {
     }
 }
 
-/// Return an error result variant
+/// Return an error result
 fn err_result(msg: &str) -> Value {
-    Value::Variant {
-        type_name: String::from("result"),
-        case_name: String::from("err"),
-        tag: 1,
-        payload: alloc::vec![Value::String(String::from(msg))],
+    Value::Result {
+        ok_type: ValueType::Tuple(alloc::vec![]),
+        err_type: ValueType::String,
+        value: Err(alloc::boxed::Box::new(Value::String(String::from(msg)))),
     }
 }
 
+/// Return an ok result wrapping the state tuple
 fn ok_state(state: Value) -> Value {
-    Value::Variant {
-        type_name: String::from("result"),
-        case_name: String::from("ok"),
-        tag: 0,
-        payload: alloc::vec![Value::Tuple(alloc::vec![state])],
+    let inner = Value::Tuple(alloc::vec![state]);
+    Value::Result {
+        ok_type: inner.infer_type(),
+        err_type: ValueType::String,
+        value: Ok(alloc::boxed::Box::new(inner)),
     }
 }

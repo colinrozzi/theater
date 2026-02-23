@@ -56,6 +56,7 @@ use uuid::Uuid;
 // Pack integration
 use theater::pack_bridge::{
     AsyncCtx, Ctx, HostLinkerBuilder, InterfaceImpl, LinkerError, TypeHash, Value, ValueType,
+    parse_pact,
 };
 
 /// Errors that can occur during message server operations
@@ -75,29 +76,25 @@ pub enum MessageServerError {
 // Interface Declarations
 // ============================================================================
 
-/// Declare the theater:simple/message-server-host interface.
+/// Embedded message-server.pact file content
+const MESSAGE_SERVER_PACT: &str = include_str!("../../../pact/message-server.pact");
+
+/// Declare the theater:simple/message-server-host interface from the pact file.
 ///
 /// Functions for actor-to-actor messaging:
-/// - register() -> result<(), string>  // Register with router and start message consumption
-/// - send(address: string, msg: list<u8>) -> result<(), string>
+/// - register() -> result<_, string>  // Register with router and start message consumption
+/// - send(address: string, msg: list<u8>) -> result<_, string>
 /// - request(address: string, msg: list<u8>) -> result<list<u8>, string>
 /// - list-outstanding-requests() -> list<string>
-/// - respond-to-request(request-id: string, response: list<u8>) -> result<(), string>
-/// - cancel-request(request-id: string) -> result<(), string>
+/// - respond-to-request(request-id: string, response: list<u8>) -> result<_, string>
+/// - cancel-request(request-id: string) -> result<_, string>
 /// - open-channel(address: string, initial-msg: list<u8>) -> result<string, string>
-/// - send-on-channel(channel-id: string, msg: list<u8>) -> result<(), string>
-/// - close-channel(channel-id: string) -> result<(), string>
+/// - send-on-channel(channel-id: string, msg: list<u8>) -> result<_, string>
+/// - close-channel(channel-id: string) -> result<_, string>
 fn message_server_interface() -> InterfaceImpl {
-    InterfaceImpl::new("theater:simple/message-server-host")
-        .func("register", || -> Result<(), String> { Ok(()) })
-        .func("send", |_: String, _: Vec<u8>| -> Result<(), String> { Ok(()) })
-        .func("request", |_: String, _: Vec<u8>| -> Result<Vec<u8>, String> { Ok(vec![]) })
-        .func("list-outstanding-requests", || -> Vec<String> { vec![] })
-        .func("respond-to-request", |_: String, _: Vec<u8>| -> Result<(), String> { Ok(()) })
-        .func("cancel-request", |_: String| -> Result<(), String> { Ok(()) })
-        .func("open-channel", |_: String, _: Vec<u8>| -> Result<String, String> { Ok(String::new()) })
-        .func("send-on-channel", |_: String, _: Vec<u8>| -> Result<(), String> { Ok(()) })
-        .func("close-channel", |_: String| -> Result<(), String> { Ok(()) })
+    let pact = parse_pact(MESSAGE_SERVER_PACT)
+        .expect("embedded message-server.pact should be valid");
+    InterfaceImpl::from_pact(&pact)
 }
 
 /// Channel acceptance response
@@ -453,16 +450,28 @@ impl MessageServerHandler {
                     Value::String(request_id),
                     bytes_to_value(data),
                 ]);
-                let result = actor_handle
+                match actor_handle
                     .call_function(
                         "theater:simple/message-server-client.handle-request".to_string(),
                         params,
                     )
-                    .await?;
-                // Result is result<tuple<option<list<u8>>, tuple<option<list<u8>>>>, string>
-                // Extract the optional response
-                if let Some(response_data) = parse_option_bytes_from_tuple(&result) {
-                    let _ = response_tx.send(response_data);
+                    .await
+                {
+                    Ok(result) => {
+                        // Result is result<tuple<option<list<u8>>, tuple<option<list<u8>>>>, string>
+                        // Extract the optional response
+                        if let Some(response_data) = parse_option_bytes_from_tuple(&result) {
+                            let _ = response_tx.send(response_data);
+                        } else {
+                            tracing::warn!("Failed to parse handle-request response: {:?}", result);
+                            // Send empty response to prevent channel close
+                            let _ = response_tx.send(vec![]);
+                        }
+                    }
+                    Err(e) => {
+                        tracing::error!("handle-request call failed: {:?}", e);
+                        let _ = response_tx.send(vec![]);
+                    }
                 }
             }
             ActorMessage::ChannelOpen(ActorChannelOpen {
@@ -701,7 +710,7 @@ impl Handler for MessageServerHandler
                 }
             })?
             // send(address: string, msg: list<u8>) -> result<_, string>
-            .func_async_result("send", move |ctx: AsyncCtx<ActorStore>, input: Value| {
+            .func_async_result("send", move |_ctx: AsyncCtx<ActorStore>, input: Value| {
                 let router = router.clone();
                 async move {
                     let (address, msg) = parse_address_and_message(&input)?;
@@ -730,7 +739,7 @@ impl Handler for MessageServerHandler
                 }
             })?
             // request(address: string, msg: list<u8>) -> result<list<u8>, string>
-            .func_async_result("request", move |ctx: AsyncCtx<ActorStore>, input: Value| {
+            .func_async_result("request", move |_ctx: AsyncCtx<ActorStore>, input: Value| {
                 let router = router2.clone();
                 async move {
                     let (address, msg) = parse_address_and_message(&input)?;

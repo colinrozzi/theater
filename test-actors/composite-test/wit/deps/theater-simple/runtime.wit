@@ -35,8 +35,6 @@ package theater:simple;
 /// logging behavior can be controlled through manifest settings.
 
 interface runtime {
-    use types.{chain, actor-id};
-
     /// Logs a message to the actor's log stream.
     ///
     /// ## Purpose
@@ -72,19 +70,13 @@ interface runtime {
     ///
     /// ## Returns
     ///
-    /// * `chain` - The actor's event chain containing all recorded events
+    /// * `list<u8>` - The actor's event chain serialized as bytes
     ///
     /// ## Example
     ///
     /// ```rust
     /// // In Rust actor code
-    /// let chain = runtime::get_chain();
-    /// 
-    /// // Count events by type
-    /// let mut event_counts = std::collections::HashMap::new();
-    /// for event in chain.events {
-    ///     *event_counts.entry(event.event_type.clone()).or_insert(0) += 1;
-    /// }
+    /// let chain_bytes = runtime::get_chain();
     /// ```
     ///
     /// ## Security
@@ -92,7 +84,7 @@ interface runtime {
     /// The event chain is immutable and cryptographically verifiable, ensuring that actors
     /// cannot tamper with their event history. This provides a secure audit trail of all
     /// actor actions.
-    get-chain: func() -> chain;
+    get-chain: func() -> list<u8>;
 
     shutdown: func(data: option<list<u8>>) -> result<_, string>;
 }

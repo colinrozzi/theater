@@ -15,9 +15,12 @@ extern crate alloc;
 use alloc::string::String;
 use alloc::vec;
 use alloc::vec::Vec;
-use pack_guest::{export, import, Value};
+use pack_guest::{export, import, pack_types, Value, ValueType};
 
 pack_guest::setup_guest!();
+
+// Embed interface metadata for hash verification (loaded from actor.types)
+pack_types!(file = "actor.types");
 
 // ============================================================================
 // Host imports — the #[import] macro generates all FFI boilerplate:
@@ -116,28 +119,26 @@ fn handle_connection(input: Value) -> Value {
 // ============================================================================
 
 fn err_result(msg: &str) -> Value {
-    Value::Variant {
-        type_name: String::from("result"),
-        case_name: String::from("err"),
-        tag: 1,
-        payload: vec![Value::String(String::from(msg))],
+    Value::Result {
+        ok_type: ValueType::Tuple(vec![]),
+        err_type: ValueType::String,
+        value: Err(alloc::boxed::Box::new(Value::String(String::from(msg)))),
     }
 }
 
 fn err_result_string(msg: &String) -> Value {
-    Value::Variant {
-        type_name: String::from("result"),
-        case_name: String::from("err"),
-        tag: 1,
-        payload: vec![Value::String(msg.clone())],
+    Value::Result {
+        ok_type: ValueType::Tuple(vec![]),
+        err_type: ValueType::String,
+        value: Err(alloc::boxed::Box::new(Value::String(msg.clone()))),
     }
 }
 
 fn ok_state(state: Value) -> Value {
-    Value::Variant {
-        type_name: String::from("result"),
-        case_name: String::from("ok"),
-        tag: 0,
-        payload: vec![Value::Tuple(vec![state])],
+    let inner = Value::Tuple(vec![state]);
+    Value::Result {
+        ok_type: inner.infer_type(),
+        err_type: ValueType::String,
+        value: Ok(alloc::boxed::Box::new(inner)),
     }
 }

@@ -160,6 +160,16 @@ impl ActorPhaseManager {
         let mut rx = self.phase_rx.clone();
         let _ = rx.wait_for(|current_phase| *current_phase == phase).await;
     }
+
+    /// Wait until the actor reaches Running or ShuttingDown.
+    /// Returns true if Running, false if ShuttingDown.
+    pub async fn wait_for_ready_or_shutdown(&self) -> bool {
+        let mut rx = self.phase_rx.clone();
+        let _ = rx.wait_for(|current_phase| {
+            *current_phase == ActorPhase::Running || *current_phase == ActorPhase::ShuttingDown
+        }).await;
+        self.is_phase(ActorPhase::Running)
+    }
 }
 
 impl ActorRuntime {
@@ -511,6 +521,7 @@ impl ActorRuntime {
         info_tx: Sender<ActorInfo>,
         control_rx: Receiver<ActorControl>,
         control_tx: Sender<ActorControl>,
+        setup_result_tx: Option<tokio::sync::oneshot::Sender<Result<(), String>>>,
     ) -> () {
         info!("Actor runtime starting communication loops");
         let actor_phase_manager = ActorPhaseManager::new();
@@ -564,10 +575,22 @@ impl ActorRuntime {
 
                         actor_phase_manager.set_phase(ActorPhase::Running);
                         info!("Actor setup complete, now running");
+
+                        // Signal success to spawn_actor
+                        if let Some(tx) = setup_result_tx {
+                            let _ = tx.send(Ok(()));
+                        }
                     }
                     Err(e) => {
-                        error!("Failed to set up actor runtime: {}", e);
-                        // Handle setup failure (e.g., notify theater runtime)
+                        let error_msg = format!("{}", e);
+                        error!("Failed to set up actor runtime: {}", error_msg);
+                        // Set phase to ShuttingDown so operation_loop and other loops can exit
+                        actor_phase_manager.set_phase(ActorPhase::ShuttingDown);
+
+                        // Signal failure to spawn_actor
+                        if let Some(tx) = setup_result_tx {
+                            let _ = tx.send(Err(error_msg));
+                        }
                     }
                 }
             })
@@ -704,9 +727,12 @@ impl ActorRuntime {
         theater_tx: Sender<TheaterCommand>,
         actor_phase_manager: ActorPhaseManager,
     ) {
-        actor_phase_manager
-            .wait_for_phase(ActorPhase::Running)
-            .await;
+        // Wait for actor to be ready or fail during setup
+        if !actor_phase_manager.wait_for_ready_or_shutdown().await {
+            // Actor setup failed - exit immediately
+            debug!("Actor setup failed, operation_loop exiting");
+            return;
+        }
 
         loop {
             tokio::select! {

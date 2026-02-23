@@ -14,19 +14,23 @@ use theater::handler::{Handler, HandlerContext, SharedActorInstance};
 use theater::shutdown::ShutdownReceiver;
 
 // Pack integration
-use theater::pack_bridge::{Ctx, HostLinkerBuilder, InterfaceImpl, LinkerError, TypeHash, Value, ValueType};
+use theater::pack_bridge::{Ctx, HostLinkerBuilder, InterfaceImpl, LinkerError, TypeHash, Value, ValueType, parse_pact};
 
 // ============================================================================
 // Interface Declarations
 // ============================================================================
 
-/// Declare the wisp:assembler/runtime interface.
+/// Embedded assembler.pact file content
+const ASSEMBLER_PACT: &str = include_str!("../../../pact/assembler.pact");
+
+/// Declare the wisp:assembler/runtime interface from the pact file.
 ///
 /// Functions:
 /// - wat-to-wasm(wat: string) -> result<list<u8>, string>
 fn assembler_interface() -> InterfaceImpl {
-    InterfaceImpl::new("wisp:assembler/runtime")
-        .func("wat-to-wasm", |_: String| -> Result<Vec<u8>, String> { Ok(vec![]) })
+    let pact = parse_pact(ASSEMBLER_PACT)
+        .expect("embedded assembler.pact should be valid");
+    InterfaceImpl::from_pact(&pact)
 }
 
 /// Handler for providing WAT to WASM assembly capabilities

@@ -42,45 +42,36 @@ use theater::store::{ContentRef, ContentStore, Label};
 // Pack integration
 use theater::pack_bridge::{
     AsyncCtx, Ctx, HostLinkerBuilder, InterfaceImpl, LinkerError, TypeHash, Value,
+    parse_pact,
 };
 
 // ============================================================================
 // Interface Declarations
 // ============================================================================
 
-/// Declare the theater:simple/store interface.
+/// Embedded store.pact file content
+const STORE_PACT: &str = include_str!("../../../pact/store.pact");
+
+/// Declare the theater:simple/store interface from the pact file.
 ///
 /// Functions for content-addressed storage:
 /// - new() -> result<string, string>
-/// - store(store-id: string, content: list<u8>) -> result<content-ref, string>
-/// - get(store-id: string, content-ref: content-ref) -> result<list<u8>, string>
-/// - exists(store-id: string, content-ref: content-ref) -> result<bool, string>
-/// - label(store-id: string, label: string, content-ref: content-ref) -> result<(), string>
-/// - get-by-label(store-id: string, label: string) -> result<option<content-ref>, string>
-/// - remove-label(store-id: string, label: string) -> result<(), string>
-/// - store-at-label(store-id: string, label: string, content: list<u8>) -> result<content-ref, string>
-/// - replace-content-at-label(store-id: string, label: string, content: list<u8>) -> result<content-ref, string>
-/// - replace-at-label(store-id: string, label: string, content-ref: content-ref) -> result<(), string>
-/// - list-all-content(store-id: string) -> result<list<content-ref>, string>
+/// - store(store-id: string, content: list<u8>) -> result<string, string>
+/// - get(store-id: string, content-ref: string) -> result<list<u8>, string>
+/// - exists(store-id: string, content-ref: string) -> result<bool, string>
+/// - label(store-id: string, label: string, content-ref: string) -> result<_, string>
+/// - get-by-label(store-id: string, label: string) -> result<option<string>, string>
+/// - remove-label(store-id: string, label: string) -> result<_, string>
+/// - store-at-label(store-id: string, label: string, content: list<u8>) -> result<string, string>
+/// - replace-content-at-label(store-id: string, label: string, content: list<u8>) -> result<string, string>
+/// - replace-at-label(store-id: string, label: string, content-ref: string) -> result<_, string>
+/// - list-all-content(store-id: string) -> result<list<string>, string>
 /// - calculate-total-size(store-id: string) -> result<u64, string>
 /// - list-labels(store-id: string) -> result<list<string>, string>
-///
-/// Note: content-ref is approximated as String (the hash) for signature hashing.
 fn store_interface() -> InterfaceImpl {
-    InterfaceImpl::new("theater:simple/store")
-        .func("new", || -> Result<String, String> { Ok(String::new()) })
-        .func("store", |_: String, _: Vec<u8>| -> Result<String, String> { Ok(String::new()) })
-        .func("get", |_: String, _: String| -> Result<Vec<u8>, String> { Ok(vec![]) })
-        .func("exists", |_: String, _: String| -> Result<bool, String> { Ok(false) })
-        .func("label", |_: String, _: String, _: String| -> Result<(), String> { Ok(()) })
-        .func("get-by-label", |_: String, _: String| -> Result<Option<String>, String> { Ok(None) })
-        .func("remove-label", |_: String, _: String| -> Result<(), String> { Ok(()) })
-        .func("store-at-label", |_: String, _: String, _: Vec<u8>| -> Result<String, String> { Ok(String::new()) })
-        .func("replace-content-at-label", |_: String, _: String, _: Vec<u8>| -> Result<String, String> { Ok(String::new()) })
-        .func("replace-at-label", |_: String, _: String, _: String| -> Result<(), String> { Ok(()) })
-        .func("list-all-content", |_: String| -> Result<Vec<String>, String> { Ok(vec![]) })
-        .func("calculate-total-size", |_: String| -> Result<u64, String> { Ok(0) })
-        .func("list-labels", |_: String| -> Result<Vec<String>, String> { Ok(vec![]) })
+    let pact = parse_pact(STORE_PACT)
+        .expect("embedded store.pact should be valid");
+    InterfaceImpl::from_pact(&pact)
 }
 
 /// Errors that can occur during store operations

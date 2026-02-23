@@ -103,7 +103,7 @@ async fn test_composite_instance_basic() {
 
     info!("Calling init function...");
 
-    let result = instance.call_function("init", state, params).await;
+    let result = instance.call_function("theater:simple/actor.init", state, params).await;
 
     match result {
         Ok((new_state, result_bytes)) => {

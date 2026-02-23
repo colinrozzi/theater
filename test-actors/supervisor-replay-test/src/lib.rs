@@ -21,184 +21,50 @@ extern crate alloc;
 use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
-use pack_guest::{decode, encode, export, Value, ValueType};
+use pack_guest::{export, import, pack_types, Value, ValueType};
 
 pack_guest::setup_guest!();
+
+// Embed interface metadata for hash verification
+pack_types! {
+    imports {
+        theater:simple/runtime {
+            log: func(msg: string),
+        }
+        theater:simple/supervisor {
+            spawn: func(manifest: string, init-bytes: option<list<u8>>, wasm-bytes: option<list<u8>>) -> result<string, string>,
+            list-children: func() -> list<string>,
+            stop-child: func(child-id: string) -> result<_, string>,
+        }
+        theater:simple/message-server-host {
+            register: func() -> result<_, string>,
+        }
+    }
+    exports {
+        theater:simple/actor.init: func(state: option<list<u8>>) -> result<tuple<option<list<u8>>>, string>,
+        theater:simple/message-server-client.handle-send: func(state: option<list<u8>>, params: tuple<string, list<u8>>) -> result<tuple<option<list<u8>>>, string>,
+        theater:simple/supervisor-handlers.handle-child-external-stop: func(state: option<list<u8>>, params: tuple<string>) -> result<tuple<option<list<u8>>>, string>,
+    }
+}
 
 // ============================================================================
 // Host imports
 // ============================================================================
 
-#[link(wasm_import_module = "theater:simple/runtime")]
-extern "C" {
-    #[link_name = "log"]
-    fn host_log(in_ptr: i32, in_len: i32, out_ptr: i32, out_len: i32) -> i32;
-}
+#[import(module = "theater:simple/runtime", name = "log")]
+fn log(msg: String);
 
-#[link(wasm_import_module = "theater:simple/supervisor")]
-extern "C" {
-    #[link_name = "spawn"]
-    fn host_spawn(in_ptr: i32, in_len: i32, out_ptr: i32, out_len: i32) -> i32;
+#[import(module = "theater:simple/supervisor", name = "spawn")]
+fn supervisor_spawn(manifest_path: String, init_bytes: Option<Vec<u8>>, wasm_bytes: Option<Vec<u8>>) -> Result<String, String>;
 
-    #[link_name = "list-children"]
-    fn host_list_children(in_ptr: i32, in_len: i32, out_ptr: i32, out_len: i32) -> i32;
+#[import(module = "theater:simple/supervisor", name = "list-children")]
+fn supervisor_list_children() -> Vec<String>;
 
-    #[link_name = "stop-child"]
-    fn host_stop_child(in_ptr: i32, in_len: i32, out_ptr: i32, out_len: i32) -> i32;
-}
+#[import(module = "theater:simple/supervisor", name = "stop-child")]
+fn supervisor_stop_child(child_id: String) -> Result<(), String>;
 
-// ============================================================================
-// Host function helpers
-// ============================================================================
-
-fn log(msg: &str) {
-    let input = Value::String(String::from(msg));
-    let input_bytes = match encode(&input) {
-        Ok(b) => b,
-        Err(_) => return,
-    };
-    let mut out_ptr: i32 = 0;
-    let mut out_len: i32 = 0;
-    unsafe {
-        host_log(
-            input_bytes.as_ptr() as i32,
-            input_bytes.len() as i32,
-            &mut out_ptr as *mut i32 as i32,
-            &mut out_len as *mut i32 as i32,
-        );
-    }
-}
-
-/// Read the host function result from the output pointer/length slots.
-fn read_host_result(out_ptr: i32, out_len: i32) -> Result<Value, String> {
-    if out_len <= 0 {
-        return Err(String::from("no result data"));
-    }
-    let result_bytes =
-        unsafe { core::slice::from_raw_parts(out_ptr as *const u8, out_len as usize) };
-    decode(result_bytes).map_err(|e| format!("decode: {:?}", e))
-}
-
-/// Extract Ok(String) from a result variant returned by a host function.
-fn extract_ok_string(value: Value) -> Result<String, String> {
-    match value {
-        Value::Variant {
-            tag: 0,
-            mut payload,
-            ..
-        } => match payload.pop() {
-            Some(Value::String(s)) => Ok(s),
-            _ => Err(String::from("expected string in ok payload")),
-        },
-        Value::Variant {
-            tag: 1,
-            mut payload,
-            ..
-        } => match payload.pop() {
-            Some(Value::String(s)) => Err(s),
-            _ => Err(String::from("unknown error")),
-        },
-        _ => Err(String::from("expected result variant")),
-    }
-}
-
-fn spawn_child(manifest: &str) -> Result<String, String> {
-    let input = Value::Tuple(alloc::vec![
-        Value::String(String::from(manifest)),
-        Value::Option {
-            inner_type: ValueType::List(alloc::boxed::Box::new(ValueType::U8)),
-            value: None,
-        },
-    ]);
-    let input_bytes = encode(&input).map_err(|e| format!("encode: {:?}", e))?;
-    let mut out_ptr: i32 = 0;
-    let mut out_len: i32 = 0;
-    let status = unsafe {
-        host_spawn(
-            input_bytes.as_ptr() as i32,
-            input_bytes.len() as i32,
-            &mut out_ptr as *mut i32 as i32,
-            &mut out_len as *mut i32 as i32,
-        )
-    };
-    if status != 0 {
-        return Err(String::from("spawn host call failed"));
-    }
-    let result = read_host_result(out_ptr, out_len)?;
-    extract_ok_string(result)
-}
-
-fn list_children_call() -> Result<(), String> {
-    let input = Value::Tuple(alloc::vec![]);
-    let input_bytes = encode(&input).map_err(|e| format!("encode: {:?}", e))?;
-    let mut out_ptr: i32 = 0;
-    let mut out_len: i32 = 0;
-    let status = unsafe {
-        host_list_children(
-            input_bytes.as_ptr() as i32,
-            input_bytes.len() as i32,
-            &mut out_ptr as *mut i32 as i32,
-            &mut out_len as *mut i32 as i32,
-        )
-    };
-    if status != 0 {
-        return Err(String::from("list-children host call failed"));
-    }
-    let result = read_host_result(out_ptr, out_len)?;
-    match result {
-        Value::Variant {
-            tag: 0, payload, ..
-        } => {
-            if let Some(Value::List { items, .. }) = payload.into_iter().next() {
-                log(&format!(
-                    "supervisor-replay-test: children count: {}",
-                    items.len()
-                ));
-            }
-            Ok(())
-        }
-        Value::Variant {
-            tag: 1,
-            mut payload,
-            ..
-        } => match payload.pop() {
-            Some(Value::String(s)) => Err(s),
-            _ => Err(String::from("list-children error")),
-        },
-        _ => Err(String::from("expected result variant")),
-    }
-}
-
-fn stop_child_call(child_id: &str) -> Result<(), String> {
-    let input = Value::String(String::from(child_id));
-    let input_bytes = encode(&input).map_err(|e| format!("encode: {:?}", e))?;
-    let mut out_ptr: i32 = 0;
-    let mut out_len: i32 = 0;
-    let status = unsafe {
-        host_stop_child(
-            input_bytes.as_ptr() as i32,
-            input_bytes.len() as i32,
-            &mut out_ptr as *mut i32 as i32,
-            &mut out_len as *mut i32 as i32,
-        )
-    };
-    if status != 0 {
-        return Err(String::from("stop-child host call failed"));
-    }
-    let result = read_host_result(out_ptr, out_len)?;
-    match result {
-        Value::Variant { tag: 0, .. } => Ok(()),
-        Value::Variant {
-            tag: 1,
-            mut payload,
-            ..
-        } => match payload.pop() {
-            Some(Value::String(s)) => Err(s),
-            _ => Err(String::from("stop-child error")),
-        },
-        _ => Err(String::from("expected result variant")),
-    }
-}
+#[import(module = "theater:simple/message-server-host", name = "register")]
+fn message_server_register() -> Result<(), String>;
 
 // ============================================================================
 // State helpers
@@ -247,8 +113,16 @@ fn init(input: Value) -> Value {
         }
     };
 
-    log("supervisor-replay-test: init called");
-    log("supervisor-replay-test: init complete");
+    log(String::from("supervisor-replay-test: init called"));
+
+    // Register with message server to receive commands
+    if let Err(e) = message_server_register() {
+        log(format!("supervisor-replay-test: register failed: {}", e));
+        return err_result("Failed to register with message server");
+    }
+    log(String::from("supervisor-replay-test: registered with message server"));
+
+    log(String::from("supervisor-replay-test: init complete"));
 
     ok_state(state)
 }
@@ -266,26 +140,29 @@ fn handle_send(input: Value) -> Value {
         }
     };
 
-    // Extract message bytes from params (List<u8>)
-    let msg_bytes = extract_bytes(params);
+    // Extract message bytes from params tuple: (source: string, data: list<u8>)
+    let msg_bytes = match params {
+        Value::Tuple(mut items) if items.len() >= 2 => extract_bytes(items.remove(1)),
+        _ => alloc::vec![],
+    };
     let msg = match core::str::from_utf8(&msg_bytes) {
         Ok(s) => s,
         Err(_) => {
-            log("supervisor-replay-test: handle-send received non-utf8 data");
+            log(String::from("supervisor-replay-test: handle-send received non-utf8 data"));
             return ok_state(state);
         }
     };
 
-    log(&format!("supervisor-replay-test: handle-send: {}", msg));
+    log(format!("supervisor-replay-test: handle-send: {}", msg));
 
     if let Some(manifest_path) = msg.strip_prefix("spawn:") {
-        log(&format!(
+        log(format!(
             "supervisor-replay-test: spawning child from {}",
             manifest_path
         ));
-        match spawn_child(manifest_path) {
+        match supervisor_spawn(String::from(manifest_path), None, None) {
             Ok(child_id) => {
-                log(&format!(
+                log(format!(
                     "supervisor-replay-test: spawned child {}",
                     child_id
                 ));
@@ -293,43 +170,42 @@ fn handle_send(input: Value) -> Value {
                 return ok_state(new_state);
             }
             Err(e) => {
-                log(&format!("supervisor-replay-test: spawn error: {}", e));
+                log(format!("supervisor-replay-test: spawn error: {}", e));
                 return ok_state(state);
             }
         }
     } else if msg == "list" {
-        log("supervisor-replay-test: listing children");
-        match list_children_call() {
-            Ok(()) => {}
-            Err(e) => {
-                log(&format!("supervisor-replay-test: list error: {}", e));
-            }
-        }
+        log(String::from("supervisor-replay-test: listing children"));
+        let children = supervisor_list_children();
+        log(format!(
+            "supervisor-replay-test: children count: {}",
+            children.len()
+        ));
         return ok_state(state);
     } else if msg == "stop" {
         match child_id_from_state(&state) {
             Some(child_id) => {
-                log(&format!(
+                log(format!(
                     "supervisor-replay-test: stopping child {}",
                     child_id
                 ));
-                match stop_child_call(&child_id) {
+                match supervisor_stop_child(child_id) {
                     Ok(()) => {
-                        log("supervisor-replay-test: stop-child succeeded");
+                        log(String::from("supervisor-replay-test: stop-child succeeded"));
                     }
                     Err(e) => {
-                        log(&format!("supervisor-replay-test: stop error: {}", e));
+                        log(format!("supervisor-replay-test: stop error: {}", e));
                     }
                 }
             }
             None => {
-                log("supervisor-replay-test: no child_id in state");
+                log(String::from("supervisor-replay-test: no child_id in state"));
             }
         }
         return ok_state(state);
     }
 
-    log("supervisor-replay-test: unknown command");
+    log(String::from("supervisor-replay-test: unknown command"));
     ok_state(state)
 }
 
@@ -355,7 +231,7 @@ fn handle_child_external_stop(input: Value) -> Value {
         _ => String::from("unknown"),
     };
 
-    log(&format!(
+    log(format!(
         "supervisor-replay-test: child externally stopped: {}",
         child_id
     ));
@@ -381,22 +257,21 @@ fn extract_bytes(value: Value) -> Vec<u8> {
     }
 }
 
-/// Return an error result variant
+/// Return an error result
 fn err_result(msg: &str) -> Value {
-    Value::Variant {
-        type_name: String::from("result"),
-        case_name: String::from("err"),
-        tag: 1,
-        payload: alloc::vec![Value::String(String::from(msg))],
+    Value::Result {
+        ok_type: ValueType::Tuple(alloc::vec![]),
+        err_type: ValueType::String,
+        value: Err(alloc::boxed::Box::new(Value::String(String::from(msg)))),
     }
 }
 
-/// Return an ok result variant wrapping the state
+/// Return an ok result wrapping the state tuple
 fn ok_state(state: Value) -> Value {
-    Value::Variant {
-        type_name: String::from("result"),
-        case_name: String::from("ok"),
-        tag: 0,
-        payload: alloc::vec![Value::Tuple(alloc::vec![state])],
+    let inner = Value::Tuple(alloc::vec![state]);
+    Value::Result {
+        ok_type: inner.infer_type(),
+        err_type: ValueType::String,
+        value: Ok(alloc::boxed::Box::new(inner)),
     }
 }

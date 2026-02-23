@@ -26,8 +26,9 @@ use crate::pack_bridge::InterfaceHash;
 ///     // Create a command to spawn a new actor
 ///     let (tx, rx) = oneshot::channel();
 ///     let spawn_cmd = TheaterCommand::SpawnActor {
-///         manifest_path: "actor_manifest.toml".to_string(),
-///         wasm_bytes: None, // Load from manifest.package path
+///         name: Some("my-actor".to_string()),
+///         manifest: None,
+///         wasm_bytes: vec![], // WASM bytes would be loaded here
 ///         response_tx: tx,
 ///         parent_id: None,
 ///         supervisor_tx: None,

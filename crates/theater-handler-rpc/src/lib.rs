@@ -35,13 +35,17 @@ use tokio::sync::oneshot;
 // Pack integration
 use theater::pack_bridge::{
     AsyncCtx, HostLinkerBuilder, InterfaceImpl, LinkerError, TypeHash, Value, ValueType,
+    parse_pact,
 };
 
 // ============================================================================
 // Interface Declarations
 // ============================================================================
 
-/// Declare the theater:simple/rpc interface.
+/// Embedded rpc.pact file content
+const RPC_PACT: &str = include_str!("../../../pact/rpc.pact");
+
+/// Declare the theater:simple/rpc interface from the pact file.
 ///
 /// Functions:
 /// - call(actor-id: string, function: string, params: value, options: value) -> value
@@ -51,25 +55,9 @@ use theater::pack_bridge::{
 /// Note: The actual return types are wrapped results (variant with ok/err cases).
 /// We declare them as `value` to match how actors declare them in pack_types!.
 fn rpc_interface() -> InterfaceImpl {
-    InterfaceImpl::new("theater:simple/rpc")
-        // call: (string, string, value, value) -> value
-        .func(
-            "call",
-            |_: String, _: String, _: Value, _: Value| -> Value {
-                Value::Bool(false) // Dummy implementation for signature
-            },
-        )
-        // implements: (string, string) -> value
-        .func(
-            "implements",
-            |_: String, _: String| -> Value {
-                Value::Bool(false)
-            },
-        )
-        // exports: (string) -> value
-        .func("exports", |_: String| -> Value {
-            Value::Bool(false)
-        })
+    let pact = parse_pact(RPC_PACT)
+        .expect("embedded rpc.pact should be valid");
+    InterfaceImpl::from_pact(&pact)
 }
 
 // ============================================================================

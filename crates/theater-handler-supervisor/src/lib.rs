@@ -19,6 +19,7 @@ use theater::ManifestConfig;
 // Pack integration
 use theater::pack_bridge::{
     AsyncCtx, HostLinkerBuilder, InterfaceImpl, LinkerError, TypeHash, Value, ValueType,
+    parse_pact,
 };
 
 use anyhow::Result;
@@ -34,36 +35,26 @@ use tracing::{debug, error, info};
 // Interface Declarations
 // ============================================================================
 
-/// Declare the theater:simple/supervisor interface.
+/// Embedded supervisor.pact file content
+const SUPERVISOR_PACT: &str = include_str!("../../../pact/supervisor.pact");
+
+/// Declare the theater:simple/supervisor interface from the pact file.
 ///
 /// Functions for spawning and managing child actors:
 /// - spawn(manifest: string, init-bytes: option<list<u8>>, wasm-bytes: option<list<u8>>) -> result<string, string>
 /// - spawn-and-wait(manifest: string, init-bytes: option<list<u8>>, wasm-bytes: option<list<u8>>, timeout-ms: option<u64>) -> result<option<list<u8>>, string>
 /// - resume(manifest: string, state-bytes: option<list<u8>>, wasm-bytes: option<list<u8>>) -> result<string, string>
 /// - list-children() -> list<string>
-/// - restart-child(child-id: string) -> result<(), string>
-/// - stop-child(child-id: string) -> result<(), string>
+/// - restart-child(child-id: string) -> result<_, string>
+/// - stop-child(child-id: string) -> result<_, string>
 /// - get-child-state(child-id: string) -> result<option<list<u8>>, string>
-/// - get-child-events(child-id: string) -> result<list<chain-event>, string>
+/// - get-child-events(child-id: string) -> result<list<list<u8>>, string>
 ///
-/// Note: chain-event is approximated as Vec<u8> (serialized) for signature hashing.
+/// Note: chain-event is approximated as list<u8> for interface hashing.
 fn supervisor_interface() -> InterfaceImpl {
-    InterfaceImpl::new("theater:simple/supervisor")
-        .func("spawn", |_: String, _: Option<Vec<u8>>, _: Option<Vec<u8>>| -> Result<String, String> {
-            Ok(String::new())
-        })
-        .func("spawn-and-wait", |_: String, _: Option<Vec<u8>>, _: Option<Vec<u8>>, _: Option<u64>| -> Result<Option<Vec<u8>>, String> {
-            Ok(None)
-        })
-        .func("resume", |_: String, _: Option<Vec<u8>>, _: Option<Vec<u8>>| -> Result<String, String> {
-            Ok(String::new())
-        })
-        .func("list-children", || -> Vec<String> { vec![] })
-        .func("restart-child", |_: String| -> Result<(), String> { Ok(()) })
-        .func("stop-child", |_: String| -> Result<(), String> { Ok(()) })
-        .func("get-child-state", |_: String| -> Result<Option<Vec<u8>>, String> { Ok(None) })
-        // chain-event approximated as Vec<u8>
-        .func("get-child-events", |_: String| -> Result<Vec<Vec<u8>>, String> { Ok(vec![]) })
+    let pact = parse_pact(SUPERVISOR_PACT)
+        .expect("embedded supervisor.pact should be valid");
+    InterfaceImpl::from_pact(&pact)
 }
 
 /// Errors that can occur during supervisor operations

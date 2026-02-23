@@ -9,7 +9,7 @@ edition = "2021"
 crate-type = ["cdylib"]
 
 [dependencies]
-composite-guest = { path = "../../../composite/crates/composite-guest" }
+pack-guest = { path = "../../../pack/crates/pack-guest" }
 
 [profile.release]
 opt-level = "s"

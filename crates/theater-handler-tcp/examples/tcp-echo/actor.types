@@ -1,0 +1,21 @@
+// TCP Echo Actor - Interface Declarations
+//
+// This file describes the imports and exports for the tcp-echo actor.
+// It is used by the pack_types! macro to generate interface metadata
+// for hash verification at runtime.
+
+imports {
+    theater:simple/runtime {
+        log: func(msg: string),
+    }
+    theater:simple/tcp {
+        send: func(connection-id: string, data: list<u8>) -> result<u64, string>,
+        receive: func(connection-id: string, max-bytes: u32) -> result<list<u8>, string>,
+        close: func(connection-id: string) -> result<_, string>,
+    }
+}
+
+exports {
+    theater:simple/actor.init: func(state: option<list<u8>>) -> result<tuple<option<list<u8>>>, string>,
+    theater:simple/tcp-client.handle-connection: func(state: option<list<u8>>, params: tuple<string>) -> result<tuple<option<list<u8>>>, string>,
+}

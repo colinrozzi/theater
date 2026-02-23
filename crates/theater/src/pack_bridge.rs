@@ -34,6 +34,8 @@ pub use pack::types::{Arena, Function, Param, Type};
 pub use pack::{
     FuncSignature, InterfaceImpl, PackParams, PackType, TypeHash,
 };
+// Re-export pact parsing for loading interface definitions from .pact files
+pub use pack::{parse_pact, PactInterface};
 
 use crate::actor::store::ActorStore;
 use crate::id::TheaterId;

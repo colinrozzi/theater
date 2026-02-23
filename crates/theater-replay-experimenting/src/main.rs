@@ -27,6 +27,7 @@ use theater::chain::ChainEvent;
 use theater::config::actor_manifest::{RuntimeHostConfig, SupervisorHostConfig};
 use theater::handler::HandlerRegistry;
 use theater::messages::{ActorMessage, ActorRequest, ActorSend, MessageCommand, TheaterCommand};
+use theater::pack_bridge::Value;
 use theater::theater_runtime::TheaterRuntime;
 use theater::utils::resolve_reference;
 use theater::ActorError;
@@ -339,6 +340,27 @@ pub async fn run_replay_verification(
         println!("Recorded run - Actor ID: {}", actor_id);
     }
 
+    // Get actor handle and call init
+    let (handle_tx, handle_rx) = tokio::sync::oneshot::channel();
+    theater_tx
+        .send(TheaterCommand::GetActorHandle {
+            actor_id: actor_id.clone(),
+            response_tx: handle_tx,
+        })
+        .await?;
+    let actor_handle = timeout(Duration::from_secs(5), handle_rx)
+        .await??
+        .ok_or_else(|| anyhow::anyhow!("Actor handle not found"))?;
+
+    // Call init to start the actor
+    if verbose {
+        println!("Calling init...");
+    }
+    actor_handle
+        .call_function("theater:simple/actor.init".to_string(), Value::Tuple(vec![]))
+        .await
+        .map_err(|e| anyhow::anyhow!("Failed to call init: {:?}", e))?;
+
     // Collect init events (short idle timeout so we move on quickly)
     let mut recorded_chain = collect_events(
         &mut event_rx,
@@ -558,6 +580,27 @@ pub async fn run_request_replay_verification(
     if verbose {
         println!("Recorded run - Actor ID: {}", actor_id);
     }
+
+    // Get actor handle and call init
+    let (handle_tx, handle_rx) = tokio::sync::oneshot::channel();
+    theater_tx
+        .send(TheaterCommand::GetActorHandle {
+            actor_id: actor_id.clone(),
+            response_tx: handle_tx,
+        })
+        .await?;
+    let actor_handle = timeout(Duration::from_secs(5), handle_rx)
+        .await??
+        .ok_or_else(|| anyhow::anyhow!("Actor handle not found"))?;
+
+    // Call init to start the actor
+    if verbose {
+        println!("Calling init...");
+    }
+    actor_handle
+        .call_function("theater:simple/actor.init".to_string(), Value::Tuple(vec![]))
+        .await
+        .map_err(|e| anyhow::anyhow!("Failed to call init: {:?}", e))?;
 
     // Collect init events
     let mut recorded_chain = collect_events(
@@ -838,6 +881,27 @@ pub async fn run_supervisor_replay_verification(
     if verbose {
         println!("Parent actor ID: {}", actor_id);
     }
+
+    // Get actor handle and call init
+    let (handle_tx, handle_rx) = tokio::sync::oneshot::channel();
+    theater_tx
+        .send(TheaterCommand::GetActorHandle {
+            actor_id: actor_id.clone(),
+            response_tx: handle_tx,
+        })
+        .await?;
+    let actor_handle = timeout(Duration::from_secs(5), handle_rx)
+        .await??
+        .ok_or_else(|| anyhow::anyhow!("Actor handle not found"))?;
+
+    // Call init to start the actor
+    if verbose {
+        println!("Calling init...");
+    }
+    actor_handle
+        .call_function("theater:simple/actor.init".to_string(), Value::Tuple(vec![]))
+        .await
+        .map_err(|e| anyhow::anyhow!("Failed to call init: {:?}", e))?;
 
     // Collect init events
     let mut recorded_chain = collect_events(
@@ -1297,7 +1361,7 @@ mod tests {
     async fn test_request_replay_verification() {
         let chain_path = format!("/tmp/test_request_replay_chain_{}.json", std::process::id());
 
-        let result = run_request_replay_verification(&chain_path, false)
+        let result = run_request_replay_verification(&chain_path, true)
             .await
             .expect("Request replay verification should complete");
 

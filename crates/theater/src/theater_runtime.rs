@@ -106,6 +106,7 @@ pub struct TheaterRuntime {
     #[allow(dead_code)]
     channel_events_tx: Option<Sender<crate::messages::ChannelEvent>>,
     /// Composite async runtime for WASM execution
+    #[allow(dead_code)]
     pack_runtime: AsyncRuntime,
     /// Handler registry
     pub handler_registry: HandlerRegistry,
@@ -668,6 +669,10 @@ impl TheaterRuntime {
         let actor_id_for_task = actor_id.clone();
         let actor_name_for_task = actor_name.clone();
         let pack_runtime = AsyncRuntime::new();
+
+        // Create channel to receive setup result
+        let (setup_tx, setup_rx) = tokio::sync::oneshot::channel::<Result<(), String>>();
+
         let actor_runtime_process = tokio::spawn(async move {
             let _actor_runtime = ActorRuntime::start(
                 actor_id_for_task.clone(),
@@ -683,9 +688,25 @@ impl TheaterRuntime {
                 actor_info_tx,
                 control_rx,
                 actor_control_tx,
+                Some(setup_tx),
             )
             .await;
         });
+
+        // Wait for setup to complete
+        match setup_rx.await {
+            Ok(Ok(())) => {
+                debug!("Actor {} setup completed successfully", actor_id);
+            }
+            Ok(Err(e)) => {
+                error!("Actor {} setup failed: {}", actor_id, e);
+                return Err(anyhow::anyhow!("Actor setup failed: {}", e));
+            }
+            Err(_) => {
+                error!("Actor {} setup channel closed unexpectedly", actor_id);
+                return Err(anyhow::anyhow!("Actor setup failed: channel closed"));
+            }
+        }
 
         // Create ActorHandle for lifecycle notification before moving channels
         let _actor_handle = crate::actor::handle::ActorHandle::new(

@@ -19,24 +19,26 @@ use tokio::sync::mpsc::Sender;
 // Pack integration
 use theater::pack_bridge::{
     AsyncCtx, Ctx, HostLinkerBuilder, InterfaceImpl, LinkerError, TypeHash, Value,
+    parse_pact,
 };
 
 // ============================================================================
 // Interface Declarations
 // ============================================================================
 
-/// Declare the theater:simple/runtime interface.
+/// Embedded runtime.pact file content
+const RUNTIME_PACT: &str = include_str!("../../../pact/runtime.pact");
+
+/// Declare the theater:simple/runtime interface from the pact file.
 ///
 /// Functions:
 /// - log(msg: string) -> ()
-/// - get-chain() -> chain (approximated as Vec<u8> for hashing)
+/// - get-chain() -> list<u8> (actual implementation returns structured chain record)
 /// - shutdown(data: option<list<u8>>) -> result<(), string>
 fn runtime_interface() -> InterfaceImpl {
-    InterfaceImpl::new("theater:simple/runtime")
-        .func("log", |_: String| {})
-        // get-chain returns a complex record type, approximate with Vec<u8>
-        .func("get-chain", || -> Vec<u8> { vec![] })
-        .func("shutdown", |_: Option<Vec<u8>>| -> Result<(), String> { Ok(()) })
+    let pact = parse_pact(RUNTIME_PACT)
+        .expect("embedded runtime.pact should be valid");
+    InterfaceImpl::from_pact(&pact)
 }
 
 /// Handler for providing runtime information and control to WebAssembly actors
@@ -323,8 +325,9 @@ mod tests {
         runtime_interface.add_function(Function::with_signature(
             "shutdown",
             vec![Param::new("data", Type::Option(Box::new(Type::List(Box::new(Type::U8)))))],
+            // Note: result<_, string> uses Bool for ok type to match pack-guest-macros convention
             vec![Type::Result {
-                ok: Box::new(Type::Unit),
+                ok: Box::new(Type::Bool),
                 err: Box::new(Type::String),
             }],
         ));
