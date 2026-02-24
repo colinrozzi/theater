@@ -9,6 +9,7 @@ imports {
         log: func(msg: string),
     }
     theater:simple/tcp {
+        listen: func(address: string) -> result<string, string>,
         send: func(connection-id: string, data: list<u8>) -> result<u64, string>,
         receive: func(connection-id: string, max-bytes: u32) -> result<list<u8>, string>,
         close: func(connection-id: string) -> result<_, string>,

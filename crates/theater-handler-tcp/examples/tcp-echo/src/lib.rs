@@ -41,6 +41,9 @@ fn tcp_receive(connection_id: String, max_bytes: u32) -> Result<Vec<u8>, String>
 #[import(module = "theater:simple/tcp", name = "close")]
 fn tcp_close(connection_id: String) -> Result<(), String>;
 
+#[import(module = "theater:simple/tcp", name = "listen")]
+fn tcp_listen(address: String) -> Result<String, String>;
+
 // ============================================================================
 // Exports
 // ============================================================================
@@ -53,6 +56,47 @@ fn init(input: Value) -> Value {
     };
 
     log(String::from("tcp-echo: init"));
+
+    // Extract listen address from state (expected: { "listen": "addr" } as option<list<u8>>)
+    if let Value::Option { value: Some(state_bytes), .. } = &state {
+        if let Value::List { items, .. } = state_bytes.as_ref() {
+            // Convert list<u8> to bytes
+            let bytes: Vec<u8> = items
+                .iter()
+                .filter_map(|v| match v {
+                    Value::U8(b) => Some(*b),
+                    _ => None,
+                })
+                .collect();
+
+            // Try to parse as JSON
+            if let Ok(json_str) = core::str::from_utf8(&bytes) {
+                // Simple JSON parsing for {"listen": "addr"}
+                if let Some(start) = json_str.find("\"listen\"") {
+                    if let Some(colon) = json_str[start..].find(':') {
+                        let after_colon = &json_str[start + colon + 1..];
+                        if let Some(quote_start) = after_colon.find('"') {
+                            let addr_start = quote_start + 1;
+                            if let Some(quote_end) = after_colon[addr_start..].find('"') {
+                                let address = &after_colon[addr_start..addr_start + quote_end];
+                                log(alloc::format!("tcp-echo: starting listener on {}", address));
+                                match tcp_listen(String::from(address)) {
+                                    Ok(listener_id) => {
+                                        log(alloc::format!("tcp-echo: listener started: {}", listener_id));
+                                    }
+                                    Err(e) => {
+                                        log(alloc::format!("tcp-echo: listen failed: {}", e));
+                                        return err_result_string(&e);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     ok_state(state)
 }
 

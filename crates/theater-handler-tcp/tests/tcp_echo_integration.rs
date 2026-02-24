@@ -37,18 +37,20 @@ fn create_handler_registry(theater_tx: mpsc::Sender<TheaterCommand>) -> HandlerR
 
 /// Build a manifest TOML string with an absolute path to the pre-built WASM.
 fn make_manifest(wasm_path: &str, listen_addr: &str) -> String {
+    // Pass the listen address via initial_state so the actor can call listen()
+    let initial_state = format!(r#"{{"listen": "{}"}}"#, listen_addr);
     format!(
         r#"
 name = "tcp-echo-test"
 version = "0.1.0"
 package = "{wasm_path}"
+initial_state = '{initial_state}'
 
 [[handler]]
 type = "runtime"
 
 [[handler]]
 type = "tcp"
-listen = "{listen_addr}"
 "#
     )
 }
@@ -63,7 +65,7 @@ fn wasm_path() -> String {
 }
 
 #[tokio::test]
-#[ignore = "tcp-echo actor needs listen import to start listener"]
+#[ignore = "actor init not called automatically by runtime - needs TheaterCommand::CallActorInit"]
 async fn test_tcp_echo_and_chain() {
     let _ = tracing_subscriber::fmt()
         .with_env_filter("info")

@@ -8,6 +8,8 @@ theater = { path = "../theater" }
 theater-handler-runtime = { path = "../theater-handler-runtime" }
 theater-handler-message-server = { path = "../theater-handler-message-server" }
 theater-handler-supervisor = { path = "../theater-handler-supervisor" }
+theater-handler-tcp = { path = "../theater-handler-tcp" }
+pack = { path = "../../../pack" }
 anyhow = "1.0"
 tokio = { version = "1.0", features = ["full"] }
 serde_json = "1.0"

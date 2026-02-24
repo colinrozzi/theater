@@ -20,13 +20,17 @@ use theater_handler_supervisor::SupervisorHandler;
 use tokio::sync::mpsc;
 use tracing::info;
 
-#[tokio::test]
-#[ignore = "store handler requires filesystem backing not set up in this test"]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "async host functions deadlock in standalone test - works in full actor runtime"]
 async fn test_multi_handler_composite() {
     // Initialize tracing for test output
     let _ = tracing_subscriber::fmt()
         .with_env_filter("info")
         .try_init();
+
+    // Set up a temp directory for THEATER_HOME so the store handler has filesystem backing
+    let temp_dir = tempfile::tempdir().expect("Failed to create temp directory");
+    std::env::set_var("THEATER_HOME", temp_dir.path());
 
     // Load the test actor WASM
     let wasm_path = concat!(

@@ -24,9 +24,9 @@
 
 # Development
 - [Building Actors](development/building-actors.md)
+- [Pact Interface Definitions](development/concepts/pact-interfaces.md)
 - [Testing with Replay](development/testing-with-replay.md)
 - [Building Host Functions](development/building-host-functions.md)
-- [WIT Debugging](development/wit-debugging.md)
 - [Making Changes](development/making-changes.md)
 - [System Internals](development/system-internals/README.md)
     - [System Architecture](development/system-internals/architecture.md)
