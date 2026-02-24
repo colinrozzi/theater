@@ -27,12 +27,29 @@ Investigation revealed deeper issues:
 - Both tests remain ignored with updated explanations
 
 ### 3. Add TCP Replay Test
-**Status**: Partial (test created but ignored)
+**Status**: Blocked (needs initial_state infrastructure)
 **Files**: `crates/theater-replay-experimenting/`
 
 Created `run_tcp_replay_verification()` and `test_tcp_replay_verification` test.
-Test is currently ignored due to TCP listener timing issues in single-threaded
-tokio test runtime - the listener task doesn't start before the test client connects.
+Test is blocked due to missing infrastructure for passing initial_state from manifest
+to actor store during spawn.
+
+**Root Cause Analysis:**
+1. TCP echo actor needs listen address passed via initial_state in manifest
+2. Manifest has `initial_state = '{"listen": "..."}'` but this isn't used
+3. When init is called via ActorHandle::call_function():
+   - execute_call_pack gets state from actor_store.get_state() (empty)
+   - call_function_with_value builds Tuple([store_state, params])
+   - Actor receives Tuple([Option{None}, params]) and extracts first element
+   - Actor gets empty state instead of the listen address
+4. The state we pass as params is ignored because the actor extracts the first tuple element
+
+**Required Fix:**
+Pass initial_state from manifest through the spawn chain:
+- spawn_actor (theater_runtime.rs) - extract from manifest
+- ActorRuntime::start (actor/runtime.rs) - add parameter
+- build_actor_resources (actor/runtime.rs) - add parameter
+- ActorStore::new (actor/store.rs) - add initial_state parameter
 
 **Changes made:**
 - Added `get_tcp_echo_wasm_path()` helper
@@ -41,10 +58,7 @@ tokio test runtime - the listener task doesn't start before the test client conn
 - Added `run_tcp_replay_verification()` function
 - Added `test_tcp_replay_verification` test (ignored)
 - Updated main() to include TCP replay verification
-
-**Remaining:**
-- Fix timing issue (needs multi-threaded tokio runtime or connection retry logic)
-- Or investigate why TCP listener isn't starting in time
+- Updated tcp-echo actor with listen import
 
 ### 4. Remove Dead Scaffolding from pack-guest-macros
 **Status**: Complete
@@ -103,3 +117,5 @@ To fully remove, would need to:
 - Created pact-interfaces.md documentation
 - Rewrote building-actors.md with modern pack_types!/pack_guest patterns
 - Updated SUMMARY.md with Pact documentation link
+- Investigated TCP replay test failure - found manifest initial_state not passed to actor store
+- Documented root cause and required fix for initial_state infrastructure

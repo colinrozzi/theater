@@ -1270,6 +1270,8 @@ pub async fn run_tcp_replay_verification(
     }
 
     // Build initial state as option<list<u8>>
+    // Note: This state isn't actually used - it gets passed as params but the actor
+    // receives the store state (empty) as the first tuple element.
     let state_json = format!(r#"{{"listen": "{}"}}"#, listen_addr_str);
     let state_bytes: Vec<pack::abi::Value> = state_json.bytes().map(pack::abi::Value::U8).collect();
     let init_state = pack::abi::Value::Option {
@@ -1297,15 +1299,28 @@ pub async fn run_tcp_replay_verification(
         println!("After init: {} events", recorded_chain.len());
     }
 
-    // Give the listener time to start
-    tokio::time::sleep(Duration::from_millis(200)).await;
-
-    // Connect a test client and send data
+    // Connect a test client with retry logic
     if verbose {
         println!("Connecting test client...");
     }
 
-    let mut tcp_client = tokio::net::TcpStream::connect(&listen_addr).await?;
+    let mut tcp_client = None;
+    for attempt in 0..10 {
+        match tokio::net::TcpStream::connect(&listen_addr).await {
+            Ok(stream) => {
+                tcp_client = Some(stream);
+                break;
+            }
+            Err(e) if attempt < 9 => {
+                if verbose {
+                    println!("  Connection attempt {} failed: {}, retrying...", attempt + 1, e);
+                }
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+            Err(e) => return Err(anyhow::anyhow!("Failed to connect after 10 attempts: {}", e)),
+        }
+    }
+    let mut tcp_client = tcp_client.unwrap();
     let test_data = b"Hello from TCP test!";
 
     // Send data
@@ -1837,11 +1852,14 @@ mod tests {
     /// 3. Records the event chain
     /// 4. Replays and verifies hash determinism
     ///
-    /// Currently ignored: TCP listener startup has timing issues in the single-threaded
-    /// tokio test runtime. The actor calls tcp_listen() but the listener task may not
-    /// start before the test client tries to connect.
-    #[tokio::test]
-    #[ignore = "TCP listener timing issues - needs multi-threaded runtime or retry logic"]
+    /// BLOCKED: Manifest initial_state not passed to actor store.
+    /// The manifest specifies initial_state with the listen address, but this state
+    /// isn't set on the ActorStore during spawn. When init is called, it gets empty
+    /// state from the store instead of the manifest's initial_state.
+    /// Fix requires: passing initial_state from manifest through spawn_actor ->
+    /// ActorRuntime::start -> build_actor_resources -> ActorStore::new.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[ignore = "Blocked: manifest initial_state not passed to actor store during spawn"]
     async fn test_tcp_replay_verification() {
         let chain_path = format!(
             "/tmp/test_tcp_replay_chain_{}.json",
