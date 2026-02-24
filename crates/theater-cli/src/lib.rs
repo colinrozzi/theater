@@ -39,6 +39,10 @@ pub enum Commands {
     #[command(name = "start")]
     Start(commands::start::StartArgs),
 
+    /// Run an actor function and print the result
+    #[command(name = "run")]
+    Run(commands::run::RunArgs),
+
     /// Generate shell completion scripts
     #[command(name = "completion")]
     Completion(commands::completion::CompletionArgs),
@@ -76,6 +80,9 @@ pub async fn run(
                 .await
                 .map_err(|e| anyhow::Error::from(e)),
             Commands::Start(args) => commands::start::execute_async(args, &ctx)
+                .await
+                .map_err(|e| anyhow::Error::from(e)),
+            Commands::Run(args) => commands::run::execute_async(args, &ctx)
                 .await
                 .map_err(|e| anyhow::Error::from(e)),
             Commands::Completion(args) => commands::completion::execute_async(args, &ctx)

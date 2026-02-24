@@ -49,11 +49,12 @@
         # Setup crane with our toolchain
         craneLib = (crane.mkLib pkgs).overrideToolchain rustToolchain;
 
-        # Source filtering - include Cargo files, Rust sources, and WIT files
+        # Source filtering - include Cargo files, Rust sources, WIT files, and Pact files
         theaterSrc = pkgs.lib.cleanSourceWith {
           src = ./.;
           filter = path: type:
             (pkgs.lib.hasSuffix ".wit" path) ||
+            (pkgs.lib.hasSuffix ".pact" path) ||
             (pkgs.lib.hasSuffix ".toml" path) ||
             (craneLib.filterCargoSources path type);
         };

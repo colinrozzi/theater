@@ -52,6 +52,7 @@ async fn test_handler_creation_permission_validation() {
         version: "1.0.0".to_string(),
         description: None,
         long_description: None,
+        initial_state: None,
         save_chain: Some(false),
         permission_policy: Default::default(),
     };

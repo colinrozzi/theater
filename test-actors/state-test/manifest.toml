@@ -1,0 +1,6 @@
+name = "state-test"
+version = "0.1.0"
+package = "target/wasm32-unknown-unknown/release/state_test_actor.wasm"
+
+[[handler]]
+type = "runtime"

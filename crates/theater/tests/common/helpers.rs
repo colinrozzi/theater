@@ -27,6 +27,7 @@ pub fn create_test_manifest(name: &str) -> ManifestConfig {
         package: format!("{}.wasm", name),
         description: None,
         long_description: None,
+        initial_state: None,
         save_chain: None,
         permission_policy: Default::default(),
         handlers: Vec::new(),

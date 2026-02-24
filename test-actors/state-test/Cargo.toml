@@ -1,0 +1,18 @@
+[package]
+name = "state-test-actor"
+version = "0.1.0"
+edition = "2021"
+
+[workspace]
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+pack-guest = { path = "../../../pack/crates/pack-guest" }
+serde = { version = "1.0", default-features = false, features = ["alloc", "derive"] }
+serde_json = { version = "1.0", default-features = false, features = ["alloc"] }
+
+[profile.release]
+opt-level = "s"
+lto = true

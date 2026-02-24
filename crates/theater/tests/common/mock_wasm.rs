@@ -129,6 +129,7 @@ impl MockActorComponentFactory {
             handlers: Vec::new(),
             description: None,
             long_description: None,
+            initial_state: None,
             save_chain: None,
             permission_policy: Default::default(),
         };

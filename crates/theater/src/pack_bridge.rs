@@ -17,7 +17,7 @@ use std::sync::Arc;
 // Re-export Pack types for convenient use throughout Theater
 // Note: We use composite's internal abi module, not composite_abi crate directly,
 // because that's what the runtime functions return.
-pub use pack::abi::{Value, ValueType};
+pub use pack::abi::{FromValue, FromValueError, Value, ValueType};
 pub use pack::{
     AsyncCtx, AsyncInstance, AsyncRuntime, CallInterceptor, Ctx, HostFunctionProvider,
     HostLinkerBuilder, InterfaceBuilder, LinkerError,
@@ -312,6 +312,41 @@ impl PackInstance {
             .await
             .context(format!("Failed to call function '{}'", function_name))
     }
+
+    /// Call an actor function with typed decoding.
+    ///
+    /// This provides a higher-level API that:
+    /// - Automatically wraps state and params into the expected tuple
+    /// - Decodes the result into `ActorResult<T>` with the new state and typed return value
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let result: ActorResult<i32> = instance.call_typed(
+    ///     "increment",
+    ///     state,
+    ///     Value::Tuple(vec![]),
+    /// ).await?;
+    /// println!("New count: {}, state: {:?}", result.value, result.state);
+    /// ```
+    pub async fn call_typed<T: FromValue>(
+        &mut self,
+        function_name: &str,
+        state: Option<Vec<u8>>,
+        params: Value,
+    ) -> Result<ActorResult<T>> {
+        let state_value = state_to_value(state);
+        let input = Value::Tuple(vec![state_value, params]);
+
+        let output = self
+            .instance
+            .call_with_value_async(function_name, &input)
+            .await
+            .context(format!("Failed to call function '{}'", function_name))?;
+
+        ActorResult::<T>::from_value(output)
+            .map_err(|e| anyhow::anyhow!("Failed to decode result: {}", e))
+    }
 }
 
 // =============================================================================
@@ -380,43 +415,24 @@ pub fn decode_value(bytes: &[u8]) -> Result<Value> {
 /// Where R is the function-specific result type.
 fn decode_function_result(value: Value) -> Result<(Option<Vec<u8>>, Vec<u8>)> {
     match value {
-        // Result variant: tag 0 = Ok, tag 1 = Err
+        // Handle Value::Result (Pack's native result type)
+        Value::Result { value: Ok(inner), .. } => {
+            decode_ok_payload(*inner)
+        }
+        Value::Result { value: Err(err), .. } => {
+            let error_msg = match *err {
+                Value::String(s) => s,
+                other => format!("{:?}", other),
+            };
+            Err(anyhow::anyhow!("Function returned error: {}", error_msg))
+        }
+        // Handle Value::Variant (legacy/alternative encoding)
         Value::Variant {
             tag: 0,
             payload,
             ..
         } if !payload.is_empty() => {
-            // Ok case - payload is tuple<option<list<u8>>, R>
-            match payload.into_iter().next().unwrap() {
-                Value::Tuple(items) if !items.is_empty() => {
-                    // First element is state
-                    let new_state = match &items[0] {
-                        Value::Option { value: Some(inner), .. } => Some(value_to_bytes((**inner).clone())?),
-                        Value::Option { value: None, .. } => None,
-                        other => {
-                            return Err(anyhow::anyhow!(
-                                "Expected Option for state, got {:?}",
-                                other
-                            ))
-                        }
-                    };
-
-                    // Encode the rest as the result (or just the second element)
-                    let result_value = if items.len() > 1 {
-                        items[1].clone()
-                    } else {
-                        Value::Tuple(vec![])
-                    };
-                    let result_bytes = encode_value(&result_value)?;
-
-                    Ok((new_state, result_bytes))
-                }
-                other => {
-                    // Maybe it's just the state directly
-                    let result_bytes = encode_value(&other)?;
-                    Ok((None, result_bytes))
-                }
-            }
+            decode_ok_payload(payload.into_iter().next().unwrap())
         }
         Value::Variant { tag: 0, payload, .. } if payload.is_empty() => {
             // Ok with no payload
@@ -440,10 +456,166 @@ fn decode_function_result(value: Value) -> Result<(Option<Vec<u8>>, Vec<u8>)> {
         Value::Variant { tag, .. } => {
             Err(anyhow::anyhow!("Unexpected result variant tag: {}", tag))
         }
-        // If it's not a variant, treat the whole value as the result
+        // If it's not a variant or result, treat the whole value as the result
         other => {
             let result_bytes = encode_value(&other)?;
             Ok((None, result_bytes))
+        }
+    }
+}
+
+/// Helper to decode the Ok payload of a result.
+/// Expected format: tuple<option<list<u8>>, R> where first element is state
+fn decode_ok_payload(value: Value) -> Result<(Option<Vec<u8>>, Vec<u8>)> {
+    match value {
+        Value::Tuple(items) if !items.is_empty() => {
+            // First element is state
+            let new_state = match &items[0] {
+                Value::Option { value: Some(inner), .. } => Some(value_to_bytes((**inner).clone())?),
+                Value::Option { value: None, .. } => None,
+                other => {
+                    return Err(anyhow::anyhow!(
+                        "Expected Option for state, got {:?}",
+                        other
+                    ))
+                }
+            };
+
+            // Encode the rest as the result (or just the second element)
+            let result_value = if items.len() > 1 {
+                items[1].clone()
+            } else {
+                Value::Tuple(vec![])
+            };
+            let result_bytes = encode_value(&result_value)?;
+
+            Ok((new_state, result_bytes))
+        }
+        other => {
+            // Maybe it's just the state directly
+            let result_bytes = encode_value(&other)?;
+            Ok((None, result_bytes))
+        }
+    }
+}
+
+// =============================================================================
+// Actor Result Type - for typed decoding of actor function results
+// =============================================================================
+
+/// Result type for actor function calls.
+///
+/// Theater actors return `result<tuple<option<list<u8>>, R>, string>` where:
+/// - First tuple element is the updated state (or None)
+/// - Second element is the function's return value
+/// - Error case contains an error message
+///
+/// This type provides typed decoding via `FromValue`.
+///
+/// # Example
+///
+/// ```ignore
+/// // Call an actor function with typed result
+/// let result: ActorResult<i32> = instance.call_typed("increment", params).await?;
+/// let new_state = result.state;
+/// let count = result.value;
+/// ```
+#[derive(Debug, Clone)]
+pub struct ActorResult<T> {
+    /// The updated actor state, or None if unchanged
+    pub state: Option<Vec<u8>>,
+    /// The function's return value
+    pub value: T,
+}
+
+impl<T: FromValue> FromValue for ActorResult<T> {
+    fn from_value(value: Value) -> std::result::Result<Self, FromValueError> {
+        match value {
+            // Handle Value::Result (Pack's native result type)
+            Value::Result { value: Ok(inner), .. } => {
+                decode_actor_ok_payload(*inner)
+            }
+            Value::Result { value: Err(err), .. } => {
+                let error_msg = match *err {
+                    Value::String(s) => s,
+                    other => format!("{:?}", other),
+                };
+                Err(FromValueError::Custom(format!("Actor error: {}", error_msg)))
+            }
+            // Handle Value::Variant (alternative encoding)
+            Value::Variant { tag: 0, payload, .. } if !payload.is_empty() => {
+                decode_actor_ok_payload(payload.into_iter().next().unwrap())
+            }
+            Value::Variant { tag: 0, .. } => {
+                Err(FromValueError::Custom("Ok variant with empty payload".to_string()))
+            }
+            Value::Variant { tag: 1, payload, .. } => {
+                let error_msg = payload.into_iter().next()
+                    .map(|v| match v {
+                        Value::String(s) => s,
+                        other => format!("{:?}", other),
+                    })
+                    .unwrap_or_else(|| "Unknown error".to_string());
+                Err(FromValueError::Custom(format!("Actor error: {}", error_msg)))
+            }
+            other => {
+                Err(FromValueError::TypeMismatch {
+                    expected: "Result or Variant",
+                    got: format!("{:?}", other),
+                })
+            }
+        }
+    }
+}
+
+/// Helper to decode the Ok payload of an actor result.
+fn decode_actor_ok_payload<T: FromValue>(value: Value) -> std::result::Result<ActorResult<T>, FromValueError> {
+    match value {
+        Value::Tuple(mut items) if !items.is_empty() => {
+            // First element is state: option<list<u8>>
+            let state = match items.remove(0) {
+                Value::Option { value: Some(inner), .. } => {
+                    match *inner {
+                        Value::List { items, .. } => {
+                            let bytes: std::result::Result<Vec<u8>, _> = items.into_iter()
+                                .map(|v| match v {
+                                    Value::U8(b) => Ok(b),
+                                    other => Err(FromValueError::TypeMismatch {
+                                        expected: "U8",
+                                        got: format!("{:?}", other),
+                                    }),
+                                })
+                                .collect();
+                            Some(bytes?)
+                        }
+                        other => return Err(FromValueError::TypeMismatch {
+                            expected: "List<u8>",
+                            got: format!("{:?}", other),
+                        }),
+                    }
+                }
+                Value::Option { value: None, .. } => None,
+                other => return Err(FromValueError::TypeMismatch {
+                    expected: "Option",
+                    got: format!("{:?}", other),
+                }),
+            };
+
+            // Second element (if present) is the return value
+            let return_value = if !items.is_empty() {
+                items.remove(0)
+            } else {
+                Value::Tuple(vec![]) // Unit if no second element
+            };
+
+            let value = T::from_value(return_value)?;
+
+            Ok(ActorResult { state, value })
+        }
+        // Single value - treat as return value with no state
+        other => {
+            let value = T::from_value(other)?;
+            Ok(ActorResult { state: None, value })
         }
     }
 }
@@ -457,25 +629,13 @@ pub trait IntoValue {
     fn into_value(self) -> Value;
 }
 
-/// Trait for converting Pack Values to Theater types.
-pub trait FromValue: Sized {
-    fn from_value(value: Value) -> Result<Self>;
-}
+// Note: FromValue is now imported from Pack (pack::abi::FromValue)
 
 // Implement for common types
 
 impl IntoValue for () {
     fn into_value(self) -> Value {
         Value::Tuple(vec![])
-    }
-}
-
-impl FromValue for () {
-    fn from_value(value: Value) -> Result<Self> {
-        match value {
-            Value::Tuple(items) if items.is_empty() => Ok(()),
-            other => Err(anyhow::anyhow!("Expected unit tuple, got {:?}", other)),
-        }
     }
 }
 
