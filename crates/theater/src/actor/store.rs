@@ -74,12 +74,13 @@ impl ActorStore {
         theater_tx: Sender<TheaterCommand>,
         actor_handle: ActorHandle,
         chain: Arc<RwLock<StateChain>>,
+        initial_state: Option<Vec<u8>>,
     ) -> Self {
         Self {
             id: id.clone(),
             theater_tx: theater_tx.clone(),
             chain,
-            state: Some(vec![]),
+            state: initial_state,
             actor_handle,
             resource_table: Arc::new(Mutex::new(ResourceTable::new())),
             extensions: Arc::new(RwLock::new(HashMap::new())),

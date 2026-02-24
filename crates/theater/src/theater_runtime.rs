@@ -657,11 +657,14 @@ impl TheaterRuntime {
         self.chains.insert(actor_id.clone(), chain.clone());
 
         // If manifest provided, check for replay handler and create modified registry
-        let handler_registry = if let Some(ref manifest) = manifest {
-            self.create_handler_registry_for_manifest(manifest).await?
+        let (handler_registry, initial_state) = if let Some(ref manifest) = manifest {
+            let registry = self.create_handler_registry_for_manifest(manifest).await?;
+            // Convert initial_state from String to bytes
+            let state = manifest.initial_state.as_ref().map(|s| s.as_bytes().to_vec());
+            (registry, state)
         } else {
             // No manifest - use global handlers directly
-            self.handler_registry.clone()
+            (self.handler_registry.clone(), None)
         };
 
         // Start the actor in a detached task
@@ -688,6 +691,7 @@ impl TheaterRuntime {
                 actor_info_tx,
                 control_rx,
                 actor_control_tx,
+                initial_state,
                 Some(setup_tx),
             )
             .await;

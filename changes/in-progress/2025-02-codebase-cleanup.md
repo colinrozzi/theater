@@ -27,38 +27,29 @@ Investigation revealed deeper issues:
 - Both tests remain ignored with updated explanations
 
 ### 3. Add TCP Replay Test
-**Status**: Blocked (needs initial_state infrastructure)
-**Files**: `crates/theater-replay-experimenting/`
+**Status**: Complete
+**Files**: `crates/theater-replay-experimenting/`, `crates/theater/src/`
 
 Created `run_tcp_replay_verification()` and `test_tcp_replay_verification` test.
-Test is blocked due to missing infrastructure for passing initial_state from manifest
-to actor store during spawn.
+Test now passes after implementing initial_state support.
 
-**Root Cause Analysis:**
-1. TCP echo actor needs listen address passed via initial_state in manifest
-2. Manifest has `initial_state = '{"listen": "..."}'` but this isn't used
-3. When init is called via ActorHandle::call_function():
-   - execute_call_pack gets state from actor_store.get_state() (empty)
-   - call_function_with_value builds Tuple([store_state, params])
-   - Actor receives Tuple([Option{None}, params]) and extracts first element
-   - Actor gets empty state instead of the listen address
-4. The state we pass as params is ignored because the actor extracts the first tuple element
-
-**Required Fix:**
-Pass initial_state from manifest through the spawn chain:
-- spawn_actor (theater_runtime.rs) - extract from manifest
-- ActorRuntime::start (actor/runtime.rs) - add parameter
-- build_actor_resources (actor/runtime.rs) - add parameter
-- ActorStore::new (actor/store.rs) - add initial_state parameter
+**Fix Applied:**
+Passed initial_state from manifest through the spawn chain:
+- Added `initial_state: Option<String>` field to ManifestConfig
+- Extract initial_state in spawn_actor (theater_runtime.rs)
+- Pass through ActorRuntime::start -> build_actor_resources -> ActorStore::new
+- ActorStore now initializes with the manifest's initial_state
 
 **Changes made:**
 - Added `get_tcp_echo_wasm_path()` helper
 - Added `create_tcp_recording_manifest()` and `create_tcp_replay_manifest()`
 - Added `create_tcp_registry()` helper
 - Added `run_tcp_replay_verification()` function
-- Added `test_tcp_replay_verification` test (ignored)
+- Added `test_tcp_replay_verification` test (now passing!)
 - Updated main() to include TCP replay verification
 - Updated tcp-echo actor with listen import
+- Added initial_state field to ManifestConfig
+- Threading initial_state through spawn chain
 
 ### 4. Remove Dead Scaffolding from pack-guest-macros
 **Status**: Complete
@@ -118,4 +109,5 @@ To fully remove, would need to:
 - Rewrote building-actors.md with modern pack_types!/pack_guest patterns
 - Updated SUMMARY.md with Pact documentation link
 - Investigated TCP replay test failure - found manifest initial_state not passed to actor store
-- Documented root cause and required fix for initial_state infrastructure
+- Implemented initial_state support: ManifestConfig field + spawn chain threading
+- TCP replay test now passes with deterministic hash verification

@@ -1270,8 +1270,9 @@ pub async fn run_tcp_replay_verification(
     }
 
     // Build initial state as option<list<u8>>
-    // Note: This state isn't actually used - it gets passed as params but the actor
-    // receives the store state (empty) as the first tuple element.
+    // This is passed to the actor as params, but the actor's init function
+    // receives the store state (from manifest initial_state) as the first tuple element.
+    // For now, we pass an empty tuple as params since init doesn't need extra params.
     let state_json = format!(r#"{{"listen": "{}"}}"#, listen_addr_str);
     let state_bytes: Vec<pack::abi::Value> = state_json.bytes().map(pack::abi::Value::U8).collect();
     let init_state = pack::abi::Value::Option {
@@ -1852,14 +1853,7 @@ mod tests {
     /// 3. Records the event chain
     /// 4. Replays and verifies hash determinism
     ///
-    /// BLOCKED: Manifest initial_state not passed to actor store.
-    /// The manifest specifies initial_state with the listen address, but this state
-    /// isn't set on the ActorStore during spawn. When init is called, it gets empty
-    /// state from the store instead of the manifest's initial_state.
-    /// Fix requires: passing initial_state from manifest through spawn_actor ->
-    /// ActorRuntime::start -> build_actor_resources -> ActorStore::new.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    #[ignore = "Blocked: manifest initial_state not passed to actor store during spawn"]
     async fn test_tcp_replay_verification() {
         let chain_path = format!(
             "/tmp/test_tcp_replay_chain_{}.json",

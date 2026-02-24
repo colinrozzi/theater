@@ -60,6 +60,7 @@ async fn test_composite_instance_basic() {
         theater_tx.clone(),
         actor_handle,
         chain,
+        None, // No initial state for this test
     );
 
     // Create the PackInstance with host functions

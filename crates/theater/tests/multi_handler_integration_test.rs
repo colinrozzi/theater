@@ -69,6 +69,7 @@ async fn test_multi_handler_composite() {
         theater_tx.clone(),
         actor_handle.clone(),
         chain.clone(),
+        None, // No initial state for this test
     );
 
     // Create handler instances

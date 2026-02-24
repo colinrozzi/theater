@@ -186,6 +186,7 @@ impl ActorRuntime {
         control_tx: Sender<ActorControl>,
         actor_phase_manager: ActorPhaseManager,
         actor_instance_wrapper: Arc<RwLock<Option<PackInstance>>>,
+        initial_state: Option<Vec<u8>>,
     ) -> Result<(ShutdownController, Vec<JoinHandle<()>>), ActorRuntimeError> {
         // ---------------- Checkpoint Setup Initial ----------------
 
@@ -203,7 +204,7 @@ impl ActorRuntime {
         let handle_operation_tx = operation_tx.clone();
         let actor_handle = ActorHandle::new(handle_operation_tx, info_tx, control_tx);
         let actor_store =
-            ActorStore::new(id.clone(), theater_tx.clone(), actor_handle.clone(), chain.clone());
+            ActorStore::new(id.clone(), theater_tx.clone(), actor_handle.clone(), chain.clone(), initial_state);
 
         // ----------------- Checkpoint Store Manifest ----------------
 
@@ -521,6 +522,7 @@ impl ActorRuntime {
         info_tx: Sender<ActorInfo>,
         control_rx: Receiver<ActorControl>,
         control_tx: Sender<ActorControl>,
+        initial_state: Option<Vec<u8>>,
         setup_result_tx: Option<tokio::sync::oneshot::Sender<Result<(), String>>>,
     ) -> () {
         info!("Actor runtime starting communication loops");
@@ -559,6 +561,7 @@ impl ActorRuntime {
                     control_tx,
                     actor_phase_manager.clone(),
                     actor_instance_wrapper,
+                    initial_state,
                 )
                 .await
                 {
