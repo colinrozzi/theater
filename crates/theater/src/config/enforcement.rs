@@ -130,6 +130,10 @@ pub fn validate_manifest_permissions(
                 // Terminal handler is allowed by default
                 // It provides stdin/stdout/stderr for interactive CLI apps
             }
+            HandlerConfig::Timer { .. } => {
+                // Timer handler is allowed by default
+                // It provides periodic tick callbacks
+            }
         }
     }
     Ok(())

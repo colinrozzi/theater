@@ -12,7 +12,7 @@ use crate::{error::CliError, CommandContext};
 use theater::chain::ChainEvent;
 use theater::config::actor_manifest::{
     RuntimeHostConfig, StoreHandlerConfig, SupervisorHostConfig, TcpHandlerConfig,
-    TerminalHandlerConfig,
+    TerminalHandlerConfig, TimerHandlerConfig,
 };
 use theater::handler::HandlerRegistry;
 use theater::messages::TheaterCommand;
@@ -28,6 +28,7 @@ use theater_handler_store::StoreHandler;
 use theater_handler_supervisor::SupervisorHandler;
 use theater_handler_tcp::TcpHandler;
 use theater_handler_terminal::TerminalHandler;
+use theater_handler_timer::TimerHandler;
 
 /// Log level for runtime/system logs
 #[derive(Debug, Clone, Copy, ValueEnum, Default)]
@@ -225,6 +226,10 @@ fn create_handler_registry(
     // Terminal handler - stdin/stdout/stderr for interactive CLI apps
     let terminal_config = TerminalHandlerConfig::default();
     registry.register(TerminalHandler::new(terminal_config));
+
+    // Timer handler - periodic tick callbacks for game loops, polling, etc.
+    let timer_config = TimerHandlerConfig::default();
+    registry.register(TimerHandler::new(timer_config));
 
     registry
 }

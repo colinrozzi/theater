@@ -1,0 +1,22 @@
+[package]
+name = "theater-handler-timer"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+rust-version.workspace = true
+
+description = "Timer handler for Theater WebAssembly runtime - periodic tick callbacks"
+
+[dependencies]
+theater = { workspace = true }
+anyhow.workspace = true
+tracing.workspace = true
+tokio.workspace = true
+
+[dev-dependencies]
+tracing-subscriber.workspace = true

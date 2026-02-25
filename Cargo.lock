@@ -3395,6 +3395,7 @@ dependencies = [
  "theater-handler-supervisor",
  "theater-handler-tcp",
  "theater-handler-terminal",
+ "theater-handler-timer",
  "thiserror 1.0.69",
  "tokio",
  "tokio-util",
@@ -3536,6 +3537,17 @@ dependencies = [
  "signal-hook-tokio",
  "theater",
  "theater-handler-runtime",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "theater-handler-timer"
+version = "0.2.1"
+dependencies = [
+ "anyhow",
+ "theater",
  "tokio",
  "tracing",
  "tracing-subscriber",

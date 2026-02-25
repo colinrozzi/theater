@@ -171,6 +171,11 @@ pub enum HandlerConfig {
         #[serde(flatten)]
         config: TerminalHandlerConfig,
     },
+    #[serde(rename = "timer")]
+    Timer {
+        #[serde(flatten)]
+        config: TimerHandlerConfig,
+    },
 }
 
 impl HandlerConfig {
@@ -194,6 +199,7 @@ impl HandlerConfig {
             HandlerConfig::Tcp { .. } => "tcp",
             HandlerConfig::Rpc { .. } => "rpc",
             HandlerConfig::Terminal { .. } => "terminal",
+            HandlerConfig::Timer { .. } => "timer",
         }
     }
 }
@@ -226,6 +232,16 @@ pub struct TerminalHandlerConfig {
     /// Whether to start in raw mode (disables line buffering and echo)
     #[serde(default)]
     pub raw_mode: Option<bool>,
+}
+
+/// Configuration for the Timer handler
+/// This handler provides periodic tick callbacks for game loops, polling, etc.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+pub struct TimerHandlerConfig {
+    /// Default interval in milliseconds for the timer tick
+    /// If set, starts a "default" timer automatically
+    #[serde(default)]
+    pub interval_ms: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
