@@ -126,6 +126,10 @@ pub fn validate_manifest_permissions(
                 // RPC handler is allowed by default
                 // It enables actor-to-actor function calls
             }
+            HandlerConfig::Terminal { .. } => {
+                // Terminal handler is allowed by default
+                // It provides stdin/stdout/stderr for interactive CLI apps
+            }
         }
     }
     Ok(())

@@ -3052,12 +3052,34 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0fda2ff0d084019ba4d7c6f371c95d8fd75ce3524c3cb8fb653a3023f6323e64"
 
 [[package]]
+name = "signal-hook"
+version = "0.3.18"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d881a16cf4426aa584979d30bd82cb33429027e42122b169753d6ef1085ed6e2"
+dependencies = [
+ "libc",
+ "signal-hook-registry",
+]
+
+[[package]]
 name = "signal-hook-registry"
 version = "1.4.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9203b8055f63a2a00e2f593bb0510367fe707d7ff1e5c872de2f537b339e5410"
 dependencies = [
  "libc",
+]
+
+[[package]]
+name = "signal-hook-tokio"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "213241f76fb1e37e27de3b6aa1b068a2c333233b59cca6634f634b80a27ecf1e"
+dependencies = [
+ "futures-core",
+ "libc",
+ "signal-hook",
+ "tokio",
 ]
 
 [[package]]
@@ -3371,6 +3393,8 @@ dependencies = [
  "theater-handler-runtime",
  "theater-handler-store",
  "theater-handler-supervisor",
+ "theater-handler-tcp",
+ "theater-handler-terminal",
  "thiserror 1.0.69",
  "tokio",
  "tokio-util",
@@ -3494,6 +3518,22 @@ version = "0.2.1"
 dependencies = [
  "anyhow",
  "serde_json",
+ "theater",
+ "theater-handler-runtime",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "theater-handler-terminal"
+version = "0.2.1"
+dependencies = [
+ "anyhow",
+ "futures-util",
+ "libc",
+ "signal-hook",
+ "signal-hook-tokio",
  "theater",
  "theater-handler-runtime",
  "tokio",

@@ -29,6 +29,8 @@ theater-handler-store.workspace = true
 theater-handler-supervisor.workspace = true
 theater-handler-message-server.workspace = true
 theater-handler-rpc.workspace = true
+theater-handler-tcp.workspace = true
+theater-handler-terminal.workspace = true
 
 # Core dependencies
 anyhow.workspace = true

@@ -166,6 +166,11 @@ pub enum HandlerConfig {
         #[serde(flatten)]
         config: RpcHandlerConfig,
     },
+    #[serde(rename = "terminal")]
+    Terminal {
+        #[serde(flatten)]
+        config: TerminalHandlerConfig,
+    },
 }
 
 impl HandlerConfig {
@@ -188,6 +193,7 @@ impl HandlerConfig {
             HandlerConfig::Replay { .. } => "replay",
             HandlerConfig::Tcp { .. } => "tcp",
             HandlerConfig::Rpc { .. } => "rpc",
+            HandlerConfig::Terminal { .. } => "terminal",
         }
     }
 }
@@ -212,6 +218,15 @@ pub struct TcpHandlerConfig {
 /// This handler enables direct actor-to-actor function calls
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct RpcHandlerConfig {}
+
+/// Configuration for the Terminal handler
+/// This handler provides terminal I/O for interactive CLI applications
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+pub struct TerminalHandlerConfig {
+    /// Whether to start in raw mode (disables line buffering and echo)
+    #[serde(default)]
+    pub raw_mode: Option<bool>,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct SupervisorHostConfig {}

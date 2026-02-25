@@ -1,0 +1,9 @@
+name = "terminal-echo"
+version = "0.1.0"
+package = "./target/wasm32-unknown-unknown/release/terminal_echo_actor.wasm"
+
+[[handler]]
+type = "runtime"
+
+[[handler]]
+type = "terminal"

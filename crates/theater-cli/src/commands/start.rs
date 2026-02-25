@@ -11,7 +11,8 @@ use tracing_subscriber::EnvFilter;
 use crate::{error::CliError, CommandContext};
 use theater::chain::ChainEvent;
 use theater::config::actor_manifest::{
-    RuntimeHostConfig, StoreHandlerConfig, SupervisorHostConfig,
+    RuntimeHostConfig, StoreHandlerConfig, SupervisorHostConfig, TcpHandlerConfig,
+    TerminalHandlerConfig,
 };
 use theater::handler::HandlerRegistry;
 use theater::messages::TheaterCommand;
@@ -25,6 +26,8 @@ use theater_handler_rpc::RpcHandler;
 use theater_handler_runtime::RuntimeHandler;
 use theater_handler_store::StoreHandler;
 use theater_handler_supervisor::SupervisorHandler;
+use theater_handler_tcp::TcpHandler;
+use theater_handler_terminal::TerminalHandler;
 
 /// Log level for runtime/system logs
 #[derive(Debug, Clone, Copy, ValueEnum, Default)]
@@ -212,6 +215,17 @@ fn create_handler_registry(
     // RPC handler - direct actor-to-actor function calls
     registry.register(RpcHandler::new(theater_tx.clone()));
 
+    // TCP handler - TCP server/client functionality
+    let tcp_config = TcpHandlerConfig {
+        listen: None,
+        max_connections: None,
+    };
+    registry.register(TcpHandler::new(tcp_config));
+
+    // Terminal handler - stdin/stdout/stderr for interactive CLI apps
+    let terminal_config = TerminalHandlerConfig::default();
+    registry.register(TerminalHandler::new(terminal_config));
+
     registry
 }
 
@@ -275,11 +289,25 @@ pub async fn execute_async(args: &StartArgs, ctx: &CommandContext) -> Result<(),
         CliError::invalid_manifest(format!("Failed to parse manifest: {}", e))
     })?;
 
-    // Load WASM bytes from manifest.package
-    let wasm_bytes = resolve_reference(&manifest.package).await.map_err(|e| {
+    // Resolve WASM path relative to manifest directory
+    let wasm_path = if manifest.package.starts_with('/') || manifest.package.contains("://") {
+        // Absolute path or URL - use as is
+        manifest.package.clone()
+    } else {
+        // Relative path - resolve relative to manifest's directory
+        let manifest_path = std::path::Path::new(&args.manifest);
+        if let Some(manifest_dir) = manifest_path.parent() {
+            manifest_dir.join(&manifest.package).to_string_lossy().to_string()
+        } else {
+            manifest.package.clone()
+        }
+    };
+
+    // Load WASM bytes
+    let wasm_bytes = resolve_reference(&wasm_path).await.map_err(|e| {
         CliError::server_error(format!(
             "Failed to load WASM from '{}': {}",
-            manifest.package, e
+            wasm_path, e
         ))
     })?;
 
