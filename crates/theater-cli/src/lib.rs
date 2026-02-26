@@ -43,6 +43,10 @@ pub enum Commands {
     #[command(name = "run")]
     Run(commands::run::RunArgs),
 
+    /// List, inspect, and manage event chains
+    #[command(name = "chains")]
+    Chains(commands::chains::ChainsArgs),
+
     /// Generate shell completion scripts
     #[command(name = "completion")]
     Completion(commands::completion::CompletionArgs),
@@ -83,6 +87,9 @@ pub async fn run(
                 .await
                 .map_err(|e| anyhow::Error::from(e)),
             Commands::Run(args) => commands::run::execute_async(args, &ctx)
+                .await
+                .map_err(|e| anyhow::Error::from(e)),
+            Commands::Chains(args) => commands::chains::execute_async(args, &ctx)
                 .await
                 .map_err(|e| anyhow::Error::from(e)),
             Commands::Completion(args) => commands::completion::execute_async(args, &ctx)

@@ -27,13 +27,19 @@
 //! making it possible to detect any tampering or corruption. Each event links to its parent, creating
 //! a tamper-evident chain of custody for all actor state changes.
 
+mod chain_writer;
+
+pub use chain_writer::{ChainWriter, RunMeta};
+
+use std::fmt;
+use std::path::Path;
+use std::sync::{Arc, Mutex};
+
 use anyhow::Result;
 use console::style;
 use serde::{Deserialize, Serialize};
-use std::fmt;
-use std::path::Path;
 use tokio::sync::mpsc::Sender;
-use tracing::{debug, warn};
+use tracing::{debug, info, warn};
 use wasmtime::component::{ComponentType, Lift, Lower};
 
 use crate::events::ChainEventData;
@@ -246,7 +252,7 @@ impl PartialEq for ChainEvent {
 /// via a channel. This allows the runtime to monitor and react to events across
 /// all actors in the system. The state chain can also be persisted to disk for
 /// long-term storage or debugging.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Clone, Serialize)]
 pub struct StateChain {
     /// The ordered sequence of events in this chain, from oldest to newest.
     events: Vec<ChainEvent>,
@@ -258,6 +264,19 @@ pub struct StateChain {
     /// The identifier of the actor that owns this chain.
     #[serde(skip)]
     actor_id: TheaterId,
+    /// Run log for streaming events to disk.
+    #[serde(skip)]
+    chain_writer: Arc<Mutex<Option<ChainWriter>>>,
+}
+
+impl fmt::Debug for StateChain {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("StateChain")
+            .field("events", &self.events)
+            .field("current_hash", &self.current_hash)
+            .field("actor_id", &self.actor_id)
+            .finish()
+    }
 }
 
 impl StateChain {
@@ -294,11 +313,41 @@ impl StateChain {
     /// # }
     /// ```
     pub fn new(actor_id: TheaterId, theater_tx: Sender<TheaterCommand>) -> Self {
+        // Create run log for streaming events to disk
+        let chain_writer = match ChainWriter::new(&actor_id) {
+            Ok(log) => {
+                info!("Created run log at {:?}", log.path());
+                Some(log)
+            }
+            Err(e) => {
+                warn!("Failed to create run log: {}", e);
+                None
+            }
+        };
+
         Self {
             events: Vec::new(),
             current_hash: None,
             theater_tx,
             actor_id,
+            chain_writer: Arc::new(Mutex::new(chain_writer)),
+        }
+    }
+
+    /// Sets the run metadata (actor name, manifest path, etc.)
+    pub fn set_run_meta(&self, actor_name: Option<String>, manifest_path: Option<String>) {
+        let meta = RunMeta {
+            actor_id: self.actor_id.to_string(),
+            actor_name,
+            manifest_path,
+            started_at: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs(),
+        };
+
+        if let Err(e) = ChainWriter::write_meta(&self.actor_id, &meta) {
+            warn!("Failed to write run meta: {}", e);
         }
     }
 
@@ -381,6 +430,15 @@ impl StateChain {
         // Now that we have the hash, store the updated event in memory
         self.events.push(event.clone());
         self.current_hash = Some(event.hash.clone());
+
+        // Write to run log for crash recovery
+        if let Ok(mut guard) = self.chain_writer.lock() {
+            if let Some(ref mut log) = *guard {
+                if let Err(e) = log.append(&event) {
+                    warn!("Failed to append to run log: {}", e);
+                }
+            }
+        }
 
         // notify the runtime of the event synchronously to preserve ordering
         if let Err(e) = self.theater_tx.try_send(TheaterCommand::NewEvent {

@@ -654,6 +654,11 @@ impl TheaterRuntime {
             self.theater_tx.clone(),
         )));
 
+        // Write run metadata for debugging/crash recovery
+        if let Ok(chain_guard) = chain.read() {
+            chain_guard.set_run_meta(Some(actor_name.clone()), None);
+        }
+
         self.chains.insert(actor_id.clone(), chain.clone());
 
         // If manifest provided, check for replay handler and create modified registry
