@@ -75,19 +75,18 @@ impl Handler for RuntimeHandler {
         Box::new(self.clone())
     }
 
-    fn start(
+    fn setup(
         &mut self,
         _actor_handle: ActorHandle,
         _actor_instance: SharedActorInstance,
         shutdown_receiver: ShutdownReceiver,
     ) -> Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send>> {
-        info!("Starting runtime handler");
+        info!("Runtime handler setup");
 
         Box::pin(async {
             // Runtime handler doesn't need a background task, but we should wait for shutdown
             shutdown_receiver.wait_for_shutdown().await;
             info!("Runtime handler received shutdown signal");
-            info!("Runtime handler shut down");
             Ok(())
         })
     }

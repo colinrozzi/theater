@@ -56,19 +56,18 @@ impl Handler for AssemblerHandler {
         Box::new(self.clone())
     }
 
-    fn start(
+    fn setup(
         &mut self,
         _actor_handle: ActorHandle,
         _actor_instance: SharedActorInstance,
         shutdown_receiver: ShutdownReceiver,
     ) -> Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send>> {
-        info!("Starting assembler handler");
+        info!("Assembler handler setup");
 
         Box::pin(async {
             // Assembler handler doesn't need a background task, just wait for shutdown
             shutdown_receiver.wait_for_shutdown().await;
             info!("Assembler handler received shutdown signal");
-            info!("Assembler handler shut down");
             Ok(())
         })
     }

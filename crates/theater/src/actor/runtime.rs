@@ -480,11 +480,11 @@ impl ActorRuntime {
             *instance_guard = Some(actor_instance);
         }
 
-        // Start the handlers
+        // Set up handlers
         let mut handler_tasks: Vec<JoinHandle<()>> = vec![];
         let mut shutdown_controller = ShutdownController::new();
         let handler_actor_handle = actor_handle.clone();
-        debug!("Starting {} handlers", handlers.len());
+        debug!("Setting up {} handlers", handlers.len());
         for mut handler in handlers {
             let handler_name = handler.name().to_string();
             debug!("Spawning task for handler: {}", handler_name);
@@ -494,12 +494,12 @@ impl ActorRuntime {
             let handler_task = tokio::spawn(async move {
                 debug!("Handler task running: {}", handler_name);
                 if let Err(e) = handler
-                    .start(actor_handle, actor_instance, shutdown_receiver)
+                    .setup(actor_handle, actor_instance, shutdown_receiver)
                     .await
                 {
-                    error!("Handler '{}' start() failed: {:?}", handler_name, e);
+                    error!("Handler '{}' setup() failed: {:?}", handler_name, e);
                 } else {
-                    debug!("Handler '{}' start() completed", handler_name);
+                    debug!("Handler '{}' setup() completed", handler_name);
                 }
             });
             handler_tasks.push(handler_task);

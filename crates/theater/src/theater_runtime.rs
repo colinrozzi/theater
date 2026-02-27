@@ -7,7 +7,7 @@
 use crate::actor::handle::ActorHandle;
 use crate::actor::runtime::ActorRuntime;
 use crate::actor::types::{ActorControl, ActorError, ActorInfo, ActorOperation};
-use crate::chain::ChainEvent;
+use crate::chain::{ChainEvent, ChainReader};
 use crate::pack_bridge::AsyncRuntime;
 use crate::config::actor_manifest::HandlerConfig;
 use crate::handler::HandlerRegistry;
@@ -1229,19 +1229,12 @@ impl TheaterRuntime {
                     config.chain
                 );
 
-                // Load the chain from the file
-                let chain_bytes = tokio::fs::read(&config.chain).await.map_err(|e| {
-                    TheaterRuntimeError::ActorInitializationError(format!(
-                        "Failed to read replay chain file {:?}: {}",
-                        config.chain, e
-                    ))
-                })?;
-
+                // Load the chain from the file (supports .chain EVENT format)
                 let chain_events: Vec<ChainEvent> =
-                    serde_json::from_slice(&chain_bytes).map_err(|e| {
+                    ChainReader::read_file(&config.chain).map_err(|e| {
                         TheaterRuntimeError::ActorInitializationError(format!(
-                            "Failed to parse replay chain JSON: {}",
-                            e
+                            "Failed to read replay chain file {:?}: {}",
+                            config.chain, e
                         ))
                     })?;
 

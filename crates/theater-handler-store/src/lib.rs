@@ -221,13 +221,13 @@ impl Handler for StoreHandler
         Box::new(self.clone())
     }
 
-    fn start(
+    fn setup(
         &mut self,
         _actor_handle: ActorHandle,
         _actor_instance: SharedActorInstance,
         shutdown_receiver: ShutdownReceiver,
     ) -> Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send>> {
-        info!("Store handler starting...");
+        info!("Store handler setup");
 
         Box::pin(async move {
             shutdown_receiver.wait_for_shutdown().await;

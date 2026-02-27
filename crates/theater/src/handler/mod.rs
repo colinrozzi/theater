@@ -168,7 +168,12 @@ pub trait Handler: Send + Sync + 'static {
     /// with that config. Otherwise, clones the current instance.
     fn create_instance(&self, config: Option<&HandlerConfig>) -> Box<dyn Handler>;
 
-    fn start(
+    /// Initialize the handler with actor references.
+    ///
+    /// This is called once when the actor starts. Handlers should store the provided
+    /// handles for later use but NOT start event loops here. Event loops should be
+    /// triggered by explicit actor calls (e.g., `enable-input()` for terminal).
+    fn setup(
         &mut self,
         actor_handle: ActorHandle,
         actor_instance: SharedActorInstance,

@@ -27,8 +27,10 @@
 //! making it possible to detect any tampering or corruption. Each event links to its parent, creating
 //! a tamper-evident chain of custody for all actor state changes.
 
+mod chain_reader;
 mod chain_writer;
 
+pub use chain_reader::ChainReader;
 pub use chain_writer::{ChainWriter, RunMeta};
 
 use std::fmt;

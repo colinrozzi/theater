@@ -16,7 +16,6 @@ use theater::config::actor_manifest::{
 };
 use theater::handler::HandlerRegistry;
 use theater::messages::TheaterCommand;
-use theater::pack_bridge::Value;
 use theater::theater_runtime::TheaterRuntime;
 use theater::utils::resolve_reference;
 use theater::TheaterId;
@@ -63,10 +62,6 @@ pub struct StartArgs {
     /// Path or URL to the actor manifest file
     #[arg(default_value = "manifest.toml")]
     pub manifest: String,
-
-    /// Initial state as JSON string or path to JSON file
-    #[arg(short, long)]
-    pub initial_state: Option<String>,
 
     /// Output all chain events as JSON (not just logs)
     #[arg(long)]
@@ -357,72 +352,6 @@ pub async fn execute_async(args: &StartArgs, ctx: &CommandContext) -> Result<(),
             )));
         }
     };
-
-    // Call init on the actor (actors no longer auto-init)
-    // Get the actor handle first
-    let (handle_tx, handle_rx) = tokio::sync::oneshot::channel();
-    theater_tx
-        .send(TheaterCommand::GetActorHandle {
-            actor_id: actor_id.clone(),
-            response_tx: handle_tx,
-        })
-        .await
-        .map_err(|e| CliError::server_error(format!("Failed to get actor handle: {}", e)))?;
-
-    let actor_handle = match handle_rx.await {
-        Ok(Some(handle)) => handle,
-        Ok(None) => {
-            return Err(CliError::server_error("Actor handle not found".to_string()));
-        }
-        Err(e) => {
-            return Err(CliError::server_error(format!(
-                "Failed to receive actor handle: {}",
-                e
-            )));
-        }
-    };
-
-    // Build init params - the initial state (option<list<u8>>)
-    let init_state = if let Some(ref state_arg) = args.initial_state {
-        // Try to parse as JSON file path or inline JSON
-        let state_bytes = if std::path::Path::new(state_arg).exists() {
-            std::fs::read(state_arg).map_err(|e| {
-                CliError::file_operation_failed("read initial state", state_arg.clone(), e)
-            })?
-        } else {
-            state_arg.as_bytes().to_vec()
-        };
-        Value::Option {
-            inner_type: theater::pack_bridge::ValueType::List(Box::new(
-                theater::pack_bridge::ValueType::U8,
-            )),
-            value: Some(Box::new(Value::List {
-                elem_type: theater::pack_bridge::ValueType::U8,
-                items: state_bytes.into_iter().map(Value::U8).collect(),
-            })),
-        }
-    } else {
-        Value::Option {
-            inner_type: theater::pack_bridge::ValueType::List(Box::new(
-                theater::pack_bridge::ValueType::U8,
-            )),
-            value: None,
-        }
-    };
-
-    // Call init - wraps the state in a tuple as expected by the function signature
-    let init_params = Value::Tuple(vec![init_state]);
-    debug!("Calling init on actor {}", actor_id);
-    if let Err(e) = actor_handle
-        .call_function("theater:simple/actor.init".to_string(), init_params)
-        .await
-    {
-        return Err(CliError::server_error(format!(
-            "Failed to call init: {:?}",
-            e
-        )));
-    }
-    debug!("Init completed for actor {}", actor_id);
 
     // Now wait for either:
     // - The actor to exit (supervisor notification)

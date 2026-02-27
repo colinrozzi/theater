@@ -212,13 +212,13 @@ impl Handler for TcpHandler {
         vec![tcp_interface()]
     }
 
-    fn start(
+    fn setup(
         &mut self,
         actor_handle: ActorHandle,
         _actor_instance: SharedActorInstance,
         shutdown_receiver: ShutdownReceiver,
     ) -> Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send>> {
-        info!("TCP handler starting (passive mode)");
+        info!("TCP handler setup (passive mode)");
 
         // Store the actor_handle and shutdown_receiver for use by listen()
         {

@@ -128,13 +128,13 @@ impl Handler for RpcHandler {
         Box::new(self.clone())
     }
 
-    fn start(
+    fn setup(
         &mut self,
         _actor_handle: ActorHandle,
         _actor_instance: SharedActorInstance,
         shutdown_receiver: ShutdownReceiver,
     ) -> Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send>> {
-        info!("Starting RPC handler");
+        info!("RPC handler setup");
 
         Box::pin(async move {
             // RPC handler doesn't need a background task

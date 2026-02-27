@@ -163,6 +163,8 @@ pub struct TerminalHandler {
     config: TerminalHandlerConfig,
     state: Option<TerminalState>,
     actor_handle: Arc<std::sync::Mutex<Option<ActorHandle>>>,
+    /// Shutdown receiver for background input loop
+    shutdown_receiver: Arc<std::sync::Mutex<Option<ShutdownReceiver>>>,
 }
 
 impl TerminalHandler {
@@ -171,6 +173,7 @@ impl TerminalHandler {
             config,
             state: None,
             actor_handle: Arc::new(std::sync::Mutex::new(None)),
+            shutdown_receiver: Arc::new(std::sync::Mutex::new(None)),
         }
     }
 }
@@ -212,204 +215,27 @@ impl Handler for TerminalHandler {
         vec![terminal_interface()]
     }
 
-    fn start(
+    fn setup(
         &mut self,
         actor_handle: ActorHandle,
         _actor_instance: SharedActorInstance,
         shutdown_receiver: ShutdownReceiver,
     ) -> Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send>> {
-        info!("Terminal handler starting");
+        info!("Terminal handler setup (passive mode)");
 
-        // Store the actor handle
+        // Store the actor_handle and shutdown_receiver for use by enable-input()
         {
             let mut handle_guard = self.actor_handle.lock().unwrap();
-            *handle_guard = Some(actor_handle.clone());
+            *handle_guard = Some(actor_handle);
+        }
+        {
+            let mut shutdown_guard = self.shutdown_receiver.lock().unwrap();
+            *shutdown_guard = Some(shutdown_receiver);
         }
 
-        let state = self.state.clone();
-
+        // Handler is now passive - actors call enable-input() to start the input loop
         Box::pin(async move {
-            // Set up signal handling
-            #[cfg(unix)]
-            let mut signals = {
-                use signal_hook::consts::signal::{SIGINT, SIGTERM, SIGWINCH};
-                use signal_hook_tokio::Signals;
-
-                Signals::new([SIGINT, SIGTERM, SIGWINCH])
-                    .expect("Failed to register signal handlers")
-            };
-
-            // Set up stdin reader
-            let stdin = tokio::io::stdin();
-            let mut reader = BufReader::new(stdin);
-            let mut buffer = vec![0u8; 1024];
-
-            // Create fused shutdown future
-            let mut shutdown_fut = std::pin::pin!(shutdown_receiver.wait_for_shutdown());
-            let mut shutdown_complete = false;
-
-            // Main event loop
-            loop {
-                if shutdown_complete {
-                    break;
-                }
-
-                #[cfg(unix)]
-                {
-                    use futures_util::StreamExt;
-
-                    tokio::select! {
-                        biased;
-
-                        // Shutdown signal (only poll if not already triggered)
-                        _ = &mut shutdown_fut, if !shutdown_complete => {
-                            info!("Terminal handler received shutdown");
-                            shutdown_complete = true;
-                        }
-
-                        // Stdin input
-                        result = reader.read(&mut buffer) => {
-                            match result {
-                                Ok(0) => {
-                                    info!("Stdin closed (EOF)");
-                                    break;
-                                }
-                                Ok(n) => {
-                                    let data = buffer[..n].to_vec();
-                                    debug!("Read {} bytes from stdin", n);
-
-                                    let input_value = Value::List {
-                                        elem_type: ValueType::U8,
-                                        items: data.iter().map(|&b| Value::U8(b)).collect(),
-                                    };
-
-                                    if let Err(e) = actor_handle
-                                        .call_function(
-                                            "theater:simple/terminal.handle-input".to_string(),
-                                            input_value,
-                                        )
-                                        .await
-                                    {
-                                        error!("Failed to call handle-input: {:?}", e);
-                                    }
-                                }
-                                Err(e) => {
-                                    error!("Error reading stdin: {}", e);
-                                    break;
-                                }
-                            }
-                        }
-
-                        // Signals
-                        signal = signals.next() => {
-                            use signal_hook::consts::signal::{SIGINT, SIGTERM, SIGWINCH};
-
-                            match signal {
-                                Some(SIGINT) => {
-                                    debug!("Received SIGINT");
-                                    let input = Value::String("interrupt".to_string());
-                                    if let Err(e) = actor_handle
-                                        .call_function(
-                                            "theater:simple/terminal.handle-signal".to_string(),
-                                            input,
-                                        )
-                                        .await
-                                    {
-                                        warn!("Failed to call handle-signal: {:?}", e);
-                                    }
-                                }
-                                Some(SIGTERM) => {
-                                    debug!("Received SIGTERM");
-                                    let input = Value::String("terminate".to_string());
-                                    if let Err(e) = actor_handle
-                                        .call_function(
-                                            "theater:simple/terminal.handle-signal".to_string(),
-                                            input,
-                                        )
-                                        .await
-                                    {
-                                        warn!("Failed to call handle-signal: {:?}", e);
-                                    }
-                                }
-                                Some(SIGWINCH) => {
-                                    debug!("Received SIGWINCH");
-                                    if let Ok((cols, rows)) = TerminalState::get_size() {
-                                        let input = Value::Tuple(vec![
-                                            Value::U16(cols),
-                                            Value::U16(rows),
-                                        ]);
-                                        if let Err(e) = actor_handle
-                                            .call_function(
-                                                "theater:simple/terminal.handle-resize".to_string(),
-                                                input,
-                                            )
-                                            .await
-                                        {
-                                            warn!("Failed to call handle-resize: {:?}", e);
-                                        }
-                                    }
-                                }
-                                Some(sig) => {
-                                    debug!("Received signal {}", sig);
-                                }
-                                None => {
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                }
-
-                #[cfg(not(unix))]
-                {
-                    tokio::select! {
-                        biased;
-
-                        _ = &mut shutdown_fut, if !shutdown_complete => {
-                            info!("Terminal handler received shutdown");
-                            shutdown_complete = true;
-                        }
-
-                        result = reader.read(&mut buffer) => {
-                            match result {
-                                Ok(0) => {
-                                    info!("Stdin closed (EOF)");
-                                    break;
-                                }
-                                Ok(n) => {
-                                    let data = buffer[..n].to_vec();
-                                    debug!("Read {} bytes from stdin", n);
-
-                                    let input_value = Value::List {
-                                        elem_type: ValueType::U8,
-                                        items: data.iter().map(|&b| Value::U8(b)).collect(),
-                                    };
-
-                                    if let Err(e) = actor_handle
-                                        .call_function(
-                                            "theater:simple/terminal.handle-input".to_string(),
-                                            input_value,
-                                        )
-                                        .await
-                                    {
-                                        error!("Failed to call handle-input: {:?}", e);
-                                    }
-                                }
-                                Err(e) => {
-                                    error!("Error reading stdin: {}", e);
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            // Restore terminal on exit
-            if let Some(ref s) = state {
-                s.restore_terminal().await;
-            }
-
+            // Nothing to do here - enable-input() spawns background input tasks
             Ok(())
         })
     }
@@ -486,6 +312,44 @@ impl Handler for TerminalHandler {
                     let (cols, rows) = TerminalState::get_size().map_err(Value::String)?;
                     Ok::<Value, Value>(Value::Tuple(vec![Value::U16(cols), Value::U16(rows)]))
                 },
+            )?
+            // enable-input() -> result<_, string>
+            // Starts the background input loop that reads from stdin and calls handle-input
+            .func_async_result(
+                "enable-input",
+                {
+                    let actor_handle = self.actor_handle.clone();
+                    let shutdown_receiver = self.shutdown_receiver.clone();
+                    let state = state.clone();
+                    move |_ctx: AsyncCtx<ActorStore>, _input: Value| {
+                        let actor_handle = actor_handle.clone();
+                        let shutdown_receiver = shutdown_receiver.clone();
+                        let state = state.clone();
+                        async move {
+                            // Get the actor handle
+                            let handle = {
+                                let guard = actor_handle.lock().unwrap();
+                                guard.clone().ok_or_else(|| {
+                                    Value::String("Actor handle not available".to_string())
+                                })?
+                            };
+
+                            // Get the shutdown receiver
+                            let shutdown_rx = {
+                                let mut guard = shutdown_receiver.lock().unwrap();
+                                guard.take().ok_or_else(|| {
+                                    Value::String("Input already enabled".to_string())
+                                })?
+                            };
+
+                            // Spawn the input loop as a background task
+                            tokio::spawn(run_input_loop(handle, shutdown_rx, state));
+
+                            info!("Terminal input enabled");
+                            Ok::<Value, Value>(Value::Tuple(vec![]))
+                        }
+                    }
+                },
             )?;
 
         ctx.mark_satisfied("theater:simple/terminal");
@@ -493,6 +357,193 @@ impl Handler for TerminalHandler {
 
         Ok(())
     }
+}
+
+// ============================================================================
+// Input Loop
+// ============================================================================
+
+/// Background task that reads stdin and signals, calling actor export functions
+async fn run_input_loop(
+    actor_handle: ActorHandle,
+    shutdown_receiver: ShutdownReceiver,
+    state: TerminalState,
+) {
+    // Set up signal handling
+    #[cfg(unix)]
+    let mut signals = {
+        use signal_hook::consts::signal::{SIGINT, SIGTERM, SIGWINCH};
+        use signal_hook_tokio::Signals;
+
+        Signals::new([SIGINT, SIGTERM, SIGWINCH]).expect("Failed to register signal handlers")
+    };
+
+    // Set up stdin reader
+    let stdin = tokio::io::stdin();
+    let mut reader = BufReader::new(stdin);
+    let mut buffer = vec![0u8; 1024];
+
+    // Create fused shutdown future
+    let mut shutdown_fut = std::pin::pin!(shutdown_receiver.wait_for_shutdown());
+    let mut shutdown_complete = false;
+
+    // Main event loop
+    loop {
+        if shutdown_complete {
+            break;
+        }
+
+        #[cfg(unix)]
+        {
+            use futures_util::StreamExt;
+
+            tokio::select! {
+                biased;
+
+                // Shutdown signal (only poll if not already triggered)
+                _ = &mut shutdown_fut, if !shutdown_complete => {
+                    info!("Terminal input loop received shutdown");
+                    shutdown_complete = true;
+                }
+
+                // Stdin input
+                result = reader.read(&mut buffer) => {
+                    match result {
+                        Ok(0) => {
+                            info!("Stdin closed (EOF)");
+                            break;
+                        }
+                        Ok(n) => {
+                            let data = buffer[..n].to_vec();
+                            debug!("Read {} bytes from stdin", n);
+
+                            let input_value = Value::List {
+                                elem_type: ValueType::U8,
+                                items: data.iter().map(|&b| Value::U8(b)).collect(),
+                            };
+
+                            if let Err(e) = actor_handle
+                                .call_function(
+                                    "theater:simple/terminal.handle-input".to_string(),
+                                    input_value,
+                                )
+                                .await
+                            {
+                                error!("Failed to call handle-input: {:?}", e);
+                            }
+                        }
+                        Err(e) => {
+                            error!("Error reading stdin: {}", e);
+                            break;
+                        }
+                    }
+                }
+
+                // Signals
+                signal = signals.next() => {
+                    use signal_hook::consts::signal::{SIGINT, SIGTERM, SIGWINCH};
+
+                    match signal {
+                        Some(SIGINT) => {
+                            debug!("Received SIGINT");
+                            let input = Value::String("interrupt".to_string());
+                            if let Err(e) = actor_handle
+                                .call_function(
+                                    "theater:simple/terminal.handle-signal".to_string(),
+                                    input,
+                                )
+                                .await
+                            {
+                                warn!("Failed to call handle-signal: {:?}", e);
+                            }
+                        }
+                        Some(SIGTERM) => {
+                            debug!("Received SIGTERM");
+                            let input = Value::String("terminate".to_string());
+                            if let Err(e) = actor_handle
+                                .call_function(
+                                    "theater:simple/terminal.handle-signal".to_string(),
+                                    input,
+                                )
+                                .await
+                            {
+                                warn!("Failed to call handle-signal: {:?}", e);
+                            }
+                        }
+                        Some(SIGWINCH) => {
+                            debug!("Received SIGWINCH");
+                            if let Ok((cols, rows)) = TerminalState::get_size() {
+                                let input = Value::Tuple(vec![Value::U16(cols), Value::U16(rows)]);
+                                if let Err(e) = actor_handle
+                                    .call_function(
+                                        "theater:simple/terminal.handle-resize".to_string(),
+                                        input,
+                                    )
+                                    .await
+                                {
+                                    warn!("Failed to call handle-resize: {:?}", e);
+                                }
+                            }
+                        }
+                        Some(sig) => {
+                            debug!("Received signal {}", sig);
+                        }
+                        None => {
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
+        #[cfg(not(unix))]
+        {
+            tokio::select! {
+                biased;
+
+                _ = &mut shutdown_fut, if !shutdown_complete => {
+                    info!("Terminal input loop received shutdown");
+                    shutdown_complete = true;
+                }
+
+                result = reader.read(&mut buffer) => {
+                    match result {
+                        Ok(0) => {
+                            info!("Stdin closed (EOF)");
+                            break;
+                        }
+                        Ok(n) => {
+                            let data = buffer[..n].to_vec();
+                            debug!("Read {} bytes from stdin", n);
+
+                            let input_value = Value::List {
+                                elem_type: ValueType::U8,
+                                items: data.iter().map(|&b| Value::U8(b)).collect(),
+                            };
+
+                            if let Err(e) = actor_handle
+                                .call_function(
+                                    "theater:simple/terminal.handle-input".to_string(),
+                                    input_value,
+                                )
+                                .await
+                            {
+                                error!("Failed to call handle-input: {:?}", e);
+                            }
+                        }
+                        Err(e) => {
+                            error!("Error reading stdin: {}", e);
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Restore terminal on exit
+    state.restore_terminal().await;
+    info!("Terminal input loop exited");
 }
 
 // ============================================================================

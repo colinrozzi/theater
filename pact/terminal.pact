@@ -21,5 +21,10 @@ interface terminal {
 
         // Get terminal size as (columns, rows)
         get-size: func() -> result<tuple<u16, u16>, string>
+
+        // Enable input reading from stdin
+        // This starts the background input loop that calls handle-input on the actor
+        // Must be called explicitly by the actor to start receiving input
+        enable-input: func() -> result<_, string>
     }
 }

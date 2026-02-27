@@ -697,13 +697,13 @@ impl Handler for SupervisorHandler
         true
     }
 
-    fn start(
+    fn setup(
         &mut self,
         actor_handle: ActorHandle,
         _actor_instance: SharedActorInstance,
         mut shutdown_receiver: ShutdownReceiver,
     ) -> Pin<Box<dyn Future<Output = Result<()>> + Send>> {
-        info!("Starting supervisor handler");
+        info!("Supervisor handler setup");
 
         // Take the receiver out of the Arc<Mutex<Option<>>>
         let channel_rx_opt = self.channel_rx.lock().unwrap().take();

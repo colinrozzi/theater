@@ -555,13 +555,13 @@ impl Handler for MessageServerHandler
         vec![message_server_interface()]
     }
 
-    fn start(
+    fn setup(
         &mut self,
         actor_handle: ActorHandle,
         _actor_instance: SharedActorInstance,
         shutdown_receiver: ShutdownReceiver,
     ) -> Pin<Box<dyn Future<Output = Result<()>> + Send>> {
-        info!("Message server handler starting (passive mode)");
+        info!("Message server handler setup (passive mode)");
 
         // Store the actor_handle and shutdown_receiver for use by register()
         {

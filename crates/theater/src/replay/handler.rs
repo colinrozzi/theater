@@ -32,7 +32,7 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 
-use tracing::{info, warn};
+use tracing::info;
 
 use crate::actor::handle::ActorHandle;
 use crate::actor::store::ActorStore;
@@ -201,7 +201,7 @@ impl Handler for ReplayHandler {
         Box::new(self.clone())
     }
 
-    fn start(
+    fn setup(
         &mut self,
         actor_handle: ActorHandle,
         _actor_instance: SharedActorInstance,
@@ -210,7 +210,6 @@ impl Handler for ReplayHandler {
         let expected_events = (*self.state.events).clone();
 
         Box::pin(async move {
-            let mut verified_position = 0usize;
             let total_expected = expected_events.len();
             let mut shutdown_rx = shutdown_receiver.receiver;
 
@@ -231,49 +230,50 @@ impl Handler for ReplayHandler {
             info!("Replay: found {} WasmCall events to replay out of {} total events",
                   calls_to_replay.len(), total_expected);
 
-            for (idx, function_name, params) in calls_to_replay {
-                info!("Replay: calling {} (expected event {})", function_name, idx);
+            let total_calls = calls_to_replay.len();
+            for (call_num, (_idx, function_name, params)) in calls_to_replay.into_iter().enumerate() {
+                // Log progress every 1000 calls
+                if call_num % 1000 == 0 {
+                    info!("Replay: progress {}/{} calls", call_num, total_calls);
+                }
 
                 let call_result = tokio::select! {
                     result = actor_handle.call_function_pack_void(function_name.clone(), params) => result,
                     _ = &mut shutdown_rx => {
-                        info!("Replay: shutdown received, stopping");
+                        info!("Replay: shutdown received, stopping at call {}", call_num);
                         return Ok(());
                     }
                 };
 
                 if let Err(e) = call_result {
-                    return Err(anyhow::anyhow!("Replay failed at {}: {:?}", function_name, e));
+                    return Err(anyhow::anyhow!("Replay failed at {} (call {}): {:?}", function_name, call_num, e));
                 }
-
-                // After each call, verify new chain hashes against expected
-                let new_chain = actor_handle.get_chain().await
-                    .map_err(|e| anyhow::anyhow!("Failed to get chain: {:?}", e))?;
-
-                for pos in verified_position..new_chain.len() {
-                    if pos >= total_expected {
-                        return Err(anyhow::anyhow!(
-                            "Replay produced more events than expected ({} > {})",
-                            new_chain.len(), total_expected
-                        ));
-                    }
-                    if new_chain[pos].hash != expected_events[pos].hash {
-                        return Err(anyhow::anyhow!(
-                            "Hash mismatch at event {}: expected {}, got {}",
-                            pos,
-                            hex::encode(&expected_events[pos].hash),
-                            hex::encode(&new_chain[pos].hash),
-                        ));
-                    }
-                }
-                verified_position = new_chain.len();
             }
 
-            if verified_position != total_expected {
-                warn!("Replay: verified {}/{} events", verified_position, total_expected);
+            // Verify chain hashes at the end (O(n) instead of O(n²))
+            info!("Replay: verifying {} events...", total_expected);
+            let final_chain = actor_handle.get_chain().await
+                .map_err(|e| anyhow::anyhow!("Failed to get chain: {:?}", e))?;
+
+            if final_chain.len() != total_expected {
+                return Err(anyhow::anyhow!(
+                    "Replay produced {} events, expected {}",
+                    final_chain.len(), total_expected
+                ));
             }
 
-            info!("Replay complete: {}/{} events verified", verified_position, total_expected);
+            for pos in 0..total_expected {
+                if final_chain[pos].hash != expected_events[pos].hash {
+                    return Err(anyhow::anyhow!(
+                        "Hash mismatch at event {}: expected {}, got {}",
+                        pos,
+                        hex::encode(&expected_events[pos].hash),
+                        hex::encode(&final_chain[pos].hash),
+                    ));
+                }
+            }
+
+            info!("Replay complete: {}/{} events verified", total_expected, total_expected);
             Ok(())
         })
     }
