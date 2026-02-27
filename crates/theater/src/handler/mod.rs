@@ -236,17 +236,23 @@ pub trait Handler: Send + Sync + 'static {
     /// Interface hashes enable O(1) compatibility checking between handlers and
     /// components. Two interfaces are compatible if their hashes match.
     ///
-    /// Handlers can compute these hashes using `InterfaceImpl`:
+    /// Handlers compute these hashes from `.pact` files using `InterfaceImpl::from_pact()`:
     ///
     /// ```ignore
-    /// use pack::{InterfaceImpl, TypeHash};
+    /// use pack::{parse_pact, InterfaceImpl, TypeHash};
+    ///
+    /// const MY_PACT: &str = include_str!("../../../pact/my-interface.pact");
+    ///
+    /// fn my_interface() -> InterfaceImpl {
+    ///     let pact = parse_pact(MY_PACT).expect("embedded pact should be valid");
+    ///     InterfaceImpl::from_pact(&pact)
+    /// }
     ///
     /// fn interface_hashes(&self) -> Vec<(String, TypeHash)> {
-    ///     let interface = InterfaceImpl::new("my:interface")
-    ///         .func("greet", |name: String| -> String { String::new() })
-    ///         .func("add", |a: i32, b: i32| -> i32 { 0 });
-    ///
-    ///     vec![(interface.name().to_string(), interface.hash())]
+    ///     self.interfaces()
+    ///         .iter()
+    ///         .map(|i| (i.name().to_string(), i.hash()))
+    ///         .collect()
     /// }
     /// ```
     fn interface_hashes(&self) -> Vec<(String, TypeHash)> {
@@ -259,15 +265,16 @@ pub trait Handler: Send + Sync + 'static {
     /// When an actor imports only some functions from an interface, the runtime
     /// can compute a subset hash to verify compatibility.
     ///
-    /// Handlers should return their InterfaceImpl objects:
+    /// Handlers should load interfaces from `.pact` files:
     ///
     /// ```ignore
+    /// use pack::{parse_pact, InterfaceImpl};
+    ///
+    /// const MY_PACT: &str = include_str!("../../../pact/my-interface.pact");
+    ///
     /// fn interfaces(&self) -> Vec<InterfaceImpl> {
-    ///     vec![
-    ///         InterfaceImpl::new("my:interface")
-    ///             .func("greet", |name: String| -> String { String::new() })
-    ///             .func("add", |a: i32, b: i32| -> i32 { 0 })
-    ///     ]
+    ///     let pact = parse_pact(MY_PACT).expect("embedded pact should be valid");
+    ///     vec![InterfaceImpl::from_pact(&pact)]
     /// }
     /// ```
     fn interfaces(&self) -> Vec<crate::pack_bridge::InterfaceImpl> {
