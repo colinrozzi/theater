@@ -247,20 +247,34 @@ impl Handler for ReplayHandler {
                             if verified_position >= expected_events_for_verify.len() {
                                 // More events than expected
                                 let msg = format!(
-                                    "Divergence: received event {} but only expected {}",
-                                    verified_position + 1, expected_events_for_verify.len()
+                                    "Divergence: received event {} but expected chain has only {} events\n  extra event type: {}",
+                                    verified_position + 1,
+                                    expected_events_for_verify.len(),
+                                    actual_event.event_type
                                 );
                                 let _ = divergence_tx.send(msg);
                                 return verified_position;
                             }
 
-                            let expected_hash = &expected_events_for_verify[verified_position].hash;
-                            if actual_event.hash != *expected_hash {
+                            let expected_event = &expected_events_for_verify[verified_position];
+                            if actual_event.hash != expected_event.hash {
+                                // Format hashes for readability (first 8 + last 8 hex chars)
+                                let expected_hex = hex::encode(&expected_event.hash);
+                                let actual_hex = hex::encode(&actual_event.hash);
+                                let truncate_hash = |h: &str| {
+                                    if h.len() > 16 {
+                                        format!("{}..{}", &h[..8], &h[h.len()-8..])
+                                    } else {
+                                        h.to_string()
+                                    }
+                                };
+
                                 let msg = format!(
-                                    "Divergence at event {}: expected {}, got {}",
+                                    "Divergence at event {} [{}]\n  expected: {}\n  actual:   {}",
                                     verified_position,
-                                    hex::encode(expected_hash),
-                                    hex::encode(&actual_event.hash)
+                                    expected_event.event_type,
+                                    truncate_hash(&expected_hex),
+                                    truncate_hash(&actual_hex)
                                 );
                                 let _ = divergence_tx.send(msg);
                                 return verified_position;
