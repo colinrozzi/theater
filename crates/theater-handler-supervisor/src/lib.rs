@@ -702,6 +702,7 @@ impl Handler for SupervisorHandler
         actor_handle: ActorHandle,
         _actor_instance: SharedActorInstance,
         mut shutdown_receiver: ShutdownReceiver,
+        _event_rx: tokio::sync::broadcast::Receiver<theater::chain::ChainEvent>,
     ) -> Pin<Box<dyn Future<Output = Result<()>> + Send>> {
         info!("Supervisor handler setup");
 

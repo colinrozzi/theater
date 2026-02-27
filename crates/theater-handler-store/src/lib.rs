@@ -226,6 +226,7 @@ impl Handler for StoreHandler
         _actor_handle: ActorHandle,
         _actor_instance: SharedActorInstance,
         shutdown_receiver: ShutdownReceiver,
+        _event_rx: tokio::sync::broadcast::Receiver<theater::chain::ChainEvent>,
     ) -> Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send>> {
         info!("Store handler setup");
 

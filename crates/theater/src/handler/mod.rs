@@ -10,6 +10,7 @@ use std::collections::HashSet;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
+use tokio::sync::broadcast;
 use tokio::sync::RwLock;
 
 /// Shared reference to an actor instance for handlers that need direct store access
@@ -173,11 +174,15 @@ pub trait Handler: Send + Sync + 'static {
     /// This is called once when the actor starts. Handlers should store the provided
     /// handles for later use but NOT start event loops here. Event loops should be
     /// triggered by explicit actor calls (e.g., `enable-input()` for terminal).
+    ///
+    /// The `event_rx` parameter receives chain events as they're recorded. Most handlers
+    /// can ignore this, but ReplayHandler uses it for streaming hash verification.
     fn setup(
         &mut self,
         actor_handle: ActorHandle,
         actor_instance: SharedActorInstance,
         shutdown_receiver: ShutdownReceiver,
+        event_rx: broadcast::Receiver<ChainEvent>,
     ) -> Pin<Box<dyn Future<Output = Result<()>> + Send>>;
 
     /// Set up host functions for this handler (Composite Graph ABI runtime).

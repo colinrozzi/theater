@@ -491,10 +491,15 @@ impl ActorRuntime {
             let actor_handle = handler_actor_handle.clone();
             let actor_instance = actor_instance_wrapper.clone();
             let shutdown_receiver = shutdown_controller.subscribe();
+            // Create event subscription for streaming verification
+            let event_rx = {
+                let chain_guard = chain.read().unwrap();
+                chain_guard.subscribe()
+            };
             let handler_task = tokio::spawn(async move {
                 debug!("Handler task running: {}", handler_name);
                 if let Err(e) = handler
-                    .setup(actor_handle, actor_instance, shutdown_receiver)
+                    .setup(actor_handle, actor_instance, shutdown_receiver, event_rx)
                     .await
                 {
                     error!("Handler '{}' setup() failed: {:?}", handler_name, e);

@@ -32,7 +32,8 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 
-use tracing::info;
+use tokio::sync::{broadcast, oneshot};
+use tracing::{info, error};
 
 use crate::actor::handle::ActorHandle;
 use crate::actor::store::ActorStore;
@@ -206,6 +207,7 @@ impl Handler for ReplayHandler {
         actor_handle: ActorHandle,
         _actor_instance: SharedActorInstance,
         shutdown_receiver: ShutdownReceiver,
+        mut event_rx: broadcast::Receiver<ChainEvent>,
     ) -> Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send>> {
         let expected_events = (*self.state.events).clone();
 
@@ -230,11 +232,83 @@ impl Handler for ReplayHandler {
             info!("Replay: found {} WasmCall events to replay out of {} total events",
                   calls_to_replay.len(), total_expected);
 
+            // Set up streaming verification
+            // Channel to signal divergence to the main loop
+            let (divergence_tx, mut divergence_rx) = oneshot::channel::<String>();
+            let expected_events_for_verify = expected_events.clone();
+
+            // Spawn verification task that checks hashes as events are recorded
+            let verification_task = tokio::spawn(async move {
+                let mut verified_position = 0usize;
+
+                loop {
+                    match event_rx.recv().await {
+                        Ok(actual_event) => {
+                            if verified_position >= expected_events_for_verify.len() {
+                                // More events than expected
+                                let msg = format!(
+                                    "Divergence: received event {} but only expected {}",
+                                    verified_position + 1, expected_events_for_verify.len()
+                                );
+                                let _ = divergence_tx.send(msg);
+                                return verified_position;
+                            }
+
+                            let expected_hash = &expected_events_for_verify[verified_position].hash;
+                            if actual_event.hash != *expected_hash {
+                                let msg = format!(
+                                    "Divergence at event {}: expected {}, got {}",
+                                    verified_position,
+                                    hex::encode(expected_hash),
+                                    hex::encode(&actual_event.hash)
+                                );
+                                let _ = divergence_tx.send(msg);
+                                return verified_position;
+                            }
+
+                            verified_position += 1;
+
+                            // Log progress every 10000 events
+                            if verified_position % 10000 == 0 {
+                                info!("Replay: streaming verify progress {}/{}", verified_position, expected_events_for_verify.len());
+                            }
+
+                            // Check if we've verified all expected events
+                            if verified_position >= expected_events_for_verify.len() {
+                                info!("Replay: streaming verification complete - all {} events verified", verified_position);
+                                return verified_position;
+                            }
+                        }
+                        Err(broadcast::error::RecvError::Lagged(n)) => {
+                            // We missed some events - this is a problem for verification
+                            error!("Replay verification lagged by {} events - verification may be incomplete", n);
+                        }
+                        Err(broadcast::error::RecvError::Closed) => {
+                            // Channel closed - verification stops
+                            return verified_position;
+                        }
+                    }
+                }
+            });
+
             let total_calls = calls_to_replay.len();
             for (call_num, (_idx, function_name, params)) in calls_to_replay.into_iter().enumerate() {
                 // Log progress every 1000 calls
                 if call_num % 1000 == 0 {
                     info!("Replay: progress {}/{} calls", call_num, total_calls);
+                }
+
+                // Check for divergence before each call
+                match divergence_rx.try_recv() {
+                    Ok(msg) => {
+                        return Err(anyhow::anyhow!("Replay stopped: {}", msg));
+                    }
+                    Err(oneshot::error::TryRecvError::Closed) => {
+                        // Verification task ended - continue, will check at end
+                    }
+                    Err(oneshot::error::TryRecvError::Empty) => {
+                        // No divergence yet - continue
+                    }
                 }
 
                 let call_result = tokio::select! {
@@ -250,30 +324,27 @@ impl Handler for ReplayHandler {
                 }
             }
 
-            // Verify chain hashes at the end (O(n) instead of O(n²))
-            info!("Replay: verifying {} events...", total_expected);
-            let final_chain = actor_handle.get_chain().await
-                .map_err(|e| anyhow::anyhow!("Failed to get chain: {:?}", e))?;
+            // Wait for verification task to complete
+            let verified_count = verification_task.await
+                .map_err(|e| anyhow::anyhow!("Verification task panicked: {:?}", e))?;
 
-            if final_chain.len() != total_expected {
+            // Final check for any divergence message
+            match divergence_rx.try_recv() {
+                Ok(msg) => {
+                    return Err(anyhow::anyhow!("Replay failed: {}", msg));
+                }
+                Err(_) => {}
+            }
+
+            // Verify we got all expected events
+            if verified_count != total_expected {
                 return Err(anyhow::anyhow!(
                     "Replay produced {} events, expected {}",
-                    final_chain.len(), total_expected
+                    verified_count, total_expected
                 ));
             }
 
-            for pos in 0..total_expected {
-                if final_chain[pos].hash != expected_events[pos].hash {
-                    return Err(anyhow::anyhow!(
-                        "Hash mismatch at event {}: expected {}, got {}",
-                        pos,
-                        hex::encode(&expected_events[pos].hash),
-                        hex::encode(&final_chain[pos].hash),
-                    ));
-                }
-            }
-
-            info!("Replay complete: {}/{} events verified", total_expected, total_expected);
+            info!("Replay complete: {}/{} events verified via streaming", total_expected, total_expected);
             Ok(())
         })
     }

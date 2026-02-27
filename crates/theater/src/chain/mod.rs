@@ -40,6 +40,7 @@ use std::sync::{Arc, Mutex};
 use anyhow::Result;
 use console::style;
 use serde::{Deserialize, Serialize};
+use tokio::sync::broadcast;
 use tokio::sync::mpsc::Sender;
 use tracing::{debug, info, warn};
 use wasmtime::component::{ComponentType, Lift, Lower};
@@ -269,6 +270,10 @@ pub struct StateChain {
     /// Run log for streaming events to disk.
     #[serde(skip)]
     chain_writer: Arc<Mutex<Option<ChainWriter>>>,
+    /// Broadcast channel for direct event subscription.
+    /// Handlers can subscribe to this channel to receive events as they're recorded.
+    #[serde(skip)]
+    event_broadcast: broadcast::Sender<ChainEvent>,
 }
 
 impl fmt::Debug for StateChain {
@@ -327,12 +332,17 @@ impl StateChain {
             }
         };
 
+        // Create broadcast channel for direct event subscription
+        // Buffer size of 1024 should be enough for most use cases
+        let (event_broadcast, _) = broadcast::channel(1024);
+
         Self {
             events: Vec::new(),
             current_hash: None,
             theater_tx,
             actor_id,
             chain_writer: Arc::new(Mutex::new(chain_writer)),
+            event_broadcast,
         }
     }
 
@@ -449,6 +459,10 @@ impl StateChain {
         }) {
             warn!("Failed to send event notification: {}", e);
         }
+
+        // Broadcast to direct subscribers (e.g., ReplayHandler for streaming verification)
+        // Ignore send errors - they just mean no active subscribers
+        let _ = self.event_broadcast.send(event.clone());
 
         // I am removing storing the events in the content store for now because they are
         // accumulating too quickly. I need to build out the store local to each actor to store its
@@ -723,5 +737,28 @@ impl StateChain {
     /// ```
     pub fn get_events(&self) -> &[ChainEvent] {
         &self.events
+    }
+
+    /// Subscribe to events as they are recorded to the chain.
+    ///
+    /// Returns a broadcast receiver that will receive each event as it's added.
+    /// This is useful for streaming verification during replay.
+    ///
+    /// ## Returns
+    ///
+    /// A broadcast receiver that receives `ChainEvent` values as they're recorded.
+    ///
+    /// ## Example
+    ///
+    /// ```rust,ignore
+    /// let mut event_rx = chain.subscribe();
+    /// tokio::spawn(async move {
+    ///     while let Ok(event) = event_rx.recv().await {
+    ///         println!("Event recorded: {}", event.event_type);
+    ///     }
+    /// });
+    /// ```
+    pub fn subscribe(&self) -> broadcast::Receiver<ChainEvent> {
+        self.event_broadcast.subscribe()
     }
 }

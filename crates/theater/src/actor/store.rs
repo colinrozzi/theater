@@ -248,6 +248,34 @@ impl ActorStore {
         self.get_all_events()
     }
 
+    /// Subscribe to events as they are recorded to the chain.
+    ///
+    /// Returns a broadcast receiver that will receive each event as it's added.
+    /// This is useful for streaming verification during replay - handlers can
+    /// verify each event's hash as it's recorded rather than waiting until the end.
+    ///
+    /// ## Returns
+    ///
+    /// A `tokio::sync::broadcast::Receiver<ChainEvent>` that receives events.
+    ///
+    /// ## Example
+    ///
+    /// ```rust,ignore
+    /// let mut event_rx = actor_store.subscribe_to_events();
+    /// tokio::spawn(async move {
+    ///     while let Ok(event) = event_rx.recv().await {
+    ///         // Verify event hash matches expected
+    ///         if event.hash != expected_hash {
+    ///             // Divergence detected!
+    ///         }
+    ///     }
+    /// });
+    /// ```
+    pub fn subscribe_to_events(&self) -> tokio::sync::broadcast::Receiver<ChainEvent> {
+        let chain = self.chain.read().unwrap();
+        chain.subscribe()
+    }
+
     /// # Save the event chain to a file
     ///
     /// Persists the entire event chain to a file on disk.
