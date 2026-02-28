@@ -230,17 +230,19 @@ impl Handler for SupervisorHandler
                 move |ctx: AsyncCtx<ActorStore>, input: Value| {
                     let supervisor_tx = supervisor_tx.clone();
                     async move {
-                        // Parse input: (string, option<list<u8>>)
-                        let (manifest_path, provided_wasm_bytes) = match input {
-                            Value::Tuple(args) if args.len() == 2 => {
+                        // Parse input: (string, option<list<u8>>, option<list<u8>>)
+                        // init-bytes is passed to init, wasm-bytes is used if provided
+                        let (manifest_path, init_bytes, provided_wasm_bytes) = match input {
+                            Value::Tuple(args) if args.len() == 3 => {
                                 let manifest = match &args[0] {
                                     Value::String(s) => s.clone(),
                                     _ => return Err(Value::String("Invalid manifest argument".to_string())),
                                 };
-                                let wasm_bytes = parse_optional_bytes(&args[1]);
-                                (manifest, wasm_bytes)
+                                let init_bytes = parse_optional_bytes(&args[1]);
+                                let wasm_bytes = parse_optional_bytes(&args[2]);
+                                (manifest, init_bytes, wasm_bytes)
                             }
-                            _ => return Err(Value::String("Invalid spawn arguments: expected (string, option<list<u8>>)".to_string())),
+                            _ => return Err(Value::String("Invalid spawn arguments: expected (string, option<list<u8>>, option<list<u8>>)".to_string())),
                         };
 
                         if let Some(ref bytes) = provided_wasm_bytes {

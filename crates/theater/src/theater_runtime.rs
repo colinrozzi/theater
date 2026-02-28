@@ -448,14 +448,20 @@ impl TheaterRuntime {
                     }
                 }
                 TheaterCommand::ShuttingDown { actor_id, data } => {
-                    debug!("Shutting down actor: {:?}", actor_id);
+                    info!("TheaterCommand::ShuttingDown received for actor: {:?}", actor_id);
+                    let start = std::time::Instant::now();
                     match self.shutdown_actor(actor_id, data).await {
                         Ok(_) => {
-                            info!("Actor shut down successfully");
+                            info!("Actor shut down successfully in {:?}", start.elapsed());
                         }
                         Err(e) => {
                             error!("Failed to shut down actor: {}", e);
                         }
+                    }
+                    // If all actors have shut down, exit the runtime
+                    if self.actors.is_empty() {
+                        info!("All actors have shut down, exiting runtime");
+                        break;
                     }
                 }
                 TheaterCommand::NewEvent { actor_id, event } => {
@@ -582,6 +588,10 @@ impl TheaterRuntime {
                     } else {
                         let _ = response_tx.send(None);
                     }
+                }
+                TheaterCommand::ShutdownRuntime => {
+                    info!("Received shutdown runtime command");
+                    break;
                 }
             };
         }
@@ -878,7 +888,7 @@ impl TheaterRuntime {
     /// 5. Remove the actor from the runtime's registries
     /// 6. Clean up any channel registrations
     async fn stop_actor(&mut self, actor_id: TheaterId, shutdown_type: ShutdownType) -> Result<()> {
-        debug!("Stopping actor: {:?}", actor_id);
+        info!("stop_actor called for: {:?} (shutdown_type: {:?})", actor_id, shutdown_type);
 
         // Check if the actor exists in the registry
         if !self.actors.contains_key(&actor_id) {
@@ -988,6 +998,7 @@ impl TheaterRuntime {
         // First, signal the actor runtime itself to shut down via its control channel
         // This stops the operation/info loops from processing new requests
         debug!("Sending shutdown signal to actor runtime for {:?}", actor_id);
+        let actor_runtime_start = std::time::Instant::now();
         let (response_tx, response_rx) = tokio::sync::oneshot::channel();
         if let Err(e) = proc.control_tx.send(ActorControl::Shutdown { response_tx }).await {
             error!("Failed to send shutdown signal to actor runtime for {:?}: {}", actor_id, e);
@@ -996,7 +1007,7 @@ impl TheaterRuntime {
             // Wait for the actor runtime to acknowledge shutdown with a timeout
             match tokio::time::timeout(std::time::Duration::from_secs(10), response_rx).await {
                 Ok(Ok(Ok(_))) => {
-                    debug!("Actor runtime for {:?} acknowledged shutdown", actor_id);
+                    debug!("Actor runtime for {:?} acknowledged shutdown in {:?}", actor_id, actor_runtime_start.elapsed());
                 }
                 Ok(Ok(Err(e))) => {
                     error!("Actor runtime for {:?} returned error during shutdown: {:?}", actor_id, e);
@@ -1005,7 +1016,7 @@ impl TheaterRuntime {
                     error!("Actor runtime for {:?} response channel closed", actor_id);
                 }
                 Err(_) => {
-                    error!("Timeout waiting for actor runtime {:?} to shut down", actor_id);
+                    error!("Timeout waiting for actor runtime {:?} to shut down (10s)", actor_id);
                 }
             }
         }
@@ -1013,6 +1024,7 @@ impl TheaterRuntime {
         // Now signal handlers to shut down
         // The handlers will wait for their cleanup to complete before responding
         debug!("Signaling handlers to shutdown for actor {:?}", actor_id);
+        let handler_start = std::time::Instant::now();
 
         // Remove from map now, after actor runtime has shut down but before waiting on handlers
         // This ensures the actor is removed from the registry while handlers clean up
@@ -1022,7 +1034,7 @@ impl TheaterRuntime {
             .signal_shutdown(shutdown_type)
             .await;
 
-        debug!("Actor {:?} shutdown complete", actor_id);
+        debug!("Actor {:?} handler shutdown complete in {:?}", actor_id, handler_start.elapsed());
 
         // Remove actor from any channel registrations
         let mut channels_to_remove = Vec::new();

@@ -3534,6 +3534,7 @@ dependencies = [
  "theater",
  "theater-handler-runtime",
  "tokio",
+ "tokio-util",
  "tracing",
  "tracing-subscriber",
 ]

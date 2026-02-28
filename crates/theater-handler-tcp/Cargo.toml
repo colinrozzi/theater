@@ -17,6 +17,7 @@ theater = { workspace = true }
 anyhow.workspace = true
 tracing.workspace = true
 tokio.workspace = true
+tokio-util.workspace = true
 
 [dev-dependencies]
 theater-handler-runtime.workspace = true

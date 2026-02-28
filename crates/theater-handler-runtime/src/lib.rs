@@ -204,17 +204,29 @@ impl Handler for RuntimeHandler {
 
                         info!("[ACTOR] [{}] Shutdown requested: {:?}", actor_id, data);
 
-                        // Send shutdown command
-                        match theater_tx
-                            .send(TheaterCommand::ShuttingDown {
-                                actor_id,
-                                data,
-                            })
-                            .await
-                        {
-                            Ok(_) => Ok(Value::Tuple(vec![])),
-                            Err(e) => Err(Value::String(e.to_string())),
-                        }
+                        // Spawn the shutdown command send as a fire-and-forget task.
+                        // This prevents a deadlock where:
+                        // 1. shutdown() awaits send(), yielding to tokio
+                        // 2. Theater receives ShuttingDown, calls stop_actor
+                        // 3. stop_actor sends Shutdown to handler's control loop
+                        // 4. Control loop tries to join operation_handle
+                        // 5. But operation_handle is blocked waiting for shutdown() to return
+                        //
+                        // By spawning, shutdown() returns immediately, allowing the
+                        // operation to complete before the theater processes ShuttingDown.
+                        tokio::spawn(async move {
+                            if let Err(e) = theater_tx
+                                .send(TheaterCommand::ShuttingDown {
+                                    actor_id: actor_id.clone(),
+                                    data,
+                                })
+                                .await
+                            {
+                                tracing::error!("[ACTOR] [{}] Failed to send ShuttingDown: {}", actor_id, e);
+                            }
+                        });
+
+                        Ok::<Value, Value>(Value::Tuple(vec![]))
                     }
                 },
             )?;

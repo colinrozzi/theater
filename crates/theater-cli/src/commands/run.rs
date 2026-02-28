@@ -4,14 +4,25 @@ use tokio::sync::mpsc;
 use tracing::debug;
 
 use crate::{error::CliError, CommandContext};
+use theater::config::actor_manifest::{
+    RuntimeHostConfig, StoreHandlerConfig, SupervisorHostConfig, TcpHandlerConfig,
+    TerminalHandlerConfig, TimerHandlerConfig,
+};
 use theater::handler::HandlerRegistry;
 use theater::messages::TheaterCommand;
 use theater::pack_bridge::{Value, ValueType};
 use theater::theater_runtime::TheaterRuntime;
 use theater::utils::resolve_reference;
 use theater::ManifestConfig;
+use theater_handler_loop::LoopHandler;
+use theater_handler_message_server::{MessageRouter, MessageServerHandler};
+use theater_handler_rpc::RpcHandler;
 use theater_handler_runtime::RuntimeHandler;
-use theater::config::actor_manifest::RuntimeHostConfig;
+use theater_handler_store::StoreHandler;
+use theater_handler_supervisor::SupervisorHandler;
+use theater_handler_tcp::TcpHandler;
+use theater_handler_terminal::TerminalHandler;
+use theater_handler_timer::TimerHandler;
 
 #[derive(Debug, Parser)]
 pub struct RunArgs {
@@ -36,8 +47,8 @@ pub struct RunArgs {
     pub raw: bool,
 }
 
-/// Create a minimal handler registry with just runtime for logging
-fn create_minimal_registry(
+/// Create a handler registry with all Theater handlers
+fn create_handler_registry(
     theater_tx: mpsc::Sender<TheaterCommand>,
 ) -> HandlerRegistry {
     let mut registry = HandlerRegistry::new();
@@ -45,6 +56,39 @@ fn create_minimal_registry(
     // Runtime handler - provides log, get-chain, shutdown
     let runtime_config = RuntimeHostConfig {};
     registry.register(RuntimeHandler::new(runtime_config, theater_tx.clone(), None));
+
+    // Store handler - provides content storage
+    let store_config = StoreHandlerConfig {};
+    registry.register(StoreHandler::new(store_config, None));
+
+    // Supervisor handler - allows spawning/managing child actors
+    let supervisor_config = SupervisorHostConfig {};
+    registry.register(SupervisorHandler::new(supervisor_config, None));
+
+    // Message server handler - inter-actor messaging
+    let message_router = MessageRouter::new();
+    registry.register(MessageServerHandler::new(None, message_router.clone()));
+
+    // RPC handler - direct actor-to-actor function calls
+    registry.register(RpcHandler::new(theater_tx.clone()));
+
+    // TCP handler - TCP server/client functionality
+    let tcp_config = TcpHandlerConfig {
+        listen: None,
+        max_connections: None,
+    };
+    registry.register(TcpHandler::new(tcp_config));
+
+    // Terminal handler - stdin/stdout/stderr for interactive CLI apps
+    let terminal_config = TerminalHandlerConfig::default();
+    registry.register(TerminalHandler::new(terminal_config));
+
+    // Timer handler - periodic tick callbacks for game loops, polling, etc.
+    let timer_config = TimerHandlerConfig::default();
+    registry.register(TimerHandler::new(timer_config));
+
+    // Loop handler - cooperative looping with yield points
+    registry.register(LoopHandler::new());
 
     registry
 }
@@ -178,7 +222,7 @@ pub async fn execute_async(args: &RunArgs, _ctx: &CommandContext) -> Result<(), 
 
     // Create the TheaterRuntime in-process
     let (theater_tx, theater_rx) = mpsc::channel::<TheaterCommand>(32);
-    let handler_registry = create_minimal_registry(theater_tx.clone());
+    let handler_registry = create_handler_registry(theater_tx.clone());
 
     let mut runtime = TheaterRuntime::new(
         theater_tx.clone(),

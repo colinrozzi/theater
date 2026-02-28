@@ -639,13 +639,8 @@ impl ActorRuntime {
                     info!("Shutdown requested");
                     actor_phase_manager.set_phase(ActorPhase::ShuttingDown);
 
-                    debug!("Signaled shutdown to operation and info loops");
-
-                    // Wait for operation and info loops to finish gracefully
-                    let (_, _, _) = tokio::join!(operation_handle, info_handle, setup_handle);
-
-                    debug!("Operation and info loops have exited");
-
+                    // Signal handlers FIRST so they can cancel any blocking operations
+                    // (e.g., TCP receive() calls that are waiting for data)
                     match handlers_shutdown_controller.write().await.take() {
                         Some(controller) => {
                             controller.signal_shutdown(ShutdownType::Graceful).await;
@@ -654,8 +649,14 @@ impl ActorRuntime {
                             warn!("No handlers shutdown controller found");
                         }
                     }
+                    info!("Signaled shutdown to handlers");
 
-                    debug!("Signaled shutdown to handlers");
+                    info!("Waiting for operation and info loops to finish");
+
+                    // Wait for operation and info loops to finish gracefully
+                    let (_, _, _) = tokio::join!(operation_handle, info_handle, setup_handle);
+
+                    info!("Operation and info loops have exited");
 
                     if let Err(e) = response_tx.send(Ok(())) {
                         error!("Failed to send shutdown confirmation: {:?}", e);

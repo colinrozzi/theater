@@ -5,12 +5,26 @@ use tracing::debug;
 /// Default timeout for waiting for a component to shutdown gracefully
 pub const DEFAULT_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);
 
-/// A signal indicating that a component should shutdown
+/// A signal indicating that a component should shutdown.
+///
+/// When this signal is dropped, it automatically sends a response to acknowledge
+/// that shutdown handling is complete. This ensures the shutdown controller
+/// doesn't wait indefinitely for responses.
 #[derive(Debug)]
 pub struct ShutdownSignal {
     /// Type of shutdown to perform
     pub shutdown_type: ShutdownType,
-    pub sender: Option<Sender<()>>,
+    /// Response channel - automatically sent when signal is dropped
+    sender: Option<Sender<()>>,
+}
+
+impl Drop for ShutdownSignal {
+    fn drop(&mut self) {
+        // Automatically respond when the signal is dropped
+        if let Some(sender) = self.sender.take() {
+            let _ = sender.send(()); // Ignore error if receiver already closed
+        }
+    }
 }
 
 /// Type of shutdown to perform

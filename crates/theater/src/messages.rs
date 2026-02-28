@@ -198,6 +198,12 @@ pub enum TheaterCommand {
         data: Option<Vec<u8>>,
     },
 
+    /// # Shutdown the entire runtime
+    ///
+    /// Gracefully shuts down the theater runtime and all actors.
+    /// The runtime will stop all actors, clean up resources, and exit.
+    ShutdownRuntime,
+
     /// # Record a new event
     ///
     /// Records an event in an actor's event chain.
@@ -464,6 +470,7 @@ impl TheaterCommand {
             TheaterCommand::GetActorExportHashes { actor_id, .. } => {
                 format!("GetActorExportHashes: {:?}", actor_id)
             }
+            TheaterCommand::ShutdownRuntime => "ShutdownRuntime".to_string(),
         }
     }
 }

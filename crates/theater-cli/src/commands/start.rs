@@ -20,6 +20,7 @@ use theater::theater_runtime::TheaterRuntime;
 use theater::utils::resolve_reference;
 use theater::TheaterId;
 use theater::ManifestConfig;
+use theater::pack_bridge::{Value, ValueType};
 use theater_handler_message_server::{MessageRouter, MessageServerHandler};
 use theater_handler_rpc::RpcHandler;
 use theater_handler_runtime::RuntimeHandler;
@@ -79,6 +80,10 @@ pub struct StartArgs {
     /// Show verbose output (deprecated, use --events or --log-level)
     #[arg(long, hide = true)]
     pub verbose: bool,
+
+    /// Call the actor's init function after spawning
+    #[arg(long)]
+    pub init: bool,
 }
 
 /// Extract log message from a chain event if it's a runtime log event
@@ -356,6 +361,47 @@ pub async fn execute_async(args: &StartArgs, ctx: &CommandContext) -> Result<(),
             )));
         }
     };
+
+    // Call init if --init flag is set
+    if args.init {
+        // Get the actor handle
+        let (handle_tx, handle_rx) = tokio::sync::oneshot::channel();
+        theater_tx
+            .send(TheaterCommand::GetActorHandle {
+                actor_id: actor_id.clone(),
+                response_tx: handle_tx,
+            })
+            .await
+            .map_err(|e| CliError::server_error(format!("Failed to get actor handle: {}", e)))?;
+
+        let actor_handle = match handle_rx.await {
+            Ok(Some(handle)) => handle,
+            Ok(None) => {
+                return Err(CliError::server_error("Actor handle not found".to_string()));
+            }
+            Err(e) => {
+                return Err(CliError::server_error(format!(
+                    "Failed to receive actor handle: {}",
+                    e
+                )));
+            }
+        };
+
+        // Build init state (None for now)
+        let init_state = Value::Option {
+            inner_type: ValueType::List(Box::new(ValueType::U8)),
+            value: None,
+        };
+
+        // Call init
+        let init_params = Value::Tuple(vec![init_state]);
+        debug!("Calling init on actor {}", actor_id);
+        let _init_result = actor_handle
+            .call_function("theater:simple/actor.init".to_string(), init_params)
+            .await
+            .map_err(|e| CliError::server_error(format!("Failed to call init: {:?}", e)))?;
+        debug!("Init completed");
+    }
 
     // Now wait for either:
     // - The actor to exit (supervisor notification)

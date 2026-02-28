@@ -35,6 +35,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::Mutex;
+use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, warn};
 
 use theater::actor::handle::ActorHandle;
@@ -165,8 +166,8 @@ pub struct TcpHandler {
     actor_id: Arc<std::sync::Mutex<Option<TheaterId>>>,
     /// Actor handle for calling export functions (set in setup, used by listen)
     actor_handle: Arc<std::sync::Mutex<Option<ActorHandle>>>,
-    /// Shutdown receiver for background accept loops
-    shutdown_receiver: Arc<std::sync::Mutex<Option<ShutdownReceiver>>>,
+    /// Cancellation token for spawned background tasks
+    cancellation_token: CancellationToken,
 }
 
 impl TcpHandler {
@@ -176,7 +177,7 @@ impl TcpHandler {
             shared_state: Arc::new(SharedTcpState::new(None)),
             actor_id: Arc::new(std::sync::Mutex::new(None)),
             actor_handle: Arc::new(std::sync::Mutex::new(None)),
-            shutdown_receiver: Arc::new(std::sync::Mutex::new(None)),
+            cancellation_token: CancellationToken::new(),
         }
     }
 
@@ -275,12 +276,13 @@ impl Handler for TcpHandler {
         };
 
         // Share the same state across all instances - this is the key for transfer!
+        // Each instance gets its own cancellation token (cancelled when that actor shuts down)
         Box::new(TcpHandler {
             config: tcp_config,
             shared_state: self.shared_state.clone(), // Same Arc!
             actor_id: Arc::new(std::sync::Mutex::new(None)),
             actor_handle: Arc::new(std::sync::Mutex::new(None)),
-            shutdown_receiver: Arc::new(std::sync::Mutex::new(None)),
+            cancellation_token: CancellationToken::new(),
         })
     }
 
@@ -321,18 +323,24 @@ impl Handler for TcpHandler {
     ) -> Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send>> {
         info!("TCP handler setup (passive mode)");
 
-        // Store the actor_handle and shutdown_receiver for use by listen()
+        // Store the actor_handle for use by listen()
         {
             let mut handle_guard = self.actor_handle.lock().unwrap();
             *handle_guard = Some(actor_handle);
         }
-        {
-            let mut shutdown_guard = self.shutdown_receiver.lock().unwrap();
-            *shutdown_guard = Some(shutdown_receiver);
-        }
 
-        // Handler is now passive - actors call listen() to start the accept loop
-        Box::pin(async move { Ok(()) })
+        // Get cancellation token to cancel on shutdown
+        let cancel_token = self.cancellation_token.clone();
+
+        // Wait for shutdown, then cancel all spawned tasks
+        Box::pin(async move {
+            info!("TCP handler setup waiting for shutdown signal");
+            shutdown_receiver.wait_for_shutdown().await;
+            info!("TCP handler received shutdown, cancelling background tasks");
+            cancel_token.cancel();
+            info!("TCP handler cancellation token cancelled");
+            Ok(())
+        })
     }
 
     fn setup_host_functions_composite(
@@ -368,7 +376,7 @@ impl Handler for TcpHandler {
 
         // Clone handler fields for use in listen() callback
         let actor_handle_for_listen = self.actor_handle.clone();
-        let shutdown_receiver_for_listen = self.shutdown_receiver.clone();
+        let cancel_token_for_listen = self.cancellation_token.clone();
 
         // Clone state and actor_id for each closure
         let st_connect = state.clone();
@@ -386,6 +394,7 @@ impl Handler for TcpHandler {
         let st_set_active = state.clone();
         let aid_set_active = actor_id_for_closures.clone();
         let actor_handle_for_set_active = self.actor_handle.clone();
+        let cancel_token_for_set_active = self.cancellation_token.clone();
 
         let st_transfer = state.clone();
         let aid_transfer = actor_id_for_closures.clone();
@@ -398,6 +407,7 @@ impl Handler for TcpHandler {
 
         let st_receive = state.clone();
         let aid_receive = actor_id_for_closures.clone();
+        let cancel_token_for_receive = self.cancellation_token.clone();
 
         let st_close = state.clone();
         let aid_close = actor_id_for_closures.clone();
@@ -455,7 +465,7 @@ impl Handler for TcpHandler {
                     let st = st_listen.clone();
                     let actor_id = aid_listen.clone();
                     let actor_handle_arc = actor_handle_for_listen.clone();
-                    let shutdown_receiver_arc = shutdown_receiver_for_listen.clone();
+                    let cancel_token = cancel_token_for_listen.clone();
 
                     async move {
                         let address = parse_string(&input)?;
@@ -482,82 +492,71 @@ impl Handler for TcpHandler {
                             ));
                         };
 
-                        // Take the shutdown receiver (only available for the first listener)
-                        let shutdown_receiver = {
-                            let mut guard = shutdown_receiver_arc.lock().unwrap();
-                            guard.take()
-                        };
-
                         // Clone state for the background task
                         let st_for_task = st.clone();
                         let actor_id_for_task = actor_id.clone();
 
-                        // Spawn background accept loop
+                        // Spawn background accept loop with cancellation support
                         tokio::spawn(async move {
                             info!("TCP accept loop started for listener={}", listener_id);
 
-                            let accept_loop = async {
-                                loop {
-                                    match listener.accept().await {
-                                        Ok((stream, peer_addr)) => {
-                                            let conn_id = st_for_task.next_id();
-                                            info!(
-                                                "tcp accepted conn={} from {} on listener={}",
-                                                conn_id, peer_addr, listener_id
-                                            );
-
-                                            // Store connection in PENDING state
-                                            st_for_task.connections.lock().await.insert(
-                                                conn_id,
-                                                ConnectionEntry {
-                                                    stream: StreamState::Full(stream),
-                                                    peer_addr,
-                                                    owner: actor_id_for_task.clone(),
-                                                    state: ConnectionState::Pending,
-                                                    data_mode: DataMode::Passive,
-                                                },
-                                            );
-
-                                            // Call the actor's handle-connection export
-                                            let conn_id_str = id_to_string(conn_id);
-                                            let params =
-                                                Value::Tuple(vec![Value::String(conn_id_str)]);
-
-                                            if let Err(e) = actor_handle
-                                                .call_function(
-                                                    "theater:simple/tcp-client.handle-connection"
-                                                        .to_string(),
-                                                    params,
-                                                )
-                                                .await
-                                            {
-                                                error!(
-                                                    "Failed to call handle-connection for conn={}: {}",
-                                                    conn_id, e
+                            loop {
+                                tokio::select! {
+                                    _ = cancel_token.cancelled() => {
+                                        info!("TCP accept loop cancelled for listener={}", listener_id);
+                                        break;
+                                    }
+                                    result = listener.accept() => {
+                                        match result {
+                                            Ok((stream, peer_addr)) => {
+                                                let conn_id = st_for_task.next_id();
+                                                info!(
+                                                    "tcp accepted conn={} from {} on listener={}",
+                                                    conn_id, peer_addr, listener_id
                                                 );
-                                                // Clean up the pending connection
-                                                st_for_task.connections.lock().await.remove(&conn_id);
+
+                                                // Store connection in PENDING state
+                                                st_for_task.connections.lock().await.insert(
+                                                    conn_id,
+                                                    ConnectionEntry {
+                                                        stream: StreamState::Full(stream),
+                                                        peer_addr,
+                                                        owner: actor_id_for_task.clone(),
+                                                        state: ConnectionState::Pending,
+                                                        data_mode: DataMode::Passive,
+                                                    },
+                                                );
+
+                                                // Call the actor's handle-connection export
+                                                let conn_id_str = id_to_string(conn_id);
+                                                let params =
+                                                    Value::Tuple(vec![Value::String(conn_id_str)]);
+
+                                                if let Err(e) = actor_handle
+                                                    .call_function(
+                                                        "theater:simple/tcp-client.handle-connection"
+                                                            .to_string(),
+                                                        params,
+                                                    )
+                                                    .await
+                                                {
+                                                    error!(
+                                                        "Failed to call handle-connection for conn={}: {}",
+                                                        conn_id, e
+                                                    );
+                                                    // Clean up the pending connection
+                                                    st_for_task.connections.lock().await.remove(&conn_id);
+                                                }
+                                            }
+                                            Err(e) => {
+                                                error!(
+                                                    "TCP accept error on listener={}: {}",
+                                                    listener_id, e
+                                                );
                                             }
                                         }
-                                        Err(e) => {
-                                            error!(
-                                                "TCP accept error on listener={}: {}",
-                                                listener_id, e
-                                            );
-                                        }
                                     }
                                 }
-                            };
-
-                            if let Some(shutdown_rx) = shutdown_receiver {
-                                tokio::select! {
-                                    _ = shutdown_rx.wait_for_shutdown() => {
-                                        info!("TCP accept loop received shutdown for listener={}", listener_id);
-                                    }
-                                    _ = accept_loop => {}
-                                }
-                            } else {
-                                accept_loop.await;
                             }
 
                             info!("TCP accept loop stopped for listener={}", listener_id);
@@ -666,6 +665,7 @@ impl Handler for TcpHandler {
                     let st = st_set_active.clone();
                     let actor_id = aid_set_active.clone();
                     let actor_handle_arc = actor_handle_for_set_active.clone();
+                    let cancel_token = cancel_token_for_set_active.clone();
                     async move {
                         let (conn_id_str, mode_str) = parse_two_strings(&input)?;
                         let conn_id = string_to_id(&conn_id_str)?;
@@ -739,10 +739,11 @@ impl Handler for TcpHandler {
                                     ));
                                 };
 
-                                // Spawn background read task
+                                // Spawn background read task with cancellation support
                                 let conn_id_for_task = conn_id;
                                 let st_for_task = st.clone();
                                 let is_once = new_mode == DataMode::Once;
+                                let cancel_token_for_task = cancel_token.clone();
 
                                 tokio::spawn(async move {
                                     tcp_read_loop(
@@ -751,6 +752,7 @@ impl Handler for TcpHandler {
                                         actor_handle,
                                         st_for_task,
                                         is_once,
+                                        cancel_token_for_task,
                                     )
                                     .await;
                                 });
@@ -790,7 +792,7 @@ impl Handler for TcpHandler {
             // ----------------------------------------------------------------
             .func_async_result(
                 "transfer",
-                move |_ctx: AsyncCtx<ActorStore>, input: Value| {
+                move |ctx: AsyncCtx<ActorStore>, input: Value| {
                     let st = st_transfer.clone();
                     let actor_id = aid_transfer.clone();
                     async move {
@@ -801,27 +803,62 @@ impl Handler for TcpHandler {
                             .parse()
                             .map_err(|e| Value::String(format!("Invalid actor ID: {}", e)))?;
 
-                        let mut connections = st.connections.lock().await;
-                        let entry = connections.get_mut(&conn_id).ok_or_else(|| {
-                            Value::String(format!("Connection not found: {}", conn_id_str))
-                        })?;
+                        {
+                            let mut connections = st.connections.lock().await;
+                            let entry = connections.get_mut(&conn_id).ok_or_else(|| {
+                                Value::String(format!("Connection not found: {}", conn_id_str))
+                            })?;
 
-                        if entry.owner != actor_id {
-                            return Err(Value::String(format!(
-                                "Connection {} not owned by this actor",
-                                conn_id_str
-                            )));
+                            if entry.owner != actor_id {
+                                return Err(Value::String(format!(
+                                    "Connection {} not owned by this actor",
+                                    conn_id_str
+                                )));
+                            }
+
+                            // Transfer ownership and activate
+                            let old_owner = entry.owner.clone();
+                            entry.owner = target_actor.clone();
+                            entry.state = ConnectionState::Active;
+
+                            info!(
+                                "tcp transferred conn={} from {} to {} (now active)",
+                                conn_id, old_owner, target_actor
+                            );
                         }
 
-                        // Transfer ownership and activate
-                        let old_owner = entry.owner.clone();
-                        entry.owner = target_actor.clone();
-                        entry.state = ConnectionState::Active;
+                        // Get target actor's handle and call handle-connection-transfer
+                        let store = ctx.data();
+                        let theater_tx = store.theater_tx.clone();
 
-                        info!(
-                            "tcp transferred conn={} from {} to {} (now active)",
-                            conn_id, old_owner, target_actor
-                        );
+                        let (handle_tx, handle_rx) = tokio::sync::oneshot::channel();
+                        let get_handle_cmd = theater::messages::TheaterCommand::GetActorHandle {
+                            actor_id: target_actor.clone(),
+                            response_tx: handle_tx,
+                        };
+                        theater_tx.send(get_handle_cmd).await
+                            .map_err(|e| Value::String(format!("Failed to get target handle: {}", e)))?;
+
+                        let target_handle = match handle_rx.await {
+                            Ok(Some(handle)) => handle,
+                            Ok(None) => return Err(Value::String("Target actor handle not found".to_string())),
+                            Err(e) => return Err(Value::String(format!("Failed to receive handle: {}", e))),
+                        };
+
+                        // Call handle-connection-transfer on target
+                        // Just pass conn_id - runtime will prepend state to make (state, conn_id)
+                        let params = Value::String(conn_id_str.clone());
+                        if let Err(e) = target_handle
+                            .call_function(
+                                "theater:simple/tcp-client.handle-connection-transfer".to_string(),
+                                params,
+                            )
+                            .await
+                        {
+                            warn!("Failed to call handle-connection-transfer: {:?}", e);
+                            // Don't fail the transfer, just log the warning
+                        }
+
                         Ok::<Value, Value>(Value::Tuple(vec![]))
                     }
                 },
@@ -921,6 +958,7 @@ impl Handler for TcpHandler {
                 move |_ctx: AsyncCtx<ActorStore>, input: Value| {
                     let st = st_receive.clone();
                     let actor_id = aid_receive.clone();
+                    let cancel_token = cancel_token_for_receive.clone();
                     async move {
                         let (conn_id_str, max_bytes) = parse_string_and_u32(&input)?;
                         let conn_id = string_to_id(&conn_id_str)?;
@@ -968,10 +1006,17 @@ impl Handler for TcpHandler {
                         };
 
                         let mut buf = vec![0u8; max_bytes as usize];
-                        let n = stream
-                            .read(&mut buf)
-                            .await
-                            .map_err(|e| Value::String(e.to_string()))?;
+
+                        // Use select to make the read interruptible on shutdown
+                        let n = tokio::select! {
+                            result = stream.read(&mut buf) => {
+                                result.map_err(|e| Value::String(e.to_string()))?
+                            }
+                            _ = cancel_token.cancelled() => {
+                                info!("TCP receive cancelled due to shutdown, conn={}", conn_id);
+                                return Err(Value::String("Connection closed: actor shutting down".to_string()));
+                            }
+                        };
 
                         debug!(
                             "tcp receive conn={} {} bytes (max={})",
@@ -1072,6 +1117,7 @@ async fn tcp_read_loop(
     actor_handle: ActorHandle,
     shared_state: Arc<SharedTcpState>,
     is_once: bool,
+    cancel_token: CancellationToken,
 ) {
     let conn_id_str = id_to_string(conn_id);
     info!(
@@ -1082,88 +1128,90 @@ async fn tcp_read_loop(
     let mut buf = vec![0u8; ACTIVE_READ_BUFFER_SIZE];
 
     loop {
-        match read_half.read(&mut buf).await {
-            Ok(0) => {
-                // EOF - connection closed by peer
-                info!("tcp conn={} received EOF", conn_id);
-
-                // Call on-close callback
-                let params = Value::Tuple(vec![
-                    Value::String(conn_id_str.clone()),
-                    Value::String("eof".to_string()),
-                ]);
-
-                if let Err(e) = actor_handle
-                    .call_function("theater:simple/tcp-client.on-close".to_string(), params)
-                    .await
-                {
-                    warn!("tcp conn={} on-close callback failed: {}", conn_id, e);
-                }
-
+        tokio::select! {
+            _ = cancel_token.cancelled() => {
+                info!("tcp read loop cancelled for conn={}", conn_id);
                 // Remove connection from shared state
                 shared_state.connections.lock().await.remove(&conn_id);
                 break;
             }
-            Ok(n) => {
-                // Data received - call on-data callback
-                let data = buf[..n].to_vec();
-                debug!("tcp conn={} received {} bytes, calling on-data", conn_id, n);
+            result = read_half.read(&mut buf) => {
+                match result {
+                    Ok(0) => {
+                        // EOF - connection closed by peer
+                        info!("tcp conn={} received EOF", conn_id);
 
-                let params = Value::Tuple(vec![
-                    Value::String(conn_id_str.clone()),
-                    Value::List {
-                        elem_type: ValueType::U8,
-                        items: data.into_iter().map(Value::U8).collect(),
-                    },
-                ]);
+                        // Call on-close callback
+                        let params = Value::Tuple(vec![
+                            Value::String(conn_id_str.clone()),
+                            Value::String("eof".to_string()),
+                        ]);
 
-                if let Err(e) = actor_handle
-                    .call_function("theater:simple/tcp-client.on-data".to_string(), params)
-                    .await
-                {
-                    error!("tcp conn={} on-data callback failed: {}", conn_id, e);
-                    // Continue reading even if callback fails
-                }
+                        if let Err(e) = actor_handle
+                            .call_function("theater:simple/tcp-client.on-close".to_string(), params)
+                            .await
+                        {
+                            warn!("tcp conn={} on-close callback failed: {}", conn_id, e);
+                        }
 
-                if is_once {
-                    // Once mode: switch back to passive after one read
-                    info!("tcp conn={} once mode complete, switching to passive", conn_id);
-
-                    // Rejoin the stream halves
-                    // This is tricky - we need the write half too
-                    // For now, we'll mark that once completed but keep reading disabled
-                    // The actor will need to use send() for the write half
-
-                    // Update the connection's data mode
-                    if let Some(entry) = shared_state.connections.lock().await.get_mut(&conn_id) {
-                        entry.data_mode = DataMode::Passive;
-                        // Note: We can't easily rejoin the stream halves, so receive() won't work
-                        // The actor should switch to using a different connection if they need
-                        // bidirectional passive mode again
+                        // Remove connection from shared state
+                        shared_state.connections.lock().await.remove(&conn_id);
+                        break;
                     }
-                    break;
+                    Ok(n) => {
+                        // Data received - call on-data callback
+                        let data = buf[..n].to_vec();
+                        debug!("tcp conn={} received {} bytes, calling on-data", conn_id, n);
+
+                        let params = Value::Tuple(vec![
+                            Value::String(conn_id_str.clone()),
+                            Value::List {
+                                elem_type: ValueType::U8,
+                                items: data.into_iter().map(Value::U8).collect(),
+                            },
+                        ]);
+
+                        if let Err(e) = actor_handle
+                            .call_function("theater:simple/tcp-client.on-data".to_string(), params)
+                            .await
+                        {
+                            error!("tcp conn={} on-data callback failed: {}", conn_id, e);
+                            // Continue reading even if callback fails
+                        }
+
+                        if is_once {
+                            // Once mode: switch back to passive after one read
+                            info!("tcp conn={} once mode complete, switching to passive", conn_id);
+
+                            // Update the connection's data mode
+                            if let Some(entry) = shared_state.connections.lock().await.get_mut(&conn_id) {
+                                entry.data_mode = DataMode::Passive;
+                            }
+                            break;
+                        }
+                    }
+                    Err(e) => {
+                        // Read error - connection broken
+                        error!("tcp conn={} read error: {}", conn_id, e);
+
+                        // Call on-close callback with error
+                        let params = Value::Tuple(vec![
+                            Value::String(conn_id_str.clone()),
+                            Value::String(e.to_string()),
+                        ]);
+
+                        if let Err(e) = actor_handle
+                            .call_function("theater:simple/tcp-client.on-close".to_string(), params)
+                            .await
+                        {
+                            warn!("tcp conn={} on-close callback failed: {}", conn_id, e);
+                        }
+
+                        // Remove connection from shared state
+                        shared_state.connections.lock().await.remove(&conn_id);
+                        break;
+                    }
                 }
-            }
-            Err(e) => {
-                // Read error - connection broken
-                error!("tcp conn={} read error: {}", conn_id, e);
-
-                // Call on-close callback with error
-                let params = Value::Tuple(vec![
-                    Value::String(conn_id_str.clone()),
-                    Value::String(e.to_string()),
-                ]);
-
-                if let Err(e) = actor_handle
-                    .call_function("theater:simple/tcp-client.on-close".to_string(), params)
-                    .await
-                {
-                    warn!("tcp conn={} on-close callback failed: {}", conn_id, e);
-                }
-
-                // Remove connection from shared state
-                shared_state.connections.lock().await.remove(&conn_id);
-                break;
             }
         }
     }
