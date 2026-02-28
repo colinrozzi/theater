@@ -28,6 +28,7 @@ use theater_handler_supervisor::SupervisorHandler;
 use theater_handler_tcp::TcpHandler;
 use theater_handler_terminal::TerminalHandler;
 use theater_handler_timer::TimerHandler;
+use theater_handler_loop::LoopHandler;
 
 /// Log level for runtime/system logs
 #[derive(Debug, Clone, Copy, ValueEnum, Default)]
@@ -225,6 +226,9 @@ fn create_handler_registry(
     // Timer handler - periodic tick callbacks for game loops, polling, etc.
     let timer_config = TimerHandlerConfig::default();
     registry.register(TimerHandler::new(timer_config));
+
+    // Loop handler - cooperative looping with yield points
+    registry.register(LoopHandler::new());
 
     registry
 }

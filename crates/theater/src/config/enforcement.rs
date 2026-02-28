@@ -134,6 +134,10 @@ pub fn validate_manifest_permissions(
                 // Timer handler is allowed by default
                 // It provides periodic tick callbacks
             }
+            HandlerConfig::Loop { .. } => {
+                // Loop handler is allowed by default
+                // It provides cooperative looping with yield points
+            }
         }
     }
     Ok(())

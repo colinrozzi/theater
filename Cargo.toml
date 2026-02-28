@@ -16,6 +16,7 @@ members = [
     "crates/theater-handler-timer",
     "crates/theater-handler-assembler",
     "crates/theater-handler-rpc",
+    "crates/theater-handler-loop",
     "crates/theater-replay-experimenting",
 ]
 exclude = [
@@ -68,6 +69,7 @@ theater-handler-terminal = { version = "0.2.1", path = "crates/theater-handler-t
 theater-handler-timer = { version = "0.2.1", path = "crates/theater-handler-timer" }
 theater-handler-assembler = { version = "0.2.1", path = "crates/theater-handler-assembler" }
 theater-handler-rpc = { version = "0.2.1", path = "crates/theater-handler-rpc" }
+theater-handler-loop = { version = "0.2.1", path = "crates/theater-handler-loop" }
 # DEPRECATED: WASI handlers (moved to crates/deprecated/)
 # theater-handler-environment = { version = "0.2.1", path = "crates/deprecated/theater-handler-environment" }
 # theater-handler-filesystem = { version = "0.2.1", path = "crates/deprecated/theater-handler-filesystem" }

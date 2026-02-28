@@ -176,6 +176,11 @@ pub enum HandlerConfig {
         #[serde(flatten)]
         config: TimerHandlerConfig,
     },
+    #[serde(rename = "loop")]
+    Loop {
+        #[serde(flatten)]
+        config: LoopHandlerConfig,
+    },
 }
 
 impl HandlerConfig {
@@ -200,6 +205,7 @@ impl HandlerConfig {
             HandlerConfig::Rpc { .. } => "rpc",
             HandlerConfig::Terminal { .. } => "terminal",
             HandlerConfig::Timer { .. } => "timer",
+            HandlerConfig::Loop { .. } => "loop",
         }
     }
 }
@@ -243,6 +249,11 @@ pub struct TimerHandlerConfig {
     #[serde(default)]
     pub interval_ms: Option<u64>,
 }
+
+/// Configuration for the Loop handler
+/// This handler provides cooperative looping with yield points
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+pub struct LoopHandlerConfig {}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct SupervisorHostConfig {}

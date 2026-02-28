@@ -1,0 +1,22 @@
+[package]
+name = "theater-handler-loop"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+rust-version.workspace = true
+
+description = "Loop handler for Theater WebAssembly runtime - cooperative looping with yield points"
+
+[dependencies]
+theater = { workspace = true }
+anyhow.workspace = true
+tracing.workspace = true
+tokio.workspace = true
+
+[dev-dependencies]
+tracing-subscriber.workspace = true

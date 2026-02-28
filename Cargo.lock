@@ -3388,6 +3388,7 @@ dependencies = [
  "tempfile",
  "term_size",
  "theater",
+ "theater-handler-loop",
  "theater-handler-message-server",
  "theater-handler-rpc",
  "theater-handler-runtime",
@@ -3433,6 +3434,17 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "wat",
+]
+
+[[package]]
+name = "theater-handler-loop"
+version = "0.2.1"
+dependencies = [
+ "anyhow",
+ "theater",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]

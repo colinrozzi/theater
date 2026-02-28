@@ -32,6 +32,7 @@ theater-handler-rpc.workspace = true
 theater-handler-tcp.workspace = true
 theater-handler-terminal.workspace = true
 theater-handler-timer.workspace = true
+theater-handler-loop.workspace = true
 
 # Core dependencies
 anyhow.workspace = true
