@@ -58,7 +58,7 @@ fn create_handler_registry(
     registry.register(RuntimeHandler::new(runtime_config, theater_tx.clone(), None));
 
     // Store handler - provides content storage
-    let store_config = StoreHandlerConfig {};
+    let store_config = StoreHandlerConfig::default();
     registry.register(StoreHandler::new(store_config, None));
 
     // Supervisor handler - allows spawning/managing child actors

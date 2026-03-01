@@ -137,7 +137,7 @@ fn create_handler_registry(theater_tx: mpsc::Sender<TheaterCommand>) -> HandlerR
     registry.register(RuntimeHandler::new(runtime_config, theater_tx.clone(), None));
 
     // Store handler - provides key-value storage for actors
-    let store_config = StoreHandlerConfig {};
+    let store_config = StoreHandlerConfig::default();
     registry.register(StoreHandler::new(store_config, None));
 
     // Supervisor handler - allows actors to spawn and manage child actors

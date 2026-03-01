@@ -22,6 +22,7 @@ git.json
 inline-chat.log
 theater-client.log
 /.theater-chat
+.direnv
 
 # Documentation build
 book/book/

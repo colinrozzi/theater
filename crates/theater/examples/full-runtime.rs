@@ -44,7 +44,7 @@ fn create_handler_registry(theater_tx: tokio::sync::mpsc::Sender<TheaterCommand>
 
     // Store handler - provides key-value storage for actors
     info!("  - Registering store handler");
-    let store_config = StoreHandlerConfig {};
+    let store_config = StoreHandlerConfig::default();
     registry.register(StoreHandler::new(store_config, None));
 
     // Supervisor handler - allows actors to spawn and manage child actors

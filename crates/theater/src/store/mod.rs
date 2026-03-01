@@ -240,13 +240,22 @@ impl std::fmt::Display for Label {
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct ContentStore {
     pub id: String,
+    /// Custom base path for the store. If None, uses the default theater home location.
+    #[serde(skip)]
+    custom_base_path: Option<PathBuf>,
 }
 
 impl ContentStore {
-    /// Create a new store with the given base path
+    /// Create a new store with the default base path
     pub fn new() -> Self {
         let id = uuid::Uuid::new_v4().to_string();
-        Self { id }
+        Self { id, custom_base_path: None }
+    }
+
+    /// Create a new store with a custom base path
+    pub fn new_with_base_path(base_path: PathBuf) -> Self {
+        let id = uuid::Uuid::new_v4().to_string();
+        Self { id, custom_base_path: Some(base_path) }
     }
 
     pub fn new_named_store(id: &str) -> Self {
@@ -254,7 +263,12 @@ impl ContentStore {
     }
 
     pub fn from_id(id: &str) -> Self {
-        Self { id: id.to_string() }
+        Self { id: id.to_string(), custom_base_path: None }
+    }
+
+    /// Create a store from ID with a custom base path
+    pub fn from_id_with_base_path(id: &str, base_path: PathBuf) -> Self {
+        Self { id: id.to_string(), custom_base_path: Some(base_path) }
     }
 
     pub fn id(&self) -> &str {
@@ -262,8 +276,12 @@ impl ContentStore {
     }
 
     pub fn base_path(&self) -> PathBuf {
-        let theater_home = utils::get_theater_home();
-        PathBuf::from(&theater_home).join("store").join(&self.id)
+        if let Some(ref custom) = self.custom_base_path {
+            custom.join(&self.id)
+        } else {
+            let theater_home = utils::get_theater_home();
+            PathBuf::from(&theater_home).join("store").join(&self.id)
+        }
     }
 
     /// Store content and return its ContentRef

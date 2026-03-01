@@ -319,8 +319,12 @@ fn default_wasi_http_host() -> String {
     "127.0.0.1".to_string()
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct StoreHandlerConfig {}
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+pub struct StoreHandlerConfig {
+    /// Custom base path for the content store. If not set, uses the default location.
+    #[serde(default)]
+    pub base_path: Option<std::path::PathBuf>,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct HttpFrameworkHandlerConfig {}

@@ -73,7 +73,7 @@ async fn test_multi_handler_composite() {
     );
 
     // Create handler instances
-    let mut store_handler = StoreHandler::new(StoreHandlerConfig {}, None);
+    let mut store_handler = StoreHandler::new(StoreHandlerConfig::default(), None);
     let mut supervisor_handler = SupervisorHandler::new(SupervisorHostConfig {}, None);
 
     // Create handler context for tracking satisfied imports

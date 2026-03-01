@@ -1,0 +1,10 @@
+name = "store-test"
+version = "0.1.0"
+package = "./target/wasm32-unknown-unknown/release/store_test_actor.wasm"
+
+[[handler]]
+type = "runtime"
+
+[[handler]]
+type = "store"
+base_path = "/tmp/theater-store-test"
