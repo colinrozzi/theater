@@ -47,31 +47,10 @@ pub struct StartArgs {
     /// Skip calling the actor's init function after spawning
     #[arg(long)]
     pub no_init: bool,
-}
 
-/// Extract log message from a chain event if it's a runtime log event
-fn extract_log_message(event: &ChainEvent) -> Option<String> {
-    if event.event_type != "theater:simple/runtime/log" {
-        return None;
-    }
-
-    // Parse the event data to extract the log message
-    // The data is a serialized ChainEventPayload::HostFunction(HostFunctionCall)
-    // where input contains the log message
-    let data_str = std::str::from_utf8(&event.data).ok()?;
-    let payload: serde_json::Value = serde_json::from_str(data_str).ok()?;
-
-    // Navigate to the input field which contains the log message
-    // Structure: {"category":"HostFunction","interface":"...","function":"log","input":{"String":"message"},...}
-    let input = payload.get("input")?;
-
-    // The input is a Pack Value, which for a string is {"String": "the message"}
-    if let Some(msg) = input.get("String") {
-        return msg.as_str().map(|s| s.to_string());
-    }
-
-    // Fallback: try to get it as a direct string
-    input.as_str().map(|s| s.to_string())
+    /// Disable actor log output to stdout
+    #[arg(long)]
+    pub no_actor_logs: bool,
 }
 
 /// Format a chain event in the custom block format for file persistence
@@ -105,16 +84,6 @@ fn format_event_json(event: &ChainEvent, actor_id: &TheaterId) -> String {
         "data": serde_json::from_slice::<serde_json::Value>(&event.data).ok()
     });
     serde_json::to_string(&json).unwrap_or_else(|_| "{}".to_string())
-}
-
-/// Short actor ID for display (first 8 chars)
-fn short_id(id: &TheaterId) -> String {
-    let s = id.to_string();
-    if s.len() > 8 {
-        s[..8].to_string()
-    } else {
-        s
-    }
 }
 
 /// Manages chain file writers for multiple actors
@@ -158,12 +127,16 @@ impl ChainFileManager {
 /// Create a handler registry with all Theater handlers
 fn create_handler_registry(
     theater_tx: mpsc::Sender<TheaterCommand>,
+    show_actor_logs: bool,
 ) -> HandlerRegistry {
     let mut registry = HandlerRegistry::new();
 
     // Runtime handler - provides log, get-chain, shutdown
     let runtime_config = RuntimeHostConfig {};
-    registry.register(RuntimeHandler::new(runtime_config, theater_tx.clone(), None));
+    registry.register(
+        RuntimeHandler::new(runtime_config, theater_tx.clone(), None)
+            .with_show_logs(show_actor_logs)
+    );
 
     // Store handler - provides content storage
     let store_config = StoreHandlerConfig::default();
@@ -227,7 +200,7 @@ pub async fn execute_async(args: &StartArgs, ctx: &CommandContext) -> Result<(),
 
     // Create the TheaterRuntime in-process
     let (theater_tx, theater_rx) = mpsc::channel::<TheaterCommand>(32);
-    let handler_registry = create_handler_registry(theater_tx.clone());
+    let handler_registry = create_handler_registry(theater_tx.clone(), !args.no_actor_logs);
 
     let mut runtime = TheaterRuntime::new(
         theater_tx.clone(),
@@ -409,15 +382,10 @@ pub async fn execute_async(args: &StartArgs, ctx: &CommandContext) -> Result<(),
                                 }
                             }
 
-                            // Output to stdout based on mode
+                            // Output JSON if --events mode is enabled
+                            // (Actor logs are printed directly by RuntimeHandler, not extracted here)
                             if args.events {
-                                // JSON mode: output all events as JSON
                                 println!("{}", format_event_json(&chain_event, &actor_id));
-                            } else {
-                                // Default mode: only show log messages
-                                if let Some(msg) = extract_log_message(&chain_event) {
-                                    println!("[{}] {}", short_id(&actor_id), msg);
-                                }
                             }
 
                             if chain_event.event_type == "shutdown" {

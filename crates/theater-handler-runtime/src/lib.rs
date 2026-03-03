@@ -49,6 +49,8 @@ pub struct RuntimeHandler {
     theater_tx: Sender<TheaterCommand>,
     #[allow(dead_code)]
     permissions: Option<RuntimePermissions>,
+    /// Whether to print actor logs to stdout
+    show_logs: bool,
 }
 
 impl RuntimeHandler {
@@ -61,7 +63,14 @@ impl RuntimeHandler {
             config,
             theater_tx,
             permissions,
+            show_logs: true, // Default to showing logs
         }
+    }
+
+    /// Set whether to print actor logs to stdout
+    pub fn with_show_logs(mut self, show_logs: bool) -> Self {
+        self.show_logs = show_logs;
+        self
     }
 
     /// Get the interface declarations for this handler.
@@ -106,17 +115,25 @@ impl Handler for RuntimeHandler {
         }
 
         let theater_tx = self.theater_tx.clone();
+        let show_logs = self.show_logs;
 
         builder
             .interface("theater:simple/runtime")?
             // Log function: log(msg: string)
-            // Actor logs are captured as chain events and printed by the CLI,
-            // not through tracing (which is for runtime/system logs)
-            .func_typed("log", |_ctx: &mut Ctx<'_, ActorStore>, input: Value| {
-                // The log message is captured as a chain event automatically
-                // by the host function recording mechanism. The CLI extracts
-                // and prints these via extract_log_message().
-                let _ = input; // Message is in the chain event, not printed here
+            // Actor logs are printed directly to stdout (configurable via show_logs).
+            // The call is also recorded as a chain event for persistence/replay.
+            .func_typed("log", move |ctx: &mut Ctx<'_, ActorStore>, input: Value| {
+                if show_logs {
+                    let msg = match &input {
+                        Value::String(s) => s.as_str(),
+                        _ => return Value::Tuple(vec![]),
+                    };
+                    let store = ctx.data();
+                    let id = &store.id;
+                    // Print to stdout with short actor ID prefix
+                    let short_id = &id.to_string()[..8.min(id.to_string().len())];
+                    println!("[{}] {}", short_id, msg);
+                }
                 Value::Tuple(vec![])
             })?
             // Get chain function: get-chain() -> chain
