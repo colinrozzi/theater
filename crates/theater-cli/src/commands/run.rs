@@ -76,6 +76,7 @@ fn create_handler_registry(
     let tcp_config = TcpHandlerConfig {
         listen: None,
         max_connections: None,
+        ..Default::default()
     };
     registry.register(TcpHandler::new(tcp_config));
 

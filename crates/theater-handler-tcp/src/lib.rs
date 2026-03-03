@@ -24,6 +24,32 @@
 //! - `"once"`: Single `on-data` callback, then switches back to passive
 //!
 //! This matches Erlang/OTP's `{active, true/false/once}` socket options.
+//!
+//! ## TLS Support
+//!
+//! TLS can be enabled via manifest configuration:
+//!
+//! ```toml
+//! [[handler]]
+//! type = "tcp"
+//!
+//! [handler.client_tls]
+//! enabled = true
+//! # ca_cert = "/path/to/ca.pem"  # Optional custom CA
+//! # skip_verify = false          # For development only
+//!
+//! [handler.server_tls]
+//! enabled = true
+//! cert = "/path/to/server.pem"
+//! key = "/path/to/server-key.pem"
+//! ```
+//!
+//! When TLS is configured, connections are automatically encrypted. The actor
+//! code doesn't need to change - it uses the same `tcp-connect`, `tcp-listen`,
+//! `tcp-read`, `tcp-write` interface.
+
+mod stream;
+mod tls;
 
 use std::collections::HashMap;
 use std::future::Future;
@@ -32,11 +58,13 @@ use std::pin::Pin;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, warn};
+
+use stream::{UnifiedReadHalf, UnifiedStream, UnifiedWriteHalf};
+use tls::TlsContext;
 
 use theater::actor::handle::ActorHandle;
 use theater::actor::store::ActorStore;
@@ -90,9 +118,9 @@ enum DataMode {
 /// Represents the stream state based on data mode
 enum StreamState {
     /// Full stream available for passive mode operations
-    Full(TcpStream),
+    Full(UnifiedStream),
     /// Only write half available - read half taken by active mode task
-    WriteOnly(OwnedWriteHalf),
+    WriteOnly(UnifiedWriteHalf),
     /// Connection closed or stream taken
     Closed,
 }
@@ -168,16 +196,28 @@ pub struct TcpHandler {
     actor_handle: Arc<std::sync::Mutex<Option<ActorHandle>>>,
     /// Cancellation token for spawned background tasks
     cancellation_token: CancellationToken,
+    /// TLS context for encrypted connections (shared across clones)
+    tls_context: Arc<Option<TlsContext>>,
 }
 
 impl TcpHandler {
     pub fn new(config: TcpHandlerConfig) -> Self {
+        // Build TLS context from config
+        let tls_context = match TlsContext::from_config(&config) {
+            Ok(ctx) => Arc::new(ctx),
+            Err(e) => {
+                error!("Failed to build TLS context: {}. TLS will be disabled.", e);
+                Arc::new(None)
+            }
+        };
+
         Self {
             config,
             shared_state: Arc::new(SharedTcpState::new(None)),
             actor_id: Arc::new(std::sync::Mutex::new(None)),
             actor_handle: Arc::new(std::sync::Mutex::new(None)),
             cancellation_token: CancellationToken::new(),
+            tls_context,
         }
     }
 
@@ -275,6 +315,21 @@ impl Handler for TcpHandler {
             _ => self.config.clone(),
         };
 
+        // Build TLS context from config if different from current
+        let tls_context = if config.is_some() {
+            // New config provided, rebuild TLS context
+            match TlsContext::from_config(&tcp_config) {
+                Ok(ctx) => Arc::new(ctx),
+                Err(e) => {
+                    error!("Failed to build TLS context: {}. TLS will be disabled.", e);
+                    Arc::new(None)
+                }
+            }
+        } else {
+            // Reuse existing TLS context
+            self.tls_context.clone()
+        };
+
         // Share the same state across all instances - this is the key for transfer!
         // Each instance gets its own cancellation token (cancelled when that actor shuts down)
         Box::new(TcpHandler {
@@ -283,6 +338,7 @@ impl Handler for TcpHandler {
             actor_id: Arc::new(std::sync::Mutex::new(None)),
             actor_handle: Arc::new(std::sync::Mutex::new(None)),
             cancellation_token: CancellationToken::new(),
+            tls_context,
         })
     }
 
@@ -381,12 +437,15 @@ impl Handler for TcpHandler {
         // Clone state and actor_id for each closure
         let st_connect = state.clone();
         let aid_connect = actor_id_for_closures.clone();
+        let tls_for_connect = self.tls_context.clone();
 
         let st_listen = state.clone();
         let aid_listen = actor_id_for_closures.clone();
+        let tls_for_listen = self.tls_context.clone();
 
         let st_accept = state.clone();
         let aid_accept = actor_id_for_closures.clone();
+        let tls_for_accept = self.tls_context.clone();
 
         let st_activate = state.clone();
         let aid_activate = actor_id_for_closures.clone();
@@ -426,24 +485,48 @@ impl Handler for TcpHandler {
                 move |_ctx: AsyncCtx<ActorStore>, input: Value| {
                     let st = st_connect.clone();
                     let actor_id = aid_connect.clone();
+                    let tls_ctx = tls_for_connect.clone();
                     async move {
                         let address = parse_string(&input)?;
                         st.check_connection_limit().await?;
                         debug!("tcp connect to {}", address);
 
-                        let stream = TcpStream::connect(&address)
+                        let tcp_stream = TcpStream::connect(&address)
                             .await
                             .map_err(|e| Value::String(e.to_string()))?;
 
-                        let peer_addr = stream
+                        let peer_addr = tcp_stream
                             .peer_addr()
                             .map_err(|e| Value::String(e.to_string()))?;
+
+                        // Apply TLS if configured
+                        let unified_stream = if let Some(ref ctx) = *tls_ctx {
+                            if let Some(ref connector) = ctx.client_connector {
+                                // Extract hostname from address for SNI
+                                let server_name = tls::parse_server_name(
+                                    address.split(':').next().unwrap_or(&address),
+                                )
+                                .map_err(|e| Value::String(e.to_string()))?;
+
+                                debug!("tcp connect: performing TLS handshake with SNI {:?}", server_name);
+                                let tls_stream = connector
+                                    .connect(server_name, tcp_stream)
+                                    .await
+                                    .map_err(|e| Value::String(format!("TLS handshake failed: {}", e)))?;
+                                info!("tcp connect: TLS handshake complete");
+                                UnifiedStream::ClientTls(tls_stream)
+                            } else {
+                                UnifiedStream::Plain(tcp_stream)
+                            }
+                        } else {
+                            UnifiedStream::Plain(tcp_stream)
+                        };
 
                         let id = st.next_id();
                         st.connections.lock().await.insert(
                             id,
                             ConnectionEntry {
-                                stream: StreamState::Full(stream),
+                                stream: StreamState::Full(unified_stream),
                                 peer_addr,
                                 owner: actor_id,
                                 state: ConnectionState::Active, // Outbound = active
@@ -466,6 +549,7 @@ impl Handler for TcpHandler {
                     let actor_id = aid_listen.clone();
                     let actor_handle_arc = actor_handle_for_listen.clone();
                     let cancel_token = cancel_token_for_listen.clone();
+                    let tls_ctx = tls_for_listen.clone();
 
                     async move {
                         let address = parse_string(&input)?;
@@ -476,9 +560,13 @@ impl Handler for TcpHandler {
                             .map_err(|e| Value::String(e.to_string()))?;
 
                         let listener_id = st.next_id();
+                        let has_tls = match tls_ctx.as_ref() {
+                            Some(ctx) => ctx.server_acceptor.is_some(),
+                            None => false,
+                        };
                         info!(
-                            "tcp listening on {} as listener={}",
-                            address, listener_id
+                            "tcp listening on {} as listener={} (tls={})",
+                            address, listener_id, has_tls
                         );
 
                         // Take the actor_handle for use in the accept loop
@@ -508,18 +596,39 @@ impl Handler for TcpHandler {
                                     }
                                     result = listener.accept() => {
                                         match result {
-                                            Ok((stream, peer_addr)) => {
+                                            Ok((tcp_stream, peer_addr)) => {
                                                 let conn_id = st_for_task.next_id();
                                                 info!(
                                                     "tcp accepted conn={} from {} on listener={}",
                                                     conn_id, peer_addr, listener_id
                                                 );
 
+                                                // Apply TLS if configured
+                                                let unified_stream = if let Some(ref ctx) = *tls_ctx {
+                                                    if let Some(ref acceptor) = ctx.server_acceptor {
+                                                        debug!("tcp accept: performing TLS handshake for conn={}", conn_id);
+                                                        match acceptor.accept(tcp_stream).await {
+                                                            Ok(tls_stream) => {
+                                                                info!("tcp accept: TLS handshake complete for conn={}", conn_id);
+                                                                UnifiedStream::ServerTls(tls_stream)
+                                                            }
+                                                            Err(e) => {
+                                                                error!("TLS handshake failed for conn={}: {}", conn_id, e);
+                                                                continue; // Skip this connection
+                                                            }
+                                                        }
+                                                    } else {
+                                                        UnifiedStream::Plain(tcp_stream)
+                                                    }
+                                                } else {
+                                                    UnifiedStream::Plain(tcp_stream)
+                                                };
+
                                                 // Store connection in PENDING state
                                                 st_for_task.connections.lock().await.insert(
                                                     conn_id,
                                                     ConnectionEntry {
-                                                        stream: StreamState::Full(stream),
+                                                        stream: StreamState::Full(unified_stream),
                                                         peer_addr,
                                                         owner: actor_id_for_task.clone(),
                                                         state: ConnectionState::Pending,
@@ -575,6 +684,7 @@ impl Handler for TcpHandler {
                 move |_ctx: AsyncCtx<ActorStore>, input: Value| {
                     let st = st_accept.clone();
                     let actor_id = aid_accept.clone();
+                    let tls_ctx = tls_for_accept.clone();
                     async move {
                         let listener_id_str = parse_string(&input)?;
                         let listener_id = string_to_id(&listener_id_str)?;
@@ -593,7 +703,7 @@ impl Handler for TcpHandler {
                             )));
                         }
 
-                        let (stream, peer_addr) = entry
+                        let (tcp_stream, peer_addr) = entry
                             .listener
                             .accept()
                             .await
@@ -602,10 +712,27 @@ impl Handler for TcpHandler {
                         let conn_id = st.next_id();
                         drop(listeners); // Release lock before acquiring connections lock
 
+                        // Apply TLS if configured
+                        let unified_stream = if let Some(ref ctx) = *tls_ctx {
+                            if let Some(ref acceptor) = ctx.server_acceptor {
+                                debug!("tcp manual accept: performing TLS handshake for conn={}", conn_id);
+                                let tls_stream = acceptor
+                                    .accept(tcp_stream)
+                                    .await
+                                    .map_err(|e| Value::String(format!("TLS handshake failed: {}", e)))?;
+                                info!("tcp manual accept: TLS handshake complete for conn={}", conn_id);
+                                UnifiedStream::ServerTls(tls_stream)
+                            } else {
+                                UnifiedStream::Plain(tcp_stream)
+                            }
+                        } else {
+                            UnifiedStream::Plain(tcp_stream)
+                        };
+
                         st.connections.lock().await.insert(
                             conn_id,
                             ConnectionEntry {
-                                stream: StreamState::Full(stream),
+                                stream: StreamState::Full(unified_stream),
                                 peer_addr,
                                 owner: actor_id,
                                 state: ConnectionState::Pending, // Starts pending!
@@ -1113,7 +1240,7 @@ const ACTIVE_READ_BUFFER_SIZE: usize = 8192;
 /// This is spawned when a connection enters "active" or "once" mode.
 async fn tcp_read_loop(
     conn_id: u64,
-    mut read_half: OwnedReadHalf,
+    mut read_half: UnifiedReadHalf,
     actor_handle: ActorHandle,
     shared_state: Arc<SharedTcpState>,
     is_once: bool,
@@ -1225,10 +1352,7 @@ mod tests {
 
     #[test]
     fn test_tcp_handler_creation() {
-        let config = TcpHandlerConfig {
-            listen: None,
-            max_connections: None,
-        };
+        let config = TcpHandlerConfig::default();
         let handler = TcpHandler::new(config);
 
         assert_eq!(handler.name(), "tcp");
@@ -1244,10 +1368,7 @@ mod tests {
 
     #[test]
     fn test_tcp_handler_clone_shares_state() {
-        let config = TcpHandlerConfig {
-            listen: None,
-            max_connections: None,
-        };
+        let config = TcpHandlerConfig::default();
         let handler = TcpHandler::new(config);
         let cloned = handler.create_instance(None);
 
@@ -1268,10 +1389,7 @@ mod tests {
 
     #[test]
     fn test_tcp_handler_interface_hashes() {
-        let config = TcpHandlerConfig {
-            listen: None,
-            max_connections: None,
-        };
+        let config = TcpHandlerConfig::default();
         let handler = TcpHandler::new(config);
 
         let hashes = handler.interface_hashes();

@@ -1184,7 +1184,7 @@ pub fn create_tcp_registry(
     let mut registry = HandlerRegistry::new();
     let runtime_config = RuntimeHostConfig {};
     registry.register(RuntimeHandler::new(runtime_config, theater_tx, None));
-    registry.register(TcpHandler::new(TcpHandlerConfig { listen: None, max_connections: None }));
+    registry.register(TcpHandler::new(TcpHandlerConfig::default()));
     registry
 }
 

@@ -27,10 +27,7 @@ fn create_handler_registry(theater_tx: mpsc::Sender<TheaterCommand>) -> HandlerR
         None,
     ));
 
-    registry.register(TcpHandler::new(TcpHandlerConfig {
-        listen: None,
-        max_connections: None,
-    }));
+    registry.register(TcpHandler::new(TcpHandlerConfig::default()));
 
     registry
 }
