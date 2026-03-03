@@ -15,12 +15,8 @@ async fn main() -> Result<()> {
         Config::default()
     });
 
-    // Initialize logging based on verbose flag and config
-    let log_level = if cli.verbose {
-        tracing::Level::DEBUG
-    } else {
-        config.logging.level.parse().unwrap_or(tracing::Level::WARN)
-    };
+    // Initialize logging based on --log-level
+    let log_level: tracing::Level = cli.log_level.into();
 
     let registry = tracing_subscriber::registry()
         .with(tracing_subscriber::EnvFilter::from_default_env().add_directive(log_level.into()));

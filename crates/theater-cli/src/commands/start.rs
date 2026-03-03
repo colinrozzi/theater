@@ -1,12 +1,11 @@
 use anyhow::Result;
-use clap::{Parser, ValueEnum};
+use clap::Parser;
 use std::collections::HashMap;
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::PathBuf;
 use tokio::sync::mpsc;
 use tracing::{debug, error};
-use tracing_subscriber::EnvFilter;
 
 use crate::{error::CliError, CommandContext};
 use theater::chain::ChainEvent;
@@ -31,34 +30,6 @@ use theater_handler_terminal::TerminalHandler;
 use theater_handler_timer::TimerHandler;
 use theater_handler_loop::LoopHandler;
 
-/// Log level for runtime/system logs
-#[derive(Debug, Clone, Copy, ValueEnum, Default)]
-pub enum LogLevel {
-    /// Show error logs only
-    Error,
-    /// Show warning and error logs
-    Warn,
-    /// Show info, warning, and error logs
-    #[default]
-    Info,
-    /// Show debug and above
-    Debug,
-    /// Show all logs including trace
-    Trace,
-}
-
-impl std::fmt::Display for LogLevel {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            LogLevel::Error => write!(f, "error"),
-            LogLevel::Warn => write!(f, "warn"),
-            LogLevel::Info => write!(f, "info"),
-            LogLevel::Debug => write!(f, "debug"),
-            LogLevel::Trace => write!(f, "trace"),
-        }
-    }
-}
-
 #[derive(Debug, Parser)]
 pub struct StartArgs {
     /// Path or URL to the actor manifest file
@@ -73,17 +44,9 @@ pub struct StartArgs {
     #[arg(long)]
     pub chain_dir: Option<PathBuf>,
 
-    /// Runtime log level (for system/tracing logs)
-    #[arg(long, value_enum)]
-    pub log_level: Option<LogLevel>,
-
-    /// Show verbose output (deprecated, use --events or --log-level)
-    #[arg(long, hide = true)]
-    pub verbose: bool,
-
-    /// Call the actor's init function after spawning
+    /// Skip calling the actor's init function after spawning
     #[arg(long)]
-    pub init: bool,
+    pub no_init: bool,
 }
 
 /// Extract log message from a chain event if it's a runtime log event
@@ -241,18 +204,6 @@ fn create_handler_registry(
 
 /// Execute the start command - spin up a local runtime and run the actor
 pub async fn execute_async(args: &StartArgs, ctx: &CommandContext) -> Result<(), CliError> {
-    // Set up tracing based on --log-level
-    if let Some(level) = &args.log_level {
-        let filter = EnvFilter::try_new(format!("theater={},theater_handler={}", level, level))
-            .unwrap_or_else(|_| EnvFilter::new("info"));
-        let subscriber = tracing_subscriber::fmt()
-            .with_env_filter(filter)
-            .with_target(true)
-            .with_writer(std::io::stderr)
-            .finish();
-        let _ = tracing::subscriber::set_global_default(subscriber);
-    }
-
     debug!("Starting actor from manifest: {}", args.manifest);
 
     // Resolve the manifest reference (file path, URL, or store path)
@@ -363,8 +314,8 @@ pub async fn execute_async(args: &StartArgs, ctx: &CommandContext) -> Result<(),
         }
     };
 
-    // Call init if --init flag is set
-    if args.init {
+    // Call init unless --no-init flag is set
+    if !args.no_init {
         // Get the actor handle
         let (handle_tx, handle_rx) = tokio::sync::oneshot::channel();
         theater_tx

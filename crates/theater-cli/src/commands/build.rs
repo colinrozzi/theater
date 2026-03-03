@@ -60,7 +60,7 @@ pub async fn execute_async(args: &BuildArgs, ctx: &CommandContext) -> Result<(),
         let mut clean_cmd = Command::new("cargo");
         clean_cmd.arg("clean").current_dir(&project_dir);
 
-        if let Err(e) = run_command_with_output(&mut clean_cmd, ctx.verbose) {
+        if let Err(e) = run_command_with_output(&mut clean_cmd, ctx.is_verbose()) {
             error!("Failed to clean cargo artifacts: {}", e);
             // Continue anyway, as this is not fatal
         }
@@ -84,7 +84,7 @@ pub async fn execute_async(args: &BuildArgs, ctx: &CommandContext) -> Result<(),
 
     // Run the build command and capture output
     let (status, stdout, stderr) =
-        run_command_with_output(&mut build_cmd, ctx.verbose).map_err(|e| {
+        run_command_with_output(&mut build_cmd, ctx.is_verbose()).map_err(|e| {
             CliError::build_failed(format!("Failed to execute cargo build: {}", e))
         })?;
 

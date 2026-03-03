@@ -110,19 +110,13 @@ impl Handler for RuntimeHandler {
         builder
             .interface("theater:simple/runtime")?
             // Log function: log(msg: string)
-            .func_typed("log", |ctx: &mut Ctx<'_, ActorStore>, input: Value| {
-                // Extract string from Value
-                let msg = match input {
-                    Value::String(s) => s,
-                    _ => format!("{:?}", input),
-                };
-
-                let store = ctx.data();
-                let id = store.id.clone();
-
-                info!("[ACTOR] [{}] {}", id, msg);
-
-                // Return unit (empty tuple)
+            // Actor logs are captured as chain events and printed by the CLI,
+            // not through tracing (which is for runtime/system logs)
+            .func_typed("log", |_ctx: &mut Ctx<'_, ActorStore>, input: Value| {
+                // The log message is captured as a chain event automatically
+                // by the host function recording mechanism. The CLI extracts
+                // and prints these via extract_log_message().
+                let _ = input; // Message is in the chain event, not printed here
                 Value::Tuple(vec![])
             })?
             // Get chain function: get-chain() -> chain

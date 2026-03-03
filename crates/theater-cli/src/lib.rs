@@ -5,7 +5,35 @@ pub mod output;
 pub mod templates;
 pub mod utils;
 
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
+
+/// Log level for runtime/system logs
+#[derive(Debug, Clone, Copy, ValueEnum, Default)]
+pub enum LogLevel {
+    /// Show error logs only
+    Error,
+    /// Show warning and error logs
+    #[default]
+    Warn,
+    /// Show info, warning, and error logs
+    Info,
+    /// Show debug and above
+    Debug,
+    /// Show all logs including trace
+    Trace,
+}
+
+impl From<LogLevel> for tracing::Level {
+    fn from(level: LogLevel) -> Self {
+        match level {
+            LogLevel::Error => tracing::Level::ERROR,
+            LogLevel::Warn => tracing::Level::WARN,
+            LogLevel::Info => tracing::Level::INFO,
+            LogLevel::Debug => tracing::Level::DEBUG,
+            LogLevel::Trace => tracing::Level::TRACE,
+        }
+    }
+}
 
 /// Theater CLI - A WebAssembly actor system that enables state management,
 /// verification, and flexible interaction patterns.
@@ -13,9 +41,9 @@ use clap::{Parser, Subcommand};
 #[command(name = "theater")]
 #[command(author, version, about, long_about = None)]
 pub struct Cli {
-    /// Turn on verbose output
-    #[arg(short, long, global = true)]
-    pub verbose: bool,
+    /// Set the log level for runtime/system logs
+    #[arg(short, long, global = true, value_enum, default_value = "warn")]
+    pub log_level: LogLevel,
 
     /// Display output in JSON format
     #[arg(long, global = true)]
@@ -69,7 +97,7 @@ pub async fn run(
     let ctx = CommandContext {
         config,
         output,
-        verbose: cli.verbose,
+        log_level: cli.log_level,
         json: cli.json,
         shutdown_token: shutdown_token.clone(),
     };
@@ -118,12 +146,12 @@ pub async fn run(
             // Use our enhanced error handling
             if let Some(cli_error) = e.downcast_ref::<error::CliError>() {
                 ctx.output.error(&cli_error.user_message())?;
-                if ctx.verbose {
+                if ctx.is_verbose() {
                     eprintln!("\nDebug info: {:?}", cli_error);
                 }
             } else {
                 ctx.output.error(&format!("Error: {}", e))?;
-                if ctx.verbose {
+                if ctx.is_verbose() {
                     eprintln!("\nDebug info: {:?}", e);
                 }
             }
@@ -136,7 +164,14 @@ pub async fn run(
 pub struct CommandContext {
     pub config: config::Config,
     pub output: output::OutputManager,
-    pub verbose: bool,
+    pub log_level: LogLevel,
     pub json: bool,
     pub shutdown_token: tokio_util::sync::CancellationToken,
+}
+
+impl CommandContext {
+    /// Returns true if log level is debug or higher (more verbose)
+    pub fn is_verbose(&self) -> bool {
+        matches!(self.log_level, LogLevel::Debug | LogLevel::Trace)
+    }
 }
