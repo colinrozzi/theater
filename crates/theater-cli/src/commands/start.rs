@@ -1,5 +1,5 @@
 use anyhow::Result;
-use clap::Parser;
+use clap::{Parser, ValueEnum};
 use std::collections::HashMap;
 use std::fs::{self, OpenOptions};
 use std::io::Write;
@@ -30,15 +30,31 @@ use theater_handler_terminal::TerminalHandler;
 use theater_handler_timer::TimerHandler;
 use theater_handler_loop::LoopHandler;
 
+/// Output format for chain events
+#[derive(Debug, Clone, Copy, ValueEnum, Default)]
+pub enum EventFormat {
+    /// JSON format (one JSON object per line)
+    Json,
+    /// Short format (compact, one line per event)
+    #[default]
+    Short,
+    /// Full format (complete event data, multi-line)
+    Full,
+}
+
 #[derive(Debug, Parser)]
 pub struct StartArgs {
     /// Path or URL to the actor manifest file
     #[arg(default_value = "manifest.toml")]
     pub manifest: String,
 
-    /// Output all chain events as JSON (not just logs)
+    /// Output chain events from all actors
     #[arg(long)]
     pub events: bool,
+
+    /// Format for event output (used with --events)
+    #[arg(long, value_enum, default_value = "short")]
+    pub events_format: EventFormat,
 
     /// Directory to persist chain events (one file per actor)
     #[arg(long)]
@@ -53,19 +69,28 @@ pub struct StartArgs {
     pub no_actor_logs: bool,
 }
 
-/// Format a chain event in the custom block format for file persistence
-fn format_event_block(event: &ChainEvent) -> String {
+/// Format a chain event with actor ID prefix using ChainEvent's Display impl (short)
+fn format_event_short(event: &ChainEvent, actor_id: &TheaterId) -> String {
+    let id_str = actor_id.to_string();
+    let short_id = &id_str[..8.min(id_str.len())];
+    format!("[{}] {}\n", short_id, event)
+}
+
+/// Format a chain event with full data (multi-line, complete)
+fn format_event_full(event: &ChainEvent, actor_id: &TheaterId) -> String {
+    let id_str = actor_id.to_string();
+    let short_id = &id_str[..8.min(id_str.len())];
     let hash_hex = hex::encode(&event.hash);
     let parent_hex = event
         .parent_hash
         .as_ref()
         .map(|h| hex::encode(h))
-        .unwrap_or_else(|| "0000000000000000000000000000000000000000".to_string());
-
+        .unwrap_or_else(|| "none".to_string());
     let data_str = String::from_utf8_lossy(&event.data);
 
     format!(
-        "EVENT {}\n{}\n{}\n{}\n\n{}\n\n",
+        "EVENT [{}] {}\nparent: {}\ntype: {}\nsize: {}\n{}\n\n",
+        short_id,
         hash_hex,
         parent_hex,
         event.event_type,
@@ -113,7 +138,7 @@ impl ChainFileManager {
                 .expect("Failed to open chain file")
         });
 
-        let block = format_event_block(event);
+        let block = format_event_full(event, actor_id);
         file.write_all(block.as_bytes()).map_err(|e| {
             CliError::file_operation_failed("write event", format!("{}.chain", actor_id), e)
         })?;
@@ -211,6 +236,10 @@ pub async fn execute_async(args: &StartArgs, ctx: &CommandContext) -> Result<(),
     .await
     .map_err(|e| CliError::server_error(format!("Failed to create runtime: {}", e)))?;
 
+    // Set up global event subscription (receives events from ALL actors)
+    let (global_events_tx, mut global_events_rx) = mpsc::channel(256);
+    runtime.add_global_subscription(global_events_tx);
+
     // Spawn the runtime event loop in a background task
     let runtime_handle = tokio::spawn(async move {
         if let Err(e) = runtime.run().await {
@@ -251,9 +280,6 @@ pub async fn execute_async(args: &StartArgs, ctx: &CommandContext) -> Result<(),
     // Set up a supervisor channel so we get notified when the actor exits
     let (supervisor_tx, mut supervisor_rx) = mpsc::channel(32);
 
-    // Set up an event subscription channel for logging
-    let (subscription_tx, mut subscription_rx) = mpsc::channel(32);
-
     theater_tx
         .send(TheaterCommand::SpawnActor {
             wasm_bytes,
@@ -262,7 +288,7 @@ pub async fn execute_async(args: &StartArgs, ctx: &CommandContext) -> Result<(),
             response_tx,
             parent_id: None,
             supervisor_tx: Some(supervisor_tx),
-            subscription_tx: Some(subscription_tx),
+            subscription_tx: None, // Using global subscription instead
         })
         .await
         .map_err(|e| CliError::server_error(format!("Failed to send spawn command: {}", e)))?;
@@ -370,25 +396,36 @@ pub async fn execute_async(args: &StartArgs, ctx: &CommandContext) -> Result<(),
                 }
             }
 
-            // Event subscription
-            event = subscription_rx.recv() => {
-                if let Some(event) = event {
-                    match event {
+            // Global event subscription (all actors)
+            event = global_events_rx.recv() => {
+                if let Some((event_actor_id, event_result)) = event {
+                    match event_result {
                         Ok(chain_event) => {
                             // Persist to chain file if enabled
                             if let Some(ref mut manager) = chain_file_manager {
-                                if let Err(e) = manager.write_event(&actor_id, &chain_event) {
+                                if let Err(e) = manager.write_event(&event_actor_id, &chain_event) {
                                     eprintln!("Warning: failed to write chain event: {}", e);
                                 }
                             }
 
-                            // Output JSON if --events mode is enabled
+                            // Output events if --events mode is enabled
                             // (Actor logs are printed directly by RuntimeHandler, not extracted here)
                             if args.events {
-                                println!("{}", format_event_json(&chain_event, &actor_id));
+                                match args.events_format {
+                                    EventFormat::Json => {
+                                        println!("{}", format_event_json(&chain_event, &event_actor_id));
+                                    }
+                                    EventFormat::Short => {
+                                        print!("{}", format_event_short(&chain_event, &event_actor_id));
+                                    }
+                                    EventFormat::Full => {
+                                        print!("{}", format_event_full(&chain_event, &event_actor_id));
+                                    }
+                                }
                             }
 
-                            if chain_event.event_type == "shutdown" {
+                            // Check for root actor shutdown
+                            if event_actor_id == actor_id && chain_event.event_type == "shutdown" {
                                 break;
                             }
                         }

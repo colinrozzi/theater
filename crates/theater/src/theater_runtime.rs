@@ -110,6 +110,8 @@ pub struct TheaterRuntime {
     pack_runtime: AsyncRuntime,
     /// Handler registry
     pub handler_registry: HandlerRegistry,
+    /// Global event subscribers (receive events from all actors)
+    global_subscriptions: Vec<Sender<(TheaterId, Result<ChainEvent, ActorError>)>>,
 }
 
 /// # ActorProcess
@@ -201,7 +203,14 @@ impl TheaterRuntime {
             channel_events_tx,
             pack_runtime,
             handler_registry,
+            global_subscriptions: Vec::new(),
         })
+    }
+
+    /// Add a global event subscriber that receives events from all actors.
+    /// The subscriber receives tuples of (actor_id, event_result).
+    pub fn add_global_subscription(&mut self, tx: Sender<(TheaterId, Result<ChainEvent, ActorError>)>) {
+        self.global_subscriptions.push(tx);
     }
 
     /// Starts the runtime's main event loop, processing commands until shutdown.
@@ -785,7 +794,24 @@ impl TheaterRuntime {
     async fn handle_actor_event(&mut self, actor_id: TheaterId, event: ChainEvent) -> Result<()> {
         debug!("Handling event for actor: {:?}", actor_id);
 
-        // Use entry API to handle the subscription map more elegantly
+        // Send to global subscribers first
+        let mut global_to_remove: Vec<usize> = Vec::new();
+        for (index, subscriber) in self.global_subscriptions.iter().enumerate() {
+            if let Err(e) = subscriber.send((actor_id.clone(), Ok(event.clone()))).await {
+                error!("Failed to send event to global subscriber: {}", e);
+                global_to_remove.push(index);
+            }
+        }
+        // Remove failed global subscribers in reverse order
+        if !global_to_remove.is_empty() {
+            global_to_remove.sort_unstable_by(|a, b| b.cmp(a));
+            for index in global_to_remove {
+                self.global_subscriptions.swap_remove(index);
+                debug!("Removed failed global subscriber at index {}", index);
+            }
+        }
+
+        // Use entry API to handle the per-actor subscription map
         let should_remove = if let std::collections::hash_map::Entry::Occupied(mut entry) =
             self.subscriptions.entry(actor_id.clone())
         {
