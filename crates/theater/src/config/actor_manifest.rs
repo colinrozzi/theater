@@ -356,6 +356,10 @@ pub struct StoreHandlerConfig {
     /// Custom base path for the content store. If not set, uses the default location.
     #[serde(default)]
     pub base_path: Option<std::path::PathBuf>,
+    /// Fixed store ID. If set, actors will use this ID instead of creating a new store.
+    /// This allows multiple actors to share the same store.
+    #[serde(default)]
+    pub store_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

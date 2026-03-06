@@ -95,6 +95,8 @@ pub struct StoreHandler {
     permissions: Option<StorePermissions>,
     /// Custom base path for content storage. If None, uses the default theater home location.
     base_path: Option<std::path::PathBuf>,
+    /// Fixed store ID. If set, the `new()` function returns this ID instead of creating a new store.
+    store_id: Option<String>,
 }
 
 impl StoreHandler {
@@ -106,6 +108,7 @@ impl StoreHandler {
         Self {
             permissions,
             base_path: config.base_path,
+            store_id: config.store_id,
         }
     }
 
@@ -280,8 +283,9 @@ impl Handler for StoreHandler
             return Ok(());
         }
 
-        // Clone base_path for use in each closure
+        // Clone base_path and store_id for use in each closure
         let bp_new = self.base_path.clone();
+        let configured_store_id = self.store_id.clone();
         let bp_store = self.base_path.clone();
         let bp_get = self.base_path.clone();
         let bp_exists = self.base_path.clone();
@@ -308,17 +312,25 @@ impl Handler for StoreHandler
             .interface("theater:simple/store")?
             // new() -> result<string, string>
             .func_typed("new", move |_ctx: &mut Ctx<'_, ActorStore>, _input: Value| {
-                let store = if let Some(ref bp) = bp_new {
-                    ContentStore::new_with_base_path(bp.clone())
+                // If a store_id is configured, use it; otherwise create a new store
+                let store_id = if let Some(ref id) = configured_store_id {
+                    // Use the configured store ID - just return it without creating new store
+                    id.clone()
                 } else {
-                    ContentStore::new()
+                    // Create a new store with a new UUID
+                    let store = if let Some(ref bp) = bp_new {
+                        ContentStore::new_with_base_path(bp.clone())
+                    } else {
+                        ContentStore::new()
+                    };
+                    store.id().to_string()
                 };
                 // Return Ok(store_id) as Variant with tag 0
                 Value::Variant {
                     type_name: String::from("result"),
                     case_name: String::from("ok"),
                     tag: 0, // ok
-                    payload: vec![Value::String(store.id().to_string())],
+                    payload: vec![Value::String(store_id)],
                 }
             })?
             // store(store-id: string, content: list<u8>) -> result<string, string>
