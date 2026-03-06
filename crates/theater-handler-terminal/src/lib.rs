@@ -10,7 +10,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use tokio::io::{AsyncReadExt, BufReader};
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, Notify};
 use tracing::{debug, error, info, warn};
 
 use theater::actor::handle::ActorHandle;
@@ -165,6 +165,8 @@ pub struct TerminalHandler {
     actor_handle: Arc<std::sync::Mutex<Option<ActorHandle>>>,
     /// Shutdown receiver for background input loop
     shutdown_receiver: Arc<std::sync::Mutex<Option<ShutdownReceiver>>>,
+    /// Notifies setup() when enable-input() takes the shutdown receiver
+    input_enabled_notify: Arc<Notify>,
 }
 
 impl TerminalHandler {
@@ -174,6 +176,7 @@ impl TerminalHandler {
             state: None,
             actor_handle: Arc::new(std::sync::Mutex::new(None)),
             shutdown_receiver: Arc::new(std::sync::Mutex::new(None)),
+            input_enabled_notify: Arc::new(Notify::new()),
         }
     }
 }
@@ -224,19 +227,43 @@ impl Handler for TerminalHandler {
     ) -> Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send>> {
         info!("Terminal handler setup (passive mode)");
 
-        // Store the actor_handle and shutdown_receiver for use by enable-input()
+        // Store the actor_handle for use by enable-input()
         {
             let mut handle_guard = self.actor_handle.lock().unwrap();
             *handle_guard = Some(actor_handle);
         }
+
+        // Store the shutdown_receiver - it may be taken by enable-input() later
         {
             let mut shutdown_guard = self.shutdown_receiver.lock().unwrap();
             *shutdown_guard = Some(shutdown_receiver);
         }
 
-        // Handler is now passive - actors call enable-input() to start the input loop
+        let shutdown_receiver_arc = self.shutdown_receiver.clone();
+        let input_enabled_notify = self.input_enabled_notify.clone();
+
+        // Wait for either:
+        // 1. enable-input() takes the receiver (notified via input_enabled_notify)
+        // 2. Shutdown signal received (if enable-input() was never called)
         Box::pin(async move {
-            // Nothing to do here - enable-input() spawns background input tasks
+            tokio::select! {
+                // Wait for enable-input() to take the receiver
+                _ = input_enabled_notify.notified() => {
+                    info!("Terminal handler: input enabled, setup complete");
+                }
+                // Wait for shutdown if receiver wasn't taken
+                _ = async {
+                    // Take the receiver (if it's still there) and wait for shutdown
+                    let receiver = {
+                        let mut guard = shutdown_receiver_arc.lock().unwrap();
+                        guard.take()
+                    };
+                    if let Some(rx) = receiver {
+                        rx.wait_for_shutdown().await;
+                        info!("Terminal handler received shutdown signal");
+                    }
+                } => {}
+            }
             Ok(())
         })
     }
@@ -321,10 +348,12 @@ impl Handler for TerminalHandler {
                 {
                     let actor_handle = self.actor_handle.clone();
                     let shutdown_receiver = self.shutdown_receiver.clone();
+                    let input_enabled_notify = self.input_enabled_notify.clone();
                     let state = state.clone();
                     move |_ctx: AsyncCtx<ActorStore>, _input: Value| {
                         let actor_handle = actor_handle.clone();
                         let shutdown_receiver = shutdown_receiver.clone();
+                        let input_enabled_notify = input_enabled_notify.clone();
                         let state = state.clone();
                         async move {
                             // Get the actor handle
@@ -342,6 +371,9 @@ impl Handler for TerminalHandler {
                                     Value::String("Input already enabled".to_string())
                                 })?
                             };
+
+                            // Notify setup() that we've taken the receiver
+                            input_enabled_notify.notify_one();
 
                             // Spawn the input loop as a background task
                             tokio::spawn(run_input_loop(handle, shutdown_rx, state));

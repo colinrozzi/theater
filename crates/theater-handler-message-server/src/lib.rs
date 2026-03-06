@@ -50,6 +50,7 @@ use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 use thiserror::Error;
 use tokio::sync::mpsc::{Receiver, Sender};
+use tokio::sync::Notify;
 use tracing::{error, info};
 use uuid::Uuid;
 
@@ -393,6 +394,9 @@ pub struct MessageServerHandler {
     // Shutdown receiver for the consumption task (set in start(), used by register())
     shutdown_receiver: Arc<Mutex<Option<ShutdownReceiver>>>,
 
+    // Notifies setup() when register() takes the shutdown receiver
+    registered_notify: Arc<Notify>,
+
     // Request-response tracking for this actor
     outstanding_requests: Arc<Mutex<HashMap<String, tokio::sync::oneshot::Sender<Vec<u8>>>>>,
 
@@ -416,6 +420,7 @@ impl MessageServerHandler {
             actor_handle: Arc::new(Mutex::new(None)),
             is_registered: Arc::new(Mutex::new(false)),
             shutdown_receiver: Arc::new(Mutex::new(None)),
+            registered_notify: Arc::new(Notify::new()),
             outstanding_requests: Arc::new(Mutex::new(HashMap::new())),
             permissions,
         }
@@ -574,10 +579,30 @@ impl Handler for MessageServerHandler
             *shutdown_guard = Some(shutdown_receiver);
         }
 
-        // Handler is now passive - actors call register() to start message consumption
+        let shutdown_receiver_arc = self.shutdown_receiver.clone();
+        let registered_notify = self.registered_notify.clone();
+
+        // Wait for either:
+        // 1. register() takes the receiver (notified via registered_notify)
+        // 2. Shutdown signal received (if register() was never called)
         Box::pin(async move {
-            // Nothing to do - register() spawns the consumption task
-            // The consumption task handles its own shutdown via the shutdown_receiver
+            tokio::select! {
+                // Wait for register() to take the receiver
+                _ = registered_notify.notified() => {
+                    info!("Message server handler: registered, setup complete");
+                }
+                // Wait for shutdown if receiver wasn't taken
+                _ = async {
+                    let receiver = {
+                        let mut guard = shutdown_receiver_arc.lock().unwrap();
+                        guard.take()
+                    };
+                    if let Some(rx) = receiver {
+                        rx.wait_for_shutdown().await;
+                        info!("Message server handler received shutdown signal");
+                    }
+                } => {}
+            }
             Ok(())
         })
     }
@@ -620,6 +645,7 @@ impl Handler for MessageServerHandler
         let actor_handle_for_register = self.actor_handle.clone();
         let is_registered = self.is_registered.clone();
         let shutdown_receiver_for_register = self.shutdown_receiver.clone();
+        let registered_notify_for_register = self.registered_notify.clone();
         let outstanding_requests_for_register = self.outstanding_requests.clone();
 
         builder
@@ -632,6 +658,7 @@ impl Handler for MessageServerHandler
                 let actor_handle_arc = actor_handle_for_register.clone();
                 let is_registered = is_registered.clone();
                 let shutdown_receiver_arc = shutdown_receiver_for_register.clone();
+                let registered_notify = registered_notify_for_register.clone();
                 let outstanding_requests = outstanding_requests_for_register.clone();
 
                 async move {
@@ -664,6 +691,9 @@ impl Handler for MessageServerHandler
                     let Some(mut shutdown_receiver) = shutdown_receiver else {
                         return Err(Value::String("Shutdown receiver not available".to_string()));
                     };
+
+                    // Notify setup() that we've taken the receiver
+                    registered_notify.notify_one();
 
                     // Create mailbox channel and register with the router
                     let (mailbox_tx, mut mailbox_rx) = tokio::sync::mpsc::channel(100);

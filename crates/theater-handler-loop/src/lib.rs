@@ -30,6 +30,7 @@ use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
+use tokio::sync::Notify;
 use tracing::{debug, error, info};
 
 use theater::actor::handle::ActorHandle;
@@ -99,6 +100,8 @@ pub struct LoopHandler {
     actor_handle: Arc<std::sync::Mutex<Option<ActorHandle>>>,
     /// Shutdown receiver for graceful termination
     shutdown_receiver: Arc<std::sync::Mutex<Option<ShutdownReceiver>>>,
+    /// Notifies setup() when start-loop() takes the shutdown receiver
+    loop_started_notify: Arc<Notify>,
 }
 
 impl Default for LoopHandler {
@@ -113,6 +116,7 @@ impl LoopHandler {
             state: Arc::new(LoopState::new()),
             actor_handle: Arc::new(std::sync::Mutex::new(None)),
             shutdown_receiver: Arc::new(std::sync::Mutex::new(None)),
+            loop_started_notify: Arc::new(Notify::new()),
         }
     }
 
@@ -177,7 +181,32 @@ impl Handler for LoopHandler {
             *shutdown_guard = Some(shutdown_receiver);
         }
 
-        Box::pin(async move { Ok(()) })
+        let shutdown_receiver_arc = self.shutdown_receiver.clone();
+        let loop_started_notify = self.loop_started_notify.clone();
+
+        // Wait for either:
+        // 1. start-loop() takes the receiver (notified via loop_started_notify)
+        // 2. Shutdown signal received (if start-loop() was never called)
+        Box::pin(async move {
+            tokio::select! {
+                // Wait for start-loop() to take the receiver
+                _ = loop_started_notify.notified() => {
+                    info!("Loop handler: loop started, setup complete");
+                }
+                // Wait for shutdown if receiver wasn't taken
+                _ = async {
+                    let receiver = {
+                        let mut guard = shutdown_receiver_arc.lock().unwrap();
+                        guard.take()
+                    };
+                    if let Some(rx) = receiver {
+                        rx.wait_for_shutdown().await;
+                        info!("Loop handler received shutdown signal");
+                    }
+                } => {}
+            }
+            Ok(())
+        })
     }
 
     fn setup_host_functions_composite(
@@ -195,6 +224,7 @@ impl Handler for LoopHandler {
         let state = self.state.clone();
         let actor_handle_arc = self.actor_handle.clone();
         let shutdown_receiver_arc = self.shutdown_receiver.clone();
+        let loop_started_notify = self.loop_started_notify.clone();
 
         let state_for_stop = state.clone();
 
@@ -209,6 +239,7 @@ impl Handler for LoopHandler {
                     let state = state.clone();
                     let actor_handle_arc = actor_handle_arc.clone();
                     let shutdown_receiver_arc = shutdown_receiver_arc.clone();
+                    let loop_started_notify = loop_started_notify.clone();
 
                     async move {
                         // Parse initial state
@@ -265,6 +296,9 @@ impl Handler for LoopHandler {
                             let mut guard = shutdown_receiver_arc.lock().unwrap();
                             guard.take()
                         };
+
+                        // Notify setup() that we've taken the receiver
+                        loop_started_notify.notify_one();
 
                         // Spawn the loop task
                         let state_for_task = state.clone();
