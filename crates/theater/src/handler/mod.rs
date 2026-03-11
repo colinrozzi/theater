@@ -4,7 +4,7 @@ use crate::chain::ChainEvent;
 use crate::id::TheaterId;
 use crate::pack_bridge::{HostLinkerBuilder, LinkerError, PackInstance, TypeHash};
 use crate::config::actor_manifest::HandlerConfig;
-use crate::shutdown::ShutdownReceiver;
+use crate::shutdown::{ShutdownController, ShutdownReceiver};
 use anyhow::Result;
 use std::collections::HashSet;
 use std::future::Future;
@@ -17,12 +17,21 @@ use tokio::sync::RwLock;
 pub type SharedActorInstance = Arc<RwLock<Option<PackInstance>>>;
 
 /// Context passed to handlers during setup, tracking which imports are already satisfied
-#[derive(Debug, Clone, Default)]
+/// and providing access to the shutdown controller for handlers that need it.
+#[derive(Debug, Clone)]
 pub struct HandlerContext {
     /// Set of imports that have already been registered by other handlers
     pub satisfied_imports: HashSet<String>,
     /// The actor ID for the actor being set up
     pub actor_id: Option<TheaterId>,
+    /// Shutdown controller - handlers can subscribe to get shutdown signals
+    pub shutdown_controller: Option<ShutdownController>,
+}
+
+impl Default for HandlerContext {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl HandlerContext {
@@ -30,7 +39,22 @@ impl HandlerContext {
         Self {
             satisfied_imports: HashSet::new(),
             actor_id: None,
+            shutdown_controller: None,
         }
+    }
+
+    /// Create a new context with a shutdown controller
+    pub fn with_shutdown_controller(shutdown_controller: ShutdownController) -> Self {
+        Self {
+            satisfied_imports: HashSet::new(),
+            actor_id: None,
+            shutdown_controller: Some(shutdown_controller),
+        }
+    }
+
+    /// Get a shutdown receiver from the controller, if available
+    pub fn subscribe_shutdown(&mut self) -> Option<ShutdownReceiver> {
+        self.shutdown_controller.as_mut().map(|c| c.subscribe())
     }
 
     /// Check if an import is already satisfied
@@ -155,6 +179,14 @@ impl HandlerRegistry {
 /// External handler crates can implement this trait and register their handlers
 /// with the Theater runtime without depending on the concrete `Handler` enum.
 ///
+/// ## Handler Lifecycle
+///
+/// 1. `create_instance()` - Clone/create handler instance with optional config
+/// 2. `setup_host_functions_composite()` - Register host functions (sync, during instantiation)
+///    - HandlerContext provides shutdown_controller for handlers that need early access
+/// 3. `init()` - Synchronous critical initialization (called before actor can receive calls)
+/// 4. `run()` - Async runtime loop (spawned as background task)
+///
 /// ## Composite Migration
 ///
 /// For handlers migrating to Composite's Graph ABI runtime, implement:
@@ -169,21 +201,61 @@ pub trait Handler: Send + Sync + 'static {
     /// with that config. Otherwise, clones the current instance.
     fn create_instance(&self, config: Option<&HandlerConfig>) -> Box<dyn Handler>;
 
-    /// Initialize the handler with actor references.
+    /// Synchronous initialization called BEFORE the actor can receive any calls.
     ///
-    /// This is called once when the actor starts. Handlers should store the provided
-    /// handles for later use but NOT start event loops here. Event loops should be
-    /// triggered by explicit actor calls (e.g., `enable-input()` for terminal).
+    /// This is the place for critical setup that must complete before host functions
+    /// can be used. For example, storing actor handles that host functions depend on.
+    ///
+    /// Note: If a handler needs a ShutdownReceiver for host functions, it should
+    /// subscribe via `ctx.subscribe_shutdown()` during `setup_host_functions_composite()`.
+    ///
+    /// This runs synchronously - do NOT do any async work here.
+    /// Default implementation does nothing.
+    fn init(
+        &mut self,
+        _actor_handle: ActorHandle,
+        _actor_instance: SharedActorInstance,
+    ) {
+        // Default: no-op
+    }
+
+    /// Async runtime loop that runs for the handler's lifetime.
+    ///
+    /// This is spawned as a background task AFTER init() completes and the actor
+    /// is ready to receive calls. Use this for event loops, message consumption,
+    /// or any long-running async operations.
     ///
     /// The `event_rx` parameter receives chain events as they're recorded. Most handlers
     /// can ignore this, but ReplayHandler uses it for streaming hash verification.
+    ///
+    /// Default implementation just waits for shutdown.
+    fn run(
+        &mut self,
+        shutdown_receiver: ShutdownReceiver,
+        _event_rx: broadcast::Receiver<ChainEvent>,
+    ) -> Pin<Box<dyn Future<Output = Result<()>> + Send>> {
+        Box::pin(async move {
+            shutdown_receiver.wait_for_shutdown().await;
+            Ok(())
+        })
+    }
+
+    /// Initialize and run the handler.
+    ///
+    /// The runtime calls init() synchronously, then spawns run() as a background task.
+    /// Most handlers should override init() and/or run() rather than this method.
     fn setup(
         &mut self,
         actor_handle: ActorHandle,
         actor_instance: SharedActorInstance,
         shutdown_receiver: ShutdownReceiver,
         event_rx: broadcast::Receiver<ChainEvent>,
-    ) -> Pin<Box<dyn Future<Output = Result<()>> + Send>>;
+    ) -> Pin<Box<dyn Future<Output = Result<()>> + Send>> {
+        // Call init synchronously first
+        self.init(actor_handle, actor_instance);
+        // Then return the run future
+        self.run(shutdown_receiver, event_rx)
+    }
 
     /// Set up host functions for this handler (Composite Graph ABI runtime).
     ///

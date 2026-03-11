@@ -1,3 +1,4 @@
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::sync::oneshot::{Receiver, Sender};
 use tracing::debug;
@@ -34,31 +35,45 @@ pub enum ShutdownType {
     Force,
 }
 
-/// Controller that can broadcast shutdown signals to multiple receivers
+/// Controller that can broadcast shutdown signals to multiple receivers.
+/// This type is Clone-able and all clones share the same subscriber list.
+#[derive(Clone)]
 pub struct ShutdownController {
-    subscribers: Vec<Sender<ShutdownSignal>>,
+    subscribers: Arc<Mutex<Vec<Sender<ShutdownSignal>>>>,
+}
+
+impl std::fmt::Debug for ShutdownController {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ShutdownController")
+            .field("subscriber_count", &self.subscribers.lock().unwrap().len())
+            .finish()
+    }
 }
 
 impl ShutdownController {
     /// Create a new ShutdownController and a ShutdownReceiver
     pub fn new() -> Self {
         Self {
-            subscribers: Vec::new(),
+            subscribers: Arc::new(Mutex::new(Vec::new())),
         }
     }
 
     /// Get a new receiver for this controller
     pub fn subscribe(&mut self) -> ShutdownReceiver {
         let (sender, receiver) = tokio::sync::oneshot::channel();
-        self.subscribers.push(sender);
+        self.subscribers.lock().unwrap().push(sender);
         ShutdownReceiver { receiver }
     }
 
     /// Signal all receivers to shutdown
     pub async fn signal_shutdown(self, shutdown_type: ShutdownType) {
         debug!("Signaling shutdown to all subscribers");
+        let subscribers = {
+            let mut guard = self.subscribers.lock().unwrap();
+            std::mem::take(&mut *guard)
+        };
         let mut receivers = Vec::new();
-        for sender in self.subscribers {
+        for sender in subscribers {
             let (responder, receiver) = tokio::sync::oneshot::channel();
             receivers.push(receiver);
             match sender.send(ShutdownSignal {

@@ -290,8 +290,11 @@ impl ActorRuntime {
             Some(Arc::new(RecordingInterceptor::new(chain.clone())))
         };
 
-        // Create a closure that sets up all handler host functions
-        let mut handler_ctx = HandlerContext::new();
+        // Create shutdown controller early so handlers can subscribe during setup
+        let mut shutdown_controller = ShutdownController::new();
+
+        // Create handler context with shutdown controller access
+        let mut handler_ctx = HandlerContext::with_shutdown_controller(shutdown_controller.clone());
         handler_ctx.actor_id = Some(id.clone());
         let handlers_for_setup = &mut handlers;
 
@@ -480,9 +483,8 @@ impl ActorRuntime {
             *instance_guard = Some(actor_instance);
         }
 
-        // Set up handlers
+        // Set up handlers - use the shutdown_controller created earlier
         let mut handler_tasks: Vec<JoinHandle<()>> = vec![];
-        let mut shutdown_controller = ShutdownController::new();
         let handler_actor_handle = actor_handle.clone();
         debug!("Setting up {} handlers", handlers.len());
         for mut handler in handlers {

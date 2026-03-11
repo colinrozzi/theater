@@ -569,40 +569,30 @@ impl Handler for MessageServerHandler
     ) -> Pin<Box<dyn Future<Output = Result<()>> + Send>> {
         info!("Message server handler setup (passive mode)");
 
-        // Store the actor_handle and shutdown_receiver for use by register()
+        // Store the actor_handle for use by register()
         {
             let mut handle_guard = self.actor_handle.lock().unwrap();
             *handle_guard = Some(actor_handle);
         }
+        // Only store shutdown_receiver if not already set during setup_host_functions_composite()
+        // The early receiver from setup_host_functions_composite() is what register() needs
         {
             let mut shutdown_guard = self.shutdown_receiver.lock().unwrap();
-            *shutdown_guard = Some(shutdown_receiver);
+            if shutdown_guard.is_none() {
+                *shutdown_guard = Some(shutdown_receiver);
+            }
+            // If already set, drop the one passed here - the controller will notify both
         }
 
-        let shutdown_receiver_arc = self.shutdown_receiver.clone();
         let registered_notify = self.registered_notify.clone();
 
-        // Wait for either:
-        // 1. register() takes the receiver (notified via registered_notify)
-        // 2. Shutdown signal received (if register() was never called)
+        // Wait for register() to be called (or shutdown if never called).
+        // The shutdown receiver is left in the mutex for register() to take.
+        // If the actor never calls register(), the receiver stays in the mutex
+        // and will be dropped when the handler is dropped.
         Box::pin(async move {
-            tokio::select! {
-                // Wait for register() to take the receiver
-                _ = registered_notify.notified() => {
-                    info!("Message server handler: registered, setup complete");
-                }
-                // Wait for shutdown if receiver wasn't taken
-                _ = async {
-                    let receiver = {
-                        let mut guard = shutdown_receiver_arc.lock().unwrap();
-                        guard.take()
-                    };
-                    if let Some(rx) = receiver {
-                        rx.wait_for_shutdown().await;
-                        info!("Message server handler received shutdown signal");
-                    }
-                } => {}
-            }
+            registered_notify.notified().await;
+            info!("Message server handler: registered, setup complete");
             Ok(())
         })
     }
@@ -621,6 +611,16 @@ impl Handler for MessageServerHandler
         // Store the actor_id from context for use in start()
         if let Some(ref actor_id) = ctx.actor_id {
             self.actor_id = Some(actor_id.clone());
+        }
+
+        // Get a shutdown receiver early - this is needed by register() which may be
+        // called before the async setup() runs. This fixes the race condition where
+        // an actor calls register() immediately in init before setup() has stored
+        // the shutdown_receiver.
+        if let Some(shutdown_receiver) = ctx.subscribe_shutdown() {
+            let mut guard = self.shutdown_receiver.lock().unwrap();
+            *guard = Some(shutdown_receiver);
+            info!("Message server handler: got shutdown receiver during host function setup");
         }
 
         // Check if already satisfied
