@@ -17,7 +17,134 @@ use std::sync::Arc;
 // Re-export Pack types for convenient use throughout Theater
 // Note: We use composite's internal abi module, not composite_abi crate directly,
 // because that's what the runtime functions return.
-pub use pack::abi::{FromValue, FromValueError, Value, ValueType};
+pub use pack::abi::{Value, ValueType};
+
+// ============================================================================
+// Value Conversion Types
+// ============================================================================
+
+/// Error type for Value conversions
+#[derive(Debug, Clone)]
+pub enum ConversionError {
+    /// Type mismatch during conversion
+    TypeMismatch { expected: String, got: String },
+    /// Missing field in record
+    MissingField(String),
+    /// Missing index in tuple/list
+    MissingIndex(usize),
+    /// Missing payload for variant
+    MissingPayload,
+    /// Field conversion error
+    FieldError(String, Box<ConversionError>),
+    /// Index conversion error
+    IndexError(usize, Box<ConversionError>),
+}
+
+impl std::fmt::Display for ConversionError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::TypeMismatch { expected, got } => {
+                write!(f, "type mismatch: expected {}, got {}", expected, got)
+            }
+            Self::MissingField(name) => write!(f, "missing field: {}", name),
+            Self::MissingIndex(idx) => write!(f, "missing index: {}", idx),
+            Self::MissingPayload => write!(f, "missing payload for variant"),
+            Self::FieldError(name, e) => write!(f, "field '{}': {}", name, e),
+            Self::IndexError(idx, e) => write!(f, "index {}: {}", idx, e),
+        }
+    }
+}
+
+impl std::error::Error for ConversionError {}
+
+/// Trait for converting from a Pack Value.
+///
+/// This is Theater's local version that works with pack::abi::Value.
+pub trait FromValue: Sized {
+    fn from_value(v: Value) -> std::result::Result<Self, ConversionError>;
+}
+
+// Basic FromValue implementations
+
+impl FromValue for () {
+    fn from_value(v: Value) -> std::result::Result<Self, ConversionError> {
+        match v {
+            Value::Tuple(items) if items.is_empty() => Ok(()),
+            other => Err(ConversionError::TypeMismatch {
+                expected: String::from("()"),
+                got: format!("{:?}", other),
+            }),
+        }
+    }
+}
+
+impl FromValue for String {
+    fn from_value(v: Value) -> std::result::Result<Self, ConversionError> {
+        match v {
+            Value::String(s) => Ok(s),
+            other => Err(ConversionError::TypeMismatch {
+                expected: String::from("String"),
+                got: format!("{:?}", other),
+            }),
+        }
+    }
+}
+
+impl FromValue for i64 {
+    fn from_value(v: Value) -> std::result::Result<Self, ConversionError> {
+        match v {
+            Value::S64(n) => Ok(n),
+            other => Err(ConversionError::TypeMismatch {
+                expected: String::from("i64"),
+                got: format!("{:?}", other),
+            }),
+        }
+    }
+}
+
+impl FromValue for i32 {
+    fn from_value(v: Value) -> std::result::Result<Self, ConversionError> {
+        match v {
+            Value::S32(n) => Ok(n),
+            other => Err(ConversionError::TypeMismatch {
+                expected: String::from("i32"),
+                got: format!("{:?}", other),
+            }),
+        }
+    }
+}
+
+impl FromValue for bool {
+    fn from_value(v: Value) -> std::result::Result<Self, ConversionError> {
+        match v {
+            Value::Bool(b) => Ok(b),
+            other => Err(ConversionError::TypeMismatch {
+                expected: String::from("bool"),
+                got: format!("{:?}", other),
+            }),
+        }
+    }
+}
+
+impl<T: FromValue> FromValue for Vec<T> {
+    fn from_value(v: Value) -> std::result::Result<Self, ConversionError> {
+        match v {
+            Value::List { items, .. } => {
+                items.into_iter()
+                    .enumerate()
+                    .map(|(i, item)| {
+                        T::from_value(item).map_err(|e| ConversionError::IndexError(i, Box::new(e)))
+                    })
+                    .collect()
+            }
+            other => Err(ConversionError::TypeMismatch {
+                expected: String::from("List"),
+                got: format!("{:?}", other),
+            }),
+        }
+    }
+}
+
 pub use pack::{
     AsyncCtx, AsyncInstance, AsyncRuntime, CallInterceptor, Ctx, HostFunctionProvider,
     HostLinkerBuilder, InterfaceBuilder, LinkerError,
@@ -529,7 +656,7 @@ pub struct ActorResult<T> {
 }
 
 impl<T: FromValue> FromValue for ActorResult<T> {
-    fn from_value(value: Value) -> std::result::Result<Self, FromValueError> {
+    fn from_value(value: Value) -> std::result::Result<Self, ConversionError> {
         match value {
             // Handle Value::Result (Pack's native result type)
             Value::Result { value: Ok(inner), .. } => {
@@ -540,14 +667,17 @@ impl<T: FromValue> FromValue for ActorResult<T> {
                     Value::String(s) => s,
                     other => format!("{:?}", other),
                 };
-                Err(FromValueError::Custom(format!("Actor error: {}", error_msg)))
+                Err(ConversionError::TypeMismatch {
+                    expected: String::from("Ok result"),
+                    got: format!("Actor error: {}", error_msg),
+                })
             }
             // Handle Value::Variant (alternative encoding)
             Value::Variant { tag: 0, payload, .. } if !payload.is_empty() => {
                 decode_actor_ok_payload(payload.into_iter().next().unwrap())
             }
             Value::Variant { tag: 0, .. } => {
-                Err(FromValueError::Custom("Ok variant with empty payload".to_string()))
+                Err(ConversionError::MissingPayload)
             }
             Value::Variant { tag: 1, payload, .. } => {
                 let error_msg = payload.into_iter().next()
@@ -556,11 +686,14 @@ impl<T: FromValue> FromValue for ActorResult<T> {
                         other => format!("{:?}", other),
                     })
                     .unwrap_or_else(|| "Unknown error".to_string());
-                Err(FromValueError::Custom(format!("Actor error: {}", error_msg)))
+                Err(ConversionError::TypeMismatch {
+                    expected: String::from("Ok result"),
+                    got: format!("Actor error: {}", error_msg),
+                })
             }
             other => {
-                Err(FromValueError::TypeMismatch {
-                    expected: "Result or Variant",
+                Err(ConversionError::TypeMismatch {
+                    expected: String::from("Result or Variant"),
                     got: format!("{:?}", other),
                 })
             }
@@ -569,7 +702,7 @@ impl<T: FromValue> FromValue for ActorResult<T> {
 }
 
 /// Helper to decode the Ok payload of an actor result.
-fn decode_actor_ok_payload<T: FromValue>(value: Value) -> std::result::Result<ActorResult<T>, FromValueError> {
+fn decode_actor_ok_payload<T: FromValue>(value: Value) -> std::result::Result<ActorResult<T>, ConversionError> {
     match value {
         Value::Tuple(mut items) if !items.is_empty() => {
             // First element is state: option<list<u8>>
@@ -580,23 +713,23 @@ fn decode_actor_ok_payload<T: FromValue>(value: Value) -> std::result::Result<Ac
                             let bytes: std::result::Result<Vec<u8>, _> = items.into_iter()
                                 .map(|v| match v {
                                     Value::U8(b) => Ok(b),
-                                    other => Err(FromValueError::TypeMismatch {
-                                        expected: "U8",
+                                    other => Err(ConversionError::TypeMismatch {
+                                        expected: String::from("U8"),
                                         got: format!("{:?}", other),
                                     }),
                                 })
                                 .collect();
                             Some(bytes?)
                         }
-                        other => return Err(FromValueError::TypeMismatch {
-                            expected: "List<u8>",
+                        other => return Err(ConversionError::TypeMismatch {
+                            expected: String::from("List<u8>"),
                             got: format!("{:?}", other),
                         }),
                     }
                 }
                 Value::Option { value: None, .. } => None,
-                other => return Err(FromValueError::TypeMismatch {
-                    expected: "Option",
+                other => return Err(ConversionError::TypeMismatch {
+                    expected: String::from("Option"),
                     got: format!("{:?}", other),
                 }),
             };
