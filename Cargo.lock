@@ -2230,6 +2230,7 @@ name = "pack-abi"
 version = "0.1.0"
 dependencies = [
  "hashbrown 0.14.5",
+ "serde",
  "sha2",
 ]
 
