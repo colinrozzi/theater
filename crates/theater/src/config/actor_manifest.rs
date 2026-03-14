@@ -694,7 +694,6 @@ impl ManifestConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::permissions::*;
 
     #[test]
     fn test_manifest_permission_policy_parsing() {

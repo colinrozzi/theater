@@ -232,7 +232,7 @@ impl Handler for SupervisorHandler
                     async move {
                         // Parse input: (string, option<list<u8>>, option<list<u8>>)
                         // init-bytes is passed to init, wasm-bytes is used if provided
-                        let (manifest_path, init_bytes, provided_wasm_bytes) = match input {
+                        let (manifest_path, _init_bytes, provided_wasm_bytes) = match input {
                             Value::Tuple(args) if args.len() == 3 => {
                                 let manifest = match &args[0] {
                                     Value::String(s) => s.clone(),

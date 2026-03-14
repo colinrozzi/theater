@@ -8,16 +8,16 @@ use crate::actor::handle::ActorHandle;
 use crate::actor::runtime::ActorRuntime;
 use crate::actor::types::{ActorControl, ActorError, ActorInfo, ActorOperation};
 use crate::chain::{ChainEvent, ChainReader};
-use crate::pack_bridge::{AsyncRuntime, Value};
 use crate::config::actor_manifest::HandlerConfig;
 use crate::handler::HandlerRegistry;
 use crate::id::TheaterId;
-use crate::replay::ReplayHandler;
 use crate::messages::{ActorMessage, ActorStatus, TheaterCommand};
 use crate::messages::{
     ActorResult, ChannelId, ChannelParticipant, ChildError, ChildExternalStop, ChildResult,
 };
 use crate::metrics::ActorMetrics;
+use crate::pack_bridge::{AsyncRuntime, Value};
+use crate::replay::ReplayHandler;
 use crate::shutdown::{ShutdownController, ShutdownType};
 use crate::utils::{self, resolve_reference};
 use crate::Result;
@@ -209,7 +209,10 @@ impl TheaterRuntime {
 
     /// Add a global event subscriber that receives events from all actors.
     /// The subscriber receives tuples of (actor_id, event_result).
-    pub fn add_global_subscription(&mut self, tx: Sender<(TheaterId, Result<ChainEvent, ActorError>)>) {
+    pub fn add_global_subscription(
+        &mut self,
+        tx: Sender<(TheaterId, Result<ChainEvent, ActorError>)>,
+    ) {
         self.global_subscriptions.push(tx);
     }
 
@@ -349,12 +352,16 @@ impl TheaterRuntime {
                             || manifest_path.starts_with("https:")
                             || PathBuf::from(&manifest_path).exists()
                         {
-                            let manifest_bytes = resolve_reference(&manifest_path).await
-                                .map_err(|e| TheaterRuntimeError::ActorInitializationError(
-                                    format!("Failed to load manifest: {}", e)
-                                ))?;
-                            String::from_utf8(manifest_bytes)
-                                .map_err(|e| TheaterRuntimeError::ActorInitializationError(e.to_string()))?
+                            let manifest_bytes =
+                                resolve_reference(&manifest_path).await.map_err(|e| {
+                                    TheaterRuntimeError::ActorInitializationError(format!(
+                                        "Failed to load manifest: {}",
+                                        e
+                                    ))
+                                })?;
+                            String::from_utf8(manifest_bytes).map_err(|e| {
+                                TheaterRuntimeError::ActorInitializationError(e.to_string())
+                            })?
                         } else {
                             manifest_path.clone()
                         };
@@ -380,16 +387,15 @@ impl TheaterRuntime {
                     // Resolve WASM bytes
                     let wasm_bytes = match wasm_bytes {
                         Some(bytes) => bytes,
-                        None => {
-                            match resolve_reference(&manifest.package).await {
-                                Ok(bytes) => bytes,
-                                Err(e) => {
-                                    error!("Failed to load WASM: {}", e);
-                                    let _ = response_tx.send(Err(anyhow::anyhow!("Failed to load WASM: {}", e)));
-                                    continue;
-                                }
+                        None => match resolve_reference(&manifest.package).await {
+                            Ok(bytes) => bytes,
+                            Err(e) => {
+                                error!("Failed to load WASM: {}", e);
+                                let _ = response_tx
+                                    .send(Err(anyhow::anyhow!("Failed to load WASM: {}", e)));
+                                continue;
                             }
-                        }
+                        },
                     };
 
                     let name = Some(manifest.name.clone());
@@ -457,7 +463,10 @@ impl TheaterRuntime {
                     }
                 }
                 TheaterCommand::ShuttingDown { actor_id, data } => {
-                    info!("TheaterCommand::ShuttingDown received for actor: {:?}", actor_id);
+                    info!(
+                        "TheaterCommand::ShuttingDown received for actor: {:?}",
+                        actor_id
+                    );
                     let start = std::time::Instant::now();
                     match self.shutdown_actor(actor_id, data).await {
                         Ok(_) => {
@@ -547,13 +556,11 @@ impl TheaterRuntime {
                         }
                     }
                 }
-                #[allow(unused_variables)]
                 TheaterCommand::SubscribeToActor { actor_id, event_tx } => {
                     debug!("Subscribing to events for actor: {:?}", actor_id);
                     self.subscribe_to_actor(actor_id, event_tx)
                         .expect("Failed to subscribe");
                 }
-                // Channel-related commands
                 TheaterCommand::NewStore { response_tx } => {
                     debug!("Creating new content store");
                     let store_id = crate::store::ContentStore::new();
@@ -684,7 +691,10 @@ impl TheaterRuntime {
         let (handler_registry, initial_state) = if let Some(ref manifest) = manifest {
             let registry = self.create_handler_registry_for_manifest(manifest).await?;
             // Convert initial_state from String to Value
-            let state = manifest.initial_state.as_ref().map(|s| Value::String(s.clone()));
+            let state = manifest
+                .initial_state
+                .as_ref()
+                .map(|s| Value::String(s.clone()));
             (registry, state)
         } else {
             // No manifest - use global handlers directly
@@ -914,7 +924,10 @@ impl TheaterRuntime {
     /// 5. Remove the actor from the runtime's registries
     /// 6. Clean up any channel registrations
     async fn stop_actor(&mut self, actor_id: TheaterId, shutdown_type: ShutdownType) -> Result<()> {
-        info!("stop_actor called for: {:?} (shutdown_type: {:?})", actor_id, shutdown_type);
+        info!(
+            "stop_actor called for: {:?} (shutdown_type: {:?})",
+            actor_id, shutdown_type
+        );
 
         // Check if the actor exists in the registry
         if !self.actors.contains_key(&actor_id) {
@@ -922,7 +935,7 @@ impl TheaterRuntime {
             return Ok(());
         }
 
-        let proc = match self.actors.get(&actor_id) {
+        let _proc = match self.actors.get(&actor_id) {
             Some(proc) => proc,
             None => {
                 error!("Actor {:?} not found in registry", actor_id);
@@ -968,19 +981,10 @@ impl TheaterRuntime {
                 .expect("Failed to record event");
             debug!("Final event added to chain for actor {:?}", actor_id);
 
-            let should_save_chain = proc.manifest.as_ref().map(|m| m.save_chain()).unwrap_or(false);
-            if should_save_chain {
-                debug!("Actor {:?} manifest requires chain saving", actor_id);
-                writable_chain.save_chain().map_err(|e| {
-                    error!("Failed to save chain for actor {:?}: {}", actor_id, e);
-                    e
-                })?;
-            } else {
-                debug!(
-                    "Actor {:?} manifest does not require chain saving",
-                    actor_id
-                );
-            }
+            writable_chain.save_chain().map_err(|e| {
+                error!("Failed to save chain for actor {:?}: {}", actor_id, e);
+                e
+            })?;
         }
 
         self.chains.remove(&actor_id);
@@ -1023,26 +1027,46 @@ impl TheaterRuntime {
 
         // First, signal the actor runtime itself to shut down via its control channel
         // This stops the operation/info loops from processing new requests
-        debug!("Sending shutdown signal to actor runtime for {:?}", actor_id);
+        debug!(
+            "Sending shutdown signal to actor runtime for {:?}",
+            actor_id
+        );
         let actor_runtime_start = std::time::Instant::now();
         let (response_tx, response_rx) = tokio::sync::oneshot::channel();
-        if let Err(e) = proc.control_tx.send(ActorControl::Shutdown { response_tx }).await {
-            error!("Failed to send shutdown signal to actor runtime for {:?}: {}", actor_id, e);
+        if let Err(e) = proc
+            .control_tx
+            .send(ActorControl::Shutdown { response_tx })
+            .await
+        {
+            error!(
+                "Failed to send shutdown signal to actor runtime for {:?}: {}",
+                actor_id, e
+            );
             // Continue with shutdown anyway - we'll try to clean up handlers
         } else {
             // Wait for the actor runtime to acknowledge shutdown with a timeout
             match tokio::time::timeout(std::time::Duration::from_secs(10), response_rx).await {
                 Ok(Ok(Ok(_))) => {
-                    debug!("Actor runtime for {:?} acknowledged shutdown in {:?}", actor_id, actor_runtime_start.elapsed());
+                    debug!(
+                        "Actor runtime for {:?} acknowledged shutdown in {:?}",
+                        actor_id,
+                        actor_runtime_start.elapsed()
+                    );
                 }
                 Ok(Ok(Err(e))) => {
-                    error!("Actor runtime for {:?} returned error during shutdown: {:?}", actor_id, e);
+                    error!(
+                        "Actor runtime for {:?} returned error during shutdown: {:?}",
+                        actor_id, e
+                    );
                 }
                 Ok(Err(_)) => {
                     error!("Actor runtime for {:?} response channel closed", actor_id);
                 }
                 Err(_) => {
-                    error!("Timeout waiting for actor runtime {:?} to shut down (10s)", actor_id);
+                    error!(
+                        "Timeout waiting for actor runtime {:?} to shut down (10s)",
+                        actor_id
+                    );
                 }
             }
         }
@@ -1060,7 +1084,11 @@ impl TheaterRuntime {
             .signal_shutdown(shutdown_type)
             .await;
 
-        debug!("Actor {:?} handler shutdown complete in {:?}", actor_id, handler_start.elapsed());
+        debug!(
+            "Actor {:?} handler shutdown complete in {:?}",
+            actor_id,
+            handler_start.elapsed()
+        );
 
         // Remove actor from any channel registrations
         let mut channels_to_remove = Vec::new();
@@ -1255,9 +1283,7 @@ impl TheaterRuntime {
         manifest: &ManifestConfig,
     ) -> Result<HandlerRegistry> {
         // Clone the registry with per-actor configs applied
-        let mut registry = self
-            .handler_registry
-            .clone_with_configs(&manifest.handlers);
+        let mut registry = self.handler_registry.clone_with_configs(&manifest.handlers);
 
         // Special handling for replay handler - needs to load chain file
         for handler_config in &manifest.handlers {
