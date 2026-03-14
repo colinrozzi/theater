@@ -136,7 +136,6 @@ async fn test_rpc_calculator_demo() {
             name: Some(calc_manifest.name.clone()),
             manifest: Some(calc_manifest),
             response_tx: calc_response_tx,
-            parent_id: None,
             supervisor_tx: None,
             subscription_tx: Some(calc_subscription_tx),
         })
@@ -170,7 +169,6 @@ async fn test_rpc_calculator_demo() {
             name: Some(caller_manifest.name.clone()),
             manifest: Some(caller_manifest),
             response_tx: caller_response_tx,
-            parent_id: None,
             supervisor_tx: None,
             subscription_tx: Some(caller_subscription_tx),
         })

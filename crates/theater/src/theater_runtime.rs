@@ -143,8 +143,6 @@ pub struct ActorProcess {
     pub info_tx: mpsc::Sender<ActorInfo>,
     /// Channel for sending control commands to the actor
     pub control_tx: mpsc::Sender<ActorControl>,
-    /// Set of child actor IDs
-    pub children: HashSet<TheaterId>,
     /// Current status of the actor
     pub status: ActorStatus,
     /// Optional actor manifest (for handler configs, replay, etc.)
@@ -244,13 +242,10 @@ impl TheaterRuntime {
                     parent_id,
                     response_tx,
                 } => {
-                    debug!("Getting children for actor: {:?}", parent_id);
-                    if let Some(proc) = self.actors.get(&parent_id) {
-                        let children = proc.children.iter().cloned().collect();
-                        let _ = response_tx.send(children);
-                    } else {
-                        let _ = response_tx.send(Vec::new());
-                    }
+                    // Note: Child tracking is now handled by the supervisor handler.
+                    // This command returns empty - use supervisor handler's internal tracking instead.
+                    debug!("ListChildren called for {:?} (deprecated - supervisor handles child tracking)", parent_id);
+                    let _ = response_tx.send(Vec::new());
                 }
                 TheaterCommand::RestartActor {
                     actor_id,
@@ -298,7 +293,6 @@ impl TheaterRuntime {
                     wasm_bytes,
                     name,
                     manifest,
-                    parent_id,
                     response_tx,
                     supervisor_tx,
                     subscription_tx,
@@ -310,7 +304,6 @@ impl TheaterRuntime {
                             wasm_bytes,
                             name,
                             manifest,
-                            parent_id,
                             supervisor_tx,
                             subscription_tx,
                         )
@@ -337,7 +330,6 @@ impl TheaterRuntime {
                     manifest_path,
                     wasm_bytes,
                     response_tx,
-                    parent_id,
                     supervisor_tx,
                     subscription_tx,
                 } => {
@@ -404,7 +396,6 @@ impl TheaterRuntime {
                             wasm_bytes,
                             name,
                             Some(manifest),
-                            parent_id,
                             supervisor_tx,
                             subscription_tx,
                         )
@@ -622,7 +613,8 @@ impl TheaterRuntime {
     /// * `wasm_bytes` - The WASM module bytes to instantiate
     /// * `name` - Optional actor name for debugging/logging
     /// * `manifest` - Optional manifest for handler configs, replay settings, etc.
-    /// * `parent_id` - Optional ID of the parent actor
+    /// * `supervisor_tx` - Optional channel for supervisor to receive lifecycle events
+    /// * `subscription_tx` - Optional channel to subscribe to all actor events
     ///
     /// ## Returns
     ///
@@ -635,7 +627,6 @@ impl TheaterRuntime {
     /// - Creating communication channels
     /// - Spawning the actor runtime in a new task
     /// - Registering the actor with the runtime
-    /// - Setting up parent-child relationships
     ///
     /// If no manifest is provided, the actor uses global handler defaults.
     async fn spawn_actor(
@@ -643,7 +634,6 @@ impl TheaterRuntime {
         wasm_bytes: Vec<u8>,
         name: Option<String>,
         manifest: Option<ManifestConfig>,
-        parent_id: Option<TheaterId>,
         supervisor_tx: Option<Sender<ActorResult>>,
         subscription_tx: Option<Sender<Result<ChainEvent, ActorError>>>,
     ) -> Result<TheaterId> {
@@ -761,25 +751,11 @@ impl TheaterRuntime {
             operation_tx,
             info_tx,
             control_tx,
-            children: HashSet::new(),
             status: ActorStatus::Running,
             manifest,
             shutdown_controller,
             supervisor_tx,
         };
-
-        if let Some(parent_id) = parent_id {
-            debug!("Adding actor {:?} as child of {:?}", actor_id, parent_id);
-            if let Some(parent) = self.actors.get_mut(&parent_id) {
-                parent.children.insert(actor_id.clone());
-                debug!("Added actor {:?} as child of {:?}", actor_id, parent_id);
-            } else {
-                warn!(
-                    "Parent actor {:?} not found for new actor {:?}",
-                    parent_id, actor_id
-                );
-            }
-        }
 
         self.actors.insert(actor_id.clone(), process);
         debug!("Actor process registered with runtime");
@@ -989,34 +965,9 @@ impl TheaterRuntime {
 
         self.chains.remove(&actor_id);
 
-        // Find the actor's children to stop them first
-        let children = if let Some(proc) = self.actors.get(&actor_id) {
-            debug!(
-                "Actor {:?} has {} children to stop first",
-                actor_id,
-                proc.children.len()
-            );
-            proc.children.clone()
-        } else {
-            debug!("Actor {:?} not found", actor_id);
-            return Ok(());
-        };
-
-        // First, stop all children recursively
-        for (index, child_id) in children.iter().enumerate() {
-            debug!(
-                "Stopping child {}/{} with ID {:?} of parent {:?}",
-                index + 1,
-                children.len(),
-                child_id,
-                actor_id
-            );
-            Box::pin(self.stop_actor(child_id.clone(), shutdown_type)).await?;
-            debug!("Successfully stopped child {:?}", child_id);
-        }
-
         // Get the actor process - but DON'T remove it from the map yet
         // We need to keep it in the map while shutdown is in progress
+        // Note: Child stopping is now handled by the supervisor handler
         let proc = match self.actors.get(&actor_id) {
             Some(proc) => proc,
             None => {

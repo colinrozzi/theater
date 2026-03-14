@@ -276,7 +276,6 @@ pub async fn execute_async(args: &RunArgs, _ctx: &CommandContext) -> Result<(), 
             name: Some(manifest.name.clone()),
             manifest: Some(manifest),
             response_tx,
-            parent_id: None,
             supervisor_tx: Some(supervisor_tx),
             subscription_tx: None,
         })

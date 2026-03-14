@@ -92,7 +92,6 @@ async fn main() -> Result<()> {
             name: Some(manifest.name.clone()),
             manifest: Some(manifest),
             response_tx,
-            parent_id: None,
             supervisor_tx: None,
             subscription_tx: None,
         })

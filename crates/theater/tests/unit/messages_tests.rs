@@ -61,7 +61,6 @@ async fn test_theater_command_stop_actor() {
 #[tokio::test]
 async fn test_theater_command_spawn_actor() {
     let actor_name = "test-actor".to_string();
-    let parent_id = TheaterId::generate();
     let (tx, _rx) = oneshot::channel();
 
     let command = TheaterCommand::SpawnActor {
@@ -69,7 +68,6 @@ async fn test_theater_command_spawn_actor() {
         name: Some(actor_name.clone()),
         manifest: None,
         response_tx: tx,
-        parent_id: Some(parent_id.clone()),
         supervisor_tx: None,
         subscription_tx: None,
     };
@@ -77,11 +75,9 @@ async fn test_theater_command_spawn_actor() {
     match command {
         TheaterCommand::SpawnActor {
             name: ref n,
-            parent_id: ref parent,
             ..
         } => {
             assert_eq!(*n, Some(actor_name.clone()));
-            assert_eq!(*parent, Some(parent_id));
         }
         _ => panic!("Wrong command type"),
     }

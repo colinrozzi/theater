@@ -694,7 +694,6 @@ impl TheaterServer {
                             name: Some(manifest_config.name.clone()),
                             manifest: Some(manifest_config),
                             response_tx: cmd_tx,
-                            parent_id: None,
                             supervisor_tx,
                             subscription_tx,
                         })

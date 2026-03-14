@@ -112,7 +112,6 @@ async fn test_tcp_echo_and_chain() {
             name: Some(manifest.name.clone()),
             manifest: Some(manifest),
             response_tx,
-            parent_id: None,
             supervisor_tx: None,
             subscription_tx: Some(subscription_tx),
         })

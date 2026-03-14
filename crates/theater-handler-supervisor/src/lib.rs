@@ -8,6 +8,7 @@ pub mod events;
 use theater::actor::handle::ActorHandle;
 use theater::actor::store::ActorStore;
 use theater::actor::types::ActorError;
+use theater::chain::ChainEvent;
 use theater::config::actor_manifest::SupervisorHostConfig;
 use theater::config::permissions::SupervisorPermissions;
 use theater::handler::{Handler, HandlerContext, SharedActorInstance};
@@ -23,13 +24,15 @@ use theater::pack_bridge::{
 };
 
 use anyhow::Result;
+use std::collections::HashSet;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use thiserror::Error;
+use theater::id::TheaterId;
 use tokio::sync::{mpsc, oneshot};
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
 
 // ============================================================================
 // Interface Declarations
@@ -79,10 +82,20 @@ pub enum SupervisorError {
 /// - List, restart, and stop children
 /// - Get child state and event chains
 /// - Receive notifications when children error, exit, or are stopped
+/// - Subscribe to all events from children (via subscription_tx)
+/// - Clean up children on shutdown
 #[derive(Clone)]
 pub struct SupervisorHandler {
+    /// Channel for receiving lifecycle events (ActorResult) from children
     channel_tx: tokio::sync::mpsc::Sender<ActorResult>,
     channel_rx: Arc<Mutex<Option<tokio::sync::mpsc::Receiver<ActorResult>>>>,
+    /// Channel for receiving all ChainEvents from children (via subscription_tx)
+    event_tx: tokio::sync::mpsc::Sender<Result<ChainEvent, ActorError>>,
+    event_rx: Arc<Mutex<Option<tokio::sync::mpsc::Receiver<Result<ChainEvent, ActorError>>>>>,
+    /// Set of currently active child actor IDs
+    children: Arc<Mutex<HashSet<TheaterId>>>,
+    /// Theater command sender for stopping children on shutdown
+    theater_tx: Arc<Mutex<Option<mpsc::Sender<TheaterCommand>>>>,
     #[allow(dead_code)]
     permissions: Option<SupervisorPermissions>,
 }
@@ -101,9 +114,14 @@ impl SupervisorHandler {
         permissions: Option<SupervisorPermissions>,
     ) -> Self {
         let (channel_tx, channel_rx) = tokio::sync::mpsc::channel(100);
+        let (event_tx, event_rx) = tokio::sync::mpsc::channel(1024);
         Self {
             channel_tx,
             channel_rx: Arc::new(Mutex::new(Some(channel_rx))),
+            event_tx,
+            event_rx: Arc::new(Mutex::new(Some(event_rx))),
+            children: Arc::new(Mutex::new(HashSet::new())),
+            theater_tx: Arc::new(Mutex::new(None)),
             permissions,
         }
     }
@@ -116,6 +134,14 @@ impl SupervisorHandler {
         self.channel_tx.clone()
     }
 
+    /// Get a clone of the event subscription sender
+    ///
+    /// This is used when spawning children to subscribe to all their events.
+    /// The supervisor will receive every ChainEvent from its children.
+    pub fn get_event_sender(&self) -> tokio::sync::mpsc::Sender<Result<ChainEvent, ActorError>> {
+        self.event_tx.clone()
+    }
+
     /// Get the interface declarations for this handler.
     pub fn interfaces(&self) -> Vec<InterfaceImpl> {
         vec![supervisor_interface()]
@@ -124,11 +150,28 @@ impl SupervisorHandler {
     /// Process child actor results received via the channel
     ///
     /// This should be called in a loop to handle child lifecycle events.
+    /// Also removes the child from tracking when it exits.
     async fn process_child_result(
         actor_handle: &ActorHandle,
         actor_result: ActorResult,
+        children: &Arc<Mutex<HashSet<TheaterId>>>,
     ) -> Result<()> {
         info!("Processing child result");
+
+        // Get the child ID for tracking removal
+        let child_id = match &actor_result {
+            ActorResult::Error(e) => e.actor_id.clone(),
+            ActorResult::Success(r) => r.actor_id.clone(),
+            ActorResult::ExternalStop(s) => s.actor_id.clone(),
+        };
+
+        // Remove from tracking
+        {
+            let mut children_guard = children.lock().unwrap();
+            if children_guard.remove(&child_id) {
+                debug!("Removed child {} from tracking, remaining: {}", child_id, children_guard.len());
+            }
+        }
 
         match actor_result {
             ActorResult::Error(child_error) => {
@@ -171,6 +214,58 @@ impl SupervisorHandler {
                         params,
                     )
                     .await?;
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Process a chain event received from a child actor.
+    ///
+    /// This is called for every event a child records, allowing the supervisor
+    /// to monitor child activity, implement logging, or trigger reactions.
+    async fn process_child_event(
+        actor_handle: &ActorHandle,
+        event_result: Result<ChainEvent, ActorError>,
+    ) -> Result<()> {
+        match event_result {
+            Ok(event) => {
+                debug!(
+                    "Supervisor received child event: type={}, data_len={}",
+                    event.event_type,
+                    event.data.len()
+                );
+
+                // Call the actor's handle-child-event export if it exists
+                // The actor can implement this to react to child events
+                let params = Value::Tuple(vec![
+                    Value::String(event.event_type.clone()),
+                    Value::List {
+                        elem_type: ValueType::U8,
+                        items: event.data.iter().map(|b| Value::U8(*b)).collect(),
+                    },
+                ]);
+
+                // Try to call handle-child-event, but don't fail if it doesn't exist
+                match actor_handle
+                    .call_function(
+                        "theater:simple/supervisor-handlers.handle-child-event".to_string(),
+                        params,
+                    )
+                    .await
+                {
+                    Ok(_) => {}
+                    Err(e) => {
+                        // Only log at debug level since this export is optional
+                        debug!(
+                            "Could not call handle-child-event (may not be implemented): {}",
+                            e
+                        );
+                    }
+                }
+            }
+            Err(e) => {
+                error!("Supervisor received error from child subscription: {}", e);
             }
         }
 
@@ -221,14 +316,23 @@ impl Handler for SupervisorHandler
         }
 
         let supervisor_tx = self.channel_tx.clone();
+        let event_tx = self.event_tx.clone();
+        let children = self.children.clone();
+        let theater_tx_holder = self.theater_tx.clone();
 
         builder.interface("theater:simple/supervisor")?
             // spawn: func(manifest: string, wasm-bytes: option<list<u8>>) -> result<string, string>
             // Spawns a child actor. If wasm-bytes is provided, uses those bytes instead of loading from manifest.package.
             .func_async_result("spawn", {
                 let supervisor_tx = supervisor_tx.clone();
+                let event_tx = event_tx.clone();
+                let children = children.clone();
+                let theater_tx_holder = theater_tx_holder.clone();
                 move |ctx: AsyncCtx<ActorStore>, input: Value| {
                     let supervisor_tx = supervisor_tx.clone();
+                    let event_tx = event_tx.clone();
+                    let children = children.clone();
+                    let theater_tx_holder = theater_tx_holder.clone();
                     async move {
                         // Parse input: (string, option<list<u8>>, option<list<u8>>)
                         // init-bytes is passed to init, wasm-bytes is used if provided
@@ -278,8 +382,6 @@ impl Handler for SupervisorHandler
 
                         let store = ctx.data();
                         let theater_tx = store.theater_tx.clone();
-                        let parent_id = store.id.clone();
-
                         let name = Some(manifest.name.clone());
                         let (response_tx, response_rx) = oneshot::channel();
                         let cmd = TheaterCommand::SpawnActor {
@@ -287,17 +389,32 @@ impl Handler for SupervisorHandler
                             name,
                             manifest: Some(manifest),
                             response_tx,
-                            parent_id: Some(parent_id),
                             supervisor_tx: Some(supervisor_tx),
-                            subscription_tx: None,
+                            subscription_tx: Some(event_tx),
                         };
 
                         if let Err(e) = theater_tx.send(cmd).await {
                             return Err(Value::String(format!("Failed to send spawn command: {}", e)));
                         }
 
+                        // Store theater_tx for shutdown (first spawn stores it)
+                        {
+                            let mut holder = theater_tx_holder.lock().unwrap();
+                            if holder.is_none() {
+                                *holder = Some(theater_tx);
+                            }
+                        }
+
                         match response_rx.await {
-                            Ok(Ok(actor_id)) => Ok(Value::String(actor_id.to_string())),
+                            Ok(Ok(actor_id)) => {
+                                // Track the child
+                                {
+                                    let mut children_guard = children.lock().unwrap();
+                                    children_guard.insert(actor_id.clone());
+                                    debug!("Tracking child {}, total children: {}", actor_id, children_guard.len());
+                                }
+                                Ok(Value::String(actor_id.to_string()))
+                            }
                             Ok(Err(e)) => Err(Value::String(e.to_string())),
                             Err(e) => Err(Value::String(format!("Failed to receive response: {}", e))),
                         }
@@ -353,7 +470,6 @@ impl Handler for SupervisorHandler
 
                         let store = ctx.data();
                         let theater_tx = store.theater_tx.clone();
-                        let parent_id = store.id.clone();
 
                         // Create a dedicated channel for this spawn to receive the child's result
                         let (result_tx, mut result_rx) = mpsc::channel::<ActorResult>(1);
@@ -365,7 +481,6 @@ impl Handler for SupervisorHandler
                             name,
                             manifest: Some(manifest),
                             response_tx,
-                            parent_id: Some(parent_id),
                             supervisor_tx: Some(result_tx),
                             subscription_tx: None,
                         };
@@ -424,8 +539,14 @@ impl Handler for SupervisorHandler
             // If wasm-bytes is provided, uses those bytes instead of loading from manifest.package.
             .func_async_result("resume", {
                 let supervisor_tx = supervisor_tx.clone();
+                let event_tx = event_tx.clone();
+                let children = children.clone();
+                let theater_tx_holder = theater_tx_holder.clone();
                 move |ctx: AsyncCtx<ActorStore>, input: Value| {
                     let supervisor_tx = supervisor_tx.clone();
+                    let event_tx = event_tx.clone();
+                    let children = children.clone();
+                    let theater_tx_holder = theater_tx_holder.clone();
                     async move {
                         let (manifest, wasm_bytes) = match input {
                             Value::Tuple(args) if args.len() == 2 => {
@@ -441,24 +562,38 @@ impl Handler for SupervisorHandler
 
                         let store = ctx.data();
                         let theater_tx = store.theater_tx.clone();
-                        let parent_id = store.id.clone();
 
                         let (response_tx, response_rx) = oneshot::channel();
                         let cmd = TheaterCommand::ResumeActor {
                             manifest_path: manifest,
                             wasm_bytes,
                             response_tx,
-                            parent_id: Some(parent_id),
                             supervisor_tx: Some(supervisor_tx),
-                            subscription_tx: None,
+                            subscription_tx: Some(event_tx),
                         };
 
                         if let Err(e) = theater_tx.send(cmd).await {
                             return Err(Value::String(format!("Failed to send resume command: {}", e)));
                         }
 
+                        // Store theater_tx for shutdown
+                        {
+                            let mut holder = theater_tx_holder.lock().unwrap();
+                            if holder.is_none() {
+                                *holder = Some(theater_tx);
+                            }
+                        }
+
                         match response_rx.await {
-                            Ok(Ok(actor_id)) => Ok(Value::String(actor_id.to_string())),
+                            Ok(Ok(actor_id)) => {
+                                // Track the child
+                                {
+                                    let mut children_guard = children.lock().unwrap();
+                                    children_guard.insert(actor_id.clone());
+                                    debug!("Tracking resumed child {}, total children: {}", actor_id, children_guard.len());
+                                }
+                                Ok(Value::String(actor_id.to_string()))
+                            }
                             Ok(Err(e)) => Err(Value::String(e.to_string())),
                             Err(e) => Err(Value::String(format!("Failed to receive response: {}", e))),
                         }
@@ -705,8 +840,13 @@ impl Handler for SupervisorHandler
     ) -> Pin<Box<dyn Future<Output = Result<()>> + Send>> {
         info!("Supervisor handler setup");
 
-        // Take the receiver out of the Arc<Mutex<Option<>>>
+        // Take the receivers out of the Arc<Mutex<Option<>>>
         let channel_rx_opt = self.channel_rx.lock().unwrap().take();
+        let event_rx_opt = self.event_rx.lock().unwrap().take();
+
+        // Clone children and theater_tx for use in the async closure
+        let children = self.children.clone();
+        let theater_tx = self.theater_tx.clone();
 
         Box::pin(async move {
             // If we don't have a receiver (e.g., this is a cloned instance), just return Ok
@@ -715,19 +855,105 @@ impl Handler for SupervisorHandler
                 return Ok(());
             };
 
+            // Get event receiver if available
+            let mut event_rx = event_rx_opt;
+
             loop {
                 tokio::select! {
+                    // Process lifecycle events from children (ActorResult)
                     Some(child_result) = channel_rx.recv() => {
-                        if let Err(e) = Self::process_child_result(&actor_handle, child_result).await {
+                        if let Err(e) = Self::process_child_result(&actor_handle, child_result, &children).await {
                             error!("Error processing child result: {}", e);
                         }
                     }
+                    // Process all chain events from children
+                    Some(event_result) = async {
+                        if let Some(ref mut rx) = event_rx {
+                            rx.recv().await
+                        } else {
+                            std::future::pending().await
+                        }
+                    } => {
+                        if let Err(e) = Self::process_child_event(&actor_handle, event_result).await {
+                            error!("Error processing child event: {}", e);
+                        }
+                    }
                     _ = &mut shutdown_receiver.receiver => {
-                        info!("Shutdown signal received");
+                        info!("Shutdown signal received, stopping children");
                         break;
                     }
                 }
             }
+
+            // Stop all children on shutdown
+            let children_to_stop: Vec<TheaterId> = {
+                let children_guard = children.lock().unwrap();
+                children_guard.iter().cloned().collect()
+            };
+
+            if !children_to_stop.is_empty() {
+                info!("Stopping {} children", children_to_stop.len());
+
+                // Get theater_tx if available
+                let theater_tx_opt = {
+                    let guard = theater_tx.lock().unwrap();
+                    guard.clone()
+                };
+
+                if let Some(theater_tx) = theater_tx_opt {
+                    for child_id in &children_to_stop {
+                        debug!("Stopping child {}", child_id);
+                        let (response_tx, _response_rx) = oneshot::channel();
+                        let cmd = TheaterCommand::StopActor {
+                            actor_id: child_id.clone(),
+                            response_tx,
+                        };
+                        if let Err(e) = theater_tx.send(cmd).await {
+                            warn!("Failed to send stop command for child {}: {}", child_id, e);
+                        }
+                    }
+
+                    // Wait for children to exit (with timeout)
+                    let timeout = Duration::from_secs(5);
+                    let start = std::time::Instant::now();
+
+                    while start.elapsed() < timeout {
+                        // Check if all children have exited
+                        let remaining = {
+                            let children_guard = children.lock().unwrap();
+                            children_guard.len()
+                        };
+
+                        if remaining == 0 {
+                            info!("All children have exited");
+                            break;
+                        }
+
+                        // Process any remaining child results while waiting
+                        tokio::select! {
+                            Some(child_result) = channel_rx.recv() => {
+                                if let Err(e) = Self::process_child_result(&actor_handle, child_result, &children).await {
+                                    error!("Error processing child result during shutdown: {}", e);
+                                }
+                            }
+                            _ = tokio::time::sleep(Duration::from_millis(100)) => {
+                                // Just check again
+                            }
+                        }
+                    }
+
+                    let remaining = {
+                        let children_guard = children.lock().unwrap();
+                        children_guard.len()
+                    };
+                    if remaining > 0 {
+                        warn!("{} children did not exit within timeout", remaining);
+                    }
+                } else {
+                    warn!("No theater_tx available, cannot stop children");
+                }
+            }
+
             info!("Supervisor handler shut down complete");
             Ok(())
         })

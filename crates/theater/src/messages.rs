@@ -128,7 +128,8 @@ pub enum TheaterCommand {
     /// * `name` - Optional actor name for debugging/logging
     /// * `manifest` - Optional manifest for handler configs, replay settings, etc.
     /// * `response_tx` - Channel to receive the result (actor ID or error)
-    /// * `parent_id` - Optional parent actor ID for supervision hierarchy
+    /// * `supervisor_tx` - Optional channel for supervisor to receive lifecycle events
+    /// * `subscription_tx` - Optional channel to subscribe to all actor events
     ///
     /// ## Notes
     ///
@@ -141,7 +142,6 @@ pub enum TheaterCommand {
         name: Option<String>,
         manifest: Option<ManifestConfig>,
         response_tx: oneshot::Sender<Result<TheaterId>>,
-        parent_id: Option<TheaterId>,
         supervisor_tx: Option<Sender<ActorResult>>,
         subscription_tx: Option<Sender<Result<ChainEvent, ActorError>>>,
     },
@@ -156,12 +156,12 @@ pub enum TheaterCommand {
     /// * `manifest_path` - Path to the actor's manifest file
     /// * `wasm_bytes` - Optional pre-loaded WASM bytes. If None, bytes are resolved from manifest.package
     /// * `response_tx` - Channel to receive the result (actor ID or error)
-    /// * `parent_id` - Optional parent actor ID for supervision hierarchy
+    /// * `supervisor_tx` - Optional channel for supervisor to receive lifecycle events
+    /// * `subscription_tx` - Optional channel to subscribe to all actor events
     ResumeActor {
         manifest_path: String,
         wasm_bytes: Option<Vec<u8>>,
         response_tx: oneshot::Sender<Result<TheaterId>>,
-        parent_id: Option<TheaterId>,
         supervisor_tx: Option<Sender<ActorResult>>,
         subscription_tx: Option<Sender<Result<ChainEvent, ActorError>>>,
     },

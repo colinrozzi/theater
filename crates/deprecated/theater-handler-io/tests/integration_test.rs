@@ -197,7 +197,6 @@ async fn test_io_handler_with_test_actor() -> Result<()> {
             manifest_path: manifest_content,
             wasm_bytes: None,
             init_bytes: None,
-            parent_id: None,
             response_tx,
             supervisor_tx: None,
             subscription_tx: Some(event_tx),
