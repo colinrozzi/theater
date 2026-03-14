@@ -387,14 +387,39 @@ impl Handler for TcpHandler {
 
         // Get cancellation token to cancel on shutdown
         let cancel_token = self.cancellation_token.clone();
+        let shared_state = self.shared_state.clone();
 
-        // Wait for shutdown, then cancel all spawned tasks
+        // Wait for shutdown, then clean up all resources
         Box::pin(async move {
             info!("TCP handler setup waiting for shutdown signal");
             shutdown_receiver.wait_for_shutdown().await;
-            info!("TCP handler received shutdown, cancelling background tasks");
+            info!("TCP handler received shutdown, cleaning up resources");
+
+            // Cancel all spawned background tasks (listeners, active mode readers)
             cancel_token.cancel();
             info!("TCP handler cancellation token cancelled");
+
+            // Close all connections - clearing the map drops the streams
+            {
+                let mut connections = shared_state.connections.lock().await;
+                let conn_count = connections.len();
+                connections.clear();
+                if conn_count > 0 {
+                    info!("TCP handler closed {} connections", conn_count);
+                }
+            }
+
+            // Close all listeners - clearing the map drops the TcpListeners
+            {
+                let mut listeners = shared_state.listeners.lock().await;
+                let listener_count = listeners.len();
+                listeners.clear();
+                if listener_count > 0 {
+                    info!("TCP handler closed {} listeners", listener_count);
+                }
+            }
+
+            info!("TCP handler shutdown complete");
             Ok(())
         })
     }

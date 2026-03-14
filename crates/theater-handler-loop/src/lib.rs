@@ -98,8 +98,10 @@ pub struct LoopHandler {
     state: Arc<LoopState>,
     /// Actor handle for calling the loop export
     actor_handle: Arc<std::sync::Mutex<Option<ActorHandle>>>,
-    /// Shutdown receiver for graceful termination
+    /// Shutdown receiver for the loop task (used by start-loop())
     shutdown_receiver: Arc<std::sync::Mutex<Option<ShutdownReceiver>>>,
+    /// Shutdown receiver for setup() itself - ensures setup() can exit on shutdown
+    setup_shutdown_receiver: Arc<std::sync::Mutex<Option<ShutdownReceiver>>>,
     /// Notifies setup() when start-loop() takes the shutdown receiver
     loop_started_notify: Arc<Notify>,
 }
@@ -116,6 +118,7 @@ impl LoopHandler {
             state: Arc::new(LoopState::new()),
             actor_handle: Arc::new(std::sync::Mutex::new(None)),
             shutdown_receiver: Arc::new(std::sync::Mutex::new(None)),
+            setup_shutdown_receiver: Arc::new(std::sync::Mutex::new(None)),
             loop_started_notify: Arc::new(Notify::new()),
         }
     }
@@ -176,34 +179,44 @@ impl Handler for LoopHandler {
             let mut handle_guard = self.actor_handle.lock().unwrap();
             *handle_guard = Some(actor_handle);
         }
-        {
-            let mut shutdown_guard = self.shutdown_receiver.lock().unwrap();
-            *shutdown_guard = Some(shutdown_receiver);
-        }
 
-        let shutdown_receiver_arc = self.shutdown_receiver.clone();
+        // Try to get setup_shutdown_receiver from setup_host_functions_composite
+        // If not available, use the passed shutdown_receiver directly for setup
+        let setup_receiver = {
+            let mut guard = self.setup_shutdown_receiver.lock().unwrap();
+            guard.take()
+        };
+
         let loop_started_notify = self.loop_started_notify.clone();
 
+        // Use either the setup receiver (from setup_host_functions_composite) or
+        // the passed shutdown_receiver directly for setup
+        let mut receiver_for_setup = match setup_receiver {
+            Some(r) => {
+                // We have a dedicated setup receiver, so store the passed one for start-loop
+                let mut shutdown_guard = self.shutdown_receiver.lock().unwrap();
+                if shutdown_guard.is_none() {
+                    *shutdown_guard = Some(shutdown_receiver);
+                }
+                r
+            }
+            None => {
+                // No setup receiver available, use the passed one directly
+                shutdown_receiver
+            }
+        };
+
         // Wait for either:
-        // 1. start-loop() takes the receiver (notified via loop_started_notify)
+        // 1. start-loop() is called (notified via loop_started_notify)
         // 2. Shutdown signal received (if start-loop() was never called)
         Box::pin(async move {
             tokio::select! {
-                // Wait for start-loop() to take the receiver
                 _ = loop_started_notify.notified() => {
                     info!("Loop handler: loop started, setup complete");
                 }
-                // Wait for shutdown if receiver wasn't taken
-                _ = async {
-                    let receiver = {
-                        let mut guard = shutdown_receiver_arc.lock().unwrap();
-                        guard.take()
-                    };
-                    if let Some(rx) = receiver {
-                        rx.wait_for_shutdown().await;
-                        info!("Loop handler received shutdown signal");
-                    }
-                } => {}
+                _ = &mut receiver_for_setup.receiver => {
+                    info!("Loop handler: shutdown before start-loop, exiting setup");
+                }
             }
             Ok(())
         })
@@ -219,6 +232,18 @@ impl Handler for LoopHandler {
         if ctx.is_satisfied("theater:simple/loop") {
             info!("theater:simple/loop already satisfied, skipping");
             return Ok(());
+        }
+
+        // Subscribe to two shutdown receivers:
+        // 1. One for start-loop() to use in the loop task
+        // 2. One for setup() to use so it can exit if start-loop() is never called
+        if let Some(shutdown_receiver) = ctx.subscribe_shutdown() {
+            let mut guard = self.shutdown_receiver.lock().unwrap();
+            *guard = Some(shutdown_receiver);
+        }
+        if let Some(setup_shutdown_receiver) = ctx.subscribe_shutdown() {
+            let mut guard = self.setup_shutdown_receiver.lock().unwrap();
+            *guard = Some(setup_shutdown_receiver);
         }
 
         let state = self.state.clone();

@@ -163,8 +163,10 @@ pub struct TerminalHandler {
     config: TerminalHandlerConfig,
     state: Option<TerminalState>,
     actor_handle: Arc<std::sync::Mutex<Option<ActorHandle>>>,
-    /// Shutdown receiver for background input loop
+    /// Shutdown receiver for background input loop (used by enable-input())
     shutdown_receiver: Arc<std::sync::Mutex<Option<ShutdownReceiver>>>,
+    /// Shutdown receiver for setup() itself - ensures setup() can exit on shutdown
+    setup_shutdown_receiver: Arc<std::sync::Mutex<Option<ShutdownReceiver>>>,
     /// Notifies setup() when enable-input() takes the shutdown receiver
     input_enabled_notify: Arc<Notify>,
 }
@@ -176,6 +178,7 @@ impl TerminalHandler {
             state: None,
             actor_handle: Arc::new(std::sync::Mutex::new(None)),
             shutdown_receiver: Arc::new(std::sync::Mutex::new(None)),
+            setup_shutdown_receiver: Arc::new(std::sync::Mutex::new(None)),
             input_enabled_notify: Arc::new(Notify::new()),
         }
     }
@@ -233,36 +236,42 @@ impl Handler for TerminalHandler {
             *handle_guard = Some(actor_handle);
         }
 
-        // Store the shutdown_receiver - it may be taken by enable-input() later
-        {
-            let mut shutdown_guard = self.shutdown_receiver.lock().unwrap();
-            *shutdown_guard = Some(shutdown_receiver);
-        }
+        // Try to get setup_shutdown_receiver from setup_host_functions_composite
+        let setup_receiver = {
+            let mut guard = self.setup_shutdown_receiver.lock().unwrap();
+            guard.take()
+        };
 
-        let shutdown_receiver_arc = self.shutdown_receiver.clone();
         let input_enabled_notify = self.input_enabled_notify.clone();
 
+        // Use either the setup receiver (from setup_host_functions_composite) or
+        // the passed shutdown_receiver directly for setup
+        let mut receiver_for_setup = match setup_receiver {
+            Some(r) => {
+                // We have a dedicated setup receiver, so store the passed one for enable-input
+                let mut shutdown_guard = self.shutdown_receiver.lock().unwrap();
+                if shutdown_guard.is_none() {
+                    *shutdown_guard = Some(shutdown_receiver);
+                }
+                r
+            }
+            None => {
+                // No setup receiver available, use the passed one directly
+                shutdown_receiver
+            }
+        };
+
         // Wait for either:
-        // 1. enable-input() takes the receiver (notified via input_enabled_notify)
+        // 1. enable-input() is called (notified via input_enabled_notify)
         // 2. Shutdown signal received (if enable-input() was never called)
         Box::pin(async move {
             tokio::select! {
-                // Wait for enable-input() to take the receiver
                 _ = input_enabled_notify.notified() => {
                     info!("Terminal handler: input enabled, setup complete");
                 }
-                // Wait for shutdown if receiver wasn't taken
-                _ = async {
-                    // Take the receiver (if it's still there) and wait for shutdown
-                    let receiver = {
-                        let mut guard = shutdown_receiver_arc.lock().unwrap();
-                        guard.take()
-                    };
-                    if let Some(rx) = receiver {
-                        rx.wait_for_shutdown().await;
-                        info!("Terminal handler received shutdown signal");
-                    }
-                } => {}
+                _ = &mut receiver_for_setup.receiver => {
+                    info!("Terminal handler: shutdown before enable-input, exiting setup");
+                }
             }
             Ok(())
         })
@@ -278,6 +287,18 @@ impl Handler for TerminalHandler {
         if ctx.is_satisfied("theater:simple/terminal") {
             info!("theater:simple/terminal already satisfied, skipping");
             return Ok(());
+        }
+
+        // Subscribe to two shutdown receivers:
+        // 1. One for enable-input() to use in the input reading task
+        // 2. One for setup() to use so it can exit if enable-input() is never called
+        if let Some(shutdown_receiver) = ctx.subscribe_shutdown() {
+            let mut guard = self.shutdown_receiver.lock().unwrap();
+            *guard = Some(shutdown_receiver);
+        }
+        if let Some(setup_shutdown_receiver) = ctx.subscribe_shutdown() {
+            let mut guard = self.setup_shutdown_receiver.lock().unwrap();
+            *guard = Some(setup_shutdown_receiver);
         }
 
         let state = TerminalState::new();

@@ -394,6 +394,10 @@ pub struct MessageServerHandler {
     // Shutdown receiver for the consumption task (set in start(), used by register())
     shutdown_receiver: Arc<Mutex<Option<ShutdownReceiver>>>,
 
+    // Shutdown receiver for setup() itself - ensures setup() can exit on shutdown
+    // even if register() is never called
+    setup_shutdown_receiver: Arc<Mutex<Option<ShutdownReceiver>>>,
+
     // Notifies setup() when register() takes the shutdown receiver
     registered_notify: Arc<Notify>,
 
@@ -420,6 +424,7 @@ impl MessageServerHandler {
             actor_handle: Arc::new(Mutex::new(None)),
             is_registered: Arc::new(Mutex::new(false)),
             shutdown_receiver: Arc::new(Mutex::new(None)),
+            setup_shutdown_receiver: Arc::new(Mutex::new(None)),
             registered_notify: Arc::new(Notify::new()),
             outstanding_requests: Arc::new(Mutex::new(HashMap::new())),
             permissions,
@@ -574,25 +579,43 @@ impl Handler for MessageServerHandler
             let mut handle_guard = self.actor_handle.lock().unwrap();
             *handle_guard = Some(actor_handle);
         }
-        // Only store shutdown_receiver if not already set during setup_host_functions_composite()
-        // The early receiver from setup_host_functions_composite() is what register() needs
-        {
-            let mut shutdown_guard = self.shutdown_receiver.lock().unwrap();
-            if shutdown_guard.is_none() {
-                *shutdown_guard = Some(shutdown_receiver);
-            }
-            // If already set, drop the one passed here - the controller will notify both
-        }
+
+        // Try to get setup_shutdown_receiver from setup_host_functions_composite
+        let setup_receiver = {
+            let mut guard = self.setup_shutdown_receiver.lock().unwrap();
+            guard.take()
+        };
 
         let registered_notify = self.registered_notify.clone();
 
-        // Wait for register() to be called (or shutdown if never called).
-        // The shutdown receiver is left in the mutex for register() to take.
-        // If the actor never calls register(), the receiver stays in the mutex
-        // and will be dropped when the handler is dropped.
+        // Use either the setup receiver (from setup_host_functions_composite) or
+        // the passed shutdown_receiver directly for setup
+        let mut receiver_for_setup = match setup_receiver {
+            Some(r) => {
+                // We have a dedicated setup receiver, so store the passed one for register()
+                let mut shutdown_guard = self.shutdown_receiver.lock().unwrap();
+                if shutdown_guard.is_none() {
+                    *shutdown_guard = Some(shutdown_receiver);
+                }
+                r
+            }
+            None => {
+                // No setup receiver available, use the passed one directly
+                shutdown_receiver
+            }
+        };
+
+        // Wait for register() to be called OR shutdown signal.
+        // This ensures setup() can exit cleanly even if register() is never called.
         Box::pin(async move {
-            registered_notify.notified().await;
-            info!("Message server handler: registered, setup complete");
+            tokio::select! {
+                _ = registered_notify.notified() => {
+                    info!("Message server handler: registered, setup complete");
+                }
+                _ = &mut receiver_for_setup.receiver => {
+                    info!("Message server handler: shutdown before register, exiting setup");
+                }
+            }
             Ok(())
         })
     }
@@ -613,14 +636,23 @@ impl Handler for MessageServerHandler
             self.actor_id = Some(actor_id.clone());
         }
 
-        // Get a shutdown receiver early - this is needed by register() which may be
+        // Get shutdown receivers early - this is needed by register() which may be
         // called before the async setup() runs. This fixes the race condition where
         // an actor calls register() immediately in init before setup() has stored
         // the shutdown_receiver.
+        //
+        // We subscribe twice:
+        // 1. One for register() to use in its consumption loop
+        // 2. One for setup() to use so it can exit if register() is never called
         if let Some(shutdown_receiver) = ctx.subscribe_shutdown() {
             let mut guard = self.shutdown_receiver.lock().unwrap();
             *guard = Some(shutdown_receiver);
-            info!("Message server handler: got shutdown receiver during host function setup");
+            info!("Message server handler: got shutdown receiver for register()");
+        }
+        if let Some(setup_shutdown_receiver) = ctx.subscribe_shutdown() {
+            let mut guard = self.setup_shutdown_receiver.lock().unwrap();
+            *guard = Some(setup_shutdown_receiver);
+            info!("Message server handler: got shutdown receiver for setup()");
         }
 
         // Check if already satisfied

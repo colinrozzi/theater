@@ -72,9 +72,14 @@ pretty_assertions = "1.4"
 tempfile = "3.8.1"
 mockall = "0.11.4"
 
-# Theater-specific handlers (for examples)
+# Theater-specific handlers (for testing)
 theater-handler-message-server.workspace = true
 theater-handler-runtime.workspace = true
 theater-handler-store.workspace = true
 theater-handler-supervisor.workspace = true
+theater-handler-tcp.workspace = true
+theater-handler-timer.workspace = true
+theater-handler-loop.workspace = true
+theater-handler-terminal.workspace = true
+theater-handler-rpc.workspace = true
 # DEPRECATED: WASI handlers removed - see crates/deprecated/

@@ -385,18 +385,31 @@ async fn test_message_server_shutdown_without_register() {
 
 ---
 
-## Priority Order for Fixes
+## Fixes Applied
 
-1. **Message Server** - Can hang on shutdown (HIGH)
-2. **TCP** - Connections not explicitly closed (MEDIUM)
-3. **Loop/Terminal** - May have similar hang issues (MEDIUM)
-4. **Others** - Generally OK
+### 1. Message Server Handler (FIXED)
+- Added `setup_shutdown_receiver` field
+- Subscribe twice in `setup_host_functions_composite()`
+- `setup()` now uses `select!` to wait for either notify or shutdown
+
+### 2. TCP Handler (FIXED)
+- Added explicit cleanup of connections and listeners in `setup()`
+- Clear `shared_state.connections` and `shared_state.listeners` on shutdown
+
+### 3. Loop Handler (FIXED)
+- Added `setup_shutdown_receiver` field
+- Subscribe twice in `setup_host_functions_composite()`
+- `setup()` now uses `select!` with its own receiver
+
+### 4. Terminal Handler (FIXED)
+- Added `setup_shutdown_receiver` field
+- Subscribe twice in `setup_host_functions_composite()`
+- `setup()` now uses `select!` with its own receiver
 
 ---
 
 ## Next Steps
 
 1. Create test infrastructure in `crates/theater/src/handler/tests/`
-2. Write failing tests for known issues
-3. Fix handlers one by one
-4. Ensure all tests pass
+2. Write tests to verify shutdown behavior
+3. Consider integration tests that spawn actors and verify clean shutdown
