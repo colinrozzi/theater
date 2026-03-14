@@ -1,7 +1,7 @@
 use crate::actor::handle::ActorHandle;
 use crate::actor::ActorError;
 use crate::actor::ActorRuntimeError;
-use crate::pack_bridge::InterfaceHash;
+use crate::pack_bridge::{InterfaceHash, Value};
 /// # Theater Message System
 ///
 /// Defines the message types used for communication between different components
@@ -312,7 +312,7 @@ pub enum TheaterCommand {
     /// This operation is only available to the actor's supervisor or to the system itself.
     GetActorState {
         actor_id: TheaterId,
-        response_tx: oneshot::Sender<Result<Option<Vec<u8>>>>,
+        response_tx: oneshot::Sender<Result<Option<Value>>>,
     },
 
     /// # Get actor events

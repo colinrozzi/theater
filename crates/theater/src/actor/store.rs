@@ -9,6 +9,7 @@ use crate::chain::{ChainEvent, StateChain};
 use crate::events::{ChainEventData, ChainEventPayload};
 use crate::id::TheaterId;
 use crate::messages::TheaterCommand;
+use crate::pack_bridge::Value;
 use std::any::{Any, TypeId};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, RwLock};
@@ -38,8 +39,8 @@ pub struct ActorStore {
     /// The event chain that records all actor operations for verification and audit
     pub chain: Arc<RwLock<StateChain>>,
 
-    /// The current state of the actor, stored as a binary blob
-    pub state: Option<Vec<u8>>,
+    /// The current state of the actor, stored as a Pack Value
+    pub state: Option<Value>,
 
     /// Handle to interact with the actor
     pub actor_handle: ActorHandle,
@@ -74,7 +75,7 @@ impl ActorStore {
         theater_tx: Sender<TheaterCommand>,
         actor_handle: ActorHandle,
         chain: Arc<RwLock<StateChain>>,
-        initial_state: Option<Vec<u8>>,
+        initial_state: Option<Value>,
     ) -> Self {
         Self {
             id: id.clone(),
@@ -115,10 +116,10 @@ impl ActorStore {
     ///
     /// ## Returns
     ///
-    /// A clone of the actor's state as an Option<Vec<u8>>.
-    /// - Some(Vec<u8>) if state exists
+    /// A clone of the actor's state as an Option<Value>.
+    /// - Some(Value) if state exists
     /// - None if no state has been set
-    pub fn get_state(&self) -> Option<Vec<u8>> {
+    pub fn get_state(&self) -> Option<Value> {
         self.state.clone()
     }
 
@@ -128,10 +129,10 @@ impl ActorStore {
     ///
     /// ## Parameters
     ///
-    /// * `state` - The new state data as an Option<Vec<u8>>
-    ///   - Some(Vec<u8>) to set a specific state
+    /// * `state` - The new state data as an Option<Value>
+    ///   - Some(Value) to set a specific state
     ///   - None to clear the state
-    pub fn set_state(&mut self, state: Option<Vec<u8>>) {
+    pub fn set_state(&mut self, state: Option<Value>) {
         self.state = state;
     }
 

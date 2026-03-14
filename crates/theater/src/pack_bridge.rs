@@ -252,7 +252,7 @@ impl PackInstance {
     /// ## Parameters
     ///
     /// * `function_name` - The function name (e.g., "theater:simple/actor.init")
-    /// * `state` - Current actor state (optional)
+    /// * `state` - Current actor state as a Value (optional)
     /// * `params` - Parameters encoded as bytes (will be decoded and re-encoded as Value)
     ///
     /// ## Returns
@@ -261,9 +261,9 @@ impl PackInstance {
     pub async fn call_function(
         &mut self,
         function_name: &str,
-        state: Option<Vec<u8>>,
+        state: Option<Value>,
         params: Vec<u8>,
-    ) -> Result<(Option<Vec<u8>>, Vec<u8>)> {
+    ) -> Result<(Option<Value>, Vec<u8>)> {
         // Build input value: tuple of (state, params)
         let state_value = state_to_value(state);
         let params_value = bytes_to_value(&params);
@@ -288,9 +288,9 @@ impl PackInstance {
     pub async fn call_function_with_value(
         &mut self,
         function_name: &str,
-        state: Option<Vec<u8>>,
+        state: Option<Value>,
         params: Value,
-    ) -> Result<(Option<Vec<u8>>, Vec<u8>)> {
+    ) -> Result<(Option<Value>, Vec<u8>)> {
         let state_value = state_to_value(state);
         let input = Value::Tuple(vec![state_value, params]);
 
@@ -332,7 +332,7 @@ impl PackInstance {
     pub async fn call_typed<T: FromValue>(
         &mut self,
         function_name: &str,
-        state: Option<Vec<u8>>,
+        state: Option<Value>,
         params: Value,
     ) -> Result<ActorResult<T>> {
         let state_value = state_to_value(state);
@@ -353,19 +353,18 @@ impl PackInstance {
 // Value Conversion Utilities
 // =============================================================================
 
-/// Convert actor state to a Value.
-fn state_to_value(state: Option<Vec<u8>>) -> Value {
+/// Convert actor state to a Value (wrapped in Option).
+fn state_to_value(state: Option<Value>) -> Value {
     use pack::abi::ValueType;
     match state {
-        Some(bytes) => Value::Option {
-            inner_type: ValueType::List(Box::new(ValueType::U8)),
-            value: Some(Box::new(Value::List {
-                elem_type: ValueType::U8,
-                items: bytes.into_iter().map(Value::U8).collect(),
-            })),
+        Some(v) => Value::Option {
+            inner_type: v.infer_type(),
+            value: Some(Box::new(v)),
         },
         None => Value::Option {
-            inner_type: ValueType::List(Box::new(ValueType::U8)),
+            // Use a placeholder type for None - the actual type doesn't matter
+            // since value is None
+            inner_type: ValueType::Bool,
             value: None,
         },
     }
@@ -377,25 +376,6 @@ fn bytes_to_value(bytes: &[u8]) -> Value {
     Value::List {
         elem_type: ValueType::U8,
         items: bytes.iter().copied().map(Value::U8).collect(),
-    }
-}
-
-/// Convert a Value (list of u8) back to bytes.
-fn value_to_bytes(value: Value) -> Result<Vec<u8>> {
-    match value {
-        Value::List { items, .. } => {
-            let mut bytes = Vec::with_capacity(items.len());
-            for item in items {
-                match item {
-                    Value::U8(b) => bytes.push(b),
-                    other => {
-                        return Err(anyhow::anyhow!("Expected U8 in list, got {:?}", other))
-                    }
-                }
-            }
-            Ok(bytes)
-        }
-        other => Err(anyhow::anyhow!("Expected List, got {:?}", other)),
     }
 }
 
@@ -411,9 +391,9 @@ pub fn decode_value(bytes: &[u8]) -> Result<Value> {
 
 /// Decode a function result in the standard format.
 ///
-/// Expected format: result<tuple<option<list<u8>>, R>, string>
-/// Where R is the function-specific result type.
-fn decode_function_result(value: Value) -> Result<(Option<Vec<u8>>, Vec<u8>)> {
+/// Expected format: result<tuple<option<state>, R>, string>
+/// Where state is a Value and R is the function-specific result type.
+fn decode_function_result(value: Value) -> Result<(Option<Value>, Vec<u8>)> {
     match value {
         // Handle Value::Result (Pack's native result type)
         Value::Result { value: Ok(inner), .. } => {
@@ -465,20 +445,16 @@ fn decode_function_result(value: Value) -> Result<(Option<Vec<u8>>, Vec<u8>)> {
 }
 
 /// Helper to decode the Ok payload of a result.
-/// Expected format: tuple<option<list<u8>>, R> where first element is state
-fn decode_ok_payload(value: Value) -> Result<(Option<Vec<u8>>, Vec<u8>)> {
+/// Expected format: tuple<option<state>, R> where first element is state (as Value)
+fn decode_ok_payload(value: Value) -> Result<(Option<Value>, Vec<u8>)> {
     match value {
         Value::Tuple(items) if !items.is_empty() => {
-            // First element is state
+            // First element is state (wrapped in Option)
             let new_state = match &items[0] {
-                Value::Option { value: Some(inner), .. } => Some(value_to_bytes((**inner).clone())?),
+                Value::Option { value: Some(inner), .. } => Some((**inner).clone()),
                 Value::Option { value: None, .. } => None,
-                other => {
-                    return Err(anyhow::anyhow!(
-                        "Expected Option for state, got {:?}",
-                        other
-                    ))
-                }
+                // If it's not wrapped in Option, treat the value directly as state
+                other => Some(other.clone()),
             };
 
             // Encode the rest as the result (or just the second element)
@@ -492,7 +468,7 @@ fn decode_ok_payload(value: Value) -> Result<(Option<Vec<u8>>, Vec<u8>)> {
             Ok((new_state, result_bytes))
         }
         other => {
-            // Maybe it's just the state directly
+            // Maybe it's just the result directly (no state change)
             let result_bytes = encode_value(&other)?;
             Ok((None, result_bytes))
         }
@@ -505,8 +481,8 @@ fn decode_ok_payload(value: Value) -> Result<(Option<Vec<u8>>, Vec<u8>)> {
 
 /// Result type for actor function calls.
 ///
-/// Theater actors return `result<tuple<option<list<u8>>, R>, string>` where:
-/// - First tuple element is the updated state (or None)
+/// Theater actors return `result<tuple<option<state>, R>, string>` where:
+/// - First tuple element is the updated state as a Value (or None)
 /// - Second element is the function's return value
 /// - Error case contains an error message
 ///
@@ -522,8 +498,8 @@ fn decode_ok_payload(value: Value) -> Result<(Option<Vec<u8>>, Vec<u8>)> {
 /// ```
 #[derive(Debug, Clone)]
 pub struct ActorResult<T> {
-    /// The updated actor state, or None if unchanged
-    pub state: Option<Vec<u8>>,
+    /// The updated actor state as a Value, or None if unchanged
+    pub state: Option<Value>,
     /// The function's return value
     pub value: T,
 }
@@ -578,33 +554,12 @@ impl<T: FromValue> FromValue for ActorResult<T> {
 fn decode_actor_ok_payload<T: FromValue>(value: Value) -> std::result::Result<ActorResult<T>, ConversionError> {
     match value {
         Value::Tuple(mut items) if !items.is_empty() => {
-            // First element is state: option<list<u8>>
+            // First element is state (wrapped in Option)
             let state = match items.remove(0) {
-                Value::Option { value: Some(inner), .. } => {
-                    match *inner {
-                        Value::List { items, .. } => {
-                            let bytes: std::result::Result<Vec<u8>, _> = items.into_iter()
-                                .map(|v| match v {
-                                    Value::U8(b) => Ok(b),
-                                    other => Err(ConversionError::TypeMismatch {
-                                        expected: String::from("U8"),
-                                        got: format!("{:?}", other),
-                                    }),
-                                })
-                                .collect();
-                            Some(bytes?)
-                        }
-                        other => return Err(ConversionError::TypeMismatch {
-                            expected: String::from("List<u8>"),
-                            got: format!("{:?}", other),
-                        }),
-                    }
-                }
+                Value::Option { value: Some(inner), .. } => Some(*inner),
                 Value::Option { value: None, .. } => None,
-                other => return Err(ConversionError::TypeMismatch {
-                    expected: String::from("Option"),
-                    got: format!("{:?}", other),
-                }),
+                // If not wrapped in Option, treat the value directly as state
+                other => Some(other),
             };
 
             // Second element (if present) is the return value
@@ -741,29 +696,28 @@ mod tests {
 
     #[test]
     fn test_state_to_value() {
-        let state = Some(vec![1, 2, 3]);
+        // Test with a Value (now state is directly a Value)
+        let state = Some(Value::String("test state".to_string()));
         let value = state_to_value(state);
 
         match value {
             Value::Option { value: Some(inner), .. } => match *inner {
-                Value::List { items, .. } => {
-                    assert_eq!(items.len(), 3);
-                }
-                _ => panic!("Expected List"),
+                Value::String(s) => assert_eq!(s, "test state"),
+                _ => panic!("Expected String"),
             },
             _ => panic!("Expected Option(Some(...))"),
         }
     }
 
     #[test]
-    fn test_value_to_bytes() {
-        use pack::abi::ValueType;
-        let value = Value::List {
-            elem_type: ValueType::U8,
-            items: vec![Value::U8(1), Value::U8(2), Value::U8(3)],
-        };
-        let bytes = value_to_bytes(value).unwrap();
-        assert_eq!(bytes, vec![1, 2, 3]);
+    fn test_state_to_value_none() {
+        let state: Option<Value> = None;
+        let value = state_to_value(state);
+
+        match value {
+            Value::Option { value: None, .. } => {}
+            _ => panic!("Expected Option(None)"),
+        }
     }
 
     #[test]

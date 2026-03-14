@@ -610,17 +610,14 @@ impl Handler for SupervisorHandler
 
                     match response_rx.await {
                         Ok(Ok(state)) => {
-
+                            // State is already a Value, just wrap in Option
                             let state_value = match state {
-                                Some(bytes) => Value::Option {
-                                    inner_type: ValueType::List(Box::new(ValueType::U8)),
-                                    value: Some(Box::new(Value::List {
-                                        elem_type: ValueType::U8,
-                                        items: bytes.into_iter().map(Value::U8).collect(),
-                                    })),
+                                Some(v) => Value::Option {
+                                    inner_type: v.infer_type(),
+                                    value: Some(Box::new(v)),
                                 },
                                 None => Value::Option {
-                                    inner_type: ValueType::List(Box::new(ValueType::U8)),
+                                    inner_type: ValueType::Bool, // placeholder
                                     value: None,
                                 },
                             };

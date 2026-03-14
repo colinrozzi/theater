@@ -9,7 +9,7 @@ use crate::actor::store::ActorStore;
 use crate::actor::types::ActorError;
 use crate::actor::types::ActorOperation;
 use crate::interceptor::{RecordingInterceptor, ReplayRecordingInterceptor};
-use crate::pack_bridge::{AsyncRuntime, CallInterceptor, HostLinkerBuilder, PackInstance};
+use crate::pack_bridge::{AsyncRuntime, CallInterceptor, HostLinkerBuilder, PackInstance, Value};
 use crate::events::wasm::WasmEventData;
 use crate::events::ChainEventData;
 use crate::handler::Handler;
@@ -186,7 +186,7 @@ impl ActorRuntime {
         control_tx: Sender<ActorControl>,
         actor_phase_manager: ActorPhaseManager,
         actor_instance_wrapper: Arc<RwLock<Option<PackInstance>>>,
-        initial_state: Option<Vec<u8>>,
+        initial_state: Option<Value>,
     ) -> Result<(ShutdownController, Vec<JoinHandle<()>>), ActorRuntimeError> {
         // ---------------- Checkpoint Setup Initial ----------------
 
@@ -529,7 +529,7 @@ impl ActorRuntime {
         info_tx: Sender<ActorInfo>,
         control_rx: Receiver<ActorControl>,
         control_tx: Sender<ActorControl>,
-        initial_state: Option<Vec<u8>>,
+        initial_state: Option<Value>,
         setup_result_tx: Option<tokio::sync::oneshot::Sender<Result<(), String>>>,
     ) -> () {
         info!("Actor runtime starting communication loops");
@@ -996,9 +996,9 @@ impl ActorRuntime {
 
         let state = actor_instance.actor_store.get_state();
         debug!(
-            "Executing pack call to function '{}' with state size: {:?}",
+            "Executing pack call to function '{}' with state: {}",
             name,
-            state.as_ref().map(|s| s.len()).unwrap_or(0)
+            if state.is_some() { "present" } else { "none" }
         );
 
         let params_value = crate::pack_bridge::decode_value(&params).map_err(|e| {
@@ -1046,9 +1046,9 @@ impl ActorRuntime {
         };
 
         debug!(
-            "Pack call to '{}' completed, new state size: {:?}",
+            "Pack call to '{}' completed, new state: {}",
             name,
-            new_state.as_ref().map(|s| s.len()).unwrap_or(0)
+            if new_state.is_some() { "present" } else { "none" }
         );
         actor_instance.actor_store.set_state(new_state);
 

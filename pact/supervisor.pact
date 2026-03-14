@@ -23,7 +23,7 @@ interface supervisor {
         resume: func(manifest: string, state-bytes: option<list<u8>>, wasm-bytes: option<list<u8>>) -> result<string, string>
 
         // List all child actor IDs
-        list-children: func() -> list<string>
+        list-children: func() -> result<list<string>, string>
 
         // Restart a child actor
         restart-child: func(child-id: string) -> result<_, string>

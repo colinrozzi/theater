@@ -1,3 +1,4 @@
+use crate::pack_bridge::Value;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -8,7 +9,7 @@ pub enum WasmEventData {
     },
     WasmResult {
         function_name: String,
-        result: (Option<Vec<u8>>, Vec<u8>),
+        result: (Option<Value>, Vec<u8>),
     },
     WasmError {
         function_name: String,

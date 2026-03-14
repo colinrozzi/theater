@@ -9,6 +9,7 @@ use theater::messages::{
     ActorMessage, ActorRequest, ActorResult, ActorSend, ActorStatus, ChannelEvent,
     ChannelParticipant,
 };
+use theater::pack_bridge::Value;
 use theater::{ChainEvent, ManifestConfig};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{mpsc, Mutex};
@@ -150,7 +151,7 @@ pub enum ManagementResponse {
     },
     ActorState {
         id: TheaterId,
-        state: Option<Vec<u8>>,
+        state: Option<Value>,
     },
     ActorEvents {
         id: TheaterId,

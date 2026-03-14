@@ -8,7 +8,7 @@ use crate::actor::handle::ActorHandle;
 use crate::actor::runtime::ActorRuntime;
 use crate::actor::types::{ActorControl, ActorError, ActorInfo, ActorOperation};
 use crate::chain::{ChainEvent, ChainReader};
-use crate::pack_bridge::AsyncRuntime;
+use crate::pack_bridge::{AsyncRuntime, Value};
 use crate::config::actor_manifest::HandlerConfig;
 use crate::handler::HandlerRegistry;
 use crate::id::TheaterId;
@@ -683,8 +683,8 @@ impl TheaterRuntime {
         // If manifest provided, check for replay handler and create modified registry
         let (handler_registry, initial_state) = if let Some(ref manifest) = manifest {
             let registry = self.create_handler_registry_for_manifest(manifest).await?;
-            // Convert initial_state from String to bytes
-            let state = manifest.initial_state.as_ref().map(|s| s.as_bytes().to_vec());
+            // Convert initial_state from String to Value
+            let state = manifest.initial_state.as_ref().map(|s| Value::String(s.clone()));
             (registry, state)
         } else {
             // No manifest - use global handlers directly
@@ -1141,12 +1141,12 @@ impl TheaterRuntime {
         Err(anyhow::anyhow!("Actor restart not implemented"))
     }
 
-    async fn get_actor_state(&self, actor_id: TheaterId) -> Result<Option<Vec<u8>>> {
+    async fn get_actor_state(&self, actor_id: TheaterId) -> Result<Option<Value>> {
         if let Some(proc) = self.actors.get(&actor_id) {
             // Send a message to get the actor's state
             let (tx, rx): (
-                oneshot::Sender<Result<Option<Vec<u8>>, ActorError>>,
-                oneshot::Receiver<Result<Option<Vec<u8>>, ActorError>>,
+                oneshot::Sender<Result<Option<Value>, ActorError>>,
+                oneshot::Receiver<Result<Option<Value>, ActorError>>,
             ) = oneshot::channel();
             proc.info_tx
                 .send(ActorInfo::GetState { response_tx: tx })

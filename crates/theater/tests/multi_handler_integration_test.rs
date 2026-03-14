@@ -119,7 +119,7 @@ async fn test_multi_handler_composite() {
     info!("PackInstance created with multiple handlers");
 
     // Call the init function
-    let state: Option<Vec<u8>> = None;
+    let state: Option<Value> = None;
     let params: Vec<u8> = vec![];
 
     info!("Calling init function to test all handlers...");

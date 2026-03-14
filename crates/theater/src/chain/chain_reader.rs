@@ -1,8 +1,8 @@
 //! # Chain Reader
 //!
-//! Parses `.chain` files in the EVENT format back into `ChainEvent` objects.
+//! Parses chain files in either EVENT format or JSON format back into `ChainEvent` objects.
 //!
-//! The EVENT format is:
+//! ## EVENT Format
 //! ```text
 //! EVENT <hash-hex>
 //! <parent-hash-hex or 0000000000000000...>
@@ -12,6 +12,9 @@
 //! <body bytes>
 //!
 //! ```
+//!
+//! ## JSON Format
+//! A JSON array of ChainEvent objects (as produced by serde_json).
 
 use std::fs;
 use std::io::{BufRead, BufReader};
@@ -21,15 +24,26 @@ use anyhow::{anyhow, Context, Result};
 
 use crate::chain::ChainEvent;
 
-/// Reads and parses a `.chain` file into a vector of `ChainEvent`s.
+/// Reads and parses a chain file (EVENT or JSON format) into a vector of `ChainEvent`s.
 pub struct ChainReader;
 
 impl ChainReader {
-    /// Parse a chain file from a path.
+    /// Parse a chain file from a path. Auto-detects EVENT vs JSON format.
     pub fn read_file(path: &Path) -> Result<Vec<ChainEvent>> {
-        let file = fs::File::open(path)
-            .with_context(|| format!("Failed to open chain file: {:?}", path))?;
-        Self::read(BufReader::new(file))
+        let content = fs::read_to_string(path)
+            .with_context(|| format!("Failed to read chain file: {:?}", path))?;
+
+        let trimmed = content.trim_start();
+
+        // Auto-detect format: JSON starts with '[', EVENT format starts with 'EVENT'
+        if trimmed.starts_with('[') {
+            // JSON format
+            serde_json::from_str(&content)
+                .with_context(|| format!("Failed to parse JSON chain file: {:?}", path))
+        } else {
+            // EVENT format
+            Self::read(BufReader::new(content.as_bytes()))
+        }
     }
 
     /// Parse chain events from a reader.

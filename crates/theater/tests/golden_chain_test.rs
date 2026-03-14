@@ -110,7 +110,7 @@ async fn test_state_tracking_typed_api() {
         .await
         .expect("init should succeed");
 
-    info!("init succeeded, state = {:?}", result.state.as_ref().map(|s| String::from_utf8_lossy(s)));
+    info!("init succeeded, state = {:?}", result.state);
     assert!(result.state.is_some(), "init should return state");
     let state = result.state;
 
