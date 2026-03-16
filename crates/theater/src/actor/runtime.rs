@@ -12,14 +12,11 @@ use crate::interceptor::{RecordingInterceptor, ReplayRecordingInterceptor};
 use crate::pack_bridge::{AsyncRuntime, CallInterceptor, HostLinkerBuilder, PackInstance, Value};
 use crate::events::wasm::WasmEventData;
 use crate::events::ChainEventData;
-use crate::handler::Handler;
 use crate::handler::HandlerContext;
 use crate::handler::HandlerRegistry;
 use crate::id::TheaterId;
 use crate::messages::TheaterCommand;
 use crate::metrics::MetricsCollector;
-use crate::store::ContentStore;
-use crate::ManifestConfig;
 
 use crate::Result;
 use crate::ShutdownController;
@@ -36,34 +33,15 @@ use tracing::{debug, error, info, warn};
 use super::types::ActorControl;
 use super::types::ActorInfo;
 
-/// Maximum time to wait for graceful shutdown before forceful termination
-#[allow(dead_code)]
-const SHUTDOWN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
-
 /// # ActorRuntime
 ///
 /// Coordinates the execution and lifecycle of a single WebAssembly actor within the Theater system.
 ///
-/// `ActorRuntime` manages the various components that make up an actor's execution environment,
-/// including handlers and communication channels. It's responsible for starting the actor,
-/// setting up its capabilities via handlers, executing operations, and ensuring proper shutdown.
-///
-/// Note: The struct fields are currently unused as the runtime is driven by the
-/// `start()` and `build_actor_resources()` functions which manage the instance
-/// through shared wrappers.
-#[allow(dead_code)]
-pub struct ActorRuntime {
-    /// Unique identifier for this actor
-    pub id: TheaterId,
-    config: ManifestConfig,
-    handlers: Vec<Box<dyn Handler>>,
-    metrics: MetricsCollector,
-    operation_rx: Receiver<ActorOperation>,
-    info_rx: Receiver<ActorInfo>,
-    control_rx: Receiver<ActorControl>,
-    theater_tx: Sender<TheaterCommand>,
-    actor_phase_manager: ActorPhaseManager,
-}
+/// `ActorRuntime` provides static methods for building and running actors. It manages the various
+/// components that make up an actor's execution environment, including handlers and communication
+/// channels. It's responsible for starting the actor, setting up its capabilities via handlers,
+/// executing operations, and ensuring proper shutdown.
+pub struct ActorRuntime;
 
 /// # Result of starting an actor
 ///
@@ -219,13 +197,6 @@ impl ActorRuntime {
                 message: "phase error found at setup task Checkpoint Store Manifest".into(),
             });
         }
-
-        // Store manifest (but don't record an event - the manifest hash varies between runs)
-        let manifest_store = ContentStore::from_id("manifest");
-        // Manifest storage removed - manifests are now optional and stored
-        // at the runtime level if needed, not in the actor's content store.
-        debug!("Actor {} ready (manifest_store available for actor content)", id);
-        let _ = manifest_store; // suppress unused warning
 
         // ----------------- Checkpoint Load Component -----------------
 
