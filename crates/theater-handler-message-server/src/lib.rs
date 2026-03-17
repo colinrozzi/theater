@@ -605,6 +605,10 @@ impl Handler for MessageServerHandler
             }
         };
 
+        // We also need access to the shutdown_receiver stored for register(),
+        // so we can consume it if register() is never called and we get shutdown.
+        let shutdown_receiver_for_register = self.shutdown_receiver.clone();
+
         // Wait for register() to be called OR shutdown signal.
         // This ensures setup() can exit cleanly even if register() is never called.
         Box::pin(async move {
@@ -614,6 +618,14 @@ impl Handler for MessageServerHandler
                 }
                 _ = &mut receiver_for_setup.receiver => {
                     info!("Message server handler: shutdown before register, exiting setup");
+                    // IMPORTANT: Also consume the shutdown_receiver that was stored for register()
+                    // to avoid blocking signal_shutdown(). If register() was never called,
+                    // this receiver is sitting unconsumed and will block shutdown.
+                    let register_receiver = shutdown_receiver_for_register.lock().unwrap().take();
+                    if let Some(mut receiver) = register_receiver {
+                        receiver.wait_for_shutdown().await;
+                        info!("Message server handler: consumed register shutdown receiver");
+                    }
                 }
             }
             Ok(())

@@ -630,7 +630,7 @@ impl StateChain {
         // head of the chain) will be saved at the actor id in the THEATER_DIR/chains/{actor_id} path
 
         let theater_dir = std::env::var("THEATER_HOME").expect(
-            "THEATER_DIR environment variable must be set to the directory where events are stored",
+            "THEATER_HOME environment variable must be set to the directory where events are stored",
         );
         let events_dir = format!("{}/events", theater_dir);
         let chains_dir = format!("{}/chains", theater_dir);

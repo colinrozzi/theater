@@ -601,35 +601,21 @@ impl Handler for SupervisorHandler
                 }
             })?
             // list-children: func() -> list<string>
-            .func_async_result("list-children", move |ctx: AsyncCtx<ActorStore>, _input: Value| {
-                async move {
-                    let store = ctx.data();
-                    let theater_tx = store.theater_tx.clone();
-                    let parent_id = store.id.clone();
-
-                    let (response_tx, response_rx) = oneshot::channel();
-                    let cmd = TheaterCommand::ListChildren {
-                        parent_id,
-                        response_tx,
-                    };
-
-                    if let Err(e) = theater_tx.send(cmd).await {
-                        return Err(Value::String(format!("Failed to send list-children command: {}", e)));
-                    }
-
-                    match response_rx.await {
-                        Ok(children) => {
-
-                            let children_values: Vec<Value> = children
-                                .into_iter()
-                                .map(|id| Value::String(id.to_string()))
-                                .collect();
-                            Ok(Value::List {
-                                elem_type: ValueType::String,
-                                items: children_values,
-                            })
-                        }
-                        Err(e) => Err(Value::String(format!("Failed to receive children list: {}", e))),
+            // Returns the handler's internal tracking of children (not the runtime's)
+            .func_async_result("list-children", {
+                let children = children.clone();
+                move |_ctx: AsyncCtx<ActorStore>, _input: Value| {
+                    let children = children.clone();
+                    async move {
+                        let children_guard = children.lock().unwrap();
+                        let children_values: Vec<Value> = children_guard
+                            .iter()
+                            .map(|id| Value::String(id.to_string()))
+                            .collect();
+                        Ok::<Value, Value>(Value::List {
+                            elem_type: ValueType::String,
+                            items: children_values,
+                        })
                     }
                 }
             })?
@@ -849,9 +835,11 @@ impl Handler for SupervisorHandler
         let theater_tx = self.theater_tx.clone();
 
         Box::pin(async move {
-            // If we don't have a receiver (e.g., this is a cloned instance), just return Ok
+            // If we don't have a receiver (e.g., this is a cloned instance), just wait for shutdown
             let Some(mut channel_rx) = channel_rx_opt else {
                 info!("Supervisor handler has no receiver (cloned instance), not starting");
+                // Still need to wait for shutdown to avoid blocking the shutdown controller
+                shutdown_receiver.wait_for_shutdown().await;
                 return Ok(());
             };
 

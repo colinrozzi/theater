@@ -911,7 +911,7 @@ impl TheaterRuntime {
             return Ok(());
         }
 
-        let _proc = match self.actors.get(&actor_id) {
+        let proc = match self.actors.get(&actor_id) {
             Some(proc) => proc,
             None => {
                 error!("Actor {:?} not found in registry", actor_id);
@@ -919,7 +919,14 @@ impl TheaterRuntime {
             }
         };
 
-        debug!("Actor {:?} found, proceeding with shutdown", actor_id);
+        // Check if this actor should save its chain (based on manifest setting)
+        let should_save_chain = proc
+            .manifest
+            .as_ref()
+            .map(|m| m.save_chain())
+            .unwrap_or(false);
+
+        debug!("Actor {:?} found, proceeding with shutdown (save_chain: {})", actor_id, should_save_chain);
 
         'chain_block: {
             // Get the actor's chain
@@ -957,10 +964,12 @@ impl TheaterRuntime {
                 .expect("Failed to record event");
             debug!("Final event added to chain for actor {:?}", actor_id);
 
-            writable_chain.save_chain().map_err(|e| {
-                error!("Failed to save chain for actor {:?}: {}", actor_id, e);
-                e
-            })?;
+            if should_save_chain {
+                writable_chain.save_chain().map_err(|e| {
+                    error!("Failed to save chain for actor {:?}: {}", actor_id, e);
+                    e
+                })?;
+            }
         }
 
         self.chains.remove(&actor_id);
