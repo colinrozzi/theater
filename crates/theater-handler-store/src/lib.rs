@@ -312,6 +312,7 @@ impl Handler for StoreHandler
             .interface("theater:simple/store")?
             // new() -> result<string, string>
             .func_typed("new", move |_ctx: &mut Ctx<'_, ActorStore>, _input: Value| {
+                use theater::ValueType;
                 // If a store_id is configured, use it; otherwise create a new store
                 let store_id = if let Some(ref id) = configured_store_id {
                     // Use the configured store ID - just return it without creating new store
@@ -325,12 +326,11 @@ impl Handler for StoreHandler
                     };
                     store.id().to_string()
                 };
-                // Return Ok(store_id) as Variant with tag 0
-                Value::Variant {
-                    type_name: String::from("result"),
-                    case_name: String::from("ok"),
-                    tag: 0, // ok
-                    payload: vec![Value::String(store_id)],
+                // Return Ok(store_id) as Result
+                Value::Result {
+                    ok_type: ValueType::String,
+                    err_type: ValueType::String,
+                    value: Ok(Box::new(Value::String(store_id))),
                 }
             })?
             // store(store-id: string, content: list<u8>) -> result<string, string>
