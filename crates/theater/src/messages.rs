@@ -28,6 +28,7 @@ use crate::pack_bridge::{InterfaceHash, Value};
 ///     let spawn_cmd = TheaterCommand::SpawnActor {
 ///         name: Some("my-actor".to_string()),
 ///         manifest: None,
+///         init_bytes: None,
 ///         wasm_bytes: vec![], // WASM bytes would be loaded here
 ///         response_tx: tx,
 ///         parent_id: None,
@@ -141,6 +142,7 @@ pub enum TheaterCommand {
         wasm_bytes: Vec<u8>,
         name: Option<String>,
         manifest: Option<ManifestConfig>,
+        init_bytes: Option<Vec<u8>>,
         response_tx: oneshot::Sender<Result<TheaterId>>,
         supervisor_tx: Option<Sender<ActorResult>>,
         subscription_tx: Option<Sender<Result<ChainEvent, ActorError>>>,

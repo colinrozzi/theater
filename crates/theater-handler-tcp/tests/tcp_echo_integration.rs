@@ -171,6 +171,7 @@ async fn test_tcp_echo_and_chain() {
     theater_tx
         .send(TheaterCommand::GetActorEvents {
             actor_id: actor_id.clone(),
+                            init_bytes: None,
             response_tx: events_tx,
         })
         .await

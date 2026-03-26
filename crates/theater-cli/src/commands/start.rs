@@ -285,6 +285,7 @@ pub async fn execute_async(args: &StartArgs, ctx: &CommandContext) -> Result<(),
             wasm_bytes,
             name: Some(manifest.name.clone()),
             manifest: Some(manifest),
+            init_bytes: None,
             response_tx,
             supervisor_tx: Some(supervisor_tx),
             subscription_tx: None, // Using global subscription instead

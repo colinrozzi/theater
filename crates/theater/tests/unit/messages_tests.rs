@@ -67,6 +67,7 @@ async fn test_theater_command_spawn_actor() {
         wasm_bytes: vec![0, 1, 2, 3],
         name: Some(actor_name.clone()),
         manifest: None,
+                            init_bytes: None,
         response_tx: tx,
         supervisor_tx: None,
         subscription_tx: None,

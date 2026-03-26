@@ -16,7 +16,7 @@ use crate::messages::{
     ActorResult, ChannelId, ChannelParticipant, ChildError, ChildExternalStop, ChildResult,
 };
 use crate::metrics::ActorMetrics;
-use crate::pack_bridge::{AsyncRuntime, Value};
+use crate::pack_bridge::{AsyncRuntime, Value, ValueType};
 use crate::replay::ReplayHandler;
 use crate::shutdown::{ShutdownController, ShutdownType};
 use crate::utils::{self, resolve_reference};
@@ -293,6 +293,7 @@ impl TheaterRuntime {
                     wasm_bytes,
                     name,
                     manifest,
+                    init_bytes,
                     response_tx,
                     supervisor_tx,
                     subscription_tx,
@@ -304,6 +305,7 @@ impl TheaterRuntime {
                             wasm_bytes,
                             name,
                             manifest,
+                            init_bytes,
                             supervisor_tx,
                             subscription_tx,
                         )
@@ -396,6 +398,7 @@ impl TheaterRuntime {
                             wasm_bytes,
                             name,
                             Some(manifest),
+                            None,
                             supervisor_tx,
                             subscription_tx,
                         )
@@ -634,6 +637,7 @@ impl TheaterRuntime {
         wasm_bytes: Vec<u8>,
         name: Option<String>,
         manifest: Option<ManifestConfig>,
+        init_bytes: Option<Vec<u8>>,
         supervisor_tx: Option<Sender<ActorResult>>,
         subscription_tx: Option<Sender<Result<ChainEvent, ActorError>>>,
     ) -> Result<TheaterId> {
@@ -680,15 +684,31 @@ impl TheaterRuntime {
         // If manifest provided, check for replay handler and create modified registry
         let (handler_registry, initial_state) = if let Some(ref manifest) = manifest {
             let registry = self.create_handler_registry_for_manifest(manifest).await?;
-            // Convert initial_state from String to Value
-            let state = manifest
-                .initial_state
-                .as_ref()
-                .map(|s| Value::String(s.clone()));
+            // Prefer init_bytes over manifest's initial_state
+            let state = if let Some(bytes) = init_bytes {
+                let items: Vec<Value> = bytes.into_iter().map(Value::U8).collect();
+                Some(Value::List {
+                    elem_type: ValueType::U8,
+                    items,
+                })
+            } else {
+                // Fall back to manifest's initial_state (as String)
+                manifest
+                    .initial_state
+                    .as_ref()
+                    .map(|s| Value::String(s.clone()))
+            };
             (registry, state)
         } else {
             // No manifest - use global handlers directly
-            (self.handler_registry.clone(), None)
+            let state = init_bytes.map(|bytes| {
+                let items: Vec<Value> = bytes.into_iter().map(Value::U8).collect();
+                Value::List {
+                    elem_type: ValueType::U8,
+                    items,
+                }
+            });
+            (self.handler_registry.clone(), state)
         };
 
         // Start the actor in a detached task

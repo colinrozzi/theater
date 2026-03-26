@@ -265,6 +265,7 @@ async fn test_timing_handler_with_test_actor() -> Result<()> {
     theater_tx
         .send(TheaterCommand::GetActorStatus {
             actor_id: actor_id.clone(),
+                            init_bytes: None,
             response_tx: status_tx,
         })
         .await?;

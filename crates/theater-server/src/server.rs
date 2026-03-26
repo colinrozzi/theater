@@ -693,6 +693,7 @@ impl TheaterServer {
                             wasm_bytes,
                             name: Some(manifest_config.name.clone()),
                             manifest: Some(manifest_config),
+                            init_bytes: None,
                             response_tx: cmd_tx,
                             supervisor_tx,
                             subscription_tx,
