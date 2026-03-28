@@ -174,9 +174,6 @@
             llvmPackages.clang
             cmake
 
-            # Documentation
-            mdbook
-
             # Debugging
             lldb
           ] ++ pkgs.lib.optionals pkgs.stdenv.isDarwin [

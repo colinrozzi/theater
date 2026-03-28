@@ -102,9 +102,6 @@
             cargo-audit
             cargo-expand
             cargo-udeps
-            
-            # Helpful for documentation
-            mdbook
           ];
 
           # Environment variables
