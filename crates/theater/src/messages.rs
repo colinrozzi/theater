@@ -200,6 +200,15 @@ pub enum TheaterCommand {
         data: Option<Vec<u8>>,
     },
 
+    /// # Actor shutdown complete
+    ///
+    /// Sent by the spawned shutdown task after the actor runtime has
+    /// acknowledged shutdown. Triggers final cleanup (removing from maps,
+    /// signaling handler shutdown, etc.)
+    ActorShutdownComplete {
+        actor_id: TheaterId,
+    },
+
     /// # Shutdown the entire runtime
     ///
     /// Gracefully shuts down the theater runtime and all actors.
@@ -432,6 +441,9 @@ impl TheaterCommand {
                     actor_id,
                     data.as_ref().map(|d| String::from_utf8_lossy(d))
                 )
+            }
+            TheaterCommand::ActorShutdownComplete { actor_id } => {
+                format!("ActorShutdownComplete: {:?}", actor_id)
             }
             TheaterCommand::NewEvent { actor_id, .. } => {
                 format!("NewEvent: {:?}", actor_id)

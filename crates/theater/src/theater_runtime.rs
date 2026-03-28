@@ -461,16 +461,90 @@ impl TheaterRuntime {
                         "TheaterCommand::ShuttingDown received for actor: {:?}",
                         actor_id
                     );
-                    let start = std::time::Instant::now();
-                    match self.shutdown_actor(actor_id, data).await {
-                        Ok(_) => {
-                            info!("Actor shut down successfully in {:?}", start.elapsed());
-                        }
-                        Err(e) => {
-                            error!("Failed to shut down actor: {}", e);
+                    // Notify supervisor before spawning the async shutdown
+                    if let Some(proc) = self.actors.get(&actor_id) {
+                        if let Some(supervisor_tx) = &proc.supervisor_tx {
+                            let message = ActorResult::Success(ChildResult {
+                                actor_id: actor_id.clone(),
+                                result: data,
+                            });
+                            if let Err(e) = supervisor_tx.send(message).await {
+                                error!("Failed to send shutdown message to supervisor: {}", e);
+                            }
                         }
                     }
-                    // If all actors have shut down, exit the runtime
+                    // Spawn the stop so the event loop stays free to process
+                    // child StopActor commands (prevents deadlock when parent
+                    // shutdown triggers child cleanup via supervisor handler)
+                    let theater_tx = self.theater_tx.clone();
+                    let actor_id_clone = actor_id.clone();
+                    if let Some(proc) = self.actors.get(&actor_id) {
+                        let control_tx = proc.control_tx.clone();
+                        tokio::spawn(async move {
+                            let start = std::time::Instant::now();
+                            let (response_tx, response_rx) = tokio::sync::oneshot::channel();
+                            if let Err(e) = control_tx
+                                .send(ActorControl::Shutdown { response_tx })
+                                .await
+                            {
+                                error!("Failed to send shutdown signal: {}", e);
+                            } else {
+                                match tokio::time::timeout(
+                                    std::time::Duration::from_secs(10),
+                                    response_rx,
+                                ).await {
+                                    Ok(Ok(Ok(_))) => {
+                                        info!("Actor runtime {:?} acknowledged shutdown in {:?}",
+                                            actor_id_clone, start.elapsed());
+                                    }
+                                    Ok(Ok(Err(e))) => {
+                                        error!("Actor runtime {:?} shutdown error: {:?}",
+                                            actor_id_clone, e);
+                                    }
+                                    Ok(Err(_)) => {
+                                        error!("Actor runtime {:?} response channel closed",
+                                            actor_id_clone);
+                                    }
+                                    Err(_) => {
+                                        error!("Timeout waiting for actor runtime {:?} (10s)",
+                                            actor_id_clone);
+                                    }
+                                }
+                            }
+                            // Signal theater to finalize cleanup
+                            let _ = theater_tx.send(TheaterCommand::ActorShutdownComplete {
+                                actor_id: actor_id_clone,
+                            }).await;
+                        });
+                    }
+                }
+                TheaterCommand::ActorShutdownComplete { actor_id } => {
+                    info!("ActorShutdownComplete for {:?}, cleaning up", actor_id);
+
+                    // Signal handlers to shut down and remove from maps
+                    if let Some(proc) = self.actors.remove(&actor_id) {
+                        proc.shutdown_controller
+                            .signal_shutdown(ShutdownType::Graceful)
+                            .await;
+                        info!("Actor {:?} handler shutdown complete", actor_id);
+                    }
+
+                    // Remove from channels
+                    let id_for_channels = ChannelParticipant::Actor(actor_id.clone());
+                    let mut channels_to_remove = Vec::new();
+                    for (channel_id, participants) in self.channels.iter_mut() {
+                        if participants.remove(&id_for_channels) {
+                            if participants.is_empty() {
+                                channels_to_remove.push(channel_id.clone());
+                            }
+                        }
+                    }
+                    for channel_id in channels_to_remove {
+                        self.channels.remove(&channel_id);
+                    }
+
+                    self.chains.remove(&actor_id);
+
                     if self.actors.is_empty() {
                         info!("All actors have shut down, exiting runtime");
                         break;

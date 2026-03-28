@@ -517,7 +517,7 @@ impl ActorRuntime {
         let info_rx = info_rx;
         let mut control_rx = control_rx;
 
-        let setup_handle = {
+        let mut setup_handle = {
             let actor_instance_wrapper = actor_instance_wrapper.clone();
             let actor_phase_manager = actor_phase_manager.clone();
             let name = name.clone();
@@ -577,7 +577,7 @@ impl ActorRuntime {
             })
         };
 
-        let info_handle = {
+        let mut info_handle = {
             let actor_instance_wrapper = actor_instance_wrapper.clone();
             let metrics = metrics.clone();
             let actor_phase_manager = actor_phase_manager.clone();
@@ -590,7 +590,7 @@ impl ActorRuntime {
             ))
         };
 
-        let operation_handle = {
+        let mut operation_handle = {
             let actor_instance_wrapper = actor_instance_wrapper.clone();
             let metrics = metrics.clone();
             let theater_tx = theater_tx.clone();
@@ -626,10 +626,44 @@ impl ActorRuntime {
 
                     info!("Waiting for operation and info loops to finish");
 
-                    // Wait for operation and info loops to finish gracefully
-                    let (_, _, _) = tokio::join!(operation_handle, info_handle, setup_handle);
+                    // Wait for each individually to identify which one hangs
+                    let op_result = tokio::select! {
+                        r = &mut operation_handle => {
+                            info!("Operation loop exited: {:?}", r.is_ok());
+                            r
+                        }
+                        _ = tokio::time::sleep(std::time::Duration::from_secs(5)) => {
+                            error!("Operation loop did not exit within 5s - aborting");
+                            operation_handle.abort();
+                            operation_handle.await
+                        }
+                    };
 
-                    info!("Operation and info loops have exited");
+                    let info_result = tokio::select! {
+                        r = &mut info_handle => {
+                            info!("Info loop exited: {:?}", r.is_ok());
+                            r
+                        }
+                        _ = tokio::time::sleep(std::time::Duration::from_secs(2)) => {
+                            error!("Info loop did not exit within 2s - aborting");
+                            info_handle.abort();
+                            info_handle.await
+                        }
+                    };
+
+                    let setup_result = tokio::select! {
+                        r = &mut setup_handle => {
+                            info!("Setup loop exited: {:?}", r.is_ok());
+                            r
+                        }
+                        _ = tokio::time::sleep(std::time::Duration::from_secs(2)) => {
+                            error!("Setup loop did not exit within 2s - aborting");
+                            setup_handle.abort();
+                            setup_handle.await
+                        }
+                    };
+
+                    info!("All loops have exited");
 
                     if let Err(e) = response_tx.send(Ok(())) {
                         error!("Failed to send shutdown confirmation: {:?}", e);
