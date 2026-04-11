@@ -106,7 +106,11 @@ fn format_event_json(event: &ChainEvent, actor_id: &TheaterId) -> String {
         "hash": hex::encode(&event.hash),
         "parent_hash": event.parent_hash.as_ref().map(hex::encode),
         "event_type": event.event_type,
-        "data": serde_json::from_slice::<serde_json::Value>(&event.data).ok()
+        "data": serde_json::from_slice::<serde_json::Value>(&event.data)
+            .ok()
+            .or_else(|| Some(serde_json::Value::String(
+                format!("{} bytes (pack-encoded)", event.data.len())
+            )))
     });
     serde_json::to_string(&json).unwrap_or_else(|_| "{}".to_string())
 }

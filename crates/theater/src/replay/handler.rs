@@ -44,8 +44,6 @@ use crate::pack_bridge::{HostLinkerBuilder, InterfaceImpl, LinkerError, TypeHash
 use crate::handler::{Handler, HandlerContext, SharedActorInstance};
 use crate::shutdown::ShutdownReceiver;
 
-use super::HostFunctionCall;
-
 /// Shared state for tracking replay position across all stub functions.
 #[derive(Clone)]
 pub struct ReplayState {
@@ -99,11 +97,8 @@ impl ReplayState {
     /// Assumes the event data contains a serialized HostFunctionCall.
     pub fn current_output(&self) -> Option<pack::abi::Value> {
         let event = self.current_event()?;
-        if let Ok(call) = serde_json::from_slice::<HostFunctionCall>(&event.data) {
-            Some(call.output)
-        } else {
-            None
-        }
+        let call = crate::events::decode_host_function_call(&event.data)?;
+        Some(call.output)
     }
 
     /// Advance to the next event.
@@ -219,7 +214,7 @@ impl Handler for ReplayHandler {
             let calls_to_replay: Vec<(usize, String, Vec<u8>)> = expected_events.iter()
                 .enumerate()
                 .filter_map(|(idx, event)| {
-                    let payload: ChainEventPayload = serde_json::from_slice(&event.data).ok()?;
+                    let payload = crate::events::decode_chain_event_payload(&event.data)?;
                     match payload {
                         ChainEventPayload::Wasm(WasmEventData::WasmCall { function_name, params }) => {
                             Some((idx, function_name, params))

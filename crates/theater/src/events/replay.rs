@@ -1,5 +1,6 @@
 //! Replay-related events for tracking replay completion and verification.
 
+use crate::pack_bridge::{ConversionError, IntoValue, Value};
 use serde::{Deserialize, Serialize};
 
 /// Summary of a replay execution.
@@ -55,6 +56,61 @@ impl ReplaySummary {
             mismatches: 0,
             success: false,
             error: Some(error),
+        }
+    }
+}
+
+impl IntoValue for ReplaySummary {
+    fn into_value(self) -> Value {
+        Value::Record {
+            type_name: String::from("replay-summary"),
+            fields: vec![
+                ("total-events".into(), Value::U64(self.total_events as u64)),
+                ("events-replayed".into(), Value::U64(self.events_replayed as u64)),
+                ("mismatches".into(), Value::U64(self.mismatches as u64)),
+                ("success".into(), Value::Bool(self.success)),
+                ("error".into(), self.error.into_value()),
+            ],
+        }
+    }
+}
+
+impl TryFrom<Value> for ReplaySummary {
+    type Error = ConversionError;
+
+    fn try_from(v: Value) -> Result<Self, Self::Error> {
+        match v {
+            Value::Record { fields, .. } => {
+                let mut total_events = 0u64;
+                let mut events_replayed = 0u64;
+                let mut mismatches = 0u64;
+                let mut success = false;
+                let mut error = None;
+
+                for (name, val) in fields {
+                    match name.as_str() {
+                        "total-events" => total_events = u64::try_from(val)?,
+                        "events-replayed" => events_replayed = u64::try_from(val)?,
+                        "mismatches" => mismatches = u64::try_from(val)?,
+                        "success" => success = bool::try_from(val)?,
+                        "error" => {
+                            if let Value::Option { value: Some(v), .. } = val {
+                                error = Some(String::try_from(*v)?);
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+
+                Ok(ReplaySummary {
+                    total_events: total_events as usize,
+                    events_replayed: events_replayed as usize,
+                    mismatches: mismatches as usize,
+                    success,
+                    error,
+                })
+            }
+            other => Err(ConversionError::ExpectedRecord(format!("{:?}", other))),
         }
     }
 }

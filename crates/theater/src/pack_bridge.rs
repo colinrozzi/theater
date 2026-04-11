@@ -679,6 +679,12 @@ impl<T: IntoValue> IntoValue for Option<T> {
     }
 }
 
+impl IntoValue for Value {
+    fn into_value(self) -> Value {
+        self
+    }
+}
+
 impl<T: IntoValue> IntoValue for Vec<T> {
     fn into_value(self) -> Value {
         let items: Vec<Value> = self.into_iter().map(|v| v.into_value()).collect();

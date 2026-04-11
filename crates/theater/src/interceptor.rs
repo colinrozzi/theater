@@ -111,18 +111,8 @@ impl ReplayRecordingInterceptor {
         while *pos < self.expected_events.len() {
             let event = &self.expected_events[*pos];
 
-            // Try to deserialize the event data as a ChainEventPayload
-            if let Ok(payload) = serde_json::from_slice::<ChainEventPayload>(&event.data) {
-                if let ChainEventPayload::HostFunction(call) = payload {
-                    if call.interface == interface && call.function == function {
-                        *pos += 1;
-                        return Some(call);
-                    }
-                }
-            }
-
-            // Also try deserializing directly as HostFunctionCall (backward compat)
-            if let Ok(call) = serde_json::from_slice::<HostFunctionCall>(&event.data) {
+            // Try to decode the event data (pack first, JSON fallback)
+            if let Some(call) = crate::events::decode_host_function_call(&event.data) {
                 if call.interface == interface && call.function == function {
                     *pos += 1;
                     return Some(call);

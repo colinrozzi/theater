@@ -180,12 +180,21 @@ impl SupervisorHandler {
                     Value::String(child_error.actor_id.to_string()),
                     actor_error_to_value(child_error.error),
                 ]);
-                actor_handle
+                match actor_handle
                     .call_function(
                         "theater:simple/supervisor-handlers.handle-child-error".to_string(),
                         params,
                     )
-                    .await?;
+                    .await
+                {
+                    Ok(_) => {}
+                    Err(e) => {
+                        debug!(
+                            "Could not call handle-child-error (may not be implemented): {}",
+                            e
+                        );
+                    }
+                }
             }
             ActorResult::Success(child_result) => {
                 // handle-child-exit(state, params: tuple<string, option<list<u8>>>)
@@ -194,12 +203,21 @@ impl SupervisorHandler {
                     Value::String(child_result.actor_id.to_string()),
                     option_bytes_to_value(child_result.result.into()),
                 ]);
-                actor_handle
+                match actor_handle
                     .call_function(
                         "theater:simple/supervisor-handlers.handle-child-exit".to_string(),
                         params,
                     )
-                    .await?;
+                    .await
+                {
+                    Ok(_) => {}
+                    Err(e) => {
+                        debug!(
+                            "Could not call handle-child-exit (may not be implemented): {}",
+                            e
+                        );
+                    }
+                }
             }
             ActorResult::ExternalStop(stop_data) => {
                 // handle-child-external-stop(state, params: tuple<string>)
@@ -207,13 +225,22 @@ impl SupervisorHandler {
                 let params = Value::Tuple(vec![
                     Value::String(stop_data.actor_id.to_string()),
                 ]);
-                actor_handle
+                match actor_handle
                     .call_function(
                         "theater:simple/supervisor-handlers.handle-child-external-stop"
                             .to_string(),
                         params,
                     )
-                    .await?;
+                    .await
+                {
+                    Ok(_) => {}
+                    Err(e) => {
+                        debug!(
+                            "Could not call handle-child-external-stop (may not be implemented): {}",
+                            e
+                        );
+                    }
+                }
             }
         }
 

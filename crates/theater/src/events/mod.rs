@@ -1,3 +1,4 @@
+use crate::pack_bridge::{ConversionError, IntoValue, Value};
 use crate::replay::HostFunctionCall;
 use serde::{Deserialize, Serialize};
 
@@ -55,6 +56,60 @@ impl From<replay::ReplaySummary> for ChainEventPayload {
     }
 }
 
+impl IntoValue for ChainEventPayload {
+    fn into_value(self) -> Value {
+        match self {
+            ChainEventPayload::HostFunction(call) => Value::Variant {
+                type_name: String::from("chain-event-payload"),
+                case_name: String::from("host-function"),
+                tag: 0,
+                payload: vec![call.into_value()],
+            },
+            ChainEventPayload::Wasm(data) => Value::Variant {
+                type_name: String::from("chain-event-payload"),
+                case_name: String::from("wasm"),
+                tag: 1,
+                payload: vec![data.into_value()],
+            },
+            ChainEventPayload::ReplaySummary(summary) => Value::Variant {
+                type_name: String::from("chain-event-payload"),
+                case_name: String::from("replay-summary"),
+                tag: 2,
+                payload: vec![summary.into_value()],
+            },
+        }
+    }
+}
+
+impl TryFrom<Value> for ChainEventPayload {
+    type Error = ConversionError;
+
+    fn try_from(v: Value) -> Result<Self, Self::Error> {
+        match v {
+            Value::Variant { case_name, payload, .. } => {
+                let inner = payload.into_iter().next().ok_or_else(|| {
+                    ConversionError::MissingField("payload".into())
+                })?;
+                match case_name.as_str() {
+                    "host-function" => Ok(ChainEventPayload::HostFunction(
+                        HostFunctionCall::try_from(inner)?,
+                    )),
+                    "wasm" => Ok(ChainEventPayload::Wasm(
+                        wasm::WasmEventData::try_from(inner)?,
+                    )),
+                    "replay-summary" => Ok(ChainEventPayload::ReplaySummary(
+                        replay::ReplaySummary::try_from(inner)?,
+                    )),
+                    other => Err(ConversionError::ExpectedVariant(format!(
+                        "unknown chain-event-payload case: {other}"
+                    ))),
+                }
+            }
+            other => Err(ConversionError::ExpectedVariant(format!("{:?}", other))),
+        }
+    }
+}
+
 /// # Chain Event Data
 ///
 /// `ChainEventData` is the structure for all typed events in the Theater system.
@@ -93,16 +148,52 @@ impl ChainEventData {
     ///
     /// ## Returns
     ///
-    /// A new `ChainEvent` with the serialized event data and metadata.
+    /// A new `ChainEvent` with the pack-encoded event data and metadata.
     /// The hash field will be empty - it's filled in by `StateChain::add_event`.
     pub fn to_chain_event(&self, parent_hash: Option<Vec<u8>>) -> ChainEvent {
+        let encoded_data = pack::abi::encode(&self.data.clone().into_value())
+            .unwrap_or_else(|_| vec![]);
         ChainEvent {
             parent_hash,
             hash: vec![],
             event_type: self.event_type.clone(),
-            data: serde_json::to_vec(&self.data).unwrap_or_else(|_| vec![]),
+            data: encoded_data,
         }
     }
+}
+
+/// Decode chain event data from pack-encoded bytes.
+///
+/// Falls back to JSON decoding for backward compatibility with old chain data.
+pub fn decode_chain_event_payload(data: &[u8]) -> Option<ChainEventPayload> {
+    // Try pack decoding first
+    if let Ok(value) = pack::abi::decode(data) {
+        if let Ok(payload) = ChainEventPayload::try_from(value) {
+            return Some(payload);
+        }
+    }
+    // Fall back to JSON for backward compatibility
+    serde_json::from_slice::<ChainEventPayload>(data).ok()
+}
+
+/// Decode a HostFunctionCall from pack-encoded bytes.
+///
+/// Falls back to JSON decoding for backward compatibility with old chain data.
+pub fn decode_host_function_call(data: &[u8]) -> Option<HostFunctionCall> {
+    // Try pack decoding first (as full payload, then extract)
+    if let Some(payload) = decode_chain_event_payload(data) {
+        if let ChainEventPayload::HostFunction(call) = payload {
+            return Some(call);
+        }
+    }
+    // Try direct pack decode as HostFunctionCall
+    if let Ok(value) = pack::abi::decode(data) {
+        if let Ok(call) = HostFunctionCall::try_from(value) {
+            return Some(call);
+        }
+    }
+    // Fall back to JSON
+    serde_json::from_slice::<HostFunctionCall>(data).ok()
 }
 
 pub mod replay;

@@ -26,6 +26,7 @@ mod handler;
 
 pub use handler::{ReplayHandler, ReplayState};
 
+use crate::pack_bridge::{ConversionError, IntoValue};
 use pack::abi::Value;
 use serde::{Deserialize, Serialize};
 
@@ -72,6 +73,48 @@ impl HostFunctionCall {
         output: Value,
     ) -> Self {
         Self::new(interface, function, Value::Tuple(vec![]), output)
+    }
+}
+
+impl IntoValue for HostFunctionCall {
+    fn into_value(self) -> Value {
+        Value::Record {
+            type_name: String::from("host-function-call"),
+            fields: vec![
+                ("interface".into(), Value::String(self.interface)),
+                ("function".into(), Value::String(self.function)),
+                ("input".into(), self.input),
+                ("output".into(), self.output),
+            ],
+        }
+    }
+}
+
+impl TryFrom<Value> for HostFunctionCall {
+    type Error = ConversionError;
+
+    fn try_from(v: Value) -> Result<Self, Self::Error> {
+        match v {
+            Value::Record { fields, .. } => {
+                let mut interface = String::new();
+                let mut function = String::new();
+                let mut input = Value::Tuple(vec![]);
+                let mut output = Value::Tuple(vec![]);
+
+                for (name, val) in fields {
+                    match name.as_str() {
+                        "interface" => interface = String::try_from(val)?,
+                        "function" => function = String::try_from(val)?,
+                        "input" => input = val,
+                        "output" => output = val,
+                        _ => {}
+                    }
+                }
+
+                Ok(HostFunctionCall { interface, function, input, output })
+            }
+            other => Err(ConversionError::ExpectedRecord(format!("{:?}", other))),
+        }
     }
 }
 
