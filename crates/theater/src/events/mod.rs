@@ -163,37 +163,18 @@ impl ChainEventData {
 }
 
 /// Decode chain event data from pack-encoded bytes.
-///
-/// Falls back to JSON decoding for backward compatibility with old chain data.
 pub fn decode_chain_event_payload(data: &[u8]) -> Option<ChainEventPayload> {
-    // Try pack decoding first
-    if let Ok(value) = pack::abi::decode(data) {
-        if let Ok(payload) = ChainEventPayload::try_from(value) {
-            return Some(payload);
-        }
-    }
-    // Fall back to JSON for backward compatibility
-    serde_json::from_slice::<ChainEventPayload>(data).ok()
+    let value = pack::abi::decode(data).ok()?;
+    ChainEventPayload::try_from(value).ok()
 }
 
 /// Decode a HostFunctionCall from pack-encoded bytes.
-///
-/// Falls back to JSON decoding for backward compatibility with old chain data.
 pub fn decode_host_function_call(data: &[u8]) -> Option<HostFunctionCall> {
-    // Try pack decoding first (as full payload, then extract)
-    if let Some(payload) = decode_chain_event_payload(data) {
-        if let ChainEventPayload::HostFunction(call) = payload {
-            return Some(call);
-        }
+    let payload = decode_chain_event_payload(data)?;
+    match payload {
+        ChainEventPayload::HostFunction(call) => Some(call),
+        _ => None,
     }
-    // Try direct pack decode as HostFunctionCall
-    if let Ok(value) = pack::abi::decode(data) {
-        if let Ok(call) = HostFunctionCall::try_from(value) {
-            return Some(call);
-        }
-    }
-    // Fall back to JSON
-    serde_json::from_slice::<HostFunctionCall>(data).ok()
 }
 
 pub mod replay;

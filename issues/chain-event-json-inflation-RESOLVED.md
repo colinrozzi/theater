@@ -60,15 +60,14 @@ ChainEventPayload -> Variant {
 
 ### Decoding path
 
-Two helper functions in `events/mod.rs` handle decoding with backward
-compatibility:
+Two helper functions in `events/mod.rs` handle decoding:
 
-- `decode_chain_event_payload(data)` — tries pack decode first, falls back to
-  JSON for old chain data
-- `decode_host_function_call(data)` — same pattern, also tries unwrapping from
-  a full `ChainEventPayload`
+- `decode_chain_event_payload(data)` — decodes pack-encoded bytes to
+  `ChainEventPayload`
+- `decode_host_function_call(data)` — decodes and unwraps to `HostFunctionCall`
 
 All decoder sites (interceptor, replay handler, CLI display) use these helpers.
+No JSON fallback — old chain data is not compatible.
 
 ### Pack-abi Array node kind
 
