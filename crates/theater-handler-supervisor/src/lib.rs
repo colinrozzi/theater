@@ -155,6 +155,9 @@ impl SupervisorHandler {
         actor_handle: &ActorHandle,
         actor_result: ActorResult,
         children: &Arc<Mutex<HashSet<TheaterId>>>,
+        has_child_error: bool,
+        has_child_exit: bool,
+        has_child_external_stop: bool,
     ) -> Result<()> {
         info!("Processing child result");
 
@@ -175,71 +178,47 @@ impl SupervisorHandler {
 
         match actor_result {
             ActorResult::Error(child_error) => {
-                // handle-child-error(state, params: tuple<string, wit-actor-error>)
-                let params = Value::Tuple(vec![
-                    Value::String(child_error.actor_id.to_string()),
-                    actor_error_to_value(child_error.error),
-                ]);
-                match actor_handle
-                    .call_function(
-                        "theater:simple/supervisor-handlers.handle-child-error".to_string(),
-                        params,
-                    )
-                    .await
-                {
-                    Ok(_) => {}
-                    Err(e) => {
-                        debug!(
-                            "Could not call handle-child-error (may not be implemented): {}",
-                            e
-                        );
-                    }
+                if has_child_error {
+                    let params = Value::Tuple(vec![
+                        Value::String(child_error.actor_id.to_string()),
+                        actor_error_to_value(child_error.error),
+                    ]);
+                    actor_handle
+                        .call_function(
+                            "theater:simple/supervisor-handlers.handle-child-error".to_string(),
+                            params,
+                        )
+                        .await?;
                 }
             }
             ActorResult::Success(child_result) => {
-                // handle-child-exit(state, params: tuple<string, option<list<u8>>>)
-                info!("Child result: {:?}", child_result);
-                let params = Value::Tuple(vec![
-                    Value::String(child_result.actor_id.to_string()),
-                    option_bytes_to_value(child_result.result.into()),
-                ]);
-                match actor_handle
-                    .call_function(
-                        "theater:simple/supervisor-handlers.handle-child-exit".to_string(),
-                        params,
-                    )
-                    .await
-                {
-                    Ok(_) => {}
-                    Err(e) => {
-                        debug!(
-                            "Could not call handle-child-exit (may not be implemented): {}",
-                            e
-                        );
-                    }
+                if has_child_exit {
+                    info!("Child result: {:?}", child_result);
+                    let params = Value::Tuple(vec![
+                        Value::String(child_result.actor_id.to_string()),
+                        option_bytes_to_value(child_result.result.into()),
+                    ]);
+                    actor_handle
+                        .call_function(
+                            "theater:simple/supervisor-handlers.handle-child-exit".to_string(),
+                            params,
+                        )
+                        .await?;
                 }
             }
             ActorResult::ExternalStop(stop_data) => {
-                // handle-child-external-stop(state, params: tuple<string>)
-                info!("External stop received for actor: {}", stop_data.actor_id);
-                let params = Value::Tuple(vec![
-                    Value::String(stop_data.actor_id.to_string()),
-                ]);
-                match actor_handle
-                    .call_function(
-                        "theater:simple/supervisor-handlers.handle-child-external-stop"
-                            .to_string(),
-                        params,
-                    )
-                    .await
-                {
-                    Ok(_) => {}
-                    Err(e) => {
-                        debug!(
-                            "Could not call handle-child-external-stop (may not be implemented): {}",
-                            e
-                        );
-                    }
+                if has_child_external_stop {
+                    info!("External stop received for actor: {}", stop_data.actor_id);
+                    let params = Value::Tuple(vec![
+                        Value::String(stop_data.actor_id.to_string()),
+                    ]);
+                    actor_handle
+                        .call_function(
+                            "theater:simple/supervisor-handlers.handle-child-external-stop"
+                                .to_string(),
+                            params,
+                        )
+                        .await?;
                 }
             }
         }
@@ -254,6 +233,7 @@ impl SupervisorHandler {
     async fn process_child_event(
         actor_handle: &ActorHandle,
         event_result: Result<ChainEvent, ActorError>,
+        has_child_event: bool,
     ) -> Result<()> {
         match event_result {
             Ok(event) => {
@@ -263,32 +243,21 @@ impl SupervisorHandler {
                     event.data.len()
                 );
 
-                // Call the actor's handle-child-event export if it exists
-                // The actor can implement this to react to child events
-                let params = Value::Tuple(vec![
-                    Value::String(event.event_type.clone()),
-                    Value::List {
-                        elem_type: ValueType::U8,
-                        items: event.data.iter().map(|b| Value::U8(*b)).collect(),
-                    },
-                ]);
+                if has_child_event {
+                    let params = Value::Tuple(vec![
+                        Value::String(event.event_type.clone()),
+                        Value::List {
+                            elem_type: ValueType::U8,
+                            items: event.data.iter().map(|b| Value::U8(*b)).collect(),
+                        },
+                    ]);
 
-                // Try to call handle-child-event, but don't fail if it doesn't exist
-                match actor_handle
-                    .call_function(
-                        "theater:simple/supervisor-handlers.handle-child-event".to_string(),
-                        params,
-                    )
-                    .await
-                {
-                    Ok(_) => {}
-                    Err(e) => {
-                        // Only log at debug level since this export is optional
-                        debug!(
-                            "Could not call handle-child-event (may not be implemented): {}",
-                            e
-                        );
-                    }
+                    actor_handle
+                        .call_function(
+                            "theater:simple/supervisor-handlers.handle-child-event".to_string(),
+                            params,
+                        )
+                        .await?;
                 }
             }
             Err(e) => {
@@ -849,7 +818,7 @@ impl Handler for SupervisorHandler
     fn setup(
         &mut self,
         actor_handle: ActorHandle,
-        _actor_instance: SharedActorInstance,
+        actor_instance: SharedActorInstance,
         mut shutdown_receiver: ShutdownReceiver,
         _event_rx: tokio::sync::broadcast::Receiver<theater::chain::ChainEvent>,
     ) -> Pin<Box<dyn Future<Output = Result<()>> + Send>> {
@@ -872,6 +841,28 @@ impl Handler for SupervisorHandler
                 return Ok(());
             };
 
+            // Check which optional supervisor handler exports the actor implements
+            let (has_child_event, has_child_error, has_child_exit, has_child_external_stop) = {
+                let mut instance_guard = actor_instance.write().await;
+                if let Some(instance) = instance_guard.as_mut() {
+                    let iface = "theater:simple/supervisor-handlers";
+                    let e1 = instance.has_export(iface, "handle-child-event").await.unwrap_or(false);
+                    let e2 = instance.has_export(iface, "handle-child-error").await.unwrap_or(false);
+                    let e3 = instance.has_export(iface, "handle-child-exit").await.unwrap_or(false);
+                    let e4 = instance.has_export(iface, "handle-child-external-stop").await.unwrap_or(false);
+                    (e1, e2, e3, e4)
+                } else {
+                    (false, false, false, false)
+                }
+            };
+
+            if has_child_event || has_child_error || has_child_exit || has_child_external_stop {
+                debug!(
+                    "Supervisor handler exports: event={}, error={}, exit={}, external_stop={}",
+                    has_child_event, has_child_error, has_child_exit, has_child_external_stop
+                );
+            }
+
             // Get event receiver if available
             let mut event_rx = event_rx_opt;
 
@@ -879,7 +870,10 @@ impl Handler for SupervisorHandler
                 tokio::select! {
                     // Process lifecycle events from children (ActorResult)
                     Some(child_result) = channel_rx.recv() => {
-                        if let Err(e) = Self::process_child_result(&actor_handle, child_result, &children).await {
+                        if let Err(e) = Self::process_child_result(
+                            &actor_handle, child_result, &children,
+                            has_child_error, has_child_exit, has_child_external_stop,
+                        ).await {
                             error!("Error processing child result: {}", e);
                         }
                     }
@@ -891,7 +885,9 @@ impl Handler for SupervisorHandler
                             std::future::pending().await
                         }
                     } => {
-                        if let Err(e) = Self::process_child_event(&actor_handle, event_result).await {
+                        if let Err(e) = Self::process_child_event(
+                            &actor_handle, event_result, has_child_event,
+                        ).await {
                             error!("Error processing child event: {}", e);
                         }
                     }
@@ -949,7 +945,10 @@ impl Handler for SupervisorHandler
                         // Process any remaining child results while waiting
                         tokio::select! {
                             Some(child_result) = channel_rx.recv() => {
-                                if let Err(e) = Self::process_child_result(&actor_handle, child_result, &children).await {
+                                if let Err(e) = Self::process_child_result(
+                                    &actor_handle, child_result, &children,
+                                    has_child_error, has_child_exit, has_child_external_stop,
+                                ).await {
                                     error!("Error processing child result during shutdown: {}", e);
                                 }
                             }
