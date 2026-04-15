@@ -52,10 +52,10 @@
     "pack": {
       "flake": false,
       "locked": {
-        "lastModified": 1775934153,
-        "narHash": "sha256-G1qsX8i8tDaJKeQpEaA6dUOK3wbpJRI3lpjo83Vec6E=",
-        "rev": "1010e6e5571f548f3ae328f1374b892bfc367b9a",
-        "revCount": 69,
+        "lastModified": 1776220312,
+        "narHash": "sha256-xV4vaVbS0q70n4liauR43lS4h+sM94HzJ2JR+PPlong=",
+        "rev": "a3d2c55076457460c0441672c8a030c6fd31fcfd",
+        "revCount": 70,
         "type": "git",
         "url": "file:../pack"
       },

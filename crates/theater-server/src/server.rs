@@ -151,7 +151,7 @@ pub enum ManagementResponse {
     },
     ActorState {
         id: TheaterId,
-        state: Option<Value>,
+        state: Value,
     },
     ActorEvents {
         id: TheaterId,

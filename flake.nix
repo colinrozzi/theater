@@ -145,6 +145,33 @@
         packages = {
           default = theaterPackage;
           theater = theaterPackage;
+
+          # Script to build all WASM test actors
+          build-test-actors = pkgs.writeShellScriptBin "build-test-actors" ''
+            set -e
+            echo "Building test actors..."
+            for dir in test-actors/*/; do
+              if [ -f "$dir/Cargo.toml" ]; then
+                name=$(basename "$dir")
+                echo "  Building $name..."
+                (cd "$dir" && cargo build --target wasm32-unknown-unknown --release 2>&1 | tail -1)
+              fi
+            done
+            echo "All test actors built."
+          '';
+
+          # Script to build test actors then run tests
+          test = pkgs.writeShellScriptBin "theater-test" ''
+            set -e
+            echo "=== Building test actors ==="
+            nix run .#build-test-actors
+            echo ""
+            echo "=== Running tests ==="
+            cargo test --lib "''${@}"
+            echo ""
+            echo "=== Running integration tests ==="
+            cargo test --test golden_chain_test --test composite_integration_test --test shutdown_timing_test "''${@}"
+          '';
         };
 
         # Development shell
@@ -202,12 +229,14 @@
             echo "  - wasm32-wasip1"
             echo ""
             echo "Commands:"
-            echo "  cargo build              Build the workspace"
-            echo "  cargo test               Run tests"
-            echo "  cargo clippy             Run linter"
-            echo "  cargo fmt                Format code"
-            echo "  cargo watch -x check     Watch for changes"
-            echo "  nix flake check          Run all checks"
+            echo "  cargo build                    Build the workspace"
+            echo "  cargo test                     Run tests"
+            echo "  cargo clippy                   Run linter"
+            echo "  cargo fmt                      Format code"
+            echo "  cargo watch -x check           Watch for changes"
+            echo "  nix flake check                Run all checks"
+            echo "  nix run .#build-test-actors    Build WASM test actors"
+            echo "  nix run .#test                 Build actors + run all tests"
             echo ""
             echo "Note: Requires ../pack to be present"
             echo "========================================"

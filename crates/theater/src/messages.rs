@@ -323,7 +323,7 @@ pub enum TheaterCommand {
     /// This operation is only available to the actor's supervisor or to the system itself.
     GetActorState {
         actor_id: TheaterId,
-        response_tx: oneshot::Sender<Result<Option<Value>>>,
+        response_tx: oneshot::Sender<Result<Value>>,
     },
 
     /// # Get actor events

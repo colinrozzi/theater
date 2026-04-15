@@ -3,15 +3,15 @@
 //! This actor:
 //! 1. Exports `init` function for the theater:simple/actor interface
 //! 2. Imports `log` function from theater:simple/runtime interface
-//! 3. Demonstrates basic state handling
+//! 3. Demonstrates typed state — init receives empty state, returns a record
 
 #![no_std]
 
 extern crate alloc;
 
+use alloc::boxed::Box;
 use alloc::string::String;
 use alloc::vec;
-use alloc::vec::Vec;
 use pack_guest::{export, import, pack_types, Value, ValueType};
 
 // Set up allocator and panic handler
@@ -25,7 +25,7 @@ pack_types! {
         }
     }
     exports {
-        theater:simple/actor.init: func(state: option<list<u8>>) -> result<tuple<option<list<u8>>>, string>,
+        theater:simple/actor.init: func(state: value) -> result<value, string>,
     }
 }
 
@@ -35,37 +35,21 @@ fn log(msg: String);
 
 /// The init function for theater:simple/actor interface.
 #[export(name = "theater:simple/actor.init")]
-fn init(input: Value) -> Value {
-    // Extract state from input tuple
-    let state = match input {
-        Value::Tuple(items) if !items.is_empty() => items.into_iter().next().unwrap(),
-        _ => return err_result("Invalid input format"),
-    };
-
+fn init(_input: Value) -> Value {
     log(String::from("Composite test actor: init called!"));
     log(String::from("Composite test actor: init completed successfully!"));
 
-    // Return the state unchanged, wrapped in Ok
-    ok_state(state)
-}
+    // Return a typed state record
+    let state = Value::Record {
+        type_name: String::from("composite-state"),
+        fields: vec![
+            (String::from("initialized"), Value::Bool(true)),
+        ],
+    };
 
-// ============================================================================
-// Helpers
-// ============================================================================
-
-fn err_result(msg: &str) -> Value {
     Value::Result {
-        ok_type: ValueType::Tuple(vec![]),
+        ok_type: state.infer_type(),
         err_type: ValueType::String,
-        value: Err(alloc::boxed::Box::new(Value::String(String::from(msg)))),
-    }
-}
-
-fn ok_state(state: Value) -> Value {
-    let inner = Value::Tuple(vec![state]);
-    Value::Result {
-        ok_type: inner.infer_type(),
-        err_type: ValueType::String,
-        value: Ok(alloc::boxed::Box::new(inner)),
+        value: Ok(Box::new(state)),
     }
 }

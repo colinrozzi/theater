@@ -261,23 +261,11 @@ impl PackInstance {
     pub async fn call_function(
         &mut self,
         function_name: &str,
-        state: Option<Value>,
+        state: Value,
         params: Vec<u8>,
-    ) -> Result<(Option<Value>, Vec<u8>)> {
-        // Build input value: tuple of (state, params)
-        let state_value = state_to_value(state);
+    ) -> Result<(Value, Vec<u8>)> {
         let params_value = bytes_to_value(&params);
-        let input = Value::Tuple(vec![state_value, params_value]);
-
-        // Call the function using the full name (Pack exports use the #[export(name = "...")] syntax)
-        let output = self
-            .instance
-            .call_with_value_async(function_name, &input)
-            .await
-            .context(format!("Failed to call function '{}'", function_name))?;
-
-        // Decode the result
-        decode_function_result(output)
+        self.call_function_with_value(function_name, state, params_value).await
     }
 
     /// Call an export function with structured Value params (no bytes_to_value flattening).
@@ -288,11 +276,19 @@ impl PackInstance {
     pub async fn call_function_with_value(
         &mut self,
         function_name: &str,
-        state: Option<Value>,
+        state: Value,
         params: Value,
-    ) -> Result<(Option<Value>, Vec<u8>)> {
-        let state_value = state_to_value(state);
-        let input = Value::Tuple(vec![state_value, params]);
+    ) -> Result<(Value, Vec<u8>)> {
+        // Flatten: prepend state to params
+        let input = match params {
+            Value::Tuple(items) => {
+                let mut all = Vec::with_capacity(1 + items.len());
+                all.push(state);
+                all.extend(items);
+                Value::Tuple(all)
+            }
+            other => Value::Tuple(vec![state, other]),
+        };
 
         let output = self
             .instance
@@ -332,43 +328,24 @@ impl PackInstance {
     pub async fn call_typed<T: FromValue>(
         &mut self,
         function_name: &str,
-        state: Option<Value>,
+        state: Value,
         params: Value,
     ) -> Result<ActorResult<T>> {
-        let state_value = state_to_value(state);
-        let input = Value::Tuple(vec![state_value, params]);
-
-        let output = self
-            .instance
-            .call_with_value_async(function_name, &input)
-            .await
-            .context(format!("Failed to call function '{}'", function_name))?;
-
-        ActorResult::<T>::from_value(output)
-            .map_err(|e| anyhow::anyhow!("Failed to decode result: {}", e))
+        let (new_state, result_bytes) = self.call_function_with_value(function_name, state, params).await?;
+        let result_value = if result_bytes.is_empty() {
+            Value::Tuple(vec![]) // Unit when no return value
+        } else {
+            decode_value(&result_bytes)?
+        };
+        let value = T::from_value(result_value)
+            .map_err(|e| anyhow::anyhow!("Failed to decode result: {:?}", e))?;
+        Ok(ActorResult { state: new_state, value })
     }
 }
 
 // =============================================================================
 // Value Conversion Utilities
 // =============================================================================
-
-/// Convert actor state to a Value (wrapped in Option).
-fn state_to_value(state: Option<Value>) -> Value {
-    use pack::abi::ValueType;
-    match state {
-        Some(v) => Value::Option {
-            inner_type: v.infer_type(),
-            value: Some(Box::new(v)),
-        },
-        None => Value::Option {
-            // Use a placeholder type for None - the actual type doesn't matter
-            // since value is None
-            inner_type: ValueType::Bool,
-            value: None,
-        },
-    }
-}
 
 /// Convert bytes to a Value (as a list of u8).
 fn bytes_to_value(bytes: &[u8]) -> Value {
@@ -393,7 +370,7 @@ pub fn decode_value(bytes: &[u8]) -> Result<Value> {
 ///
 /// Expected format: result<tuple<option<state>, R>, string>
 /// Where state is a Value and R is the function-specific result type.
-fn decode_function_result(value: Value) -> Result<(Option<Value>, Vec<u8>)> {
+fn decode_function_result(value: Value) -> Result<(Value, Vec<u8>)> {
     match value {
         // Handle Value::Result (Pack's native result type)
         Value::Result { value: Ok(inner), .. } => {
@@ -406,7 +383,7 @@ fn decode_function_result(value: Value) -> Result<(Option<Value>, Vec<u8>)> {
             };
             Err(anyhow::anyhow!("Function returned error: {}", error_msg))
         }
-        // Handle Value::Variant (legacy/alternative encoding)
+        // Handle Value::Variant (alternative encoding)
         Value::Variant {
             tag: 0,
             payload,
@@ -414,63 +391,53 @@ fn decode_function_result(value: Value) -> Result<(Option<Value>, Vec<u8>)> {
         } if !payload.is_empty() => {
             decode_ok_payload(payload.into_iter().next().unwrap())
         }
-        Value::Variant { tag: 0, payload, .. } if payload.is_empty() => {
-            // Ok with no payload
-            Ok((None, vec![]))
-        }
         Value::Variant {
             tag: 1,
             payload,
             ..
         } if !payload.is_empty() => {
-            // Err case - payload is the error message
             let error_msg = match payload.into_iter().next().unwrap() {
                 Value::String(s) => s,
                 other => format!("{:?}", other),
             };
             Err(anyhow::anyhow!("Function returned error: {}", error_msg))
         }
-        Value::Variant { tag: 1, payload, .. } if payload.is_empty() => {
+        Value::Variant { tag: 1, .. } => {
             Err(anyhow::anyhow!("Function returned error (no message)"))
         }
         Value::Variant { tag, .. } => {
             Err(anyhow::anyhow!("Unexpected result variant tag: {}", tag))
         }
-        // If it's not a variant or result, treat the whole value as the result
+        // If it's not a variant or result, treat the whole value as the state
         other => {
-            let result_bytes = encode_value(&other)?;
-            Ok((None, result_bytes))
+            Ok((other, vec![]))
         }
     }
 }
 
 /// Helper to decode the Ok payload of a result.
-/// Expected format: tuple<option<state>, R> where first element is state (as Value)
-fn decode_ok_payload(value: Value) -> Result<(Option<Value>, Vec<u8>)> {
+/// Expected format: tuple<state, R...> where first element is state
+fn decode_ok_payload(value: Value) -> Result<(Value, Vec<u8>)> {
     match value {
-        Value::Tuple(items) if !items.is_empty() => {
-            // First element is state (wrapped in Option)
-            let new_state = match &items[0] {
-                Value::Option { value: Some(inner), .. } => Some((**inner).clone()),
-                Value::Option { value: None, .. } => None,
-                // If it's not wrapped in Option, treat the value directly as state
-                other => Some(other.clone()),
-            };
+        Value::Tuple(mut items) if !items.is_empty() => {
+            // First element is state directly
+            let new_state = items.remove(0);
 
-            // Encode the rest as the result (or just the second element)
-            let result_value = if items.len() > 1 {
-                items[1].clone()
-            } else {
+            // Remaining elements are the return value
+            let result_value = if items.len() == 1 {
+                items.remove(0)
+            } else if items.is_empty() {
                 Value::Tuple(vec![])
+            } else {
+                Value::Tuple(items)
             };
             let result_bytes = encode_value(&result_value)?;
 
             Ok((new_state, result_bytes))
         }
+        // Single value — treat as state with no additional return
         other => {
-            // Maybe it's just the result directly (no state change)
-            let result_bytes = encode_value(&other)?;
-            Ok((None, result_bytes))
+            Ok((other, vec![]))
         }
     }
 }
@@ -498,8 +465,8 @@ fn decode_ok_payload(value: Value) -> Result<(Option<Value>, Vec<u8>)> {
 /// ```
 #[derive(Debug, Clone)]
 pub struct ActorResult<T> {
-    /// The updated actor state as a Value, or None if unchanged
-    pub state: Option<Value>,
+    /// The updated actor state
+    pub state: Value,
     /// The function's return value
     pub value: T,
 }
@@ -554,29 +521,24 @@ impl<T: FromValue> FromValue for ActorResult<T> {
 fn decode_actor_ok_payload<T: FromValue>(value: Value) -> std::result::Result<ActorResult<T>, ConversionError> {
     match value {
         Value::Tuple(mut items) if !items.is_empty() => {
-            // First element is state (wrapped in Option)
-            let state = match items.remove(0) {
-                Value::Option { value: Some(inner), .. } => Some(*inner),
-                Value::Option { value: None, .. } => None,
-                // If not wrapped in Option, treat the value directly as state
-                other => Some(other),
-            };
+            // First element is state
+            let state = items.remove(0);
 
-            // Second element (if present) is the return value
-            let return_value = if !items.is_empty() {
+            // Remaining elements are the return value
+            let return_value = if items.len() == 1 {
                 items.remove(0)
+            } else if items.is_empty() {
+                Value::Tuple(vec![])
             } else {
-                Value::Tuple(vec![]) // Unit if no second element
+                Value::Tuple(items)
             };
 
             let value = T::from_value(return_value)?;
-
             Ok(ActorResult { state, value })
         }
-        // Single value - treat as return value with no state
+        // Single value — treat as state with no return
         other => {
-            let value = T::from_value(other)?;
-            Ok(ActorResult { state: None, value })
+            Ok(ActorResult { state: other, value: T::from_value(Value::Tuple(vec![]))? })
         }
     }
 }
@@ -700,31 +662,6 @@ impl<T: IntoValue> IntoValue for Vec<T> {
 mod tests {
     use super::*;
 
-    #[test]
-    fn test_state_to_value() {
-        // Test with a Value (now state is directly a Value)
-        let state = Some(Value::String("test state".to_string()));
-        let value = state_to_value(state);
-
-        match value {
-            Value::Option { value: Some(inner), .. } => match *inner {
-                Value::String(s) => assert_eq!(s, "test state"),
-                _ => panic!("Expected String"),
-            },
-            _ => panic!("Expected Option(Some(...))"),
-        }
-    }
-
-    #[test]
-    fn test_state_to_value_none() {
-        let state: Option<Value> = None;
-        let value = state_to_value(state);
-
-        match value {
-            Value::Option { value: None, .. } => {}
-            _ => panic!("Expected Option(None)"),
-        }
-    }
 
     #[test]
     fn test_into_value_result() {

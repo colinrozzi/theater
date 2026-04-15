@@ -9,7 +9,7 @@ pub enum WasmEventData {
     },
     WasmResult {
         function_name: String,
-        result: (Option<Value>, Vec<u8>),
+        result: (Value, Vec<u8>),
     },
     WasmError {
         function_name: String,
@@ -42,7 +42,7 @@ impl IntoValue for WasmEventData {
                 }],
             },
             WasmEventData::WasmResult { function_name, result } => {
-                let (opt_value, bytes) = result;
+                let (state_value, bytes) = result;
                 Value::Variant {
                     type_name: String::from("wasm-event-data"),
                     case_name: String::from("wasm-result"),
@@ -51,7 +51,7 @@ impl IntoValue for WasmEventData {
                         type_name: String::from("wasm-result"),
                         fields: vec![
                             ("function-name".into(), Value::String(function_name)),
-                            ("value".into(), opt_value.into_value()),
+                            ("state".into(), state_value),
                             ("bytes".into(), bytes.into_value()),
                         ],
                     }],
@@ -111,23 +111,19 @@ impl TryFrom<Value> for WasmEventData {
                     }
                     "wasm-result" => {
                         let mut function_name = String::new();
-                        let mut opt_value = None;
+                        let mut state_value = Value::Tuple(vec![]);
                         let mut bytes = Vec::new();
                         for (name, val) in fields {
                             match name.as_str() {
                                 "function-name" => function_name = String::try_from(val)?,
-                                "value" => {
-                                    if let Value::Option { value: Some(v), .. } = val {
-                                        opt_value = Some(*v);
-                                    }
-                                }
+                                "state" => state_value = val,
                                 "bytes" => bytes = extract_bytes(val)?,
                                 _ => {}
                             }
                         }
                         Ok(WasmEventData::WasmResult {
                             function_name,
-                            result: (opt_value, bytes),
+                            result: (state_value, bytes),
                         })
                     }
                     "wasm-error" => {

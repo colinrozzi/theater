@@ -761,27 +761,27 @@ impl TheaterRuntime {
             // Prefer init_bytes over manifest's initial_state
             let state = if let Some(bytes) = init_bytes {
                 let items: Vec<Value> = bytes.into_iter().map(Value::U8).collect();
-                Some(Value::List {
+                Value::List {
                     elem_type: ValueType::U8,
                     items,
-                })
+                }
+            } else if let Some(s) = manifest.initial_state.as_ref() {
+                Value::String(s.clone())
             } else {
-                // Fall back to manifest's initial_state (as String)
-                manifest
-                    .initial_state
-                    .as_ref()
-                    .map(|s| Value::String(s.clone()))
+                Value::Tuple(vec![])
             };
             (registry, state)
         } else {
             // No manifest - use global handlers directly
-            let state = init_bytes.map(|bytes| {
+            let state = if let Some(bytes) = init_bytes {
                 let items: Vec<Value> = bytes.into_iter().map(Value::U8).collect();
                 Value::List {
                     elem_type: ValueType::U8,
                     items,
                 }
-            });
+            } else {
+                Value::Tuple(vec![])
+            };
             (self.handler_registry.clone(), state)
         };
 
@@ -1223,12 +1223,12 @@ impl TheaterRuntime {
         Err(anyhow::anyhow!("Actor restart not implemented"))
     }
 
-    async fn get_actor_state(&self, actor_id: TheaterId) -> Result<Option<Value>> {
+    async fn get_actor_state(&self, actor_id: TheaterId) -> Result<Value> {
         if let Some(proc) = self.actors.get(&actor_id) {
             // Send a message to get the actor's state
             let (tx, rx): (
-                oneshot::Sender<Result<Option<Value>, ActorError>>,
-                oneshot::Receiver<Result<Option<Value>, ActorError>>,
+                oneshot::Sender<Result<Value, ActorError>>,
+                oneshot::Receiver<Result<Value, ActorError>>,
             ) = oneshot::channel();
             proc.info_tx
                 .send(ActorInfo::GetState { response_tx: tx })

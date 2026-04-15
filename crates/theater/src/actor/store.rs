@@ -40,7 +40,7 @@ pub struct ActorStore {
     pub chain: Arc<RwLock<StateChain>>,
 
     /// The current state of the actor, stored as a Pack Value
-    pub state: Option<Value>,
+    pub state: Value,
 
     /// Handle to interact with the actor
     pub actor_handle: ActorHandle,
@@ -75,7 +75,7 @@ impl ActorStore {
         theater_tx: Sender<TheaterCommand>,
         actor_handle: ActorHandle,
         chain: Arc<RwLock<StateChain>>,
-        initial_state: Option<Value>,
+        initial_state: Value,
     ) -> Self {
         Self {
             id: id.clone(),
@@ -116,10 +116,8 @@ impl ActorStore {
     ///
     /// ## Returns
     ///
-    /// A clone of the actor's state as an Option<Value>.
-    /// - Some(Value) if state exists
-    /// - None if no state has been set
-    pub fn get_state(&self) -> Option<Value> {
+    /// A clone of the actor's current state Value.
+    pub fn get_state(&self) -> Value {
         self.state.clone()
     }
 
@@ -129,10 +127,8 @@ impl ActorStore {
     ///
     /// ## Parameters
     ///
-    /// * `state` - The new state data as an Option<Value>
-    ///   - Some(Value) to set a specific state
-    ///   - None to clear the state
-    pub fn set_state(&mut self, state: Option<Value>) {
+    /// * `state` - The new state Value
+    pub fn set_state(&mut self, state: Value) {
         self.state = state;
     }
 

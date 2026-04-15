@@ -21,8 +21,7 @@ pack_types! {
         }
     }
     exports {
-        theater:simple/actor.init: func(state: option<list<u8>>)
-            -> result<tuple<option<list<u8>>>, string>,
+        theater:simple/actor.init: func(state: value) -> result<value, string>,
     }
 }
 
@@ -34,16 +33,9 @@ fn init(_input: Value) -> Value {
     log(String::from("[shutdown-test] Init called"));
 
     // Return empty state
-    let state = Value::Tuple(vec![
-        Value::Option {
-            inner_type: ValueType::List(Box::new(ValueType::U8)),
-            value: None,
-        },
-    ]);
-
     Value::Result {
-        ok_type: state.infer_type(),
+        ok_type: ValueType::Tuple(vec![]),
         err_type: ValueType::String,
-        value: Ok(Box::new(state)),
+        value: Ok(Box::new(Value::Tuple(vec![]))),
     }
 }

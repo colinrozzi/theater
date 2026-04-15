@@ -66,7 +66,7 @@ async fn test_state_tracking_typed_api() {
         theater_tx.clone(),
         actor_handle,
         chain.clone(),
-        None, // No initial state
+        Value::Tuple(vec![]), // Empty initial state
     );
 
     // Create the PackInstance with host functions
@@ -103,15 +103,15 @@ async fn test_state_tracking_typed_api() {
 
     info!("PackInstance created successfully");
 
-    // Step 1: Call init using typed API
+    // Step 1: Call init — state is empty tuple on first call
     info!("=== Calling init ===");
+    let init_state = Value::Tuple(vec![]);
     let result: ActorResult<()> = instance
-        .call_typed("theater:simple/actor.init", None, Value::Tuple(vec![]))
+        .call_typed("theater:simple/actor.init", init_state, Value::Tuple(vec![]))
         .await
         .expect("init should succeed");
 
     info!("init succeeded, state = {:?}", result.state);
-    assert!(result.state.is_some(), "init should return state");
     let state = result.state;
 
     // Step 2: Call increment (first time) - expect count = 1

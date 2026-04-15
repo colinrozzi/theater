@@ -164,7 +164,7 @@ impl ActorRuntime {
         control_tx: Sender<ActorControl>,
         actor_phase_manager: ActorPhaseManager,
         actor_instance_wrapper: Arc<RwLock<Option<PackInstance>>>,
-        initial_state: Option<Value>,
+        initial_state: Value,
     ) -> Result<(ShutdownController, Vec<JoinHandle<()>>), ActorRuntimeError> {
         // ---------------- Checkpoint Setup Initial ----------------
 
@@ -500,7 +500,7 @@ impl ActorRuntime {
         info_tx: Sender<ActorInfo>,
         control_rx: Receiver<ActorControl>,
         control_tx: Sender<ActorControl>,
-        initial_state: Option<Value>,
+        initial_state: Value,
         setup_result_tx: Option<tokio::sync::oneshot::Sender<Result<(), String>>>,
     ) -> () {
         info!("Actor runtime starting communication loops");
@@ -1001,9 +1001,9 @@ impl ActorRuntime {
 
         let state = actor_instance.actor_store.get_state();
         debug!(
-            "Executing pack call to function '{}' with state: {}",
+            "Executing pack call to function '{}' with state: {:?}",
             name,
-            if state.is_some() { "present" } else { "none" }
+            state
         );
 
         let params_value = crate::pack_bridge::decode_value(&params).map_err(|e| {
@@ -1050,11 +1050,7 @@ impl ActorRuntime {
             }
         };
 
-        debug!(
-            "Pack call to '{}' completed, new state: {}",
-            name,
-            if new_state.is_some() { "present" } else { "none" }
-        );
+        debug!("Pack call to '{}' completed", name);
         actor_instance.actor_store.set_state(new_state);
 
         let duration = start.elapsed();

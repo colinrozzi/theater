@@ -239,7 +239,7 @@ pub enum ActorInfo {
     /// Retrieve the actor's current state
     GetState {
         /// Channel to send state back to the caller
-        response_tx: oneshot::Sender<Result<Option<Value>, ActorError>>,
+        response_tx: oneshot::Sender<Result<Value, ActorError>>,
     },
     /// Retrieve the actor's event chain (audit log)
     GetChain {

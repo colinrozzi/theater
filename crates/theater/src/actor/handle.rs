@@ -227,10 +227,9 @@ impl ActorHandle {
     ///
     /// ## Returns
     ///
-    /// * `Ok(Some(Value))` - The actor's current state as a Value, if it has state.
-    /// * `Ok(None)` - The actor does not have any state.
+    /// * `Ok(Value)` - The actor's current state as a Value.
     /// * `Err(ActorError)` - An error occurred while retrieving the state.
-    pub async fn get_state(&self) -> Result<Option<Value>, ActorError> {
+    pub async fn get_state(&self) -> Result<Value, ActorError> {
         let (tx, rx) = oneshot::channel();
 
         self.info_tx

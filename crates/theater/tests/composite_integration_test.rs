@@ -60,7 +60,7 @@ async fn test_composite_instance_basic() {
         theater_tx.clone(),
         actor_handle,
         chain,
-        None, // No initial state for this test
+        Value::Tuple(vec![]), // Empty initial state
     );
 
     // Create the PackInstance with host functions
@@ -97,9 +97,8 @@ async fn test_composite_instance_basic() {
 
     info!("PackInstance created successfully");
 
-    // Call the init function
-    // The init function expects: Tuple(Option<Value>, List<u8>)
-    let state: Option<Value> = None;
+    // Call the init function with empty state
+    let state = Value::Tuple(vec![]);
     let params: Vec<u8> = vec![];
 
     info!("Calling init function...");
@@ -110,7 +109,7 @@ async fn test_composite_instance_basic() {
         Ok((new_state, result_bytes)) => {
             info!("init succeeded!");
             info!("New state: {:?}", new_state);
-            info!("Result bytes: {:?}", result_bytes);
+            info!("Result bytes: {} bytes", result_bytes.len());
         }
         Err(e) => {
             panic!("init failed: {}", e);

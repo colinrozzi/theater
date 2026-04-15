@@ -728,20 +728,7 @@ impl Handler for SupervisorHandler
                     }
 
                     match response_rx.await {
-                        Ok(Ok(state)) => {
-                            // State is already a Value, just wrap in Option
-                            let state_value = match state {
-                                Some(v) => Value::Option {
-                                    inner_type: v.infer_type(),
-                                    value: Some(Box::new(v)),
-                                },
-                                None => Value::Option {
-                                    inner_type: ValueType::Bool, // placeholder
-                                    value: None,
-                                },
-                            };
-                            Ok(state_value)
-                        }
+                        Ok(Ok(state)) => Ok(state),
                         Ok(Err(e)) => Err(Value::String(e.to_string())),
                         Err(e) => Err(Value::String(format!("Failed to receive state: {}", e))),
                     }
