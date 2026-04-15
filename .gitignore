@@ -24,8 +24,8 @@ theater-client.log
 /.theater-chat
 .direnv
 
-# Documentation build
-book/book/
+# Nix
+result
 
 # Temporary files
 /tmp
