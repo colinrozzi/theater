@@ -43,12 +43,14 @@ use std::collections::HashMap;
 use crate::actor::store::ActorStore;
 use crate::id::TheaterId;
 
-/// Cached type information for a function's parameters, used for
-/// host-side validation before crossing the WASM boundary.
+/// Cached type information for a function's parameters and return types,
+/// used for host-side contract enforcement.
 #[derive(Debug, Clone)]
 pub struct FunctionTypeInfo {
     /// The declared type for each parameter.
     pub param_types: Vec<Type>,
+    /// The declared return types.
+    pub result_types: Vec<Type>,
     /// Type definitions available for resolving Ref types.
     pub type_defs: Vec<TypeDef>,
 }
@@ -284,6 +286,7 @@ impl PackInstance {
 
                         function_types.insert(full_name, FunctionTypeInfo {
                             param_types: func.params.iter().map(|p| p.ty.clone()).collect(),
+                            result_types: func.results.clone(),
                             type_defs: all_types,
                         });
                     }
@@ -366,6 +369,19 @@ impl PackInstance {
             .call_with_value_async(function_name, &input)
             .await
             .context(format!("Failed to call function '{}'", function_name))?;
+
+        // Validate return value against the function's declared result types.
+        if !self.function_types.is_empty() {
+            if let Some(info) = self.function_types.get(function_name) {
+                if let Some(result_type) = info.result_types.first() {
+                    validate_value_in_type_space(&output, result_type, &info.type_defs)
+                        .map_err(|e| anyhow::anyhow!(
+                            "Return type violation from '{}': {}",
+                            function_name, e
+                        ))?;
+                }
+            }
+        }
 
         decode_function_result(output)
     }

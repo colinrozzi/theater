@@ -1,34 +1,21 @@
 # Theater Documentation
 
-Welcome to the Theater documentation!
+## Core Concepts
 
-## Guides
+- **[Contract Enforcement](./contract-enforcement.md)** — How Theater validates type contracts between the runtime and actors, on both input and output.
 
-### Handler Development
+## System Design
 
-- **[Implementing WASI Handlers](./implementing-wasi-handlers.md)** - Complete guide to implementing WASI-compliant handlers in Theater, with a step-by-step walkthrough of the wasi:random implementation.
-
-## Quick Links
-
-- [Project README](../README.md)
-- [Theater Crate](../crates/theater/)
-- [Handler Implementations](../crates/theater-handler-random/)
-- [Test Actors](../test-actors/)
+- **[Shutdown System Analysis](./shutdown-system-analysis.md)** — How actor shutdown works, including graceful vs forced shutdown paths.
+- **[Shutdown Resource Ownership](./shutdown-resource-ownership.md)** — Resource lifecycle and ownership during shutdown.
+- **[Handler Shutdown Analysis](./handler-shutdown-analysis.md)** — How handlers participate in shutdown.
 
 ## Overview
 
-Theater is a WebAssembly Actor Runtime for building distributed systems. Key concepts:
+Theater is a WebAssembly actor runtime. Actors are WASM modules loaded via pack, with typed interfaces enforced at the boundary.
 
-- **Actors**: WebAssembly components that process messages
-- **Handlers**: Capabilities that actors can import (filesystem, HTTP, random, etc.)
-- **Event Chain**: Audit log of all operations for correctness and replay
-- **WASI Compliance**: Standard WebAssembly System Interface support
-
-## Contributing
-
-When implementing new handlers or features:
-
-1. Follow the WASI specification when implementing standard interfaces
-2. Ensure all boundary-crossing data is logged to the event chain
-3. Create test actors to validate functionality
-4. Document your implementation following the existing guide structure
+- **Actors**: WebAssembly modules with typed state and function signatures
+- **Handlers**: Capabilities that actors import (message server, store, supervisor, etc.)
+- **Pack**: The type system and ABI layer — encodes/decodes values, embeds type metadata
+- **Event Chain**: Pack-encoded audit log of all operations
+- **Contract Enforcement**: Runtime validates types before and after every WASM call
