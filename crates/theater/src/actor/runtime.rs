@@ -416,6 +416,18 @@ impl ActorRuntime {
                 }
 
                 info!("All interface hashes verified for actor {}", id);
+
+                // Cache function type info for host-side validation.
+                // This is mandatory — we guarantee type safety to actors.
+                actor_instance.cache_function_types().await.map_err(|e| {
+                    ActorRuntimeError::SetupError {
+                        message: format!(
+                            "Failed to cache function types for actor {}: {:?}. \
+                             All actors must have valid type metadata.",
+                            id, e
+                        ),
+                    }
+                })?;
             }
             Err(e) => {
                 // Actor doesn't have __pack_types metadata - FATAL

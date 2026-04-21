@@ -27,9 +27,10 @@ pub use pack::{
     FunctionSignature, MetadataError, MetadataWithHashes, PackageMetadata, ParamSignature, TypeDesc,
     InterfaceHash, compute_interface_hash, compute_interface_hashes, hash_type,
     decode_metadata_with_hashes, encode_metadata_with_hashes,
+    validate_value_in_type_space, TypeValidationError,
 };
 // Re-export type system types for building metadata in tests
-pub use pack::types::{Arena, Function, Param, Type};
+pub use pack::types::{Arena, Function, Param, Type, TypeDef};
 // Re-export interface implementation types for handler interface declarations
 pub use pack::{
     FuncSignature, InterfaceImpl, PackParams, PackType, TypeHash,
@@ -37,8 +38,20 @@ pub use pack::{
 // Re-export pact parsing for loading interface definitions from .pact files
 pub use pack::{parse_pact, PactInterface};
 
+use std::collections::HashMap;
+
 use crate::actor::store::ActorStore;
 use crate::id::TheaterId;
+
+/// Cached type information for a function's parameters, used for
+/// host-side validation before crossing the WASM boundary.
+#[derive(Debug, Clone)]
+pub struct FunctionTypeInfo {
+    /// The declared type for each parameter.
+    pub param_types: Vec<Type>,
+    /// Type definitions available for resolving Ref types.
+    pub type_defs: Vec<TypeDef>,
+}
 
 /// Extract functions from an Arena by finding a child arena with the given name.
 ///
@@ -109,6 +122,9 @@ pub struct PackInstance {
     pub instance: AsyncInstance<ActorStore>,
     /// The actor store
     pub actor_store: ActorStore,
+    /// Cached parameter type info per function name, for host-side validation.
+    /// Populated after instantiation via `cache_function_types()`.
+    function_types: HashMap<String, FunctionTypeInfo>,
 }
 
 impl PackInstance {
@@ -174,6 +190,7 @@ impl PackInstance {
             name: name.into(),
             instance,
             actor_store,
+            function_types: HashMap::new(),
         })
     }
 
@@ -242,6 +259,42 @@ impl PackInstance {
         Ok(metadata.export_hashes)
     }
 
+    /// Cache function type information from the package metadata.
+    ///
+    /// This reads the metadata once and stores resolved parameter types
+    /// for each exported function, enabling host-side type validation
+    /// before crossing the WASM boundary.
+    pub async fn cache_function_types(&mut self) -> Result<(), MetadataError> {
+        let metadata = self.get_metadata().await?;
+        let mut function_types = HashMap::new();
+
+        // Walk the exports section of the arena
+        for child in &metadata.children {
+            if child.name == "exports" {
+                for interface_arena in &child.children {
+                    // Collect type defs from the interface level
+                    let interface_types = &interface_arena.types;
+
+                    for func in &interface_arena.functions {
+                        let full_name = format!("{}.{}", interface_arena.name, func.name);
+
+                        // Merge function-scoped and interface-scoped type defs
+                        let mut all_types = interface_types.clone();
+                        all_types.extend(func.types.clone());
+
+                        function_types.insert(full_name, FunctionTypeInfo {
+                            param_types: func.params.iter().map(|p| p.ty.clone()).collect(),
+                            type_defs: all_types,
+                        });
+                    }
+                }
+            }
+        }
+
+        self.function_types = function_types;
+        Ok(())
+    }
+
     /// Call an export function with the given state and parameters.
     ///
     /// This is the primary way to invoke actor functions. It:
@@ -279,6 +332,24 @@ impl PackInstance {
         state: Value,
         params: Value,
     ) -> Result<(Value, Vec<u8>)> {
+        // Validate state against the function's expected first parameter type.
+        // We guarantee to actors that values match their declared types.
+        if !self.function_types.is_empty() {
+            let info = self.function_types.get(function_name).ok_or_else(|| {
+                anyhow::anyhow!(
+                    "Function '{}' not found in cached type metadata",
+                    function_name
+                )
+            })?;
+            if let Some(first_param) = info.param_types.first() {
+                validate_value_in_type_space(&state, first_param, &info.type_defs)
+                    .map_err(|e| anyhow::anyhow!(
+                        "State type mismatch for '{}': {}",
+                        function_name, e
+                    ))?;
+            }
+        }
+
         // Flatten: prepend state to params
         let input = match params {
             Value::Tuple(items) => {

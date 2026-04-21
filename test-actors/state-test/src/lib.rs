@@ -15,25 +15,26 @@ use alloc::boxed::Box;
 use alloc::format;
 use alloc::string::String;
 use alloc::vec;
-use alloc::vec::Vec;
 use pack_guest::{export, import, pack_types, Value, ValueType};
 
 // Set up allocator and panic handler
 pack_guest::setup_guest!();
 
-// Embed interface metadata for hash verification
-// Note: pack_types uses pact syntax — records must be referenced by name, not inline.
-// The actual typed state is enforced at runtime by pack's Value encoding.
+// Embed interface metadata with typed state
 pack_types! {
+    record actor-state {
+        count: s32,
+    }
+
     imports {
         theater:simple/runtime {
             log: func(msg: string),
         }
     }
     exports {
-        theater:simple/actor.init: func(state: value) -> result<value, string>,
-        theater:simple/state-test.increment: func(state: value) -> result<tuple<value, s32>, string>,
-        theater:simple/state-test.get-count: func(state: value) -> result<tuple<value, s32>, string>,
+        theater:simple/actor.init: func(state: value) -> result<actor-state, string>,
+        theater:simple/state-test.increment: func(state: actor-state) -> result<tuple<actor-state, s32>, string>,
+        theater:simple/state-test.get-count: func(state: actor-state) -> result<tuple<actor-state, s32>, string>,
     }
 }
 
@@ -44,7 +45,7 @@ fn log(msg: String);
 /// Build a state record Value from a count
 fn make_state(count: i32) -> Value {
     Value::Record {
-        type_name: String::from("state"),
+        type_name: String::from("actor-state"),
         fields: vec![
             (String::from("count"), Value::S32(count)),
         ],
