@@ -84,8 +84,8 @@ theater-handler-loop = { version = "0.2.1", path = "crates/theater-handler-loop"
 # theater-handler-timing = { version = "0.2.1", path = "crates/deprecated/theater-handler-timing" }
 
 # Pack runtime integration (Graph ABI-based WASM runtime)
-pack = { path = "../pack" }
-pack-abi = { path = "../pack/crates/pack-abi" }
+pack = { git = "https://github.com/colinrozzi/pack.git" }
+pack-abi = { git = "https://github.com/colinrozzi/pack.git" }
 
 # Metadata for Nix crane builds
 [workspace.metadata.crane]

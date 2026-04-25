@@ -13,18 +13,11 @@
 
     crane.url = "github:ipetkov/crane";
 
-    # Pack runtime dependency (local development - use git+file for local clone)
+    # Pack runtime dependency
     pack = {
-      url = "git+file:../pack";
+      url = "github:colinrozzi/pack";
       flake = false;
     };
-
-    # TODO: When ready to distribute, uncomment this and remove the local path assumption:
-    # composite = {
-    #   url = "github:colinrozzi/composite";  # or your actual repo
-    #   inputs.nixpkgs.follows = "nixpkgs";
-    #   inputs.rust-overlay.follows = "rust-overlay";
-    # };
   };
 
   outputs = { self, nixpkgs, rust-overlay, flake-utils, crane, pack, ... }:

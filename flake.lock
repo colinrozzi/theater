@@ -52,16 +52,17 @@
     "pack": {
       "flake": false,
       "locked": {
-        "lastModified": 1776220312,
-        "narHash": "sha256-xV4vaVbS0q70n4liauR43lS4h+sM94HzJ2JR+PPlong=",
-        "rev": "a3d2c55076457460c0441672c8a030c6fd31fcfd",
-        "revCount": 70,
-        "type": "git",
-        "url": "file:../pack"
+        "lastModified": 1777067634,
+        "narHash": "sha256-m1gCQ0T++abhf5yceHx3leoBRyPS0W5TvndD1lh6ntQ=",
+        "owner": "colinrozzi",
+        "repo": "pack",
+        "rev": "5e1566b94228319377279b38d14eb25d525e73fc",
+        "type": "github"
       },
       "original": {
-        "type": "git",
-        "url": "file:../pack"
+        "owner": "colinrozzi",
+        "repo": "pack",
+        "type": "github"
       }
     },
     "root": {

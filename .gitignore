@@ -27,6 +27,9 @@ theater-client.log
 # Nix
 result
 
+# Local cargo overrides (dev-only, each developer has their own)
+.cargo/config.toml
+
 # Temporary files
 /tmp
 test-actors/wasi-random-test/target
