@@ -9,7 +9,7 @@ edition = "2021"
 crate-type = ["cdylib"]
 
 [dependencies]
-pack-guest = { path = "../../../pack/crates/pack-guest" }
+pack-guest = { git = "https://github.com/colinrozzi/pack.git", tag = "v0.2.0" }
 
 [profile.release]
 opt-level = "s"

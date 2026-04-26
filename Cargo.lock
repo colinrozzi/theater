@@ -5563,3 +5563,11 @@ dependencies = [
  "cc",
  "pkg-config",
 ]
+
+[[patch.unused]]
+name = "pack-guest"
+version = "0.1.0"
+
+[[patch.unused]]
+name = "pack-guest-macros"
+version = "0.1.0"

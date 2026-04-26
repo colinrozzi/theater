@@ -10,4 +10,4 @@ name = "pact-test"
 path = "src/main.rs"
 
 [dependencies]
-pack = { path = "../../../pack" }
+pack = { git = "https://github.com/colinrozzi/pack.git", tag = "v0.2.0" }
