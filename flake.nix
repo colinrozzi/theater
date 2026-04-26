@@ -203,6 +203,35 @@ with open('flake.nix', 'w') as f:
             echo "Pack updated to $VERSION. Changes:"
             git diff --stat
           '';
+
+          # Create a PR from the current jj revision
+          pr = pkgs.writeShellScriptBin "theater-pr" ''
+            set -e
+            DESCRIPTION=$(jj log -r @ --no-graph -T 'description' 2>/dev/null)
+            if [ -z "$DESCRIPTION" ] || [ "$DESCRIPTION" = "(no description set)" ]; then
+              echo "Error: Current revision has no description. Run: jj describe -m 'your change'"
+              exit 1
+            fi
+
+            # Extract first line as branch name
+            TITLE=$(echo "$DESCRIPTION" | head -1)
+            BRANCH=$(echo "$TITLE" | tr '[:upper:]' '[:lower:]' | tr ' ' '-' | tr -cd 'a-z0-9-' | head -c 50)
+
+            echo "Creating PR: $TITLE"
+            echo "Branch: $BRANCH"
+            echo ""
+
+            # Create/move bookmark and push
+            jj bookmark create "$BRANCH" -r @ 2>/dev/null || jj bookmark set "$BRANCH" -r @
+            jj git push --bookmark "$BRANCH"
+
+            # Create PR via gh
+            ${pkgs.gh}/bin/gh pr create \
+              --title "$TITLE" \
+              --body "$DESCRIPTION" \
+              --base main \
+              --head "$BRANCH"
+          '';
         };
 
         # Development shell
@@ -234,6 +263,9 @@ with open('flake.nix', 'w') as f:
 
             # Debugging
             lldb
+
+            # GitHub CLI
+            gh
           ] ++ pkgs.lib.optionals pkgs.stdenv.isDarwin [
             pkgs.darwin.apple_sdk.frameworks.Security
             pkgs.darwin.apple_sdk.frameworks.SystemConfiguration
