@@ -3,7 +3,7 @@ name = "basic"
 description = "A simple Theater actor with basic functionality"
 
 [files]
-"Cargo.toml" = "Cargo.toml"
+"Cargo.toml" = "Cargo.toml.template"
 "manifest.toml" = "manifest.toml"
 "wit/world.wit" = "world.wit"
 "src/lib.rs" = "lib.rs"

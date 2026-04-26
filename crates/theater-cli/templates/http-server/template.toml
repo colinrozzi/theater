@@ -3,7 +3,7 @@ name = "http-server"
 description = "A basic HTTP server with routing and WebSocket support"
 
 [files]
-"Cargo.toml" = "Cargo.toml"
+"Cargo.toml" = "Cargo.toml.template"
 "manifest.toml" = "manifest.toml"
 "wit/world.wit" = "world.wit"
 "src/lib.rs" = "lib.rs"
