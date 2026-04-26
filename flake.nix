@@ -165,6 +165,44 @@
             echo "=== Running integration tests ==="
             cargo test --test golden_chain_test --test composite_integration_test --test shutdown_timing_test "''${@}"
           '';
+
+          # Update pack dependency to a new version tag
+          update-pack = pkgs.writeShellScriptBin "update-pack" ''
+            set -e
+            VERSION="''${1:?Usage: nix run .#update-pack <version> (e.g. v0.2.1)}"
+
+            echo "Updating pack to $VERSION..."
+
+            # Update Cargo.toml git tags
+            ${pkgs.gnused}/bin/sed -i \
+              "s|colinrozzi/pack\.git\", tag = \"[^\"]*\"|colinrozzi/pack.git\", tag = \"$VERSION\"|g" \
+              Cargo.toml
+            echo "  Updated Cargo.toml"
+
+            # Update flake.nix URL (only the inputs.pack.url line)
+            ${pkgs.python3}/bin/python3 -c "
+import re, sys
+with open('flake.nix', 'r') as f:
+    content = f.read()
+content = re.sub(
+    r'(url = \"github:colinrozzi/pack)/[^\"]*',
+    r'\1/' + sys.argv[1],
+    content,
+    count=1
+)
+with open('flake.nix', 'w') as f:
+    f.write(content)
+            " "$VERSION"
+            echo "  Updated flake.nix"
+
+            # Update flake lock
+            nix flake update pack
+            echo "  Updated flake.lock"
+
+            echo ""
+            echo "Pack updated to $VERSION. Changes:"
+            git diff --stat
+          '';
         };
 
         # Development shell
