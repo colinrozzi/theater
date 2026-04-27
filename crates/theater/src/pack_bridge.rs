@@ -16,25 +16,25 @@ use std::sync::Arc;
 
 // Re-export Pack types for convenient use throughout Theater
 // Now unified: pack re-exports from pack_abi, so Value/FromValue/ConversionError are consistent
-pub use pack::abi::{ConversionError, FromValue, Value, ValueType};
+pub use packr::abi::{ConversionError, FromValue, Value, ValueType};
 
-pub use pack::{
+pub use packr::{
     AsyncCtx, AsyncInstance, AsyncRuntime, CallInterceptor, Ctx, HostFunctionProvider,
     HostLinkerBuilder, InterfaceBuilder, LinkerError,
 };
 // Re-export metadata types for querying actor exports/imports
-pub use pack::{
+pub use packr::{
     compute_interface_hash, compute_interface_hashes, decode_metadata_with_hashes,
     encode_metadata_with_hashes, hash_type, validate_value_in_type_space, FunctionSignature,
     InterfaceHash, MetadataError, MetadataWithHashes, PackageMetadata, ParamSignature, TypeDesc,
     TypeValidationError,
 };
 // Re-export type system types for building metadata in tests
-pub use pack::types::{Arena, Function, Param, Type, TypeDef};
+pub use packr::types::{Arena, Function, Param, Type, TypeDef};
 // Re-export interface implementation types for handler interface declarations
-pub use pack::{FuncSignature, InterfaceImpl, PackParams, PackType, TypeHash};
+pub use packr::{FuncSignature, InterfaceImpl, PackParams, PackType, TypeHash};
 // Re-export pact parsing for loading interface definitions from .pact files
-pub use pack::{parse_pact, PactInterface};
+pub use packr::{parse_pact, PactInterface};
 
 use std::collections::HashMap;
 
@@ -448,7 +448,7 @@ impl PackInstance {
 
 /// Convert bytes to a Value (as a list of u8).
 fn bytes_to_value(bytes: &[u8]) -> Value {
-    use pack::abi::ValueType;
+    use packr::abi::ValueType;
     Value::List {
         elem_type: ValueType::U8,
         items: bytes.iter().copied().map(Value::U8).collect(),
@@ -457,12 +457,12 @@ fn bytes_to_value(bytes: &[u8]) -> Value {
 
 /// Encode a Value to bytes using the Graph ABI.
 pub fn encode_value(value: &Value) -> Result<Vec<u8>> {
-    pack::encode(value).map_err(|e| anyhow::anyhow!("Failed to encode value: {:?}", e))
+    packr::encode(value).map_err(|e| anyhow::anyhow!("Failed to encode value: {:?}", e))
 }
 
 /// Decode bytes to a Value using the Graph ABI.
 pub fn decode_value(bytes: &[u8]) -> Result<Value> {
-    pack::decode(bytes).map_err(|e| anyhow::anyhow!("Failed to decode value: {:?}", e))
+    packr::decode(bytes).map_err(|e| anyhow::anyhow!("Failed to decode value: {:?}", e))
 }
 
 /// Decode a function result in the standard format.
@@ -650,7 +650,7 @@ pub trait IntoValue {
     fn into_value(self) -> Value;
 }
 
-// Note: FromValue is now imported from Pack (pack::abi::FromValue)
+// Note: FromValue is now imported from Pack (packr::abi::FromValue)
 
 // Implement for common types
 
@@ -713,7 +713,7 @@ impl IntoValue for u64 {
 
 impl IntoValue for Vec<u8> {
     fn into_value(self) -> Value {
-        use pack::abi::ValueType;
+        use packr::abi::ValueType;
         Value::List {
             elem_type: ValueType::U8,
             items: self.into_iter().map(Value::U8).collect(),
@@ -731,7 +731,7 @@ impl<T: IntoValue> IntoValue for Option<T> {
             }
             None => {
                 // For None, we don't have a value to infer from, use a placeholder
-                use pack::abi::ValueType;
+                use packr::abi::ValueType;
                 (ValueType::Bool, None)
             }
         };
@@ -749,7 +749,7 @@ impl<T: IntoValue> IntoValue for Vec<T> {
     fn into_value(self) -> Value {
         let items: Vec<Value> = self.into_iter().map(|v| v.into_value()).collect();
         let elem_type = items.first().map(|v| v.infer_type()).unwrap_or_else(|| {
-            use pack::abi::ValueType;
+            use packr::abi::ValueType;
             ValueType::Bool // placeholder for empty lists
         });
         Value::List { elem_type, items }

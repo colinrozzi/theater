@@ -127,7 +127,7 @@ async fn test_pact_file_todo_actor() {
         .expect("list should succeed");
 
     // Decode and check the list
-    let result_value = pack::abi::decode(&result_bytes).expect("decode result");
+    let result_value = packr::abi::decode(&result_bytes).expect("decode result");
     info!("Todo list: {:?}", result_value);
 
     // Toggle first todo
@@ -146,7 +146,7 @@ async fn test_pact_file_todo_actor() {
         .await
         .expect("list should succeed after toggle");
 
-    let result_value = pack::abi::decode(&result_bytes).expect("decode result");
+    let result_value = packr::abi::decode(&result_bytes).expect("decode result");
     info!("Todo list after toggle: {:?}", result_value);
 
     info!("Pact file contract test passed!");

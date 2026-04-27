@@ -67,10 +67,10 @@ pub async fn resolve_reference(reference: &str) -> Result<Vec<u8>, ReferenceErro
                 Err(e) => Err(ReferenceError::ResolveError(e.to_string())),
             }
         } else {
-            return Err(ReferenceError::ResolveError(format!(
+            Err(ReferenceError::ResolveError(format!(
                 "Invalid store path format: {}",
                 reference
-            )));
+            )))
         }
     } else if reference.starts_with("http://") || reference.starts_with("https://") {
         // HTTP/HTTPS URL

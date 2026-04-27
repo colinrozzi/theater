@@ -12,10 +12,10 @@ extern crate alloc;
 use alloc::boxed::Box;
 use alloc::string::String;
 use alloc::vec;
-use pack_guest::{export, import, pack_types, Value, ValueType};
+use packr_guest::{export, import, pack_types, Value, ValueType};
 
 // Set up allocator and panic handler
-pack_guest::setup_guest!();
+packr_guest::setup_guest!();
 
 // Embed interface metadata for hash verification
 pack_types! {

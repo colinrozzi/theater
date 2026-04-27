@@ -1283,11 +1283,12 @@ pub async fn run_tcp_replay_verification(
     // receives the store state (from manifest initial_state) as the first tuple element.
     // For now, we pass an empty tuple as params since init doesn't need extra params.
     let state_json = format!(r#"{{"listen": "{}"}}"#, listen_addr_str);
-    let state_bytes: Vec<pack::abi::Value> = state_json.bytes().map(pack::abi::Value::U8).collect();
-    let init_state = pack::abi::Value::Option {
-        inner_type: pack::abi::ValueType::List(Box::new(pack::abi::ValueType::U8)),
-        value: Some(Box::new(pack::abi::Value::List {
-            elem_type: pack::abi::ValueType::U8,
+    let state_bytes: Vec<packr::abi::Value> =
+        state_json.bytes().map(packr::abi::Value::U8).collect();
+    let init_state = packr::abi::Value::Option {
+        inner_type: packr::abi::ValueType::List(Box::new(packr::abi::ValueType::U8)),
+        value: Some(Box::new(packr::abi::Value::List {
+            elem_type: packr::abi::ValueType::U8,
             items: state_bytes,
         })),
     };

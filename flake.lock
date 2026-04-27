@@ -49,29 +49,11 @@
         "type": "github"
       }
     },
-    "pack": {
-      "flake": false,
-      "locked": {
-        "lastModified": 1777215181,
-        "narHash": "sha256-KqCEjl2UufXWbvPOYpyAizrY1UwSSVkQhFpnu3/dBUE=",
-        "owner": "colinrozzi",
-        "repo": "pack",
-        "rev": "2e141a093ed43a5b6dd7a28541c56b33a66ecc9c",
-        "type": "github"
-      },
-      "original": {
-        "owner": "colinrozzi",
-        "ref": "v0.2.0",
-        "repo": "pack",
-        "type": "github"
-      }
-    },
     "root": {
       "inputs": {
         "crane": "crane",
         "flake-utils": "flake-utils",
         "nixpkgs": "nixpkgs",
-        "pack": "pack",
         "rust-overlay": "rust-overlay"
       }
     },

@@ -1,5 +1,6 @@
 [package]
 name = "theater-handler-runtime"
+description = "Core runtime handler for Theater WebAssembly runtime - logging, state, lifecycle"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true

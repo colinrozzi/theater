@@ -10,9 +10,9 @@ extern crate alloc;
 use alloc::boxed::Box;
 use alloc::string::String;
 use alloc::vec;
-use pack_guest::{export, import, pack_types, Value, ValueType};
+use packr_guest::{export, import, pack_types, Value, ValueType};
 
-pack_guest::setup_guest!();
+packr_guest::setup_guest!();
 
 pack_types! {
     imports {

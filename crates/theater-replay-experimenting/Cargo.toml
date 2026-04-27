@@ -9,7 +9,7 @@ theater-handler-runtime.workspace = true
 theater-handler-message-server.workspace = true
 theater-handler-supervisor.workspace = true
 theater-handler-tcp.workspace = true
-pack = { git = "https://github.com/colinrozzi/pack.git", tag = "v0.2.0" }
+packr = "0.4.0"
 anyhow = "1.0"
 tokio = { version = "1.0", features = ["full"] }
 serde_json = "1.0"

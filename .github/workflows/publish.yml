@@ -1,0 +1,150 @@
+name: Publish to crates.io
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "Cargo.toml"
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  check-version:
+    name: Check version change
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.detect.outputs.version }}
+      changed: ${{ steps.detect.outputs.changed }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Detect version change
+        id: detect
+        run: |
+          NEW=$(grep -m1 '^version = ' Cargo.toml | sed 's/version = "\(.*\)"/\1/')
+          OLD=$(git show HEAD~1:Cargo.toml 2>/dev/null | grep -m1 '^version = ' | sed 's/version = "\(.*\)"/\1/' || echo "")
+          echo "version=$NEW" >> "$GITHUB_OUTPUT"
+          if [ "$NEW" != "$OLD" ] && [ -n "$OLD" ]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "Version changed: $OLD -> $NEW"
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "No version change (current: $NEW)"
+          fi
+
+  publish:
+    name: Publish
+    runs-on: ubuntu-latest
+    needs: check-version
+    if: needs.check-version.outputs.changed == 'true'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: DeterminateSystems/nix-installer-action@main
+
+      - uses: DeterminateSystems/magic-nix-cache-action@main
+
+      - name: Test
+        run: |
+          nix develop --command cargo test -p theater --lib
+
+      # Layer 1: no theater-* deps
+      - name: Publish theater-chain
+        run: nix develop --command cargo publish -p theater-chain
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
+      # Layer 2: depends on theater-chain
+      - name: Publish theater
+        run: nix develop --command cargo publish -p theater
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
+      # Layer 3: all handlers depend on theater
+      - name: Publish theater-handler-assembler
+        run: nix develop --command cargo publish -p theater-handler-assembler
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
+      - name: Publish theater-handler-loop
+        run: nix develop --command cargo publish -p theater-handler-loop
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
+      - name: Publish theater-handler-message-server
+        run: nix develop --command cargo publish -p theater-handler-message-server
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
+      - name: Publish theater-handler-rpc
+        run: nix develop --command cargo publish -p theater-handler-rpc
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
+      - name: Publish theater-handler-runtime
+        run: nix develop --command cargo publish -p theater-handler-runtime
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
+      - name: Publish theater-handler-store
+        run: nix develop --command cargo publish -p theater-handler-store
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
+      - name: Publish theater-handler-supervisor
+        run: nix develop --command cargo publish -p theater-handler-supervisor
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
+      - name: Publish theater-handler-tcp
+        run: nix develop --command cargo publish -p theater-handler-tcp
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
+      - name: Publish theater-handler-terminal
+        run: nix develop --command cargo publish -p theater-handler-terminal
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
+      - name: Publish theater-handler-timer
+        run: nix develop --command cargo publish -p theater-handler-timer
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
+      # Layer 4: depends on theater + handlers
+      - name: Publish theater-server
+        run: nix develop --command cargo publish -p theater-server
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
+      - name: Publish theater-cli
+        run: nix develop --command cargo publish -p theater-cli
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
+      # Layer 5: depends on theater-server
+      - name: Publish theater-client
+        run: nix develop --command cargo publish -p theater-client
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
+      - name: Publish theater-server-cli
+        run: nix develop --command cargo publish -p theater-server-cli
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
+      - name: Create tag and GitHub release
+        run: |
+          VERSION="v${{ needs.check-version.outputs.version }}"
+          git tag "$VERSION"
+          git push origin "$VERSION"
+          gh release create "$VERSION" --generate-notes
+        env:
+          GH_TOKEN: ${{ github.token }}

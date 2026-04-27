@@ -16,8 +16,8 @@
 
 use std::sync::{Arc, Mutex, RwLock};
 
-use pack::abi::Value;
-use pack::CallInterceptor;
+use packr::abi::Value;
+use packr::CallInterceptor;
 
 use crate::chain::StateChain;
 use crate::events::{ChainEventData, ChainEventPayload};

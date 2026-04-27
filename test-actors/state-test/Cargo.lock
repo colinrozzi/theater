@@ -108,27 +108,33 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "42f5e15c9953c5e4ccceeb2e7382a716482c34515315f7b03532b8b4e8393d2d"
 
 [[package]]
-name = "pack-abi"
-version = "0.1.0"
+name = "packr-abi"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "559564e999673ccd382f8832e677c7a33cee8623b6aa27d2f20dea9c21fda3aa"
 dependencies = [
  "hashbrown",
  "sha2",
 ]
 
 [[package]]
-name = "pack-guest"
-version = "0.1.0"
+name = "packr-guest"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e4bb274dab85457a032cbad482ef7fe775eadb183906ca7a0e3fa591c931948d"
 dependencies = [
  "dlmalloc",
- "pack-abi",
- "pack-guest-macros",
+ "packr-abi",
+ "packr-guest-macros",
 ]
 
 [[package]]
-name = "pack-guest-macros"
-version = "0.1.0"
+name = "packr-guest-macros"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "890ff116638b771af4bf82a2866d87e33421fe73e57ffd33c9496292f34b35af"
 dependencies = [
- "pack-abi",
+ "packr-abi",
  "proc-macro2",
  "quote",
  "syn",
@@ -167,7 +173,7 @@ dependencies = [
 name = "state-test-actor"
 version = "0.1.0"
 dependencies = [
- "pack-guest",
+ "packr-guest",
 ]
 
 [[package]]
@@ -233,7 +239,3 @@ dependencies = [
  "quote",
  "syn",
 ]
-
-[[patch.unused]]
-name = "pack"
-version = "0.2.0"
