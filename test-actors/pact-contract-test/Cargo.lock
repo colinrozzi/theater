@@ -233,3 +233,7 @@ dependencies = [
  "quote",
  "syn",
 ]
+
+[[patch.unused]]
+name = "pack"
+version = "0.2.0"

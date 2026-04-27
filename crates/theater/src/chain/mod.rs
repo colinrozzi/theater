@@ -111,7 +111,7 @@ impl HttpReplayChain {
 /// Events are serialized to JSON for storage and transmission. The `Display` implementation
 /// provides a human-readable representation of the event, making events easier to read in logs
 /// and debugging output.
-#[derive(Debug, Clone, Serialize, Deserialize, ComponentType, Lift, Lower, Hash, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, ComponentType, Lift, Lower, Eq)]
 #[component(record)]
 pub struct ChainEvent {
     /// Cryptographic hash of this event's content, used as its identifier.
@@ -208,6 +208,12 @@ impl EventType for ChainEvent {
 impl PartialEq for ChainEvent {
     fn eq(&self, other: &Self) -> bool {
         self.hash == other.hash
+    }
+}
+
+impl std::hash::Hash for ChainEvent {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.hash.hash(state);
     }
 }
 
