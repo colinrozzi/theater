@@ -223,7 +223,7 @@ with open('flake.nix', 'w') as f:
 
             # Create/move bookmark and push
             jj bookmark create "$BRANCH" -r @ 2>/dev/null || jj bookmark set "$BRANCH" -r @
-            jj git push --bookmark "$BRANCH"
+            jj git push --bookmark "$BRANCH" --allow-new
 
             # Create PR via gh
             ${pkgs.gh}/bin/gh pr create \

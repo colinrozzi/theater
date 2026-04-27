@@ -99,3 +99,19 @@ checksum = "9fd734226eac1fd7c450956964e3a9094c9cee65e9dafdf126feef8c0096db65"
 dependencies = [
  "bitflags",
 ]
+
+[[patch.unused]]
+name = "pack"
+version = "0.2.0"
+
+[[patch.unused]]
+name = "pack-abi"
+version = "0.1.0"
+
+[[patch.unused]]
+name = "pack-guest"
+version = "0.1.0"
+
+[[patch.unused]]
+name = "pack-guest-macros"
+version = "0.1.0"
