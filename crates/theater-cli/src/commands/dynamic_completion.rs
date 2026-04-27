@@ -30,9 +30,7 @@ pub async fn execute_async(args: &DynamicCompletionArgs, _ctx: &CommandContext) 
 }
 
 /// Generate completions based on context
-async fn generate_dynamic_completions(
-    args: &DynamicCompletionArgs,
-) -> CliResult<Vec<String>> {
+async fn generate_dynamic_completions(args: &DynamicCompletionArgs) -> CliResult<Vec<String>> {
     let words: Vec<&str> = args.line.split_whitespace().collect();
 
     match words.as_slice() {

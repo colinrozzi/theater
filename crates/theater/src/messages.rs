@@ -1,7 +1,6 @@
 use crate::actor::handle::ActorHandle;
 use crate::actor::ActorError;
 use crate::actor::ActorRuntimeError;
-use crate::pack_bridge::{InterfaceHash, Value};
 /// # Theater Message System
 ///
 /// Defines the message types used for communication between different components
@@ -74,6 +73,7 @@ use crate::pack_bridge::{InterfaceHash, Value};
 use crate::chain::ChainEvent;
 use crate::id::TheaterId;
 use crate::metrics::ActorMetrics;
+use crate::pack_bridge::{InterfaceHash, Value};
 use crate::store::ContentStore;
 use crate::ManifestConfig;
 use crate::Result;

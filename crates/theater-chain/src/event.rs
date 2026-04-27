@@ -9,15 +9,30 @@ pub trait EventType:
 {
     fn event_type(&self) -> String;
     fn len(&self) -> usize;
+    fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, ComponentType, Lift, Lower, Hash, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, ComponentType, Lift, Lower, Eq)]
 #[component(record)]
 pub struct Event<D: EventType> {
     pub hash: Vec<u8>,
     #[component(name = "parent-hash")]
     pub parent_hash: Option<Vec<u8>>,
     pub data: D,
+}
+
+impl<D: EventType> PartialEq for Event<D> {
+    fn eq(&self, other: &Self) -> bool {
+        self.hash == other.hash
+    }
+}
+
+impl<D: EventType> Hash for Event<D> {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.hash.hash(state);
+    }
 }
 
 impl<D: EventType> Event<D> {
@@ -61,12 +76,5 @@ impl<D: EventType> Display for Event<D> {
         writeln!(f, "{}", self.data)?;
         writeln!(f)?;
         Ok(())
-    }
-}
-
-// implement Eq for ChainEvent
-impl<D: EventType> PartialEq for Event<D> {
-    fn eq(&self, other: &Self) -> bool {
-        self.hash == other.hash
     }
 }

@@ -24,17 +24,15 @@ pub use pack::{
 };
 // Re-export metadata types for querying actor exports/imports
 pub use pack::{
-    FunctionSignature, MetadataError, MetadataWithHashes, PackageMetadata, ParamSignature, TypeDesc,
-    InterfaceHash, compute_interface_hash, compute_interface_hashes, hash_type,
-    decode_metadata_with_hashes, encode_metadata_with_hashes,
-    validate_value_in_type_space, TypeValidationError,
+    compute_interface_hash, compute_interface_hashes, decode_metadata_with_hashes,
+    encode_metadata_with_hashes, hash_type, validate_value_in_type_space, FunctionSignature,
+    InterfaceHash, MetadataError, MetadataWithHashes, PackageMetadata, ParamSignature, TypeDesc,
+    TypeValidationError,
 };
 // Re-export type system types for building metadata in tests
 pub use pack::types::{Arena, Function, Param, Type, TypeDef};
 // Re-export interface implementation types for handler interface declarations
-pub use pack::{
-    FuncSignature, InterfaceImpl, PackParams, PackType, TypeHash,
-};
+pub use pack::{FuncSignature, InterfaceImpl, PackParams, PackType, TypeHash};
 // Re-export pact parsing for loading interface definitions from .pact files
 pub use pack::{parse_pact, PactInterface};
 
@@ -69,7 +67,10 @@ pub struct FunctionTypeInfo {
 /// ```
 ///
 /// Returns tuples of (interface_name, function).
-fn extract_functions_from_arena(arena: &PackageMetadata, section: &str) -> Vec<(String, FunctionSignature)> {
+fn extract_functions_from_arena(
+    arena: &PackageMetadata,
+    section: &str,
+) -> Vec<(String, FunctionSignature)> {
     let mut result = Vec::new();
 
     // Find the child arena with the given name (e.g., "imports" or "exports")
@@ -214,11 +215,15 @@ impl PackInstance {
     /// Check if the package exports a function with the given name.
     ///
     /// This queries the embedded package metadata to check for the export.
-    pub async fn has_export(&mut self, interface: &str, function: &str) -> Result<bool, MetadataError> {
+    pub async fn has_export(
+        &mut self,
+        interface: &str,
+        function: &str,
+    ) -> Result<bool, MetadataError> {
         let exports = self.get_exports().await?;
-        Ok(exports.iter().any(|(iface, func)| {
-            iface == interface && func.name == function
-        }))
+        Ok(exports
+            .iter()
+            .any(|(iface, func)| iface == interface && func.name == function))
     }
 
     /// Get the list of exported functions with their full type signatures.
@@ -284,11 +289,14 @@ impl PackInstance {
                         let mut all_types = interface_types.clone();
                         all_types.extend(func.types.clone());
 
-                        function_types.insert(full_name, FunctionTypeInfo {
-                            param_types: func.params.iter().map(|p| p.ty.clone()).collect(),
-                            result_types: func.results.clone(),
-                            type_defs: all_types,
-                        });
+                        function_types.insert(
+                            full_name,
+                            FunctionTypeInfo {
+                                param_types: func.params.iter().map(|p| p.ty.clone()).collect(),
+                                result_types: func.results.clone(),
+                                type_defs: all_types,
+                            },
+                        );
                     }
                 }
             }
@@ -321,7 +329,8 @@ impl PackInstance {
         params: Vec<u8>,
     ) -> Result<(Value, Vec<u8>)> {
         let params_value = bytes_to_value(&params);
-        self.call_function_with_value(function_name, state, params_value).await
+        self.call_function_with_value(function_name, state, params_value)
+            .await
     }
 
     /// Call an export function with structured Value params (no bytes_to_value flattening).
@@ -345,11 +354,9 @@ impl PackInstance {
                 )
             })?;
             if let Some(first_param) = info.param_types.first() {
-                validate_value_in_type_space(&state, first_param, &info.type_defs)
-                    .map_err(|e| anyhow::anyhow!(
-                        "State type mismatch for '{}': {}",
-                        function_name, e
-                    ))?;
+                validate_value_in_type_space(&state, first_param, &info.type_defs).map_err(
+                    |e| anyhow::anyhow!("State type mismatch for '{}': {}", function_name, e),
+                )?;
             }
         }
 
@@ -374,11 +381,11 @@ impl PackInstance {
         if !self.function_types.is_empty() {
             if let Some(info) = self.function_types.get(function_name) {
                 if let Some(result_type) = info.result_types.first() {
-                    validate_value_in_type_space(&output, result_type, &info.type_defs)
-                        .map_err(|e| anyhow::anyhow!(
-                            "Return type violation from '{}': {}",
-                            function_name, e
-                        ))?;
+                    validate_value_in_type_space(&output, result_type, &info.type_defs).map_err(
+                        |e| {
+                            anyhow::anyhow!("Return type violation from '{}': {}", function_name, e)
+                        },
+                    )?;
                 }
             }
         }
@@ -418,7 +425,9 @@ impl PackInstance {
         state: Value,
         params: Value,
     ) -> Result<ActorResult<T>> {
-        let (new_state, result_bytes) = self.call_function_with_value(function_name, state, params).await?;
+        let (new_state, result_bytes) = self
+            .call_function_with_value(function_name, state, params)
+            .await?;
         let result_value = if result_bytes.is_empty() {
             Value::Tuple(vec![]) // Unit when no return value
         } else {
@@ -426,7 +435,10 @@ impl PackInstance {
         };
         let value = T::from_value(result_value)
             .map_err(|e| anyhow::anyhow!("Failed to decode result: {:?}", e))?;
-        Ok(ActorResult { state: new_state, value })
+        Ok(ActorResult {
+            state: new_state,
+            value,
+        })
     }
 }
 
@@ -460,10 +472,12 @@ pub fn decode_value(bytes: &[u8]) -> Result<Value> {
 fn decode_function_result(value: Value) -> Result<(Value, Vec<u8>)> {
     match value {
         // Handle Value::Result (Pack's native result type)
-        Value::Result { value: Ok(inner), .. } => {
-            decode_ok_payload(*inner)
-        }
-        Value::Result { value: Err(err), .. } => {
+        Value::Result {
+            value: Ok(inner), ..
+        } => decode_ok_payload(*inner),
+        Value::Result {
+            value: Err(err), ..
+        } => {
             let error_msg = match *err {
                 Value::String(s) => s,
                 other => format!("{:?}", other),
@@ -472,16 +486,10 @@ fn decode_function_result(value: Value) -> Result<(Value, Vec<u8>)> {
         }
         // Handle Value::Variant (alternative encoding)
         Value::Variant {
-            tag: 0,
-            payload,
-            ..
-        } if !payload.is_empty() => {
-            decode_ok_payload(payload.into_iter().next().unwrap())
-        }
+            tag: 0, payload, ..
+        } if !payload.is_empty() => decode_ok_payload(payload.into_iter().next().unwrap()),
         Value::Variant {
-            tag: 1,
-            payload,
-            ..
+            tag: 1, payload, ..
         } if !payload.is_empty() => {
             let error_msg = match payload.into_iter().next().unwrap() {
                 Value::String(s) => s,
@@ -496,9 +504,7 @@ fn decode_function_result(value: Value) -> Result<(Value, Vec<u8>)> {
             Err(anyhow::anyhow!("Unexpected result variant tag: {}", tag))
         }
         // If it's not a variant or result, treat the whole value as the state
-        other => {
-            Ok((other, vec![]))
-        }
+        other => Ok((other, vec![])),
     }
 }
 
@@ -523,9 +529,7 @@ fn decode_ok_payload(value: Value) -> Result<(Value, Vec<u8>)> {
             Ok((new_state, result_bytes))
         }
         // Single value — treat as state with no additional return
-        other => {
-            Ok((other, vec![]))
-        }
+        other => Ok((other, vec![])),
     }
 }
 
@@ -562,10 +566,12 @@ impl<T: FromValue> FromValue for ActorResult<T> {
     fn from_value(value: Value) -> std::result::Result<Self, ConversionError> {
         match value {
             // Handle Value::Result (Pack's native result type)
-            Value::Result { value: Ok(inner), .. } => {
-                decode_actor_ok_payload(*inner)
-            }
-            Value::Result { value: Err(err), .. } => {
+            Value::Result {
+                value: Ok(inner), ..
+            } => decode_actor_ok_payload(*inner),
+            Value::Result {
+                value: Err(err), ..
+            } => {
                 let error_msg = match *err {
                     Value::String(s) => s,
                     other => format!("{:?}", other),
@@ -576,14 +582,18 @@ impl<T: FromValue> FromValue for ActorResult<T> {
                 })
             }
             // Handle Value::Variant (alternative encoding)
-            Value::Variant { tag: 0, payload, .. } if !payload.is_empty() => {
+            Value::Variant {
+                tag: 0, payload, ..
+            } if !payload.is_empty() => {
                 decode_actor_ok_payload(payload.into_iter().next().unwrap())
             }
-            Value::Variant { tag: 0, .. } => {
-                Err(ConversionError::MissingPayload)
-            }
-            Value::Variant { tag: 1, payload, .. } => {
-                let error_msg = payload.into_iter().next()
+            Value::Variant { tag: 0, .. } => Err(ConversionError::MissingPayload),
+            Value::Variant {
+                tag: 1, payload, ..
+            } => {
+                let error_msg = payload
+                    .into_iter()
+                    .next()
                     .map(|v| match v {
                         Value::String(s) => s,
                         other => format!("{:?}", other),
@@ -594,18 +604,18 @@ impl<T: FromValue> FromValue for ActorResult<T> {
                     got: format!("Actor error: {}", error_msg),
                 })
             }
-            other => {
-                Err(ConversionError::TypeMismatch {
-                    expected: String::from("Result or Variant"),
-                    got: format!("{:?}", other),
-                })
-            }
+            other => Err(ConversionError::TypeMismatch {
+                expected: String::from("Result or Variant"),
+                got: format!("{:?}", other),
+            }),
         }
     }
 }
 
 /// Helper to decode the Ok payload of an actor result.
-fn decode_actor_ok_payload<T: FromValue>(value: Value) -> std::result::Result<ActorResult<T>, ConversionError> {
+fn decode_actor_ok_payload<T: FromValue>(
+    value: Value,
+) -> std::result::Result<ActorResult<T>, ConversionError> {
     match value {
         Value::Tuple(mut items) if !items.is_empty() => {
             // First element is state
@@ -624,9 +634,10 @@ fn decode_actor_ok_payload<T: FromValue>(value: Value) -> std::result::Result<Ac
             Ok(ActorResult { state, value })
         }
         // Single value — treat as state with no return
-        other => {
-            Ok(ActorResult { state: other, value: T::from_value(Value::Tuple(vec![]))? })
-        }
+        other => Ok(ActorResult {
+            state: other,
+            value: T::from_value(Value::Tuple(vec![]))?,
+        }),
     }
 }
 
@@ -749,7 +760,6 @@ impl<T: IntoValue> IntoValue for Vec<T> {
 mod tests {
     use super::*;
 
-
     #[test]
     fn test_into_value_result() {
         let ok: Result<String, String> = Ok("success".to_string());
@@ -760,11 +770,9 @@ mod tests {
                 tag: 0,
                 ref payload,
                 ..
-            } if !payload.is_empty() => {
-                match &payload[0] {
-                    Value::String(s) => assert_eq!(s, "success"),
-                    _ => panic!("Expected String"),
-                }
+            } if !payload.is_empty() => match &payload[0] {
+                Value::String(s) => assert_eq!(s, "success"),
+                _ => panic!("Expected String"),
             },
             _ => panic!("Expected Ok variant"),
         }

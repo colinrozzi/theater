@@ -1,7 +1,7 @@
 use tempfile::tempdir;
 use theater::chain::StateChain;
-use theater::events::{ChainEventData, ChainEventPayload};
 use theater::events::wasm::WasmEventData;
+use theater::events::{ChainEventData, ChainEventPayload};
 use theater::id::TheaterId;
 use tokio::sync::mpsc;
 

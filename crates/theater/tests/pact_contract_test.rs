@@ -8,9 +8,9 @@ use std::sync::RwLock as SyncRwLock;
 use theater::actor::handle::ActorHandle;
 use theater::actor::store::ActorStore;
 use theater::chain::StateChain;
-use theater::pack_bridge::{AsyncRuntime, PackInstance, Ctx, Value, ValueType};
 use theater::id::TheaterId;
 use theater::messages::TheaterCommand;
+use theater::pack_bridge::{AsyncRuntime, Ctx, PackInstance, Value, ValueType};
 use tokio::sync::mpsc;
 use tracing::info;
 
@@ -34,7 +34,10 @@ async fn create_instance() -> PackInstance {
     let (operation_tx, _) = mpsc::channel(10);
     let (info_tx, _) = mpsc::channel(10);
     let (control_tx, _) = mpsc::channel(10);
-    let chain = Arc::new(SyncRwLock::new(StateChain::new(actor_id.clone(), theater_tx.clone())));
+    let chain = Arc::new(SyncRwLock::new(StateChain::new(
+        actor_id.clone(),
+        theater_tx.clone(),
+    )));
     let actor_handle = ActorHandle::new(operation_tx, info_tx, control_tx);
 
     let actor_store = ActorStore::new(
@@ -51,23 +54,27 @@ async fn create_instance() -> PackInstance {
         &runtime,
         actor_store,
         |builder| {
-            builder
-                .interface("theater:simple/runtime")?
-                .func_typed("log", |_ctx: &mut Ctx<'_, ActorStore>, input: Value| {
+            builder.interface("theater:simple/runtime")?.func_typed(
+                "log",
+                |_ctx: &mut Ctx<'_, ActorStore>, input: Value| {
                     let msg = match input {
                         Value::String(s) => s,
                         _ => format!("{:?}", input),
                     };
                     info!("[ACTOR LOG] {}", msg);
                     Value::Tuple(vec![])
-                })?;
+                },
+            )?;
             Ok(())
         },
     )
     .await
     .expect("Failed to create PackInstance");
 
-    instance.cache_function_types().await.expect("Failed to cache function types");
+    instance
+        .cache_function_types()
+        .await
+        .expect("Failed to cache function types");
     instance
 }
 
@@ -115,11 +122,7 @@ async fn test_pact_file_todo_actor() {
 
     // List todos
     let (state, result_bytes) = instance
-        .call_function_with_value(
-            "theater:todo/actions.list",
-            state,
-            Value::Tuple(vec![]),
-        )
+        .call_function_with_value("theater:todo/actions.list", state, Value::Tuple(vec![]))
         .await
         .expect("list should succeed");
 
@@ -139,11 +142,7 @@ async fn test_pact_file_todo_actor() {
 
     // List again to verify toggle
     let (_state, result_bytes) = instance
-        .call_function_with_value(
-            "theater:todo/actions.list",
-            state,
-            Value::Tuple(vec![]),
-        )
+        .call_function_with_value("theater:todo/actions.list", state, Value::Tuple(vec![]))
         .await
         .expect("list should succeed after toggle");
 

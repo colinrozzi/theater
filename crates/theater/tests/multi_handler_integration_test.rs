@@ -10,11 +10,11 @@ use std::sync::RwLock as SyncRwLock;
 use theater::actor::handle::ActorHandle;
 use theater::actor::store::ActorStore;
 use theater::chain::StateChain;
-use theater::pack_bridge::{AsyncRuntime, PackInstance, Ctx, Value};
 use theater::config::actor_manifest::{StoreHandlerConfig, SupervisorHostConfig};
 use theater::handler::{Handler, HandlerContext};
 use theater::id::TheaterId;
 use theater::messages::TheaterCommand;
+use theater::pack_bridge::{AsyncRuntime, Ctx, PackInstance, Value};
 use theater_handler_store::StoreHandler;
 use theater_handler_supervisor::SupervisorHandler;
 use tokio::sync::mpsc;
@@ -24,9 +24,7 @@ use tracing::info;
 #[ignore = "async host functions deadlock in standalone test - works in full actor runtime"]
 async fn test_multi_handler_composite() {
     // Initialize tracing for test output
-    let _ = tracing_subscriber::fmt()
-        .with_env_filter("info")
-        .try_init();
+    let _ = tracing_subscriber::fmt().with_env_filter("info").try_init();
 
     // Set up a temp directory for THEATER_HOME so the store handler has filesystem backing
     let temp_dir = tempfile::tempdir().expect("Failed to create temp directory");
@@ -61,7 +59,10 @@ async fn test_multi_handler_composite() {
     let (operation_tx, _operation_rx) = mpsc::channel(10);
     let (info_tx, _info_rx) = mpsc::channel(10);
     let (control_tx, _control_rx) = mpsc::channel(10);
-    let chain = Arc::new(SyncRwLock::new(StateChain::new(actor_id.clone(), theater_tx.clone())));
+    let chain = Arc::new(SyncRwLock::new(StateChain::new(
+        actor_id.clone(),
+        theater_tx.clone(),
+    )));
     let actor_handle = ActorHandle::new(operation_tx, info_tx, control_tx);
 
     let actor_store = ActorStore::new(
@@ -87,16 +88,17 @@ async fn test_multi_handler_composite() {
         actor_store,
         |builder| {
             // Register runtime handler (log function)
-            builder
-                .interface("theater:simple/runtime")?
-                .func_typed("log", |_ctx: &mut Ctx<'_, ActorStore>, input: Value| {
+            builder.interface("theater:simple/runtime")?.func_typed(
+                "log",
+                |_ctx: &mut Ctx<'_, ActorStore>, input: Value| {
                     let msg = match input {
                         Value::String(s) => s,
                         _ => format!("{:?}", input),
                     };
                     info!("[ACTOR LOG] {}", msg);
                     Value::Tuple(vec![])
-                })?;
+                },
+            )?;
 
             // Register store handler
             store_handler.setup_host_functions_composite(builder, &mut handler_ctx)?;

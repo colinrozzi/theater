@@ -1,9 +1,9 @@
 use crate::actor::handle::ActorHandle;
 use crate::actor::store::ActorStore;
 use crate::chain::ChainEvent;
+use crate::config::actor_manifest::HandlerConfig;
 use crate::id::TheaterId;
 use crate::pack_bridge::{HostLinkerBuilder, LinkerError, PackInstance, TypeHash};
-use crate::config::actor_manifest::HandlerConfig;
 use crate::shutdown::{ShutdownController, ShutdownReceiver};
 use anyhow::Result;
 use std::collections::HashSet;
@@ -159,9 +159,7 @@ impl HandlerRegistry {
         let mut new_registry = HandlerRegistry::new();
         for handler in &self.handlers {
             // Check if there's a config for this handler
-            let matching_config = configs
-                .iter()
-                .find(|c| c.handler_name() == handler.name());
+            let matching_config = configs.iter().find(|c| c.handler_name() == handler.name());
             new_registry
                 .handlers
                 .push(handler.create_instance(matching_config));
@@ -211,11 +209,7 @@ pub trait Handler: Send + Sync + 'static {
     ///
     /// This runs synchronously - do NOT do any async work here.
     /// Default implementation does nothing.
-    fn init(
-        &mut self,
-        _actor_handle: ActorHandle,
-        _actor_instance: SharedActorInstance,
-    ) {
+    fn init(&mut self, _actor_handle: ActorHandle, _actor_instance: SharedActorInstance) {
         // Default: no-op
     }
 

@@ -358,7 +358,10 @@ pub async fn run_replay_verification(
         println!("Calling init...");
     }
     actor_handle
-        .call_function("theater:simple/actor.init".to_string(), Value::Tuple(vec![]))
+        .call_function(
+            "theater:simple/actor.init".to_string(),
+            Value::Tuple(vec![]),
+        )
         .await
         .map_err(|e| anyhow::anyhow!("Failed to call init: {:?}", e))?;
 
@@ -599,7 +602,10 @@ pub async fn run_request_replay_verification(
         println!("Calling init...");
     }
     actor_handle
-        .call_function("theater:simple/actor.init".to_string(), Value::Tuple(vec![]))
+        .call_function(
+            "theater:simple/actor.init".to_string(),
+            Value::Tuple(vec![]),
+        )
         .await
         .map_err(|e| anyhow::anyhow!("Failed to call init: {:?}", e))?;
 
@@ -663,10 +669,7 @@ pub async fn run_request_replay_verification(
         let response = timeout(Duration::from_secs(5), actor_response_rx).await??;
 
         if verbose {
-            println!(
-                "Request response: {:?}",
-                String::from_utf8_lossy(&response)
-            );
+            println!("Request response: {:?}", String::from_utf8_lossy(&response));
         }
 
         assert_eq!(
@@ -900,7 +903,10 @@ pub async fn run_supervisor_replay_verification(
         println!("Calling init...");
     }
     actor_handle
-        .call_function("theater:simple/actor.init".to_string(), Value::Tuple(vec![]))
+        .call_function(
+            "theater:simple/actor.init".to_string(),
+            Value::Tuple(vec![]),
+        )
         .await
         .map_err(|e| anyhow::anyhow!("Failed to call init: {:?}", e))?;
 
@@ -1152,7 +1158,11 @@ type = "tcp"
 }
 
 /// Create a replay manifest for TCP actor
-pub fn create_tcp_replay_manifest(wasm_path: &PathBuf, chain_path: &str, listen_addr: &str) -> String {
+pub fn create_tcp_replay_manifest(
+    wasm_path: &PathBuf,
+    chain_path: &str,
+    listen_addr: &str,
+) -> String {
     let initial_state = format!(r#"{{"listen": "{}"}}"#, listen_addr);
     format!(
         r#"name = "tcp-echo-replay-test-replay"
@@ -1177,9 +1187,7 @@ type = "tcp"
 }
 
 /// Creates a handler registry with RuntimeHandler and TcpHandler.
-pub fn create_tcp_registry(
-    theater_tx: mpsc::Sender<TheaterCommand>,
-) -> HandlerRegistry {
+pub fn create_tcp_registry(theater_tx: mpsc::Sender<TheaterCommand>) -> HandlerRegistry {
     use theater::config::actor_manifest::TcpHandlerConfig;
     let mut registry = HandlerRegistry::new();
     let runtime_config = RuntimeHostConfig {};
@@ -1284,7 +1292,10 @@ pub async fn run_tcp_replay_verification(
     };
 
     actor_handle
-        .call_function("theater:simple/actor.init".to_string(), Value::Tuple(vec![init_state]))
+        .call_function(
+            "theater:simple/actor.init".to_string(),
+            Value::Tuple(vec![init_state]),
+        )
         .await
         .map_err(|e| anyhow::anyhow!("Failed to call init: {:?}", e))?;
 
@@ -1314,11 +1325,20 @@ pub async fn run_tcp_replay_verification(
             }
             Err(e) if attempt < 9 => {
                 if verbose {
-                    println!("  Connection attempt {} failed: {}, retrying...", attempt + 1, e);
+                    println!(
+                        "  Connection attempt {} failed: {}, retrying...",
+                        attempt + 1,
+                        e
+                    );
                 }
                 tokio::time::sleep(Duration::from_millis(100)).await;
             }
-            Err(e) => return Err(anyhow::anyhow!("Failed to connect after 10 attempts: {}", e)),
+            Err(e) => {
+                return Err(anyhow::anyhow!(
+                    "Failed to connect after 10 attempts: {}",
+                    e
+                ))
+            }
         }
     }
     let mut tcp_client = tcp_client.unwrap();
@@ -1601,8 +1621,7 @@ async fn main() -> Result<()> {
     println!("\n\n{}", "=".repeat(60));
     println!("=== Request Replay Verification ===\n");
 
-    let request_result =
-        run_request_replay_verification(request_chain_path, verbose).await?;
+    let request_result = run_request_replay_verification(request_chain_path, verbose).await?;
 
     println!("\n=== Request Comparison ===\n");
     println!("Original events: {}", request_result.original_chain.len());
@@ -1709,7 +1728,8 @@ mod tests {
             result.replay_chain.len()
         );
         assert_eq!(
-            result.mismatches, 0,
+            result.mismatches,
+            0,
             "All hashes should match. Comparison:\n{}",
             result.comparison_details()
         );
@@ -1754,7 +1774,8 @@ mod tests {
             result.replay_chain.len()
         );
         assert_eq!(
-            result.mismatches, 0,
+            result.mismatches,
+            0,
             "All hashes should match. Comparison:\n{}",
             result.comparison_details()
         );
@@ -1834,7 +1855,8 @@ mod tests {
             result.replay_chain.len()
         );
         assert_eq!(
-            result.mismatches, 0,
+            result.mismatches,
+            0,
             "All hashes should match. Comparison:\n{}",
             result.comparison_details()
         );
@@ -1855,10 +1877,7 @@ mod tests {
     ///
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_tcp_replay_verification() {
-        let chain_path = format!(
-            "/tmp/test_tcp_replay_chain_{}.json",
-            std::process::id()
-        );
+        let chain_path = format!("/tmp/test_tcp_replay_chain_{}.json", std::process::id());
 
         let result = run_tcp_replay_verification(&chain_path, true)
             .await
@@ -1883,7 +1902,8 @@ mod tests {
             result.replay_chain.len()
         );
         assert_eq!(
-            result.mismatches, 0,
+            result.mismatches,
+            0,
             "All hashes should match. Comparison:\n{}",
             result.comparison_details()
         );

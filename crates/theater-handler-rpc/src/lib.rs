@@ -34,8 +34,7 @@ use tokio::sync::oneshot;
 
 // Pack integration
 use theater::pack_bridge::{
-    AsyncCtx, HostLinkerBuilder, InterfaceImpl, LinkerError, TypeHash, Value, ValueType,
-    parse_pact,
+    parse_pact, AsyncCtx, HostLinkerBuilder, InterfaceImpl, LinkerError, TypeHash, Value, ValueType,
 };
 
 // ============================================================================
@@ -55,8 +54,7 @@ const RPC_PACT: &str = include_str!("../../../pact/rpc.pact");
 /// Note: The actual return types are wrapped results (variant with ok/err cases).
 /// We declare them as `value` to match how actors declare them in pack_types!.
 fn rpc_interface() -> InterfaceImpl {
-    let pact = parse_pact(RPC_PACT)
-        .expect("embedded rpc.pact should be valid");
+    let pact = parse_pact(RPC_PACT).expect("embedded rpc.pact should be valid");
     InterfaceImpl::from_pact(&pact)
 }
 
@@ -75,24 +73,27 @@ impl CallOptions {
     /// Parse call options from a Pack Value
     fn from_value(value: &Value) -> Option<Self> {
         match value {
-            Value::Option { value: Some(inner), .. } => {
-                match inner.as_ref() {
-                    Value::Record { fields, .. } => {
-                        let mut options = CallOptions::default();
-                        for (name, val) in fields {
-                            if name == "timeout-ms" {
-                                if let Value::Option { value: Some(inner), .. } = val {
-                                    if let Value::U64(ms) = inner.as_ref() {
-                                        options.timeout_ms = Some(*ms);
-                                    }
+            Value::Option {
+                value: Some(inner), ..
+            } => match inner.as_ref() {
+                Value::Record { fields, .. } => {
+                    let mut options = CallOptions::default();
+                    for (name, val) in fields {
+                        if name == "timeout-ms" {
+                            if let Value::Option {
+                                value: Some(inner), ..
+                            } = val
+                            {
+                                if let Value::U64(ms) = inner.as_ref() {
+                                    options.timeout_ms = Some(*ms);
                                 }
                             }
                         }
-                        Some(options)
                     }
-                    _ => None,
+                    Some(options)
                 }
-            }
+                _ => None,
+            },
             Value::Option { value: None, .. } => None,
             _ => None,
         }

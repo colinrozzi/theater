@@ -89,7 +89,11 @@ async fn test_actor_shutdown_timing() {
     // Create handler registry with runtime handler
     let mut handler_registry = HandlerRegistry::new();
     let runtime_config = RuntimeHostConfig {};
-    handler_registry.register(RuntimeHandler::new(runtime_config, theater_tx.clone(), None));
+    handler_registry.register(RuntimeHandler::new(
+        runtime_config,
+        theater_tx.clone(),
+        None,
+    ));
 
     // Create and start the theater runtime
     let runtime_handle = tokio::spawn(async move {
@@ -119,7 +123,7 @@ async fn test_actor_shutdown_timing() {
             wasm_bytes: wasm_bytes.clone(),
             name: Some("shutdown-test".to_string()),
             manifest: Some(manifest),
-                            init_bytes: None,
+            init_bytes: None,
             response_tx: spawn_tx,
             supervisor_tx: None,
             subscription_tx: None,
@@ -218,7 +222,11 @@ async fn test_multiple_actor_shutdown_timing() {
     let theater_tx_clone = theater_tx.clone();
     let mut handler_registry = HandlerRegistry::new();
     let runtime_config = RuntimeHostConfig {};
-    handler_registry.register(RuntimeHandler::new(runtime_config, theater_tx.clone(), None));
+    handler_registry.register(RuntimeHandler::new(
+        runtime_config,
+        theater_tx.clone(),
+        None,
+    ));
 
     let runtime_handle = tokio::spawn(async move {
         let mut runtime = theater::theater_runtime::TheaterRuntime::new(
@@ -248,7 +256,7 @@ async fn test_multiple_actor_shutdown_timing() {
                 wasm_bytes: wasm_bytes.clone(),
                 name: Some(format!("shutdown-test-{}", i)),
                 manifest: Some(manifest),
-                            init_bytes: None,
+                init_bytes: None,
                 response_tx: spawn_tx,
                 supervisor_tx: None,
                 subscription_tx: None,
@@ -359,7 +367,11 @@ async fn test_actor_shutdown_with_supervisor_handler() {
     // Create handler registry with runtime AND supervisor handlers
     let mut handler_registry = HandlerRegistry::new();
     let runtime_config = RuntimeHostConfig {};
-    handler_registry.register(RuntimeHandler::new(runtime_config, theater_tx.clone(), None));
+    handler_registry.register(RuntimeHandler::new(
+        runtime_config,
+        theater_tx.clone(),
+        None,
+    ));
 
     // Add supervisor handler - this was identified as potentially problematic
     let supervisor_config = SupervisorHostConfig {};
@@ -409,7 +421,7 @@ async fn test_actor_shutdown_with_supervisor_handler() {
             wasm_bytes: wasm_bytes.clone(),
             name: Some("shutdown-test-supervisor".to_string()),
             manifest: Some(manifest),
-                            init_bytes: None,
+            init_bytes: None,
             response_tx: spawn_tx,
             supervisor_tx: None,
             subscription_tx: None,
@@ -563,7 +575,7 @@ async fn test_actor_shutdown_with_all_handlers() {
             wasm_bytes: wasm_bytes.clone(),
             name: Some("shutdown-test-all-handlers".to_string()),
             manifest: Some(manifest),
-                            init_bytes: None,
+            init_bytes: None,
             response_tx: spawn_tx,
             supervisor_tx: None,
             subscription_tx: None,

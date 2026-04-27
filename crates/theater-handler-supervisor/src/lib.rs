@@ -4,7 +4,6 @@
 
 pub mod events;
 
-
 use theater::actor::handle::ActorHandle;
 use theater::actor::store::ActorStore;
 use theater::actor::types::ActorError;
@@ -19,8 +18,7 @@ use theater::ManifestConfig;
 
 // Pack integration
 use theater::pack_bridge::{
-    AsyncCtx, HostLinkerBuilder, InterfaceImpl, LinkerError, TypeHash, Value, ValueType,
-    parse_pact,
+    parse_pact, AsyncCtx, HostLinkerBuilder, InterfaceImpl, LinkerError, TypeHash, Value, ValueType,
 };
 
 use anyhow::Result;
@@ -29,8 +27,8 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use thiserror::Error;
 use theater::id::TheaterId;
+use thiserror::Error;
 use tokio::sync::{mpsc, oneshot};
 use tracing::{debug, error, info, warn};
 
@@ -55,8 +53,7 @@ const SUPERVISOR_PACT: &str = include_str!("../../../pact/supervisor.pact");
 ///
 /// Note: chain-event is approximated as list<u8> for interface hashing.
 fn supervisor_interface() -> InterfaceImpl {
-    let pact = parse_pact(SUPERVISOR_PACT)
-        .expect("embedded supervisor.pact should be valid");
+    let pact = parse_pact(SUPERVISOR_PACT).expect("embedded supervisor.pact should be valid");
     InterfaceImpl::from_pact(&pact)
 }
 
@@ -72,7 +69,6 @@ pub enum SupervisorError {
     #[error("Serialization error: {0}")]
     SerializationError(#[from] serde_json::Error),
 }
-
 
 /// The SupervisorHandler provides child actor management capabilities.
 ///
@@ -109,10 +105,7 @@ impl SupervisorHandler {
     ///
     /// # Returns
     /// The SupervisorHandler (receiver is stored internally)
-    pub fn new(
-        _config: SupervisorHostConfig,
-        permissions: Option<SupervisorPermissions>,
-    ) -> Self {
+    pub fn new(_config: SupervisorHostConfig, permissions: Option<SupervisorPermissions>) -> Self {
         let (channel_tx, channel_rx) = tokio::sync::mpsc::channel(100);
         let (event_tx, event_rx) = tokio::sync::mpsc::channel(1024);
         Self {
@@ -172,7 +165,11 @@ impl SupervisorHandler {
         {
             let mut children_guard = children.lock().unwrap();
             if children_guard.remove(&child_id) {
-                debug!("Removed child {} from tracking, remaining: {}", child_id, children_guard.len());
+                debug!(
+                    "Removed child {} from tracking, remaining: {}",
+                    child_id,
+                    children_guard.len()
+                );
             }
         }
 
@@ -209,9 +206,7 @@ impl SupervisorHandler {
             ActorResult::ExternalStop(stop_data) => {
                 if has_child_external_stop {
                     info!("External stop received for actor: {}", stop_data.actor_id);
-                    let params = Value::Tuple(vec![
-                        Value::String(stop_data.actor_id.to_string()),
-                    ]);
+                    let params = Value::Tuple(vec![Value::String(stop_data.actor_id.to_string())]);
                     actor_handle
                         .call_function(
                             "theater:simple/supervisor-handlers.handle-child-external-stop"
@@ -269,9 +264,11 @@ impl SupervisorHandler {
     }
 }
 
-impl Handler for SupervisorHandler
-{
-    fn create_instance(&self, _config: Option<&theater::config::actor_manifest::HandlerConfig>) -> Box<dyn Handler> {
+impl Handler for SupervisorHandler {
+    fn create_instance(
+        &self,
+        _config: Option<&theater::config::actor_manifest::HandlerConfig>,
+    ) -> Box<dyn Handler> {
         Box::new(self.clone())
     }
 
@@ -280,7 +277,12 @@ impl Handler for SupervisorHandler
     }
 
     fn imports(&self) -> Option<Vec<String>> {
-        Some(self.interfaces().iter().map(|i| i.name().to_string()).collect())
+        Some(
+            self.interfaces()
+                .iter()
+                .map(|i| i.name().to_string())
+                .collect(),
+        )
     }
 
     fn exports(&self) -> Option<Vec<String>> {
@@ -833,10 +835,22 @@ impl Handler for SupervisorHandler
                 let mut instance_guard = actor_instance.write().await;
                 if let Some(instance) = instance_guard.as_mut() {
                     let iface = "theater:simple/supervisor-handlers";
-                    let e1 = instance.has_export(iface, "handle-child-event").await.unwrap_or(false);
-                    let e2 = instance.has_export(iface, "handle-child-error").await.unwrap_or(false);
-                    let e3 = instance.has_export(iface, "handle-child-exit").await.unwrap_or(false);
-                    let e4 = instance.has_export(iface, "handle-child-external-stop").await.unwrap_or(false);
+                    let e1 = instance
+                        .has_export(iface, "handle-child-event")
+                        .await
+                        .unwrap_or(false);
+                    let e2 = instance
+                        .has_export(iface, "handle-child-error")
+                        .await
+                        .unwrap_or(false);
+                    let e3 = instance
+                        .has_export(iface, "handle-child-exit")
+                        .await
+                        .unwrap_or(false);
+                    let e4 = instance
+                        .has_export(iface, "handle-child-external-stop")
+                        .await
+                        .unwrap_or(false);
                     (e1, e2, e3, e4)
                 } else {
                     (false, false, false, false)
@@ -1024,11 +1038,16 @@ fn option_bytes_to_value(data: Option<Vec<u8>>) -> Value {
 /// Parse an optional byte list from a Pack Value
 fn parse_optional_bytes(value: &Value) -> Option<Vec<u8>> {
     match value {
-        Value::Option { value: Some(inner), .. } => {
+        Value::Option {
+            value: Some(inner), ..
+        } => {
             if let Value::List { items, .. } = inner.as_ref() {
-                Some(items.iter().filter_map(|v| {
-                    if let Value::U8(b) = v { Some(*b) } else { None }
-                }).collect())
+                Some(
+                    items
+                        .iter()
+                        .filter_map(|v| if let Value::U8(b) = v { Some(*b) } else { None })
+                        .collect(),
+                )
             } else {
                 None
             }
@@ -1041,12 +1060,12 @@ fn parse_optional_bytes(value: &Value) -> Option<Vec<u8>> {
 /// Parse an optional u64 from a Pack Value
 fn parse_optional_u64(value: &Value) -> Option<u64> {
     match value {
-        Value::Option { value: Some(inner), .. } => {
-            match inner.as_ref() {
-                Value::U64(n) => Some(*n),
-                _ => None,
-            }
-        }
+        Value::Option {
+            value: Some(inner), ..
+        } => match inner.as_ref() {
+            Value::U64(n) => Some(*n),
+            _ => None,
+        },
         Value::Option { value: None, .. } => None,
         _ => None,
     }

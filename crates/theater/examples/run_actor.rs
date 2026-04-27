@@ -7,7 +7,9 @@
 
 use anyhow::{Context, Result};
 use std::path::PathBuf;
-use theater::config::actor_manifest::{RuntimeHostConfig, StoreHandlerConfig, SupervisorHostConfig};
+use theater::config::actor_manifest::{
+    RuntimeHostConfig, StoreHandlerConfig, SupervisorHostConfig,
+};
 use theater::handler::HandlerRegistry;
 use theater::messages::TheaterCommand;
 use theater::theater_runtime::TheaterRuntime;
@@ -74,10 +76,9 @@ async fn main() -> Result<()> {
     let manifest_bytes = resolve_reference(&manifest_path.to_string_lossy())
         .await
         .context("Failed to load manifest")?;
-    let manifest_str = String::from_utf8(manifest_bytes)
-        .context("Manifest is not valid UTF-8")?;
-    let manifest = ManifestConfig::from_toml_str(&manifest_str)
-        .context("Failed to parse manifest")?;
+    let manifest_str = String::from_utf8(manifest_bytes).context("Manifest is not valid UTF-8")?;
+    let manifest =
+        ManifestConfig::from_toml_str(&manifest_str).context("Failed to parse manifest")?;
     let wasm_bytes = resolve_reference(&manifest.package)
         .await
         .context("Failed to load WASM package")?;
@@ -133,7 +134,11 @@ fn create_handler_registry(theater_tx: mpsc::Sender<TheaterCommand>) -> HandlerR
 
     // Runtime handler - provides actor runtime information and control
     let runtime_config = RuntimeHostConfig {};
-    registry.register(RuntimeHandler::new(runtime_config, theater_tx.clone(), None));
+    registry.register(RuntimeHandler::new(
+        runtime_config,
+        theater_tx.clone(),
+        None,
+    ));
 
     // Store handler - provides key-value storage for actors
     let store_config = StoreHandlerConfig::default();

@@ -45,12 +45,7 @@ impl CallInterceptor for RecordingInterceptor {
     }
 
     fn after_import(&self, interface: &str, function: &str, input: &Value, output: &Value) {
-        let call = HostFunctionCall::new(
-            interface,
-            function,
-            input.clone(),
-            output.clone(),
-        );
+        let call = HostFunctionCall::new(interface, function, input.clone(), output.clone());
 
         let mut chain = self.chain.write().unwrap();
         let _ = chain.add_typed_event(ChainEventData {
@@ -92,7 +87,10 @@ impl ReplayRecordingInterceptor {
     /// `expected_events` are the events from the original chain (used to look up
     /// recorded host function outputs). `chain` is the new chain being built
     /// during replay (used to record events for hash comparison).
-    pub fn new(expected_events: Vec<crate::chain::ChainEvent>, chain: Arc<RwLock<StateChain>>) -> Self {
+    pub fn new(
+        expected_events: Vec<crate::chain::ChainEvent>,
+        chain: Arc<RwLock<StateChain>>,
+    ) -> Self {
         Self {
             expected_events,
             position: Mutex::new(0),
@@ -102,11 +100,7 @@ impl ReplayRecordingInterceptor {
 
     /// Find the next HostFunction event at or after the current position,
     /// matching interface/function name.
-    fn find_next_host_call(
-        &self,
-        interface: &str,
-        function: &str,
-    ) -> Option<HostFunctionCall> {
+    fn find_next_host_call(&self, interface: &str, function: &str) -> Option<HostFunctionCall> {
         let mut pos = self.position.lock().unwrap();
         while *pos < self.expected_events.len() {
             let event = &self.expected_events[*pos];
@@ -135,12 +129,7 @@ impl CallInterceptor for ReplayRecordingInterceptor {
 
     fn after_import(&self, interface: &str, function: &str, input: &Value, output: &Value) {
         // Record to the new chain (same as RecordingInterceptor)
-        let call = HostFunctionCall::new(
-            interface,
-            function,
-            input.clone(),
-            output.clone(),
-        );
+        let call = HostFunctionCall::new(interface, function, input.clone(), output.clone());
 
         let mut chain = self.chain.write().unwrap();
         let _ = chain.add_typed_event(ChainEventData {

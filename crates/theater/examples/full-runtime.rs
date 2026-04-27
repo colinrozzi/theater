@@ -32,7 +32,9 @@ use theater_handler_store::StoreHandler;
 use theater_handler_supervisor::SupervisorHandler;
 
 /// Creates a HandlerRegistry with Theater-specific handlers.
-fn create_handler_registry(theater_tx: tokio::sync::mpsc::Sender<TheaterCommand>) -> HandlerRegistry {
+fn create_handler_registry(
+    theater_tx: tokio::sync::mpsc::Sender<TheaterCommand>,
+) -> HandlerRegistry {
     let mut registry = HandlerRegistry::new();
 
     info!("Registering Theater-specific handlers...");

@@ -33,15 +33,15 @@ use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 
 use tokio::sync::{broadcast, oneshot};
-use tracing::{info, error};
+use tracing::{error, info};
 
 use crate::actor::handle::ActorHandle;
 use crate::actor::store::ActorStore;
 use crate::chain::ChainEvent;
-use crate::events::ChainEventPayload;
 use crate::events::wasm::WasmEventData;
-use crate::pack_bridge::{HostLinkerBuilder, InterfaceImpl, LinkerError, TypeHash};
+use crate::events::ChainEventPayload;
 use crate::handler::{Handler, HandlerContext, SharedActorInstance};
+use crate::pack_bridge::{HostLinkerBuilder, InterfaceImpl, LinkerError, TypeHash};
 use crate::shutdown::ShutdownReceiver;
 
 /// Shared state for tracking replay position across all stub functions.
@@ -211,21 +211,26 @@ impl Handler for ReplayHandler {
             let mut shutdown_rx = shutdown_receiver.receiver;
 
             // Collect WasmCall events to replay
-            let calls_to_replay: Vec<(usize, String, Vec<u8>)> = expected_events.iter()
+            let calls_to_replay: Vec<(usize, String, Vec<u8>)> = expected_events
+                .iter()
                 .enumerate()
                 .filter_map(|(idx, event)| {
                     let payload = crate::events::decode_chain_event_payload(&event.data)?;
                     match payload {
-                        ChainEventPayload::Wasm(WasmEventData::WasmCall { function_name, params }) => {
-                            Some((idx, function_name, params))
-                        }
+                        ChainEventPayload::Wasm(WasmEventData::WasmCall {
+                            function_name,
+                            params,
+                        }) => Some((idx, function_name, params)),
                         _ => None,
                     }
                 })
                 .collect();
 
-            info!("Replay: found {} WasmCall events to replay out of {} total events",
-                  calls_to_replay.len(), total_expected);
+            info!(
+                "Replay: found {} WasmCall events to replay out of {} total events",
+                calls_to_replay.len(),
+                total_expected
+            );
 
             // Set up streaming verification
             // Channel to signal divergence to the main loop
@@ -258,7 +263,7 @@ impl Handler for ReplayHandler {
                                 let actual_hex = hex::encode(&actual_event.hash);
                                 let truncate_hash = |h: &str| {
                                     if h.len() > 16 {
-                                        format!("{}..{}", &h[..8], &h[h.len()-8..])
+                                        format!("{}..{}", &h[..8], &h[h.len() - 8..])
                                     } else {
                                         h.to_string()
                                     }
@@ -279,7 +284,11 @@ impl Handler for ReplayHandler {
 
                             // Log progress every 10000 events
                             if verified_position % 10000 == 0 {
-                                info!("Replay: streaming verify progress {}/{}", verified_position, expected_events_for_verify.len());
+                                info!(
+                                    "Replay: streaming verify progress {}/{}",
+                                    verified_position,
+                                    expected_events_for_verify.len()
+                                );
                             }
 
                             // Check if we've verified all expected events
@@ -301,7 +310,8 @@ impl Handler for ReplayHandler {
             });
 
             let total_calls = calls_to_replay.len();
-            for (call_num, (_idx, function_name, params)) in calls_to_replay.into_iter().enumerate() {
+            for (call_num, (_idx, function_name, params)) in calls_to_replay.into_iter().enumerate()
+            {
                 // Log progress every 1000 calls
                 if call_num % 1000 == 0 {
                     info!("Replay: progress {}/{} calls", call_num, total_calls);
@@ -329,12 +339,18 @@ impl Handler for ReplayHandler {
                 };
 
                 if let Err(e) = call_result {
-                    return Err(anyhow::anyhow!("Replay failed at {} (call {}): {:?}", function_name, call_num, e));
+                    return Err(anyhow::anyhow!(
+                        "Replay failed at {} (call {}): {:?}",
+                        function_name,
+                        call_num,
+                        e
+                    ));
                 }
             }
 
             // Wait for verification task to complete
-            let verified_count = verification_task.await
+            let verified_count = verification_task
+                .await
                 .map_err(|e| anyhow::anyhow!("Verification task panicked: {:?}", e))?;
 
             // Final check for any divergence message
@@ -349,11 +365,15 @@ impl Handler for ReplayHandler {
             if verified_count != total_expected {
                 return Err(anyhow::anyhow!(
                     "Replay produced {} events, expected {}",
-                    verified_count, total_expected
+                    verified_count,
+                    total_expected
                 ));
             }
 
-            info!("Replay complete: {}/{} events verified via streaming", total_expected, total_expected);
+            info!(
+                "Replay complete: {}/{} events verified via streaming",
+                total_expected, total_expected
+            );
             Ok(())
         })
     }

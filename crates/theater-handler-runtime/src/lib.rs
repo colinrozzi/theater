@@ -18,8 +18,7 @@ use tokio::sync::mpsc::Sender;
 
 // Pack integration
 use theater::pack_bridge::{
-    AsyncCtx, Ctx, HostLinkerBuilder, InterfaceImpl, LinkerError, TypeHash, Value,
-    parse_pact,
+    parse_pact, AsyncCtx, Ctx, HostLinkerBuilder, InterfaceImpl, LinkerError, TypeHash, Value,
 };
 
 // ============================================================================
@@ -36,8 +35,7 @@ const RUNTIME_PACT: &str = include_str!("../../../pact/runtime.pact");
 /// - get-chain() -> list<u8> (actual implementation returns structured chain record)
 /// - shutdown(data: option<list<u8>>) -> result<(), string>
 fn runtime_interface() -> InterfaceImpl {
-    let pact = parse_pact(RUNTIME_PACT)
-        .expect("embedded runtime.pact should be valid");
+    let pact = parse_pact(RUNTIME_PACT).expect("embedded runtime.pact should be valid");
     InterfaceImpl::from_pact(&pact)
 }
 
@@ -80,7 +78,10 @@ impl RuntimeHandler {
 }
 
 impl Handler for RuntimeHandler {
-    fn create_instance(&self, _config: Option<&theater::config::actor_manifest::HandlerConfig>) -> Box<dyn Handler> {
+    fn create_instance(
+        &self,
+        _config: Option<&theater::config::actor_manifest::HandlerConfig>,
+    ) -> Box<dyn Handler> {
         Box::new(self.clone())
     }
 
@@ -170,16 +171,20 @@ impl Handler for RuntimeHandler {
                             };
 
                             // meta-event record: (hash, (event-type, parent, data))
-                            Value::Tuple(vec![
-                                hash,
-                                Value::Tuple(vec![event_type, parent, data]),
-                            ])
+                            Value::Tuple(vec![hash, Value::Tuple(vec![event_type, parent, data])])
                         })
                         .collect();
 
                     // Return as chain record: (events,)
                     Value::Tuple(vec![Value::List {
-                        elem_type: ValueType::Tuple(vec![ValueType::U64, ValueType::Tuple(vec![ValueType::String, ValueType::Option(Box::new(ValueType::U64)), ValueType::List(Box::new(ValueType::U8))])]),
+                        elem_type: ValueType::Tuple(vec![
+                            ValueType::U64,
+                            ValueType::Tuple(vec![
+                                ValueType::String,
+                                ValueType::Option(Box::new(ValueType::U64)),
+                                ValueType::List(Box::new(ValueType::U8)),
+                            ]),
+                        ]),
                         items: chain_events,
                     }])
                 },
@@ -193,7 +198,9 @@ impl Handler for RuntimeHandler {
                     async move {
                         // Parse input: option<list<u8>>
                         let data: Option<Vec<u8>> = match input {
-                            Value::Option { value: Some(inner), .. } => match *inner {
+                            Value::Option {
+                                value: Some(inner), ..
+                            } => match *inner {
                                 Value::List { items, .. } => {
                                     let result: Result<Vec<u8>, _> = items
                                         .into_iter()
@@ -233,7 +240,11 @@ impl Handler for RuntimeHandler {
                                 })
                                 .await
                             {
-                                tracing::error!("[ACTOR] [{}] Failed to send ShuttingDown: {}", actor_id, e);
+                                tracing::error!(
+                                    "[ACTOR] [{}] Failed to send ShuttingDown: {}",
+                                    actor_id,
+                                    e
+                                );
                             }
                         });
 
@@ -255,7 +266,11 @@ impl Handler for RuntimeHandler {
     }
 
     fn imports(&self) -> Option<Vec<String>> {
-        let mut imports: Vec<String> = self.interfaces().iter().map(|i| i.name().to_string()).collect();
+        let mut imports: Vec<String> = self
+            .interfaces()
+            .iter()
+            .map(|i| i.name().to_string())
+            .collect();
         // Add additional interface dependencies
         imports.push("theater:simple/types".to_string());
         Some(imports)
@@ -282,8 +297,7 @@ mod tests {
     use super::*;
     use theater::config::actor_manifest::RuntimeHostConfig;
     use theater::pack_bridge::{
-        Arena, Function, Param, Type,
-        decode_metadata_with_hashes, encode_metadata_with_hashes,
+        decode_metadata_with_hashes, encode_metadata_with_hashes, Arena, Function, Param, Type,
     };
     use tokio::sync::mpsc;
 
@@ -299,7 +313,10 @@ mod tests {
         assert!(imports.contains(&"theater:simple/runtime".to_string()));
         assert!(imports.contains(&"theater:simple/types".to_string()));
 
-        assert_eq!(handler.exports(), Some(vec!["theater:simple/actor".to_string()]));
+        assert_eq!(
+            handler.exports(),
+            Some(vec!["theater:simple/actor".to_string()])
+        );
     }
 
     #[test]
@@ -347,7 +364,10 @@ mod tests {
         ));
         runtime_interface.add_function(Function::with_signature(
             "shutdown",
-            vec![Param::new("data", Type::Option(Box::new(Type::List(Box::new(Type::U8)))))],
+            vec![Param::new(
+                "data",
+                Type::Option(Box::new(Type::List(Box::new(Type::U8)))),
+            )],
             // Note: result<_, string> uses Bool for ok type to match pack-guest-macros convention
             vec![Type::Result {
                 ok: Box::new(Type::Bool),
@@ -363,17 +383,21 @@ mod tests {
         package.add_child(exports_section);
 
         // Encode metadata with hashes
-        let encoded = encode_metadata_with_hashes(&package)
-            .expect("should encode metadata with hashes");
+        let encoded =
+            encode_metadata_with_hashes(&package).expect("should encode metadata with hashes");
 
         // Decode and get import hashes
-        let decoded = decode_metadata_with_hashes(&encoded)
-            .expect("should decode metadata with hashes");
+        let decoded =
+            decode_metadata_with_hashes(&encoded).expect("should decode metadata with hashes");
 
         // The decoded import hashes should include theater:simple/runtime
-        assert!(!decoded.import_hashes.is_empty(), "should have import hashes");
+        assert!(
+            !decoded.import_hashes.is_empty(),
+            "should have import hashes"
+        );
 
-        let actor_runtime_hash = decoded.import_hashes
+        let actor_runtime_hash = decoded
+            .import_hashes
             .iter()
             .find(|h| h.name == "theater:simple/runtime")
             .expect("should have theater:simple/runtime import hash");
@@ -420,7 +444,8 @@ mod tests {
         let encoded = encode_metadata_with_hashes(&package).expect("encode");
         let decoded = decode_metadata_with_hashes(&encoded).expect("decode");
 
-        let actor_hash = decoded.import_hashes
+        let actor_hash = decoded
+            .import_hashes
             .iter()
             .find(|h| h.name == "theater:simple/runtime")
             .expect("should have import hash");

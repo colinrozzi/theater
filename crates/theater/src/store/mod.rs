@@ -249,13 +249,19 @@ impl ContentStore {
     /// Create a new store with the default base path
     pub fn new() -> Self {
         let id = uuid::Uuid::new_v4().to_string();
-        Self { id, custom_base_path: None }
+        Self {
+            id,
+            custom_base_path: None,
+        }
     }
 
     /// Create a new store with a custom base path
     pub fn new_with_base_path(base_path: PathBuf) -> Self {
         let id = uuid::Uuid::new_v4().to_string();
-        Self { id, custom_base_path: Some(base_path) }
+        Self {
+            id,
+            custom_base_path: Some(base_path),
+        }
     }
 
     pub fn new_named_store(id: &str) -> Self {
@@ -263,12 +269,18 @@ impl ContentStore {
     }
 
     pub fn from_id(id: &str) -> Self {
-        Self { id: id.to_string(), custom_base_path: None }
+        Self {
+            id: id.to_string(),
+            custom_base_path: None,
+        }
     }
 
     /// Create a store from ID with a custom base path
     pub fn from_id_with_base_path(id: &str, base_path: PathBuf) -> Self {
-        Self { id: id.to_string(), custom_base_path: Some(base_path) }
+        Self {
+            id: id.to_string(),
+            custom_base_path: Some(base_path),
+        }
     }
 
     pub fn id(&self) -> &str {

@@ -315,14 +315,21 @@ struct ChannelSubscription {
 /// to use the MessageRouter for external client messaging.
 fn create_root_handler_registry(
     theater_tx: mpsc::Sender<TheaterCommand>,
-) -> (HandlerRegistry, theater_handler_message_server::MessageRouter) {
+) -> (
+    HandlerRegistry,
+    theater_handler_message_server::MessageRouter,
+) {
     let mut registry = HandlerRegistry::new();
 
     info!("Initializing Theater server with Theater-specific handlers...");
 
     // Runtime handler - provides actor runtime information and control
     let runtime_config = RuntimeHostConfig {};
-    registry.register(RuntimeHandler::new(runtime_config, theater_tx.clone(), None));
+    registry.register(RuntimeHandler::new(
+        runtime_config,
+        theater_tx.clone(),
+        None,
+    ));
 
     // Store handler - provides key-value storage for actors
     let store_config = StoreHandlerConfig::default();
@@ -588,23 +595,29 @@ impl TheaterServer {
                             Ok(s) => s,
                             Err(e) => {
                                 error!("Invalid manifest encoding: {}", e);
-                                cmd_client_tx.send(ManagementResponse::Error {
-                                    error: ManagementError::ActorInitializationError(format!(
-                                        "Invalid manifest encoding: {}",
-                                        e
-                                    )),
-                                }).await.ok();
+                                cmd_client_tx
+                                    .send(ManagementResponse::Error {
+                                        error: ManagementError::ActorInitializationError(format!(
+                                            "Invalid manifest encoding: {}",
+                                            e
+                                        )),
+                                    })
+                                    .await
+                                    .ok();
                                 continue;
                             }
                         },
                         Err(e) => {
                             error!("Failed to load manifest: {}", e);
-                            cmd_client_tx.send(ManagementResponse::Error {
-                                error: ManagementError::ActorInitializationError(format!(
-                                    "Failed to load manifest: {}",
-                                    e
-                                )),
-                            }).await.ok();
+                            cmd_client_tx
+                                .send(ManagementResponse::Error {
+                                    error: ManagementError::ActorInitializationError(format!(
+                                        "Failed to load manifest: {}",
+                                        e
+                                    )),
+                                })
+                                .await
+                                .ok();
                             continue;
                         }
                     };
@@ -613,12 +626,15 @@ impl TheaterServer {
                         Ok(m) => m,
                         Err(e) => {
                             error!("Failed to parse manifest: {}", e);
-                            cmd_client_tx.send(ManagementResponse::Error {
-                                error: ManagementError::ActorInitializationError(format!(
-                                    "Failed to parse manifest: {}",
-                                    e
-                                )),
-                            }).await.ok();
+                            cmd_client_tx
+                                .send(ManagementResponse::Error {
+                                    error: ManagementError::ActorInitializationError(format!(
+                                        "Failed to parse manifest: {}",
+                                        e
+                                    )),
+                                })
+                                .await
+                                .ok();
                             continue;
                         }
                     };
@@ -628,12 +644,15 @@ impl TheaterServer {
                         Ok(bytes) => bytes,
                         Err(e) => {
                             error!("Failed to load WASM: {}", e);
-                            cmd_client_tx.send(ManagementResponse::Error {
-                                error: ManagementError::ActorInitializationError(format!(
-                                    "Failed to load WASM: {}",
-                                    e
-                                )),
-                            }).await.ok();
+                            cmd_client_tx
+                                .send(ManagementResponse::Error {
+                                    error: ManagementError::ActorInitializationError(format!(
+                                        "Failed to load WASM: {}",
+                                        e
+                                    )),
+                                })
+                                .await
+                                .ok();
                             continue;
                         }
                     };
@@ -910,11 +929,14 @@ impl TheaterServer {
                     let message = ActorMessage::Send(ActorSend { data });
 
                     // Route via MessageRouter
-                    match message_router.route_message(theater::messages::MessageCommand::SendMessage {
-                        target_id: id.clone(),
-                        message,
-                        response_tx,
-                    }).await {
+                    match message_router
+                        .route_message(theater::messages::MessageCommand::SendMessage {
+                            target_id: id.clone(),
+                            message,
+                            response_tx,
+                        })
+                        .await
+                    {
                         Ok(_) => {
                             // Wait for routing result
                             match response_rx.await {
@@ -925,7 +947,10 @@ impl TheaterServer {
                                 Ok(Err(e)) => {
                                     error!("Failed to send message to actor: {}", e);
                                     ManagementResponse::Error {
-                                        error: ManagementError::RuntimeError(format!("Failed to send: {}", e)),
+                                        error: ManagementError::RuntimeError(format!(
+                                            "Failed to send: {}",
+                                            e
+                                        )),
                                     }
                                 }
                                 Err(e) => {
@@ -942,7 +967,10 @@ impl TheaterServer {
                         Err(e) => {
                             error!("Failed to route message: {}", e);
                             ManagementResponse::Error {
-                                error: ManagementError::RuntimeError(format!("Failed to route message: {}", e)),
+                                error: ManagementError::RuntimeError(format!(
+                                    "Failed to route message: {}",
+                                    e
+                                )),
                             }
                         }
                     }
@@ -955,17 +983,17 @@ impl TheaterServer {
                     let (response_tx, response_rx) = tokio::sync::oneshot::channel();
 
                     // Create ActorMessage with response channel embedded
-                    let message = ActorMessage::Request(ActorRequest {
-                        data,
-                        response_tx,
-                    });
+                    let message = ActorMessage::Request(ActorRequest { data, response_tx });
 
                     // Route via MessageRouter
-                    match message_router.route_message(theater::messages::MessageCommand::SendMessage {
-                        target_id: id.clone(),
-                        message,
-                        response_tx: route_tx,
-                    }).await {
+                    match message_router
+                        .route_message(theater::messages::MessageCommand::SendMessage {
+                            target_id: id.clone(),
+                            message,
+                            response_tx: route_tx,
+                        })
+                        .await
+                    {
                         Ok(_) => {
                             // Wait for routing to complete
                             match route_rx.await {
@@ -993,7 +1021,10 @@ impl TheaterServer {
                                 Ok(Err(e)) => {
                                     error!("Failed to route request to actor: {}", e);
                                     ManagementResponse::Error {
-                                        error: ManagementError::RuntimeError(format!("Failed to route: {}", e)),
+                                        error: ManagementError::RuntimeError(format!(
+                                            "Failed to route: {}",
+                                            e
+                                        )),
                                     }
                                 }
                                 Err(e) => {
@@ -1010,7 +1041,10 @@ impl TheaterServer {
                         Err(e) => {
                             error!("Failed to route request: {}", e);
                             ManagementResponse::Error {
-                                error: ManagementError::RuntimeError(format!("Failed to route request: {}", e)),
+                                error: ManagementError::RuntimeError(format!(
+                                    "Failed to route request: {}",
+                                    e
+                                )),
                             }
                         }
                     }
@@ -1136,7 +1170,7 @@ impl TheaterServer {
                     // TODO: Re-implement actor package updates
                     ManagementResponse::Error {
                         error: ManagementError::RuntimeError(
-                            "UpdateActorPackage not yet implemented".to_string()
+                            "UpdateActorPackage not yet implemented".to_string(),
                         ),
                     }
                 }
@@ -1156,17 +1190,18 @@ impl TheaterServer {
                     let channel_id_str = channel_id.0.clone();
 
                     // Send the channel open command via MessageRouter
-                    message_router.route_message(theater::messages::MessageCommand::OpenChannel {
-                        initiator_id: client_id.clone(),
-                        target_id: actor_id.clone(),
-                        channel_id: channel_id.clone(),
-                        initial_message,
-                        response_tx,
-                    })
-                    .await
-                    .map_err(|e| {
-                        anyhow::anyhow!("Failed to send channel open command: {}", e)
-                    })?;
+                    message_router
+                        .route_message(theater::messages::MessageCommand::OpenChannel {
+                            initiator_id: client_id.clone(),
+                            target_id: actor_id.clone(),
+                            channel_id: channel_id.clone(),
+                            initial_message,
+                            response_tx,
+                        })
+                        .await
+                        .map_err(|e| {
+                            anyhow::anyhow!("Failed to send channel open command: {}", e)
+                        })?;
 
                     // Wait for the response
                     match response_rx.await {
@@ -1235,12 +1270,15 @@ impl TheaterServer {
 
                     // Send the message on the channel via MessageRouter
                     let sender_id = ChannelParticipant::External;
-                    match message_router.route_message(theater::messages::MessageCommand::ChannelMessage {
-                        channel_id: channel_id_parsed,
-                        sender_id,
-                        message,
-                        response_tx,
-                    }).await {
+                    match message_router
+                        .route_message(theater::messages::MessageCommand::ChannelMessage {
+                            channel_id: channel_id_parsed,
+                            sender_id,
+                            message,
+                            response_tx,
+                        })
+                        .await
+                    {
                         Ok(_) => {
                             // Wait for routing result
                             match response_rx.await {
@@ -1251,7 +1289,10 @@ impl TheaterServer {
                                 Ok(Err(e)) => {
                                     error!("Failed to send on channel: {}", e);
                                     ManagementResponse::Error {
-                                        error: ManagementError::RuntimeError(format!("Failed to send on channel: {}", e)),
+                                        error: ManagementError::RuntimeError(format!(
+                                            "Failed to send on channel: {}",
+                                            e
+                                        )),
                                     }
                                 }
                                 Err(e) => {
@@ -1268,7 +1309,10 @@ impl TheaterServer {
                         Err(e) => {
                             error!("Failed to route channel message: {}", e);
                             ManagementResponse::Error {
-                                error: ManagementError::RuntimeError(format!("Failed to route channel message: {}", e)),
+                                error: ManagementError::RuntimeError(format!(
+                                    "Failed to route channel message: {}",
+                                    e
+                                )),
                             }
                         }
                     }
@@ -1284,11 +1328,14 @@ impl TheaterServer {
 
                     // Close the channel via MessageRouter
                     let sender_id = ChannelParticipant::External;
-                    match message_router.route_message(theater::messages::MessageCommand::ChannelClose {
-                        channel_id: channel_id_parsed,
-                        sender_id,
-                        response_tx,
-                    }).await {
+                    match message_router
+                        .route_message(theater::messages::MessageCommand::ChannelClose {
+                            channel_id: channel_id_parsed,
+                            sender_id,
+                            response_tx,
+                        })
+                        .await
+                    {
                         Ok(_) => {
                             // Wait for routing result
                             match response_rx.await {
@@ -1304,7 +1351,10 @@ impl TheaterServer {
                                 Ok(Err(e)) => {
                                     error!("Failed to close channel: {}", e);
                                     ManagementResponse::Error {
-                                        error: ManagementError::RuntimeError(format!("Failed to close channel: {}", e)),
+                                        error: ManagementError::RuntimeError(format!(
+                                            "Failed to close channel: {}",
+                                            e
+                                        )),
                                     }
                                 }
                                 Err(e) => {
@@ -1321,7 +1371,10 @@ impl TheaterServer {
                         Err(e) => {
                             error!("Failed to route channel close: {}", e);
                             ManagementResponse::Error {
-                                error: ManagementError::RuntimeError(format!("Failed to route channel close: {}", e)),
+                                error: ManagementError::RuntimeError(format!(
+                                    "Failed to route channel close: {}",
+                                    e
+                                )),
                             }
                         }
                     }

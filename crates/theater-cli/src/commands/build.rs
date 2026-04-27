@@ -83,10 +83,8 @@ pub async fn execute_async(args: &BuildArgs, ctx: &CommandContext) -> Result<(),
     build_cmd.current_dir(&project_dir);
 
     // Run the build command and capture output
-    let (status, stdout, stderr) =
-        run_command_with_output(&mut build_cmd, ctx.is_verbose()).map_err(|e| {
-            CliError::build_failed(format!("Failed to execute cargo build: {}", e))
-        })?;
+    let (status, stdout, stderr) = run_command_with_output(&mut build_cmd, ctx.is_verbose())
+        .map_err(|e| CliError::build_failed(format!("Failed to execute cargo build: {}", e)))?;
 
     // Handle build failures
     if !status.success() {

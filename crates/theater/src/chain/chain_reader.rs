@@ -69,8 +69,8 @@ impl ChainReader {
             }
 
             let hash_hex = &trimmed[6..]; // Skip "EVENT "
-            let hash = hex::decode(hash_hex)
-                .with_context(|| format!("Invalid hash hex: {}", hash_hex))?;
+            let hash =
+                hex::decode(hash_hex).with_context(|| format!("Invalid hash hex: {}", hash_hex))?;
 
             // Read parent hash line
             line.clear();
@@ -79,8 +79,10 @@ impl ChainReader {
             let parent_hash = if parent_hex.chars().all(|c| c == '0') {
                 None
             } else {
-                Some(hex::decode(parent_hex)
-                    .with_context(|| format!("Invalid parent hash hex: {}", parent_hex))?)
+                Some(
+                    hex::decode(parent_hex)
+                        .with_context(|| format!("Invalid parent hash hex: {}", parent_hex))?,
+                )
             };
 
             // Read event type line
@@ -91,7 +93,9 @@ impl ChainReader {
             // Read body length line
             line.clear();
             reader.read_line(&mut line)?;
-            let body_len: usize = line.trim().parse()
+            let body_len: usize = line
+                .trim()
+                .parse()
                 .with_context(|| format!("Invalid body length: {}", line.trim()))?;
 
             // Read blank line before body
@@ -100,13 +104,14 @@ impl ChainReader {
 
             // Read body bytes
             let mut data = vec![0u8; body_len];
-            reader.read_exact(&mut data)
+            reader
+                .read_exact(&mut data)
                 .with_context(|| format!("Failed to read {} body bytes", body_len))?;
 
             // Read trailing newlines after body
             line.clear();
             reader.read_line(&mut line)?; // First newline after body
-            // Second newline is handled by the loop
+                                          // Second newline is handled by the loop
 
             events.push(ChainEvent {
                 hash,

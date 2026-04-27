@@ -1,6 +1,6 @@
 use theater::chain::StateChain;
-use theater::events::{ChainEventData, ChainEventPayload};
 use theater::events::wasm::WasmEventData;
+use theater::events::{ChainEventData, ChainEventPayload};
 use theater::id::TheaterId;
 use theater::messages::{ActorMessage, TheaterCommand};
 use theater::ActorOperation;

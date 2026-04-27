@@ -34,12 +34,12 @@ use anyhow::Result;
 
 pub mod actor;
 pub mod chain;
-pub mod pack_bridge;
 pub mod config;
 pub mod errors;
 pub mod events;
 pub mod handler;
 pub mod interceptor;
+pub mod pack_bridge;
 
 pub mod id;
 pub mod logging;
@@ -69,14 +69,14 @@ pub use messages::ChannelEvent;
 pub use metrics::{
     ActorMetrics, MetricsCollector, OperationMetrics, OperationStats, ResourceMetrics,
 };
-pub use shutdown::{ShutdownController, ShutdownReceiver, ShutdownSignal, ShutdownType};
 pub use replay::{HostFunctionCall, ReplayHandler, ReplayState};
+pub use shutdown::{ShutdownController, ShutdownReceiver, ShutdownSignal, ShutdownType};
 pub use store::{ContentRef, ContentStore, Label};
 pub use theater_runtime::TheaterRuntime;
 
 // Pack integration
+pub use interceptor::{RecordingInterceptor, ReplayRecordingInterceptor};
 pub use pack_bridge::{
     AsyncCtx, AsyncRuntime, CallInterceptor, Ctx, HostLinkerBuilder, IntoValue, LinkerError,
     PackInstance, Value, ValueType,
 };
-pub use interceptor::{RecordingInterceptor, ReplayRecordingInterceptor};

@@ -111,7 +111,12 @@ impl TryFrom<Value> for HostFunctionCall {
                     }
                 }
 
-                Ok(HostFunctionCall { interface, function, input, output })
+                Ok(HostFunctionCall {
+                    interface,
+                    function,
+                    input,
+                    output,
+                })
             }
             other => Err(ConversionError::ExpectedRecord(format!("{:?}", other))),
         }
@@ -157,11 +162,8 @@ mod tests {
 
     #[test]
     fn test_no_input() {
-        let call = HostFunctionCall::no_input(
-            "wasi:clocks/wall-clock@0.2.3",
-            "now",
-            Value::U64(999),
-        );
+        let call =
+            HostFunctionCall::no_input("wasi:clocks/wall-clock@0.2.3", "now", Value::U64(999));
 
         assert_eq!(call.input, Value::Tuple(vec![]));
     }

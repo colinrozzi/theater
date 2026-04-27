@@ -10,18 +10,16 @@ use std::sync::RwLock as SyncRwLock;
 use theater::actor::handle::ActorHandle;
 use theater::actor::store::ActorStore;
 use theater::chain::StateChain;
-use theater::pack_bridge::{AsyncRuntime, PackInstance, Ctx, Value};
 use theater::id::TheaterId;
 use theater::messages::TheaterCommand;
+use theater::pack_bridge::{AsyncRuntime, Ctx, PackInstance, Value};
 use tokio::sync::mpsc;
 use tracing::info;
 
 #[tokio::test]
 async fn test_composite_instance_basic() {
     // Initialize tracing for test output
-    let _ = tracing_subscriber::fmt()
-        .with_env_filter("info")
-        .try_init();
+    let _ = tracing_subscriber::fmt().with_env_filter("info").try_init();
 
     // Load the test actor WASM
     let wasm_path = concat!(
@@ -52,7 +50,10 @@ async fn test_composite_instance_basic() {
     let (operation_tx, _operation_rx) = mpsc::channel(10);
     let (info_tx, _info_rx) = mpsc::channel(10);
     let (control_tx, _control_rx) = mpsc::channel(10);
-    let chain = Arc::new(SyncRwLock::new(StateChain::new(actor_id.clone(), theater_tx.clone())));
+    let chain = Arc::new(SyncRwLock::new(StateChain::new(
+        actor_id.clone(),
+        theater_tx.clone(),
+    )));
     let actor_handle = ActorHandle::new(operation_tx, info_tx, control_tx);
 
     let actor_store = ActorStore::new(
@@ -71,9 +72,9 @@ async fn test_composite_instance_basic() {
         actor_store,
         |builder| {
             // Register the log host function
-            builder
-                .interface("theater:simple/runtime")?
-                .func_typed("log", |_ctx: &mut Ctx<'_, ActorStore>, input: Value| {
+            builder.interface("theater:simple/runtime")?.func_typed(
+                "log",
+                |_ctx: &mut Ctx<'_, ActorStore>, input: Value| {
                     // Extract the message from the Value
                     let msg = match input {
                         Value::String(s) => s,
@@ -82,7 +83,8 @@ async fn test_composite_instance_basic() {
                     info!("[ACTOR LOG] {}", msg);
                     // Return unit (empty tuple)
                     Value::Tuple(vec![])
-                })?;
+                },
+            )?;
             Ok(())
         },
     )
@@ -103,7 +105,9 @@ async fn test_composite_instance_basic() {
 
     info!("Calling init function...");
 
-    let result = instance.call_function("theater:simple/actor.init", state, params).await;
+    let result = instance
+        .call_function("theater:simple/actor.init", state, params)
+        .await;
 
     match result {
         Ok((new_state, result_bytes)) => {

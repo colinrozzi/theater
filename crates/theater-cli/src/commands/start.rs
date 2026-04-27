@@ -15,11 +15,12 @@ use theater::config::actor_manifest::{
 };
 use theater::handler::HandlerRegistry;
 use theater::messages::TheaterCommand;
+use theater::pack_bridge::{Value, ValueType};
 use theater::theater_runtime::TheaterRuntime;
 use theater::utils::resolve_reference;
-use theater::TheaterId;
 use theater::ManifestConfig;
-use theater::pack_bridge::{Value, ValueType};
+use theater::TheaterId;
+use theater_handler_loop::LoopHandler;
 use theater_handler_message_server::{MessageRouter, MessageServerHandler};
 use theater_handler_rpc::RpcHandler;
 use theater_handler_runtime::RuntimeHandler;
@@ -28,7 +29,6 @@ use theater_handler_supervisor::SupervisorHandler;
 use theater_handler_tcp::TcpHandler;
 use theater_handler_terminal::TerminalHandler;
 use theater_handler_timer::TimerHandler;
-use theater_handler_loop::LoopHandler;
 
 /// Output format for chain events
 #[derive(Debug, Clone, Copy, ValueEnum, Default)]
@@ -160,7 +160,7 @@ fn create_handler_registry(
     let runtime_config = RuntimeHostConfig {};
     registry.register(
         RuntimeHandler::new(runtime_config, theater_tx.clone(), None)
-            .with_show_logs(show_actor_logs)
+            .with_show_logs(show_actor_logs),
     );
 
     // Store handler - provides content storage
@@ -248,9 +248,8 @@ pub async fn execute_async(args: &StartArgs, ctx: &CommandContext) -> Result<(),
     });
 
     // Parse the manifest
-    let manifest = ManifestConfig::from_toml_str(&manifest_content).map_err(|e| {
-        CliError::invalid_manifest(format!("Failed to parse manifest: {}", e))
-    })?;
+    let manifest = ManifestConfig::from_toml_str(&manifest_content)
+        .map_err(|e| CliError::invalid_manifest(format!("Failed to parse manifest: {}", e)))?;
 
     // Resolve WASM path relative to manifest directory
     let wasm_path = if manifest.package.starts_with('/') || manifest.package.contains("://") {
@@ -260,7 +259,10 @@ pub async fn execute_async(args: &StartArgs, ctx: &CommandContext) -> Result<(),
         // Relative path - resolve relative to manifest's directory
         let manifest_path = std::path::Path::new(&args.manifest);
         if let Some(manifest_dir) = manifest_path.parent() {
-            manifest_dir.join(&manifest.package).to_string_lossy().to_string()
+            manifest_dir
+                .join(&manifest.package)
+                .to_string_lossy()
+                .to_string()
         } else {
             manifest.package.clone()
         }
@@ -268,10 +270,7 @@ pub async fn execute_async(args: &StartArgs, ctx: &CommandContext) -> Result<(),
 
     // Load WASM bytes
     let wasm_bytes = resolve_reference(&wasm_path).await.map_err(|e| {
-        CliError::server_error(format!(
-            "Failed to load WASM from '{}': {}",
-            wasm_path, e
-        ))
+        CliError::server_error(format!("Failed to load WASM from '{}': {}", wasm_path, e))
     })?;
 
     // Spawn the actor
@@ -470,11 +469,7 @@ pub async fn execute_async(args: &StartArgs, ctx: &CommandContext) -> Result<(),
     drop(theater_tx);
 
     // Wait for runtime to finish (with timeout)
-    let _ = tokio::time::timeout(
-        tokio::time::Duration::from_secs(5),
-        runtime_handle,
-    )
-    .await;
+    let _ = tokio::time::timeout(tokio::time::Duration::from_secs(5), runtime_handle).await;
 
     Ok(())
 }

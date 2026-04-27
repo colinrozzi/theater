@@ -74,8 +74,7 @@ use theater::id::TheaterId;
 use theater::shutdown::ShutdownReceiver;
 
 use theater::pack_bridge::{
-    parse_pact, AsyncCtx, HostLinkerBuilder, InterfaceImpl, LinkerError, TypeHash, Value,
-    ValueType,
+    parse_pact, AsyncCtx, HostLinkerBuilder, InterfaceImpl, LinkerError, TypeHash, Value, ValueType,
 };
 
 // ============================================================================

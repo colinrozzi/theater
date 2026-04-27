@@ -7,6 +7,12 @@ pub struct Chain<D: EventType> {
     current_hash: Option<Vec<u8>>,
 }
 
+impl<D: EventType> Default for Chain<D> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<D: EventType> Chain<D> {
     pub fn new() -> Self {
         Self {
@@ -43,8 +49,8 @@ impl<D: EventType> Chain<D> {
                 error!(
                     "Parent hash mismatch for event {}: expected {:?}, found {:?}",
                     hex::encode(&event.hash),
-                    prev_hash.as_ref().map(|h| hex::encode(h)),
-                    event.parent_hash.as_ref().map(|h| hex::encode(h))
+                    prev_hash.as_ref().map(hex::encode),
+                    event.parent_hash.as_ref().map(hex::encode)
                 );
                 return false;
             }

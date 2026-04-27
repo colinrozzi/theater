@@ -66,7 +66,10 @@ impl IntoValue for ReplaySummary {
             type_name: String::from("replay-summary"),
             fields: vec![
                 ("total-events".into(), Value::U64(self.total_events as u64)),
-                ("events-replayed".into(), Value::U64(self.events_replayed as u64)),
+                (
+                    "events-replayed".into(),
+                    Value::U64(self.events_replayed as u64),
+                ),
                 ("mismatches".into(), Value::U64(self.mismatches as u64)),
                 ("success".into(), Value::Bool(self.success)),
                 ("error".into(), self.error.into_value()),

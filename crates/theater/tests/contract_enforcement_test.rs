@@ -10,9 +10,9 @@ use std::sync::RwLock as SyncRwLock;
 use theater::actor::handle::ActorHandle;
 use theater::actor::store::ActorStore;
 use theater::chain::StateChain;
-use theater::pack_bridge::{AsyncRuntime, PackInstance, Ctx, Value, ValueType};
 use theater::id::TheaterId;
 use theater::messages::TheaterCommand;
+use theater::pack_bridge::{AsyncRuntime, Ctx, PackInstance, Value, ValueType};
 use tokio::sync::mpsc;
 use tracing::info;
 
@@ -37,7 +37,10 @@ async fn create_instance() -> PackInstance {
     let (operation_tx, _operation_rx) = mpsc::channel(10);
     let (info_tx, _info_rx) = mpsc::channel(10);
     let (control_tx, _control_rx) = mpsc::channel(10);
-    let chain = Arc::new(SyncRwLock::new(StateChain::new(actor_id.clone(), theater_tx.clone())));
+    let chain = Arc::new(SyncRwLock::new(StateChain::new(
+        actor_id.clone(),
+        theater_tx.clone(),
+    )));
     let actor_handle = ActorHandle::new(operation_tx, info_tx, control_tx);
 
     let actor_store = ActorStore::new(
@@ -54,16 +57,17 @@ async fn create_instance() -> PackInstance {
         &runtime,
         actor_store,
         |builder| {
-            builder
-                .interface("theater:simple/runtime")?
-                .func_typed("log", |_ctx: &mut Ctx<'_, ActorStore>, input: Value| {
+            builder.interface("theater:simple/runtime")?.func_typed(
+                "log",
+                |_ctx: &mut Ctx<'_, ActorStore>, input: Value| {
                     let msg = match input {
                         Value::String(s) => s,
                         _ => format!("{:?}", input),
                     };
                     info!("[ACTOR LOG] {}", msg);
                     Value::Tuple(vec![])
-                })?;
+                },
+            )?;
             Ok(())
         },
     )
@@ -71,7 +75,10 @@ async fn create_instance() -> PackInstance {
     .expect("Failed to create PackInstance");
 
     // Cache types so validation is active
-    instance.cache_function_types().await.expect("Failed to cache function types");
+    instance
+        .cache_function_types()
+        .await
+        .expect("Failed to cache function types");
 
     instance
 }
@@ -121,7 +128,10 @@ async fn test_valid_typed_calls() {
         .expect("move-to should succeed");
 
     info!("State after move-to: {:?}", state);
-    assert!(!result_bytes.is_empty(), "Should have return value (status)");
+    assert!(
+        !result_bytes.is_empty(),
+        "Should have return value (status)"
+    );
 
     // get-status — takes actor-state, returns actor-state + status
     let (state, _) = instance
@@ -163,10 +173,7 @@ async fn test_invalid_state_type_rejected() {
     let wrong_state = Value::String("not a valid state".into());
     let target = Value::Record {
         type_name: "position".into(),
-        fields: vec![
-            ("x".into(), Value::F64(1.0)),
-            ("y".into(), Value::F64(2.0)),
-        ],
+        fields: vec![("x".into(), Value::F64(1.0)), ("y".into(), Value::F64(2.0))],
     };
 
     let result = instance
@@ -180,7 +187,11 @@ async fn test_invalid_state_type_rejected() {
     assert!(result.is_err(), "Should reject wrong state type");
     let err = result.unwrap_err().to_string();
     info!("Correctly rejected invalid state: {}", err);
-    assert!(err.contains("State type mismatch"), "Error should mention state type mismatch: {}", err);
+    assert!(
+        err.contains("State type mismatch"),
+        "Error should mention state type mismatch: {}",
+        err
+    );
 }
 
 #[tokio::test]
@@ -194,13 +205,13 @@ async fn test_missing_record_field_rejected() {
         type_name: "actor-state".into(),
         fields: vec![
             ("name".into(), Value::String("test".into())),
-            ("pos".into(), Value::Record {
-                type_name: "position".into(),
-                fields: vec![
-                    ("x".into(), Value::F64(0.0)),
-                    ("y".into(), Value::F64(0.0)),
-                ],
-            }),
+            (
+                "pos".into(),
+                Value::Record {
+                    type_name: "position".into(),
+                    fields: vec![("x".into(), Value::F64(0.0)), ("y".into(), Value::F64(0.0))],
+                },
+            ),
             // missing "status" and "step-count"
         ],
     };
@@ -216,8 +227,11 @@ async fn test_missing_record_field_rejected() {
     assert!(result.is_err(), "Should reject incomplete record");
     let err = result.unwrap_err().to_string();
     info!("Correctly rejected incomplete record: {}", err);
-    assert!(err.contains("missing field") || err.contains("MissingField"),
-        "Error should mention missing field: {}", err);
+    assert!(
+        err.contains("missing field") || err.contains("MissingField"),
+        "Error should mention missing field: {}",
+        err
+    );
 }
 
 #[tokio::test]
@@ -231,19 +245,22 @@ async fn test_wrong_field_type_rejected() {
         type_name: "actor-state".into(),
         fields: vec![
             ("name".into(), Value::String("test".into())),
-            ("pos".into(), Value::Record {
-                type_name: "position".into(),
-                fields: vec![
-                    ("x".into(), Value::F64(0.0)),
-                    ("y".into(), Value::F64(0.0)),
-                ],
-            }),
-            ("status".into(), Value::Variant {
-                type_name: "status".into(),
-                case_name: "idle".into(),
-                tag: 0,
-                payload: vec![],
-            }),
+            (
+                "pos".into(),
+                Value::Record {
+                    type_name: "position".into(),
+                    fields: vec![("x".into(), Value::F64(0.0)), ("y".into(), Value::F64(0.0))],
+                },
+            ),
+            (
+                "status".into(),
+                Value::Variant {
+                    type_name: "status".into(),
+                    case_name: "idle".into(),
+                    tag: 0,
+                    payload: vec![],
+                },
+            ),
             ("step-count".into(), Value::String("not a number".into())), // wrong type!
         ],
     };
@@ -259,6 +276,9 @@ async fn test_wrong_field_type_rejected() {
     assert!(result.is_err(), "Should reject wrong field type");
     let err = result.unwrap_err().to_string();
     info!("Correctly rejected wrong field type: {}", err);
-    assert!(err.contains("step-count") || err.contains("expected u32"),
-        "Error should reference the bad field: {}", err);
+    assert!(
+        err.contains("step-count") || err.contains("expected u32"),
+        "Error should reference the bad field: {}",
+        err
+    );
 }

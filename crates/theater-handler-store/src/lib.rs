@@ -24,7 +24,6 @@
 
 pub mod events;
 
-
 use std::future::Future;
 use std::pin::Pin;
 use thiserror::Error;
@@ -41,8 +40,7 @@ use theater::store::{ContentRef, ContentStore, Label};
 
 // Pack integration
 use theater::pack_bridge::{
-    AsyncCtx, Ctx, HostLinkerBuilder, InterfaceImpl, LinkerError, TypeHash, Value,
-    parse_pact,
+    parse_pact, AsyncCtx, Ctx, HostLinkerBuilder, InterfaceImpl, LinkerError, TypeHash, Value,
 };
 
 // ============================================================================
@@ -70,8 +68,7 @@ const STORE_PACT: &str = include_str!("../../../pact/store.pact");
 /// - calculate-total-size(store-id) -> result<u64, string>
 /// - list-labels(store-id) -> result<list<string>, string>
 fn store_interface() -> InterfaceImpl {
-    let pact = parse_pact(STORE_PACT)
-        .expect("embedded store.pact should be valid");
+    let pact = parse_pact(STORE_PACT).expect("embedded store.pact should be valid");
     InterfaceImpl::from_pact(&pact)
 }
 
@@ -101,10 +98,7 @@ pub struct StoreHandler {
 
 impl StoreHandler {
     /// Create a new store handler with the given configuration and permissions
-    pub fn new(
-        config: StoreHandlerConfig,
-        permissions: Option<StorePermissions>,
-    ) -> Self {
+    pub fn new(config: StoreHandlerConfig, permissions: Option<StorePermissions>) -> Self {
         Self {
             permissions,
             base_path: config.base_path,
@@ -130,12 +124,10 @@ fn parse_content_ref(value: &Value) -> Result<ContentRef, Value> {
 fn parse_store_id(input: &Value) -> Result<String, Value> {
     match input {
         Value::String(s) => Ok(s.clone()),
-        Value::Tuple(fields) if fields.len() == 1 => {
-            match &fields[0] {
-                Value::String(s) => Ok(s.clone()),
-                _ => Err(Value::String("Expected string for store_id".to_string())),
-            }
-        }
+        Value::Tuple(fields) if fields.len() == 1 => match &fields[0] {
+            Value::String(s) => Ok(s.clone()),
+            _ => Err(Value::String("Expected string for store_id".to_string())),
+        },
         _ => Err(Value::String("Expected string for store_id".to_string())),
     }
 }
@@ -150,7 +142,9 @@ fn parse_store_id_and_ref(input: &Value) -> Result<(String, ContentRef), Value> 
             let content_ref = parse_content_ref(&fields[1])?;
             Ok((store_id, content_ref))
         }
-        _ => Err(Value::String("Expected tuple (store_id, content_ref)".to_string())),
+        _ => Err(Value::String(
+            "Expected tuple (store_id, content_ref)".to_string(),
+        )),
     }
 }
 
@@ -167,7 +161,9 @@ fn parse_store_id_and_label(input: &Value) -> Result<(String, String), Value> {
             };
             Ok((store_id, label))
         }
-        _ => Err(Value::String("Expected tuple (store_id, label)".to_string())),
+        _ => Err(Value::String(
+            "Expected tuple (store_id, label)".to_string(),
+        )),
     }
 }
 
@@ -185,7 +181,9 @@ fn parse_store_label_ref(input: &Value) -> Result<(String, String, ContentRef), 
             let content_ref = parse_content_ref(&fields[2])?;
             Ok((store_id, label, content_ref))
         }
-        _ => Err(Value::String("Expected tuple (store_id, label, content_ref)".to_string())),
+        _ => Err(Value::String(
+            "Expected tuple (store_id, label, content_ref)".to_string(),
+        )),
     }
 }
 
@@ -201,27 +199,38 @@ fn parse_store_label_content(input: &Value) -> Result<(String, String, Vec<u8>),
                 _ => return Err(Value::String("Expected string for label".to_string())),
             };
             let content = match &fields[2] {
-                Value::List { items, .. } => {
-                    items.iter().filter_map(|v| match v {
+                Value::List { items, .. } => items
+                    .iter()
+                    .filter_map(|v| match v {
                         Value::U8(b) => Some(*b),
                         _ => None,
-                    }).collect::<Vec<u8>>()
-                }
+                    })
+                    .collect::<Vec<u8>>(),
                 _ => return Err(Value::String("Expected list<u8> for content".to_string())),
             };
             Ok((store_id, label, content))
         }
-        _ => Err(Value::String("Expected tuple (store_id, label, content)".to_string())),
+        _ => Err(Value::String(
+            "Expected tuple (store_id, label, content)".to_string(),
+        )),
     }
 }
 
-impl Handler for StoreHandler
-{
-    fn create_instance(&self, config: Option<&theater::config::actor_manifest::HandlerConfig>) -> Box<dyn Handler> {
+impl Handler for StoreHandler {
+    fn create_instance(
+        &self,
+        config: Option<&theater::config::actor_manifest::HandlerConfig>,
+    ) -> Box<dyn Handler> {
         use theater::config::actor_manifest::HandlerConfig;
 
-        if let Some(HandlerConfig::Store { config: store_config }) = config {
-            Box::new(StoreHandler::new(store_config.clone(), self.permissions.clone()))
+        if let Some(HandlerConfig::Store {
+            config: store_config,
+        }) = config
+        {
+            Box::new(StoreHandler::new(
+                store_config.clone(),
+                self.permissions.clone(),
+            ))
         } else {
             Box::new(self.clone())
         }
@@ -248,7 +257,12 @@ impl Handler for StoreHandler
     }
 
     fn imports(&self) -> Option<Vec<String>> {
-        Some(self.interfaces().iter().map(|i| i.name().to_string()).collect())
+        Some(
+            self.interfaces()
+                .iter()
+                .map(|i| i.name().to_string())
+                .collect(),
+        )
     }
 
     fn exports(&self) -> Option<Vec<String>> {
@@ -311,28 +325,31 @@ impl Handler for StoreHandler
         builder
             .interface("theater:simple/store")?
             // new() -> result<string, string>
-            .func_typed("new", move |_ctx: &mut Ctx<'_, ActorStore>, _input: Value| {
-                use theater::ValueType;
-                // If a store_id is configured, use it; otherwise create a new store
-                let store_id = if let Some(ref id) = configured_store_id {
-                    // Use the configured store ID - just return it without creating new store
-                    id.clone()
-                } else {
-                    // Create a new store with a new UUID
-                    let store = if let Some(ref bp) = bp_new {
-                        ContentStore::new_with_base_path(bp.clone())
+            .func_typed(
+                "new",
+                move |_ctx: &mut Ctx<'_, ActorStore>, _input: Value| {
+                    use theater::ValueType;
+                    // If a store_id is configured, use it; otherwise create a new store
+                    let store_id = if let Some(ref id) = configured_store_id {
+                        // Use the configured store ID - just return it without creating new store
+                        id.clone()
                     } else {
-                        ContentStore::new()
+                        // Create a new store with a new UUID
+                        let store = if let Some(ref bp) = bp_new {
+                            ContentStore::new_with_base_path(bp.clone())
+                        } else {
+                            ContentStore::new()
+                        };
+                        store.id().to_string()
                     };
-                    store.id().to_string()
-                };
-                // Return Ok(store_id) as Result
-                Value::Result {
-                    ok_type: ValueType::String,
-                    err_type: ValueType::String,
-                    value: Ok(Box::new(Value::String(store_id))),
-                }
-            })?
+                    // Return Ok(store_id) as Result
+                    Value::Result {
+                        ok_type: ValueType::String,
+                        err_type: ValueType::String,
+                        value: Ok(Box::new(Value::String(store_id))),
+                    }
+                },
+            )?
             // store(store-id: string, content: list<u8>) -> result<string, string>
             .func_async_result("store", move |_ctx: AsyncCtx<ActorStore>, input: Value| {
                 let bp = bp_store.clone();
@@ -342,20 +359,33 @@ impl Handler for StoreHandler
                         Value::Tuple(fields) if fields.len() == 2 => {
                             let store_id = match &fields[0] {
                                 Value::String(s) => s.clone(),
-                                _ => return Err(Value::String("Expected string for store_id".to_string())),
+                                _ => {
+                                    return Err(Value::String(
+                                        "Expected string for store_id".to_string(),
+                                    ))
+                                }
                             };
                             let content = match &fields[1] {
-                                Value::List { items, .. } => {
-                                    items.iter().filter_map(|v| match v {
+                                Value::List { items, .. } => items
+                                    .iter()
+                                    .filter_map(|v| match v {
                                         Value::U8(b) => Some(*b),
                                         _ => None,
-                                    }).collect::<Vec<u8>>()
+                                    })
+                                    .collect::<Vec<u8>>(),
+                                _ => {
+                                    return Err(Value::String(
+                                        "Expected list<u8> for content".to_string(),
+                                    ))
                                 }
-                                _ => return Err(Value::String("Expected list<u8> for content".to_string())),
                             };
                             (store_id, content)
                         }
-                        _ => return Err(Value::String("Expected tuple (store_id, content)".to_string())),
+                        _ => {
+                            return Err(Value::String(
+                                "Expected tuple (store_id, content)".to_string(),
+                            ))
+                        }
                     };
 
                     let store = make_store(&store_id, &bp);
@@ -422,188 +452,210 @@ impl Handler for StoreHandler
                 }
             })?
             // get-by-label(store-id: string, label: string) -> result<option<string>, string>
-            .func_async_result("get-by-label", move |_ctx: AsyncCtx<ActorStore>, input: Value| {
-                let bp = bp_get_by_label.clone();
-                async move {
-                    let (store_id, label_string) = parse_store_id_and_label(&input)?;
-                    let store = make_store(&store_id, &bp);
-                    let label = Label::new(label_string);
+            .func_async_result(
+                "get-by-label",
+                move |_ctx: AsyncCtx<ActorStore>, input: Value| {
+                    let bp = bp_get_by_label.clone();
+                    async move {
+                        let (store_id, label_string) = parse_store_id_and_label(&input)?;
+                        let store = make_store(&store_id, &bp);
+                        let label = Label::new(label_string);
 
-                    match store.get_by_label(&label).await {
-                        Ok(content_ref_opt) => {
-                            use theater::ValueType;
-                            debug!("Content reference by label retrieved successfully");
-                            match content_ref_opt {
-                                Some(cr) => Ok(Value::Option {
-                                    inner_type: ValueType::String,
-                                    value: Some(Box::new(Value::String(cr.hash().to_string()))),
-                                }),
-                                None => Ok(Value::Option {
-                                    inner_type: ValueType::String,
-                                    value: None,
-                                }),
+                        match store.get_by_label(&label).await {
+                            Ok(content_ref_opt) => {
+                                use theater::ValueType;
+                                debug!("Content reference by label retrieved successfully");
+                                match content_ref_opt {
+                                    Some(cr) => Ok(Value::Option {
+                                        inner_type: ValueType::String,
+                                        value: Some(Box::new(Value::String(cr.hash().to_string()))),
+                                    }),
+                                    None => Ok(Value::Option {
+                                        inner_type: ValueType::String,
+                                        value: None,
+                                    }),
+                                }
+                            }
+                            Err(e) => {
+                                error!("Error retrieving content by label: {}", e);
+                                Err(Value::String(e.to_string()))
                             }
                         }
-                        Err(e) => {
-                            error!("Error retrieving content by label: {}", e);
-                            Err(Value::String(e.to_string()))
-                        }
                     }
-                }
-            })?
+                },
+            )?
             // remove-label(store-id: string, label: string) -> result<_, string>
-            .func_async_result("remove-label", move |_ctx: AsyncCtx<ActorStore>, input: Value| {
-                let bp = bp_remove_label.clone();
-                async move {
-                    let (store_id, label_string) = parse_store_id_and_label(&input)?;
-                    let store = make_store(&store_id, &bp);
-                    let label = Label::new(label_string);
+            .func_async_result(
+                "remove-label",
+                move |_ctx: AsyncCtx<ActorStore>, input: Value| {
+                    let bp = bp_remove_label.clone();
+                    async move {
+                        let (store_id, label_string) = parse_store_id_and_label(&input)?;
+                        let store = make_store(&store_id, &bp);
+                        let label = Label::new(label_string);
 
-                    match store.remove_label(&label).await {
-                        Ok(_) => {
-                            debug!("Label removed successfully");
-                            Ok(Value::Tuple(vec![]))
-                        }
-                        Err(e) => {
-                            error!("Error removing label: {}", e);
-                            Err(Value::String(e.to_string()))
+                        match store.remove_label(&label).await {
+                            Ok(_) => {
+                                debug!("Label removed successfully");
+                                Ok(Value::Tuple(vec![]))
+                            }
+                            Err(e) => {
+                                error!("Error removing label: {}", e);
+                                Err(Value::String(e.to_string()))
+                            }
                         }
                     }
-                }
-            })?
+                },
+            )?
             // store-at-label(store-id: string, label: string, content: list<u8>) -> result<string, string>
-            .func_async_result("store-at-label", move |_ctx: AsyncCtx<ActorStore>, input: Value| {
-                let bp = bp_store_at_label.clone();
-                async move {
-                    let (store_id, label_string, content) = parse_store_label_content(&input)?;
-                    let store = make_store(&store_id, &bp);
-                    let label = Label::new(label_string);
+            .func_async_result(
+                "store-at-label",
+                move |_ctx: AsyncCtx<ActorStore>, input: Value| {
+                    let bp = bp_store_at_label.clone();
+                    async move {
+                        let (store_id, label_string, content) = parse_store_label_content(&input)?;
+                        let store = make_store(&store_id, &bp);
+                        let label = Label::new(label_string);
 
-                    match store.store_at_label(&label, content).await {
-                        Ok(content_ref) => {
-                            debug!("Content stored at label successfully");
-                            Ok(Value::String(content_ref.hash().to_string()))
-                        }
-                        Err(e) => {
-                            error!("Error storing content at label: {}", e);
-                            Err(Value::String(e.to_string()))
+                        match store.store_at_label(&label, content).await {
+                            Ok(content_ref) => {
+                                debug!("Content stored at label successfully");
+                                Ok(Value::String(content_ref.hash().to_string()))
+                            }
+                            Err(e) => {
+                                error!("Error storing content at label: {}", e);
+                                Err(Value::String(e.to_string()))
+                            }
                         }
                     }
-                }
-            })?
+                },
+            )?
             // replace-content-at-label(store-id: string, label: string, content: list<u8>) -> result<string, string>
-            .func_async_result("replace-content-at-label", move |_ctx: AsyncCtx<ActorStore>, input: Value| {
-                let bp = bp_replace_content.clone();
-                async move {
-                    let (store_id, label_string, content) = parse_store_label_content(&input)?;
-                    let store = make_store(&store_id, &bp);
-                    let label = Label::new(label_string);
+            .func_async_result(
+                "replace-content-at-label",
+                move |_ctx: AsyncCtx<ActorStore>, input: Value| {
+                    let bp = bp_replace_content.clone();
+                    async move {
+                        let (store_id, label_string, content) = parse_store_label_content(&input)?;
+                        let store = make_store(&store_id, &bp);
+                        let label = Label::new(label_string);
 
-                    match store.replace_content_at_label(&label, content).await {
-                        Ok(content_ref) => {
-                            debug!("Content at label replaced successfully");
-                            Ok(Value::String(content_ref.hash().to_string()))
-                        }
-                        Err(e) => {
-                            error!("Error replacing content at label: {}", e);
-                            Err(Value::String(e.to_string()))
+                        match store.replace_content_at_label(&label, content).await {
+                            Ok(content_ref) => {
+                                debug!("Content at label replaced successfully");
+                                Ok(Value::String(content_ref.hash().to_string()))
+                            }
+                            Err(e) => {
+                                error!("Error replacing content at label: {}", e);
+                                Err(Value::String(e.to_string()))
+                            }
                         }
                     }
-                }
-            })?
+                },
+            )?
             // replace-at-label(store-id: string, label: string, content-ref: content-ref) -> result<_, string>
-            .func_async_result("replace-at-label", move |_ctx: AsyncCtx<ActorStore>, input: Value| {
-                let bp = bp_replace_at.clone();
-                async move {
-                    let (store_id, label_string, content_ref) = parse_store_label_ref(&input)?;
-                    let store = make_store(&store_id, &bp);
-                    let label = Label::new(label_string);
+            .func_async_result(
+                "replace-at-label",
+                move |_ctx: AsyncCtx<ActorStore>, input: Value| {
+                    let bp = bp_replace_at.clone();
+                    async move {
+                        let (store_id, label_string, content_ref) = parse_store_label_ref(&input)?;
+                        let store = make_store(&store_id, &bp);
+                        let label = Label::new(label_string);
 
-                    match store.replace_at_label(&label, &content_ref).await {
-                        Ok(_) => {
-                            debug!("Content at label replaced with reference successfully");
-                            Ok(Value::Tuple(vec![]))
-                        }
-                        Err(e) => {
-                            error!("Error replacing content at label: {}", e);
-                            Err(Value::String(e.to_string()))
+                        match store.replace_at_label(&label, &content_ref).await {
+                            Ok(_) => {
+                                debug!("Content at label replaced with reference successfully");
+                                Ok(Value::Tuple(vec![]))
+                            }
+                            Err(e) => {
+                                error!("Error replacing content at label: {}", e);
+                                Err(Value::String(e.to_string()))
+                            }
                         }
                     }
-                }
-            })?
+                },
+            )?
             // list-all-content(store-id: string) -> result<list<string>, string>
-            .func_async_result("list-all-content", move |_ctx: AsyncCtx<ActorStore>, input: Value| {
-                let bp = bp_list_all.clone();
-                async move {
-                    let store_id = parse_store_id(&input)?;
-                    let store = make_store(&store_id, &bp);
+            .func_async_result(
+                "list-all-content",
+                move |_ctx: AsyncCtx<ActorStore>, input: Value| {
+                    let bp = bp_list_all.clone();
+                    async move {
+                        let store_id = parse_store_id(&input)?;
+                        let store = make_store(&store_id, &bp);
 
-                    match store.list_all_content().await {
-                        Ok(content_refs) => {
-                            use theater::ValueType;
-                            debug!("All content references listed successfully");
-                            let refs: Vec<Value> = content_refs
-                                .into_iter()
-                                .map(|cr| Value::String(cr.hash().to_string()))
-                                .collect();
-                            Ok(Value::List {
-                                elem_type: ValueType::String,
-                                items: refs,
-                            })
-                        }
-                        Err(e) => {
-                            error!("Error listing all content: {}", e);
-                            Err(Value::String(e.to_string()))
+                        match store.list_all_content().await {
+                            Ok(content_refs) => {
+                                use theater::ValueType;
+                                debug!("All content references listed successfully");
+                                let refs: Vec<Value> = content_refs
+                                    .into_iter()
+                                    .map(|cr| Value::String(cr.hash().to_string()))
+                                    .collect();
+                                Ok(Value::List {
+                                    elem_type: ValueType::String,
+                                    items: refs,
+                                })
+                            }
+                            Err(e) => {
+                                error!("Error listing all content: {}", e);
+                                Err(Value::String(e.to_string()))
+                            }
                         }
                     }
-                }
-            })?
+                },
+            )?
             // calculate-total-size(store-id: string) -> result<u64, string>
-            .func_async_result("calculate-total-size", move |_ctx: AsyncCtx<ActorStore>, input: Value| {
-                let bp = bp_calc_size.clone();
-                async move {
-                    let store_id = parse_store_id(&input)?;
-                    let store = make_store(&store_id, &bp);
+            .func_async_result(
+                "calculate-total-size",
+                move |_ctx: AsyncCtx<ActorStore>, input: Value| {
+                    let bp = bp_calc_size.clone();
+                    async move {
+                        let store_id = parse_store_id(&input)?;
+                        let store = make_store(&store_id, &bp);
 
-                    match store.calculate_total_size().await {
-                        Ok(total_size) => {
-                            debug!("Total size calculated successfully");
-                            Ok(Value::U64(total_size))
-                        }
-                        Err(e) => {
-                            error!("Error calculating total size: {}", e);
-                            Err(Value::String(e.to_string()))
+                        match store.calculate_total_size().await {
+                            Ok(total_size) => {
+                                debug!("Total size calculated successfully");
+                                Ok(Value::U64(total_size))
+                            }
+                            Err(e) => {
+                                error!("Error calculating total size: {}", e);
+                                Err(Value::String(e.to_string()))
+                            }
                         }
                     }
-                }
-            })?
+                },
+            )?
             // list-labels(store-id: string) -> result<list<string>, string>
-            .func_async_result("list-labels", move |_ctx: AsyncCtx<ActorStore>, input: Value| {
-                let bp = bp_list_labels.clone();
-                async move {
-                    let store_id = parse_store_id(&input)?;
-                    let store = make_store(&store_id, &bp);
+            .func_async_result(
+                "list-labels",
+                move |_ctx: AsyncCtx<ActorStore>, input: Value| {
+                    let bp = bp_list_labels.clone();
+                    async move {
+                        let store_id = parse_store_id(&input)?;
+                        let store = make_store(&store_id, &bp);
 
-                    match store.list_labels().await {
-                        Ok(labels) => {
-                            use theater::ValueType;
-                            debug!("Labels listed successfully");
-                            let label_values: Vec<Value> = labels
-                                .into_iter()
-                                .map(Value::String)
-                                .collect();
-                            Ok(Value::List {
-                                elem_type: ValueType::String,
-                                items: label_values,
-                            })
-                        }
-                        Err(e) => {
-                            error!("Error listing labels: {}", e);
-                            Err(Value::String(e.to_string()))
+                        match store.list_labels().await {
+                            Ok(labels) => {
+                                use theater::ValueType;
+                                debug!("Labels listed successfully");
+                                let label_values: Vec<Value> =
+                                    labels.into_iter().map(Value::String).collect();
+                                Ok(Value::List {
+                                    elem_type: ValueType::String,
+                                    items: label_values,
+                                })
+                            }
+                            Err(e) => {
+                                error!("Error listing labels: {}", e);
+                                Err(Value::String(e.to_string()))
+                            }
                         }
                     }
-                }
-            })?;
+                },
+            )?;
 
         ctx.mark_satisfied("theater:simple/store");
         info!("Store host functions (Pack) set up successfully");
@@ -625,7 +677,10 @@ mod tests {
         let handler = StoreHandler::new(config, None);
 
         assert_eq!(handler.name(), "store");
-        assert_eq!(handler.imports(), Some(vec!["theater:simple/store".to_string()]));
+        assert_eq!(
+            handler.imports(),
+            Some(vec!["theater:simple/store".to_string()])
+        );
         assert_eq!(handler.exports(), None);
     }
 

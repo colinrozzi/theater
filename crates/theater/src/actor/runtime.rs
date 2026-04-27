@@ -8,15 +8,15 @@ use crate::actor::handle::ActorHandle;
 use crate::actor::store::ActorStore;
 use crate::actor::types::ActorError;
 use crate::actor::types::ActorOperation;
-use crate::interceptor::{RecordingInterceptor, ReplayRecordingInterceptor};
-use crate::pack_bridge::{AsyncRuntime, CallInterceptor, HostLinkerBuilder, PackInstance, Value};
 use crate::events::wasm::WasmEventData;
 use crate::events::ChainEventData;
 use crate::handler::HandlerContext;
 use crate::handler::HandlerRegistry;
 use crate::id::TheaterId;
+use crate::interceptor::{RecordingInterceptor, ReplayRecordingInterceptor};
 use crate::messages::TheaterCommand;
 use crate::metrics::MetricsCollector;
+use crate::pack_bridge::{AsyncRuntime, CallInterceptor, HostLinkerBuilder, PackInstance, Value};
 
 use crate::Result;
 use crate::ShutdownController;
@@ -143,9 +143,11 @@ impl ActorPhaseManager {
     /// Returns true if Running, false if ShuttingDown.
     pub async fn wait_for_ready_or_shutdown(&self) -> bool {
         let mut rx = self.phase_rx.clone();
-        let _ = rx.wait_for(|current_phase| {
-            *current_phase == ActorPhase::Running || *current_phase == ActorPhase::ShuttingDown
-        }).await;
+        let _ = rx
+            .wait_for(|current_phase| {
+                *current_phase == ActorPhase::Running || *current_phase == ActorPhase::ShuttingDown
+            })
+            .await;
         self.is_phase(ActorPhase::Running)
     }
 }
@@ -181,8 +183,13 @@ impl ActorRuntime {
 
         let handle_operation_tx = operation_tx.clone();
         let actor_handle = ActorHandle::new(handle_operation_tx, info_tx, control_tx);
-        let actor_store =
-            ActorStore::new(id.clone(), theater_tx.clone(), actor_handle.clone(), chain.clone(), initial_state);
+        let actor_store = ActorStore::new(
+            id.clone(),
+            theater_tx.clone(),
+            actor_handle.clone(),
+            chain.clone(),
+            initial_state,
+        );
 
         // ----------------- Checkpoint Store Manifest ----------------
 
@@ -253,10 +260,14 @@ impl ActorRuntime {
         let interceptor: Option<Arc<dyn CallInterceptor>> = if handler_registry.is_replay_mode() {
             // In replay mode, use the expected chain from the registry to look up
             // recorded host function outputs, and record new events to the actor's chain.
-            let expected_events = handler_registry.replay_chain()
+            let expected_events = handler_registry
+                .replay_chain()
                 .expect("Replay mode set but no replay chain provided")
                 .clone();
-            Some(Arc::new(ReplayRecordingInterceptor::new(expected_events, chain.clone())))
+            Some(Arc::new(ReplayRecordingInterceptor::new(
+                expected_events,
+                chain.clone(),
+            )))
         } else {
             Some(Arc::new(RecordingInterceptor::new(chain.clone())))
         };
@@ -278,7 +289,10 @@ impl ActorRuntime {
             |builder: &mut HostLinkerBuilder<'_, ActorStore>| {
                 // Set up host functions for each handler
                 for handler in handlers_for_setup.iter_mut() {
-                    debug!("Setting up Composite host functions for handler '{}'", handler.name());
+                    debug!(
+                        "Setting up Composite host functions for handler '{}'",
+                        handler.name()
+                    );
                     match handler.setup_host_functions_composite(builder, &mut handler_ctx) {
                         Ok(()) => {
                             debug!(
@@ -337,8 +351,10 @@ impl ActorRuntime {
                     let actor_hash = &actor_import.hash;
 
                     // Get the function names the actor imports from this interface
-                    let actor_function_names = metadata.arena.imported_function_names(interface_name);
-                    let function_name_refs: Vec<&str> = actor_function_names.iter().map(|s| s.as_str()).collect();
+                    let actor_function_names =
+                        metadata.arena.imported_function_names(interface_name);
+                    let function_name_refs: Vec<&str> =
+                        actor_function_names.iter().map(|s| s.as_str()).collect();
 
                     // Find a handler that provides this interface and satisfies all required functions
                     let mut interface_verified = false;
@@ -347,7 +363,10 @@ impl ActorRuntime {
                     for handler in handlers.iter() {
                         // Get the InterfaceImpl objects from the handler
                         let handler_interfaces = handler.interfaces();
-                        if let Some(handler_interface) = handler_interfaces.iter().find(|i| i.name() == interface_name) {
+                        if let Some(handler_interface) = handler_interfaces
+                            .iter()
+                            .find(|i| i.name() == interface_name)
+                        {
                             // Compute the handler's subset hash for just those functions
                             match handler_interface.hash_subset(&function_name_refs) {
                                 Some(subset_hash) => {
@@ -409,9 +428,7 @@ impl ActorRuntime {
                             )
                         });
                         error!("{}", error_msg);
-                        return Err(ActorRuntimeError::SetupError {
-                            message: error_msg,
-                        });
+                        return Err(ActorRuntimeError::SetupError { message: error_msg });
                     }
                 }
 
@@ -438,9 +455,7 @@ impl ActorRuntime {
                     id, e
                 );
                 error!("{}", error_msg);
-                return Err(ActorRuntimeError::SetupError {
-                    message: error_msg,
-                });
+                return Err(ActorRuntimeError::SetupError { message: error_msg });
             }
         }
 
@@ -519,8 +534,7 @@ impl ActorRuntime {
         let actor_phase_manager = ActorPhaseManager::new();
 
         // These will be set once setup completes
-        let actor_instance_wrapper: Arc<RwLock<Option<PackInstance>>> =
-            Arc::new(RwLock::new(None));
+        let actor_instance_wrapper: Arc<RwLock<Option<PackInstance>>> = Arc::new(RwLock::new(None));
         let metrics: Arc<RwLock<MetricsCollector>> = Arc::new(RwLock::new(MetricsCollector::new()));
         let handler_tasks: Arc<RwLock<Vec<JoinHandle<()>>>> = Arc::new(RwLock::new(vec![]));
         let handlers_shutdown_controller: Arc<RwLock<Option<ShutdownController>>> =
@@ -1014,8 +1028,7 @@ impl ActorRuntime {
         let state = actor_instance.actor_store.get_state();
         debug!(
             "Executing pack call to function '{}' with state: {:?}",
-            name,
-            state
+            name, state
         );
 
         let params_value = crate::pack_bridge::decode_value(&params).map_err(|e| {

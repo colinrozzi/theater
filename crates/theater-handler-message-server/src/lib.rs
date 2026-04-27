@@ -28,16 +28,14 @@
 
 pub mod events;
 
-
 use theater::actor::handle::ActorHandle;
 use theater::actor::store::ActorStore;
 use theater::actor::types::ActorError;
 use theater::config::permissions::MessageServerPermissions;
 use theater::handler::{Handler, HandlerContext, SharedActorInstance};
 use theater::messages::{
-    ActorChannelClose, ActorChannelInitiated, ActorChannelMessage, ActorChannelOpen,
-    ActorMessage, ActorRequest, ActorSend, ChannelId, ChannelParticipant,
-    MessageCommand,
+    ActorChannelClose, ActorChannelInitiated, ActorChannelMessage, ActorChannelOpen, ActorMessage,
+    ActorRequest, ActorSend, ChannelId, ChannelParticipant, MessageCommand,
 };
 use theater::shutdown::ShutdownReceiver;
 use theater::TheaterId;
@@ -56,8 +54,8 @@ use uuid::Uuid;
 
 // Pack integration
 use theater::pack_bridge::{
-    AsyncCtx, Ctx, HostLinkerBuilder, InterfaceImpl, LinkerError, TypeHash, Value, ValueType,
-    parse_pact,
+    parse_pact, AsyncCtx, Ctx, HostLinkerBuilder, InterfaceImpl, LinkerError, TypeHash, Value,
+    ValueType,
 };
 
 /// Errors that can occur during message server operations
@@ -93,8 +91,8 @@ const MESSAGE_SERVER_PACT: &str = include_str!("../../../pact/message-server.pac
 /// - send-on-channel(channel-id: string, msg: list<u8>) -> result<_, string>
 /// - close-channel(channel-id: string) -> result<_, string>
 fn message_server_interface() -> InterfaceImpl {
-    let pact = parse_pact(MESSAGE_SERVER_PACT)
-        .expect("embedded message-server.pact should be valid");
+    let pact =
+        parse_pact(MESSAGE_SERVER_PACT).expect("embedded message-server.pact should be valid");
     InterfaceImpl::from_pact(&pact)
 }
 
@@ -150,28 +148,41 @@ impl MessageRouter {
     }
 
     /// Register an actor with the router
-    pub async fn register_actor(&self, actor_id: TheaterId, mailbox_tx: Sender<ActorMessage>) -> Result<()> {
+    pub async fn register_actor(
+        &self,
+        actor_id: TheaterId,
+        mailbox_tx: Sender<ActorMessage>,
+    ) -> Result<()> {
         let (response_tx, response_rx) = tokio::sync::oneshot::channel();
 
-        self.command_tx.send(RouterCommand::RegisterActor {
-            actor_id,
-            mailbox_tx,
-            response_tx,
-        }).await.map_err(|e| anyhow::anyhow!("Failed to send register command: {}", e))?;
+        self.command_tx
+            .send(RouterCommand::RegisterActor {
+                actor_id,
+                mailbox_tx,
+                response_tx,
+            })
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to send register command: {}", e))?;
 
-        response_rx.await.map_err(|e| anyhow::anyhow!("Failed to receive registration confirmation: {}", e))?;
+        response_rx
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to receive registration confirmation: {}", e))?;
 
         Ok(())
     }
 
     /// Unregister an actor from the router
     pub async fn unregister_actor(&self, actor_id: TheaterId) {
-        let _ = self.command_tx.send(RouterCommand::UnregisterActor { actor_id }).await;
+        let _ = self
+            .command_tx
+            .send(RouterCommand::UnregisterActor { actor_id })
+            .await;
     }
 
     /// Route a message command to the appropriate actor
     pub async fn route_message(&self, command: MessageCommand) -> Result<()> {
-        self.command_tx.send(RouterCommand::RouteMessage { command })
+        self.command_tx
+            .send(RouterCommand::RouteMessage { command })
             .await
             .map_err(|e| anyhow::anyhow!("Failed to send route command: {}", e))?;
 
@@ -188,7 +199,11 @@ impl MessageRouter {
 
         while let Some(cmd) = command_rx.recv().await {
             match cmd {
-                RouterCommand::RegisterActor { actor_id, mailbox_tx, response_tx } => {
+                RouterCommand::RegisterActor {
+                    actor_id,
+                    mailbox_tx,
+                    response_tx,
+                } => {
                     info!("Router: Registering actor {}", actor_id);
                     actors.insert(actor_id, mailbox_tx);
                     let _ = response_tx.send(());
@@ -200,7 +215,9 @@ impl MessageRouter {
                 }
 
                 RouterCommand::RouteMessage { command } => {
-                    if let Err(e) = Self::handle_route_command(&actors, &mut channels, command).await {
+                    if let Err(e) =
+                        Self::handle_route_command(&actors, &mut channels, command).await
+                    {
                         error!("Router: Failed to route message: {}", e);
                     }
                 }
@@ -217,29 +234,45 @@ impl MessageRouter {
         command: MessageCommand,
     ) -> Result<()> {
         match command {
-            MessageCommand::SendMessage { target_id, message, response_tx } => {
+            MessageCommand::SendMessage {
+                target_id,
+                message,
+                response_tx,
+            } => {
                 if let Some(mailbox) = actors.get(&target_id) {
-                    mailbox.send(message).await
+                    mailbox
+                        .send(message)
+                        .await
                         .map_err(|e| anyhow::anyhow!("Failed to send to mailbox: {}", e))?;
                     let _ = response_tx.send(Ok(()));
                 } else {
-                    let _ = response_tx.send(Err(anyhow::anyhow!("Actor not found: {}", target_id)));
+                    let _ =
+                        response_tx.send(Err(anyhow::anyhow!("Actor not found: {}", target_id)));
                 }
             }
 
-            MessageCommand::OpenChannel { target_id, channel_id, initiator_id, initial_message, response_tx } => {
+            MessageCommand::OpenChannel {
+                target_id,
+                channel_id,
+                initiator_id,
+                initial_message,
+                response_tx,
+            } => {
                 // Extract actor ID from ChannelParticipant
                 let actor_id = match &target_id {
                     ChannelParticipant::Actor(id) => id,
                     ChannelParticipant::External => {
-                        let _ = response_tx.send(Err(anyhow::anyhow!("Cannot open channel to external participant")));
+                        let _ = response_tx.send(Err(anyhow::anyhow!(
+                            "Cannot open channel to external participant"
+                        )));
                         return Ok(());
                     }
                 };
 
                 if let Some(mailbox) = actors.get(actor_id) {
                     // Create a wrapper response channel to track the channel opening
-                    let (wrapped_response_tx, wrapped_response_rx) = tokio::sync::oneshot::channel();
+                    let (wrapped_response_tx, wrapped_response_rx) =
+                        tokio::sync::oneshot::channel();
 
                     let msg = ActorMessage::ChannelOpen(ActorChannelOpen {
                         channel_id: channel_id.clone(),
@@ -248,7 +281,9 @@ impl MessageRouter {
                         initial_msg: initial_message,
                     });
 
-                    mailbox.send(msg).await
+                    mailbox
+                        .send(msg)
+                        .await
                         .map_err(|e| anyhow::anyhow!("Failed to send channel open: {}", e))?;
 
                     // Wait for actor's response and track the channel if accepted
@@ -256,13 +291,18 @@ impl MessageRouter {
                         Ok(Ok(accepted)) => {
                             if accepted {
                                 // Track the channel
-                                info!("Router: Tracking channel {} (initiator: {:?}, target: {:?})",
-                                    channel_id, initiator_id, target_id);
-                                channels.insert(channel_id.clone(), ChannelState {
-                                    initiator_id: initiator_id.clone(),
-                                    target_id: target_id.clone(),
-                                    is_open: true,
-                                });
+                                info!(
+                                    "Router: Tracking channel {} (initiator: {:?}, target: {:?})",
+                                    channel_id, initiator_id, target_id
+                                );
+                                channels.insert(
+                                    channel_id.clone(),
+                                    ChannelState {
+                                        initiator_id: initiator_id.clone(),
+                                        target_id: target_id.clone(),
+                                        is_open: true,
+                                    },
+                                );
                             }
                             let _ = response_tx.send(Ok(accepted));
                         }
@@ -270,15 +310,24 @@ impl MessageRouter {
                             let _ = response_tx.send(Err(e));
                         }
                         Err(e) => {
-                            let _ = response_tx.send(Err(anyhow::anyhow!("Actor didn't respond to channel open: {}", e)));
+                            let _ = response_tx.send(Err(anyhow::anyhow!(
+                                "Actor didn't respond to channel open: {}",
+                                e
+                            )));
                         }
                     }
                 } else {
-                    let _ = response_tx.send(Err(anyhow::anyhow!("Actor not found: {}", target_id)));
+                    let _ =
+                        response_tx.send(Err(anyhow::anyhow!("Actor not found: {}", target_id)));
                 }
             }
 
-            MessageCommand::ChannelMessage { channel_id, sender_id, message, response_tx } => {
+            MessageCommand::ChannelMessage {
+                channel_id,
+                sender_id,
+                message,
+                response_tx,
+            } => {
                 // Look up channel state to find the other participant
                 if let Some(channel_state) = channels.get(&channel_id) {
                     if !channel_state.is_open {
@@ -292,7 +341,9 @@ impl MessageRouter {
                     } else if sender_id == channel_state.target_id {
                         &channel_state.initiator_id
                     } else {
-                        let _ = response_tx.send(Err(anyhow::anyhow!("Sender is not a participant in this channel")));
+                        let _ = response_tx.send(Err(anyhow::anyhow!(
+                            "Sender is not a participant in this channel"
+                        )));
                         return Ok(());
                     };
 
@@ -304,11 +355,15 @@ impl MessageRouter {
                                     channel_id,
                                     msg: message,
                                 });
-                                mailbox.send(msg).await
-                                    .map_err(|e| anyhow::anyhow!("Failed to send channel message: {}", e))?;
+                                mailbox.send(msg).await.map_err(|e| {
+                                    anyhow::anyhow!("Failed to send channel message: {}", e)
+                                })?;
                                 let _ = response_tx.send(Ok(()));
                             } else {
-                                let _ = response_tx.send(Err(anyhow::anyhow!("Recipient actor not found: {}", actor_id)));
+                                let _ = response_tx.send(Err(anyhow::anyhow!(
+                                    "Recipient actor not found: {}",
+                                    actor_id
+                                )));
                             }
                         }
                         ChannelParticipant::External => {
@@ -318,16 +373,25 @@ impl MessageRouter {
                         }
                     }
                 } else {
-                    let _ = response_tx.send(Err(anyhow::anyhow!("Channel not found: {}", channel_id)));
+                    let _ =
+                        response_tx.send(Err(anyhow::anyhow!("Channel not found: {}", channel_id)));
                 }
             }
 
-            MessageCommand::ChannelClose { channel_id, sender_id, response_tx } => {
+            MessageCommand::ChannelClose {
+                channel_id,
+                sender_id,
+                response_tx,
+            } => {
                 // Look up and remove channel state
                 if let Some(channel_state) = channels.remove(&channel_id) {
                     // Verify sender is a participant
-                    if sender_id != channel_state.initiator_id && sender_id != channel_state.target_id {
-                        let _ = response_tx.send(Err(anyhow::anyhow!("Sender is not a participant in this channel")));
+                    if sender_id != channel_state.initiator_id
+                        && sender_id != channel_state.target_id
+                    {
+                        let _ = response_tx.send(Err(anyhow::anyhow!(
+                            "Sender is not a participant in this channel"
+                        )));
                         return Ok(());
                     }
 
@@ -355,7 +419,8 @@ impl MessageRouter {
                     info!("Router: Closed channel {}", channel_id);
                     let _ = response_tx.send(Ok(()));
                 } else {
-                    let _ = response_tx.send(Err(anyhow::anyhow!("Channel not found: {}", channel_id)));
+                    let _ =
+                        response_tx.send(Err(anyhow::anyhow!("Channel not found: {}", channel_id)));
                 }
             }
         }
@@ -414,10 +479,7 @@ impl MessageServerHandler {
     /// # Arguments
     /// * `permissions` - Optional permission restrictions
     /// * `router` - Reference to the global MessageRouter
-    pub fn new(
-        permissions: Option<MessageServerPermissions>,
-        router: MessageRouter,
-    ) -> Self {
+    pub fn new(permissions: Option<MessageServerPermissions>, router: MessageRouter) -> Self {
         Self {
             router,
             actor_id: None,
@@ -456,10 +518,7 @@ impl MessageServerHandler {
             ActorMessage::Request(ActorRequest { response_tx, data }) => {
                 // handle-request(state, params: tuple<string, list<u8>>)
                 let request_id = Uuid::new_v4().to_string();
-                let params = Value::Tuple(vec![
-                    Value::String(request_id),
-                    bytes_to_value(data),
-                ]);
+                let params = Value::Tuple(vec![Value::String(request_id), bytes_to_value(data)]);
                 match actor_handle
                     .call_function(
                         "theater:simple/message-server-client.handle-request".to_string(),
@@ -536,9 +595,11 @@ impl MessageServerHandler {
     }
 }
 
-impl Handler for MessageServerHandler
-{
-    fn create_instance(&self, _config: Option<&theater::config::actor_manifest::HandlerConfig>) -> Box<dyn Handler> {
+impl Handler for MessageServerHandler {
+    fn create_instance(
+        &self,
+        _config: Option<&theater::config::actor_manifest::HandlerConfig>,
+    ) -> Box<dyn Handler> {
         Box::new(self.clone())
     }
 
@@ -547,7 +608,12 @@ impl Handler for MessageServerHandler
     }
 
     fn imports(&self) -> Option<Vec<String>> {
-        Some(self.interfaces().iter().map(|i| i.name().to_string()).collect())
+        Some(
+            self.interfaces()
+                .iter()
+                .map(|i| i.name().to_string())
+                .collect(),
+        )
     }
 
     fn exports(&self) -> Option<Vec<String>> {
@@ -1032,7 +1098,9 @@ fn bytes_to_value(data: Vec<u8>) -> Value {
 fn parse_option_bytes_from_tuple(value: &Value) -> Option<Vec<u8>> {
     // First, unwrap the Result if present
     let inner_tuple = match value {
-        Value::Result { value: Ok(inner), .. } => inner.as_ref(),
+        Value::Result {
+            value: Ok(inner), ..
+        } => inner.as_ref(),
         Value::Result { value: Err(_), .. } => return None,
         // Fallback for simple tuple (backward compat)
         Value::Tuple(_) => value,
@@ -1063,17 +1131,20 @@ fn parse_option_bytes_from_tuple(value: &Value) -> Option<Vec<u8>> {
 /// Parse an option<list<u8>> Value into Option<Vec<u8>>
 fn parse_option_bytes(value: &Value) -> Option<Vec<u8>> {
     match value {
-        Value::Option { value: Some(inner), .. } => {
-            match inner.as_ref() {
-                Value::List { items, .. } => {
-                    Some(items.iter().filter_map(|v| match v {
+        Value::Option {
+            value: Some(inner), ..
+        } => match inner.as_ref() {
+            Value::List { items, .. } => Some(
+                items
+                    .iter()
+                    .filter_map(|v| match v {
                         Value::U8(b) => Some(*b),
                         _ => None,
-                    }).collect())
-                }
-                _ => None,
-            }
-        }
+                    })
+                    .collect(),
+            ),
+            _ => None,
+        },
         _ => None,
     }
 }
@@ -1111,12 +1182,10 @@ fn parse_channel_accept(value: &Value) -> bool {
 fn parse_string(input: &Value) -> Result<String, Value> {
     match input {
         Value::String(s) => Ok(s.clone()),
-        Value::Tuple(fields) if fields.len() == 1 => {
-            match &fields[0] {
-                Value::String(s) => Ok(s.clone()),
-                _ => Err(Value::String("Expected string".to_string())),
-            }
-        }
+        Value::Tuple(fields) if fields.len() == 1 => match &fields[0] {
+            Value::String(s) => Ok(s.clone()),
+            _ => Err(Value::String("Expected string".to_string())),
+        },
         _ => Err(Value::String("Expected string".to_string())),
     }
 }
@@ -1129,17 +1198,20 @@ fn parse_address_and_message(input: &Value) -> Result<(String, Vec<u8>), Value> 
                 _ => return Err(Value::String("Expected string for address".to_string())),
             };
             let msg = match &fields[1] {
-                Value::List { items, .. } => {
-                    items.iter().filter_map(|v| match v {
+                Value::List { items, .. } => items
+                    .iter()
+                    .filter_map(|v| match v {
                         Value::U8(b) => Some(*b),
                         _ => None,
-                    }).collect::<Vec<u8>>()
-                }
+                    })
+                    .collect::<Vec<u8>>(),
                 _ => return Err(Value::String("Expected list<u8> for message".to_string())),
             };
             Ok((address, msg))
         }
-        _ => Err(Value::String("Expected tuple (address, message)".to_string())),
+        _ => Err(Value::String(
+            "Expected tuple (address, message)".to_string(),
+        )),
     }
 }
 
@@ -1151,17 +1223,20 @@ fn parse_request_id_and_data(input: &Value) -> Result<(String, Vec<u8>), Value> 
                 _ => return Err(Value::String("Expected string for request_id".to_string())),
             };
             let data = match &fields[1] {
-                Value::List { items, .. } => {
-                    items.iter().filter_map(|v| match v {
+                Value::List { items, .. } => items
+                    .iter()
+                    .filter_map(|v| match v {
                         Value::U8(b) => Some(*b),
                         _ => None,
-                    }).collect::<Vec<u8>>()
-                }
+                    })
+                    .collect::<Vec<u8>>(),
                 _ => return Err(Value::String("Expected list<u8> for data".to_string())),
             };
             Ok((request_id, data))
         }
-        _ => Err(Value::String("Expected tuple (request_id, data)".to_string())),
+        _ => Err(Value::String(
+            "Expected tuple (request_id, data)".to_string(),
+        )),
     }
 }
 

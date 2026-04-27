@@ -492,29 +492,42 @@ impl TheaterRuntime {
                                 match tokio::time::timeout(
                                     std::time::Duration::from_secs(10),
                                     response_rx,
-                                ).await {
+                                )
+                                .await
+                                {
                                     Ok(Ok(Ok(_))) => {
-                                        info!("Actor runtime {:?} acknowledged shutdown in {:?}",
-                                            actor_id_clone, start.elapsed());
+                                        info!(
+                                            "Actor runtime {:?} acknowledged shutdown in {:?}",
+                                            actor_id_clone,
+                                            start.elapsed()
+                                        );
                                     }
                                     Ok(Ok(Err(e))) => {
-                                        error!("Actor runtime {:?} shutdown error: {:?}",
-                                            actor_id_clone, e);
+                                        error!(
+                                            "Actor runtime {:?} shutdown error: {:?}",
+                                            actor_id_clone, e
+                                        );
                                     }
                                     Ok(Err(_)) => {
-                                        error!("Actor runtime {:?} response channel closed",
-                                            actor_id_clone);
+                                        error!(
+                                            "Actor runtime {:?} response channel closed",
+                                            actor_id_clone
+                                        );
                                     }
                                     Err(_) => {
-                                        error!("Timeout waiting for actor runtime {:?} (10s)",
-                                            actor_id_clone);
+                                        error!(
+                                            "Timeout waiting for actor runtime {:?} (10s)",
+                                            actor_id_clone
+                                        );
                                     }
                                 }
                             }
                             // Signal theater to finalize cleanup
-                            let _ = theater_tx.send(TheaterCommand::ActorShutdownComplete {
-                                actor_id: actor_id_clone,
-                            }).await;
+                            let _ = theater_tx
+                                .send(TheaterCommand::ActorShutdownComplete {
+                                    actor_id: actor_id_clone,
+                                })
+                                .await;
                         });
                     }
                 }
@@ -1020,7 +1033,10 @@ impl TheaterRuntime {
             .map(|m| m.save_chain())
             .unwrap_or(false);
 
-        debug!("Actor {:?} found, proceeding with shutdown (save_chain: {})", actor_id, should_save_chain);
+        debug!(
+            "Actor {:?} found, proceeding with shutdown (save_chain: {})",
+            actor_id, should_save_chain
+        );
 
         'chain_block: {
             // Get the actor's chain

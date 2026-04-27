@@ -67,17 +67,14 @@ async fn test_theater_command_spawn_actor() {
         wasm_bytes: vec![0, 1, 2, 3],
         name: Some(actor_name.clone()),
         manifest: None,
-                            init_bytes: None,
+        init_bytes: None,
         response_tx: tx,
         supervisor_tx: None,
         subscription_tx: None,
     };
 
     match command {
-        TheaterCommand::SpawnActor {
-            name: ref n,
-            ..
-        } => {
+        TheaterCommand::SpawnActor { name: ref n, .. } => {
             assert_eq!(*n, Some(actor_name.clone()));
         }
         _ => panic!("Wrong command type"),

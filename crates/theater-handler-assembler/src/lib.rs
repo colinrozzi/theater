@@ -14,7 +14,9 @@ use theater::handler::{Handler, HandlerContext, SharedActorInstance};
 use theater::shutdown::ShutdownReceiver;
 
 // Pack integration
-use theater::pack_bridge::{Ctx, HostLinkerBuilder, InterfaceImpl, LinkerError, TypeHash, Value, ValueType, parse_pact};
+use theater::pack_bridge::{
+    parse_pact, Ctx, HostLinkerBuilder, InterfaceImpl, LinkerError, TypeHash, Value, ValueType,
+};
 
 // ============================================================================
 // Interface Declarations
@@ -28,8 +30,7 @@ const ASSEMBLER_PACT: &str = include_str!("../../../pact/assembler.pact");
 /// Functions:
 /// - wat-to-wasm(wat: string) -> result<list<u8>, string>
 fn assembler_interface() -> InterfaceImpl {
-    let pact = parse_pact(ASSEMBLER_PACT)
-        .expect("embedded assembler.pact should be valid");
+    let pact = parse_pact(ASSEMBLER_PACT).expect("embedded assembler.pact should be valid");
     InterfaceImpl::from_pact(&pact)
 }
 
@@ -104,8 +105,7 @@ impl Handler for AssemblerHandler {
                     match wat::parse_str(&wat) {
                         Ok(wasm_bytes) => {
                             info!("[ASSEMBLER] Success: {} bytes of WASM", wasm_bytes.len());
-                            let bytes: Vec<Value> =
-                                wasm_bytes.into_iter().map(Value::U8).collect();
+                            let bytes: Vec<Value> = wasm_bytes.into_iter().map(Value::U8).collect();
                             Ok(Value::List {
                                 elem_type: ValueType::U8,
                                 items: bytes,
@@ -132,7 +132,12 @@ impl Handler for AssemblerHandler {
     }
 
     fn imports(&self) -> Option<Vec<String>> {
-        Some(self.interfaces().iter().map(|i| i.name().to_string()).collect())
+        Some(
+            self.interfaces()
+                .iter()
+                .map(|i| i.name().to_string())
+                .collect(),
+        )
     }
 
     fn exports(&self) -> Option<Vec<String>> {

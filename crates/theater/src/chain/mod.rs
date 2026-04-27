@@ -59,7 +59,10 @@ pub struct HttpReplayChain(pub Vec<ChainEvent>);
 impl HttpReplayChain {
     /// Get events filtered by event type.
     pub fn events_by_type(&self, event_type: &str) -> Vec<&ChainEvent> {
-        self.0.iter().filter(|e| e.event_type == event_type).collect()
+        self.0
+            .iter()
+            .filter(|e| e.event_type == event_type)
+            .collect()
     }
 
     /// Get all HTTP incoming handler events.

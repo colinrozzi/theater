@@ -105,18 +105,24 @@ async fn execute_list(args: &ChainsArgs, _ctx: &CommandContext) -> Result<(), Cl
 }
 
 /// Inspect a specific chain
-async fn execute_inspect(id: &str, args: &ChainsArgs, _ctx: &CommandContext) -> Result<(), CliError> {
+async fn execute_inspect(
+    id: &str,
+    args: &ChainsArgs,
+    _ctx: &CommandContext,
+) -> Result<(), CliError> {
     let chain_path = find_chain(id, args)?;
 
     println!("Chain: {}", chain_path.display());
     println!();
 
     // Read and parse the chain file
-    let contents = fs::read_to_string(&chain_path)
-        .map_err(|e| CliError::file_operation_failed("read chain", chain_path.display().to_string(), e))?;
+    let contents = fs::read_to_string(&chain_path).map_err(|e| {
+        CliError::file_operation_failed("read chain", chain_path.display().to_string(), e)
+    })?;
 
     let mut event_count = 0;
-    let mut event_types: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    let mut event_types: std::collections::HashMap<String, usize> =
+        std::collections::HashMap::new();
 
     // Parse events (simple parsing of EVENT format)
     for line in contents.lines() {
@@ -136,9 +142,7 @@ async fn execute_inspect(id: &str, args: &ChainsArgs, _ctx: &CommandContext) -> 
         }
     }
 
-    let file_size = fs::metadata(&chain_path)
-        .map(|m| m.len())
-        .unwrap_or(0);
+    let file_size = fs::metadata(&chain_path).map(|m| m.len()).unwrap_or(0);
 
     println!("Events: {}", event_count);
     println!("Size: {}", format_size(file_size));
@@ -216,7 +220,11 @@ async fn execute_gc(args: &ChainsArgs, _ctx: &CommandContext) -> Result<(), CliE
         count += 1;
     }
 
-    println!("Removed {} chain(s), freed {}", count, format_size(total_size));
+    println!(
+        "Removed {} chain(s), freed {}",
+        count,
+        format_size(total_size)
+    );
 
     Ok(())
 }
@@ -227,20 +235,23 @@ async fn execute_save(id: &str, name: Option<&str>, _ctx: &CommandContext) -> Re
     let local_dir = PathBuf::from(LOCAL_CHAINS_DIR);
 
     // Find the chain in global
-    let source_path = find_chain_in_dir(id, &global_dir)?
-        .ok_or_else(|| CliError::invalid_manifest(format!("Chain '{}' not found in global directory", id)))?;
+    let source_path = find_chain_in_dir(id, &global_dir)?.ok_or_else(|| {
+        CliError::invalid_manifest(format!("Chain '{}' not found in global directory", id))
+    })?;
 
     // Create local chains directory
-    fs::create_dir_all(&local_dir)
-        .map_err(|e| CliError::file_operation_failed("create directory", local_dir.display().to_string(), e))?;
+    fs::create_dir_all(&local_dir).map_err(|e| {
+        CliError::file_operation_failed("create directory", local_dir.display().to_string(), e)
+    })?;
 
     // Determine destination name
     let dest_name = name.unwrap_or(id);
     let dest_path = local_dir.join(format!("{}.chain", dest_name));
 
     // Copy chain file
-    fs::copy(&source_path, &dest_path)
-        .map_err(|e| CliError::file_operation_failed("copy chain", dest_path.display().to_string(), e))?;
+    fs::copy(&source_path, &dest_path).map_err(|e| {
+        CliError::file_operation_failed("copy chain", dest_path.display().to_string(), e)
+    })?;
 
     // Copy meta file if exists
     let source_meta = source_path.with_extension("meta.json");
@@ -256,8 +267,9 @@ async fn execute_save(id: &str, name: Option<&str>, _ctx: &CommandContext) -> Re
 
 /// List all .chain files in a directory
 fn list_chains_in_dir(dir: &PathBuf) -> Result<Vec<PathBuf>, CliError> {
-    let entries = fs::read_dir(dir)
-        .map_err(|e| CliError::file_operation_failed("read directory", dir.display().to_string(), e))?;
+    let entries = fs::read_dir(dir).map_err(|e| {
+        CliError::file_operation_failed("read directory", dir.display().to_string(), e)
+    })?;
 
     let mut chains: Vec<PathBuf> = entries
         .filter_map(|e| e.ok())
@@ -294,7 +306,10 @@ fn find_chain(id: &str, args: &ChainsArgs) -> Result<PathBuf, CliError> {
         }
     }
 
-    Err(CliError::invalid_manifest(format!("Chain '{}' not found", id)))
+    Err(CliError::invalid_manifest(format!(
+        "Chain '{}' not found",
+        id
+    )))
 }
 
 /// Find a chain in a specific directory
@@ -310,8 +325,9 @@ fn find_chain_in_dir(id: &str, dir: &PathBuf) -> Result<Option<PathBuf>, CliErro
     }
 
     // Try partial match
-    let entries = fs::read_dir(dir)
-        .map_err(|e| CliError::file_operation_failed("read directory", dir.display().to_string(), e))?;
+    let entries = fs::read_dir(dir).map_err(|e| {
+        CliError::file_operation_failed("read directory", dir.display().to_string(), e)
+    })?;
 
     for entry in entries.filter_map(|e| e.ok()) {
         let path = entry.path();
@@ -329,7 +345,8 @@ fn find_chain_in_dir(id: &str, dir: &PathBuf) -> Result<Option<PathBuf>, CliErro
 
 /// Print a summary of a chain file
 fn print_chain_summary(path: &PathBuf) -> Result<(), CliError> {
-    let name = path.file_stem()
+    let name = path
+        .file_stem()
         .and_then(|s| s.to_str())
         .unwrap_or("unknown");
 
@@ -340,9 +357,7 @@ fn print_chain_summary(path: &PathBuf) -> Result<(), CliError> {
     let actor_name = if meta_path.exists() {
         fs::read_to_string(&meta_path)
             .ok()
-            .and_then(|s| {
-                serde_json::from_str::<serde_json::Value>(&s).ok()
-            })
+            .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
             .and_then(|v| v.get("actor_name")?.as_str().map(String::from))
     } else {
         None

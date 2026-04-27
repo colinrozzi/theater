@@ -39,8 +39,7 @@ use theater::handler::{Handler, HandlerContext, SharedActorInstance};
 use theater::shutdown::ShutdownReceiver;
 
 use theater::pack_bridge::{
-    parse_pact, AsyncCtx, HostLinkerBuilder, InterfaceImpl, LinkerError, TypeHash, Value,
-    ValueType,
+    parse_pact, AsyncCtx, HostLinkerBuilder, InterfaceImpl, LinkerError, TypeHash, Value, ValueType,
 };
 
 // ============================================================================
@@ -445,9 +444,7 @@ impl Handler for LoopHandler {
 fn extract_loop_result(value: &Value) -> Result<Vec<u8>, String> {
     match value {
         Value::Variant {
-            case_name,
-            payload,
-            ..
+            case_name, payload, ..
         } => {
             if case_name == "ok" {
                 // Extract the list<u8> from the ok payload

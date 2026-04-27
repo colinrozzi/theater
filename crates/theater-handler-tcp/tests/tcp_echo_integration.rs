@@ -21,11 +21,7 @@ use theater_handler_tcp::TcpHandler;
 fn create_handler_registry(theater_tx: mpsc::Sender<TheaterCommand>) -> HandlerRegistry {
     let mut registry = HandlerRegistry::new();
 
-    registry.register(RuntimeHandler::new(
-        RuntimeHostConfig {},
-        theater_tx,
-        None,
-    ));
+    registry.register(RuntimeHandler::new(RuntimeHostConfig {}, theater_tx, None));
 
     registry.register(TcpHandler::new(TcpHandlerConfig::default()));
 
@@ -64,9 +60,7 @@ fn wasm_path() -> String {
 #[tokio::test]
 #[ignore = "actor init not called automatically by runtime - needs TheaterCommand::CallActorInit"]
 async fn test_tcp_echo_and_chain() {
-    let _ = tracing_subscriber::fmt()
-        .with_env_filter("info")
-        .try_init();
+    let _ = tracing_subscriber::fmt().with_env_filter("info").try_init();
 
     // ── 0. Check that the WASM binary exists ─────────────────────────────
     let wasm = wasm_path();
@@ -97,8 +91,7 @@ async fn test_tcp_echo_and_chain() {
 
     // ── 2. Spawn the tcp-echo actor ──────────────────────────────────────
     let manifest_str = make_manifest(&wasm, listen_addr);
-    let manifest = ManifestConfig::from_toml_str(&manifest_str)
-        .expect("Failed to parse manifest");
+    let manifest = ManifestConfig::from_toml_str(&manifest_str).expect("Failed to parse manifest");
     let wasm_bytes = resolve_reference(&manifest.package)
         .await
         .expect("Failed to load wasm");
@@ -171,7 +164,7 @@ async fn test_tcp_echo_and_chain() {
     theater_tx
         .send(TheaterCommand::GetActorEvents {
             actor_id: actor_id.clone(),
-                            init_bytes: None,
+            init_bytes: None,
             response_tx: events_tx,
         })
         .await

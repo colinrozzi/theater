@@ -9,7 +9,9 @@ use tokio::sync::{mpsc, oneshot};
 use tokio::time::timeout;
 use tracing::error;
 
-use crate::actor::types::{ActorError, ActorOperation, WasiHttpResponse, DEFAULT_OPERATION_TIMEOUT};
+use crate::actor::types::{
+    ActorError, ActorOperation, WasiHttpResponse, DEFAULT_OPERATION_TIMEOUT,
+};
 use crate::chain::ChainEvent;
 use crate::metrics::ActorMetrics;
 use crate::pack_bridge::{self, InterfaceHash, Value};
@@ -112,7 +114,11 @@ impl ActorHandle {
     ///
     /// Routes through `CallFunctionPack` which decodes the Pack ABI bytes back to
     /// a structured Value before passing to the wasm module.
-    pub async fn call_function_pack_void(&self, name: String, params: Vec<u8>) -> Result<(), ActorError> {
+    pub async fn call_function_pack_void(
+        &self,
+        name: String,
+        params: Vec<u8>,
+    ) -> Result<(), ActorError> {
         let (tx, rx) = oneshot::channel();
 
         self.operation_tx

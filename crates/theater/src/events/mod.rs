@@ -86,17 +86,20 @@ impl TryFrom<Value> for ChainEventPayload {
 
     fn try_from(v: Value) -> Result<Self, Self::Error> {
         match v {
-            Value::Variant { case_name, payload, .. } => {
-                let inner = payload.into_iter().next().ok_or_else(|| {
-                    ConversionError::MissingField("payload".into())
-                })?;
+            Value::Variant {
+                case_name, payload, ..
+            } => {
+                let inner = payload
+                    .into_iter()
+                    .next()
+                    .ok_or_else(|| ConversionError::MissingField("payload".into()))?;
                 match case_name.as_str() {
                     "host-function" => Ok(ChainEventPayload::HostFunction(
                         HostFunctionCall::try_from(inner)?,
                     )),
-                    "wasm" => Ok(ChainEventPayload::Wasm(
-                        wasm::WasmEventData::try_from(inner)?,
-                    )),
+                    "wasm" => Ok(ChainEventPayload::Wasm(wasm::WasmEventData::try_from(
+                        inner,
+                    )?)),
                     "replay-summary" => Ok(ChainEventPayload::ReplaySummary(
                         replay::ReplaySummary::try_from(inner)?,
                     )),
@@ -151,8 +154,8 @@ impl ChainEventData {
     /// A new `ChainEvent` with the pack-encoded event data and metadata.
     /// The hash field will be empty - it's filled in by `StateChain::add_event`.
     pub fn to_chain_event(&self, parent_hash: Option<Vec<u8>>) -> ChainEvent {
-        let encoded_data = pack::abi::encode(&self.data.clone().into_value())
-            .unwrap_or_else(|_| vec![]);
+        let encoded_data =
+            pack::abi::encode(&self.data.clone().into_value()).unwrap_or_else(|_| vec![]);
         ChainEvent {
             parent_hash,
             hash: vec![],

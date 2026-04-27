@@ -11,18 +11,16 @@ use std::sync::RwLock as SyncRwLock;
 use theater::actor::handle::ActorHandle;
 use theater::actor::store::ActorStore;
 use theater::chain::StateChain;
-use theater::pack_bridge::{ActorResult, AsyncRuntime, Ctx, PackInstance, Value};
 use theater::id::TheaterId;
 use theater::messages::TheaterCommand;
+use theater::pack_bridge::{ActorResult, AsyncRuntime, Ctx, PackInstance, Value};
 use tokio::sync::mpsc;
 use tracing::info;
 
 #[tokio::test]
 async fn test_task_manager() {
     // Initialize tracing for test output
-    let _ = tracing_subscriber::fmt()
-        .with_env_filter("info")
-        .try_init();
+    let _ = tracing_subscriber::fmt().with_env_filter("info").try_init();
 
     // Load the task-manager actor WASM
     let wasm_path = concat!(
@@ -53,7 +51,10 @@ async fn test_task_manager() {
     let (operation_tx, _operation_rx) = mpsc::channel(10);
     let (info_tx, _info_rx) = mpsc::channel(10);
     let (control_tx, _control_rx) = mpsc::channel(10);
-    let chain = Arc::new(SyncRwLock::new(StateChain::new(actor_id.clone(), theater_tx.clone())));
+    let chain = Arc::new(SyncRwLock::new(StateChain::new(
+        actor_id.clone(),
+        theater_tx.clone(),
+    )));
     let actor_handle = ActorHandle::new(operation_tx, info_tx, control_tx);
 
     let actor_store = ActorStore::new(
@@ -72,9 +73,9 @@ async fn test_task_manager() {
         actor_store,
         |builder| {
             // Register the log host function
-            builder
-                .interface("theater:simple/runtime")?
-                .func_typed("log", |_ctx: &mut Ctx<'_, ActorStore>, input: Value| {
+            builder.interface("theater:simple/runtime")?.func_typed(
+                "log",
+                |_ctx: &mut Ctx<'_, ActorStore>, input: Value| {
                     // Extract the message from the Value
                     let msg = match input {
                         Value::String(s) => s,
@@ -83,7 +84,8 @@ async fn test_task_manager() {
                     info!("[ACTOR LOG] {}", msg);
                     // Return unit (empty tuple)
                     Value::Tuple(vec![])
-                })?;
+                },
+            )?;
             Ok(())
         },
     )
@@ -200,8 +202,8 @@ async fn test_task_manager() {
     info!("list-tasks returned: {}", tasks_json);
 
     // Verify we have 3 tasks
-    let tasks: serde_json::Value = serde_json::from_slice(&result.value)
-        .expect("Should parse as JSON");
+    let tasks: serde_json::Value =
+        serde_json::from_slice(&result.value).expect("Should parse as JSON");
 
     let tasks_array = tasks.as_array().expect("Should be an array");
     assert_eq!(tasks_array.len(), 3, "Should have 3 tasks");

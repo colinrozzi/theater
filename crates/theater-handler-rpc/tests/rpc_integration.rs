@@ -81,9 +81,7 @@ fn caller_wasm_path() -> String {
 
 #[tokio::test]
 async fn test_rpc_calculator_demo() {
-    let _ = tracing_subscriber::fmt()
-        .with_env_filter("info")
-        .try_init();
+    let _ = tracing_subscriber::fmt().with_env_filter("info").try_init();
 
     // ── 0. Check that the WASM binaries exist ─────────────────────────────
     let calc_wasm = calculator_wasm_path();
@@ -121,8 +119,8 @@ async fn test_rpc_calculator_demo() {
 
     // ── 2. Spawn the calculator actor ─────────────────────────────────────
     let calc_manifest_str = make_calculator_manifest(&calc_wasm);
-    let calc_manifest = ManifestConfig::from_toml_str(&calc_manifest_str)
-        .expect("Failed to parse calc manifest");
+    let calc_manifest =
+        ManifestConfig::from_toml_str(&calc_manifest_str).expect("Failed to parse calc manifest");
     let calc_wasm_bytes = resolve_reference(&calc_manifest.package)
         .await
         .expect("Failed to load calc wasm");
@@ -135,7 +133,7 @@ async fn test_rpc_calculator_demo() {
             wasm_bytes: calc_wasm_bytes,
             name: Some(calc_manifest.name.clone()),
             manifest: Some(calc_manifest),
-                            init_bytes: None,
+            init_bytes: None,
             response_tx: calc_response_tx,
             supervisor_tx: None,
             subscription_tx: Some(calc_subscription_tx),
@@ -169,7 +167,7 @@ async fn test_rpc_calculator_demo() {
             wasm_bytes: caller_wasm_bytes,
             name: Some(caller_manifest.name.clone()),
             manifest: Some(caller_manifest),
-                            init_bytes: None,
+            init_bytes: None,
             response_tx: caller_response_tx,
             supervisor_tx: None,
             subscription_tx: Some(caller_subscription_tx),
@@ -205,7 +203,10 @@ async fn test_rpc_calculator_demo() {
         .expect("handle channel closed")
         .expect("GetActorHandle returned None");
 
-    info!("Got caller handle, invoking run-demo with calculator ID: {}", calc_actor_id);
+    info!(
+        "Got caller handle, invoking run-demo with calculator ID: {}",
+        calc_actor_id
+    );
 
     // Call my:caller.run-demo with the calculator's actor ID
     use theater::pack_bridge::Value;
@@ -225,12 +226,18 @@ async fn test_rpc_calculator_demo() {
     // The result can be either a Variant with "ok" case (from Pack result type)
     // or directly the success string if the runtime extracts the inner value
     match &result {
-        Value::Variant { case_name, payload, .. } => {
+        Value::Variant {
+            case_name, payload, ..
+        } => {
             assert_eq!(case_name, "ok", "Expected ok result, got: {:?}", result);
             info!("Demo completed successfully! Payload: {:?}", payload);
         }
         Value::String(s) => {
-            assert_eq!(s, "Demo completed successfully", "Expected success message, got: {:?}", s);
+            assert_eq!(
+                s, "Demo completed successfully",
+                "Expected success message, got: {:?}",
+                s
+            );
             info!("Demo completed successfully! Result: {:?}", s);
         }
         Value::Tuple(items) => {
@@ -283,7 +290,10 @@ async fn test_rpc_calculator_demo() {
     }
 
     // The caller should have RPC-related events
-    let caller_event_types: Vec<&str> = caller_events.iter().map(|e| e.event_type.as_str()).collect();
+    let caller_event_types: Vec<&str> = caller_events
+        .iter()
+        .map(|e| e.event_type.as_str())
+        .collect();
 
     // Should have log events from the caller
     let log_count = caller_event_types
@@ -291,7 +301,11 @@ async fn test_rpc_calculator_demo() {
         .filter(|t| **t == "theater:simple/runtime/log")
         .count();
     info!("Caller has {} log events", log_count);
-    assert!(log_count >= 5, "Expected at least 5 log events from caller demo, got {}", log_count);
+    assert!(
+        log_count >= 5,
+        "Expected at least 5 log events from caller demo, got {}",
+        log_count
+    );
 
     // The calculator should have been called multiple times
     let calc_event_types: Vec<&str> = calc_events.iter().map(|e| e.event_type.as_str()).collect();
@@ -301,7 +315,11 @@ async fn test_rpc_calculator_demo() {
         .count();
     info!("Calculator has {} log events", calc_log_count);
     // Calculator logs once per operation: add, subtract, multiply, divide (x2)
-    assert!(calc_log_count >= 5, "Expected at least 5 log events from calculator, got {}", calc_log_count);
+    assert!(
+        calc_log_count >= 5,
+        "Expected at least 5 log events from calculator, got {}",
+        calc_log_count
+    );
 
     // ── 7. Tear down ────────────────────────────────────────────────────
     let (stop_tx1, stop_rx1) = oneshot::channel();

@@ -115,10 +115,7 @@ impl OutputFormat for BuildResult {
         ]);
 
         if let Some(wasm_path) = &self.wasm_path {
-            rows.push(vec![
-                "WASM".to_string(),
-                wasm_path.display().to_string(),
-            ]);
+            rows.push(vec!["WASM".to_string(), wasm_path.display().to_string()]);
         }
 
         rows.push(vec![

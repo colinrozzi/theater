@@ -19,10 +19,8 @@ use theater::config::actor_manifest::{HandlerConfig, TerminalHandlerConfig};
 use theater::handler::{Handler, HandlerContext, SharedActorInstance};
 use theater::shutdown::ShutdownReceiver;
 
-
 use theater::pack_bridge::{
-    parse_pact, AsyncCtx, HostLinkerBuilder, InterfaceImpl, LinkerError, TypeHash, Value,
-    ValueType,
+    parse_pact, AsyncCtx, HostLinkerBuilder, InterfaceImpl, LinkerError, TypeHash, Value, ValueType,
 };
 
 // ============================================================================
@@ -364,47 +362,44 @@ impl Handler for TerminalHandler {
             )?
             // enable-input() -> result<_, string>
             // Starts the background input loop that reads from stdin and calls handle-input
-            .func_async_result(
-                "enable-input",
-                {
-                    let actor_handle = self.actor_handle.clone();
-                    let shutdown_receiver = self.shutdown_receiver.clone();
-                    let input_enabled_notify = self.input_enabled_notify.clone();
+            .func_async_result("enable-input", {
+                let actor_handle = self.actor_handle.clone();
+                let shutdown_receiver = self.shutdown_receiver.clone();
+                let input_enabled_notify = self.input_enabled_notify.clone();
+                let state = state.clone();
+                move |_ctx: AsyncCtx<ActorStore>, _input: Value| {
+                    let actor_handle = actor_handle.clone();
+                    let shutdown_receiver = shutdown_receiver.clone();
+                    let input_enabled_notify = input_enabled_notify.clone();
                     let state = state.clone();
-                    move |_ctx: AsyncCtx<ActorStore>, _input: Value| {
-                        let actor_handle = actor_handle.clone();
-                        let shutdown_receiver = shutdown_receiver.clone();
-                        let input_enabled_notify = input_enabled_notify.clone();
-                        let state = state.clone();
-                        async move {
-                            // Get the actor handle
-                            let handle = {
-                                let guard = actor_handle.lock().unwrap();
-                                guard.clone().ok_or_else(|| {
-                                    Value::String("Actor handle not available".to_string())
-                                })?
-                            };
+                    async move {
+                        // Get the actor handle
+                        let handle = {
+                            let guard = actor_handle.lock().unwrap();
+                            guard.clone().ok_or_else(|| {
+                                Value::String("Actor handle not available".to_string())
+                            })?
+                        };
 
-                            // Get the shutdown receiver
-                            let shutdown_rx = {
-                                let mut guard = shutdown_receiver.lock().unwrap();
-                                guard.take().ok_or_else(|| {
-                                    Value::String("Input already enabled".to_string())
-                                })?
-                            };
+                        // Get the shutdown receiver
+                        let shutdown_rx = {
+                            let mut guard = shutdown_receiver.lock().unwrap();
+                            guard
+                                .take()
+                                .ok_or_else(|| Value::String("Input already enabled".to_string()))?
+                        };
 
-                            // Notify setup() that we've taken the receiver
-                            input_enabled_notify.notify_one();
+                        // Notify setup() that we've taken the receiver
+                        input_enabled_notify.notify_one();
 
-                            // Spawn the input loop as a background task
-                            tokio::spawn(run_input_loop(handle, shutdown_rx, state));
+                        // Spawn the input loop as a background task
+                        tokio::spawn(run_input_loop(handle, shutdown_rx, state));
 
-                            info!("Terminal input enabled");
-                            Ok::<Value, Value>(Value::Tuple(vec![]))
-                        }
+                        info!("Terminal input enabled");
+                        Ok::<Value, Value>(Value::Tuple(vec![]))
                     }
-                },
-            )?;
+                }
+            })?;
 
         ctx.mark_satisfied("theater:simple/terminal");
         info!("Terminal host functions registered");

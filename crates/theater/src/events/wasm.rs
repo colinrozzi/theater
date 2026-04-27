@@ -29,7 +29,10 @@ pub struct WasmEvent {
 impl IntoValue for WasmEventData {
     fn into_value(self) -> Value {
         match self {
-            WasmEventData::WasmCall { function_name, params } => Value::Variant {
+            WasmEventData::WasmCall {
+                function_name,
+                params,
+            } => Value::Variant {
                 type_name: String::from("wasm-event-data"),
                 case_name: String::from("wasm-call"),
                 tag: 0,
@@ -41,7 +44,10 @@ impl IntoValue for WasmEventData {
                     ],
                 }],
             },
-            WasmEventData::WasmResult { function_name, result } => {
+            WasmEventData::WasmResult {
+                function_name,
+                result,
+            } => {
                 let (state_value, bytes) = result;
                 Value::Variant {
                     type_name: String::from("wasm-event-data"),
@@ -57,7 +63,10 @@ impl IntoValue for WasmEventData {
                     }],
                 }
             }
-            WasmEventData::WasmError { function_name, message } => Value::Variant {
+            WasmEventData::WasmError {
+                function_name,
+                message,
+            } => Value::Variant {
                 type_name: String::from("wasm-event-data"),
                 case_name: String::from("wasm-error"),
                 tag: 2,
@@ -87,10 +96,13 @@ impl TryFrom<Value> for WasmEventData {
 
     fn try_from(v: Value) -> Result<Self, Self::Error> {
         match v {
-            Value::Variant { case_name, payload, .. } => {
-                let record = payload.into_iter().next().ok_or_else(|| {
-                    ConversionError::MissingField("payload".into())
-                })?;
+            Value::Variant {
+                case_name, payload, ..
+            } => {
+                let record = payload
+                    .into_iter()
+                    .next()
+                    .ok_or_else(|| ConversionError::MissingField("payload".into()))?;
                 let fields = match record {
                     Value::Record { fields, .. } => fields,
                     other => return Err(ConversionError::ExpectedRecord(format!("{:?}", other))),
@@ -107,7 +119,10 @@ impl TryFrom<Value> for WasmEventData {
                                 _ => {}
                             }
                         }
-                        Ok(WasmEventData::WasmCall { function_name, params })
+                        Ok(WasmEventData::WasmCall {
+                            function_name,
+                            params,
+                        })
                     }
                     "wasm-result" => {
                         let mut function_name = String::new();
@@ -136,7 +151,10 @@ impl TryFrom<Value> for WasmEventData {
                                 _ => {}
                             }
                         }
-                        Ok(WasmEventData::WasmError { function_name, message })
+                        Ok(WasmEventData::WasmError {
+                            function_name,
+                            message,
+                        })
                     }
                     "wasm-component-creation-error" => {
                         let mut error = String::new();
@@ -160,15 +178,16 @@ impl TryFrom<Value> for WasmEventData {
 /// Extract bytes from a Value::List of U8 values.
 fn extract_bytes(v: Value) -> Result<Vec<u8>, ConversionError> {
     match v {
-        Value::List { items, .. } => {
-            items.into_iter().map(|item| match item {
+        Value::List { items, .. } => items
+            .into_iter()
+            .map(|item| match item {
                 Value::U8(b) => Ok(b),
                 other => Err(ConversionError::TypeMismatch {
                     expected: "U8".into(),
                     got: format!("{:?}", other),
                 }),
-            }).collect()
-        }
+            })
+            .collect(),
         other => Err(ConversionError::ExpectedList(format!("{:?}", other))),
     }
 }

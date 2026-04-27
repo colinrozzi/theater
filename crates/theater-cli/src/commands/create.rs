@@ -158,7 +158,6 @@ pub async fn execute_async(args: &CreateArgs, ctx: &CommandContext) -> Result<()
     Ok(())
 }
 
-
 /// Fetch WIT dependencies using wkg
 fn fetch_wit_dependencies(project_path: &PathBuf) -> Result<(), CliError> {
     // First try wkg wit fetch with streaming output
@@ -205,12 +204,7 @@ fn build_project(project_path: &PathBuf) -> Result<(), CliError> {
     debug!("Building project at {}", project_path.display());
 
     let mut child = Command::new("cargo")
-        .args(&[
-            "build",
-            "--target",
-            "wasm32-unknown-unknown",
-            "--release",
-        ])
+        .args(&["build", "--target", "wasm32-unknown-unknown", "--release"])
         .current_dir(project_path)
         .spawn()
         .map_err(|e| CliError::BuildFailed {
