@@ -524,6 +524,7 @@ impl ManifestConfig {
     ///     Ok(())
     /// }
     /// ```
+    #[allow(clippy::should_implement_trait)]
     pub fn from_str(content: &str) -> anyhow::Result<Self> {
         tracing::info!("Parsing manifest TOML content: {}", content);
 
@@ -717,9 +718,9 @@ mod tests {
         // Check that the permission policy was parsed correctly
         match &manifest.permission_policy.file_system {
             crate::config::inheritance::HandlerInheritance::Restrict(perms) => {
-                assert_eq!(perms.read, true);
-                assert_eq!(perms.write, true);
-                assert_eq!(perms.execute, false);
+                assert!(perms.read);
+                assert!(perms.write);
+                assert!(!perms.execute);
                 assert_eq!(perms.allowed_paths, Some(vec!["/tmp/test".to_string()]));
             }
             _ => panic!("Expected Restrict variant with FileSystemPermissions"),

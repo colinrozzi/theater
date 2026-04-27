@@ -192,7 +192,7 @@ async fn test_rpc_calculator_demo() {
     let (handle_tx, handle_rx) = oneshot::channel();
     theater_tx
         .send(TheaterCommand::GetActorHandle {
-            actor_id: caller_actor_id.clone(),
+            actor_id: caller_actor_id,
             response_tx: handle_tx,
         })
         .await
@@ -253,7 +253,7 @@ async fn test_rpc_calculator_demo() {
     let (events_tx, events_rx) = oneshot::channel();
     theater_tx
         .send(TheaterCommand::GetActorEvents {
-            actor_id: caller_actor_id.clone(),
+            actor_id: caller_actor_id,
             response_tx: events_tx,
         })
         .await
@@ -273,7 +273,7 @@ async fn test_rpc_calculator_demo() {
     let (calc_events_tx, calc_events_rx) = oneshot::channel();
     theater_tx
         .send(TheaterCommand::GetActorEvents {
-            actor_id: calc_actor_id.clone(),
+            actor_id: calc_actor_id,
             response_tx: calc_events_tx,
         })
         .await

@@ -67,33 +67,29 @@ async fn execute_list(args: &ChainsArgs, _ctx: &CommandContext) -> Result<(), Cl
     let mut found_any = false;
 
     // Check local first (unless --global specified)
-    if !args.global {
-        if local_dir.exists() {
-            let chains = list_chains_in_dir(&local_dir)?;
-            if !chains.is_empty() {
-                println!("Local chains ({}):", local_dir.display());
-                for chain in &chains {
-                    print_chain_summary(chain)?;
-                }
-                found_any = true;
+    if !args.global && local_dir.exists() {
+        let chains = list_chains_in_dir(&local_dir)?;
+        if !chains.is_empty() {
+            println!("Local chains ({}):", local_dir.display());
+            for chain in &chains {
+                print_chain_summary(chain)?;
             }
+            found_any = true;
         }
     }
 
     // Check global (unless --local specified)
-    if !args.local {
-        if global_dir.exists() {
-            let chains = list_chains_in_dir(&global_dir)?;
-            if !chains.is_empty() {
-                if found_any {
-                    println!();
-                }
-                println!("Global chains ({}):", global_dir.display());
-                for chain in &chains {
-                    print_chain_summary(chain)?;
-                }
-                found_any = true;
+    if !args.local && global_dir.exists() {
+        let chains = list_chains_in_dir(&global_dir)?;
+        if !chains.is_empty() {
+            if found_any {
+                println!();
             }
+            println!("Global chains ({}):", global_dir.display());
+            for chain in &chains {
+                print_chain_summary(chain)?;
+            }
+            found_any = true;
         }
     }
 

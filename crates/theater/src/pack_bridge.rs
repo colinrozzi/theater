@@ -199,7 +199,7 @@ impl PackInstance {
 
     /// Get the actor ID from the store.
     pub fn id(&self) -> TheaterId {
-        self.actor_store.id.clone()
+        self.actor_store.id
     }
 
     /// Get the package metadata describing imports and exports.

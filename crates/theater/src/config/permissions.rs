@@ -48,6 +48,7 @@ where
 }
 
 /// Convenience: is `parent` a **superset** of `child` for `Vec`s?
+#[allow(clippy::ptr_arg)]
 fn vec_superset<T: Eq + Hash>(parent: &Vec<T>, child: &Vec<T>) -> bool {
     parent
         .iter()
@@ -127,7 +128,9 @@ pub struct FileSystemPermissions {
 
 impl PartialOrd for FileSystemPermissions {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        if (self.read < other.read) || (self.write < other.write) || (self.execute < other.execute)
+        if (!self.read & other.read)
+            || (!self.write & other.write)
+            || (!self.execute & other.execute)
         {
             return None;
         }
@@ -274,7 +277,7 @@ impl PartialOrd for EnvironmentPermissions {
         if !option_subset(&self.denied_vars, &other.denied_vars, vec_superset) {
             return None;
         }
-        if self.allow_list_all < other.allow_list_all {
+        if !self.allow_list_all & other.allow_list_all {
             return None;
         }
         if !option_subset(
@@ -311,7 +314,7 @@ impl PartialOrd for RandomPermissions {
         if self.max_int < other.max_int {
             return None;
         }
-        if self.allow_crypto_secure < other.allow_crypto_secure {
+        if !self.allow_crypto_secure & other.allow_crypto_secure {
             return None;
         }
         Some(if self == other {

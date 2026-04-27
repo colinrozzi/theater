@@ -111,7 +111,7 @@ impl HttpReplayChain {
 /// Events are serialized to JSON for storage and transmission. The `Display` implementation
 /// provides a human-readable representation of the event, making events easier to read in logs
 /// and debugging output.
-#[derive(Debug, Clone, Serialize, Deserialize, ComponentType, Lift, Lower, Hash, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, ComponentType, Lift, Lower, Eq)]
 #[component(record)]
 pub struct ChainEvent {
     /// Cryptographic hash of this event's content, used as its identifier.
@@ -134,11 +134,7 @@ impl ChainEvent {}
 impl fmt::Display for ChainEvent {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // Format hash as short hex string (first 7 characters)
-        let hash_str = self
-            .hash
-            .iter()
-            .map(|b| format!("{:02x}", b))
-            .collect::<String>();
+        let hash_str = hex::encode(&self.hash);
         let short_hash = if hash_str.len() > 7 {
             &hash_str[0..7]
         } else {
@@ -148,7 +144,7 @@ impl fmt::Display for ChainEvent {
         // Format parent hash if it exists
         let parent_str = match &self.parent_hash {
             Some(ph) => {
-                let ph_str = ph.iter().map(|b| format!("{:02x}", b)).collect::<String>();
+                let ph_str = hex::encode(ph);
                 if ph_str.len() > 7 {
                     format!("(parent: {}...)", &ph_str[0..7])
                 } else {
@@ -204,10 +200,15 @@ impl EventType for ChainEvent {
     }
 }
 
-// implement Eq for ChainEvent
 impl PartialEq for ChainEvent {
     fn eq(&self, other: &Self) -> bool {
         self.hash == other.hash
+    }
+}
+
+impl std::hash::Hash for ChainEvent {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.hash.hash(state);
     }
 }
 
@@ -457,7 +458,7 @@ impl StateChain {
 
         // notify the runtime of the event synchronously to preserve ordering
         if let Err(e) = self.theater_tx.try_send(TheaterCommand::NewEvent {
-            actor_id: self.actor_id.clone(),
+            actor_id: self.actor_id,
             event: event.clone(),
         }) {
             warn!("Failed to send event notification: {}", e);

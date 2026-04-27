@@ -69,7 +69,7 @@ impl OutputManager {
         match format {
             "json" => {
                 let json = serde_json::to_string_pretty(data)
-                    .map_err(|e| crate::error::CliError::Serialization(e))?;
+                    .map_err(crate::error::CliError::Serialization)?;
                 println!("{}", json);
             }
             "yaml" => {

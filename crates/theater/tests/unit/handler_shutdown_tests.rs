@@ -63,7 +63,7 @@ async fn verify_handler_shutdown<H: Handler>(
     let setup_future = handler.setup(actor_handle, actor_instance, shutdown_receiver, event_rx);
 
     // Spawn setup in a task
-    let setup_handle = tokio::spawn(async move { setup_future.await });
+    let setup_handle = tokio::spawn(setup_future);
 
     // Give the setup a moment to start
     tokio::time::sleep(Duration::from_millis(10)).await;

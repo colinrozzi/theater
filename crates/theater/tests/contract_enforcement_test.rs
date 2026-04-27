@@ -12,7 +12,7 @@ use theater::actor::store::ActorStore;
 use theater::chain::StateChain;
 use theater::id::TheaterId;
 use theater::messages::TheaterCommand;
-use theater::pack_bridge::{AsyncRuntime, Ctx, PackInstance, Value, ValueType};
+use theater::pack_bridge::{AsyncRuntime, Ctx, PackInstance, Value};
 use tokio::sync::mpsc;
 use tracing::info;
 
@@ -38,13 +38,13 @@ async fn create_instance() -> PackInstance {
     let (info_tx, _info_rx) = mpsc::channel(10);
     let (control_tx, _control_rx) = mpsc::channel(10);
     let chain = Arc::new(SyncRwLock::new(StateChain::new(
-        actor_id.clone(),
+        actor_id,
         theater_tx.clone(),
     )));
     let actor_handle = ActorHandle::new(operation_tx, info_tx, control_tx);
 
     let actor_store = ActorStore::new(
-        actor_id.clone(),
+        actor_id,
         theater_tx.clone(),
         actor_handle,
         chain,

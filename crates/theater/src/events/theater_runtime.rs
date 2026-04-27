@@ -2,6 +2,7 @@ use crate::config::permissions::HandlerPermission;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(clippy::large_enum_variant)]
 pub enum TheaterRuntimeEventData {
     // Theater runtime lifecycle events
     ActorLoadCall,

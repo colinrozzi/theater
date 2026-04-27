@@ -3,6 +3,7 @@
 //! This crate experiments with the replay functionality in Theater.
 //! It demonstrates recording an actor run and then replaying it using
 //! manifest-based configuration.
+#![allow(clippy::ptr_arg)]
 //!
 //! ## Usage
 //!
@@ -345,7 +346,7 @@ pub async fn run_replay_verification(
     let (handle_tx, handle_rx) = tokio::sync::oneshot::channel();
     theater_tx
         .send(TheaterCommand::GetActorHandle {
-            actor_id: actor_id.clone(),
+            actor_id,
             response_tx: handle_tx,
         })
         .await?;
@@ -386,7 +387,7 @@ pub async fn run_replay_verification(
         let (response_tx, response_rx) = tokio::sync::oneshot::channel();
         message_router
             .route_message(MessageCommand::SendMessage {
-                target_id: actor_id.clone(),
+                target_id: actor_id,
                 message: ActorMessage::Send(ActorSend { data: msg_data }),
                 response_tx,
             })
@@ -428,7 +429,7 @@ pub async fn run_replay_verification(
     let (stop_tx, stop_rx) = tokio::sync::oneshot::channel();
     theater_tx
         .send(TheaterCommand::StopActor {
-            actor_id: actor_id.clone(),
+            actor_id,
             response_tx: stop_tx,
         })
         .await?;
@@ -589,7 +590,7 @@ pub async fn run_request_replay_verification(
     let (handle_tx, handle_rx) = tokio::sync::oneshot::channel();
     theater_tx
         .send(TheaterCommand::GetActorHandle {
-            actor_id: actor_id.clone(),
+            actor_id,
             response_tx: handle_tx,
         })
         .await?;
@@ -630,7 +631,7 @@ pub async fn run_request_replay_verification(
         let (response_tx, response_rx) = tokio::sync::oneshot::channel();
         message_router
             .route_message(MessageCommand::SendMessage {
-                target_id: actor_id.clone(),
+                target_id: actor_id,
                 message: ActorMessage::Send(ActorSend { data: msg_data }),
                 response_tx,
             })
@@ -655,7 +656,7 @@ pub async fn run_request_replay_verification(
         let (cmd_response_tx, cmd_response_rx) = tokio::sync::oneshot::channel();
         message_router
             .route_message(MessageCommand::SendMessage {
-                target_id: actor_id.clone(),
+                target_id: actor_id,
                 message: ActorMessage::Request(ActorRequest {
                     data: request_data,
                     response_tx: actor_response_tx,
@@ -711,7 +712,7 @@ pub async fn run_request_replay_verification(
     let (stop_tx, stop_rx) = tokio::sync::oneshot::channel();
     theater_tx
         .send(TheaterCommand::StopActor {
-            actor_id: actor_id.clone(),
+            actor_id,
             response_tx: stop_tx,
         })
         .await?;
@@ -890,7 +891,7 @@ pub async fn run_supervisor_replay_verification(
     let (handle_tx, handle_rx) = tokio::sync::oneshot::channel();
     theater_tx
         .send(TheaterCommand::GetActorHandle {
-            actor_id: actor_id.clone(),
+            actor_id,
             response_tx: handle_tx,
         })
         .await?;
@@ -928,7 +929,7 @@ pub async fn run_supervisor_replay_verification(
         let (response_tx, response_rx) = tokio::sync::oneshot::channel();
         message_router
             .route_message(MessageCommand::SendMessage {
-                target_id: actor_id.clone(),
+                target_id: actor_id,
                 message: ActorMessage::Send(ActorSend {
                     data: msg.into_bytes(),
                 }),
@@ -955,7 +956,7 @@ pub async fn run_supervisor_replay_verification(
         let (response_tx, response_rx) = tokio::sync::oneshot::channel();
         message_router
             .route_message(MessageCommand::SendMessage {
-                target_id: actor_id.clone(),
+                target_id: actor_id,
                 message: ActorMessage::Send(ActorSend {
                     data: b"list".to_vec(),
                 }),
@@ -982,7 +983,7 @@ pub async fn run_supervisor_replay_verification(
         let (response_tx, response_rx) = tokio::sync::oneshot::channel();
         message_router
             .route_message(MessageCommand::SendMessage {
-                target_id: actor_id.clone(),
+                target_id: actor_id,
                 message: ActorMessage::Send(ActorSend {
                     data: b"stop".to_vec(),
                 }),
@@ -1028,7 +1029,7 @@ pub async fn run_supervisor_replay_verification(
     let (stop_tx, stop_rx) = tokio::sync::oneshot::channel();
     theater_tx
         .send(TheaterCommand::StopActor {
-            actor_id: actor_id.clone(),
+            actor_id,
             response_tx: stop_tx,
         })
         .await?;
@@ -1264,7 +1265,7 @@ pub async fn run_tcp_replay_verification(
     let (handle_tx, handle_rx) = tokio::sync::oneshot::channel();
     theater_tx
         .send(TheaterCommand::GetActorHandle {
-            actor_id: actor_id.clone(),
+            actor_id,
             response_tx: handle_tx,
         })
         .await?;
@@ -1393,7 +1394,7 @@ pub async fn run_tcp_replay_verification(
     let (stop_tx, stop_rx) = tokio::sync::oneshot::channel();
     theater_tx
         .send(TheaterCommand::StopActor {
-            actor_id: actor_id.clone(),
+            actor_id,
             response_tx: stop_tx,
         })
         .await?;

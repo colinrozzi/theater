@@ -103,23 +103,23 @@ pub async fn run(
         match &cli.command {
             Commands::Create(args) => commands::create::execute_async(args, &ctx)
                 .await
-                .map_err(|e| anyhow::Error::from(e)),
+                .map_err(anyhow::Error::from),
             Commands::Build(args) => commands::build::execute_async(args, &ctx)
                 .await
-                .map_err(|e| anyhow::Error::from(e)),
+                .map_err(anyhow::Error::from),
             Commands::Start(args) => commands::start::execute_async(args, &ctx)
                 .await
-                .map_err(|e| anyhow::Error::from(e)),
+                .map_err(anyhow::Error::from),
             Commands::Chains(args) => commands::chains::execute_async(args, &ctx)
                 .await
-                .map_err(|e| anyhow::Error::from(e)),
+                .map_err(anyhow::Error::from),
             Commands::Completion(args) => commands::completion::execute_async(args, &ctx)
                 .await
-                .map_err(|e| anyhow::Error::from(e)),
+                .map_err(anyhow::Error::from),
             Commands::DynamicCompletion(args) => {
                 commands::dynamic_completion::execute_async(args, &ctx)
                     .await
-                    .map_err(|e| anyhow::Error::from(e))
+                    .map_err(anyhow::Error::from)
             }
         }
     };

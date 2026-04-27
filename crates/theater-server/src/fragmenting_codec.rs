@@ -182,7 +182,7 @@ impl FragmentingCodec {
         let chunk_size = MAX_FRAGMENT_DATA_SIZE;
 
         // Calculate how many fragments we need
-        let total_fragments = (total_size + chunk_size - 1) / chunk_size;
+        let total_fragments = total_size.div_ceil(chunk_size);
 
         debug!(
             "Fragmenting message {} into {} fragments (total size: {} bytes, chunk size: {} bytes)",

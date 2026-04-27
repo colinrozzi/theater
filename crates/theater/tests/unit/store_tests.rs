@@ -167,7 +167,7 @@ async fn test_content_store_from_id() {
     assert_eq!(retrieved, test_content);
 
     // Verify store path contains the ID
-    assert!(store.id().len() > 0);
+    assert!(!store.id().is_empty());
 }
 
 #[tokio::test]

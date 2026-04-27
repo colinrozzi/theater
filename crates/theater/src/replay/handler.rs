@@ -354,11 +354,8 @@ impl Handler for ReplayHandler {
                 .map_err(|e| anyhow::anyhow!("Verification task panicked: {:?}", e))?;
 
             // Final check for any divergence message
-            match divergence_rx.try_recv() {
-                Ok(msg) => {
-                    return Err(anyhow::anyhow!("Replay failed: {}", msg));
-                }
-                Err(_) => {}
+            if let Ok(msg) = divergence_rx.try_recv() {
+                return Err(anyhow::anyhow!("Replay failed: {}", msg));
             }
 
             // Verify we got all expected events

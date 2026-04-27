@@ -51,13 +51,13 @@ async fn test_composite_instance_basic() {
     let (info_tx, _info_rx) = mpsc::channel(10);
     let (control_tx, _control_rx) = mpsc::channel(10);
     let chain = Arc::new(SyncRwLock::new(StateChain::new(
-        actor_id.clone(),
+        actor_id,
         theater_tx.clone(),
     )));
     let actor_handle = ActorHandle::new(operation_tx, info_tx, control_tx);
 
     let actor_store = ActorStore::new(
-        actor_id.clone(),
+        actor_id,
         theater_tx.clone(),
         actor_handle,
         chain,

@@ -438,13 +438,12 @@ impl Handler for TcpHandler {
         // Get actor ID from context
         let actor_id = ctx
             .actor_id
-            .clone()
             .expect("actor_id should be set in HandlerContext");
 
         // Store actor_id for this instance
         {
             let mut id_guard = self.actor_id.lock().unwrap();
-            *id_guard = Some(actor_id.clone());
+            *id_guard = Some(actor_id);
         }
 
         // Update max_connections if configured
@@ -452,7 +451,7 @@ impl Handler for TcpHandler {
         // since it's already created. For now, first handler wins.
 
         let state = self.shared_state.clone();
-        let actor_id_for_closures = actor_id.clone();
+        let actor_id_for_closures = actor_id;
 
         // Clone handler fields for use in listen() callback
         let actor_handle_for_listen = self.actor_handle.clone();
@@ -460,43 +459,43 @@ impl Handler for TcpHandler {
 
         // Clone state and actor_id for each closure
         let st_connect = state.clone();
-        let aid_connect = actor_id_for_closures.clone();
+        let aid_connect = actor_id_for_closures;
         let tls_for_connect = self.tls_context.clone();
 
         let st_listen = state.clone();
-        let aid_listen = actor_id_for_closures.clone();
+        let aid_listen = actor_id_for_closures;
         let tls_for_listen = self.tls_context.clone();
 
         let st_accept = state.clone();
-        let aid_accept = actor_id_for_closures.clone();
+        let aid_accept = actor_id_for_closures;
         let tls_for_accept = self.tls_context.clone();
 
         let st_activate = state.clone();
-        let aid_activate = actor_id_for_closures.clone();
+        let aid_activate = actor_id_for_closures;
 
         let st_set_active = state.clone();
-        let aid_set_active = actor_id_for_closures.clone();
+        let aid_set_active = actor_id_for_closures;
         let actor_handle_for_set_active = self.actor_handle.clone();
         let cancel_token_for_set_active = self.cancellation_token.clone();
 
         let st_transfer = state.clone();
-        let aid_transfer = actor_id_for_closures.clone();
+        let aid_transfer = actor_id_for_closures;
 
         let st_peer = state.clone();
-        let aid_peer = actor_id_for_closures.clone();
+        let aid_peer = actor_id_for_closures;
 
         let st_send = state.clone();
-        let aid_send = actor_id_for_closures.clone();
+        let aid_send = actor_id_for_closures;
 
         let st_receive = state.clone();
-        let aid_receive = actor_id_for_closures.clone();
+        let aid_receive = actor_id_for_closures;
         let cancel_token_for_receive = self.cancellation_token.clone();
 
         let st_close = state.clone();
-        let aid_close = actor_id_for_closures.clone();
+        let aid_close = actor_id_for_closures;
 
         let st_close_listener = state.clone();
-        let aid_close_listener = actor_id_for_closures.clone();
+        let aid_close_listener = actor_id_for_closures;
 
         builder
             .interface("theater:simple/tcp")?
@@ -508,7 +507,7 @@ impl Handler for TcpHandler {
                 "connect",
                 move |_ctx: AsyncCtx<ActorStore>, input: Value| {
                     let st = st_connect.clone();
-                    let actor_id = aid_connect.clone();
+                    let actor_id = aid_connect;
                     let tls_ctx = tls_for_connect.clone();
                     async move {
                         let address = parse_string(&input)?;
@@ -570,7 +569,7 @@ impl Handler for TcpHandler {
                 "listen",
                 move |_ctx: AsyncCtx<ActorStore>, input: Value| {
                     let st = st_listen.clone();
-                    let actor_id = aid_listen.clone();
+                    let actor_id = aid_listen;
                     let actor_handle_arc = actor_handle_for_listen.clone();
                     let cancel_token = cancel_token_for_listen.clone();
                     let tls_ctx = tls_for_listen.clone();
@@ -606,7 +605,7 @@ impl Handler for TcpHandler {
 
                         // Clone state for the background task
                         let st_for_task = st.clone();
-                        let actor_id_for_task = actor_id.clone();
+                        let actor_id_for_task = actor_id;
 
                         // Spawn background accept loop with cancellation support
                         tokio::spawn(async move {
@@ -654,7 +653,7 @@ impl Handler for TcpHandler {
                                                     ConnectionEntry {
                                                         stream: StreamState::Full(unified_stream),
                                                         peer_addr,
-                                                        owner: actor_id_for_task.clone(),
+                                                        owner: actor_id_for_task,
                                                         state: ConnectionState::Pending,
                                                         data_mode: DataMode::Passive,
                                                     },
@@ -707,7 +706,7 @@ impl Handler for TcpHandler {
                 "accept",
                 move |_ctx: AsyncCtx<ActorStore>, input: Value| {
                     let st = st_accept.clone();
-                    let actor_id = aid_accept.clone();
+                    let actor_id = aid_accept;
                     let tls_ctx = tls_for_accept.clone();
                     async move {
                         let listener_id_str = parse_string(&input)?;
@@ -776,7 +775,7 @@ impl Handler for TcpHandler {
                 "activate",
                 move |_ctx: AsyncCtx<ActorStore>, input: Value| {
                     let st = st_activate.clone();
-                    let actor_id = aid_activate.clone();
+                    let actor_id = aid_activate;
                     async move {
                         let conn_id_str = parse_string(&input)?;
                         let conn_id = string_to_id(&conn_id_str)?;
@@ -814,7 +813,7 @@ impl Handler for TcpHandler {
                 "set-active",
                 move |_ctx: AsyncCtx<ActorStore>, input: Value| {
                     let st = st_set_active.clone();
-                    let actor_id = aid_set_active.clone();
+                    let actor_id = aid_set_active;
                     let actor_handle_arc = actor_handle_for_set_active.clone();
                     let cancel_token = cancel_token_for_set_active.clone();
                     async move {
@@ -945,7 +944,7 @@ impl Handler for TcpHandler {
                 "transfer",
                 move |ctx: AsyncCtx<ActorStore>, input: Value| {
                     let st = st_transfer.clone();
-                    let actor_id = aid_transfer.clone();
+                    let actor_id = aid_transfer;
                     async move {
                         let (conn_id_str, target_actor_str) = parse_two_strings(&input)?;
                         let conn_id = string_to_id(&conn_id_str)?;
@@ -968,8 +967,8 @@ impl Handler for TcpHandler {
                             }
 
                             // Transfer ownership and activate
-                            let old_owner = entry.owner.clone();
-                            entry.owner = target_actor.clone();
+                            let old_owner = entry.owner;
+                            entry.owner = target_actor;
                             entry.state = ConnectionState::Active;
 
                             info!(
@@ -984,7 +983,7 @@ impl Handler for TcpHandler {
 
                         let (handle_tx, handle_rx) = tokio::sync::oneshot::channel();
                         let get_handle_cmd = theater::messages::TheaterCommand::GetActorHandle {
-                            actor_id: target_actor.clone(),
+                            actor_id: target_actor,
                             response_tx: handle_tx,
                         };
                         theater_tx.send(get_handle_cmd).await
@@ -1022,7 +1021,7 @@ impl Handler for TcpHandler {
                 "peer-address",
                 move |_ctx: AsyncCtx<ActorStore>, input: Value| {
                     let st = st_peer.clone();
-                    let actor_id = aid_peer.clone();
+                    let actor_id = aid_peer;
                     async move {
                         let conn_id_str = parse_string(&input)?;
                         let conn_id = string_to_id(&conn_id_str)?;
@@ -1050,7 +1049,7 @@ impl Handler for TcpHandler {
                 "send",
                 move |_ctx: AsyncCtx<ActorStore>, input: Value| {
                     let st = st_send.clone();
-                    let actor_id = aid_send.clone();
+                    let actor_id = aid_send;
                     async move {
                         let (conn_id_str, data) = parse_string_and_bytes(&input)?;
                         let conn_id = string_to_id(&conn_id_str)?;
@@ -1108,7 +1107,7 @@ impl Handler for TcpHandler {
                 "receive",
                 move |_ctx: AsyncCtx<ActorStore>, input: Value| {
                     let st = st_receive.clone();
-                    let actor_id = aid_receive.clone();
+                    let actor_id = aid_receive;
                     let cancel_token = cancel_token_for_receive.clone();
                     async move {
                         let (conn_id_str, max_bytes) = parse_string_and_u32(&input)?;
@@ -1188,7 +1187,7 @@ impl Handler for TcpHandler {
                 "close",
                 move |_ctx: AsyncCtx<ActorStore>, input: Value| {
                     let st = st_close.clone();
-                    let actor_id = aid_close.clone();
+                    let actor_id = aid_close;
                     async move {
                         let conn_id_str = parse_string(&input)?;
                         let conn_id = string_to_id(&conn_id_str)?;
@@ -1218,7 +1217,7 @@ impl Handler for TcpHandler {
                 "close-listener",
                 move |_ctx: AsyncCtx<ActorStore>, input: Value| {
                     let st = st_close_listener.clone();
-                    let actor_id = aid_close_listener.clone();
+                    let actor_id = aid_close_listener;
                     async move {
                         let listener_id_str = parse_string(&input)?;
                         let listener_id = string_to_id(&listener_id_str)?;

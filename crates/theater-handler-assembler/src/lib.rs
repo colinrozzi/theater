@@ -192,7 +192,7 @@ mod tests {
         "#;
         let result = wat::parse_str(wat);
         assert!(result.is_ok());
-        assert!(result.unwrap().len() > 0);
+        assert!(!result.unwrap().is_empty());
     }
 
     #[test]

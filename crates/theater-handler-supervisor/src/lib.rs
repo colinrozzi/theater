@@ -81,6 +81,7 @@ pub enum SupervisorError {
 /// - Subscribe to all events from children (via subscription_tx)
 /// - Clean up children on shutdown
 #[derive(Clone)]
+#[allow(clippy::type_complexity)]
 pub struct SupervisorHandler {
     /// Channel for receiving lifecycle events (ActorResult) from children
     channel_tx: tokio::sync::mpsc::Sender<ActorResult>,
@@ -156,9 +157,9 @@ impl SupervisorHandler {
 
         // Get the child ID for tracking removal
         let child_id = match &actor_result {
-            ActorResult::Error(e) => e.actor_id.clone(),
-            ActorResult::Success(r) => r.actor_id.clone(),
-            ActorResult::ExternalStop(s) => s.actor_id.clone(),
+            ActorResult::Error(e) => e.actor_id,
+            ActorResult::Success(r) => r.actor_id,
+            ActorResult::ExternalStop(s) => s.actor_id,
         };
 
         // Remove from tracking
@@ -193,7 +194,7 @@ impl SupervisorHandler {
                     info!("Child result: {:?}", child_result);
                     let params = Value::Tuple(vec![
                         Value::String(child_result.actor_id.to_string()),
-                        option_bytes_to_value(child_result.result.into()),
+                        option_bytes_to_value(child_result.result),
                     ]);
                     actor_handle
                         .call_function(
@@ -409,7 +410,7 @@ impl Handler for SupervisorHandler {
                                 // Track the child
                                 {
                                     let mut children_guard = children.lock().unwrap();
-                                    children_guard.insert(actor_id.clone());
+                                    children_guard.insert(actor_id);
                                     debug!("Tracking child {}, total children: {}", actor_id, children_guard.len());
                                 }
                                 Ok(Value::String(actor_id.to_string()))
@@ -525,7 +526,7 @@ impl Handler for SupervisorHandler {
                                 debug!("spawn-and-wait: timeout waiting for child {}, stopping it", actor_id);
                                 let (stop_tx, _) = oneshot::channel();
                                 let _ = theater_tx.send(TheaterCommand::StopActor {
-                                    actor_id: actor_id.clone(),
+                                    actor_id,
                                     response_tx: stop_tx,
                                 }).await;
                                 Err(Value::String(format!("Timeout waiting for child actor {} to complete", actor_id)))
@@ -589,7 +590,7 @@ impl Handler for SupervisorHandler {
                                 // Track the child
                                 {
                                     let mut children_guard = children.lock().unwrap();
-                                    children_guard.insert(actor_id.clone());
+                                    children_guard.insert(actor_id);
                                     debug!("Tracking resumed child {}, total children: {}", actor_id, children_guard.len());
                                 }
                                 Ok(Value::String(actor_id.to_string()))
@@ -919,7 +920,7 @@ impl Handler for SupervisorHandler {
                         debug!("Stopping child {}", child_id);
                         let (response_tx, _response_rx) = oneshot::channel();
                         let cmd = TheaterCommand::StopActor {
-                            actor_id: child_id.clone(),
+                            actor_id: *child_id,
                             response_tx,
                         };
                         if let Err(e) = theater_tx.send(cmd).await {

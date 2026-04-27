@@ -57,7 +57,7 @@ async fn test_chain_integrity() {
 async fn test_save_and_load_chain() {
     let (tx, _rx) = mpsc::channel(10);
     let actor_id = TheaterId::generate();
-    let mut chain = StateChain::new(actor_id.clone(), tx);
+    let mut chain = StateChain::new(actor_id, tx);
 
     // Add events
     for i in 0..3 {

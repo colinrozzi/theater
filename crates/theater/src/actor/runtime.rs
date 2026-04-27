@@ -82,18 +82,13 @@ pub enum ActorRuntimeError {
     UnknownError(#[from] anyhow::Error),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum ActorPhase {
+    #[default]
     Starting,
     Running,
     Paused,
     ShuttingDown,
-}
-
-impl Default for ActorPhase {
-    fn default() -> Self {
-        ActorPhase::Starting
-    }
 }
 
 impl std::fmt::Display for ActorPhase {
@@ -111,6 +106,12 @@ impl std::fmt::Display for ActorPhase {
 pub struct ActorPhaseManager {
     phase_tx: Arc<tokio::sync::watch::Sender<ActorPhase>>,
     phase_rx: tokio::sync::watch::Receiver<ActorPhase>,
+}
+
+impl Default for ActorPhaseManager {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl ActorPhaseManager {
@@ -153,6 +154,7 @@ impl ActorPhaseManager {
 }
 
 impl ActorRuntime {
+    #[allow(clippy::too_many_arguments)]
     pub async fn build_actor_resources(
         id: TheaterId,
         name: String,
@@ -184,7 +186,7 @@ impl ActorRuntime {
         let handle_operation_tx = operation_tx.clone();
         let actor_handle = ActorHandle::new(handle_operation_tx, info_tx, control_tx);
         let actor_store = ActorStore::new(
-            id.clone(),
+            id,
             theater_tx.clone(),
             actor_handle.clone(),
             chain.clone(),
@@ -277,7 +279,7 @@ impl ActorRuntime {
 
         // Create handler context with shutdown controller access
         let mut handler_ctx = HandlerContext::with_shutdown_controller(shutdown_controller.clone());
-        handler_ctx.actor_id = Some(id.clone());
+        handler_ctx.actor_id = Some(id);
         let handlers_for_setup = &mut handlers;
 
         let mut actor_instance = PackInstance::new_with_interceptor(
@@ -513,6 +515,7 @@ impl ActorRuntime {
         Ok((shutdown_controller, handler_tasks))
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn start(
         id: TheaterId,
         name: String,
@@ -529,7 +532,7 @@ impl ActorRuntime {
         control_tx: Sender<ActorControl>,
         initial_state: Value,
         setup_result_tx: Option<tokio::sync::oneshot::Sender<Result<(), String>>>,
-    ) -> () {
+    ) {
         info!("Actor runtime starting communication loops");
         let actor_phase_manager = ActorPhaseManager::new();
 
@@ -653,7 +656,7 @@ impl ActorRuntime {
                     info!("Waiting for operation and info loops to finish");
 
                     // Wait for each individually to identify which one hangs
-                    let op_result = tokio::select! {
+                    let _op_result = tokio::select! {
                         r = &mut operation_handle => {
                             info!("Operation loop exited: {:?}", r.is_ok());
                             r
@@ -665,7 +668,7 @@ impl ActorRuntime {
                         }
                     };
 
-                    let info_result = tokio::select! {
+                    let _info_result = tokio::select! {
                         r = &mut info_handle => {
                             info!("Info loop exited: {:?}", r.is_ok());
                             r
@@ -677,7 +680,7 @@ impl ActorRuntime {
                         }
                     };
 
-                    let setup_result = tokio::select! {
+                    let _setup_result = tokio::select! {
                         r = &mut setup_handle => {
                             info!("Setup loop exited: {:?}", r.is_ok());
                             r
@@ -805,7 +808,7 @@ impl ActorRuntime {
         metrics: &Arc<RwLock<MetricsCollector>>,
         theater_tx: &Sender<TheaterCommand>,
         actor_phase_manager: ActorPhaseManager,
-    ) -> () {
+    ) {
         match op {
             ActorOperation::CallFunctionPack {
                 name,
@@ -838,7 +841,7 @@ impl ActorRuntime {
                     }
                 };
                 let metrics = metrics.write().await;
-                match Self::execute_call_pack(actor_instance, &name, params, &theater_tx, &metrics)
+                match Self::execute_call_pack(actor_instance, &name, params, theater_tx, &metrics)
                     .await
                 {
                     Ok(result) => {
@@ -852,7 +855,7 @@ impl ActorRuntime {
                     Err(actor_error) => {
                         let _ = theater_tx
                             .send(TheaterCommand::ActorError {
-                                actor_id: actor_instance.id().clone(),
+                                actor_id: actor_instance.id(),
                                 error: actor_error.clone(),
                             })
                             .await;
