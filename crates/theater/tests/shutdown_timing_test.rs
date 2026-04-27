@@ -149,7 +149,7 @@ async fn test_actor_shutdown_timing() {
 
     theater_tx
         .send(TheaterCommand::StopActor {
-            actor_id: actor_id.clone(),
+            actor_id,
             response_tx: stop_tx,
         })
         .await
@@ -286,7 +286,7 @@ async fn test_multiple_actor_shutdown_timing() {
 
         theater_tx
             .send(TheaterCommand::StopActor {
-                actor_id: actor_id.clone(),
+                actor_id: *actor_id,
                 response_tx: stop_tx,
             })
             .await
@@ -446,7 +446,7 @@ async fn test_actor_shutdown_with_supervisor_handler() {
 
     theater_tx
         .send(TheaterCommand::StopActor {
-            actor_id: actor_id.clone(),
+            actor_id,
             response_tx: stop_tx,
         })
         .await
@@ -600,7 +600,7 @@ async fn test_actor_shutdown_with_all_handlers() {
 
     theater_tx
         .send(TheaterCommand::StopActor {
-            actor_id: actor_id.clone(),
+            actor_id,
             response_tx: stop_tx,
         })
         .await

@@ -82,6 +82,12 @@ pub struct HandlerRegistry {
     replay_chain: Option<Vec<ChainEvent>>,
 }
 
+impl Default for HandlerRegistry {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl HandlerRegistry {
     pub fn new() -> Self {
         Self {

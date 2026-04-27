@@ -50,6 +50,12 @@ impl std::fmt::Debug for ShutdownController {
     }
 }
 
+impl Default for ShutdownController {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ShutdownController {
     /// Create a new ShutdownController and a ShutdownReceiver
     pub fn new() -> Self {

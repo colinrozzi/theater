@@ -118,6 +118,7 @@ use tokio::sync::oneshot;
 /// or by actors with appropriate supervision permissions. Response channels
 /// ensure that command results are only returned to the original sender.
 #[derive(Debug)]
+#[allow(clippy::large_enum_variant)]
 pub enum TheaterCommand {
     /// # Spawn a new actor
     ///

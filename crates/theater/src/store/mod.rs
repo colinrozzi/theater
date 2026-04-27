@@ -32,6 +32,7 @@ impl ContentRef {
         Self { hash }
     }
 
+    #[allow(clippy::should_implement_trait)]
     pub fn from_str(hash: &str) -> Self {
         Self::new(hash.to_string())
     }
@@ -141,6 +142,7 @@ impl Label {
     }
 
     /// Create a label from a string
+    #[allow(clippy::should_implement_trait)]
     pub fn from_str(name: &str) -> Self {
         Self::new(name.to_string())
     }
@@ -243,6 +245,12 @@ pub struct ContentStore {
     /// Custom base path for the store. If None, uses the default theater home location.
     #[serde(skip)]
     custom_base_path: Option<PathBuf>,
+}
+
+impl Default for ContentStore {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl ContentStore {
@@ -459,6 +467,7 @@ impl ContentStore {
     }
 
     /// Helper method to recursively collect labels
+    #[allow(clippy::only_used_in_recursion)]
     fn collect_labels_recursive<'a>(
         &'a self,
         base_path: &'a Path,
@@ -476,7 +485,7 @@ impl ContentStore {
                 if let Ok(file_type) = entry.file_type().await {
                     if file_type.is_file() {
                         // It's a file/label, so add it to our results
-                        if let Some(rel_path) = path.strip_prefix(base_path).ok() {
+                        if let Ok(rel_path) = path.strip_prefix(base_path) {
                             if let Some(rel_path_str) = rel_path.to_str() {
                                 result.push(rel_path_str.to_string());
                             }

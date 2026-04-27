@@ -136,6 +136,12 @@ pub struct MessageRouter {
     command_tx: Sender<RouterCommand>,
 }
 
+impl Default for MessageRouter {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MessageRouter {
     /// Create a new MessageRouter and spawn its background task
     pub fn new() -> Self {
@@ -499,6 +505,7 @@ impl MessageServerHandler {
     }
 
     /// Process a message for this actor
+    #[allow(clippy::type_complexity)]
     async fn process_actor_message(
         msg: ActorMessage,
         actor_handle: &ActorHandle,
@@ -688,7 +695,7 @@ impl Handler for MessageServerHandler {
                     // to avoid blocking signal_shutdown(). If register() was never called,
                     // this receiver is sitting unconsumed and will block shutdown.
                     let register_receiver = shutdown_receiver_for_register.lock().unwrap().take();
-                    if let Some(mut receiver) = register_receiver {
+                    if let Some(receiver) = register_receiver {
                         receiver.wait_for_shutdown().await;
                         info!("Message server handler: consumed register shutdown receiver");
                     }
@@ -711,7 +718,7 @@ impl Handler for MessageServerHandler {
 
         // Store the actor_id from context for use in start()
         if let Some(ref actor_id) = ctx.actor_id {
-            self.actor_id = Some(actor_id.clone());
+            self.actor_id = Some(*actor_id);
         }
 
         // Get shutdown receivers early - this is needed by register() which may be
@@ -751,7 +758,7 @@ impl Handler for MessageServerHandler {
         let outstanding_requests3 = self.outstanding_requests.clone();
 
         // For register() host function
-        let actor_id_for_register = self.actor_id.clone();
+        let actor_id_for_register = self.actor_id;
         let actor_handle_for_register = self.actor_handle.clone();
         let is_registered = self.is_registered.clone();
         let shutdown_receiver_for_register = self.shutdown_receiver.clone();
@@ -764,7 +771,7 @@ impl Handler for MessageServerHandler {
             // Registers with the message router and starts the consumption loop
             .func_async_result("register", move |_ctx: AsyncCtx<ActorStore>, _input: Value| {
                 let router = router_for_register.clone();
-                let actor_id = actor_id_for_register.clone();
+                let actor_id = actor_id_for_register;
                 let actor_handle_arc = actor_handle_for_register.clone();
                 let is_registered = is_registered.clone();
                 let shutdown_receiver_arc = shutdown_receiver_for_register.clone();
@@ -807,14 +814,14 @@ impl Handler for MessageServerHandler {
 
                     // Create mailbox channel and register with the router
                     let (mailbox_tx, mut mailbox_rx) = tokio::sync::mpsc::channel(100);
-                    if let Err(e) = router.register_actor(actor_id.clone(), mailbox_tx).await {
+                    if let Err(e) = router.register_actor(actor_id, mailbox_tx).await {
                         return Err(Value::String(format!("Failed to register with router: {}", e)));
                     }
 
                     info!("Actor {} registered with message router", actor_id);
 
                     // Spawn background task for message consumption
-                    let actor_id_for_task = actor_id.clone();
+                    let actor_id_for_task = actor_id;
                     let router_for_task = router.clone();
                     tokio::spawn(async move {
                         info!("Message consumption task started for actor {}", actor_id_for_task);
@@ -843,7 +850,7 @@ impl Handler for MessageServerHandler {
 
                         // Unregister from router on shutdown
                         info!("Unregistering actor {} from message router", actor_id_for_task);
-                        router_for_task.unregister_actor(actor_id_for_task.clone()).await;
+                        router_for_task.unregister_actor(actor_id_for_task).await;
                         info!("Message consumption task shutdown complete for actor {}", actor_id_for_task);
                     });
 
@@ -967,7 +974,7 @@ impl Handler for MessageServerHandler {
                 let router = router3.clone();
                 async move {
                     let (address, initial_msg) = parse_address_and_message(&input)?;
-                    let current_actor_id = ctx.data().id.clone();
+                    let current_actor_id = ctx.data().id;
 
                     let target_id = match TheaterId::parse(&address) {
                         Ok(id) => ChannelParticipant::Actor(id),
@@ -975,7 +982,7 @@ impl Handler for MessageServerHandler {
                     };
 
                     let channel_id = ChannelId::new(
-                        &ChannelParticipant::Actor(current_actor_id.clone()),
+                        &ChannelParticipant::Actor(current_actor_id),
                         &target_id,
                     );
                     let channel_id_str = channel_id.as_str().to_string();
@@ -1011,7 +1018,7 @@ impl Handler for MessageServerHandler {
                 let router = router4.clone();
                 async move {
                     let (channel_id_str, msg) = parse_address_and_message(&input)?;
-                    let sender_actor_id = ctx.data().id.clone();
+                    let sender_actor_id = ctx.data().id;
 
                     let channel_id = match ChannelId::parse(&channel_id_str) {
                         Ok(id) => id,
@@ -1042,7 +1049,7 @@ impl Handler for MessageServerHandler {
                 let router = router5.clone();
                 async move {
                     let channel_id_str = parse_string(&input)?;
-                    let sender_actor_id = ctx.data().id.clone();
+                    let sender_actor_id = ctx.data().id;
 
                     let channel_id = match ChannelId::parse(&channel_id_str) {
                         Ok(id) => id,

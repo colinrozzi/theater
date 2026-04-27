@@ -16,7 +16,6 @@
 use anyhow::Result;
 use tokio::sync::mpsc;
 use tracing::{info, Level};
-use tracing_subscriber;
 
 use theater::config::actor_manifest::{
     RuntimeHostConfig, StoreHandlerConfig, SupervisorHostConfig,

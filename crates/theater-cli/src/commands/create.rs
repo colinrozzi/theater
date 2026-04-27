@@ -1,6 +1,6 @@
 use anyhow::Result;
 use clap::Parser;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use tracing::{debug, info, warn};
 
@@ -162,7 +162,7 @@ pub async fn execute_async(args: &CreateArgs, ctx: &CommandContext) -> Result<()
 fn fetch_wit_dependencies(project_path: &PathBuf) -> Result<(), CliError> {
     // First try wkg wit fetch with streaming output
     let child = Command::new("wkg")
-        .args(&["wit", "fetch"])
+        .args(["wit", "fetch"])
         .current_dir(project_path)
         .spawn();
 
@@ -188,7 +188,7 @@ fn fetch_wit_dependencies(project_path: &PathBuf) -> Result<(), CliError> {
 }
 
 /// Try using wasm-tools or other methods to fetch dependencies
-fn try_wasm_tools_fetch(_project_path: &PathBuf) -> Result<(), CliError> {
+fn try_wasm_tools_fetch(_project_path: &Path) -> Result<(), CliError> {
     // For now, just warn the user and provide instructions
     warn!("⚠️  Could not automatically fetch WIT dependencies");
     warn!("Please run one of the following manually:");
@@ -204,7 +204,7 @@ fn build_project(project_path: &PathBuf) -> Result<(), CliError> {
     debug!("Building project at {}", project_path.display());
 
     let mut child = Command::new("cargo")
-        .args(&["build", "--target", "wasm32-unknown-unknown", "--release"])
+        .args(["build", "--target", "wasm32-unknown-unknown", "--release"])
         .current_dir(project_path)
         .spawn()
         .map_err(|e| CliError::BuildFailed {
@@ -236,7 +236,7 @@ fn is_valid_project_name(name: &str) -> bool {
 fn should_init_git() -> bool {
     // Check if git is available
     Command::new("git")
-        .args(&["--version"])
+        .args(["--version"])
         .output()
         .map(|output| output.status.success())
         .unwrap_or(false)
@@ -248,7 +248,7 @@ fn init_git_repo(project_path: &PathBuf, project_name: &str) -> Result<(), CliEr
 
     // Initialize git repository
     let init_output = Command::new("git")
-        .args(&["init"])
+        .args(["init"])
         .current_dir(project_path)
         .output()
         .map_err(|_e| CliError::MissingTool {
@@ -267,7 +267,7 @@ fn init_git_repo(project_path: &PathBuf, project_name: &str) -> Result<(), CliEr
 
     // Add all files
     let add_output = Command::new("git")
-        .args(&["add", "."])
+        .args(["add", "."])
         .current_dir(project_path)
         .output()
         .map_err(|e| CliError::BuildFailed {
@@ -286,7 +286,7 @@ fn init_git_repo(project_path: &PathBuf, project_name: &str) -> Result<(), CliEr
     // Make initial commit
     let commit_message = format!("Initial commit: Theater actor project '{}'", project_name);
     let commit_output = Command::new("git")
-        .args(&["commit", "-m", &commit_message])
+        .args(["commit", "-m", &commit_message])
         .current_dir(project_path)
         .output()
         .map_err(|e| CliError::BuildFailed {

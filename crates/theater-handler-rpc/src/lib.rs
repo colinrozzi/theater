@@ -204,7 +204,7 @@ impl Handler for RpcHandler {
                     let (response_tx, response_rx) = oneshot::channel();
                     if let Err(e) = theater_tx
                         .send(TheaterCommand::GetActorHandle {
-                            actor_id: target_id.clone(),
+                            actor_id: target_id,
                             response_tx,
                         })
                         .await
@@ -282,7 +282,7 @@ impl Handler for RpcHandler {
                         let (response_tx, response_rx) = oneshot::channel();
                         if let Err(e) = theater_tx
                             .send(TheaterCommand::GetActorExportHashes {
-                                actor_id: target_id.clone(),
+                                actor_id: target_id,
                                 response_tx,
                             })
                             .await
@@ -341,7 +341,7 @@ impl Handler for RpcHandler {
                         let (response_tx, response_rx) = oneshot::channel();
                         if let Err(e) = theater_tx
                             .send(TheaterCommand::GetActorExportHashes {
-                                actor_id: target_id.clone(),
+                                actor_id: target_id,
                                 response_tx,
                             })
                             .await

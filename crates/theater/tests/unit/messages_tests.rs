@@ -39,7 +39,7 @@ async fn test_theater_command_stop_actor() {
 
     let (tx, _rx) = oneshot::channel();
     let command = TheaterCommand::StopActor {
-        actor_id: actor_id.clone(),
+        actor_id,
         response_tx: tx,
     };
 
@@ -95,7 +95,7 @@ async fn test_theater_command_new_event() {
     };
 
     let command = TheaterCommand::NewEvent {
-        actor_id: actor_id.clone(),
+        actor_id,
         event: event.clone(),
     };
 
@@ -123,7 +123,7 @@ async fn test_command_channel() {
     let actor_id = TheaterId::generate();
     let (resp_tx, _resp_rx) = oneshot::channel();
     let command = TheaterCommand::StopActor {
-        actor_id: actor_id.clone(),
+        actor_id,
         response_tx: resp_tx,
     };
 

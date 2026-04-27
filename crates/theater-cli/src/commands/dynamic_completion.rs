@@ -90,10 +90,9 @@ async fn get_manifest_completions(current: &str) -> CliResult<Vec<String>> {
     if let Ok(entries) = std::fs::read_dir(".") {
         for entry in entries.flatten() {
             if let Some(name) = entry.file_name().to_str() {
-                if name == "manifest.toml" || name.ends_with(".toml") {
-                    if name.starts_with(current) {
-                        completions.push(name.to_string());
-                    }
+                if (name == "manifest.toml" || name.ends_with(".toml")) && name.starts_with(current)
+                {
+                    completions.push(name.to_string());
                 }
             }
         }

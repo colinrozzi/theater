@@ -218,7 +218,7 @@ impl Handler for RuntimeHandler {
                         };
 
                         let store = ctx.data();
-                        let actor_id = store.id.clone();
+                        let actor_id = store.id;
 
                         info!("[ACTOR] [{}] Shutdown requested: {:?}", actor_id, data);
 
@@ -234,10 +234,7 @@ impl Handler for RuntimeHandler {
                         // operation to complete before the theater processes ShuttingDown.
                         tokio::spawn(async move {
                             if let Err(e) = theater_tx
-                                .send(TheaterCommand::ShuttingDown {
-                                    actor_id: actor_id.clone(),
-                                    data,
-                                })
+                                .send(TheaterCommand::ShuttingDown { actor_id, data })
                                 .await
                             {
                                 tracing::error!(

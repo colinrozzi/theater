@@ -107,6 +107,7 @@ pub enum ManagementCommand {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(clippy::large_enum_variant)]
 pub enum ManagementResponse {
     ActorStarted {
         id: TheaterId,
@@ -764,7 +765,7 @@ impl TheaterServer {
                     let (cmd_tx, cmd_rx) = tokio::sync::oneshot::channel();
                     runtime_tx
                         .send(TheaterCommand::StopActor {
-                            actor_id: id.clone(),
+                            actor_id: id,
                             response_tx: cmd_tx,
                         })
                         .await?;
@@ -787,7 +788,7 @@ impl TheaterServer {
                     let (cmd_tx, cmd_rx) = tokio::sync::oneshot::channel();
                     runtime_tx
                         .send(TheaterCommand::TerminateActor {
-                            actor_id: id.clone(),
+                            actor_id: id,
                             response_tx: cmd_tx,
                         })
                         .await?;
@@ -841,7 +842,7 @@ impl TheaterServer {
                     subscriptions
                         .lock()
                         .await
-                        .entry(id.clone())
+                        .entry(id)
                         .or_default()
                         .insert(subscription);
 
@@ -849,14 +850,14 @@ impl TheaterServer {
                     let (event_tx, mut event_rx) = mpsc::channel(32);
                     runtime_tx
                         .send(TheaterCommand::SubscribeToActor {
-                            actor_id: id.clone(),
+                            actor_id: id,
                             event_tx,
                         })
                         .await
                         .map_err(|e| anyhow::anyhow!("Failed to subscribe: {}", e))?;
 
                     // Add to the list of subscriptions for this connection
-                    connection_subscriptions.push((id.clone(), subscription_id));
+                    connection_subscriptions.push((id, subscription_id));
 
                     // Create a task to forward events to this client
                     let client_tx_clone = cmd_client_tx.clone();
@@ -931,7 +932,7 @@ impl TheaterServer {
                     // Route via MessageRouter
                     match message_router
                         .route_message(theater::messages::MessageCommand::SendMessage {
-                            target_id: id.clone(),
+                            target_id: id,
                             message,
                             response_tx,
                         })
@@ -988,7 +989,7 @@ impl TheaterServer {
                     // Route via MessageRouter
                     match message_router
                         .route_message(theater::messages::MessageCommand::SendMessage {
-                            target_id: id.clone(),
+                            target_id: id,
                             message,
                             response_tx: route_tx,
                         })
@@ -1054,7 +1055,7 @@ impl TheaterServer {
                     let (cmd_tx, cmd_rx) = tokio::sync::oneshot::channel();
                     runtime_tx
                         .send(TheaterCommand::GetActorManifest {
-                            actor_id: id.clone(),
+                            actor_id: id,
                             response_tx: cmd_tx,
                         })
                         .await?;
@@ -1070,7 +1071,7 @@ impl TheaterServer {
                     let (cmd_tx, cmd_rx) = tokio::sync::oneshot::channel();
                     runtime_tx
                         .send(TheaterCommand::GetActorStatus {
-                            actor_id: id.clone(),
+                            actor_id: id,
                             response_tx: cmd_tx,
                         })
                         .await?;
@@ -1086,7 +1087,7 @@ impl TheaterServer {
                     let (cmd_tx, cmd_rx) = tokio::sync::oneshot::channel();
                     runtime_tx
                         .send(TheaterCommand::RestartActor {
-                            actor_id: id.clone(),
+                            actor_id: id,
                             response_tx: cmd_tx,
                         })
                         .await?;
@@ -1106,7 +1107,7 @@ impl TheaterServer {
                     let (cmd_tx, cmd_rx) = tokio::sync::oneshot::channel();
                     runtime_tx
                         .send(TheaterCommand::GetActorState {
-                            actor_id: id.clone(),
+                            actor_id: id,
                             response_tx: cmd_tx,
                         })
                         .await?;
@@ -1119,7 +1120,7 @@ impl TheaterServer {
                     let (cmd_tx, cmd_rx) = tokio::sync::oneshot::channel();
                     runtime_tx
                         .send(TheaterCommand::GetActorEvents {
-                            actor_id: id.clone(),
+                            actor_id: id,
                             response_tx: cmd_tx,
                         })
                         .await?;
@@ -1155,7 +1156,7 @@ impl TheaterServer {
                     let (cmd_tx, cmd_rx) = tokio::sync::oneshot::channel();
                     runtime_tx
                         .send(TheaterCommand::GetActorMetrics {
-                            actor_id: id.clone(),
+                            actor_id: id,
                             response_tx: cmd_tx,
                         })
                         .await?;

@@ -313,7 +313,7 @@ impl TheaterRuntime {
                     {
                         Ok(actor_id) => {
                             info!("Successfully spawned actor: {:?}", actor_id);
-                            if let Err(e) = response_tx.send(Ok(actor_id.clone())) {
+                            if let Err(e) = response_tx.send(Ok(actor_id)) {
                                 error!(
                                     "Failed to send success response for actor {:?}: {:?}",
                                     actor_id, e
@@ -406,7 +406,7 @@ impl TheaterRuntime {
                     {
                         Ok(actor_id) => {
                             info!("Successfully resumed actor: {:?}", actor_id);
-                            if let Err(e) = response_tx.send(Ok(actor_id.clone())) {
+                            if let Err(e) = response_tx.send(Ok(actor_id)) {
                                 error!(
                                     "Failed to send success response for actor {:?}: {:?}",
                                     actor_id, e
@@ -465,7 +465,7 @@ impl TheaterRuntime {
                     if let Some(proc) = self.actors.get(&actor_id) {
                         if let Some(supervisor_tx) = &proc.supervisor_tx {
                             let message = ActorResult::Success(ChildResult {
-                                actor_id: actor_id.clone(),
+                                actor_id,
                                 result: data,
                             });
                             if let Err(e) = supervisor_tx.send(message).await {
@@ -477,7 +477,7 @@ impl TheaterRuntime {
                     // child StopActor commands (prevents deadlock when parent
                     // shutdown triggers child cleanup via supervisor handler)
                     let theater_tx = self.theater_tx.clone();
-                    let actor_id_clone = actor_id.clone();
+                    let actor_id_clone = actor_id;
                     if let Some(proc) = self.actors.get(&actor_id) {
                         let control_tx = proc.control_tx.clone();
                         tokio::spawn(async move {
@@ -543,13 +543,11 @@ impl TheaterRuntime {
                     }
 
                     // Remove from channels
-                    let id_for_channels = ChannelParticipant::Actor(actor_id.clone());
+                    let id_for_channels = ChannelParticipant::Actor(actor_id);
                     let mut channels_to_remove = Vec::new();
                     for (channel_id, participants) in self.channels.iter_mut() {
-                        if participants.remove(&id_for_channels) {
-                            if participants.is_empty() {
-                                channels_to_remove.push(channel_id.clone());
-                            }
+                        if participants.remove(&id_for_channels) && participants.is_empty() {
+                            channels_to_remove.push(channel_id.clone());
                         }
                     }
                     for channel_id in channels_to_remove {
@@ -585,7 +583,7 @@ impl TheaterRuntime {
                     let actor_info: Vec<_> = self
                         .actors
                         .iter()
-                        .map(|(id, proc)| (id.clone(), proc.name.clone()))
+                        .map(|(id, proc)| (*id, proc.name.clone()))
                         .collect();
                     if let Err(e) = response_tx.send(Ok(actor_info)) {
                         error!("Failed to send actor info list: {:?}", e);
@@ -752,12 +750,12 @@ impl TheaterRuntime {
         debug!("Starting actor runtime");
 
         if let Some(tx) = subscription_tx {
-            self.subscribe_to_actor(actor_id.clone(), tx)
+            self.subscribe_to_actor(actor_id, tx)
                 .expect("Failed to subscribe to actor");
         }
 
         let chain = Arc::new(RwLock::new(StateChain::new(
-            actor_id.clone(),
+            actor_id,
             self.theater_tx.clone(),
         )));
 
@@ -766,7 +764,7 @@ impl TheaterRuntime {
             chain_guard.set_run_meta(Some(actor_name.clone()), None);
         }
 
-        self.chains.insert(actor_id.clone(), chain.clone());
+        self.chains.insert(actor_id, chain.clone());
 
         // If manifest provided, check for replay handler and create modified registry
         let (handler_registry, initial_state) = if let Some(ref manifest) = manifest {
@@ -800,7 +798,7 @@ impl TheaterRuntime {
 
         // Start the actor in a detached task
         // Each actor gets its own AsyncRuntime for isolation
-        let actor_id_for_task = actor_id.clone();
+        let actor_id_for_task = actor_id;
         let actor_name_for_task = actor_name.clone();
         let pack_runtime = AsyncRuntime::new();
 
@@ -809,7 +807,7 @@ impl TheaterRuntime {
 
         let actor_runtime_process = tokio::spawn(async move {
             let _actor_runtime = ActorRuntime::start(
-                actor_id_for_task.clone(),
+                actor_id_for_task,
                 actor_name_for_task,
                 wasm_bytes,
                 pack_runtime,
@@ -851,7 +849,7 @@ impl TheaterRuntime {
         );
 
         let process = ActorProcess {
-            actor_id: actor_id.clone(),
+            actor_id,
             name: actor_name,
             process: actor_runtime_process,
             mailbox_tx,
@@ -864,7 +862,7 @@ impl TheaterRuntime {
             supervisor_tx,
         };
 
-        self.actors.insert(actor_id.clone(), process);
+        self.actors.insert(actor_id, process);
         debug!("Actor process registered with runtime");
 
         Ok(actor_id)
@@ -878,8 +876,7 @@ impl TheaterRuntime {
         if let Some(subscribers) = self.subscriptions.get_mut(&actor_id) {
             subscribers.push(subscription_tx);
         } else {
-            self.subscriptions
-                .insert(actor_id.clone(), vec![subscription_tx]);
+            self.subscriptions.insert(actor_id, vec![subscription_tx]);
         }
         Ok(())
     }
@@ -890,7 +887,7 @@ impl TheaterRuntime {
         // Send to global subscribers first
         let mut global_to_remove: Vec<usize> = Vec::new();
         for (index, subscriber) in self.global_subscriptions.iter().enumerate() {
-            if let Err(e) = subscriber.send((actor_id.clone(), Ok(event.clone()))).await {
+            if let Err(e) = subscriber.send((actor_id, Ok(event.clone()))).await {
                 error!("Failed to send event to global subscriber: {}", e);
                 global_to_remove.push(index);
             }
@@ -906,7 +903,7 @@ impl TheaterRuntime {
 
         // Use entry API to handle the per-actor subscription map
         let should_remove = if let std::collections::hash_map::Entry::Occupied(mut entry) =
-            self.subscriptions.entry(actor_id.clone())
+            self.subscriptions.entry(actor_id)
         {
             let subscribers: &mut Vec<Sender<Result<ChainEvent, ActorError>>> = entry.get_mut();
             let mut to_remove: Vec<usize> = Vec::new();
@@ -950,7 +947,7 @@ impl TheaterRuntime {
         if let Some(proc) = self.actors.get(&actor_id) {
             if let Some(supervisor_tx) = &proc.supervisor_tx {
                 let error_message = ActorResult::Error(ChildError {
-                    actor_id: actor_id.clone(),
+                    actor_id,
                     error: error.clone(),
                 });
                 // Send error and immediately shutdown - don't wait for response
@@ -1162,7 +1159,7 @@ impl TheaterRuntime {
 
         // Remove actor from any channel registrations
         let mut channels_to_remove = Vec::new();
-        let id_for_channels = ChannelParticipant::Actor(actor_id.clone());
+        let id_for_channels = ChannelParticipant::Actor(actor_id);
         for (channel_id, participants) in self.channels.iter_mut() {
             if participants.remove(&id_for_channels) {
                 debug!("Removed actor {:?} from channel {:?}", actor_id, channel_id);
@@ -1185,6 +1182,7 @@ impl TheaterRuntime {
     }
 
     /// Actor is shutting itself down
+    #[allow(dead_code)]
     async fn shutdown_actor(&mut self, actor_id: TheaterId, data: Option<Vec<u8>>) -> Result<()> {
         debug!("Shutting down actor: {:?}", actor_id);
 
@@ -1192,7 +1190,7 @@ impl TheaterRuntime {
         if let Some(proc) = self.actors.get(&actor_id) {
             if let Some(supervisor_tx) = &proc.supervisor_tx {
                 let message = ActorResult::Success(ChildResult {
-                    actor_id: actor_id.clone(),
+                    actor_id,
                     result: data,
                 });
                 if let Err(e) = supervisor_tx.send(message).await {
@@ -1220,9 +1218,7 @@ impl TheaterRuntime {
         // notify the actors parents
         if let Some(proc) = self.actors.get(&actor_id) {
             if let Some(supervisor_tx) = &proc.supervisor_tx {
-                let error_message = ActorResult::ExternalStop(ChildExternalStop {
-                    actor_id: actor_id.clone(),
-                });
+                let error_message = ActorResult::ExternalStop(ChildExternalStop { actor_id });
                 if let Err(e) = supervisor_tx.send(error_message).await {
                     error!("Failed to send error message to supervisor: {}", e);
                 }
@@ -1242,10 +1238,7 @@ impl TheaterRuntime {
     async fn get_actor_state(&self, actor_id: TheaterId) -> Result<Value> {
         if let Some(proc) = self.actors.get(&actor_id) {
             // Send a message to get the actor's state
-            let (tx, rx): (
-                oneshot::Sender<Result<Value, ActorError>>,
-                oneshot::Receiver<Result<Value, ActorError>>,
-            ) = oneshot::channel();
+            let (tx, rx) = oneshot::channel();
             proc.info_tx
                 .send(ActorInfo::GetState { response_tx: tx })
                 .await?;
@@ -1268,10 +1261,7 @@ impl TheaterRuntime {
     ) -> std::result::Result<Vec<ChainEvent>, TheaterRuntimeError> {
         if let Some(proc) = self.actors.get(&actor_id) {
             // Send a message to get the actor's events
-            let (tx, rx): (
-                oneshot::Sender<Result<Vec<ChainEvent>, ActorError>>,
-                oneshot::Receiver<Result<Vec<ChainEvent>, ActorError>>,
-            ) = oneshot::channel();
+            let (tx, rx) = oneshot::channel();
 
             if let Err(e) = proc
                 .info_tx
@@ -1305,10 +1295,7 @@ impl TheaterRuntime {
     async fn get_actor_metrics(&self, actor_id: TheaterId) -> Result<ActorMetrics> {
         if let Some(proc) = self.actors.get(&actor_id) {
             // Send a message to get the actor's metrics
-            let (tx, rx): (
-                oneshot::Sender<Result<ActorMetrics, ActorError>>,
-                oneshot::Receiver<Result<ActorMetrics, ActorError>>,
-            ) = oneshot::channel();
+            let (tx, rx) = oneshot::channel();
             proc.info_tx
                 .send(ActorInfo::GetMetrics { response_tx: tx })
                 .await?;

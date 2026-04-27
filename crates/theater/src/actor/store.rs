@@ -78,7 +78,7 @@ impl ActorStore {
         initial_state: Value,
     ) -> Self {
         Self {
-            id: id.clone(),
+            id,
             theater_tx: theater_tx.clone(),
             chain,
             state: initial_state,
@@ -96,7 +96,7 @@ impl ActorStore {
     ///
     /// A clone of the actor's TheaterId.
     pub fn get_id(&self) -> TheaterId {
-        self.id.clone()
+        self.id
     }
 
     /// # Get the Theater command channel

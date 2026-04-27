@@ -84,7 +84,7 @@ fn format_event_full(event: &ChainEvent, actor_id: &TheaterId) -> String {
     let parent_hex = event
         .parent_hash
         .as_ref()
-        .map(|h| hex::encode(h))
+        .map(hex::encode)
         .unwrap_or_else(|| "none".to_string());
     let data_str = String::from_utf8_lossy(&event.data);
 
@@ -129,7 +129,7 @@ impl ChainFileManager {
     }
 
     fn write_event(&mut self, actor_id: &TheaterId, event: &ChainEvent) -> Result<(), CliError> {
-        let file = self.files.entry(actor_id.clone()).or_insert_with(|| {
+        let file = self.files.entry(*actor_id).or_insert_with(|| {
             let path = self.dir.join(format!("{}.chain", actor_id));
             OpenOptions::new()
                 .create(true)
@@ -318,7 +318,7 @@ pub async fn execute_async(args: &StartArgs, ctx: &CommandContext) -> Result<(),
         let (handle_tx, handle_rx) = tokio::sync::oneshot::channel();
         theater_tx
             .send(TheaterCommand::GetActorHandle {
-                actor_id: actor_id.clone(),
+                actor_id,
                 response_tx: handle_tx,
             })
             .await
@@ -442,7 +442,7 @@ pub async fn execute_async(args: &StartArgs, ctx: &CommandContext) -> Result<(),
 
                 let (stop_tx, stop_rx) = tokio::sync::oneshot::channel();
                 let _ = theater_tx.send(TheaterCommand::StopActor {
-                    actor_id: actor_id.clone(),
+                    actor_id,
                     response_tx: stop_tx,
                 }).await;
 
