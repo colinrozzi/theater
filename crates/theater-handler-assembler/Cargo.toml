@@ -13,7 +13,7 @@ rust-version.workspace = true
 
 [dependencies]
 # Core theater dependencies
-theater = { path = "../theater" }
+theater.workspace = true
 
 # WAT to WASM conversion
 wat = "1"
