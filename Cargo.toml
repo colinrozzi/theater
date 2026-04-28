@@ -58,6 +58,7 @@ tracing = "0.1"
 tracing-subscriber = "0.3"
 uuid = { version = "1.6", features = ["v4", "serde"] }
 
+theater-chain = { version = "0.3.1", path = "crates/theater-chain" }
 theater = { version = "0.3.1", path = "crates/theater" }
 theater-client = { version = "0.3.1", path = "crates/theater-client" }
 theater-server = { version = "0.3.1", path = "crates/theater-server" }

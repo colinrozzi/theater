@@ -13,7 +13,7 @@ rust-version.workspace = true
 
 [dependencies]
 # Core theater dependencies
-theater = { path = "../theater" }
+theater.workspace = true
 
 # Async runtime
 tokio = { version = "1.0", features = ["full"] }

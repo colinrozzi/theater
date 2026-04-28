@@ -13,7 +13,7 @@ rust-version.workspace = true
 
 [dependencies]
 # Core theater dependencies
-theater = { path = "../theater" }
+theater.workspace = true
 
 # Async runtime
 tokio = { version = "1.0", features = ["full"] }
@@ -32,4 +32,4 @@ serde_json = "1.0"
 [dev-dependencies]
 test-log = "0.2"
 tracing-subscriber = "0.3"
-theater-handler-runtime = { path = "../theater-handler-runtime" }
+theater-handler-runtime.workspace = true
