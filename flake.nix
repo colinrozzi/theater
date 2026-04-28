@@ -12,15 +12,9 @@
     flake-utils.url = "github:numtide/flake-utils";
 
     crane.url = "github:ipetkov/crane";
-
-    # Pack runtime dependency
-    pack = {
-      url = "github:colinrozzi/pack/v0.2.0";
-      flake = false;
-    };
   };
 
-  outputs = { self, nixpkgs, rust-overlay, flake-utils, crane, pack, ... }:
+  outputs = { self, nixpkgs, rust-overlay, flake-utils, crane, ... }:
     flake-utils.lib.eachDefaultSystem (system:
       let
         overlays = [ (import rust-overlay) ];
@@ -29,7 +23,7 @@
         };
 
         # Rust toolchain matching workspace rust-version
-        rustToolchain = pkgs.rust-bin.stable."1.85.0".default.override {
+        rustToolchain = pkgs.rust-bin.stable.latest.default.override {
           extensions = [
             "rust-src"
             "rust-analyzer"
@@ -52,18 +46,12 @@
             (craneLib.filterCargoSources path type);
         };
 
-        # Use theater source directly, pack will be added during build
         src = theaterSrc;
 
         # Common build arguments
         commonArgs = {
           inherit src;
           strictDeps = true;
-
-          # Set up pack as sibling directory so ../pack paths resolve
-          postUnpack = ''
-            cp -rL ${pack} pack
-          '';
 
           buildInputs = with pkgs; [
             openssl
@@ -87,15 +75,14 @@
         # Build dependencies only (for caching)
         cargoArtifacts = craneLib.buildDepsOnly (commonArgs // {
           pname = "theater-deps";
-          version = "0.2.1";
-          # Note: pack is added via postUnpack from the flake input
+          version = "0.3.0";
         });
 
         # Build the workspace
         theaterPackage = craneLib.buildPackage (commonArgs // {
           inherit cargoArtifacts;
           pname = "theater";
-          version = "0.2.1";
+          version = "0.3.0";
 
           # Build all workspace members
           cargoExtraArgs = "--workspace";
@@ -166,42 +153,64 @@
             cargo test --test golden_chain_test --test composite_integration_test --test shutdown_timing_test "''${@}"
           '';
 
-          # Update pack dependency to a new version tag
-          update-pack = pkgs.writeShellScriptBin "update-pack" ''
+          # Release: bump version and create a PR
+          # After merge, CI publishes to crates.io and creates the git tag
+          release = pkgs.writeShellScriptBin "theater-release" ''
             set -e
-            VERSION="''${1:?Usage: nix run .#update-pack <version> (e.g. v0.2.1)}"
 
-            echo "Updating pack to $VERSION..."
+            BUMP="''${1:-patch}"
+            CURRENT=$(${pkgs.gnugrep}/bin/grep -m1 '^version = ' Cargo.toml | ${pkgs.gnused}/bin/sed 's/version = "\(.*\)"/\1/')
 
-            # Update Cargo.toml git tags
-            ${pkgs.gnused}/bin/sed -i \
-              "s|colinrozzi/pack\.git\", tag = \"[^\"]*\"|colinrozzi/pack.git\", tag = \"$VERSION\"|g" \
-              Cargo.toml
-            echo "  Updated Cargo.toml"
+            IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT"
 
-            # Update flake.nix URL (only the inputs.pack.url line)
-            ${pkgs.python3}/bin/python3 -c "
-import re, sys
-with open('flake.nix', 'r') as f:
-    content = f.read()
-content = re.sub(
-    r'(url = \"github:colinrozzi/pack)/[^\"]*',
-    r'\1/' + sys.argv[1],
-    content,
-    count=1
-)
-with open('flake.nix', 'w') as f:
-    f.write(content)
-            " "$VERSION"
-            echo "  Updated flake.nix"
+            case "$BUMP" in
+              patch) PATCH=$((PATCH + 1)) ;;
+              minor) MINOR=$((MINOR + 1)); PATCH=0 ;;
+              major) MAJOR=$((MAJOR + 1)); MINOR=0; PATCH=0 ;;
+              [0-9]*.[0-9]*.[0-9]*) IFS='.' read -r MAJOR MINOR PATCH <<< "$BUMP" ;;
+              *) echo "Usage: nix run .#release -- [patch|minor|major|X.Y.Z]"; exit 1 ;;
+            esac
 
-            # Update flake lock
-            nix flake update pack
-            echo "  Updated flake.lock"
+            NEW="$MAJOR.$MINOR.$PATCH"
+            echo "Bumping $CURRENT -> $NEW"
+
+            # Update workspace version
+            ${pkgs.gnused}/bin/sed -i "0,/^version = \"$CURRENT\"/s//version = \"$NEW\"/" Cargo.toml
+
+            # Update workspace dependency versions
+            ${pkgs.gnused}/bin/sed -i "s/version = \"$CURRENT\", path/version = \"$NEW\", path/g" Cargo.toml
+
+            # Update flake.nix version
+            ${pkgs.gnused}/bin/sed -i "s/version = \"$CURRENT\"/version = \"$NEW\"/g" flake.nix
+
+            # Update Cargo.lock
+            cargo update --workspace 2>/dev/null || true
 
             echo ""
-            echo "Pack updated to $VERSION. Changes:"
-            git diff --stat
+            echo "Updated to v$NEW"
+            echo ""
+
+            BRANCH="release-v$NEW"
+
+            if command -v jj &>/dev/null; then
+              jj describe -m "release v$NEW"
+              jj bookmark create "$BRANCH" -r @ 2>/dev/null || jj bookmark set "$BRANCH" -r @
+              jj git push --bookmark "$BRANCH" --allow-new
+            else
+              git checkout -b "$BRANCH"
+              git add -A
+              git commit -m "release v$NEW"
+              git push -u origin "$BRANCH"
+            fi
+
+            ${pkgs.gh}/bin/gh pr create \
+              --title "release v$NEW" \
+              --body "Bump version to v$NEW. Merging will publish to crates.io and create a GitHub release." \
+              --base main \
+              --head "$BRANCH"
+
+            echo ""
+            echo "PR created. Merge to publish v$NEW to crates.io."
           '';
 
           # Create a PR from the current jj revision
@@ -213,19 +222,16 @@ with open('flake.nix', 'w') as f:
               exit 1
             fi
 
-            # Extract first line as branch name
             TITLE=$(echo "$DESCRIPTION" | head -1)
-            BRANCH=$(echo "$TITLE" | tr '[:upper:]' '[:lower:]' | tr ' ' '-' | tr -cd 'a-z0-9-' | head -c 50)
+            BRANCH=$(echo "$TITLE" | tr '[:upper:]' '[:lower:]' | tr ' ' '-' | tr -cd 'a-z0-9-' | ${pkgs.gnused}/bin/sed 's/--*/-/g; s/^-//; s/-$//' | head -c 50)
 
             echo "Creating PR: $TITLE"
             echo "Branch: $BRANCH"
             echo ""
 
-            # Create/move bookmark and push
             jj bookmark create "$BRANCH" -r @ 2>/dev/null || jj bookmark set "$BRANCH" -r @
             jj git push --bookmark "$BRANCH" --allow-new
 
-            # Create PR via gh
             ${pkgs.gh}/bin/gh pr create \
               --title "$TITLE" \
               --body "$DESCRIPTION" \
@@ -236,12 +242,9 @@ with open('flake.nix', 'w') as f:
 
         # Development shell
         devShells.default = craneLib.devShell {
-          # Include checks so their dependencies are available
           checks = self.checks.${system};
 
-          # Additional development tools
           packages = with pkgs; [
-            # Rust tools
             cargo-watch
             cargo-edit
             cargo-audit
@@ -249,22 +252,18 @@ with open('flake.nix', 'w') as f:
             cargo-udeps
             cargo-nextest
 
-            # WASM tooling
             wasmtime
             wasm-tools
             wit-bindgen
 
-            # Build dependencies
             pkg-config
             openssl
             llvmPackages.llvm
             llvmPackages.clang
             cmake
 
-            # Debugging
             lldb
 
-            # GitHub CLI
             gh
           ] ++ pkgs.lib.optionals pkgs.stdenv.isDarwin [
             pkgs.darwin.apple_sdk.frameworks.Security
@@ -272,37 +271,23 @@ with open('flake.nix', 'w') as f:
             pkgs.libiconv
           ];
 
-          # Environment variables
           RUST_SRC_PATH = "${rustToolchain}/lib/rustlib/src/rust/library";
           LIBCLANG_PATH = "${pkgs.llvmPackages.libclang.lib}/lib";
           RUST_BACKTRACE = "1";
 
           shellHook = ''
             echo ""
-            echo "========================================"
-            echo "  Theater Development Environment"
-            echo "========================================"
-            echo ""
-            echo "Rust:      $(rustc --version)"
-            echo "Cargo:     $(cargo --version)"
-            echo "wasmtime:  $(wasmtime --version)"
-            echo ""
-            echo "Available WASM targets:"
-            echo "  - wasm32-unknown-unknown"
-            echo "  - wasm32-wasip1"
+            echo "Theater Development Environment"
+            echo "Rust: $(rustc --version)"
             echo ""
             echo "Commands:"
             echo "  cargo build                    Build the workspace"
             echo "  cargo test                     Run tests"
             echo "  cargo clippy                   Run linter"
-            echo "  cargo fmt                      Format code"
-            echo "  cargo watch -x check           Watch for changes"
-            echo "  nix flake check                Run all checks"
             echo "  nix run .#build-test-actors    Build WASM test actors"
             echo "  nix run .#test                 Build actors + run all tests"
-            echo ""
-            echo "Note: Requires ../pack to be present"
-            echo "========================================"
+            echo "  nix run .#pr                   Create PR from jj revision"
+            echo "  nix run .#release -- patch     Bump version, create release PR"
             echo ""
           '';
         };

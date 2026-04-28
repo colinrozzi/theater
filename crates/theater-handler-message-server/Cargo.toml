@@ -1,5 +1,6 @@
 [package]
 name = "theater-handler-message-server"
+description = "Message server handler for Theater WebAssembly runtime"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true

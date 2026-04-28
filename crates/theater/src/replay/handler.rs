@@ -95,7 +95,7 @@ impl ReplayState {
 
     /// Get the output for the current event.
     /// Assumes the event data contains a serialized HostFunctionCall.
-    pub fn current_output(&self) -> Option<pack::abi::Value> {
+    pub fn current_output(&self) -> Option<packr::abi::Value> {
         let event = self.current_event()?;
         let call = crate::events::decode_host_function_call(&event.data)?;
         Some(call.output)

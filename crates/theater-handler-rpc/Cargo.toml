@@ -1,5 +1,6 @@
 [package]
 name = "theater-handler-rpc"
+description = "RPC handler for Theater WebAssembly runtime - inter-actor communication"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true

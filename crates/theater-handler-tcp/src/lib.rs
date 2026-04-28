@@ -117,7 +117,7 @@ enum DataMode {
 /// Represents the stream state based on data mode
 enum StreamState {
     /// Full stream available for passive mode operations
-    Full(UnifiedStream),
+    Full(Box<UnifiedStream>),
     /// Only write half available - read half taken by active mode task
     WriteOnly(UnifiedWriteHalf),
     /// Connection closed or stream taken
@@ -549,7 +549,7 @@ impl Handler for TcpHandler {
                         st.connections.lock().await.insert(
                             id,
                             ConnectionEntry {
-                                stream: StreamState::Full(unified_stream),
+                                stream: StreamState::Full(Box::new(unified_stream)),
                                 peer_addr,
                                 owner: actor_id,
                                 state: ConnectionState::Active, // Outbound = active
@@ -651,7 +651,7 @@ impl Handler for TcpHandler {
                                                 st_for_task.connections.lock().await.insert(
                                                     conn_id,
                                                     ConnectionEntry {
-                                                        stream: StreamState::Full(unified_stream),
+                                                        stream: StreamState::Full(Box::new(unified_stream)),
                                                         peer_addr,
                                                         owner: actor_id_for_task,
                                                         state: ConnectionState::Pending,
@@ -755,7 +755,7 @@ impl Handler for TcpHandler {
                         st.connections.lock().await.insert(
                             conn_id,
                             ConnectionEntry {
-                                stream: StreamState::Full(unified_stream),
+                                stream: StreamState::Full(Box::new(unified_stream)),
                                 peer_addr,
                                 owner: actor_id,
                                 state: ConnectionState::Pending, // Starts pending!

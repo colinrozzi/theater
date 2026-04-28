@@ -2,21 +2,16 @@ use super::permissions::RestrictWith;
 use serde::{Deserialize, Serialize};
 
 /// Defines how a handler should inherit permissions from its parent
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(tag = "type", content = "config")]
 pub enum HandlerInheritance<T> {
+    #[default]
     #[serde(rename = "inherit")]
     Inherit,
     #[serde(rename = "disallow")]
     Disallow,
     #[serde(rename = "restrict")]
     Restrict(T),
-}
-
-impl<T> Default for HandlerInheritance<T> {
-    fn default() -> Self {
-        Self::Inherit
-    }
 }
 
 impl<T> PartialEq for HandlerInheritance<T>
