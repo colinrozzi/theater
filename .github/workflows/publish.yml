@@ -61,9 +61,9 @@ jobs:
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
 
-      # Layer 2: depends on theater-chain
+      # Layer 2: depends on theater-chain (--no-verify because dev-deps on handlers aren't published yet)
       - name: Publish theater
-        run: nix develop --command cargo publish -p theater
+        run: nix develop --command cargo publish -p theater --no-verify
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
 
