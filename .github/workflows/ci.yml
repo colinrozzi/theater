@@ -56,4 +56,7 @@ jobs:
           '
 
       - name: Integration tests
-        run: nix develop --command cargo test -p theater --test contract_enforcement_test --test pact_contract_test --test golden_chain_test --test composite_integration_test --test shutdown_timing_test
+        run: nix develop --command cargo test -p theater --test contract_enforcement_test --test pact_contract_test --test golden_chain_test --test composite_integration_test
+
+      - name: Handler integration tests
+        run: nix develop --command cargo test -p theater-tests

@@ -18,6 +18,7 @@ members = [
     "crates/theater-handler-rpc",
     "crates/theater-handler-loop",
     "crates/theater-replay-experimenting",
+    "crates/theater-tests",
 ]
 exclude = [
     "crates/theater-handler-tcp/examples/tcp-echo",
