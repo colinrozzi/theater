@@ -23,7 +23,7 @@ use theater::pack_bridge::{
 // ============================================================================
 
 /// Embedded assembler.pact file content
-const ASSEMBLER_PACT: &str = include_str!("../../../pact/assembler.pact");
+const ASSEMBLER_PACT: &str = include_str!("../assembler.pact");
 
 /// Declare the wisp:assembler/runtime interface from the pact file.
 ///
