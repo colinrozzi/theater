@@ -38,7 +38,7 @@ exclude = [
 resolver = "2"
 
 [workspace.package]
-version = "0.3.1"
+version = "0.3.2"
 edition = "2021"
 authors = ["Colin Rozzi <colinrozzi+theater@gmail.com>"]
 license = "Apache-2.0"
@@ -58,32 +58,32 @@ tracing = "0.1"
 tracing-subscriber = "0.3"
 uuid = { version = "1.6", features = ["v4", "serde"] }
 
-theater-chain = { version = "0.3.1", path = "crates/theater-chain" }
-theater = { version = "0.3.1", path = "crates/theater" }
-theater-client = { version = "0.3.1", path = "crates/theater-client" }
-theater-server = { version = "0.3.1", path = "crates/theater-server" }
+theater-chain = { version = "0.3.2", path = "crates/theater-chain" }
+theater = { version = "0.3.2", path = "crates/theater" }
+theater-client = { version = "0.3.2", path = "crates/theater-client" }
+theater-server = { version = "0.3.2", path = "crates/theater-server" }
 # Theater-specific handlers
-theater-handler-message-server = { version = "0.3.1", path = "crates/theater-handler-message-server" }
-theater-handler-runtime = { version = "0.3.1", path = "crates/theater-handler-runtime" }
-theater-handler-store = { version = "0.3.1", path = "crates/theater-handler-store" }
-theater-handler-supervisor = { version = "0.3.1", path = "crates/theater-handler-supervisor" }
-theater-handler-tcp = { version = "0.3.1", path = "crates/theater-handler-tcp" }
-theater-handler-terminal = { version = "0.3.1", path = "crates/theater-handler-terminal" }
-theater-handler-timer = { version = "0.3.1", path = "crates/theater-handler-timer" }
-theater-handler-assembler = { version = "0.3.1", path = "crates/theater-handler-assembler" }
-theater-handler-rpc = { version = "0.3.1", path = "crates/theater-handler-rpc" }
-theater-handler-loop = { version = "0.3.1", path = "crates/theater-handler-loop" }
+theater-handler-message-server = { version = "0.3.2", path = "crates/theater-handler-message-server" }
+theater-handler-runtime = { version = "0.3.2", path = "crates/theater-handler-runtime" }
+theater-handler-store = { version = "0.3.2", path = "crates/theater-handler-store" }
+theater-handler-supervisor = { version = "0.3.2", path = "crates/theater-handler-supervisor" }
+theater-handler-tcp = { version = "0.3.2", path = "crates/theater-handler-tcp" }
+theater-handler-terminal = { version = "0.3.2", path = "crates/theater-handler-terminal" }
+theater-handler-timer = { version = "0.3.2", path = "crates/theater-handler-timer" }
+theater-handler-assembler = { version = "0.3.2", path = "crates/theater-handler-assembler" }
+theater-handler-rpc = { version = "0.3.2", path = "crates/theater-handler-rpc" }
+theater-handler-loop = { version = "0.3.2", path = "crates/theater-handler-loop" }
 # DEPRECATED: WASI handlers (moved to crates/deprecated/)
-# theater-handler-environment = { version = "0.3.1", path = "crates/deprecated/theater-handler-environment" }
-# theater-handler-filesystem = { version = "0.3.1", path = "crates/deprecated/theater-handler-filesystem" }
-# theater-handler-http = { version = "0.3.1", path = "crates/deprecated/theater-handler-http" }
-# theater-handler-http-client = { version = "0.3.1", path = "crates/deprecated/theater-handler-http-client" }
-# theater-handler-http-framework = { version = "0.3.1", path = "crates/deprecated/theater-handler-http-framework" }
-# theater-handler-io = { version = "0.3.1", path = "crates/deprecated/theater-handler-io" }
-# theater-handler-process = { version = "0.3.1", path = "crates/deprecated/theater-handler-process" }
-# theater-handler-random = { version = "0.3.1", path = "crates/deprecated/theater-handler-random" }
-# theater-handler-sockets = { version = "0.3.1", path = "crates/deprecated/theater-handler-sockets" }
-# theater-handler-timing = { version = "0.3.1", path = "crates/deprecated/theater-handler-timing" }
+# theater-handler-environment = { version = "0.3.2", path = "crates/deprecated/theater-handler-environment" }
+# theater-handler-filesystem = { version = "0.3.2", path = "crates/deprecated/theater-handler-filesystem" }
+# theater-handler-http = { version = "0.3.2", path = "crates/deprecated/theater-handler-http" }
+# theater-handler-http-client = { version = "0.3.2", path = "crates/deprecated/theater-handler-http-client" }
+# theater-handler-http-framework = { version = "0.3.2", path = "crates/deprecated/theater-handler-http-framework" }
+# theater-handler-io = { version = "0.3.2", path = "crates/deprecated/theater-handler-io" }
+# theater-handler-process = { version = "0.3.2", path = "crates/deprecated/theater-handler-process" }
+# theater-handler-random = { version = "0.3.2", path = "crates/deprecated/theater-handler-random" }
+# theater-handler-sockets = { version = "0.3.2", path = "crates/deprecated/theater-handler-sockets" }
+# theater-handler-timing = { version = "0.3.2", path = "crates/deprecated/theater-handler-timing" }
 
 # Pack runtime integration (Graph ABI-based WASM runtime)
 packr = "0.4.0"
