@@ -1,0 +1,25 @@
+[package]
+name = "theater-tests"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[dependencies]
+# Needed for examples
+theater.workspace = true
+theater-handler-message-server.workspace = true
+theater-handler-runtime.workspace = true
+theater-handler-store.workspace = true
+theater-handler-supervisor.workspace = true
+theater-handler-tcp.workspace = true
+theater-handler-timer.workspace = true
+theater-handler-loop.workspace = true
+theater-handler-terminal.workspace = true
+theater-handler-rpc.workspace = true
+anyhow.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+[dev-dependencies]
+tempfile = "3.8.1"
