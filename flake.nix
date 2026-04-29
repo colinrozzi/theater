@@ -75,14 +75,14 @@
         # Build dependencies only (for caching)
         cargoArtifacts = craneLib.buildDepsOnly (commonArgs // {
           pname = "theater-deps";
-          version = "0.3.4";
+          version = "0.3.5";
         });
 
         # Build the workspace
         theaterPackage = craneLib.buildPackage (commonArgs // {
           inherit cargoArtifacts;
           pname = "theater";
-          version = "0.3.4";
+          version = "0.3.5";
 
           # Build all workspace members
           cargoExtraArgs = "--workspace";
