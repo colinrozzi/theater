@@ -28,7 +28,7 @@ use theater::pack_bridge::{
 // ============================================================================
 
 /// Embedded terminal.pact file content
-const TERMINAL_PACT: &str = include_str!("../../../pact/terminal.pact");
+const TERMINAL_PACT: &str = include_str!("../terminal.pact");
 
 /// Declare the theater:simple/terminal interface from the pact file.
 fn terminal_interface() -> InterfaceImpl {

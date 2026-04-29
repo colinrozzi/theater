@@ -42,7 +42,7 @@ use theater::pack_bridge::{
 // ============================================================================
 
 /// Embedded rpc.pact file content
-const RPC_PACT: &str = include_str!("../../../pact/rpc.pact");
+const RPC_PACT: &str = include_str!("../rpc.pact");
 
 /// Declare the theater:simple/rpc interface from the pact file.
 ///

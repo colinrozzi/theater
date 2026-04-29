@@ -37,7 +37,7 @@ use tracing::{debug, error, info, warn};
 // ============================================================================
 
 /// Embedded supervisor.pact file content
-const SUPERVISOR_PACT: &str = include_str!("../../../pact/supervisor.pact");
+const SUPERVISOR_PACT: &str = include_str!("../supervisor.pact");
 
 /// Declare the theater:simple/supervisor interface from the pact file.
 ///

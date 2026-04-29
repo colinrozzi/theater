@@ -179,7 +179,10 @@
             )
             for crate in "''${CRATES[@]}"; do
               echo "=== $crate ==="
-              cargo publish -p "$crate" --dry-run --allow-dirty 2>&1 | tail -3
+              if ! cargo publish -p "$crate" --dry-run 2>&1 | tail -5; then
+                echo "FAILED: $crate"
+                exit 1
+              fi
               echo ""
             done
             echo "All crates pass dry-run!"

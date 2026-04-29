@@ -48,7 +48,7 @@ use theater::pack_bridge::{
 // ============================================================================
 
 /// Embedded store.pact file content
-const STORE_PACT: &str = include_str!("../../../pact/store.pact");
+const STORE_PACT: &str = include_str!("../store.pact");
 
 /// Declare the theater:simple/store interface from the pact file.
 /// Content-refs are represented as strings (hash values) for simplicity.

@@ -29,7 +29,7 @@ use theater::pack_bridge::{
 // ============================================================================
 
 /// Embedded timer.pact file content
-const TIMER_PACT: &str = include_str!("../../../pact/timer.pact");
+const TIMER_PACT: &str = include_str!("../timer.pact");
 
 /// Declare the theater:simple/timer interface from the pact file.
 fn timer_interface() -> InterfaceImpl {
