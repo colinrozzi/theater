@@ -76,7 +76,7 @@ pub enum MessageServerError {
 // ============================================================================
 
 /// Embedded message-server.pact file content
-const MESSAGE_SERVER_PACT: &str = include_str!("../../../pact/message-server.pact");
+const MESSAGE_SERVER_PACT: &str = include_str!("../message-server.pact");
 
 /// Declare the theater:simple/message-server-host interface from the pact file.
 ///

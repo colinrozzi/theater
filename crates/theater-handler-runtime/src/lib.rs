@@ -26,7 +26,7 @@ use theater::pack_bridge::{
 // ============================================================================
 
 /// Embedded runtime.pact file content
-const RUNTIME_PACT: &str = include_str!("../../../pact/runtime.pact");
+const RUNTIME_PACT: &str = include_str!("../runtime.pact");
 
 /// Declare the theater:simple/runtime interface from the pact file.
 ///

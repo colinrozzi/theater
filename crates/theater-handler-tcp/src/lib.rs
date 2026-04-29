@@ -82,7 +82,7 @@ use theater::pack_bridge::{
 // ============================================================================
 
 /// Embedded tcp.pact file content
-const TCP_PACT: &str = include_str!("../../../pact/tcp.pact");
+const TCP_PACT: &str = include_str!("../tcp.pact");
 
 /// Declare the theater:simple/tcp interface from the pact file.
 fn tcp_interface() -> InterfaceImpl {

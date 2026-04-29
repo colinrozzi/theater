@@ -47,7 +47,7 @@ use theater::pack_bridge::{
 // ============================================================================
 
 /// Embedded loop.pact file content
-const LOOP_PACT: &str = include_str!("../../../pact/loop.pact");
+const LOOP_PACT: &str = include_str!("../loop.pact");
 
 /// Declare the theater:simple/loop interface from the pact file.
 fn loop_interface() -> InterfaceImpl {
