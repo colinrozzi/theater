@@ -29,7 +29,3 @@ tracing = "0.1"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 
-[dev-dependencies]
-test-log = "0.2"
-tracing-subscriber = "0.3"
-theater-handler-runtime.workspace = true

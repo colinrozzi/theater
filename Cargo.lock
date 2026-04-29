@@ -3435,13 +3435,10 @@ dependencies = [
  "anyhow",
  "serde",
  "serde_json",
- "test-log",
  "theater",
- "theater-handler-runtime",
  "thiserror 1.0.69",
  "tokio",
  "tracing",
- "tracing-subscriber",
 ]
 
 [[package]]
@@ -3500,12 +3497,10 @@ dependencies = [
  "rustls-pemfile 2.2.0",
  "serde_json",
  "theater",
- "theater-handler-runtime",
  "tokio",
  "tokio-rustls 0.26.4",
  "tokio-util",
  "tracing",
- "tracing-subscriber",
  "webpki-roots 0.26.11",
 ]
 
@@ -3519,10 +3514,8 @@ dependencies = [
  "signal-hook",
  "signal-hook-tokio",
  "theater",
- "theater-handler-runtime",
  "tokio",
  "tracing",
- "tracing-subscriber",
 ]
 
 [[package]]
@@ -3598,7 +3591,10 @@ name = "theater-tests"
 version = "0.3.5"
 dependencies = [
  "anyhow",
+ "serde",
+ "serde_json",
  "tempfile",
+ "test-log",
  "theater",
  "theater-handler-loop",
  "theater-handler-message-server",
