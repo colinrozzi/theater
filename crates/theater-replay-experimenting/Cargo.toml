@@ -2,6 +2,7 @@
 name = "theater-replay-experimenting"
 version.workspace = true
 edition = "2021"
+publish = false
 
 [dependencies]
 theater.workspace = true

@@ -52,30 +52,7 @@ jobs:
       - uses: DeterminateSystems/magic-nix-cache-action@main
 
       - name: Publish all crates
-        run: |
-          CRATES=(
-            theater-chain
-            theater
-            theater-handler-assembler
-            theater-handler-loop
-            theater-handler-message-server
-            theater-handler-rpc
-            theater-handler-runtime
-            theater-handler-store
-            theater-handler-supervisor
-            theater-handler-tcp
-            theater-handler-terminal
-            theater-handler-timer
-            theater-server
-            theater-cli
-            theater-client
-            theater-server-cli
-          )
-          for crate in "${CRATES[@]}"; do
-            echo "=== Publishing $crate ==="
-            nix develop --command cargo publish -p "$crate" --no-verify
-            echo ""
-          done
+        run: nix develop --command cargo publish --workspace
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
 
