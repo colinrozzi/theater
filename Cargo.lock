@@ -3265,7 +3265,7 @@ dependencies = [
 
 [[package]]
 name = "theater"
-version = "0.3.6"
+version = "0.3.7"
 dependencies = [
  "anyhow",
  "axum",
@@ -3311,7 +3311,7 @@ dependencies = [
 
 [[package]]
 name = "theater-chain"
-version = "0.3.6"
+version = "0.3.7"
 dependencies = [
  "base64 0.21.7",
  "bytes",
@@ -3334,7 +3334,7 @@ dependencies = [
 
 [[package]]
 name = "theater-cli"
-version = "0.3.6"
+version = "0.3.7"
 dependencies = [
  "anyhow",
  "chrono",
@@ -3373,7 +3373,7 @@ dependencies = [
 
 [[package]]
 name = "theater-client"
-version = "0.3.6"
+version = "0.3.7"
 dependencies = [
  "anyhow",
  "bytes",
@@ -3391,7 +3391,7 @@ dependencies = [
 
 [[package]]
 name = "theater-handler-assembler"
-version = "0.3.6"
+version = "0.3.7"
 dependencies = [
  "anyhow",
  "test-log",
@@ -3404,7 +3404,7 @@ dependencies = [
 
 [[package]]
 name = "theater-handler-loop"
-version = "0.3.6"
+version = "0.3.7"
 dependencies = [
  "anyhow",
  "theater",
@@ -3415,7 +3415,7 @@ dependencies = [
 
 [[package]]
 name = "theater-handler-message-server"
-version = "0.3.6"
+version = "0.3.7"
 dependencies = [
  "anyhow",
  "chrono",
@@ -3430,7 +3430,7 @@ dependencies = [
 
 [[package]]
 name = "theater-handler-rpc"
-version = "0.3.6"
+version = "0.3.7"
 dependencies = [
  "anyhow",
  "serde",
@@ -3443,7 +3443,7 @@ dependencies = [
 
 [[package]]
 name = "theater-handler-runtime"
-version = "0.3.6"
+version = "0.3.7"
 dependencies = [
  "anyhow",
  "chrono",
@@ -3461,7 +3461,7 @@ dependencies = [
 
 [[package]]
 name = "theater-handler-store"
-version = "0.3.6"
+version = "0.3.7"
 dependencies = [
  "anyhow",
  "chrono",
@@ -3476,7 +3476,7 @@ dependencies = [
 
 [[package]]
 name = "theater-handler-supervisor"
-version = "0.3.6"
+version = "0.3.7"
 dependencies = [
  "anyhow",
  "chrono",
@@ -3490,7 +3490,7 @@ dependencies = [
 
 [[package]]
 name = "theater-handler-tcp"
-version = "0.3.6"
+version = "0.3.7"
 dependencies = [
  "anyhow",
  "rustls 0.23.39",
@@ -3506,7 +3506,7 @@ dependencies = [
 
 [[package]]
 name = "theater-handler-terminal"
-version = "0.3.6"
+version = "0.3.7"
 dependencies = [
  "anyhow",
  "futures-util",
@@ -3520,7 +3520,7 @@ dependencies = [
 
 [[package]]
 name = "theater-handler-timer"
-version = "0.3.6"
+version = "0.3.7"
 dependencies = [
  "anyhow",
  "theater",
@@ -3531,7 +3531,7 @@ dependencies = [
 
 [[package]]
 name = "theater-replay-experimenting"
-version = "0.3.6"
+version = "0.3.7"
 dependencies = [
  "anyhow",
  "hex",
@@ -3549,7 +3549,7 @@ dependencies = [
 
 [[package]]
 name = "theater-server"
-version = "0.3.6"
+version = "0.3.7"
 dependencies = [
  "anyhow",
  "axum",
@@ -3574,7 +3574,7 @@ dependencies = [
 
 [[package]]
 name = "theater-server-cli"
-version = "0.3.6"
+version = "0.3.7"
 dependencies = [
  "anyhow",
  "clap",
@@ -3588,7 +3588,7 @@ dependencies = [
 
 [[package]]
 name = "theater-tests"
-version = "0.3.6"
+version = "0.3.7"
 dependencies = [
  "anyhow",
  "serde",
