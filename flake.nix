@@ -156,36 +156,12 @@
             cargo test -p theater-tests "''${@}"
           '';
 
-          # Dry-run publish all crates in dependency order
-          publish-dry-run = pkgs.writeShellScriptBin "theater-publish-dry-run" ''
+          # Verify all crates can be packaged for publishing
+          publish-check = pkgs.writeShellScriptBin "theater-publish-check" ''
             set -e
-            CRATES=(
-              theater-chain
-              theater
-              theater-handler-assembler
-              theater-handler-loop
-              theater-handler-message-server
-              theater-handler-rpc
-              theater-handler-runtime
-              theater-handler-store
-              theater-handler-supervisor
-              theater-handler-tcp
-              theater-handler-terminal
-              theater-handler-timer
-              theater-server
-              theater-cli
-              theater-client
-              theater-server-cli
-            )
-            for crate in "''${CRATES[@]}"; do
-              echo "=== $crate ==="
-              if ! cargo publish -p "$crate" --dry-run 2>&1 | tail -5; then
-                echo "FAILED: $crate"
-                exit 1
-              fi
-              echo ""
-            done
-            echo "All crates pass dry-run!"
+            echo "Packaging all publishable crates..."
+            cargo package --workspace --allow-dirty
+            echo "All crates package successfully!"
           '';
 
           # Release: bump version and create a PR
@@ -323,7 +299,7 @@
             echo "  nix run .#test                 Build actors + run all tests"
             echo "  nix run .#pr                   Create PR from jj revision"
             echo "  nix run .#release -- patch     Bump version, create release PR"
-            echo "  nix run .#publish-dry-run      Verify all crates can publish"
+            echo "  nix run .#publish-check        Verify all crates package correctly"
             echo ""
           '';
         };

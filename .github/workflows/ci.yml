@@ -88,29 +88,7 @@ jobs:
       - uses: DeterminateSystems/magic-nix-cache-action@main
         if: steps.version.outputs.changed == 'true'
 
-      - name: Dry-run publish all crates
+      - name: Verify all crates package correctly
         if: steps.version.outputs.changed == 'true'
         run: |
-          CRATES=(
-            theater-chain
-            theater
-            theater-handler-assembler
-            theater-handler-loop
-            theater-handler-message-server
-            theater-handler-rpc
-            theater-handler-runtime
-            theater-handler-store
-            theater-handler-supervisor
-            theater-handler-tcp
-            theater-handler-terminal
-            theater-handler-timer
-            theater-server
-            theater-cli
-            theater-client
-            theater-server-cli
-          )
-          for crate in "${CRATES[@]}"; do
-            echo "=== $crate ==="
-            nix develop --command cargo publish -p "$crate" --dry-run 2>&1
-            echo ""
-          done
+          nix develop --command cargo package --workspace --allow-dirty
