@@ -60,3 +60,57 @@ jobs:
 
       - name: Handler integration tests
         run: nix develop --command cargo test -p theater-tests
+
+  publish-check:
+    name: Publish Check
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check for version change
+        id: version
+        run: |
+          git fetch origin main
+          NEW=$(grep -m1 '^version = ' Cargo.toml | sed 's/version = "\(.*\)"/\1/')
+          OLD=$(git show origin/main:Cargo.toml 2>/dev/null | grep -m1 '^version = ' | sed 's/version = "\(.*\)"/\1/' || echo "")
+          if [ "$NEW" != "$OLD" ] && [ -n "$OLD" ]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "Version changed: $OLD -> $NEW"
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "No version change"
+          fi
+
+      - uses: DeterminateSystems/nix-installer-action@main
+        if: steps.version.outputs.changed == 'true'
+
+      - uses: DeterminateSystems/magic-nix-cache-action@main
+        if: steps.version.outputs.changed == 'true'
+
+      - name: Dry-run publish all crates
+        if: steps.version.outputs.changed == 'true'
+        run: |
+          CRATES=(
+            theater-chain
+            theater
+            theater-handler-assembler
+            theater-handler-loop
+            theater-handler-message-server
+            theater-handler-rpc
+            theater-handler-runtime
+            theater-handler-store
+            theater-handler-supervisor
+            theater-handler-tcp
+            theater-handler-terminal
+            theater-handler-timer
+            theater-server
+            theater-cli
+            theater-client
+            theater-server-cli
+          )
+          for crate in "${CRATES[@]}"; do
+            echo "=== $crate ==="
+            nix develop --command cargo publish -p "$crate" --dry-run 2>&1
+            echo ""
+          done
