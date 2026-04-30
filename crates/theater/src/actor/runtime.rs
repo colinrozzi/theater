@@ -860,7 +860,7 @@ impl ActorRuntime {
                             })
                             .await;
 
-                        error!("Operation '{}' failed with error: {:?}", name, actor_error);
+                        error!("Operation '{}' failed with error: {}", name, actor_error);
                         if let Err(send_err) = response_tx.send(Err(actor_error)) {
                             error!("Failed to send function call error response for operation '{}': {:?}", name, send_err);
                         }
