@@ -349,7 +349,7 @@ pub async fn execute_async(args: &StartArgs, ctx: &CommandContext) -> Result<(),
         let _init_result = actor_handle
             .call_function("theater:simple/actor.init".to_string(), init_params)
             .await
-            .map_err(|e| CliError::server_error(format!("Failed to call init: {:?}", e)))?;
+            .map_err(|e| CliError::server_error(format!("Failed to call init: {}", e)))?;
         debug!("Init completed");
     }
 
