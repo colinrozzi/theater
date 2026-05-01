@@ -128,7 +128,7 @@ pub async fn run(
     let result = tokio::select! {
         result = command_future => result,
         _ = shutdown_token.cancelled() => {
-            return Err(anyhow::anyhow!("Operation cancelled"));
+            return Ok(());
         }
     };
 

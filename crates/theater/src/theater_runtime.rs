@@ -469,7 +469,7 @@ impl TheaterRuntime {
                                 result: data,
                             });
                             if let Err(e) = supervisor_tx.send(message).await {
-                                error!("Failed to send shutdown message to supervisor: {}", e);
+                                debug!("Failed to send shutdown message to supervisor (possibly shutting down): {}", e);
                             }
                         }
                     }
@@ -960,7 +960,7 @@ impl TheaterRuntime {
                 let supervisor_tx_clone = supervisor_tx.clone();
                 tokio::spawn(async move {
                     if let Err(e) = supervisor_tx_clone.send(error_message).await {
-                        error!("Failed to send error message to supervisor: {}", e);
+                        debug!("Failed to send error message to supervisor (possibly shutting down): {}", e);
                     }
                 });
             }
