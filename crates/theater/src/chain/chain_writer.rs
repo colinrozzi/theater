@@ -11,6 +11,7 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
 use crate::chain::ChainEvent;
+use crate::pack_bridge;
 use crate::TheaterId;
 
 /// Metadata about a run, written to `{actor_id}.meta.json`
@@ -48,7 +49,7 @@ impl ChainWriter {
         fs::create_dir_all(&chains_dir)
             .with_context(|| format!("Failed to create chains directory: {:?}", chains_dir))?;
 
-        let path = chains_dir.join(format!("{}.chain", actor_id));
+        let path = chains_dir.join(format!("{}.jsonl", actor_id));
         let file = OpenOptions::new()
             .create(true)
             .append(true)
@@ -77,36 +78,26 @@ impl ChainWriter {
         Ok(())
     }
 
-    /// Appends an event to the chain file.
+    /// Appends an event to the chain file as a JSON line.
     ///
-    /// Writes the event in EVENT format and flushes immediately
-    /// for crash safety.
+    /// The CGRF data is decoded to a pack Value for readability.
+    /// Falls back to hex-encoded bytes if decoding fails.
     pub fn append(&mut self, event: &ChainEvent) -> Result<()> {
-        // EVENT <hash-hex>
-        writeln!(self.writer, "EVENT {}", hex::encode(&event.hash))?;
+        let data_json = if let Ok(value) = pack_bridge::decode_value(&event.data) {
+            serde_json::to_value(&value).unwrap_or(serde_json::Value::Null)
+        } else {
+            serde_json::Value::String(hex::encode(&event.data))
+        };
 
-        // <parent-hash-hex or zeros>
-        match &event.parent_hash {
-            Some(parent) => writeln!(self.writer, "{}", hex::encode(parent))?,
-            None => writeln!(self.writer, "0000000000000000000000000000000000000000")?,
-        }
+        let entry = serde_json::json!({
+            "hash": hex::encode(&event.hash),
+            "parent_hash": event.parent_hash.as_ref().map(hex::encode),
+            "event_type": event.event_type,
+            "data": data_json,
+        });
 
-        // <event-type>
-        writeln!(self.writer, "{}", event.event_type)?;
-
-        // <body-length>
-        writeln!(self.writer, "{}", event.data.len())?;
-
-        // blank line
+        serde_json::to_writer(&mut self.writer, &entry)?;
         writeln!(self.writer)?;
-
-        // <body>
-        self.writer.write_all(&event.data)?;
-
-        // blank line after body
-        writeln!(self.writer)?;
-        writeln!(self.writer)?;
-
         self.writer.flush()?;
         Ok(())
     }
@@ -138,23 +129,24 @@ mod tests {
             hash: vec![0x1a, 0x2b, 0x3c],
             parent_hash: None,
             event_type: "test".to_string(),
-            data: b"hello world".to_vec(),
+            data: b"not valid cgrf".to_vec(),
         };
 
         writer.append(&event).unwrap();
         drop(writer);
 
         // Read back
-        let path = ChainWriter::chains_dir().join(format!("{}.chain", actor_id));
+        let path = ChainWriter::chains_dir().join(format!("{}.jsonl", actor_id));
         let mut file = File::open(&path).unwrap();
         let mut contents = String::new();
         file.read_to_string(&mut contents).unwrap();
 
-        assert!(contents.contains("EVENT 1a2b3c"));
-        assert!(contents.contains("0000000000000000000000000000000000000000"));
-        assert!(contents.contains("test"));
-        assert!(contents.contains("11")); // body length
-        assert!(contents.contains("hello world"));
+        let parsed: serde_json::Value = serde_json::from_str(contents.trim()).unwrap();
+        assert_eq!(parsed["hash"], "1a2b3c");
+        assert_eq!(parsed["parent_hash"], serde_json::Value::Null);
+        assert_eq!(parsed["event_type"], "test");
+        // Non-CGRF data falls back to hex string
+        assert!(parsed["data"].is_string());
 
         // Cleanup
         fs::remove_file(&path).ok();

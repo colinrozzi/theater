@@ -15,7 +15,7 @@ use theater::config::actor_manifest::{
 };
 use theater::handler::HandlerRegistry;
 use theater::messages::TheaterCommand;
-use theater::pack_bridge::{Value, ValueType};
+use theater::pack_bridge::Value;
 use theater::theater_runtime::TheaterRuntime;
 use theater::utils::resolve_reference;
 use theater::ManifestConfig;
@@ -337,14 +337,8 @@ pub async fn execute_async(args: &StartArgs, ctx: &CommandContext) -> Result<(),
             }
         };
 
-        // Build init state (None for now)
-        let init_state = Value::Option {
-            inner_type: ValueType::List(Box::new(ValueType::U8)),
-            value: None,
-        };
-
-        // Call init
-        let init_params = Value::Tuple(vec![init_state]);
+        // Call init — state is injected by execute_call_pack from the actor store
+        let init_params = Value::Tuple(vec![]);
         debug!("Calling init on actor {}", actor_id);
         let _init_result = actor_handle
             .call_function("theater:simple/actor.init".to_string(), init_params)
