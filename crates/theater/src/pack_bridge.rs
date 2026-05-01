@@ -375,7 +375,12 @@ impl PackInstance {
             .instance
             .call_with_value_async(function_name, &input)
             .await
-            .context(format!("Failed to call function '{}'", function_name))?;
+            .with_context(|| {
+                format!(
+                    "Failed to call function '{}' with input: {}",
+                    function_name, input
+                )
+            })?;
 
         // Validate return value against the function's declared result types.
         if !self.function_types.is_empty() {

@@ -2,7 +2,6 @@
 target/
 
 # Theater runtime directories
-/notes
 /chain
 /logs
 /store

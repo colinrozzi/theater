@@ -779,7 +779,10 @@ impl TheaterRuntime {
             } else if let Some(s) = manifest.initial_state.as_ref() {
                 Value::String(s.clone())
             } else {
-                Value::Tuple(vec![])
+                Value::Option {
+                    inner_type: ValueType::List(Box::new(ValueType::U8)),
+                    value: None,
+                }
             };
             (registry, state)
         } else {
@@ -791,7 +794,10 @@ impl TheaterRuntime {
                     items,
                 }
             } else {
-                Value::Tuple(vec![])
+                Value::Option {
+                    inner_type: ValueType::List(Box::new(ValueType::U8)),
+                    value: None,
+                }
             };
             (self.handler_registry.clone(), state)
         };
