@@ -1,6 +1,6 @@
 [package]
 name = "theater-handler-store"
-version.workspace = true
+version = "0.3.9"
 edition.workspace = true
 authors.workspace = true
 license.workspace = true

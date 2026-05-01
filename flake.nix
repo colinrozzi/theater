@@ -164,64 +164,85 @@
             echo "All crates package successfully!"
           '';
 
-          # Release: bump version and create a PR
-          # After merge, CI publishes to crates.io and creates the git tag
+          # Release: bump changed crates and create a PR
+          # Only crates with changes since the last git tag get version bumps.
+          # cargo publish --workspace skips crates whose version already exists on crates.io.
           release = pkgs.writeShellScriptBin "theater-release" ''
             set -e
 
             BUMP="''${1:-patch}"
-            CURRENT=$(${pkgs.gnugrep}/bin/grep -m1 '^version = ' Cargo.toml | ${pkgs.gnused}/bin/sed 's/version = "\(.*\)"/\1/')
 
-            IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT"
+            # Find the last release tag
+            LAST_TAG=$(${pkgs.git}/bin/git describe --tags --abbrev=0 2>/dev/null || echo "")
+            if [ -z "$LAST_TAG" ]; then
+              echo "No previous tag found, bumping all crates"
+              DIFF_BASE="--root"
+            else
+              echo "Changes since $LAST_TAG:"
+              DIFF_BASE="$LAST_TAG..HEAD"
+            fi
 
-            case "$BUMP" in
-              patch) PATCH=$((PATCH + 1)) ;;
-              minor) MINOR=$((MINOR + 1)); PATCH=0 ;;
-              major) MAJOR=$((MAJOR + 1)); MINOR=0; PATCH=0 ;;
-              [0-9]*.[0-9]*.[0-9]*) IFS='.' read -r MAJOR MINOR PATCH <<< "$BUMP" ;;
-              *) echo "Usage: nix run .#release -- [patch|minor|major|X.Y.Z]"; exit 1 ;;
-            esac
+            # Find changed crate directories
+            CHANGED_CRATES=""
+            BUMPED=""
+            for dir in crates/*/; do
+              crate_name=$(basename "$dir")
+              toml="$dir/Cargo.toml"
+              [ -f "$toml" ] || continue
 
-            NEW="$MAJOR.$MINOR.$PATCH"
-            echo "Bumping $CURRENT -> $NEW"
+              # Check if this crate has changes
+              if [ "$DIFF_BASE" = "--root" ] || ${pkgs.git}/bin/git diff --quiet "$DIFF_BASE" -- "$dir" 2>/dev/null; [ $? -ne 0 ]; then
+                # Get current version
+                CURRENT=$(${pkgs.gnugrep}/bin/grep -m1 '^version = ' "$toml" | ${pkgs.gnused}/bin/sed 's/version = "\(.*\)"/\1/')
+                IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT"
 
-            # Update workspace version
-            ${pkgs.gnused}/bin/sed -i "0,/^version = \"$CURRENT\"/s//version = \"$NEW\"/" Cargo.toml
+                case "$BUMP" in
+                  patch) PATCH=$((PATCH + 1)) ;;
+                  minor) MINOR=$((MINOR + 1)); PATCH=0 ;;
+                  major) MAJOR=$((MAJOR + 1)); MINOR=0; PATCH=0 ;;
+                esac
 
-            # Update workspace dependency versions
-            ${pkgs.gnused}/bin/sed -i "s/version = \"$CURRENT\", path/version = \"$NEW\", path/g" Cargo.toml
+                NEW="$MAJOR.$MINOR.$PATCH"
+                ${pkgs.gnused}/bin/sed -i "s/^version = \"$CURRENT\"/version = \"$NEW\"/" "$toml"
+                BUMPED="$BUMPED  $crate_name: $CURRENT -> $NEW\n"
+              fi
+            done
 
-            # Update flake.nix version
-            ${pkgs.gnused}/bin/sed -i "s/version = \"$CURRENT\"/version = \"$NEW\"/g" flake.nix
+            if [ -z "$BUMPED" ]; then
+              echo "No crates have changes since $LAST_TAG"
+              exit 0
+            fi
+
+            echo ""
+            echo -e "Bumped:\n$BUMPED"
 
             # Update Cargo.lock
             cargo update --workspace 2>/dev/null || true
 
-            echo ""
-            echo "Updated to v$NEW"
-            echo ""
-
-            BRANCH="release-v$NEW"
+            # Create a short summary for the branch name
+            BRANCH="release-$(date +%Y%m%d)"
 
             if command -v jj &>/dev/null; then
-              jj describe -m "release v$NEW"
+              jj describe -m "release: bump changed crates"
               jj bookmark create "$BRANCH" -r @ 2>/dev/null || jj bookmark set "$BRANCH" -r @
               jj git push --bookmark "$BRANCH" --allow-new
             else
               git checkout -b "$BRANCH"
               git add -A
-              git commit -m "release v$NEW"
+              git commit -m "release: bump changed crates"
               git push -u origin "$BRANCH"
             fi
 
+            BODY=$(echo -e "Bump changed crates since $LAST_TAG.\n\n$BUMPED\nMerging will publish to crates.io.")
+
             ${pkgs.gh}/bin/gh pr create \
-              --title "release v$NEW" \
-              --body "Bump version to v$NEW. Merging will publish to crates.io and create a GitHub release." \
+              --title "release: bump changed crates" \
+              --body "$BODY" \
               --base main \
               --head "$BRANCH"
 
             echo ""
-            echo "PR created. Merge to publish v$NEW to crates.io."
+            echo "PR created. Merge to publish changed crates to crates.io."
           '';
 
           # Create a PR from the current jj revision

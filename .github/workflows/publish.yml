@@ -4,7 +4,7 @@ on:
   push:
     branches: [main]
     paths:
-      - "Cargo.toml"
+      - "crates/*/Cargo.toml"
 
 permissions:
   contents: write
@@ -15,29 +15,29 @@ env:
 
 jobs:
   check-version:
-    name: Check version change
+    name: Check for version changes
     runs-on: ubuntu-latest
     outputs:
-      version: ${{ steps.detect.outputs.version }}
       changed: ${{ steps.detect.outputs.changed }}
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 2
 
-      - name: Detect version change
+      - name: Detect version changes in crates
         id: detect
         run: |
-          NEW=$(grep -m1 '^version = ' Cargo.toml | sed 's/version = "\(.*\)"/\1/')
-          OLD=$(git show HEAD~1:Cargo.toml 2>/dev/null | grep -m1 '^version = ' | sed 's/version = "\(.*\)"/\1/' || echo "")
-          echo "version=$NEW" >> "$GITHUB_OUTPUT"
-          if [ "$NEW" != "$OLD" ] && [ -n "$OLD" ]; then
-            echo "changed=true" >> "$GITHUB_OUTPUT"
-            echo "Version changed: $OLD -> $NEW"
-          else
-            echo "changed=false" >> "$GITHUB_OUTPUT"
-            echo "No version change (current: $NEW)"
-          fi
+          CHANGED=false
+          for toml in crates/*/Cargo.toml; do
+            crate=$(basename $(dirname "$toml"))
+            NEW=$(grep -m1 '^version = ' "$toml" | sed 's/version = "\(.*\)"/\1/')
+            OLD=$(git show HEAD~1:"$toml" 2>/dev/null | grep -m1 '^version = ' | sed 's/version = "\(.*\)"/\1/' || echo "")
+            if [ "$NEW" != "$OLD" ] && [ -n "$OLD" ]; then
+              echo "  $crate: $OLD -> $NEW"
+              CHANGED=true
+            fi
+          done
+          echo "changed=$CHANGED" >> "$GITHUB_OUTPUT"
 
   publish:
     name: Publish
@@ -46,21 +46,24 @@ jobs:
     if: needs.check-version.outputs.changed == 'true'
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - uses: DeterminateSystems/nix-installer-action@main
 
       - uses: DeterminateSystems/magic-nix-cache-action@main
 
-      - name: Publish all crates
+      - name: Publish changed crates
         run: nix develop --command cargo publish --workspace
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
 
       - name: Create tag and GitHub release
         run: |
-          VERSION="v${{ needs.check-version.outputs.version }}"
-          git tag "$VERSION"
-          git push origin "$VERSION"
-          gh release create "$VERSION" --generate-notes
+          DATE=$(date +%Y%m%d)
+          TAG="release-$DATE"
+          git tag "$TAG"
+          git push origin "$TAG"
+          gh release create "$TAG" --generate-notes
         env:
           GH_TOKEN: ${{ github.token }}

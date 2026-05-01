@@ -1,6 +1,6 @@
 [package]
 name = "theater-replay-experimenting"
-version.workspace = true
+version = "0.3.9"
 edition = "2021"
 publish = false
 
