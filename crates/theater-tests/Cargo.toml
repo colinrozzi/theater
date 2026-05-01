@@ -1,6 +1,6 @@
 [package]
 name = "theater-tests"
-version.workspace = true
+version = "0.3.9"
 edition.workspace = true
 publish = false
 
