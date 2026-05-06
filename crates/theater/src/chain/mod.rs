@@ -29,12 +29,13 @@
 
 mod chain_reader;
 mod chain_writer;
+pub mod format;
 
 pub use chain_reader::ChainReader;
 pub use chain_writer::{ChainWriter, RunMeta};
 
 use std::fmt;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use anyhow::Result;
@@ -312,9 +313,13 @@ impl StateChain {
     /// let chain = StateChain::new(actor_id, theater_tx);
     /// # }
     /// ```
-    pub fn new(actor_id: TheaterId, theater_tx: Sender<TheaterCommand>) -> Self {
+    pub fn new(
+        actor_id: TheaterId,
+        theater_tx: Sender<TheaterCommand>,
+        chain_dir: Option<&PathBuf>,
+    ) -> Self {
         // Create run log for streaming events to disk
-        let chain_writer = match ChainWriter::new(&actor_id) {
+        let chain_writer = match ChainWriter::new(&actor_id, chain_dir) {
             Ok(log) => {
                 info!("Created run log at {:?}", log.path());
                 Some(log)

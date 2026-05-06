@@ -53,6 +53,7 @@ async fn test_composite_instance_basic() {
     let chain = Arc::new(SyncRwLock::new(StateChain::new(
         actor_id,
         theater_tx.clone(),
+        None,
     )));
     let actor_handle = ActorHandle::new(operation_tx, info_tx, control_tx);
 

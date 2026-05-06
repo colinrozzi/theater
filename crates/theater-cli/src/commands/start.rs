@@ -56,9 +56,10 @@ pub struct StartArgs {
     #[arg(long, value_enum, default_value = "short")]
     pub events_format: EventFormat,
 
-    /// Directory to persist chain events (one file per actor)
-    #[arg(long)]
-    pub chain_dir: Option<PathBuf>,
+    /// Save the chain to a local directory after the actor exits.
+    /// Defaults to `.chains/` in the current directory.
+    #[arg(long, default_missing_value = ".chains", num_args = 0..=1)]
+    pub save: Option<PathBuf>,
 
     /// Skip calling the actor's init function after spawning
     #[arg(long)]
@@ -138,7 +139,7 @@ impl ChainFileManager {
                 .expect("Failed to open chain file")
         });
 
-        let block = format_event_full(event, actor_id);
+        let block = theater::chain::format::format_event(event);
         file.write_all(block.as_bytes()).map_err(|e| {
             CliError::file_operation_failed("write event", format!("{}.chain", actor_id), e)
         })?;
@@ -216,8 +217,8 @@ pub async fn execute_async(args: &StartArgs, ctx: &CommandContext) -> Result<(),
         CliError::invalid_manifest(format!("Manifest content is not valid UTF-8: {}", e))
     })?;
 
-    // Set up chain file manager if --chain-dir is specified
-    let mut chain_file_manager = if let Some(ref dir) = args.chain_dir {
+    // Set up chain file manager if --save is specified
+    let mut chain_file_manager = if let Some(ref dir) = args.save {
         Some(ChainFileManager::new(dir.clone())?)
     } else {
         None
@@ -235,6 +236,11 @@ pub async fn execute_async(args: &StartArgs, ctx: &CommandContext) -> Result<(),
     )
     .await
     .map_err(|e| CliError::server_error(format!("Failed to create runtime: {}", e)))?;
+
+    // Set chain output directory if --save is specified
+    if let Some(ref dir) = args.save {
+        runtime.chain_dir = Some(dir.clone());
+    }
 
     // Set up global event subscription (receives events from ALL actors)
     let (global_events_tx, mut global_events_rx) = mpsc::channel(256);
