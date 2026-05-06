@@ -296,6 +296,7 @@
 
             lldb
 
+            ripgrep
             gh
           ] ++ pkgs.lib.optionals pkgs.stdenv.isDarwin [
             pkgs.darwin.apple_sdk.frameworks.Security

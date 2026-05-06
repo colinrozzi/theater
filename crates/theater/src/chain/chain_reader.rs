@@ -28,15 +28,21 @@ use crate::chain::ChainEvent;
 pub struct ChainReader;
 
 impl ChainReader {
-    /// Parse a chain file from a path. Auto-detects EVENT vs JSON format.
+    /// Parse a chain file from a path. Auto-detects format:
+    /// - `---` → human-readable chain format (with value literals)
+    /// - `[` → JSON format
+    /// - `EVENT` → binary EVENT format
     pub fn read_file(path: &Path) -> Result<Vec<ChainEvent>> {
         let content = fs::read_to_string(path)
             .with_context(|| format!("Failed to read chain file: {:?}", path))?;
 
         let trimmed = content.trim_start();
 
-        // Auto-detect format: JSON starts with '[', EVENT format starts with 'EVENT'
-        if trimmed.starts_with('[') {
+        if trimmed.starts_with("---") {
+            // Human-readable chain format
+            crate::chain::format::load_chain_file(path)
+                .with_context(|| format!("Failed to parse chain file: {:?}", path))
+        } else if trimmed.starts_with('[') {
             // JSON format
             serde_json::from_str(&content)
                 .with_context(|| format!("Failed to parse JSON chain file: {:?}", path))

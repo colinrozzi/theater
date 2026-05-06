@@ -1,7 +1,5 @@
 use anyhow::Result;
 use clap::{Parser, ValueEnum};
-use std::collections::HashMap;
-use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::PathBuf;
 use tokio::sync::mpsc;
@@ -112,49 +110,11 @@ fn format_event_json(event: &ChainEvent, actor_id: &TheaterId) -> String {
     serde_json::to_string(&json).unwrap_or_else(|_| "{}".to_string())
 }
 
-/// Manages chain file writers for multiple actors
-struct ChainFileManager {
-    dir: PathBuf,
-    files: HashMap<TheaterId, std::fs::File>,
-}
-
-impl ChainFileManager {
-    fn new(dir: PathBuf) -> Result<Self, CliError> {
-        fs::create_dir_all(&dir).map_err(|e| {
-            CliError::file_operation_failed("create directory", dir.display().to_string(), e)
-        })?;
-        Ok(Self {
-            dir,
-            files: HashMap::new(),
-        })
-    }
-
-    fn write_event(&mut self, actor_id: &TheaterId, event: &ChainEvent) -> Result<(), CliError> {
-        let file = self.files.entry(*actor_id).or_insert_with(|| {
-            let path = self.dir.join(format!("{}.chain", actor_id));
-            OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(&path)
-                .expect("Failed to open chain file")
-        });
-
-        let block = theater::chain::format::format_event(event);
-        file.write_all(block.as_bytes()).map_err(|e| {
-            CliError::file_operation_failed("write event", format!("{}.chain", actor_id), e)
-        })?;
-        file.flush().map_err(|e| {
-            CliError::file_operation_failed("flush", format!("{}.chain", actor_id), e)
-        })?;
-        Ok(())
-    }
-}
-
 /// Create a handler registry with all Theater handlers
 fn create_handler_registry(
     theater_tx: mpsc::Sender<TheaterCommand>,
     show_actor_logs: bool,
-) -> HandlerRegistry {
+) -> Result<HandlerRegistry, CliError> {
     let mut registry = HandlerRegistry::new();
 
     // Runtime handler - provides log, get-chain, shutdown
@@ -198,7 +158,7 @@ fn create_handler_registry(
     // Loop handler - cooperative looping with yield points
     registry.register(LoopHandler::new());
 
-    registry
+    Ok(registry)
 }
 
 /// Execute the start command - spin up a local runtime and run the actor
@@ -217,16 +177,15 @@ pub async fn execute_async(args: &StartArgs, ctx: &CommandContext) -> Result<(),
         CliError::invalid_manifest(format!("Manifest content is not valid UTF-8: {}", e))
     })?;
 
-    // Set up chain file manager if --save is specified
-    let mut chain_file_manager = if let Some(ref dir) = args.save {
-        Some(ChainFileManager::new(dir.clone())?)
-    } else {
-        None
-    };
+    // (Chain writing is handled by the runtime's ChainWriter via runtime.chain_dir)
+
+    // Parse the manifest first (needed to check for replay handler)
+    let manifest = ManifestConfig::from_toml_str(&manifest_content)
+        .map_err(|e| CliError::invalid_manifest(format!("Failed to parse manifest: {}", e)))?;
 
     // Create the TheaterRuntime in-process
     let (theater_tx, theater_rx) = mpsc::channel::<TheaterCommand>(32);
-    let handler_registry = create_handler_registry(theater_tx.clone(), !args.no_actor_logs);
+    let handler_registry = create_handler_registry(theater_tx.clone(), !args.no_actor_logs)?;
 
     let mut runtime = TheaterRuntime::new(
         theater_tx.clone(),
@@ -252,10 +211,6 @@ pub async fn execute_async(args: &StartArgs, ctx: &CommandContext) -> Result<(),
             error!("Theater runtime error: {}", e);
         }
     });
-
-    // Parse the manifest
-    let manifest = ManifestConfig::from_toml_str(&manifest_content)
-        .map_err(|e| CliError::invalid_manifest(format!("Failed to parse manifest: {}", e)))?;
 
     // Resolve WASM path relative to manifest directory
     let wasm_path = if manifest.package.starts_with('/') || manifest.package.contains("://") {
@@ -400,13 +355,6 @@ pub async fn execute_async(args: &StartArgs, ctx: &CommandContext) -> Result<(),
                 if let Some((event_actor_id, event_result)) = event {
                     match event_result {
                         Ok(chain_event) => {
-                            // Persist to chain file if enabled
-                            if let Some(ref mut manager) = chain_file_manager {
-                                if let Err(e) = manager.write_event(&event_actor_id, &chain_event) {
-                                    eprintln!("Warning: failed to write chain event: {}", e);
-                                }
-                            }
-
                             // Output events if --events mode is enabled
                             // (Actor logs are printed directly by RuntimeHandler, not extracted here)
                             if args.events {

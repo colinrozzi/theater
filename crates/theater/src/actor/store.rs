@@ -187,7 +187,7 @@ impl ActorStore {
         // These are primarily for debugging/audit and not essential for replay
         let wasm_data = crate::events::wasm::WasmEventData::WasmCall {
             function_name: event_type.clone(),
-            params: serde_json::to_vec(&data).unwrap_or_default(),
+            params: Value::String(serde_json::to_string(&data).unwrap_or_default()),
         };
         self.record_event(ChainEventData {
             event_type: format!("theater-runtime/{}", event_type),
