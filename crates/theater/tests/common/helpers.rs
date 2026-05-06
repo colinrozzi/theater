@@ -44,7 +44,7 @@ pub fn create_test_manifest(name: &str) -> ManifestConfig {
 /// Create a test state chain
 pub async fn create_test_chain(actor_id: TheaterId, num_events: usize) -> StateChain {
     let (tx, _) = mpsc::channel(10);
-    let mut chain = StateChain::new(actor_id, tx);
+    let mut chain = StateChain::new(actor_id, tx, None);
 
     // Add events to the chain
     for i in 0..num_events {

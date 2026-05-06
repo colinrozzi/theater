@@ -112,6 +112,8 @@ pub struct TheaterRuntime {
     pub handler_registry: HandlerRegistry,
     /// Global event subscribers (receive events from all actors)
     global_subscriptions: Vec<Sender<(TheaterId, Result<ChainEvent, ActorError>)>>,
+    /// Optional directory to write chain files (overrides /tmp/theater/chains/)
+    pub chain_dir: Option<PathBuf>,
 }
 
 /// # ActorProcess
@@ -202,6 +204,7 @@ impl TheaterRuntime {
             pack_runtime,
             handler_registry,
             global_subscriptions: Vec::new(),
+            chain_dir: None,
         })
     }
 
@@ -757,6 +760,7 @@ impl TheaterRuntime {
         let chain = Arc::new(RwLock::new(StateChain::new(
             actor_id,
             self.theater_tx.clone(),
+            self.chain_dir.as_ref(),
         )));
 
         // Write run metadata for debugging/crash recovery
