@@ -30,7 +30,7 @@ use std::io::{self, BufRead};
 
 use crate::chain::ChainEvent;
 use crate::pack_bridge;
-use packr::abi::Value;
+use packr_abi::{parse_value, Value};
 
 /// Format a chain event as human-readable text.
 pub fn format_event(event: &ChainEvent) -> String {
@@ -205,11 +205,10 @@ pub fn format_chain(events: &[ChainEvent]) -> String {
     events.iter().map(format_event).collect::<String>()
 }
 
-/// Parse events from the human-readable format back into ChainEvents.
+/// Parse events from the human-readable chain format.
 ///
-/// Note: This is lossy — the raw CGRF bytes cannot be reconstructed from
-/// the display format. This is for inspection, not round-tripping.
-/// For full fidelity, use the JSONL format.
+/// Values in fields (input, output, state, params, data) use pack's value literal
+/// syntax and can be parsed back into `Value` via `ParsedEvent::parse_field()`.
 pub fn parse_events(reader: &mut dyn BufRead) -> io::Result<Vec<ParsedEvent>> {
     let mut events = Vec::new();
     let mut current: Option<ParsedEvent> = None;
@@ -248,6 +247,9 @@ pub fn parse_events(reader: &mut dyn BufRead) -> io::Result<Vec<ParsedEvent>> {
 }
 
 /// A parsed event from the human-readable format.
+///
+/// String fields (input, output, state, params) contain value literals
+/// that can be parsed into `Value` via the `parse_*` methods.
 #[derive(Debug, Default, Clone)]
 pub struct ParsedEvent {
     pub hash: String,
@@ -261,4 +263,26 @@ pub struct ParsedEvent {
     pub message: Option<String>,
     pub params: Option<String>,
     pub data: Option<String>,
+}
+
+impl ParsedEvent {
+    /// Parse the input field as a Value.
+    pub fn parse_input(&self) -> Option<Result<Value, packr_abi::ParseError>> {
+        self.input.as_deref().map(parse_value)
+    }
+
+    /// Parse the output field as a Value.
+    pub fn parse_output(&self) -> Option<Result<Value, packr_abi::ParseError>> {
+        self.output.as_deref().map(parse_value)
+    }
+
+    /// Parse the state field as a Value.
+    pub fn parse_state(&self) -> Option<Result<Value, packr_abi::ParseError>> {
+        self.state.as_deref().map(parse_value)
+    }
+
+    /// Parse the params field as a Value.
+    pub fn parse_params(&self) -> Option<Result<Value, packr_abi::ParseError>> {
+        self.params.as_deref().map(parse_value)
+    }
 }
