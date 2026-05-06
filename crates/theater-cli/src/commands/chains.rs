@@ -62,7 +62,7 @@ pub async fn execute_async(args: &ChainsArgs, ctx: &CommandContext) -> Result<()
 /// List chains
 async fn execute_list(args: &ChainsArgs, _ctx: &CommandContext) -> Result<(), CliError> {
     let local_dir = PathBuf::from(LOCAL_CHAINS_DIR);
-    let global_dir = ChainWriter::chains_dir();
+    let global_dir = ChainWriter::default_dir();
 
     let mut found_any = false;
 
@@ -175,7 +175,7 @@ async fn execute_gc(args: &ChainsArgs, _ctx: &CommandContext) -> Result<(), CliE
         PathBuf::from(LOCAL_CHAINS_DIR)
     } else {
         // Default to global for gc
-        ChainWriter::chains_dir()
+        ChainWriter::default_dir()
     };
 
     if !dir.exists() {
@@ -227,7 +227,7 @@ async fn execute_gc(args: &ChainsArgs, _ctx: &CommandContext) -> Result<(), CliE
 
 /// Save a chain from global to local
 async fn execute_save(id: &str, name: Option<&str>, _ctx: &CommandContext) -> Result<(), CliError> {
-    let global_dir = ChainWriter::chains_dir();
+    let global_dir = ChainWriter::default_dir();
     let local_dir = PathBuf::from(LOCAL_CHAINS_DIR);
 
     // Find the chain in global
@@ -286,7 +286,7 @@ fn list_chains_in_dir(dir: &PathBuf) -> Result<Vec<PathBuf>, CliError> {
 /// Find a chain by ID (partial match supported)
 fn find_chain(id: &str, args: &ChainsArgs) -> Result<PathBuf, CliError> {
     let local_dir = PathBuf::from(LOCAL_CHAINS_DIR);
-    let global_dir = ChainWriter::chains_dir();
+    let global_dir = ChainWriter::default_dir();
 
     // Check local first (unless --global)
     if !args.global {

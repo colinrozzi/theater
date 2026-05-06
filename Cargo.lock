@@ -1049,7 +1049,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -2170,8 +2170,7 @@ checksum = "04744f49eae99ab78e0d5c0b603ab218f515ea8cfe5a456d7629ad883a3b6e7d"
 [[package]]
 name = "packr"
 version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8f7220f960624c2bc7917afd01e0b36f13cf141a8f1941682467e8857ae29362"
+source = "git+https://github.com/colinrozzi/pack.git?branch=value-literal-parser#2667031865d8a678e7cf438ef3c3067efe72ccd4"
 dependencies = [
  "anyhow",
  "clap",
@@ -2188,8 +2187,7 @@ dependencies = [
 [[package]]
 name = "packr-abi"
 version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3fd856bc91b7062e55b4950b0d40cb5f90514b476322ba9118affe61df22bc8d"
+source = "git+https://github.com/colinrozzi/pack.git?branch=value-literal-parser#2667031865d8a678e7cf438ef3c3067efe72ccd4"
 dependencies = [
  "hashbrown 0.14.5",
  "serde",
@@ -2702,7 +2700,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.4.15",
- "windows-sys 0.59.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -2715,7 +2713,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.12.1",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -3203,7 +3201,7 @@ dependencies = [
  "getrandom 0.4.2",
  "once_cell",
  "rustix 1.1.4",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -3265,7 +3263,7 @@ dependencies = [
 
 [[package]]
 name = "theater"
-version = "0.3.9"
+version = "0.3.10"
 dependencies = [
  "anyhow",
  "axum",
@@ -3311,7 +3309,7 @@ dependencies = [
 
 [[package]]
 name = "theater-chain"
-version = "0.3.9"
+version = "0.3.10"
 dependencies = [
  "base64 0.21.7",
  "bytes",
@@ -3334,7 +3332,7 @@ dependencies = [
 
 [[package]]
 name = "theater-cli"
-version = "0.3.9"
+version = "0.3.10"
 dependencies = [
  "anyhow",
  "chrono",
@@ -3373,7 +3371,7 @@ dependencies = [
 
 [[package]]
 name = "theater-client"
-version = "0.3.9"
+version = "0.3.10"
 dependencies = [
  "anyhow",
  "bytes",
@@ -3391,7 +3389,7 @@ dependencies = [
 
 [[package]]
 name = "theater-handler-assembler"
-version = "0.3.9"
+version = "0.3.10"
 dependencies = [
  "anyhow",
  "test-log",
@@ -3404,7 +3402,7 @@ dependencies = [
 
 [[package]]
 name = "theater-handler-loop"
-version = "0.3.9"
+version = "0.3.10"
 dependencies = [
  "anyhow",
  "theater",
@@ -3415,7 +3413,7 @@ dependencies = [
 
 [[package]]
 name = "theater-handler-message-server"
-version = "0.3.9"
+version = "0.3.10"
 dependencies = [
  "anyhow",
  "chrono",
@@ -3430,7 +3428,7 @@ dependencies = [
 
 [[package]]
 name = "theater-handler-rpc"
-version = "0.3.9"
+version = "0.3.10"
 dependencies = [
  "anyhow",
  "serde",
@@ -3443,7 +3441,7 @@ dependencies = [
 
 [[package]]
 name = "theater-handler-runtime"
-version = "0.3.9"
+version = "0.3.10"
 dependencies = [
  "anyhow",
  "chrono",
@@ -3461,7 +3459,7 @@ dependencies = [
 
 [[package]]
 name = "theater-handler-store"
-version = "0.3.9"
+version = "0.3.10"
 dependencies = [
  "anyhow",
  "chrono",
@@ -3476,7 +3474,7 @@ dependencies = [
 
 [[package]]
 name = "theater-handler-supervisor"
-version = "0.3.9"
+version = "0.3.10"
 dependencies = [
  "anyhow",
  "chrono",
@@ -3490,7 +3488,7 @@ dependencies = [
 
 [[package]]
 name = "theater-handler-tcp"
-version = "0.3.9"
+version = "0.3.10"
 dependencies = [
  "anyhow",
  "rustls 0.23.39",
@@ -3506,7 +3504,7 @@ dependencies = [
 
 [[package]]
 name = "theater-handler-terminal"
-version = "0.3.9"
+version = "0.3.10"
 dependencies = [
  "anyhow",
  "futures-util",
@@ -3520,7 +3518,7 @@ dependencies = [
 
 [[package]]
 name = "theater-handler-timer"
-version = "0.3.9"
+version = "0.3.10"
 dependencies = [
  "anyhow",
  "theater",
@@ -3531,7 +3529,7 @@ dependencies = [
 
 [[package]]
 name = "theater-replay-experimenting"
-version = "0.3.9"
+version = "0.3.10"
 dependencies = [
  "anyhow",
  "hex",
@@ -3549,7 +3547,7 @@ dependencies = [
 
 [[package]]
 name = "theater-server"
-version = "0.3.9"
+version = "0.3.10"
 dependencies = [
  "anyhow",
  "axum",
@@ -3574,7 +3572,7 @@ dependencies = [
 
 [[package]]
 name = "theater-server-cli"
-version = "0.3.9"
+version = "0.3.10"
 dependencies = [
  "anyhow",
  "clap",
@@ -3588,7 +3586,7 @@ dependencies = [
 
 [[package]]
 name = "theater-tests"
-version = "0.3.9"
+version = "0.3.10"
 dependencies = [
  "anyhow",
  "serde",
@@ -4935,7 +4933,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]

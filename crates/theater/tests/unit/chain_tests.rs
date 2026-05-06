@@ -19,7 +19,7 @@ fn create_test_event_data(event_type: &str, _data: &[u8]) -> ChainEventData {
 async fn test_chain_event_creation() {
     let (tx, _rx) = mpsc::channel(10);
     let actor_id = TheaterId::generate();
-    let mut chain = StateChain::new(actor_id, tx);
+    let mut chain = StateChain::new(actor_id, tx, None);
 
     let event_data = create_test_event_data("test-event", b"test data");
     let event = chain.add_typed_event(event_data).unwrap();
@@ -33,7 +33,7 @@ async fn test_chain_event_creation() {
 async fn test_chain_integrity() {
     let (tx, _rx) = mpsc::channel(10);
     let actor_id = TheaterId::generate();
-    let mut chain = StateChain::new(actor_id, tx);
+    let mut chain = StateChain::new(actor_id, tx, None);
 
     // Add multiple events to build a chain
     for i in 0..5 {
@@ -57,7 +57,7 @@ async fn test_chain_integrity() {
 async fn test_save_and_load_chain() {
     let (tx, _rx) = mpsc::channel(10);
     let actor_id = TheaterId::generate();
-    let mut chain = StateChain::new(actor_id, tx);
+    let mut chain = StateChain::new(actor_id, tx, None);
 
     // Add events
     for i in 0..3 {
