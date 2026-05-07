@@ -1074,7 +1074,7 @@ impl TheaterRuntime {
                     data: crate::events::ChainEventPayload::Wasm(
                         crate::events::wasm::WasmEventData::WasmCall {
                             function_name: "shutdown".to_string(),
-                            params: vec![],
+                            params: Value::Tuple(vec![]),
                         },
                     ),
                 })

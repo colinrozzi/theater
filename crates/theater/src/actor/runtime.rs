@@ -1043,7 +1043,7 @@ impl ActorRuntime {
             event_type: "wasm".to_string(),
             data: WasmEventData::WasmCall {
                 function_name: name.clone(),
-                params: params.clone(),
+                params: params_value.clone(),
             }
             .into(),
         });
@@ -1053,11 +1053,17 @@ impl ActorRuntime {
             .await
         {
             Ok(result) => {
+                let response_value = if result.1.is_empty() {
+                    Value::Tuple(vec![])
+                } else {
+                    crate::pack_bridge::decode_value(&result.1).unwrap_or(Value::Tuple(vec![]))
+                };
                 actor_instance.actor_store.record_event(ChainEventData {
                     event_type: "wasm".to_string(),
                     data: WasmEventData::WasmResult {
                         function_name: name.clone(),
-                        result: result.clone(),
+                        state: result.0.clone(),
+                        response: response_value,
                     }
                     .into(),
                 });

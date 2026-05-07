@@ -220,7 +220,11 @@ impl Handler for ReplayHandler {
                         ChainEventPayload::Wasm(WasmEventData::WasmCall {
                             function_name,
                             params,
-                        }) => Some((idx, function_name, params)),
+                        }) => {
+                            // Encode params Value back to CGRF bytes for the call
+                            let params_bytes = packr::abi::encode(&params).unwrap_or_default();
+                            Some((idx, function_name, params_bytes))
+                        }
                         _ => None,
                     }
                 })

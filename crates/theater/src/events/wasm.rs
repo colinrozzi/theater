@@ -5,11 +5,12 @@ use serde::{Deserialize, Serialize};
 pub enum WasmEventData {
     WasmCall {
         function_name: String,
-        params: Vec<u8>,
+        params: Value,
     },
     WasmResult {
         function_name: String,
-        result: (Value, Vec<u8>),
+        state: Value,
+        response: Value,
     },
     WasmError {
         function_name: String,
@@ -40,29 +41,27 @@ impl IntoValue for WasmEventData {
                     type_name: String::from("wasm-call"),
                     fields: vec![
                         ("function-name".into(), Value::String(function_name)),
-                        ("params".into(), params.into_value()),
+                        ("params".into(), params),
                     ],
                 }],
             },
             WasmEventData::WasmResult {
                 function_name,
-                result,
-            } => {
-                let (state_value, bytes) = result;
-                Value::Variant {
-                    type_name: String::from("wasm-event-data"),
-                    case_name: String::from("wasm-result"),
-                    tag: 1,
-                    payload: vec![Value::Record {
-                        type_name: String::from("wasm-result"),
-                        fields: vec![
-                            ("function-name".into(), Value::String(function_name)),
-                            ("state".into(), state_value),
-                            ("bytes".into(), bytes.into_value()),
-                        ],
-                    }],
-                }
-            }
+                state,
+                response,
+            } => Value::Variant {
+                type_name: String::from("wasm-event-data"),
+                case_name: String::from("wasm-result"),
+                tag: 1,
+                payload: vec![Value::Record {
+                    type_name: String::from("wasm-result"),
+                    fields: vec![
+                        ("function-name".into(), Value::String(function_name)),
+                        ("state".into(), state),
+                        ("response".into(), response),
+                    ],
+                }],
+            },
             WasmEventData::WasmError {
                 function_name,
                 message,
@@ -111,11 +110,11 @@ impl TryFrom<Value> for WasmEventData {
                 match case_name.as_str() {
                     "wasm-call" => {
                         let mut function_name = String::new();
-                        let mut params = Vec::new();
+                        let mut params = Value::Tuple(vec![]);
                         for (name, val) in fields {
                             match name.as_str() {
                                 "function-name" => function_name = String::try_from(val)?,
-                                "params" => params = extract_bytes(val)?,
+                                "params" => params = val,
                                 _ => {}
                             }
                         }
@@ -126,19 +125,20 @@ impl TryFrom<Value> for WasmEventData {
                     }
                     "wasm-result" => {
                         let mut function_name = String::new();
-                        let mut state_value = Value::Tuple(vec![]);
-                        let mut bytes = Vec::new();
+                        let mut state = Value::Tuple(vec![]);
+                        let mut response = Value::Tuple(vec![]);
                         for (name, val) in fields {
                             match name.as_str() {
                                 "function-name" => function_name = String::try_from(val)?,
-                                "state" => state_value = val,
-                                "bytes" => bytes = extract_bytes(val)?,
+                                "state" => state = val,
+                                "response" => response = val,
                                 _ => {}
                             }
                         }
                         Ok(WasmEventData::WasmResult {
                             function_name,
-                            result: (state_value, bytes),
+                            state,
+                            response,
                         })
                     }
                     "wasm-error" => {
@@ -172,22 +172,5 @@ impl TryFrom<Value> for WasmEventData {
             }
             other => Err(ConversionError::ExpectedVariant(format!("{:?}", other))),
         }
-    }
-}
-
-/// Extract bytes from a Value::List of U8 values.
-fn extract_bytes(v: Value) -> Result<Vec<u8>, ConversionError> {
-    match v {
-        Value::List { items, .. } => items
-            .into_iter()
-            .map(|item| match item {
-                Value::U8(b) => Ok(b),
-                other => Err(ConversionError::TypeMismatch {
-                    expected: "U8".into(),
-                    got: format!("{:?}", other),
-                }),
-            })
-            .collect(),
-        other => Err(ConversionError::ExpectedList(format!("{:?}", other))),
     }
 }
