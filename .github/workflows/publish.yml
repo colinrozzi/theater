@@ -76,6 +76,8 @@ jobs:
                 echo "Published $crate"
               elif echo "$output" | grep -q "already exists on crates.io"; then
                 echo "Skipped $crate (already published)"
+              elif echo "$output" | grep -q "package.publish.*must be set"; then
+                echo "Skipped $crate (publish = false)"
               else
                 echo "Publish failed for $crate (exit $code)"
                 exit 1
