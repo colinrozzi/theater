@@ -1074,12 +1074,12 @@ impl ActorRuntime {
                     event_type: "wasm".to_string(),
                     data: WasmEventData::WasmError {
                         function_name: name.clone(),
-                        message: e.to_string(),
+                        message: format!("{:#}", e),
                     }
                     .into(),
                 });
 
-                error!("Failed to execute function '{}': {}", name, e);
+                error!("Failed to execute function '{}': {:#}", name, e);
                 return Err(ActorError::Internal(event));
             }
         };
