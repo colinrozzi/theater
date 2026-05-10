@@ -124,9 +124,16 @@ enum StreamState {
     Closed,
 }
 
-/// A tracked TCP connection with ownership and state
+/// A tracked TCP connection with ownership and state.
+///
+/// `stream` is wrapped in `Arc<Mutex<...>>` so the outer connections map
+/// mutex is only held briefly for lookup/metadata. The actual I/O acquires
+/// the per-connection lock — this lets two actors do I/O on different
+/// connections in parallel, which is essential for any flow where the
+/// runtime hosts both sides of a TCP conversation (e.g. an outbound SMTP
+/// client talking to a local SMTP server in the same theater instance).
 struct ConnectionEntry {
-    stream: StreamState,
+    stream: Arc<Mutex<StreamState>>,
     peer_addr: SocketAddr,
     owner: TheaterId,
     state: ConnectionState,
@@ -549,7 +556,9 @@ impl Handler for TcpHandler {
                         st.connections.lock().await.insert(
                             id,
                             ConnectionEntry {
-                                stream: StreamState::Full(Box::new(unified_stream)),
+                                stream: Arc::new(Mutex::new(StreamState::Full(Box::new(
+                                    unified_stream,
+                                )))),
                                 peer_addr,
                                 owner: actor_id,
                                 state: ConnectionState::Active, // Outbound = active
@@ -651,7 +660,9 @@ impl Handler for TcpHandler {
                                                 st_for_task.connections.lock().await.insert(
                                                     conn_id,
                                                     ConnectionEntry {
-                                                        stream: StreamState::Full(Box::new(unified_stream)),
+                                                        stream: Arc::new(Mutex::new(
+                                                            StreamState::Full(Box::new(unified_stream)),
+                                                        )),
                                                         peer_addr,
                                                         owner: actor_id_for_task,
                                                         state: ConnectionState::Pending,
@@ -755,7 +766,9 @@ impl Handler for TcpHandler {
                         st.connections.lock().await.insert(
                             conn_id,
                             ConnectionEntry {
-                                stream: StreamState::Full(Box::new(unified_stream)),
+                                stream: Arc::new(Mutex::new(StreamState::Full(Box::new(
+                                    unified_stream,
+                                )))),
                                 peer_addr,
                                 owner: actor_id,
                                 state: ConnectionState::Pending, // Starts pending!
@@ -857,10 +870,13 @@ impl Handler for TcpHandler {
                         match (old_mode, new_mode) {
                             (DataMode::Passive, DataMode::Active | DataMode::Once) => {
                                 // Transitioning to active/once mode - split stream and spawn reader
-                                let stream = std::mem::replace(&mut entry.stream, StreamState::Closed);
+                                let mut stream_guard = entry.stream.lock().await;
+                                let stream = std::mem::replace(&mut *stream_guard, StreamState::Closed);
                                 let full_stream = match stream {
                                     StreamState::Full(s) => s,
-                                    StreamState::WriteOnly(_) => {
+                                    other @ StreamState::WriteOnly(_) => {
+                                        // Restore — we replaced with Closed above.
+                                        *stream_guard = other;
                                         return Err(Value::String(format!(
                                             "Connection {} is already in active mode",
                                             conn_id_str
@@ -875,7 +891,8 @@ impl Handler for TcpHandler {
                                 };
 
                                 let (read_half, write_half) = full_stream.into_split();
-                                entry.stream = StreamState::WriteOnly(write_half);
+                                *stream_guard = StreamState::WriteOnly(write_half);
+                                drop(stream_guard);
                                 entry.data_mode = new_mode;
 
                                 // Get actor handle for callbacks
@@ -1055,26 +1072,35 @@ impl Handler for TcpHandler {
                         let conn_id = string_to_id(&conn_id_str)?;
                         let len = data.len();
 
-                        let mut connections = st.connections.lock().await;
-                        let entry = connections.get_mut(&conn_id).ok_or_else(|| {
-                            Value::String(format!("Connection not found: {}", conn_id_str))
-                        })?;
+                        // Lock the outer map only long enough to validate metadata
+                        // and clone the per-connection stream Arc. The actual I/O
+                        // runs without holding the outer lock — that lets two
+                        // actors do I/O on different connections in parallel.
+                        let stream_arc = {
+                            let connections = st.connections.lock().await;
+                            let entry = connections.get(&conn_id).ok_or_else(|| {
+                                Value::String(format!("Connection not found: {}", conn_id_str))
+                            })?;
 
-                        if entry.owner != actor_id {
-                            return Err(Value::String(format!(
-                                "Connection {} not owned by this actor",
-                                conn_id_str
-                            )));
-                        }
+                            if entry.owner != actor_id {
+                                return Err(Value::String(format!(
+                                    "Connection {} not owned by this actor",
+                                    conn_id_str
+                                )));
+                            }
 
-                        if entry.state == ConnectionState::Pending {
-                            return Err(Value::String(format!(
-                                "Connection {} is pending - call activate() or transfer() first",
-                                conn_id_str
-                            )));
-                        }
+                            if entry.state == ConnectionState::Pending {
+                                return Err(Value::String(format!(
+                                    "Connection {} is pending - call activate() or transfer() first",
+                                    conn_id_str
+                                )));
+                            }
 
-                        match &mut entry.stream {
+                            entry.stream.clone()
+                        };
+
+                        let mut stream_guard = stream_arc.lock().await;
+                        match &mut *stream_guard {
                             StreamState::Full(stream) => {
                                 stream
                                     .write_all(&data)
@@ -1113,33 +1139,42 @@ impl Handler for TcpHandler {
                         let (conn_id_str, max_bytes) = parse_string_and_u32(&input)?;
                         let conn_id = string_to_id(&conn_id_str)?;
 
-                        let mut connections = st.connections.lock().await;
-                        let entry = connections.get_mut(&conn_id).ok_or_else(|| {
-                            Value::String(format!("Connection not found: {}", conn_id_str))
-                        })?;
+                        // Lock the outer map only long enough to validate metadata
+                        // and clone the per-connection stream Arc. The actual read
+                        // runs without holding the outer lock so other actors can
+                        // do their own I/O concurrently on other connections.
+                        let stream_arc = {
+                            let connections = st.connections.lock().await;
+                            let entry = connections.get(&conn_id).ok_or_else(|| {
+                                Value::String(format!("Connection not found: {}", conn_id_str))
+                            })?;
 
-                        if entry.owner != actor_id {
-                            return Err(Value::String(format!(
-                                "Connection {} not owned by this actor",
-                                conn_id_str
-                            )));
-                        }
+                            if entry.owner != actor_id {
+                                return Err(Value::String(format!(
+                                    "Connection {} not owned by this actor",
+                                    conn_id_str
+                                )));
+                            }
 
-                        if entry.state == ConnectionState::Pending {
-                            return Err(Value::String(format!(
-                                "Connection {} is pending - call activate() or transfer() first",
-                                conn_id_str
-                            )));
-                        }
+                            if entry.state == ConnectionState::Pending {
+                                return Err(Value::String(format!(
+                                    "Connection {} is pending - call activate() or transfer() first",
+                                    conn_id_str
+                                )));
+                            }
 
-                        if entry.data_mode != DataMode::Passive {
-                            return Err(Value::String(format!(
-                                "Connection {} is in active mode - data is pushed via on-data callback",
-                                conn_id_str
-                            )));
-                        }
+                            if entry.data_mode != DataMode::Passive {
+                                return Err(Value::String(format!(
+                                    "Connection {} is in active mode - data is pushed via on-data callback",
+                                    conn_id_str
+                                )));
+                            }
 
-                        let stream = match &mut entry.stream {
+                            entry.stream.clone()
+                        };
+
+                        let mut stream_guard = stream_arc.lock().await;
+                        let stream = match &mut *stream_guard {
                             StreamState::Full(stream) => stream,
                             StreamState::WriteOnly(_) => {
                                 return Err(Value::String(format!(
