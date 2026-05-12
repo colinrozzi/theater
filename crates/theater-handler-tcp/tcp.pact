@@ -60,5 +60,18 @@ interface tcp {
 
         // Close a listener
         close-listener: func(listener-id: string) -> result<_, string>
+
+        // Upgrade an existing plain TCP connection to TLS as the server side.
+        // Uses the server_tls cert/key configured on this handler. The actor
+        // is expected to have already exchanged whatever protocol greeting
+        // negotiates the upgrade (e.g. SMTP STARTTLS, IMAP STARTTLS).
+        // After this returns Ok, send/receive on this connection-id flow
+        // over TLS — same connection-id, encrypted bytes.
+        upgrade-to-tls-server: func(connection-id: string) -> result<_, string>
+
+        // Upgrade an existing plain TCP connection to TLS as the client side.
+        // server-name is the hostname used for SNI and cert verification.
+        // Uses the client_tls config on this handler.
+        upgrade-to-tls-client: func(connection-id: string, server-name: string) -> result<_, string>
     }
 }
