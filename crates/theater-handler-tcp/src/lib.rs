@@ -537,8 +537,19 @@ impl Handler for TcpHandler {
                             .peer_addr()
                             .map_err(|e| Value::String(e.to_string()))?;
 
-                        // Apply TLS if configured
-                        let unified_stream = if let Some(ref ctx) = *tls_ctx {
+                        // Apply TLS if configured AND auto_handshake is enabled.
+                        // STARTTLS-style protocols set client_tls.auto_handshake = false:
+                        // the connector is built (so upgrade-to-tls-client works) but
+                        // connect() returns a plain TCP stream until the actor explicitly
+                        // upgrades it after negotiating the STARTTLS handshake.
+                        let auto_handshake = tls_ctx
+                            .as_ref()
+                            .as_ref()
+                            .map(|c| c.client_auto_handshake)
+                            .unwrap_or(true);
+                        let unified_stream = if !auto_handshake {
+                            UnifiedStream::Plain(tcp_stream)
+                        } else if let Some(ref ctx) = *tls_ctx {
                             if let Some(ref connector) = ctx.client_connector {
                                 // Extract hostname from address for SNI
                                 let server_name = tls::parse_server_name(
