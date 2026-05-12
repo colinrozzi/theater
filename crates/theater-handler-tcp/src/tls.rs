@@ -67,6 +67,10 @@ pub struct TlsContext {
     pub client_connector: Option<TlsConnector>,
     /// TLS acceptor for inbound server connections
     pub server_acceptor: Option<TlsAcceptor>,
+    /// Whether to TLS-handshake automatically on connect(). False means the
+    /// connector is built but used only by explicit upgrade-to-tls-client
+    /// calls (STARTTLS-style protocols).
+    pub client_auto_handshake: bool,
 }
 
 impl TlsContext {
@@ -99,12 +103,19 @@ impl TlsContext {
             None
         };
 
+        let client_auto_handshake = config
+            .client_tls
+            .as_ref()
+            .map(|c| c.auto_handshake)
+            .unwrap_or(true);
+
         if client_connector.is_none() && server_acceptor.is_none() {
             Ok(None)
         } else {
             Ok(Some(TlsContext {
                 client_connector,
                 server_acceptor,
+                client_auto_handshake,
             }))
         }
     }
@@ -301,6 +312,7 @@ mod tests {
                 enabled: false,
                 ca_cert: None,
                 skip_verify: false,
+                auto_handshake: true,
             }),
             server_tls: None,
             ..Default::default()

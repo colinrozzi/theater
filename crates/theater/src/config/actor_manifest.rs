@@ -244,6 +244,17 @@ pub struct ClientTlsConfig {
     /// Skip certificate verification (for development only!)
     #[serde(default)]
     pub skip_verify: bool,
+    /// Automatically perform a TLS handshake when `connect()` is called.
+    /// True (default) keeps the existing behaviour — every outbound connection
+    /// is encrypted. Set to false for STARTTLS-style protocols where the
+    /// actor wants a plain TCP connection initially and will call
+    /// `upgrade-to-tls-client` after negotiating the upgrade.
+    #[serde(default = "default_true")]
+    pub auto_handshake: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 /// TLS configuration for inbound server connections (listeners)
