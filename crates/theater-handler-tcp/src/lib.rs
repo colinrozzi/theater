@@ -501,6 +501,14 @@ impl Handler for TcpHandler {
         let st_close = state.clone();
         let aid_close = actor_id_for_closures;
 
+        let st_upgrade_server = state.clone();
+        let aid_upgrade_server = actor_id_for_closures;
+        let tls_for_upgrade_server = self.tls_context.clone();
+
+        let st_upgrade_client = state.clone();
+        let aid_upgrade_client = actor_id_for_closures;
+        let tls_for_upgrade_client = self.tls_context.clone();
+
         let st_close_listener = state.clone();
         let aid_close_listener = actor_id_for_closures;
 
@@ -1268,6 +1276,231 @@ impl Handler for TcpHandler {
                         }
 
                         debug!("tcp close conn={} (graceful)", conn_id);
+                        Ok::<Value, Value>(Value::Tuple(vec![]))
+                    }
+                },
+            )?
+            // ----------------------------------------------------------------
+            // upgrade-to-tls-server(connection-id: string) -> result<_, string>
+            //
+            // For STARTTLS-style protocols: the actor accepts a plain TCP
+            // connection, exchanges a few protocol lines, then calls this to
+            // wrap the existing stream with TLS using the server_tls cert
+            // configured on this handler. After this returns Ok, the same
+            // connection-id transports TLS-encrypted bytes.
+            // ----------------------------------------------------------------
+            .func_async_result(
+                "upgrade-to-tls-server",
+                move |_ctx: AsyncCtx<ActorStore>, input: Value| {
+                    let st = st_upgrade_server.clone();
+                    let actor_id = aid_upgrade_server;
+                    let tls_ctx = tls_for_upgrade_server.clone();
+                    async move {
+                        let conn_id_str = parse_string(&input)?;
+                        let conn_id = string_to_id(&conn_id_str)?;
+
+                        let acceptor = match tls_ctx.as_ref() {
+                            Some(ctx) => match &ctx.server_acceptor {
+                                Some(a) => a.clone(),
+                                None => {
+                                    return Err(Value::String(
+                                        "server_tls not configured on this handler".into(),
+                                    ))
+                                }
+                            },
+                            None => {
+                                return Err(Value::String(
+                                    "server_tls not configured on this handler".into(),
+                                ))
+                            }
+                        };
+
+                        let stream_arc = {
+                            let connections = st.connections.lock().await;
+                            let entry = connections.get(&conn_id).ok_or_else(|| {
+                                Value::String(format!("Connection not found: {}", conn_id_str))
+                            })?;
+                            if entry.owner != actor_id {
+                                return Err(Value::String(format!(
+                                    "Connection {} not owned by this actor",
+                                    conn_id_str
+                                )));
+                            }
+                            if entry.state != ConnectionState::Active {
+                                return Err(Value::String(format!(
+                                    "Connection {} must be activated before TLS upgrade",
+                                    conn_id_str
+                                )));
+                            }
+                            if entry.data_mode != DataMode::Passive {
+                                return Err(Value::String(format!(
+                                    "Connection {} must be in passive mode for TLS upgrade",
+                                    conn_id_str
+                                )));
+                            }
+                            entry.stream.clone()
+                        };
+
+                        let mut guard = stream_arc.lock().await;
+                        let taken = std::mem::replace(&mut *guard, StreamState::Closed);
+                        let inner = match taken {
+                            StreamState::Full(boxed) => *boxed,
+                            StreamState::WriteOnly(w) => {
+                                *guard = StreamState::WriteOnly(w);
+                                return Err(Value::String(format!(
+                                    "Connection {} is split; TLS upgrade not supported",
+                                    conn_id_str
+                                )));
+                            }
+                            StreamState::Closed => {
+                                return Err(Value::String(format!(
+                                    "Connection {} is closed",
+                                    conn_id_str
+                                )));
+                            }
+                        };
+                        let tcp = match inner {
+                            UnifiedStream::Plain(tcp) => tcp,
+                            other => {
+                                *guard = StreamState::Full(Box::new(other));
+                                return Err(Value::String(format!(
+                                    "Connection {} is already TLS",
+                                    conn_id_str
+                                )));
+                            }
+                        };
+
+                        let tls_stream = match acceptor.accept(tcp).await {
+                            Ok(s) => s,
+                            Err(e) => {
+                                // Stream is gone — leave entry as Closed.
+                                return Err(Value::String(format!(
+                                    "TLS server handshake failed: {}",
+                                    e
+                                )));
+                            }
+                        };
+                        *guard = StreamState::Full(Box::new(UnifiedStream::ServerTls(tls_stream)));
+                        drop(guard);
+
+                        debug!("tcp upgrade-to-tls-server conn={}", conn_id);
+                        Ok::<Value, Value>(Value::Tuple(vec![]))
+                    }
+                },
+            )?
+            // ----------------------------------------------------------------
+            // upgrade-to-tls-client(connection-id, server-name) -> result<_, string>
+            //
+            // The client-side mirror of upgrade-to-tls-server: wraps an
+            // existing plain TCP connection with TLS using the client_tls
+            // config. server-name is used for SNI and cert verification.
+            // ----------------------------------------------------------------
+            .func_async_result(
+                "upgrade-to-tls-client",
+                move |_ctx: AsyncCtx<ActorStore>, input: Value| {
+                    let st = st_upgrade_client.clone();
+                    let actor_id = aid_upgrade_client;
+                    let tls_ctx = tls_for_upgrade_client.clone();
+                    async move {
+                        let (conn_id_str, server_name_str) = parse_two_strings(&input)?;
+                        let conn_id = string_to_id(&conn_id_str)?;
+
+                        let connector = match tls_ctx.as_ref() {
+                            Some(ctx) => match &ctx.client_connector {
+                                Some(c) => c.clone(),
+                                None => {
+                                    return Err(Value::String(
+                                        "client_tls not configured on this handler".into(),
+                                    ))
+                                }
+                            },
+                            None => {
+                                return Err(Value::String(
+                                    "client_tls not configured on this handler".into(),
+                                ))
+                            }
+                        };
+
+                        let server_name =
+                            rustls::pki_types::ServerName::try_from(server_name_str.clone())
+                                .map_err(|e| {
+                                    Value::String(format!(
+                                        "Invalid server name {:?}: {}",
+                                        server_name_str, e
+                                    ))
+                                })?;
+
+                        let stream_arc = {
+                            let connections = st.connections.lock().await;
+                            let entry = connections.get(&conn_id).ok_or_else(|| {
+                                Value::String(format!("Connection not found: {}", conn_id_str))
+                            })?;
+                            if entry.owner != actor_id {
+                                return Err(Value::String(format!(
+                                    "Connection {} not owned by this actor",
+                                    conn_id_str
+                                )));
+                            }
+                            if entry.state != ConnectionState::Active {
+                                return Err(Value::String(format!(
+                                    "Connection {} must be activated before TLS upgrade",
+                                    conn_id_str
+                                )));
+                            }
+                            if entry.data_mode != DataMode::Passive {
+                                return Err(Value::String(format!(
+                                    "Connection {} must be in passive mode for TLS upgrade",
+                                    conn_id_str
+                                )));
+                            }
+                            entry.stream.clone()
+                        };
+
+                        let mut guard = stream_arc.lock().await;
+                        let taken = std::mem::replace(&mut *guard, StreamState::Closed);
+                        let inner = match taken {
+                            StreamState::Full(boxed) => *boxed,
+                            StreamState::WriteOnly(w) => {
+                                *guard = StreamState::WriteOnly(w);
+                                return Err(Value::String(format!(
+                                    "Connection {} is split; TLS upgrade not supported",
+                                    conn_id_str
+                                )));
+                            }
+                            StreamState::Closed => {
+                                return Err(Value::String(format!(
+                                    "Connection {} is closed",
+                                    conn_id_str
+                                )));
+                            }
+                        };
+                        let tcp = match inner {
+                            UnifiedStream::Plain(tcp) => tcp,
+                            other => {
+                                *guard = StreamState::Full(Box::new(other));
+                                return Err(Value::String(format!(
+                                    "Connection {} is already TLS",
+                                    conn_id_str
+                                )));
+                            }
+                        };
+
+                        let tls_stream = match connector.connect(server_name, tcp).await {
+                            Ok(s) => s,
+                            Err(e) => {
+                                return Err(Value::String(format!(
+                                    "TLS client handshake failed: {}",
+                                    e
+                                )));
+                            }
+                        };
+                        *guard = StreamState::Full(Box::new(UnifiedStream::ClientTls(tls_stream)));
+                        drop(guard);
+
+                        debug!(
+                            "tcp upgrade-to-tls-client conn={} server_name={}",
+                            conn_id, server_name_str
+                        );
                         Ok::<Value, Value>(Value::Tuple(vec![]))
                     }
                 },
