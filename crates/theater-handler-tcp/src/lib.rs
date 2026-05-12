@@ -1217,6 +1217,11 @@ impl Handler for TcpHandler {
             )?
             // ----------------------------------------------------------------
             // close(connection-id: string) -> result<_, string>
+            //
+            // Gracefully shuts the write side of the stream before dropping —
+            // for TLS streams this sends the close_notify alert so strict
+            // clients (e.g. rustls) don't see an "unexpected EOF". Plain TCP
+            // streams get a normal FIN.
             // ----------------------------------------------------------------
             .func_async_result(
                 "close",
@@ -1227,20 +1232,42 @@ impl Handler for TcpHandler {
                         let conn_id_str = parse_string(&input)?;
                         let conn_id = string_to_id(&conn_id_str)?;
 
-                        let mut connections = st.connections.lock().await;
-                        let entry = connections.get(&conn_id).ok_or_else(|| {
-                            Value::String(format!("Connection not found: {}", conn_id_str))
-                        })?;
+                        // Take the stream out of the map first, holding the
+                        // outer lock only long enough to validate ownership
+                        // and remove the entry.
+                        let stream_arc = {
+                            let mut connections = st.connections.lock().await;
+                            let entry = connections.get(&conn_id).ok_or_else(|| {
+                                Value::String(format!("Connection not found: {}", conn_id_str))
+                            })?;
+                            if entry.owner != actor_id {
+                                return Err(Value::String(format!(
+                                    "Connection {} not owned by this actor",
+                                    conn_id_str
+                                )));
+                            }
+                            let arc = entry.stream.clone();
+                            connections.remove(&conn_id);
+                            arc
+                        };
 
-                        if entry.owner != actor_id {
-                            return Err(Value::String(format!(
-                                "Connection {} not owned by this actor",
-                                conn_id_str
-                            )));
+                        // Move the stream out and call shutdown on the write
+                        // side. Errors are non-fatal — peer may already have
+                        // closed.
+                        let mut guard = stream_arc.lock().await;
+                        let taken = std::mem::replace(&mut *guard, StreamState::Closed);
+                        drop(guard);
+                        match taken {
+                            StreamState::Full(mut s) => {
+                                let _ = AsyncWriteExt::shutdown(&mut *s).await;
+                            }
+                            StreamState::WriteOnly(mut w) => {
+                                let _ = AsyncWriteExt::shutdown(&mut w).await;
+                            }
+                            StreamState::Closed => {}
                         }
 
-                        connections.remove(&conn_id);
-                        debug!("tcp close conn={}", conn_id);
+                        debug!("tcp close conn={} (graceful)", conn_id);
                         Ok::<Value, Value>(Value::Tuple(vec![]))
                     }
                 },
