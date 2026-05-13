@@ -26,3 +26,7 @@ rustls-pemfile = "2"
 webpki-roots = "0.26"
 
 serde_json.workspace = true
+
+[dev-dependencies]
+rcgen = "0.13"
+tracing-subscriber.workspace = true
