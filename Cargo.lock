@@ -3264,7 +3264,7 @@ dependencies = [
 
 [[package]]
 name = "theater"
-version = "0.3.15"
+version = "0.3.16"
 dependencies = [
  "anyhow",
  "axum",
@@ -3489,7 +3489,7 @@ dependencies = [
 
 [[package]]
 name = "theater-handler-tcp"
-version = "0.3.15"
+version = "0.3.16"
 dependencies = [
  "anyhow",
  "rustls 0.23.40",
@@ -3519,7 +3519,7 @@ dependencies = [
 
 [[package]]
 name = "theater-handler-timer"
-version = "0.3.10"
+version = "0.3.11"
 dependencies = [
  "anyhow",
  "theater",
