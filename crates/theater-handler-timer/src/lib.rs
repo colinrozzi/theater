@@ -272,14 +272,20 @@ impl Handler for TimerHandler {
                 },
             )?
             // now() -> u64
-            .func_async_result(
+            //
+            // Registered with `func_async` (not `func_async_result`): the pact
+            // declares `now: func() -> u64`, so the host must encode a bare
+            // `Value::U64`. Using `func_async_result` would wrap the output in
+            // `Value::Result`, which the guest then fails to decode as `u64`
+            // — the actor side appears to hang on the call.
+            .func_async(
                 "now",
                 move |_ctx: AsyncCtx<ActorStore>, _input: Value| async move {
                     let now = SystemTime::now()
                         .duration_since(UNIX_EPOCH)
                         .unwrap_or_default()
                         .as_millis() as u64;
-                    Ok::<Value, Value>(Value::U64(now))
+                    Value::U64(now)
                 },
             )?;
 
@@ -321,6 +327,7 @@ fn parse_string(input: &Value) -> Result<String, Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use theater::pack_bridge::Type;
 
     #[test]
     fn test_timer_interface_parses() {
@@ -332,5 +339,24 @@ mod tests {
     fn test_handler_name() {
         let handler = TimerHandler::new(TimerHandlerConfig::default());
         assert_eq!(handler.name(), "timer");
+    }
+
+    /// `now` returns a bare `u64` in the pact. The host registration must
+    /// match — using `func_async_result` here would encode `Value::Result`,
+    /// which the guest then fails to decode as `u64` (the call appears to
+    /// hang from the actor's side).
+    #[test]
+    fn test_now_pact_return_type_is_bare_u64() {
+        let iface = timer_interface();
+        let sig = iface
+            .signatures()
+            .iter()
+            .find(|f| f.name == "now")
+            .expect("timer.pact must declare `now`");
+        assert_eq!(
+            sig.results,
+            vec![Type::U64],
+            "timer.now() must return bare u64 (not a result); the host registration in setup_host_functions_composite assumes this"
+        );
     }
 }
