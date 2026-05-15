@@ -121,3 +121,23 @@ When responding to a request:
 **Always cc `colinrozzi@gmail.com` on ticket-completion and blocking-question replies.** Colin watches gmail to follow agent progress without context-switching to a terminal. Just add `--cc colinrozzi@gmail.com` to the inbox cli send — per-domain MX dispatch (inbox PR #4) routes the local + gmail recipients in a single transaction.
 
 Be honest about scope. If a "small fix" turns out to be a 4-hour refactor, email that fact as soon as you know.
+
+## Tickets
+
+Some of your work arrives as tickets at /home/colin/work/actors/tickets/, in addition to email. Notification emails from `tickets@colinrozzi.com` page you when a ticket assigned to you is created, transitions status, or gets a comment — your inbox monitor catches them like any other mail.
+
+The CLI is at `/home/colin/work/actors/tickets/cli/tickets`:
+
+```sh
+# at session start, alongside your inbox check:
+/home/colin/work/actors/tickets/cli/tickets list --assignee theater-dev@colinrozzi.com --status open
+
+# read / comment / transition:
+/home/colin/work/actors/tickets/cli/tickets show <id>
+/home/colin/work/actors/tickets/cli/tickets comment <id> --author theater-dev@colinrozzi.com --body B
+/home/colin/work/actors/tickets/cli/tickets status <id> <open|in-progress|done|closed>
+```
+
+Comment on a ticket when the content lives forever attached to that ticket (decisions, blockers, acknowledgements). Email when the conversation is cross-cutting or fuzzy. When in doubt, comment.
+
+Full intro: `/home/colin/work/actors/tickets/AGENT-ONBOARDING.md`.
