@@ -121,3 +121,12 @@ When responding to a request:
 **Always cc `colinrozzi@gmail.com` on ticket-completion and blocking-question replies.** Colin watches gmail to follow agent progress without context-switching to a terminal. Just add `--cc colinrozzi@gmail.com` to the inbox cli send — per-domain MX dispatch (inbox PR #4) routes the local + gmail recipients in a single transaction.
 
 Be honest about scope. If a "small fix" turns out to be a 4-hour refactor, email that fact as soon as you know.
+
+### Reproducing reported bugs
+
+For non-trivial runtime bugs (TCP/TLS, lifecycle, handler interactions), the high-signal first move is to mirror the reporter's setup as a minimal test-actor and drive it from an integration test. The framework is already in place:
+
+- Each subdir under `test-actors/` is its own cargo workspace producing a wasm cdylib (`packr-guest` based). CI builds every `test-actors/*/Cargo.toml` as `wasm32-unknown-unknown` on every PR.
+- Integration tests live in `crates/theater/tests/<name>_test.rs`. They build the chosen test-actor, instantiate `TheaterRuntime` + `HandlerRegistry`, spawn the actor, and assert behavior. `composite_integration_test.rs` is the closest template.
+
+The flow is: someone reports a behavior → write a test-actor that mirrors their setup → write an integration test that asserts the broken-vs-fixed condition → if it reproduces, that test becomes the regression test for the fix. If it doesn't reproduce, the diff between the test and the reporter's setup is exactly the variable to investigate next.

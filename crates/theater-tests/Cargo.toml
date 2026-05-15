@@ -26,3 +26,7 @@ tempfile = "3.8.1"
 test-log = "0.2"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+# For close_notify_repro_test: stands up a strict-rustls client + tls dummy server.
+rustls = "0.23"
+tokio-rustls = "0.26"
+rcgen = "0.13"

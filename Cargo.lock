@@ -3636,6 +3636,8 @@ name = "theater-tests"
 version = "0.3.10"
 dependencies = [
  "anyhow",
+ "rcgen",
+ "rustls 0.23.40",
  "serde",
  "serde_json",
  "tempfile",
@@ -3651,6 +3653,7 @@ dependencies = [
  "theater-handler-terminal",
  "theater-handler-timer",
  "tokio",
+ "tokio-rustls 0.26.4",
  "tracing",
  "tracing-subscriber",
 ]
