@@ -143,3 +143,120 @@ async fn server_shutdown_sends_close_notify() {
         "response should contain 'hello' body"
     );
 }
+
+/// POST-shape variant that mirrors the inbox `/send` close path:
+///   1. client POSTs an HTTP request body
+///   2. server reads, simulates a long synchronous side-effect (smtp_deliver),
+///      writes a larger structured JSON response, runs the close pattern
+///   3. assert clean EOF (no missing close_notify)
+///
+/// Ticket #10 hypothesis 1: tcp_close returns before close_notify is on the wire
+/// when the response is large enough that some encrypted bytes are still buffered
+/// in the kernel send queue when shutdown(SHUT_WR) fires. If reproducible, this
+/// test will trip with `UnexpectedEof`.
+#[tokio::test]
+async fn post_response_close_pattern_sends_close_notify() {
+    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+
+    let (server_cfg, client_roots) = loopback_tls();
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+    let addr = listener.local_addr().expect("local addr");
+
+    let server = tokio::spawn({
+        let acceptor = TlsAcceptor::from(Arc::new(server_cfg));
+        async move {
+            let (sock, _) = listener.accept().await.expect("accept");
+            let tls = acceptor.accept(sock).await.expect("tls handshake");
+
+            let stream_arc: Arc<Mutex<LocalState>> =
+                Arc::new(Mutex::new(LocalState::Full(Box::new(tls))));
+
+            // tcp_receive: bounded read of the POST request.
+            {
+                let mut guard = stream_arc.lock().await;
+                if let LocalState::Full(ref mut s) = *guard {
+                    let mut buf = [0u8; 65536];
+                    let _ = s.read(&mut buf).await;
+                }
+            }
+
+            // Simulate the synchronous smtp_deliver side-effect that sits
+            // between request read and response write in the inbox /send path.
+            // Yields a few times so the runtime gets a chance to do something
+            // weird if there's a race in actor-task scheduling.
+            for _ in 0..4 {
+                tokio::task::yield_now().await;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+
+            // Build a response that's the same shape and approximate size as
+            // the inbox /send structured response (PR #4).
+            let body = r#"{"status":"sent","delivered":["claude@colinrozzi.com","colinrozzi@gmail.com"],"failed":[]}"#;
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            );
+
+            // tcp_send
+            {
+                let mut guard = stream_arc.lock().await;
+                if let LocalState::Full(ref mut s) = *guard {
+                    s.write_all(response.as_bytes()).await.expect("write_all");
+                }
+            }
+
+            // tcp_close — same pattern as theater-handler-tcp/src/lib.rs.
+            {
+                let mut guard = stream_arc.lock().await;
+                let taken = std::mem::replace(&mut *guard, LocalState::Closed);
+                drop(guard);
+                match taken {
+                    LocalState::Full(mut s) => {
+                        let _ = AsyncWriteExt::shutdown(&mut *s).await;
+                    }
+                    LocalState::Closed => {}
+                }
+            }
+        }
+    });
+
+    let client_cfg = ClientConfig::builder()
+        .with_root_certificates(client_roots)
+        .with_no_client_auth();
+    let connector = TlsConnector::from(Arc::new(client_cfg));
+    let sock = tokio::net::TcpStream::connect(addr).await.expect("connect");
+    let server_name = ServerName::try_from("localhost").expect("name").to_owned();
+    let mut tls = connector
+        .connect(server_name, sock)
+        .await
+        .expect("tls connect");
+
+    // POST request matching the inbox cli's /send body shape.
+    let req_body = r#"{"to":["claude@colinrozzi.com"],"cc":["colinrozzi@gmail.com"],"bcc":[],"subject":"close_notify probe","body":"probe — disregard","smtp_server":"localhost:25"}"#;
+    let req = format!(
+        "POST /v1/mailboxes/theater-dev%40colinrozzi.com/send HTTP/1.1\r\nHost: localhost\r\nAuthorization: Bearer probe-token\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+        req_body.len(),
+        req_body
+    );
+    tls.write_all(req.as_bytes()).await.expect("client write");
+
+    let mut buf = Vec::new();
+    let read = tokio::time::timeout(Duration::from_secs(5), tls.read_to_end(&mut buf)).await;
+
+    server.await.expect("server task ok");
+
+    let result = read.expect("read timed out");
+    let n = result.expect(
+        "expected clean EOF on POST response close pattern; got UnexpectedEof — \
+         ticket #10 race reproduced",
+    );
+    assert!(n > 0, "expected response bytes, got empty");
+    let text = String::from_utf8_lossy(&buf);
+    assert!(
+        text.contains("\"status\":\"sent\""),
+        "response should contain status:sent — got: {}",
+        text
+    );
+}

@@ -1272,21 +1272,35 @@ impl Handler for TcpHandler {
 
                         // Move the stream out and call shutdown on the write
                         // side. Errors are non-fatal — peer may already have
-                        // closed.
+                        // closed — but we log them at WARN so production can
+                        // tell apart a clean close_notify-sent path from a
+                        // shutdown failure that drops bytes (ticket #10).
                         let mut guard = stream_arc.lock().await;
                         let taken = std::mem::replace(&mut *guard, StreamState::Closed);
                         drop(guard);
-                        match taken {
+                        let shutdown_result = match taken {
                             StreamState::Full(mut s) => {
-                                let _ = AsyncWriteExt::shutdown(&mut *s).await;
+                                Some(AsyncWriteExt::shutdown(&mut *s).await)
                             }
                             StreamState::WriteOnly(mut w) => {
-                                let _ = AsyncWriteExt::shutdown(&mut w).await;
+                                Some(AsyncWriteExt::shutdown(&mut w).await)
                             }
-                            StreamState::Closed => {}
+                            StreamState::Closed => None,
+                        };
+                        match shutdown_result {
+                            Some(Ok(())) => {
+                                debug!("tcp close conn={} (graceful shutdown ok)", conn_id);
+                            }
+                            Some(Err(e)) => {
+                                warn!(
+                                    "tcp close conn={} shutdown error (close_notify may not have been sent): {}",
+                                    conn_id, e
+                                );
+                            }
+                            None => {
+                                debug!("tcp close conn={} (already closed)", conn_id);
+                            }
                         }
-
-                        debug!("tcp close conn={} (graceful)", conn_id);
                         Ok::<Value, Value>(Value::Tuple(vec![]))
                     }
                 },
