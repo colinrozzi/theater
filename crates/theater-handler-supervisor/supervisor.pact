@@ -13,10 +13,11 @@ interface supervisor {
         // valid once init has completed.
         //
         // manifest: manifest path or reference
-        // init-state: initial state passed to the child's init. Use the
-        //   conventional `option<list<u8>>::none` sentinel when you have
-        //   nothing to pass. Manifest `initial_state` is used as a fallback
-        //   when this argument is the conventional default.
+        // init-state: initial state passed to the child's init. The
+        //   supervisor host function passes this value through verbatim —
+        //   it does NOT fall back to the manifest's `initial_state` field.
+        //   Use the conventional `option<list<u8>>::none` sentinel for
+        //   "no state".
         // wasm-bytes: optional WASM bytes (if not provided, loaded from manifest)
         spawn: func(manifest: string, init-state: value, wasm-bytes: option<list<u8>>) -> result<string, string>
 

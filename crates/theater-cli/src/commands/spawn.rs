@@ -13,6 +13,7 @@ use theater::config::actor_manifest::{
 };
 use theater::handler::HandlerRegistry;
 use theater::messages::{default_init_state, TheaterCommand};
+use theater::pack_bridge::Value;
 use theater::theater_runtime::TheaterRuntime;
 use theater::utils::resolve_reference;
 use theater::ManifestConfig;
@@ -256,6 +257,19 @@ async fn run(args: &SpawnArgs, ctx: &CommandContext, call_init: bool) -> Result<
     // Set up a supervisor channel so we get notified when the actor exits
     let (supervisor_tx, mut supervisor_rx) = mpsc::channel(32);
 
+    // The runtime stores `init_state` as the actor's initial state and
+    // (for SpawnActor) prepends it to the auto-fired actor.init call.
+    // For the CLI, the only place a caller can supply that state is the
+    // manifest's `initial_state` field — fall back to it here when set,
+    // otherwise use the conventional none sentinel.
+    //
+    // PR A (#58) moved this resolver out of `spawn_actor` with the intent
+    // that each caller does its own resolution; this line is the CLI's.
+    let init_state = match manifest.initial_state.as_ref() {
+        Some(s) => Value::String(s.clone()),
+        None => default_init_state(),
+    };
+
     // SpawnActor: setup + auto-init (the runtime calls actor.init before
     // responding). SetupActor: setup only — caller drives init separately
     // (or a handler like ReplayHandler does it from the chain).
@@ -264,7 +278,7 @@ async fn run(args: &SpawnArgs, ctx: &CommandContext, call_init: bool) -> Result<
             wasm_bytes,
             name: Some(manifest.name.clone()),
             manifest: Some(manifest),
-            init_state: default_init_state(),
+            init_state,
             response_tx,
             supervisor_tx: Some(supervisor_tx),
             subscription_tx: None, // Using global subscription instead
@@ -274,7 +288,7 @@ async fn run(args: &SpawnArgs, ctx: &CommandContext, call_init: bool) -> Result<
             wasm_bytes,
             name: Some(manifest.name.clone()),
             manifest: Some(manifest),
-            init_state: default_init_state(),
+            init_state,
             response_tx,
             supervisor_tx: Some(supervisor_tx),
             subscription_tx: None, // Using global subscription instead
