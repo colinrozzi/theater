@@ -22,7 +22,7 @@ use theater::config::actor_manifest::{
 };
 use theater::handler::HandlerRegistry;
 use theater::id::TheaterId;
-use theater::messages::{ChannelId, TheaterCommand};
+use theater::messages::{default_init_state, ChannelId, TheaterCommand};
 use theater::theater_runtime::TheaterRuntime;
 use theater::utils::resolve_reference;
 use theater::TheaterRuntimeError;
@@ -709,11 +709,11 @@ impl TheaterServer {
                         None
                     };
                     match runtime_tx
-                        .send(TheaterCommand::SpawnActor {
+                        .send(TheaterCommand::SetupActor {
                             wasm_bytes,
                             name: Some(manifest_config.name.clone()),
                             manifest: Some(manifest_config),
-                            init_bytes: None,
+                            init_state: default_init_state(),
                             response_tx: cmd_tx,
                             supervisor_tx,
                             subscription_tx,

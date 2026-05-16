@@ -11,7 +11,7 @@ use theater::chain::ChainEvent;
 use theater::config::actor_manifest::SupervisorHostConfig;
 use theater::config::permissions::SupervisorPermissions;
 use theater::handler::{Handler, HandlerContext, SharedActorInstance};
-use theater::messages::{ActorResult, TheaterCommand};
+use theater::messages::{default_init_state, ActorResult, TheaterCommand};
 use theater::shutdown::ShutdownReceiver;
 use theater::utils::resolve_reference;
 use theater::ManifestConfig;
@@ -383,11 +383,16 @@ impl Handler for SupervisorHandler {
                         let theater_tx = store.theater_tx.clone();
                         let name = Some(manifest.name.clone());
                         let (response_tx, response_rx) = oneshot::channel();
-                        let cmd = TheaterCommand::SpawnActor {
+                        // PR A: keep the wasm-facing "supervisor.spawn does
+                        // not auto-init" contract by dispatching SetupActor.
+                        // PR B (pact signature change) switches this to
+                        // SpawnActor for the auto-init default.
+                        let init_state = option_bytes_to_value(init_bytes);
+                        let cmd = TheaterCommand::SetupActor {
                             wasm_bytes,
                             name,
                             manifest: Some(manifest),
-                            init_bytes,
+                            init_state,
                             response_tx,
                             supervisor_tx: Some(supervisor_tx),
                             subscription_tx: Some(event_tx),
@@ -476,11 +481,13 @@ impl Handler for SupervisorHandler {
 
                         let name = Some(manifest.name.clone());
                         let (response_tx, response_rx) = oneshot::channel();
-                        let cmd = TheaterCommand::SpawnActor {
+                        // Same as the regular spawn path — preserve no-auto-init
+                        // semantics in PR A.
+                        let cmd = TheaterCommand::SetupActor {
                             wasm_bytes,
                             name,
                             manifest: Some(manifest),
-                            init_bytes: None,
+                            init_state: default_init_state(),
                             response_tx,
                             supervisor_tx: Some(result_tx),
                             subscription_tx: None,

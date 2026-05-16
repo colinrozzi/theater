@@ -27,7 +27,9 @@ use tokio::time::timeout;
 use theater::chain::ChainEvent;
 use theater::config::actor_manifest::{RuntimeHostConfig, SupervisorHostConfig};
 use theater::handler::HandlerRegistry;
-use theater::messages::{ActorMessage, ActorRequest, ActorSend, MessageCommand, TheaterCommand};
+use theater::messages::{
+    default_init_state, ActorMessage, ActorRequest, ActorSend, MessageCommand, TheaterCommand,
+};
 use theater::pack_bridge::Value;
 use theater::theater_runtime::TheaterRuntime;
 use theater::utils::resolve_reference;
@@ -324,11 +326,11 @@ pub async fn run_replay_verification(
     // Spawn the actor with event subscription
     let (response_tx, response_rx) = tokio::sync::oneshot::channel();
     theater_tx
-        .send(TheaterCommand::SpawnActor {
+        .send(TheaterCommand::SetupActor {
             wasm_bytes,
             name: Some(recording_manifest.name.clone()),
             manifest: Some(recording_manifest),
-            init_bytes: None,
+            init_state: default_init_state(),
             response_tx,
             supervisor_tx: None,
             subscription_tx: Some(event_tx),
@@ -455,11 +457,11 @@ pub async fn run_replay_verification(
     // Spawn the replay actor
     let (response_tx2, response_rx2) = tokio::sync::oneshot::channel();
     theater_tx
-        .send(TheaterCommand::SpawnActor {
+        .send(TheaterCommand::SetupActor {
             wasm_bytes: replay_wasm_bytes,
             name: Some(replay_manifest.name.clone()),
             manifest: Some(replay_manifest),
-            init_bytes: None,
+            init_state: default_init_state(),
             response_tx: response_tx2,
             supervisor_tx: None,
             subscription_tx: Some(replay_event_tx),
@@ -568,11 +570,11 @@ pub async fn run_request_replay_verification(
 
     let (response_tx, response_rx) = tokio::sync::oneshot::channel();
     theater_tx
-        .send(TheaterCommand::SpawnActor {
+        .send(TheaterCommand::SetupActor {
             wasm_bytes,
             name: Some(recording_manifest.name.clone()),
             manifest: Some(recording_manifest),
-            init_bytes: None,
+            init_state: default_init_state(),
             response_tx,
             supervisor_tx: None,
             subscription_tx: Some(event_tx),
@@ -736,11 +738,11 @@ pub async fn run_request_replay_verification(
 
     let (response_tx2, response_rx2) = tokio::sync::oneshot::channel();
     theater_tx
-        .send(TheaterCommand::SpawnActor {
+        .send(TheaterCommand::SetupActor {
             wasm_bytes: replay_wasm_bytes,
             name: Some(replay_manifest.name.clone()),
             manifest: Some(replay_manifest),
-            init_bytes: None,
+            init_state: default_init_state(),
             response_tx: response_tx2,
             supervisor_tx: None,
             subscription_tx: Some(replay_event_tx),
@@ -869,11 +871,11 @@ pub async fn run_supervisor_replay_verification(
     // Spawn the parent supervisor actor
     let (response_tx, response_rx) = tokio::sync::oneshot::channel();
     theater_tx
-        .send(TheaterCommand::SpawnActor {
+        .send(TheaterCommand::SetupActor {
             wasm_bytes,
             name: Some(recording_manifest.name.clone()),
             manifest: Some(recording_manifest),
-            init_bytes: None,
+            init_state: default_init_state(),
             response_tx,
             supervisor_tx: None,
             subscription_tx: Some(event_tx),
@@ -1054,11 +1056,11 @@ pub async fn run_supervisor_replay_verification(
 
     let (response_tx2, response_rx2) = tokio::sync::oneshot::channel();
     theater_tx
-        .send(TheaterCommand::SpawnActor {
+        .send(TheaterCommand::SetupActor {
             wasm_bytes: replay_wasm_bytes,
             name: Some(replay_manifest.name.clone()),
             manifest: Some(replay_manifest),
-            init_bytes: None,
+            init_state: default_init_state(),
             response_tx: response_tx2,
             supervisor_tx: None,
             subscription_tx: Some(replay_event_tx),
@@ -1243,11 +1245,11 @@ pub async fn run_tcp_replay_verification(
     // Spawn the TCP echo actor
     let (response_tx, response_rx) = tokio::sync::oneshot::channel();
     theater_tx
-        .send(TheaterCommand::SpawnActor {
+        .send(TheaterCommand::SetupActor {
             wasm_bytes,
             name: Some(recording_manifest.name.clone()),
             manifest: Some(recording_manifest),
-            init_bytes: None,
+            init_state: default_init_state(),
             response_tx,
             supervisor_tx: None,
             subscription_tx: Some(event_tx),
@@ -1419,11 +1421,11 @@ pub async fn run_tcp_replay_verification(
 
     let (response_tx2, response_rx2) = tokio::sync::oneshot::channel();
     theater_tx
-        .send(TheaterCommand::SpawnActor {
+        .send(TheaterCommand::SetupActor {
             wasm_bytes: replay_wasm_bytes,
             name: Some(replay_manifest.name.clone()),
             manifest: Some(replay_manifest),
-            init_bytes: None,
+            init_state: default_init_state(),
             response_tx: response_tx2,
             supervisor_tx: None,
             subscription_tx: Some(replay_event_tx),

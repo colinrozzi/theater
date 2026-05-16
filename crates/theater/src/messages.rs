@@ -27,10 +27,9 @@ use crate::actor::ActorRuntimeError;
 ///     let spawn_cmd = TheaterCommand::SpawnActor {
 ///         name: Some("my-actor".to_string()),
 ///         manifest: None,
-///         init_bytes: None,
+///         init_state: theater::pack_bridge::Value::Tuple(vec![]),
 ///         wasm_bytes: vec![], // WASM bytes would be loaded here
 ///         response_tx: tx,
-///         parent_id: None,
 ///         supervisor_tx: None,
 ///         subscription_tx: None,
 ///     };
@@ -73,7 +72,22 @@ use crate::actor::ActorRuntimeError;
 use crate::chain::ChainEvent;
 use crate::id::TheaterId;
 use crate::metrics::ActorMetrics;
-use crate::pack_bridge::{InterfaceHash, Value};
+use crate::pack_bridge::{InterfaceHash, Value, ValueType};
+
+/// The conventional "no initial state" sentinel passed to a freshly-spawned
+/// actor's `init` when no caller-provided state and no manifest
+/// `initial_state` is available. Today this is `option<list<u8>>::none` —
+/// the historical default the runtime has always given actors that don't
+/// declare otherwise.
+///
+/// Callers building a `SpawnActor`/`SetupActor` command should call this
+/// for the "no state" case rather than reconstructing the Value inline.
+pub fn default_init_state() -> Value {
+    Value::Option {
+        inner_type: ValueType::List(Box::new(ValueType::U8)),
+        value: None,
+    }
+}
 use crate::store::ContentStore;
 use crate::ManifestConfig;
 use crate::Result;
@@ -120,30 +134,55 @@ use tokio::sync::oneshot;
 #[derive(Debug)]
 #[allow(clippy::large_enum_variant)]
 pub enum TheaterCommand {
-    /// # Spawn a new actor
+    /// # Spawn a new actor (setup + init)
     ///
-    /// Creates a new actor from WASM bytes.
+    /// Creates a new actor from WASM bytes, sets up its task loops, then
+    /// calls its `theater:simple/actor.init` export before responding. The
+    /// caller gets the actor id only after init has completed successfully.
     ///
     /// ## Parameters
     ///
     /// * `wasm_bytes` - The WASM module bytes to instantiate
     /// * `name` - Optional actor name for debugging/logging
     /// * `manifest` - Optional manifest for handler configs, replay settings, etc.
+    /// * `init_state` - Initial state passed to the actor's init. Takes
+    ///   priority over `manifest.initial_state`. Defaults to
+    ///   `Value::Option<list<u8>>::None` if neither is provided.
     /// * `response_tx` - Channel to receive the result (actor ID or error)
     /// * `supervisor_tx` - Optional channel for supervisor to receive lifecycle events
     /// * `subscription_tx` - Optional channel to subscribe to all actor events
     ///
-    /// ## Notes
-    ///
-    /// After spawning, the caller should invoke whatever functions they need on the actor.
-    /// There is no automatic `init` call - actors control their own lifecycle.
-    ///
-    /// If no manifest is provided, the actor uses global handler defaults.
+    /// Use [`Self::SetupActor`] for the "setup only, do not call init" variant
+    /// (the replay path uses this — the replay handler walks the chain and
+    /// fires init from the recorded events).
     SpawnActor {
         wasm_bytes: Vec<u8>,
         name: Option<String>,
         manifest: Option<ManifestConfig>,
-        init_bytes: Option<Vec<u8>>,
+        init_state: Value,
+        response_tx: oneshot::Sender<Result<TheaterId>>,
+        supervisor_tx: Option<Sender<ActorResult>>,
+        subscription_tx: Option<Sender<Result<ChainEvent, ActorError>>>,
+    },
+
+    /// # Setup a new actor (setup only, no init)
+    ///
+    /// Same as [`Self::SpawnActor`] but does NOT call the actor's `init`
+    /// export — task loops are up, handlers attach, the actor can receive
+    /// RPCs, but its startup logic hasn't fired. The caller (or a handler
+    /// like `ReplayHandler`) is responsible for triggering init when ready.
+    ///
+    /// ## Parameters
+    ///
+    /// Identical to `SpawnActor`. The `init_state` is still stored as the
+    /// actor's initial state — it just isn't consumed by an automatic init
+    /// call. When a caller later RPCs `actor.init`, the actor receives that
+    /// state as the first parameter.
+    SetupActor {
+        wasm_bytes: Vec<u8>,
+        name: Option<String>,
+        manifest: Option<ManifestConfig>,
+        init_state: Value,
         response_tx: oneshot::Sender<Result<TheaterId>>,
         supervisor_tx: Option<Sender<ActorResult>>,
         subscription_tx: Option<Sender<Result<ChainEvent, ActorError>>>,
@@ -426,6 +465,9 @@ impl TheaterCommand {
         match self {
             TheaterCommand::SpawnActor { name, .. } => {
                 format!("SpawnActor: {}", name.as_deref().unwrap_or("<unnamed>"))
+            }
+            TheaterCommand::SetupActor { name, .. } => {
+                format!("SetupActor: {}", name.as_deref().unwrap_or("<unnamed>"))
             }
             TheaterCommand::ResumeActor { manifest_path, .. } => {
                 format!("ResumeActor: {}", manifest_path)
