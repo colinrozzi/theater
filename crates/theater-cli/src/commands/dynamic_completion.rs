@@ -37,8 +37,10 @@ async fn generate_dynamic_completions(args: &DynamicCompletionArgs) -> CliResult
         // theater <command>
         ["theater"] => Ok(get_command_completions(&args.current)),
 
-        // theater start <manifest>
-        ["theater", "start"] => get_manifest_completions(&args.current).await,
+        // theater spawn|setup <manifest>
+        ["theater", "spawn"] | ["theater", "setup"] => {
+            get_manifest_completions(&args.current).await
+        }
 
         // theater create <template>
         ["theater", "create"] => Ok(get_template_completions(&args.current)),
@@ -52,7 +54,7 @@ async fn generate_dynamic_completions(args: &DynamicCompletionArgs) -> CliResult
 
 /// Get available command completions
 fn get_command_completions(current: &str) -> Vec<String> {
-    let commands = vec!["build", "completion", "create", "start"];
+    let commands = vec!["build", "completion", "create", "setup", "spawn"];
 
     commands
         .into_iter()

@@ -46,7 +46,7 @@ Theater is a WASM actor runtime targeting AI agent workloads. Each component is 
 
 Top-level layout:
 - `crates/theater/` — runtime library (actor lifecycle, chain log, manifest parsing)
-- `crates/theater-cli/` — the `theater` binary (`theater start manifest.toml`)
+- `crates/theater-cli/` — the `theater` binary (`theater spawn manifest.toml`)
 - `crates/theater-handler-*/` — host functions exposed to actors (tcp, runtime, supervisor, store, timer, terminal, etc.)
 - `crates/theater/CLAUDE.md` — older build/style notes for the inner crate
 

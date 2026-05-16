@@ -17,7 +17,7 @@ A basic HTTP server built with [Theater](https://github.com/colinrozzi/theater) 
 cargo component build --release
 
 # Start the server
-theater start manifest.toml
+theater spawn manifest.toml
 ```
 
 The server will start on **http://localhost:8080**
@@ -76,7 +76,7 @@ fn generate_users_response() -> HttpResponse {
 cargo component build --release
 
 # Start the server
-theater start manifest.toml
+theater spawn manifest.toml
 
 # Test the endpoints
 curl http://localhost:8080/

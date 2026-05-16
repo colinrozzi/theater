@@ -62,7 +62,7 @@ impl OutputFormat for BuildResult {
                 if let Some(manifest_path) = &self.manifest_path {
                     println!("\nTo run your actor:");
                     println!(
-                        "  theater start {}",
+                        "  theater spawn {}",
                         output.theme().muted().apply_to(manifest_path.display())
                     );
                 }

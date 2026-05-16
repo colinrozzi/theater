@@ -56,7 +56,7 @@ theater build will automatically update the component path in `manifest.toml` to
 
 ## Start an agent
 ```bash
-theater start manifest.toml
+theater spawn manifest.toml
 ```
 Ensure the Theater server is running before starting agents, check out theater-server-cli for information on starting the server. The server manages the lifecycle of agents and provides a UI for monitoring.
 

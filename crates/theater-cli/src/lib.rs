@@ -63,9 +63,14 @@ pub enum Commands {
     #[command(name = "build")]
     Build(commands::build::BuildArgs),
 
-    /// Start an actor with a local runtime
-    #[command(name = "start")]
-    Start(commands::start::StartArgs),
+    /// Spawn an actor with a local runtime (setup + init)
+    #[command(name = "spawn")]
+    Spawn(commands::spawn::SpawnArgs),
+
+    /// Set up an actor with a local runtime, but do not call its init
+    /// export. The replay path uses this; otherwise drive init yourself.
+    #[command(name = "setup")]
+    Setup(commands::setup::SetupArgs),
 
     /// List, inspect, and manage event chains
     #[command(name = "chains")]
@@ -107,7 +112,10 @@ pub async fn run(
             Commands::Build(args) => commands::build::execute_async(args, &ctx)
                 .await
                 .map_err(anyhow::Error::from),
-            Commands::Start(args) => commands::start::execute_async(args, &ctx)
+            Commands::Spawn(args) => commands::spawn::execute_spawn(args, &ctx)
+                .await
+                .map_err(anyhow::Error::from),
+            Commands::Setup(args) => commands::setup::execute_async(args, &ctx)
                 .await
                 .map_err(anyhow::Error::from),
             Commands::Chains(args) => commands::chains::execute_async(args, &ctx)
