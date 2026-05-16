@@ -11,12 +11,13 @@ use crate::chain::{ChainEvent, ChainReader};
 use crate::config::actor_manifest::HandlerConfig;
 use crate::handler::HandlerRegistry;
 use crate::id::TheaterId;
-use crate::messages::{ActorMessage, ActorStatus, TheaterCommand};
 use crate::messages::{
-    ActorResult, ChannelId, ChannelParticipant, ChildError, ChildExternalStop, ChildResult,
+    default_init_state, ActorResult, ChannelId, ChannelParticipant, ChildError, ChildExternalStop,
+    ChildResult,
 };
+use crate::messages::{ActorMessage, ActorStatus, TheaterCommand};
 use crate::metrics::ActorMetrics;
-use crate::pack_bridge::{AsyncRuntime, Value, ValueType};
+use crate::pack_bridge::{AsyncRuntime, Value};
 use crate::replay::ReplayHandler;
 use crate::shutdown::{ShutdownController, ShutdownType};
 use crate::utils::{self, resolve_reference};
@@ -296,7 +297,7 @@ impl TheaterRuntime {
                     wasm_bytes,
                     name,
                     manifest,
-                    init_bytes,
+                    init_state,
                     response_tx,
                     supervisor_tx,
                     subscription_tx,
@@ -308,7 +309,8 @@ impl TheaterRuntime {
                             wasm_bytes,
                             name,
                             manifest,
-                            init_bytes,
+                            init_state,
+                            /* call_init = */ true,
                             supervisor_tx,
                             subscription_tx,
                         )
@@ -325,6 +327,46 @@ impl TheaterRuntime {
                         }
                         Err(e) => {
                             error!("Failed to spawn actor {}: {}", actor_name, e);
+                            if let Err(send_err) = response_tx.send(Err(e)) {
+                                error!("Failed to send error response: {:?}", send_err);
+                            }
+                        }
+                    }
+                }
+                TheaterCommand::SetupActor {
+                    wasm_bytes,
+                    name,
+                    manifest,
+                    init_state,
+                    response_tx,
+                    supervisor_tx,
+                    subscription_tx,
+                } => {
+                    let actor_name = name.clone().unwrap_or_else(|| "<unnamed>".to_string());
+                    debug!("Processing SetupActor command for: {}", actor_name);
+                    match self
+                        .spawn_actor(
+                            wasm_bytes,
+                            name,
+                            manifest,
+                            init_state,
+                            /* call_init = */ false,
+                            supervisor_tx,
+                            subscription_tx,
+                        )
+                        .await
+                    {
+                        Ok(actor_id) => {
+                            info!("Successfully set up actor: {:?}", actor_id);
+                            if let Err(e) = response_tx.send(Ok(actor_id)) {
+                                error!(
+                                    "Failed to send success response for actor {:?}: {:?}",
+                                    actor_id, e
+                                );
+                            }
+                        }
+                        Err(e) => {
+                            error!("Failed to set up actor {}: {}", actor_name, e);
                             if let Err(send_err) = response_tx.send(Err(e)) {
                                 error!("Failed to send error response: {:?}", send_err);
                             }
@@ -396,12 +438,16 @@ impl TheaterRuntime {
                     };
 
                     let name = Some(manifest.name.clone());
+                    // Resume goes through the replay path; the replay handler
+                    // walks the recorded chain (including the original init
+                    // call), so `spawn_actor` must NOT auto-init.
                     match self
                         .spawn_actor(
                             wasm_bytes,
                             name,
                             Some(manifest),
-                            None,
+                            default_init_state(),
+                            /* call_init = */ false,
                             supervisor_tx,
                             subscription_tx,
                         )
@@ -720,12 +766,14 @@ impl TheaterRuntime {
     /// - Registering the actor with the runtime
     ///
     /// If no manifest is provided, the actor uses global handler defaults.
+    #[allow(clippy::too_many_arguments)]
     async fn spawn_actor(
         &mut self,
         wasm_bytes: Vec<u8>,
         name: Option<String>,
         manifest: Option<ManifestConfig>,
-        init_bytes: Option<Vec<u8>>,
+        init_state: Value,
+        call_init: bool,
         supervisor_tx: Option<Sender<ActorResult>>,
         subscription_tx: Option<Sender<Result<ChainEvent, ActorError>>>,
     ) -> Result<TheaterId> {
@@ -770,41 +818,15 @@ impl TheaterRuntime {
 
         self.chains.insert(actor_id, chain.clone());
 
-        // If manifest provided, check for replay handler and create modified registry
-        let (handler_registry, initial_state) = if let Some(ref manifest) = manifest {
-            let registry = self.create_handler_registry_for_manifest(manifest).await?;
-            // Prefer init_bytes over manifest's initial_state
-            let state = if let Some(bytes) = init_bytes {
-                let items: Vec<Value> = bytes.into_iter().map(Value::U8).collect();
-                Value::List {
-                    elem_type: ValueType::U8,
-                    items,
-                }
-            } else if let Some(s) = manifest.initial_state.as_ref() {
-                Value::String(s.clone())
-            } else {
-                Value::Option {
-                    inner_type: ValueType::List(Box::new(ValueType::U8)),
-                    value: None,
-                }
-            };
-            (registry, state)
+        // The caller resolved `init_state` ahead of time (manifest precedence,
+        // defaults, etc. live in the caller). spawn_actor takes it at face
+        // value and stores it as the actor's initial state.
+        let handler_registry = if let Some(ref manifest) = manifest {
+            self.create_handler_registry_for_manifest(manifest).await?
         } else {
-            // No manifest - use global handlers directly
-            let state = if let Some(bytes) = init_bytes {
-                let items: Vec<Value> = bytes.into_iter().map(Value::U8).collect();
-                Value::List {
-                    elem_type: ValueType::U8,
-                    items,
-                }
-            } else {
-                Value::Option {
-                    inner_type: ValueType::List(Box::new(ValueType::U8)),
-                    value: None,
-                }
-            };
-            (self.handler_registry.clone(), state)
+            self.handler_registry.clone()
         };
+        let initial_state = init_state;
 
         // Start the actor in a detached task
         // Each actor gets its own AsyncRuntime for isolation
@@ -851,8 +873,9 @@ impl TheaterRuntime {
             }
         }
 
-        // Create ActorHandle for lifecycle notification before moving channels
-        let _actor_handle = crate::actor::handle::ActorHandle::new(
+        // Create ActorHandle for lifecycle notification before moving channels.
+        // Also used to fire actor.init below when `call_init` is true.
+        let actor_handle = crate::actor::handle::ActorHandle::new(
             operation_tx.clone(),
             info_tx.clone(),
             control_tx.clone(),
@@ -874,6 +897,25 @@ impl TheaterRuntime {
 
         self.actors.insert(actor_id, process);
         debug!("Actor process registered with runtime");
+
+        // Setup + init: dispatch `theater:simple/actor.init` once the actor
+        // is reachable by RPC. The stored state (set above) is prepended to
+        // these (empty) params by `execute_call_pack` before reaching wasm.
+        //
+        // Callers that need to drive init themselves (the replay handler,
+        // or callers passing typed positional args to init) use the
+        // `SetupActor` command instead, which sets `call_init = false`.
+        if call_init {
+            let init_params = Value::Tuple(vec![]);
+            if let Err(e) = actor_handle
+                .call_function("theater:simple/actor.init".to_string(), init_params)
+                .await
+            {
+                error!("Actor {} init failed: {}", actor_id, e);
+                return Err(anyhow::anyhow!("actor.init failed: {}", e));
+            }
+            debug!("Actor {} init completed", actor_id);
+        }
 
         Ok(actor_id)
     }

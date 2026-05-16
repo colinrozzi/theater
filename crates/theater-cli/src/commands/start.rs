@@ -12,8 +12,7 @@ use theater::config::actor_manifest::{
     TerminalHandlerConfig, TimerHandlerConfig,
 };
 use theater::handler::HandlerRegistry;
-use theater::messages::TheaterCommand;
-use theater::pack_bridge::Value;
+use theater::messages::{default_init_state, TheaterCommand};
 use theater::theater_runtime::TheaterRuntime;
 use theater::utils::resolve_reference;
 use theater::ManifestConfig;
@@ -240,20 +239,38 @@ pub async fn execute_async(args: &StartArgs, ctx: &CommandContext) -> Result<(),
     // Set up a supervisor channel so we get notified when the actor exits
     let (supervisor_tx, mut supervisor_rx) = mpsc::channel(32);
 
-    theater_tx
-        .send(TheaterCommand::SpawnActor {
+    // SpawnActor sets up the actor AND auto-calls actor.init before
+    // responding — no manual follow-up call needed here. For replay /
+    // staged init (`--no-init`), dispatch SetupActor instead, which sets
+    // up the task loops but skips the auto-init.
+    let cmd = if args.no_init {
+        TheaterCommand::SetupActor {
             wasm_bytes,
             name: Some(manifest.name.clone()),
             manifest: Some(manifest),
-            init_bytes: None,
+            init_state: default_init_state(),
             response_tx,
             supervisor_tx: Some(supervisor_tx),
             subscription_tx: None, // Using global subscription instead
-        })
+        }
+    } else {
+        TheaterCommand::SpawnActor {
+            wasm_bytes,
+            name: Some(manifest.name.clone()),
+            manifest: Some(manifest),
+            init_state: default_init_state(),
+            response_tx,
+            supervisor_tx: Some(supervisor_tx),
+            subscription_tx: None, // Using global subscription instead
+        }
+    };
+
+    theater_tx
+        .send(cmd)
         .await
         .map_err(|e| CliError::server_error(format!("Failed to send spawn command: {}", e)))?;
 
-    // Wait for the actor to start
+    // Wait for the actor to start (and, for SpawnActor, for init to complete).
     let actor_id = match response_rx.await {
         Ok(Ok(id)) => {
             debug!("Actor started: {}", id);
@@ -272,41 +289,6 @@ pub async fn execute_async(args: &StartArgs, ctx: &CommandContext) -> Result<(),
             )));
         }
     };
-
-    // Call init unless --no-init flag is set
-    if !args.no_init {
-        // Get the actor handle
-        let (handle_tx, handle_rx) = tokio::sync::oneshot::channel();
-        theater_tx
-            .send(TheaterCommand::GetActorHandle {
-                actor_id,
-                response_tx: handle_tx,
-            })
-            .await
-            .map_err(|e| CliError::server_error(format!("Failed to get actor handle: {}", e)))?;
-
-        let actor_handle = match handle_rx.await {
-            Ok(Some(handle)) => handle,
-            Ok(None) => {
-                return Err(CliError::server_error("Actor handle not found".to_string()));
-            }
-            Err(e) => {
-                return Err(CliError::server_error(format!(
-                    "Failed to receive actor handle: {}",
-                    e
-                )));
-            }
-        };
-
-        // Call init — state is injected by execute_call_pack from the actor store
-        let init_params = Value::Tuple(vec![]);
-        debug!("Calling init on actor {}", actor_id);
-        let _init_result = actor_handle
-            .call_function("theater:simple/actor.init".to_string(), init_params)
-            .await
-            .map_err(|e| CliError::server_error(format!("Failed to call init: {}", e)))?;
-        debug!("Init completed");
-    }
 
     // Now wait for either:
     // - The actor to exit (supervisor notification)

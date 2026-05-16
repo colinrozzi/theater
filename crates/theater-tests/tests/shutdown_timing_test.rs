@@ -16,6 +16,7 @@ use theater::config::actor_manifest::{
 };
 use theater::config::inheritance::HandlerPermissionPolicy;
 use theater::handler::HandlerRegistry;
+use theater::messages::default_init_state;
 use theater::messages::TheaterCommand;
 use theater_handler_loop::LoopHandler;
 use theater_handler_message_server::{MessageRouter, MessageServerHandler};
@@ -119,11 +120,11 @@ async fn test_actor_shutdown_timing() {
     info!("=== Spawning actor ===");
     let (spawn_tx, spawn_rx) = oneshot::channel();
     theater_tx
-        .send(TheaterCommand::SpawnActor {
+        .send(TheaterCommand::SetupActor {
             wasm_bytes: wasm_bytes.clone(),
             name: Some("shutdown-test".to_string()),
             manifest: Some(manifest),
-            init_bytes: None,
+            init_state: default_init_state(),
             response_tx: spawn_tx,
             supervisor_tx: None,
             subscription_tx: None,
@@ -252,11 +253,11 @@ async fn test_multiple_actor_shutdown_timing() {
 
         let (spawn_tx, spawn_rx) = oneshot::channel();
         theater_tx
-            .send(TheaterCommand::SpawnActor {
+            .send(TheaterCommand::SetupActor {
                 wasm_bytes: wasm_bytes.clone(),
                 name: Some(format!("shutdown-test-{}", i)),
                 manifest: Some(manifest),
-                init_bytes: None,
+                init_state: default_init_state(),
                 response_tx: spawn_tx,
                 supervisor_tx: None,
                 subscription_tx: None,
@@ -417,11 +418,11 @@ async fn test_actor_shutdown_with_supervisor_handler() {
     info!("=== Spawning actor with supervisor handler ===");
     let (spawn_tx, spawn_rx) = oneshot::channel();
     theater_tx
-        .send(TheaterCommand::SpawnActor {
+        .send(TheaterCommand::SetupActor {
             wasm_bytes: wasm_bytes.clone(),
             name: Some("shutdown-test-supervisor".to_string()),
             manifest: Some(manifest),
-            init_bytes: None,
+            init_state: default_init_state(),
             response_tx: spawn_tx,
             supervisor_tx: None,
             subscription_tx: None,
@@ -571,11 +572,11 @@ async fn test_actor_shutdown_with_all_handlers() {
     info!("=== Spawning actor with all handlers available ===");
     let (spawn_tx, spawn_rx) = oneshot::channel();
     theater_tx
-        .send(TheaterCommand::SpawnActor {
+        .send(TheaterCommand::SetupActor {
             wasm_bytes: wasm_bytes.clone(),
             name: Some("shutdown-test-all-handlers".to_string()),
             manifest: Some(manifest),
-            init_bytes: None,
+            init_state: default_init_state(),
             response_tx: spawn_tx,
             supervisor_tx: None,
             subscription_tx: None,
