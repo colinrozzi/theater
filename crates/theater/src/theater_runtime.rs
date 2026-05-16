@@ -304,34 +304,17 @@ impl TheaterRuntime {
                 } => {
                     let actor_name = name.clone().unwrap_or_else(|| "<unnamed>".to_string());
                     debug!("Processing SpawnActor command for: {}", actor_name);
-                    match self
-                        .spawn_actor(
-                            wasm_bytes,
-                            name,
-                            manifest,
-                            init_state,
-                            /* call_init = */ true,
-                            supervisor_tx,
-                            subscription_tx,
-                        )
-                        .await
-                    {
-                        Ok(actor_id) => {
-                            info!("Successfully spawned actor: {:?}", actor_id);
-                            if let Err(e) = response_tx.send(Ok(actor_id)) {
-                                error!(
-                                    "Failed to send success response for actor {:?}: {:?}",
-                                    actor_id, e
-                                );
-                            }
-                        }
-                        Err(e) => {
-                            error!("Failed to spawn actor {}: {}", actor_name, e);
-                            if let Err(send_err) = response_tx.send(Err(e)) {
-                                error!("Failed to send error response: {:?}", send_err);
-                            }
-                        }
-                    }
+                    self.spawn_actor(
+                        wasm_bytes,
+                        name,
+                        manifest,
+                        init_state,
+                        /* call_init = */ true,
+                        supervisor_tx,
+                        subscription_tx,
+                        response_tx,
+                    )
+                    .await;
                 }
                 TheaterCommand::SetupActor {
                     wasm_bytes,
@@ -344,34 +327,17 @@ impl TheaterRuntime {
                 } => {
                     let actor_name = name.clone().unwrap_or_else(|| "<unnamed>".to_string());
                     debug!("Processing SetupActor command for: {}", actor_name);
-                    match self
-                        .spawn_actor(
-                            wasm_bytes,
-                            name,
-                            manifest,
-                            init_state,
-                            /* call_init = */ false,
-                            supervisor_tx,
-                            subscription_tx,
-                        )
-                        .await
-                    {
-                        Ok(actor_id) => {
-                            info!("Successfully set up actor: {:?}", actor_id);
-                            if let Err(e) = response_tx.send(Ok(actor_id)) {
-                                error!(
-                                    "Failed to send success response for actor {:?}: {:?}",
-                                    actor_id, e
-                                );
-                            }
-                        }
-                        Err(e) => {
-                            error!("Failed to set up actor {}: {}", actor_name, e);
-                            if let Err(send_err) = response_tx.send(Err(e)) {
-                                error!("Failed to send error response: {:?}", send_err);
-                            }
-                        }
-                    }
+                    self.spawn_actor(
+                        wasm_bytes,
+                        name,
+                        manifest,
+                        init_state,
+                        /* call_init = */ false,
+                        supervisor_tx,
+                        subscription_tx,
+                        response_tx,
+                    )
+                    .await;
                 }
                 TheaterCommand::ResumeActor {
                     manifest_path,
@@ -441,34 +407,17 @@ impl TheaterRuntime {
                     // Resume goes through the replay path; the replay handler
                     // walks the recorded chain (including the original init
                     // call), so `spawn_actor` must NOT auto-init.
-                    match self
-                        .spawn_actor(
-                            wasm_bytes,
-                            name,
-                            Some(manifest),
-                            default_init_state(),
-                            /* call_init = */ false,
-                            supervisor_tx,
-                            subscription_tx,
-                        )
-                        .await
-                    {
-                        Ok(actor_id) => {
-                            info!("Successfully resumed actor: {:?}", actor_id);
-                            if let Err(e) = response_tx.send(Ok(actor_id)) {
-                                error!(
-                                    "Failed to send success response for actor {:?}: {:?}",
-                                    actor_id, e
-                                );
-                            }
-                        }
-                        Err(e) => {
-                            error!("Failed to resume actor from {:?}: {}", manifest_path, e);
-                            if let Err(send_err) = response_tx.send(Err(e)) {
-                                error!("Failed to send error response: {:?}", send_err);
-                            }
-                        }
-                    }
+                    self.spawn_actor(
+                        wasm_bytes,
+                        name,
+                        Some(manifest),
+                        default_init_state(),
+                        /* call_init = */ false,
+                        supervisor_tx,
+                        subscription_tx,
+                        response_tx,
+                    )
+                    .await;
                 }
                 TheaterCommand::StopActor {
                     actor_id,
@@ -766,6 +715,14 @@ impl TheaterRuntime {
     /// - Registering the actor with the runtime
     ///
     /// If no manifest is provided, the actor uses global handler defaults.
+    /// Set up an actor (and optionally fire its init).
+    ///
+    /// `response_tx` is fired by this function or the detached init task
+    /// it spawns — never by the caller. This is what unblocks the runtime
+    /// command loop: when `call_init = true`, the init RPC runs in a
+    /// detached tokio task so the runtime can return to processing other
+    /// commands (notably another `SpawnActor` issued from inside the
+    /// just-spawned actor's `init`, via `supervisor.spawn`).
     #[allow(clippy::too_many_arguments)]
     async fn spawn_actor(
         &mut self,
@@ -776,7 +733,8 @@ impl TheaterRuntime {
         call_init: bool,
         supervisor_tx: Option<Sender<ActorResult>>,
         subscription_tx: Option<Sender<Result<ChainEvent, ActorError>>>,
-    ) -> Result<TheaterId> {
+        response_tx: oneshot::Sender<Result<TheaterId>>,
+    ) {
         let actor_name = name.unwrap_or_else(|| "<unnamed>".to_string());
         debug!("Starting actor spawn process for: {}", actor_name);
         debug!("WASM bytes: {} bytes", wasm_bytes.len());
@@ -822,7 +780,17 @@ impl TheaterRuntime {
         // defaults, etc. live in the caller). spawn_actor takes it at face
         // value and stores it as the actor's initial state.
         let handler_registry = if let Some(ref manifest) = manifest {
-            self.create_handler_registry_for_manifest(manifest).await?
+            match self.create_handler_registry_for_manifest(manifest).await {
+                Ok(r) => r,
+                Err(e) => {
+                    error!("Failed to build handler registry: {}", e);
+                    let _ = response_tx.send(Err(anyhow::anyhow!(
+                        "Failed to build handler registry: {}",
+                        e
+                    )));
+                    return;
+                }
+            }
         } else {
             self.handler_registry.clone()
         };
@@ -865,11 +833,14 @@ impl TheaterRuntime {
             }
             Ok(Err(e)) => {
                 error!("Actor {} setup failed: {}", actor_id, e);
-                return Err(anyhow::anyhow!("Actor setup failed: {}", e));
+                let _ = response_tx.send(Err(anyhow::anyhow!("Actor setup failed: {}", e)));
+                return;
             }
             Err(_) => {
                 error!("Actor {} setup channel closed unexpectedly", actor_id);
-                return Err(anyhow::anyhow!("Actor setup failed: channel closed"));
+                let _ =
+                    response_tx.send(Err(anyhow::anyhow!("Actor setup failed: channel closed")));
+                return;
             }
         }
 
@@ -898,26 +869,33 @@ impl TheaterRuntime {
         self.actors.insert(actor_id, process);
         debug!("Actor process registered with runtime");
 
-        // Setup + init: dispatch `theater:simple/actor.init` once the actor
-        // is reachable by RPC. The stored state (set above) is prepended to
-        // these (empty) params by `execute_call_pack` before reaching wasm.
-        //
-        // Callers that need to drive init themselves (the replay handler,
-        // or callers passing typed positional args to init) use the
-        // `SetupActor` command instead, which sets `call_init = false`.
+        // Setup is complete; the actor is reachable by RPC. From here on we
+        // must not hold the runtime command loop. For `call_init = false`,
+        // fire response_tx immediately and return. For `call_init = true`,
+        // detach the init RPC into a tokio task and let response_tx fire
+        // there — that's what lets supervisor.spawn-from-inside-init work
+        // (the new SpawnActor command for the child can be picked up by the
+        // command loop while the parent's init is still mid-flight).
         if call_init {
-            let init_params = Value::Tuple(vec![]);
-            if let Err(e) = actor_handle
-                .call_function("theater:simple/actor.init".to_string(), init_params)
-                .await
-            {
-                error!("Actor {} init failed: {}", actor_id, e);
-                return Err(anyhow::anyhow!("actor.init failed: {}", e));
-            }
-            debug!("Actor {} init completed", actor_id);
+            tokio::spawn(async move {
+                let init_params = Value::Tuple(vec![]);
+                match actor_handle
+                    .call_function("theater:simple/actor.init".to_string(), init_params)
+                    .await
+                {
+                    Ok(_) => {
+                        debug!("Actor {} init completed", actor_id);
+                        let _ = response_tx.send(Ok(actor_id));
+                    }
+                    Err(e) => {
+                        error!("Actor {} init failed: {}", actor_id, e);
+                        let _ = response_tx.send(Err(anyhow::anyhow!("actor.init failed: {}", e)));
+                    }
+                }
+            });
+        } else {
+            let _ = response_tx.send(Ok(actor_id));
         }
-
-        Ok(actor_id)
     }
 
     fn subscribe_to_actor(
