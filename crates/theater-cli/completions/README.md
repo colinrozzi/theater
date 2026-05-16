@@ -88,7 +88,7 @@ theater create <TAB>
 # → basic, http
 
 # Complete manifest files
-theater start <TAB>
+theater spawn <TAB>
 # → manifest.toml, examples/basic.toml, ...
 
 # Complete channel operations

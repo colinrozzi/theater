@@ -137,7 +137,7 @@ pub async fn execute_async(args: &CreateArgs, ctx: &CommandContext) -> Result<()
 
     build_instructions.extend(vec![
         "cargo build --target wasm32-unknown-unknown --release".to_string(),
-        "theater start manifest.toml".to_string(),
+        "theater spawn manifest.toml".to_string(),
     ]);
 
     // Add git instructions if git was not initialized

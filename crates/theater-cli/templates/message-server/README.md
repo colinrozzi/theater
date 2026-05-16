@@ -11,7 +11,7 @@ cargo component build --release
 ## Running
 
 ```bash
-theater start manifest.toml
+theater spawn manifest.toml
 ```
 
 ## Features

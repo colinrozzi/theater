@@ -156,7 +156,7 @@ impl CliError {
                     "Actor '{}' was not found.\n\n\
                     Possible solutions:\n\
                     • Check the actor ID is correct\n\
-                    • Start the actor with: theater start <manifest>",
+                    • Start the actor with: theater spawn <manifest>",
                     actor_id
                 )
             }

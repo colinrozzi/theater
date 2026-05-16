@@ -39,8 +39,9 @@ pub enum EventFormat {
     Full,
 }
 
+/// Arguments shared by `theater spawn` and `theater setup`.
 #[derive(Debug, Parser)]
-pub struct StartArgs {
+pub struct SpawnArgs {
     /// Path or URL to the actor manifest file
     #[arg(default_value = "manifest.toml")]
     pub manifest: String,
@@ -58,14 +59,13 @@ pub struct StartArgs {
     #[arg(long, default_missing_value = ".chains", num_args = 0..=1)]
     pub save: Option<PathBuf>,
 
-    /// Skip calling the actor's init function after spawning
-    #[arg(long)]
-    pub no_init: bool,
-
     /// Disable actor log output to stdout
     #[arg(long)]
     pub no_actor_logs: bool,
 }
+
+/// `theater setup` takes the same arguments as `theater spawn`.
+pub type SetupArgs = SpawnArgs;
 
 /// Format a chain event with actor ID prefix using ChainEvent's Display impl (short)
 fn format_event_short(event: &ChainEvent, actor_id: &TheaterId) -> String {
@@ -160,8 +160,25 @@ fn create_handler_registry(
     Ok(registry)
 }
 
-/// Execute the start command - spin up a local runtime and run the actor
-pub async fn execute_async(args: &StartArgs, ctx: &CommandContext) -> Result<(), CliError> {
+/// `theater spawn manifest.toml` — load the actor, set up its task loops,
+/// AND call its `theater:simple/actor.init` export before returning control
+/// to the caller. The runtime auto-inits (PR A in ticket #27); the CLI
+/// doesn't fire init itself.
+pub async fn execute_spawn(args: &SpawnArgs, ctx: &CommandContext) -> Result<(), CliError> {
+    run(args, ctx, /* call_init = */ true).await
+}
+
+/// `theater setup manifest.toml` — load the actor and set up its task loops,
+/// but do NOT call `actor.init`. Used by replay (the replay handler walks
+/// the recorded chain and fires init from there) and by callers that want
+/// to drive init themselves with custom typed params.
+pub async fn execute_setup(args: &SetupArgs, ctx: &CommandContext) -> Result<(), CliError> {
+    run(args, ctx, /* call_init = */ false).await
+}
+
+/// Shared body for `spawn` and `setup`. Differs only in which
+/// `TheaterCommand` variant it dispatches.
+async fn run(args: &SpawnArgs, ctx: &CommandContext, call_init: bool) -> Result<(), CliError> {
     debug!("Starting actor from manifest: {}", args.manifest);
 
     // Resolve the manifest reference (file path, URL, or store path)
@@ -239,12 +256,11 @@ pub async fn execute_async(args: &StartArgs, ctx: &CommandContext) -> Result<(),
     // Set up a supervisor channel so we get notified when the actor exits
     let (supervisor_tx, mut supervisor_rx) = mpsc::channel(32);
 
-    // SpawnActor sets up the actor AND auto-calls actor.init before
-    // responding — no manual follow-up call needed here. For replay /
-    // staged init (`--no-init`), dispatch SetupActor instead, which sets
-    // up the task loops but skips the auto-init.
-    let cmd = if args.no_init {
-        TheaterCommand::SetupActor {
+    // SpawnActor: setup + auto-init (the runtime calls actor.init before
+    // responding). SetupActor: setup only — caller drives init separately
+    // (or a handler like ReplayHandler does it from the chain).
+    let cmd = if call_init {
+        TheaterCommand::SpawnActor {
             wasm_bytes,
             name: Some(manifest.name.clone()),
             manifest: Some(manifest),
@@ -254,7 +270,7 @@ pub async fn execute_async(args: &StartArgs, ctx: &CommandContext) -> Result<(),
             subscription_tx: None, // Using global subscription instead
         }
     } else {
-        TheaterCommand::SpawnActor {
+        TheaterCommand::SetupActor {
             wasm_bytes,
             name: Some(manifest.name.clone()),
             manifest: Some(manifest),

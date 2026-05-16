@@ -21,7 +21,7 @@ The output will be at `target/wasm32-unknown-unknown/release/{{project_name_snak
 Run the actor with Theater:
 
 ```bash
-theater start manifest.toml
+theater spawn manifest.toml
 ```
 
 ## Development
