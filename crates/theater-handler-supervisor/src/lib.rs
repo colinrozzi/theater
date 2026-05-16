@@ -11,7 +11,7 @@ use theater::chain::ChainEvent;
 use theater::config::actor_manifest::SupervisorHostConfig;
 use theater::config::permissions::SupervisorPermissions;
 use theater::handler::{Handler, HandlerContext, SharedActorInstance};
-use theater::messages::{default_init_state, ActorResult, TheaterCommand};
+use theater::messages::{ActorResult, TheaterCommand};
 use theater::shutdown::ShutdownReceiver;
 use theater::utils::resolve_reference;
 use theater::ManifestConfig;
@@ -42,14 +42,20 @@ const SUPERVISOR_PACT: &str = include_str!("../supervisor.pact");
 /// Declare the theater:simple/supervisor interface from the pact file.
 ///
 /// Functions for spawning and managing child actors:
-/// - spawn(manifest: string, init-bytes: option<list<u8>>, wasm-bytes: option<list<u8>>) -> result<string, string>
-/// - spawn-and-wait(manifest: string, init-bytes: option<list<u8>>, wasm-bytes: option<list<u8>>, timeout-ms: option<u64>) -> result<option<list<u8>>, string>
+/// - spawn(manifest: string, init-state: value, wasm-bytes: option<list<u8>>) -> result<string, string>
+/// - spawn-and-wait(manifest: string, init-state: value, wasm-bytes: option<list<u8>>, timeout-ms: option<u64>) -> result<option<list<u8>>, string>
 /// - resume(manifest: string, state-bytes: option<list<u8>>, wasm-bytes: option<list<u8>>) -> result<string, string>
 /// - list-children() -> list<string>
 /// - restart-child(child-id: string) -> result<_, string>
 /// - stop-child(child-id: string) -> result<_, string>
 /// - get-child-state(child-id: string) -> result<option<list<u8>>, string>
 /// - get-child-events(child-id: string) -> result<list<list<u8>>, string>
+///
+/// Both `spawn` and `spawn-and-wait` are setup + init: the runtime calls
+/// the child's `theater:simple/actor.init` export before returning the
+/// child id. Callers that need staged init (replay, custom init params)
+/// should use the runtime's `SetupActor` command directly via the
+/// theater crate API rather than the wasm-facing supervisor.spawn.
 ///
 /// Note: chain-event is approximated as list<u8> for interface hashing.
 fn supervisor_interface() -> InterfaceImpl {
@@ -333,19 +339,20 @@ impl Handler for SupervisorHandler {
                     let children = children.clone();
                     let theater_tx_holder = theater_tx_holder.clone();
                     async move {
-                        // Parse input: (string, option<list<u8>>, option<list<u8>>)
-                        // init-bytes is passed to init, wasm-bytes is used if provided
-                        let (manifest_path, init_bytes, provided_wasm_bytes) = match input {
-                            Value::Tuple(args) if args.len() == 3 => {
-                                let manifest = match &args[0] {
-                                    Value::String(s) => s.clone(),
+                        // Parse input: (string, value, option<list<u8>>)
+                        // init-state is passed through to actor.init as the
+                        // first parameter; wasm-bytes is used if provided.
+                        let (manifest_path, init_state, provided_wasm_bytes) = match input {
+                            Value::Tuple(mut args) if args.len() == 3 => {
+                                let wasm_bytes = parse_optional_bytes(&args[2]);
+                                let init_state = args.remove(1);
+                                let manifest = match args.remove(0) {
+                                    Value::String(s) => s,
                                     _ => return Err(Value::String("Invalid manifest argument".to_string())),
                                 };
-                                let init_bytes = parse_optional_bytes(&args[1]);
-                                let wasm_bytes = parse_optional_bytes(&args[2]);
-                                (manifest, init_bytes, wasm_bytes)
+                                (manifest, init_state, wasm_bytes)
                             }
-                            _ => return Err(Value::String("Invalid spawn arguments: expected (string, option<list<u8>>, option<list<u8>>)".to_string())),
+                            _ => return Err(Value::String("Invalid spawn arguments: expected (string, value, option<list<u8>>)".to_string())),
                         };
 
                         if let Some(ref bytes) = provided_wasm_bytes {
@@ -383,12 +390,9 @@ impl Handler for SupervisorHandler {
                         let theater_tx = store.theater_tx.clone();
                         let name = Some(manifest.name.clone());
                         let (response_tx, response_rx) = oneshot::channel();
-                        // PR A: keep the wasm-facing "supervisor.spawn does
-                        // not auto-init" contract by dispatching SetupActor.
-                        // PR B (pact signature change) switches this to
-                        // SpawnActor for the auto-init default.
-                        let init_state = option_bytes_to_value(init_bytes);
-                        let cmd = TheaterCommand::SetupActor {
+                        // PR B: supervisor.spawn means setup + init. The
+                        // runtime auto-calls actor.init before responding.
+                        let cmd = TheaterCommand::SpawnActor {
                             wasm_bytes,
                             name,
                             manifest: Some(manifest),
@@ -426,24 +430,31 @@ impl Handler for SupervisorHandler {
                     }
                 }
             })?
-            // spawn-and-wait: func(manifest: string, wasm-bytes: option<list<u8>>, timeout-ms: option<u64>) -> result<option<list<u8>>, string>
-            // Spawns a child actor and waits for it to complete. Returns the child's final result.
-            // If timeout-ms is provided, returns an error if the child doesn't complete within that time.
+            // spawn-and-wait: func(manifest: string, init-state: value, wasm-bytes: option<list<u8>>, timeout-ms: option<u64>) -> result<option<list<u8>>, string>
+            // Spawns a child actor (setup + init) and waits for it to complete.
+            // Returns the child's final result. If timeout-ms is provided,
+            // returns an error if the child doesn't complete within that time.
+            //
+            // Note: the prior implementation parsed 3 args (manifest, wasm-bytes,
+            // timeout-ms) while the pact declared 4 — fixed in PR B alongside
+            // the init-state rename. No known downstream callers were exercising
+            // this path.
             .func_async_result("spawn-and-wait", {
                 move |ctx: AsyncCtx<ActorStore>, input: Value| {
                     async move {
-                        // Parse input: (string, option<list<u8>>, option<u64>)
-                        let (manifest_path, provided_wasm_bytes, timeout_ms) = match input {
-                            Value::Tuple(args) if args.len() == 3 => {
-                                let manifest = match &args[0] {
-                                    Value::String(s) => s.clone(),
+                        // Parse input: (string, value, option<list<u8>>, option<u64>)
+                        let (manifest_path, init_state, provided_wasm_bytes, timeout_ms) = match input {
+                            Value::Tuple(mut args) if args.len() == 4 => {
+                                let timeout_ms = parse_optional_u64(&args[3]);
+                                let wasm_bytes = parse_optional_bytes(&args[2]);
+                                let init_state = args.remove(1);
+                                let manifest = match args.remove(0) {
+                                    Value::String(s) => s,
                                     _ => return Err(Value::String("Invalid manifest argument".to_string())),
                                 };
-                                let wasm_bytes = parse_optional_bytes(&args[1]);
-                                let timeout_ms = parse_optional_u64(&args[2]);
-                                (manifest, wasm_bytes, timeout_ms)
+                                (manifest, init_state, wasm_bytes, timeout_ms)
                             }
-                            _ => return Err(Value::String("Invalid spawn-and-wait arguments: expected (string, option<list<u8>>, option<u64>)".to_string())),
+                            _ => return Err(Value::String("Invalid spawn-and-wait arguments: expected (string, value, option<list<u8>>, option<u64>)".to_string())),
                         };
 
                         debug!("spawn-and-wait: manifest={}, timeout={:?}ms", manifest_path, timeout_ms);
@@ -481,13 +492,12 @@ impl Handler for SupervisorHandler {
 
                         let name = Some(manifest.name.clone());
                         let (response_tx, response_rx) = oneshot::channel();
-                        // Same as the regular spawn path — preserve no-auto-init
-                        // semantics in PR A.
-                        let cmd = TheaterCommand::SetupActor {
+                        // Same as the regular spawn path — setup + auto-init.
+                        let cmd = TheaterCommand::SpawnActor {
                             wasm_bytes,
                             name,
                             manifest: Some(manifest),
-                            init_state: default_init_state(),
+                            init_state,
                             response_tx,
                             supervisor_tx: Some(result_tx),
                             subscription_tx: None,

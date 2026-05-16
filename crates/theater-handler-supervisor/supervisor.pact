@@ -7,15 +7,24 @@ interface supervisor {
     @package: string = "theater:simple"
 
     exports {
-        // Spawn a child actor
+        // Spawn a child actor (setup + init).
+        // The runtime sets up the child and immediately calls its
+        // `theater:simple/actor.init` export; the returned id is only
+        // valid once init has completed.
+        //
         // manifest: manifest path or reference
-        // init-bytes: optional initialization data
+        // init-state: initial state passed to the child's init. Use the
+        //   conventional `option<list<u8>>::none` sentinel when you have
+        //   nothing to pass. Manifest `initial_state` is used as a fallback
+        //   when this argument is the conventional default.
         // wasm-bytes: optional WASM bytes (if not provided, loaded from manifest)
-        spawn: func(manifest: string, init-bytes: option<list<u8>>, wasm-bytes: option<list<u8>>) -> result<string, string>
+        spawn: func(manifest: string, init-state: value, wasm-bytes: option<list<u8>>) -> result<string, string>
 
-        // Spawn a child actor and wait for it to complete
+        // Spawn a child actor (setup + init) and wait for it to complete.
+        // Same semantics as `spawn` for the init half.
+        //
         // timeout-ms: optional timeout in milliseconds
-        spawn-and-wait: func(manifest: string, init-bytes: option<list<u8>>, wasm-bytes: option<list<u8>>, timeout-ms: option<u64>) -> result<option<list<u8>>, string>
+        spawn-and-wait: func(manifest: string, init-state: value, wasm-bytes: option<list<u8>>, timeout-ms: option<u64>) -> result<option<list<u8>>, string>
 
         // Resume an actor from saved state
         // state-bytes: optional state to resume from
