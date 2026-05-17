@@ -58,15 +58,22 @@ let handler = SupervisorHandler::new(config, permissions);
 ### 1. Spawning a Child
 
 ```wit
-// In actor code
-let child_id = spawn("path/to/child/manifest.toml", init_state, none);
+// In actor code — passes init_state as Some(value) to override the
+// child's manifest.initial_state, or `none` to let the child's manifest
+// carry its own initial state (common for generic supervisors).
+let child_id = spawn("path/to/child/manifest.toml", some(init_state), none);
+// or:
+let child_id = spawn("path/to/child/manifest.toml", none, none);
 ```
 
 This:
 - Loads the child's manifest
 - Sets up the child's task loops and registers it with the supervisor
-- Calls the child's `theater:simple/actor.init` export with the
-  provided `init_state` as the state argument
+- Calls the child's `theater:simple/actor.init` export. State passed:
+  - `init_state = some(v)` → exactly `v` (the override case)
+  - `init_state = none`    → the child's `manifest.initial_state` (the
+    fallback case — used when the supervisor doesn't know the child's
+    secrets, e.g. bearer tokens, signing keys, etc.)
 - Returns the child's unique ID once init has completed
 
 ### 2. Monitoring Children
@@ -139,7 +146,7 @@ let events = get-child-events(child_id);
 All operations return `result<T, string>` for proper error handling:
 
 ```wit
-match spawn("manifest.toml", init_state, none) {
+match spawn("manifest.toml", none, none) {
     ok(child_id) => // Success
     err(message) => // Handle error
 }
