@@ -181,6 +181,11 @@ pub enum HandlerConfig {
         #[serde(flatten)]
         config: LoopHandlerConfig,
     },
+    #[serde(rename = "podman")]
+    Podman {
+        #[serde(flatten)]
+        config: PodmanHandlerConfig,
+    },
 }
 
 impl HandlerConfig {
@@ -206,6 +211,7 @@ impl HandlerConfig {
             HandlerConfig::Terminal { .. } => "terminal",
             HandlerConfig::Timer { .. } => "timer",
             HandlerConfig::Loop { .. } => "loop",
+            HandlerConfig::Podman { .. } => "podman",
         }
     }
 }
@@ -297,6 +303,12 @@ pub struct TimerHandlerConfig {
 /// This handler provides cooperative looping with yield points
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct LoopHandlerConfig {}
+
+/// Configuration for the Podman handler.
+/// This handler shells out to the `podman` CLI to manage containers.
+/// No daemon required; the host needs only podman installed.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+pub struct PodmanHandlerConfig {}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct SupervisorHostConfig {}

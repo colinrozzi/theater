@@ -1,0 +1,24 @@
+[package]
+name = "theater-handler-podman"
+version = "0.3.11"
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+rust-version.workspace = true
+
+description = "Podman container handler for Theater WebAssembly runtime"
+
+[dependencies]
+theater = { workspace = true }
+anyhow.workspace = true
+tracing.workspace = true
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+tracing-subscriber.workspace = true
