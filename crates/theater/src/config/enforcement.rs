@@ -138,6 +138,12 @@ pub fn validate_manifest_permissions(
                 // Loop handler is allowed by default
                 // It provides cooperative looping with yield points
             }
+            HandlerConfig::Podman { .. } => {
+                // Podman handler is allowed by default. Container ops shell
+                // out to the host's podman binary; finer-grained permission
+                // enforcement can be added later (image allow-list, mount
+                // path constraints, etc).
+            }
         }
     }
     Ok(())

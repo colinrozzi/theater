@@ -20,6 +20,7 @@ use theater::ManifestConfig;
 use theater::TheaterId;
 use theater_handler_loop::LoopHandler;
 use theater_handler_message_server::{MessageRouter, MessageServerHandler};
+use theater_handler_podman::PodmanHandler;
 use theater_handler_rpc::RpcHandler;
 use theater_handler_runtime::RuntimeHandler;
 use theater_handler_store::StoreHandler;
@@ -157,6 +158,10 @@ fn create_handler_registry(
 
     // Loop handler - cooperative looping with yield points
     registry.register(LoopHandler::new());
+
+    // Podman handler - container management via the podman CLI
+    let podman_config = theater::config::actor_manifest::PodmanHandlerConfig::default();
+    registry.register(PodmanHandler::new(podman_config));
 
     Ok(registry)
 }

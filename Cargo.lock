@@ -3399,6 +3399,7 @@ dependencies = [
  "theater",
  "theater-handler-loop",
  "theater-handler-message-server",
+ "theater-handler-podman",
  "theater-handler-rpc",
  "theater-handler-runtime",
  "theater-handler-store",
@@ -3469,6 +3470,19 @@ dependencies = [
  "tokio",
  "tracing",
  "uuid",
+]
+
+[[package]]
+name = "theater-handler-podman"
+version = "0.3.11"
+dependencies = [
+ "anyhow",
+ "serde",
+ "serde_json",
+ "theater",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
