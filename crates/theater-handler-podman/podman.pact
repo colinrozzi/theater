@@ -28,8 +28,8 @@ interface podman {
         env: list<tuple<string, string>>,
         // Bind-mounts.
         mounts: list<mount-spec>,
-        // Override the image's default command.
-        cmd: option<list<string>>,
+        // Override the image's default command. Empty list = use image default.
+        cmd: list<string>,
         // Allocate a pseudo-TTY (equivalent to `podman run -t`).
         tty: bool,
         // Keep STDIN open (equivalent to `podman run -i`).
@@ -43,8 +43,8 @@ interface podman {
         image: string,
         // Podman status string: "running", "exited", "created", "paused", etc.
         status: string,
-        // Exit code if the container has exited; none while running.
-        exit-code: option<s32>,
+        // Exit code if the container has exited; -1 while running.
+        exit-code: s32,
     }
 
     exports {

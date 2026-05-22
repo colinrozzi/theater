@@ -212,7 +212,8 @@ struct ContainerSpec {
     name: String,
     env: Vec<(String, String)>,
     mounts: Vec<MountSpec>,
-    cmd: Option<Vec<String>>,
+    /// Empty = use the image's default command.
+    cmd: Vec<String>,
     tty: bool,
     interactive: bool,
 }
@@ -227,7 +228,7 @@ fn parse_container_spec(input: &Value) -> Result<ContainerSpec, Value> {
         name: String::new(),
         env: Vec::new(),
         mounts: Vec::new(),
-        cmd: None,
+        cmd: Vec::new(),
         tty: false,
         interactive: false,
     };
@@ -266,20 +267,17 @@ fn parse_container_spec(input: &Value) -> Result<ContainerSpec, Value> {
                     }
                 }
             }
-            ("cmd", Value::Option { value, .. }) => {
-                spec.cmd = value.as_ref().map(|v| match v.as_ref() {
-                    Value::List { items, .. } => items
-                        .iter()
-                        .filter_map(|i| {
-                            if let Value::String(s) = i {
-                                Some(s.clone())
-                            } else {
-                                None
-                            }
-                        })
-                        .collect(),
-                    _ => Vec::new(),
-                });
+            ("cmd", Value::List { items, .. }) => {
+                spec.cmd = items
+                    .iter()
+                    .filter_map(|i| {
+                        if let Value::String(s) = i {
+                            Some(s.clone())
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
             }
             ("tty", Value::Bool(b)) => spec.tty = *b,
             ("interactive", Value::Bool(b)) => spec.interactive = *b,
@@ -324,9 +322,8 @@ async fn run_container(spec: ContainerSpec) -> Result<String, String> {
         args.push(format!("{}:{}{}", m.source, m.target, mode));
     }
     args.push(spec.image.clone());
-    if let Some(cmd) = &spec.cmd {
-        args.extend(cmd.iter().cloned());
-    }
+    // Empty cmd = use image default.
+    args.extend(spec.cmd.iter().cloned());
 
     let output = Command::new("podman")
         .args(&args)
@@ -420,10 +417,13 @@ async fn list_containers() -> Result<Vec<Value>, String> {
         .into_iter()
         .map(|e| {
             let name = e.names.into_iter().next().unwrap_or_default();
+            // -1 = still running (no exit code yet). Otherwise report the
+            // recorded exit code, falling back to 0 if podman didn't supply
+            // one (shouldn't happen for exited containers, but be safe).
             let exit_code = if e.state == "exited" || e.state == "stopped" {
-                e.exit_code
+                e.exit_code.unwrap_or(0)
             } else {
-                None
+                -1
             };
             build_container_info(&e.id, &name, &e.image, &e.state, exit_code)
         })
@@ -431,13 +431,7 @@ async fn list_containers() -> Result<Vec<Value>, String> {
     Ok(infos)
 }
 
-fn build_container_info(
-    id: &str,
-    name: &str,
-    image: &str,
-    status: &str,
-    exit_code: Option<i32>,
-) -> Value {
+fn build_container_info(id: &str, name: &str, image: &str, status: &str, exit_code: i32) -> Value {
     Value::Record {
         type_name: "container-info".to_string(),
         fields: vec![
@@ -445,13 +439,7 @@ fn build_container_info(
             ("name".to_string(), Value::String(name.to_string())),
             ("image".to_string(), Value::String(image.to_string())),
             ("status".to_string(), Value::String(status.to_string())),
-            (
-                "exit-code".to_string(),
-                Value::Option {
-                    inner_type: ValueType::S32,
-                    value: exit_code.map(|c| Box::new(Value::S32(c))),
-                },
-            ),
+            ("exit-code".to_string(), Value::S32(exit_code)),
         ],
     }
 }
