@@ -2183,9 +2183,9 @@ checksum = "04744f49eae99ab78e0d5c0b603ab218f515ea8cfe5a456d7629ad883a3b6e7d"
 
 [[package]]
 name = "packr"
-version = "0.5.3"
+version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ea1e5854226b13e907591d9a62c77f8c72824bfec6581894905b820dc5cc0d2f"
+checksum = "fc98eea5203ad18cb46e8bc211f95cec238c2f7d28ebce1bd65200b135d213b2"
 dependencies = [
  "anyhow",
  "clap",
@@ -2201,9 +2201,9 @@ dependencies = [
 
 [[package]]
 name = "packr-abi"
-version = "0.5.3"
+version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3560b649fbcecd32e034c80eef12b4fa5a824e615df361bc18d92f54f0992c73"
+checksum = "1bf41a868da06cbbe54032bacd05c65df638ab9e57d9ac5a8685524c3c9285e4"
 dependencies = [
  "hashbrown 0.14.5",
  "serde",
