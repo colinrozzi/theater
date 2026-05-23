@@ -1,6 +1,6 @@
 [package]
 name = "theater-handler-podman"
-version = "0.3.11"
+version = "0.3.12"
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
