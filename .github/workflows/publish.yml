@@ -54,34 +54,64 @@ jobs:
 
       - uses: DeterminateSystems/magic-nix-cache-action@main
 
-      # Try publishing each crate. Skip those already published (matched
-      # by "already exists on crates.io"). `cargo publish --workspace`
-      # would just abort on the first already-published crate, so we iterate.
+      # Try publishing each crate. Skip those already published. `cargo
+      # publish --workspace` would just abort on the first already-published
+      # crate, so we iterate.
+      #
+      # Iterating crates/*/Cargo.toml alphabetically breaks when a crate's
+      # dep on a sibling sorts later (e.g. theater-cli depends on
+      # theater-handler-podman). Retry deferred "package not found" failures
+      # in successive passes until either the queue drains or a pass makes
+      # no progress.
+      #
       # Note: capture exit code separately from output — piping through `tee`
       # would always exit 0, masking real failures.
       - name: Publish crates
         run: |
           nix develop --command bash -c '
             set -e
+            pending=()
             for toml in crates/*/Cargo.toml; do
-              crate=$(basename $(dirname "$toml"))
-              echo "::group::Publish $crate"
-              set +e
-              output=$(cargo publish -p "$crate" 2>&1)
-              code=$?
-              set -e
-              echo "$output"
+              pending+=("$(basename $(dirname "$toml"))")
+            done
+
+            pass=0
+            while [ ${#pending[@]} -gt 0 ]; do
+              pass=$((pass + 1))
+              echo "::group::Pass $pass (${#pending[@]} crate(s) to try)"
+              deferred=()
+              progress=0
+              for crate in "${pending[@]}"; do
+                echo "--- $crate"
+                set +e
+                output=$(cargo publish -p "$crate" 2>&1)
+                code=$?
+                set -e
+                echo "$output"
+                if [ $code -eq 0 ]; then
+                  echo "Published $crate"
+                  progress=1
+                elif echo "$output" | grep -q "already exists on crates.io"; then
+                  echo "Skipped $crate (already published)"
+                  progress=1
+                elif echo "$output" | grep -q "package.publish.*must be set"; then
+                  echo "Skipped $crate (publish = false)"
+                  progress=1
+                elif echo "$output" | grep -q "no matching package named"; then
+                  echo "Deferring $crate (missing dep, will retry)"
+                  deferred+=("$crate")
+                else
+                  echo "Publish failed for $crate (exit $code)"
+                  echo "::endgroup::"
+                  exit 1
+                fi
+              done
               echo "::endgroup::"
-              if [ $code -eq 0 ]; then
-                echo "Published $crate"
-              elif echo "$output" | grep -q "already exists on crates.io"; then
-                echo "Skipped $crate (already published)"
-              elif echo "$output" | grep -q "package.publish.*must be set"; then
-                echo "Skipped $crate (publish = false)"
-              else
-                echo "Publish failed for $crate (exit $code)"
+              if [ $progress -eq 0 ]; then
+                echo "No progress in pass $pass — remaining crates have unsatisfiable deps: ${deferred[*]}"
                 exit 1
               fi
+              pending=("${deferred[@]}")
             done
           '
         env:
