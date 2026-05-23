@@ -689,26 +689,34 @@ impl Handler for TcpHandler {
                                                     },
                                                 );
 
-                                                // Call the actor's handle-connection export
+                                                // Detach so a slow/blocked handle-connection in the actor
+                                                // cannot wedge the accept loop and saturate the kernel SYN queue.
                                                 let conn_id_str = id_to_string(conn_id);
                                                 let params =
                                                     Value::Tuple(vec![Value::String(conn_id_str)]);
-
-                                                if let Err(e) = actor_handle
-                                                    .call_function(
-                                                        "theater:simple/tcp-client.handle-connection"
-                                                            .to_string(),
-                                                        params,
-                                                    )
-                                                    .await
-                                                {
-                                                    error!(
-                                                        "Failed to call handle-connection for conn={}: {}",
-                                                        conn_id, e
-                                                    );
-                                                    // Clean up the pending connection
-                                                    st_for_task.connections.lock().await.remove(&conn_id);
-                                                }
+                                                let actor_handle_for_call = actor_handle.clone();
+                                                let st_for_cleanup = st_for_task.clone();
+                                                tokio::spawn(async move {
+                                                    if let Err(e) = actor_handle_for_call
+                                                        .call_function(
+                                                            "theater:simple/tcp-client.handle-connection"
+                                                                .to_string(),
+                                                            params,
+                                                        )
+                                                        .await
+                                                    {
+                                                        error!(
+                                                            "Failed to call handle-connection for conn={}: {}",
+                                                            conn_id, e
+                                                        );
+                                                        // Clean up the pending connection
+                                                        st_for_cleanup
+                                                            .connections
+                                                            .lock()
+                                                            .await
+                                                            .remove(&conn_id);
+                                                    }
+                                                });
                                             }
                                             Err(e) => {
                                                 error!(
