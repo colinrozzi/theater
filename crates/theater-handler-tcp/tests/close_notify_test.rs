@@ -25,6 +25,11 @@ use tokio_rustls::{TlsAcceptor, TlsConnector};
 /// ordering and Box deref the production handler does.
 enum LocalState {
     Full(Box<ServerTlsStream<tokio::net::TcpStream>>),
+    /// Mirrors the production `WriteOnly(UnifiedWriteHalf)` arm — entered when
+    /// a connection is split for the active-mode reader pattern. Holding the
+    /// write half here lets the cleanup path call `AsyncWriteExt::shutdown`
+    /// before dropping (i.e. send TLS close_notify before TCP FIN).
+    WriteOnly(tokio::io::WriteHalf<ServerTlsStream<tokio::net::TcpStream>>),
     Closed,
 }
 
@@ -259,4 +264,147 @@ async fn post_response_close_pattern_sends_close_notify() {
         "response should contain status:sent — got: {}",
         text
     );
+}
+
+/// Active-mode reader EOF must flush close_notify before dropping the write half.
+///
+/// This mirrors the `set-active "active"` path inside theater-handler-tcp:
+///   1. After handshake, the stream is split (`tokio::io::split`)
+///   2. The read half goes to a background reader task (`tcp_read_loop`)
+///   3. The write half lives in `StreamState::WriteOnly(write_half)` inside
+///      the shared connections map
+///   4. The actor writes responses through the write half via `tcp.send`
+///
+/// When the peer initiates a clean TLS shutdown (sends `close_notify` then
+/// FIN), the reader sees `Ok(0)` and runs the EOF cleanup branch. Prior to
+/// the fix that introduced this test, that branch called the actor's
+/// `on-close` callback then removed the entry from the connections map —
+/// which dropped the `WriteOnly(write_half)` without ever calling
+/// `AsyncWriteExt::shutdown`. For TLS, dropping the write half without
+/// shutdown means the rustls layer never flushes its outgoing `close_notify`
+/// alert, so the peer's read side observes raw TCP FIN and returns
+/// `UnexpectedEof`. That is the symptom every `inbox send` from the cli
+/// surfaces as `cli: recv: peer closed connection without sending TLS
+/// close_notify`.
+///
+/// This test models the exact pattern: server splits + spawns reader, client
+/// reads response then initiates clean shutdown, the reader's EOF branch
+/// calls `AsyncWriteExt::shutdown` on the held write half before dropping it.
+/// Without the shutdown call the client's `read_to_end` returns
+/// `UnexpectedEof` — the assertion below fails immediately.
+#[tokio::test]
+async fn active_mode_reader_eof_sends_close_notify() {
+    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+
+    let (server_cfg, client_roots) = loopback_tls();
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+    let addr = listener.local_addr().expect("local addr");
+
+    let server = tokio::spawn({
+        let acceptor = TlsAcceptor::from(Arc::new(server_cfg));
+        async move {
+            let (sock, _) = listener.accept().await.expect("accept");
+            let tls = acceptor.accept(sock).await.expect("tls handshake");
+
+            // Split the stream — entering the active-mode pattern.
+            let (mut read_half, write_half) = tokio::io::split(tls);
+            let stream_arc: Arc<Mutex<LocalState>> =
+                Arc::new(Mutex::new(LocalState::WriteOnly(write_half)));
+
+            // Drain the request through the read half — mirrors tcp_read_loop's
+            // bounded read against the split read half.
+            let mut req_buf = [0u8; 4096];
+            let _ = read_half.read(&mut req_buf).await;
+
+            // "send" the response via the write half held in the shared state.
+            // Mirrors tcp_send acquiring the StreamState lock and writing.
+            {
+                let mut guard = stream_arc.lock().await;
+                if let LocalState::WriteOnly(ref mut w) = *guard {
+                    w.write_all(
+                        b"HTTP/1.1 200 OK\r\nContent-Length: 5\r\nConnection: close\r\n\r\nhello",
+                    )
+                    .await
+                    .expect("write_all");
+                }
+            }
+
+            // Reader continues until EOF (the client's close_notify + FIN).
+            // This is the loop body in tcp_read_loop — read until Ok(0).
+            let mut sink = [0u8; 4096];
+            loop {
+                match read_half.read(&mut sink).await {
+                    Ok(0) => break,
+                    Ok(_) => continue,
+                    Err(_) => break,
+                }
+            }
+
+            // EOF cleanup — production tcp_read_loop runs the equivalent of
+            // this block. WITH the fix: take the write half from StreamState
+            // and shutdown it before drop. WITHOUT the fix: just remove the
+            // entry from the map (drop the WriteOnly without shutdown).
+            {
+                let mut guard = stream_arc.lock().await;
+                let taken = std::mem::replace(&mut *guard, LocalState::Closed);
+                drop(guard);
+                if let LocalState::WriteOnly(mut w) = taken {
+                    // This shutdown call is what flushes the server-side
+                    // close_notify. Comment it out to reproduce the bug.
+                    let _ = AsyncWriteExt::shutdown(&mut w).await;
+                }
+            }
+        }
+    });
+
+    // Client: strict rustls, connect, write request, read response, then
+    // gracefully shutdown (sends our close_notify, waits for the server's
+    // reply). Final read_to_end asserts the server's reply close_notify
+    // arrived before FIN — without it, rustls converts the bare FIN into
+    // UnexpectedEof.
+    let client_cfg = ClientConfig::builder()
+        .with_root_certificates(client_roots)
+        .with_no_client_auth();
+    let connector = TlsConnector::from(Arc::new(client_cfg));
+    let sock = tokio::net::TcpStream::connect(addr).await.expect("connect");
+    let server_name = ServerName::try_from("localhost").expect("name").to_owned();
+    let mut tls = connector
+        .connect(server_name, sock)
+        .await
+        .expect("tls connect");
+
+    tls.write_all(b"GET /v1/ping HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
+        .await
+        .expect("client write");
+
+    // Read the response body (Content-Length-bounded).
+    let mut body = [0u8; 256];
+    let body_read = tokio::time::timeout(Duration::from_secs(5), tls.read(&mut body))
+        .await
+        .expect("body read timed out")
+        .expect("body read");
+    assert!(body_read > 0, "expected response bytes, got empty");
+    assert!(
+        body[..body_read].windows(5).any(|w| w == b"hello"),
+        "response should contain 'hello' body"
+    );
+
+    // Initiate clean TLS shutdown from the client side — this sends our
+    // close_notify and waits for the server's reply close_notify.
+    tls.shutdown().await.expect("client tls shutdown");
+
+    // Drain to EOF. If the server reaped without flushing close_notify, this
+    // returns UnexpectedEof — exactly the symptom we're guarding against.
+    let mut tail = Vec::new();
+    let drained = tokio::time::timeout(Duration::from_secs(5), tls.read_to_end(&mut tail))
+        .await
+        .expect("drain timed out");
+    drained.expect(
+        "expected clean EOF after client shutdown (server flushed close_notify); \
+         got UnexpectedEof — tcp_read_loop's EOF/Err cleanup branch dropped the \
+         WriteOnly write half without calling AsyncWriteExt::shutdown",
+    );
+
+    server.await.expect("server task ok");
 }
