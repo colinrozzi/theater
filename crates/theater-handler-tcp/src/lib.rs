@@ -1586,6 +1586,52 @@ impl Handler for TcpHandler {
 /// Buffer size for active mode reads
 const ACTIVE_READ_BUFFER_SIZE: usize = 8192;
 
+/// Remove the connection entry from the shared map and, for TLS streams in
+/// the `WriteOnly(write_half)` state, flush the close_notify alert before the
+/// underlying TCP gets FIN'd.
+///
+/// Used by `tcp_read_loop` on every cleanup branch (peer-EOF, read error,
+/// cancellation). Without the shutdown call, dropping the WriteOnly write
+/// half drops the rustls session without flushing its outgoing close_notify
+/// alert — peers then observe a bare TCP FIN and surface it as
+/// `UnexpectedEof` ("peer closed connection without sending TLS
+/// close_notify"). The explicit `close` host function had this right
+/// already (PR #45); this is the parallel fix for the auto-cleanup path.
+async fn shutdown_write_half_and_remove(shared_state: &Arc<SharedTcpState>, conn_id: u64) {
+    let stream_arc = {
+        let mut connections = shared_state.connections.lock().await;
+        connections.remove(&conn_id).map(|e| e.stream)
+    };
+    let Some(stream_arc) = stream_arc else {
+        return;
+    };
+    let mut guard = stream_arc.lock().await;
+    let taken = std::mem::replace(&mut *guard, StreamState::Closed);
+    drop(guard);
+    match taken {
+        StreamState::WriteOnly(mut w) => {
+            if let Err(e) = AsyncWriteExt::shutdown(&mut w).await {
+                warn!(
+                    "tcp conn={} cleanup shutdown error (close_notify may not have been sent): {}",
+                    conn_id, e
+                );
+            }
+        }
+        StreamState::Full(mut s) => {
+            // Active-mode normally leaves the entry in WriteOnly state, but
+            // handle Full defensively in case the reader exits before set-active
+            // could complete the split.
+            if let Err(e) = AsyncWriteExt::shutdown(&mut *s).await {
+                warn!(
+                    "tcp conn={} cleanup shutdown error (close_notify may not have been sent): {}",
+                    conn_id, e
+                );
+            }
+        }
+        StreamState::Closed => {}
+    }
+}
+
 /// Background task that reads from a connection and calls on-data/on-close callbacks.
 ///
 /// This is spawned when a connection enters "active" or "once" mode.
@@ -1609,8 +1655,7 @@ async fn tcp_read_loop(
         tokio::select! {
             _ = cancel_token.cancelled() => {
                 info!("tcp read loop cancelled for conn={}", conn_id);
-                // Remove connection from shared state
-                shared_state.connections.lock().await.remove(&conn_id);
+                shutdown_write_half_and_remove(&shared_state, conn_id).await;
                 break;
             }
             result = read_half.read(&mut buf) => {
@@ -1632,8 +1677,7 @@ async fn tcp_read_loop(
                             warn!("tcp conn={} on-close callback failed: {}", conn_id, e);
                         }
 
-                        // Remove connection from shared state
-                        shared_state.connections.lock().await.remove(&conn_id);
+                        shutdown_write_half_and_remove(&shared_state, conn_id).await;
                         break;
                     }
                     Ok(n) => {
@@ -1685,8 +1729,7 @@ async fn tcp_read_loop(
                             warn!("tcp conn={} on-close callback failed: {}", conn_id, e);
                         }
 
-                        // Remove connection from shared state
-                        shared_state.connections.lock().await.remove(&conn_id);
+                        shutdown_write_half_and_remove(&shared_state, conn_id).await;
                         break;
                     }
                 }
