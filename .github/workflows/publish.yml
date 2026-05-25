@@ -67,14 +67,6 @@ jobs:
       # Note: capture exit code separately from output — piping through `tee`
       # would always exit 0, masking real failures.
       - name: Publish crates
-        env:
-          # Force C collation so the glob sorts crates/* with '-' as
-          # less than end-of-string (i.e. "theater" < "theater-cli"),
-          # not en_US.UTF-8 which treats '-' as a secondary weight and
-          # would put "theater" after "theater-cli". With UTF-8 ordering
-          # the foundational `theater` crate ends up iterated after its
-          # dependents and the loop bails before publishing it.
-          LC_ALL: C
         run: |
           nix develop --command bash -c '
             set -e
@@ -127,6 +119,13 @@ jobs:
           '
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+          # Force C collation so the glob sorts crates/* with '-' as
+          # less than end-of-string (i.e. "theater" < "theater-cli"),
+          # not en_US.UTF-8 which treats '-' as a secondary weight and
+          # would put "theater" after "theater-cli". With UTF-8 ordering
+          # the foundational `theater` crate ends up iterated after its
+          # dependents and the loop bails before publishing it.
+          LC_ALL: C
 
       - name: Create tag and GitHub release
         run: |
