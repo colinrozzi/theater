@@ -97,6 +97,14 @@ jobs:
                 elif echo "$output" | grep -q "package.publish.*must be set"; then
                   echo "Skipped $crate (publish = false)"
                   progress=1
+                elif echo "$output" | grep -q "did not match any packages"; then
+                  # `cargo publish -p <crate>` errors with this when the crate
+                  # directory exists under crates/ but the crate isn't in the
+                  # workspace `members` list (e.g. val-serde — exploratory code
+                  # that lives in-tree but isn't part of the release). Skip it
+                  # rather than aborting the whole loop.
+                  echo "Skipped $crate (not a workspace member)"
+                  progress=1
                 elif echo "$output" | grep -qE "no matching package named|failed to select a version for the requirement"; then
                   # Both errors mean "a workspace sibling we want isnt on
                   # crates.io yet" — defer to a later pass after the sibling
