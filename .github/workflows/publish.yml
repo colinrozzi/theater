@@ -67,6 +67,14 @@ jobs:
       # Note: capture exit code separately from output — piping through `tee`
       # would always exit 0, masking real failures.
       - name: Publish crates
+        env:
+          # Force C collation so the glob sorts crates/* with '-' as
+          # less than end-of-string (i.e. "theater" < "theater-cli"),
+          # not en_US.UTF-8 which treats '-' as a secondary weight and
+          # would put "theater" after "theater-cli". With UTF-8 ordering
+          # the foundational `theater` crate ends up iterated after its
+          # dependents and the loop bails before publishing it.
+          LC_ALL: C
         run: |
           nix develop --command bash -c '
             set -e
@@ -97,8 +105,11 @@ jobs:
                 elif echo "$output" | grep -q "package.publish.*must be set"; then
                   echo "Skipped $crate (publish = false)"
                   progress=1
-                elif echo "$output" | grep -q "no matching package named"; then
-                  echo "Deferring $crate (missing dep, will retry)"
+                elif echo "$output" | grep -qE "no matching package named|failed to select a version for the requirement"; then
+                  # Both errors mean "a workspace sibling we want isnt on
+                  # crates.io yet" — defer to a later pass after the sibling
+                  # publishes.
+                  echo "Deferring $crate (unresolved sibling dep, will retry)"
                   deferred+=("$crate")
                 else
                   echo "Publish failed for $crate (exit $code)"
