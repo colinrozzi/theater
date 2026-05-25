@@ -266,34 +266,36 @@ async fn post_response_close_pattern_sends_close_notify() {
     );
 }
 
-/// Active-mode reader EOF must flush close_notify before dropping the write half.
+/// Pattern documentation: the active-mode reader's peer-EOF cleanup must
+/// flush close_notify on the held write half before dropping it.
 ///
-/// This mirrors the `set-active "active"` path inside theater-handler-tcp:
-///   1. After handshake, the stream is split (`tokio::io::split`)
-///   2. The read half goes to a background reader task (`tcp_read_loop`)
-///   3. The write half lives in `StreamState::WriteOnly(write_half)` inside
-///      the shared connections map
-///   4. The actor writes responses through the write half via `tcp.send`
+/// **Pattern-doc, not integration:** like the other two tests in this file,
+/// this is a local stand-in that documents the *correct* cleanup pattern.
+/// It does NOT call into production `tcp_read_loop` or
+/// `shutdown_write_half_and_remove` — it constructs its own server task and
+/// runs the equivalent inline. End-to-end verification against the actual
+/// production code lives at deploy-time: the inbox CLI is a strict rustls
+/// client talking to a real theater-handler-tcp server, so its self-send
+/// probe (no `peer closed connection without sending TLS close_notify`
+/// warnings) is the integration check.
 ///
-/// When the peer initiates a clean TLS shutdown (sends `close_notify` then
-/// FIN), the reader sees `Ok(0)` and runs the EOF cleanup branch. Prior to
-/// the fix that introduced this test, that branch called the actor's
-/// `on-close` callback then removed the entry from the connections map —
-/// which dropped the `WriteOnly(write_half)` without ever calling
-/// `AsyncWriteExt::shutdown`. For TLS, dropping the write half without
-/// shutdown means the rustls layer never flushes its outgoing `close_notify`
-/// alert, so the peer's read side observes raw TCP FIN and returns
-/// `UnexpectedEof`. That is the symptom every `inbox send` from the cli
-/// surfaces as `cli: recv: peer closed connection without sending TLS
-/// close_notify`.
+/// What the pattern is: when an actor sets a connection to active mode,
+/// theater-handler-tcp splits the TLS stream via `tokio::io::split`, parks
+/// the write half in `StreamState::WriteOnly(write_half)` inside the shared
+/// connections map, and spawns `tcp_read_loop` on the read half. When the
+/// peer initiates a clean TLS shutdown (close_notify + FIN), the reader
+/// sees `Ok(0)`; the cleanup branch must take the WriteOnly write half and
+/// call `AsyncWriteExt::shutdown` on it before removing the entry from the
+/// map (which drops the write half). Without the shutdown call, the rustls
+/// session is dropped before its outgoing close_notify alert is flushed,
+/// and peers observe a bare TCP FIN — `UnexpectedEof` from the rustls
+/// client side, which is the symptom every `inbox send` had been surfacing
+/// as `cli: recv: peer closed connection without sending TLS close_notify`.
 ///
-/// This test models the exact pattern: server splits + spawns reader, client
-/// reads response then initiates clean shutdown, the reader's EOF branch
-/// calls `AsyncWriteExt::shutdown` on the held write half before dropping it.
-/// Without the shutdown call the client's `read_to_end` returns
-/// `UnexpectedEof` — the assertion below fails immediately.
+/// Mirror this pattern (including the `AsyncWriteExt::shutdown` call) when
+/// adding any future cleanup path that owns a TLS write half.
 #[tokio::test]
-async fn active_mode_reader_eof_sends_close_notify() {
+async fn active_mode_eof_cleanup_pattern_sends_close_notify() {
     let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
 
     let (server_cfg, client_roots) = loopback_tls();
