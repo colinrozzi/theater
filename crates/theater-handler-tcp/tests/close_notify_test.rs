@@ -648,10 +648,12 @@ async fn inbox_cli_post_send_with_outbound_tls_does_not_observe_unexpected_eof()
     .into_bytes();
     req.extend_from_slice(req_body);
 
-    let body = inbox_cli_style_request(in_addr, in_client_roots, &req).await.expect(
-        "POST + outbound TLS during processing should not surface 'recv:' — \
+    let body = inbox_cli_style_request(in_addr, in_client_roots, &req)
+        .await
+        .expect(
+            "POST + outbound TLS during processing should not surface 'recv:' — \
          if this fails, the concurrent outbound TLS IS the trigger",
-    );
+        );
 
     server.await.expect("server task ok");
     smtp_handle.await.expect("smtp task ok");
