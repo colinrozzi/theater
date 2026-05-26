@@ -301,8 +301,7 @@ async fn inbox_cli_style_request(
         }
 
         let mut chunk = [0u8; 65536];
-        let read =
-            tokio::time::timeout(Duration::from_secs(5), tls.read(&mut chunk)).await;
+        let read = tokio::time::timeout(Duration::from_secs(5), tls.read(&mut chunk)).await;
         let n = match read {
             Ok(Ok(n)) => n,
             Ok(Err(e)) => return Err(format!("recv: {}", e)),
@@ -315,10 +314,7 @@ async fn inbox_cli_style_request(
 
         if body_start.is_none() {
             let needle = b"\r\n\r\n";
-            if let Some(idx) = all
-                .windows(needle.len())
-                .position(|w| w == needle)
-            {
+            if let Some(idx) = all.windows(needle.len()).position(|w| w == needle) {
                 body_start = Some(idx + needle.len());
                 let header_str = core::str::from_utf8(&all[..idx]).unwrap_or("");
                 for line in header_str.split("\r\n") {
@@ -355,8 +351,7 @@ async fn api_handler_shape_server(
     let (sock, _) = listener.accept().await.expect("accept");
     let tls = acceptor.accept(sock).await.expect("tls handshake");
 
-    let stream_arc: Arc<Mutex<LocalState>> =
-        Arc::new(Mutex::new(LocalState::Full(Box::new(tls))));
+    let stream_arc: Arc<Mutex<LocalState>> = Arc::new(Mutex::new(LocalState::Full(Box::new(tls))));
 
     // tcp_receive: one bounded read of the request.
     {
