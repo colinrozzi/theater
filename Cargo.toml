@@ -73,7 +73,7 @@ theater-handler-message-server = { version = "0.3.10", path = "crates/theater-ha
 theater-handler-runtime = { version = "0.3.10", path = "crates/theater-handler-runtime" }
 theater-handler-store = { version = "0.3.10", path = "crates/theater-handler-store" }
 theater-handler-supervisor = { version = "0.3.11", path = "crates/theater-handler-supervisor" }
-theater-handler-tcp = { version = "0.3.18", path = "crates/theater-handler-tcp" }
+theater-handler-tcp = { version = "0.3.19", path = "crates/theater-handler-tcp" }
 theater-handler-terminal = { version = "0.3.10", path = "crates/theater-handler-terminal" }
 theater-handler-timer = { version = "0.3.12", path = "crates/theater-handler-timer" }
 theater-handler-assembler = { version = "0.3.10", path = "crates/theater-handler-assembler" }
