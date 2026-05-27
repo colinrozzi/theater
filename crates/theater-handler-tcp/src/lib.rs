@@ -394,8 +394,15 @@ impl Handler for TcpHandler {
         // Get cancellation token to cancel on shutdown
         let cancel_token = self.cancellation_token.clone();
         let shared_state = self.shared_state.clone();
+        let actor_id_for_cleanup = self.actor_id.clone();
 
-        // Wait for shutdown, then clean up all resources
+        // Wait for shutdown, then clean up all resources OWNED BY THIS ACTOR.
+        // The connections + listeners maps are shared across every TcpHandler
+        // instance in the runtime — one map, many actors. So the cleanup must
+        // filter by owner; clearing the whole map would wipe in-flight
+        // connections owned by other actors. For TLS connections it also
+        // drives `AsyncWriteExt::shutdown` so close_notify reaches the wire
+        // before TCP FIN (the same shape as the `close` host function).
         Box::pin(async move {
             info!("TCP handler setup waiting for shutdown signal");
             shutdown_receiver.wait_for_shutdown().await;
@@ -405,23 +412,41 @@ impl Handler for TcpHandler {
             cancel_token.cancel();
             info!("TCP handler cancellation token cancelled");
 
-            // Close all connections - clearing the map drops the streams
-            {
-                let mut connections = shared_state.connections.lock().await;
-                let conn_count = connections.len();
-                connections.clear();
-                if conn_count > 0 {
-                    info!("TCP handler closed {} connections", conn_count);
-                }
+            let actor_id_val = *actor_id_for_cleanup.lock().unwrap();
+
+            // Collect connection IDs owned by this actor; release the outer
+            // lock before driving per-connection shutdowns (those acquire
+            // the inner stream mutex and may await).
+            let to_remove: Vec<u64> = {
+                let connections = shared_state.connections.lock().await;
+                connections
+                    .iter()
+                    .filter(|(_, entry)| Some(entry.owner) == actor_id_val)
+                    .map(|(id, _)| *id)
+                    .collect()
+            };
+            let conn_count = to_remove.len();
+            for conn_id in to_remove {
+                shutdown_write_half_and_remove(&shared_state, conn_id).await;
+            }
+            if conn_count > 0 {
+                info!(
+                    "TCP handler closed {} connections owned by actor {:?}",
+                    conn_count, actor_id_val
+                );
             }
 
-            // Close all listeners - clearing the map drops the TcpListeners
+            // Same owner-filter for listeners.
             {
                 let mut listeners = shared_state.listeners.lock().await;
-                let listener_count = listeners.len();
-                listeners.clear();
-                if listener_count > 0 {
-                    info!("TCP handler closed {} listeners", listener_count);
+                let before = listeners.len();
+                listeners.retain(|_, entry| Some(entry.owner) != actor_id_val);
+                let removed = before - listeners.len();
+                if removed > 0 {
+                    info!(
+                        "TCP handler closed {} listeners owned by actor {:?}",
+                        removed, actor_id_val
+                    );
                 }
             }
 

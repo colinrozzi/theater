@@ -266,6 +266,406 @@ async fn post_response_close_pattern_sends_close_notify() {
     );
 }
 
+/// Drive the inbox-CLI-shape HTTP client side: write request, then read
+/// chunks until headers + Content-Length bytes are received, then BREAK
+/// without further reads (no `read_to_end`). Mirrors inbox/cli/src/lib.rs
+/// `http()` exactly — the same loop that surfaces `cli: recv: peer closed
+/// connection without sending TLS close_notify` in production.
+async fn inbox_cli_style_request(
+    addr: std::net::SocketAddr,
+    client_roots: RootCertStore,
+    request_bytes: &[u8],
+) -> Result<Vec<u8>, String> {
+    let client_cfg = ClientConfig::builder()
+        .with_root_certificates(client_roots)
+        .with_no_client_auth();
+    let connector = TlsConnector::from(Arc::new(client_cfg));
+    let sock = tokio::net::TcpStream::connect(addr).await.expect("connect");
+    let server_name = ServerName::try_from("localhost").expect("name").to_owned();
+    let mut tls = connector
+        .connect(server_name, sock)
+        .await
+        .expect("tls connect");
+
+    tls.write_all(request_bytes).await.expect("client write");
+
+    let mut all = Vec::new();
+    let mut body_start: Option<usize> = None;
+    let mut content_length: Option<usize> = None;
+
+    loop {
+        if let (Some(hs), Some(cl)) = (body_start, content_length) {
+            if all.len() >= hs + cl {
+                break;
+            }
+        }
+
+        let mut chunk = [0u8; 65536];
+        let read = tokio::time::timeout(Duration::from_secs(5), tls.read(&mut chunk)).await;
+        let n = match read {
+            Ok(Ok(n)) => n,
+            Ok(Err(e)) => return Err(format!("recv: {}", e)),
+            Err(_) => return Err(String::from("recv: timeout")),
+        };
+        if n == 0 {
+            break;
+        }
+        all.extend_from_slice(&chunk[..n]);
+
+        if body_start.is_none() {
+            let needle = b"\r\n\r\n";
+            if let Some(idx) = all.windows(needle.len()).position(|w| w == needle) {
+                body_start = Some(idx + needle.len());
+                let header_str = core::str::from_utf8(&all[..idx]).unwrap_or("");
+                for line in header_str.split("\r\n") {
+                    if let Some((name, value)) = line.split_once(':') {
+                        if name.trim().eq_ignore_ascii_case("content-length") {
+                            if let Ok(n) = value.trim().parse::<usize>() {
+                                content_length = Some(n);
+                            }
+                        }
+                    }
+                }
+                if content_length.is_none() {
+                    content_length = Some(usize::MAX);
+                }
+            }
+        }
+    }
+
+    Ok(all)
+}
+
+/// Server-side api-handler-shape lifecycle: accept TLS, one bounded
+/// `read()` for the request, a brief processing pause (mimics the
+/// synchronous side-effects inside inbox `handle_send`), write the
+/// response, run the same close pattern as `theater-handler-tcp`'s
+/// `close` host function.
+async fn api_handler_shape_server(
+    listener: TcpListener,
+    server_cfg: ServerConfig,
+    response_bytes: Vec<u8>,
+    process_delay: Duration,
+) {
+    let acceptor = TlsAcceptor::from(Arc::new(server_cfg));
+    let (sock, _) = listener.accept().await.expect("accept");
+    let tls = acceptor.accept(sock).await.expect("tls handshake");
+
+    let stream_arc: Arc<Mutex<LocalState>> = Arc::new(Mutex::new(LocalState::Full(Box::new(tls))));
+
+    // tcp_receive: one bounded read of the request.
+    {
+        let mut guard = stream_arc.lock().await;
+        if let LocalState::Full(ref mut s) = *guard {
+            let mut buf = [0u8; 65536];
+            let _ = s.read(&mut buf).await;
+        }
+    }
+
+    // Yield + sleep — mimic the processing pause between read and write.
+    for _ in 0..4 {
+        tokio::task::yield_now().await;
+    }
+    tokio::time::sleep(process_delay).await;
+
+    // tcp_send.
+    {
+        let mut guard = stream_arc.lock().await;
+        if let LocalState::Full(ref mut s) = *guard {
+            s.write_all(&response_bytes).await.expect("write_all");
+        }
+    }
+
+    // tcp_close — same pattern as theater-handler-tcp/src/lib.rs `close`.
+    {
+        let mut guard = stream_arc.lock().await;
+        let taken = std::mem::replace(&mut *guard, LocalState::Closed);
+        drop(guard);
+        match taken {
+            LocalState::Full(mut s) => {
+                let _ = AsyncWriteExt::shutdown(&mut *s).await;
+            }
+            LocalState::WriteOnly(mut w) => {
+                let _ = AsyncWriteExt::shutdown(&mut w).await;
+            }
+            LocalState::Closed => {}
+        }
+    }
+}
+
+/// Repro target: a GET-shape request to an inbox-style handler, driven
+/// by the same Content-Length-bounded read loop the inbox CLI uses.
+/// Asserts the CLI-style loop completes without surfacing a "recv:" error
+/// (i.e. without observing UnexpectedEof from rustls before its break point).
+///
+/// This is the experimental "is the minimal passive-mode pattern enough to
+/// reproduce the prod close_notify warning?" test. If both this GET test
+/// and the POST variant below pass on current main, the minimal shape
+/// doesn't capture the prod bug and we need to add elements (outbound
+/// SMTP-with-STARTTLS, wasm actor in the loop, etc).
+#[tokio::test]
+async fn inbox_cli_get_shape_does_not_observe_unexpected_eof() {
+    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+
+    let (server_cfg, client_roots) = loopback_tls();
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+    let addr = listener.local_addr().expect("local addr");
+
+    // Inbox-list-like response, JSON body, Content-Length set.
+    let response_body =
+        br#"[{"address":"theater-dev@colinrozzi.com","mailbox_id":"00000000-0000-0000-0000-000000000000"}]"#;
+    let response = {
+        let mut r = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+            response_body.len()
+        )
+        .into_bytes();
+        r.extend_from_slice(response_body);
+        r
+    };
+
+    let server = tokio::spawn(api_handler_shape_server(
+        listener,
+        server_cfg,
+        response,
+        Duration::from_millis(20),
+    ));
+
+    let req = b"GET /v1/mailboxes HTTP/1.1\r\nHost: localhost\r\nAuthorization: Bearer probe\r\nConnection: close\r\n\r\n";
+    let body = inbox_cli_style_request(addr, client_roots, req)
+        .await
+        .expect("CLI-style GET should not surface 'recv:' error");
+
+    server.await.expect("server task ok");
+
+    let text = String::from_utf8_lossy(&body);
+    assert!(
+        text.contains("theater-dev@colinrozzi.com"),
+        "GET response should contain expected body — got: {}",
+        text
+    );
+}
+
+/// Repro target: the POST send shape — the exact prod path that surfaces
+/// `cli: recv: peer closed connection without sending TLS close_notify`.
+/// Same client read loop as the GET variant, but with a request body and
+/// a response shape that matches inbox `/send`.
+///
+/// On current main: if this test FAILS with `recv: ...`, we've finally
+/// reproduced the prod symptom in a Cargo test. The same test then locks
+/// in the eventual fix.
+///
+/// If it PASSES, the minimal pattern still doesn't capture the prod bug
+/// — next iteration adds the concurrent outbound SMTP-with-STARTTLS
+/// (handle_send opens a separate TLS connection mid-processing).
+#[tokio::test]
+async fn inbox_cli_post_send_shape_does_not_observe_unexpected_eof() {
+    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+
+    let (server_cfg, client_roots) = loopback_tls();
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+    let addr = listener.local_addr().expect("local addr");
+
+    // Inbox /send response shape (PR #4), small JSON body.
+    let response_body =
+        br#"{"status":"sent","delivered":["theater-dev@colinrozzi.com"],"failed":[]}"#;
+    let response = {
+        let mut r = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+            response_body.len()
+        )
+        .into_bytes();
+        r.extend_from_slice(response_body);
+        r
+    };
+
+    // The processing pause for POST send is longer than a typical GET —
+    // smtp_deliver synchronously does TCP+TLS to localhost:25. Approximate
+    // with a wider sleep here.
+    let server = tokio::spawn(api_handler_shape_server(
+        listener,
+        server_cfg,
+        response,
+        Duration::from_millis(150),
+    ));
+
+    let req_body =
+        br#"{"to":["theater-dev@colinrozzi.com"],"cc":[],"bcc":[],"subject":"probe","body":"x"}"#;
+    let mut req = format!(
+        "POST /v1/mailboxes/theater-dev%40colinrozzi.com/send HTTP/1.1\r\nHost: localhost\r\nAuthorization: Bearer probe\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+        req_body.len()
+    )
+    .into_bytes();
+    req.extend_from_slice(req_body);
+
+    let body = inbox_cli_style_request(addr, client_roots, &req)
+        .await
+        .expect(
+            "CLI-style POST should not surface 'recv:' error — \
+             if this fails with UnexpectedEof, we've reproduced the prod close_notify warning",
+        );
+
+    server.await.expect("server task ok");
+
+    let text = String::from_utf8_lossy(&body);
+    assert!(
+        text.contains("\"status\":\"sent\""),
+        "POST response should contain status:sent — got: {}",
+        text
+    );
+}
+
+/// Tiny SMTP-shaped TLS server: accept TLS, write a 220-style banner,
+/// read a short EHLO line, write a 250 response, run the same close
+/// pattern as the api handler. Used as the outbound target for
+/// `inbox_cli_post_send_with_outbound_tls_*` — the closest minimal
+/// stand-in for the inbox `smtp_deliver` step that distinguishes POST
+/// from GET in production.
+async fn mini_smtp_tls_target(listener: TcpListener, server_cfg: ServerConfig) {
+    let acceptor = TlsAcceptor::from(Arc::new(server_cfg));
+    let (sock, _) = listener.accept().await.expect("smtp accept");
+    let mut tls = match acceptor.accept(sock).await {
+        Ok(s) => s,
+        Err(_) => return,
+    };
+    let _ = tls.write_all(b"220 ready\r\n").await;
+    let mut buf = [0u8; 4096];
+    let _ = tls.read(&mut buf).await;
+    let _ = tls.write_all(b"250 ok\r\n").await;
+    let _ = AsyncWriteExt::shutdown(&mut tls).await;
+}
+
+/// Iteration 4a (per the PR description): re-run the POST send shape, but
+/// have the api-handler-shape server open an outbound TLS connection to
+/// a second in-test TLS server BETWEEN the request read and the response
+/// write — the closest minimal stand-in for inbox `smtp_deliver`. If the
+/// concurrent outbound TLS during processing is what perturbs the inbound
+/// connection's close path, this is where it surfaces.
+#[tokio::test]
+async fn inbox_cli_post_send_with_outbound_tls_does_not_observe_unexpected_eof() {
+    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+
+    // Inbound TLS server (the one the client connects to).
+    let (in_server_cfg, in_client_roots) = loopback_tls();
+    let in_listener = TcpListener::bind("127.0.0.1:0").await.expect("in bind");
+    let in_addr = in_listener.local_addr().expect("in local addr");
+
+    // Outbound TLS target (mini SMTP-shaped) — separate cert chain so the
+    // api-handler's outbound rustls connection is a fully independent
+    // session, same as inbox's outbound to localhost:25.
+    let (out_server_cfg, out_client_roots) = loopback_tls();
+    let out_listener = TcpListener::bind("127.0.0.1:0").await.expect("out bind");
+    let out_addr = out_listener.local_addr().expect("out local addr");
+
+    let smtp_handle = tokio::spawn(mini_smtp_tls_target(out_listener, out_server_cfg));
+
+    // Server task: api-handler shape inlined with the outbound TLS step
+    // wedged in between request read and response write.
+    let response_body =
+        br#"{"status":"sent","delivered":["theater-dev@colinrozzi.com"],"failed":[]}"#;
+    let mut response = format!(
+        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+        response_body.len()
+    )
+    .into_bytes();
+    response.extend_from_slice(response_body);
+
+    let server = tokio::spawn(async move {
+        let acceptor = TlsAcceptor::from(Arc::new(in_server_cfg));
+        let (sock, _) = in_listener.accept().await.expect("in accept");
+        let tls = acceptor.accept(sock).await.expect("in tls handshake");
+        let stream_arc: Arc<Mutex<LocalState>> =
+            Arc::new(Mutex::new(LocalState::Full(Box::new(tls))));
+
+        // tcp_receive: one bounded read of the request.
+        {
+            let mut guard = stream_arc.lock().await;
+            if let LocalState::Full(ref mut s) = *guard {
+                let mut buf = [0u8; 65536];
+                let _ = s.read(&mut buf).await;
+            }
+        }
+
+        // PROCESSING STEP: concurrent outbound TLS — the smtp_deliver
+        // stand-in. tcp_connect (plain) → tls handshake → write EHLO →
+        // read 250 → AsyncWriteExt::shutdown. This is the element the
+        // minimal POST test was missing.
+        {
+            let out_client_cfg = ClientConfig::builder()
+                .with_root_certificates(out_client_roots)
+                .with_no_client_auth();
+            let connector = TlsConnector::from(Arc::new(out_client_cfg));
+            let sock = tokio::net::TcpStream::connect(out_addr)
+                .await
+                .expect("outbound tcp connect");
+            let server_name = ServerName::try_from("localhost").expect("name").to_owned();
+            let mut out_tls = connector
+                .connect(server_name, sock)
+                .await
+                .expect("outbound tls handshake");
+
+            let mut banner = [0u8; 64];
+            let _ = out_tls.read(&mut banner).await;
+            let _ = out_tls.write_all(b"EHLO probe\r\n").await;
+            let mut resp = [0u8; 64];
+            let _ = out_tls.read(&mut resp).await;
+            let _ = AsyncWriteExt::shutdown(&mut out_tls).await;
+        }
+
+        // tcp_send response.
+        {
+            let mut guard = stream_arc.lock().await;
+            if let LocalState::Full(ref mut s) = *guard {
+                s.write_all(&response).await.expect("write_all");
+            }
+        }
+
+        // tcp_close — same pattern as theater-handler-tcp/src/lib.rs.
+        {
+            let mut guard = stream_arc.lock().await;
+            let taken = std::mem::replace(&mut *guard, LocalState::Closed);
+            drop(guard);
+            match taken {
+                LocalState::Full(mut s) => {
+                    let _ = AsyncWriteExt::shutdown(&mut *s).await;
+                }
+                LocalState::WriteOnly(mut w) => {
+                    let _ = AsyncWriteExt::shutdown(&mut w).await;
+                }
+                LocalState::Closed => {}
+            }
+        }
+    });
+
+    let req_body =
+        br#"{"to":["theater-dev@colinrozzi.com"],"cc":[],"bcc":[],"subject":"probe","body":"x"}"#;
+    let mut req = format!(
+        "POST /v1/mailboxes/theater-dev%40colinrozzi.com/send HTTP/1.1\r\nHost: localhost\r\nAuthorization: Bearer probe\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+        req_body.len()
+    )
+    .into_bytes();
+    req.extend_from_slice(req_body);
+
+    let body = inbox_cli_style_request(in_addr, in_client_roots, &req)
+        .await
+        .expect(
+            "POST + outbound TLS during processing should not surface 'recv:' — \
+         if this fails, the concurrent outbound TLS IS the trigger",
+        );
+
+    server.await.expect("server task ok");
+    smtp_handle.await.expect("smtp task ok");
+
+    let text = String::from_utf8_lossy(&body);
+    assert!(
+        text.contains("\"status\":\"sent\""),
+        "POST response should contain status:sent — got: {}",
+        text
+    );
+}
+
 /// Pattern documentation: the active-mode reader's peer-EOF cleanup must
 /// flush close_notify on the held write half before dropping it.
 ///
