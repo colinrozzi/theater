@@ -7,15 +7,27 @@ interface supervisor {
     @package: string = "theater:simple"
 
     exports {
-        // Spawn a child actor
+        // Spawn a child actor (setup + init).
+        // The runtime sets up the child and immediately calls its
+        // `theater:simple/actor.init` export; the returned id is only
+        // valid once init has completed.
+        //
         // manifest: manifest path or reference
-        // init-bytes: optional initialization data
+        // init-state: initial state passed to the child's init.
+        //   - `none` means "use the child's manifest.initial_state" — the
+        //     supervisor reads the manifest and supplies it as the actor's
+        //     state. This is what generic supervisors want when they don't
+        //     know the child's secrets.
+        //   - `some(v)` means "use exactly v" — even `some(option<...>::none)`
+        //     is an explicit override that suppresses the manifest fallback.
         // wasm-bytes: optional WASM bytes (if not provided, loaded from manifest)
-        spawn: func(manifest: string, init-bytes: option<list<u8>>, wasm-bytes: option<list<u8>>) -> result<string, string>
+        spawn: func(manifest: string, init-state: option<value>, wasm-bytes: option<list<u8>>) -> result<string, string>
 
-        // Spawn a child actor and wait for it to complete
+        // Spawn a child actor (setup + init) and wait for it to complete.
+        // Same `init-state` semantics as `spawn`.
+        //
         // timeout-ms: optional timeout in milliseconds
-        spawn-and-wait: func(manifest: string, init-bytes: option<list<u8>>, wasm-bytes: option<list<u8>>, timeout-ms: option<u64>) -> result<option<list<u8>>, string>
+        spawn-and-wait: func(manifest: string, init-state: option<value>, wasm-bytes: option<list<u8>>, timeout-ms: option<u64>) -> result<option<list<u8>>, string>
 
         // Resume an actor from saved state
         // state-bytes: optional state to resume from
