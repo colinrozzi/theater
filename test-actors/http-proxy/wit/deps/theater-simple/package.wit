@@ -1847,7 +1847,7 @@ interface supervisor {
   ///
   /// ## Parameters
   ///
-  /// * `manifest` - Path or content of the manifest file describing the actor
+  /// * `manifest` - Reference to the manifest (file path, https:// URL, or store:// reference)
   /// * `init-bytes` - Optional initial state for the actor (serialized bytes)
   ///
   /// ## Returns
@@ -1863,7 +1863,7 @@ interface supervisor {
   ///
   /// ## Parameters
   ///
-  /// * `manifest` - Path or content of the manifest file describing the actor
+  /// * `manifest` - Reference to the manifest (file path, https:// URL, or store:// reference)
   /// * `init-state` - Optional new initial state for the actor (serialized bytes)
   ///
   /// ## Returns
