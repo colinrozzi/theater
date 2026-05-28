@@ -142,12 +142,27 @@ jobs:
           # dependents and the loop bails before publishing it.
           LC_ALL: C
 
-      - name: Create tag and GitHub release
+      - name: Create tag and GitHub release with binary artifact
         run: |
           DATE=$(date +%Y%m%d)
           TAG="release-$DATE"
           git tag "$TAG"
           git push origin "$TAG"
           gh release create "$TAG" --generate-notes
+
+          # Build artifact via the same nix target the pre-publish check
+          # used (result is cached). Strip the nix-store rpath via
+          # `nix shell` so the tarball stays portable to any host that
+          # has the matching glibc.
+          ARCH=$(uname -m)
+          OS=$(uname -s | tr '[:upper:]' '[:lower:]')
+          BIN_PATH="$(realpath result)/bin/theater"
+          STAGE="theater-${TAG#release-}-${OS}-${ARCH}"
+          mkdir -p "$STAGE"
+          cp "$BIN_PATH" "$STAGE/theater"
+          chmod +w "$STAGE/theater"
+          tar -czf "$STAGE.tar.gz" "$STAGE"
+          sha256sum "$STAGE.tar.gz" > "$STAGE.tar.gz.sha256"
+          gh release upload "$TAG" "$STAGE.tar.gz" "$STAGE.tar.gz.sha256"
         env:
           GH_TOKEN: ${{ github.token }}
