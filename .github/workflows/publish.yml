@@ -54,6 +54,13 @@ jobs:
 
       - uses: DeterminateSystems/magic-nix-cache-action@main
 
+      # Pre-publish workspace build sanity check. Builds the full workspace
+      # via crane (the same path that produces the release artifact). Blocks
+      # the publish loop if main doesn't compile — cheap insurance against
+      # iterating cargo publish attempts on a broken tree.
+      - name: Build workspace
+        run: nix build .#theater
+
       # Try publishing each crate. Skip those already published. `cargo
       # publish --workspace` would just abort on the first already-published
       # crate, so we iterate.
