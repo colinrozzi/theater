@@ -67,3 +67,47 @@ rather than the cause itself.
   separately, batched by a background task)
 
 None of these address the root cause, only the symptom we've observed.
+
+## Recurrence #5 — 2026-05-30 ~16:22 UTC
+
+First wedge observed with PR #67 (accept-loop `tokio::spawn`) +
+PR #76 (close_notify active-mode) + PR #80 (close_notify
+cleanup-clears-shared-map) all deployed.
+
+- **Uptime at detection:** 1d 2h ~33m (service started 2026-05-29
+  13:48 UTC after the prior restart)
+- **Deployed binary:** `/nix/store/am16fdw66xzmklsf8ni9czfbifjmxwmf-theater-0.3.9`
+  (should include #67 / #76 / #80)
+- **Fingerprint:** identical to the original pre-#67 wedge
+    - `Recv-Q` 129/128 on :443
+    - 43 `CLOSE-WAIT`, 36 `ESTAB` on :443
+    - Per-thread: main + 1 worker `futex_wait`, 1 worker
+      `epoll_wait` (all `wchan=0` from /proc, no kernel-side block)
+    - 3 threads total, 38 FDs (normal)
+    - Chain logs last updated 15:55 UTC (27 min before detection)
+    - Journal silent since restart (no errors)
+- **System resources fine:** disk 76%, inodes 39%, no swap
+  pressure (mem 526MB/964MB used, 93MB free, 343MB buff/cache)
+- **Side observation (probably unrelated):** `/tmp/theater/chains`
+  is 6.7GB across 80k files; largest single chain 800MB (some
+  api-handler accumulated). Hygiene-relevant, not the immediate
+  cause.
+
+### Interpretation
+
+PR #67's fix didn't prevent this recurrence. Possibilities:
+
+  a) Fix shipped but is insufficient — there's another blocking
+     point in the accept path beyond `handle-connection`.
+  b) Fix didn't actually make it into `am16fdw66` (build
+     mismatch — worth verifying via `strings`/symbols).
+  c) Something downstream of #67 (post-deploy code) re-introduced
+     the same blocking pattern.
+
+Cadence is now ~26h between wedges with the fix in place, vs
+~36h pre-fix per the earlier note.
+
+Restart cleared it as expected. No deeper investigation per
+Colin's call — fold into the test-infra Track 1 backlog
+(real-network harness for accept-loop survival under load) when
+that work picks up.
