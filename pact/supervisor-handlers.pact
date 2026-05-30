@@ -34,8 +34,17 @@ interface supervisor-handlers {
         handle-child-external-stop: func(child-id: string) -> result<_, string>
 
         // Called for every event a child records (optional - may not be implemented)
+        // child-id: the id of the child that recorded the event
         // event-type: the type string of the event
         // event-data: the serialized event data
-        handle-child-event: func(event-type: string, event-data: list<u8>) -> result<_, string>
+        //
+        // child-id lets supervisors of N children attribute events to the
+        // child they came from. The other handle-child-* callbacks already
+        // carry child-id; this one was historically untagged because the
+        // supervisor's event-subscription channel was multiplexed at the
+        // handler boundary. The handler now tags events per-child before
+        // dispatching, so every callback in this interface is keyed by
+        // child-id.
+        handle-child-event: func(child-id: string, event-type: string, event-data: list<u8>) -> result<_, string>
     }
 }

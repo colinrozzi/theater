@@ -101,9 +101,14 @@ pub struct SupervisorHandler {
     /// Channel for receiving lifecycle events (ActorResult) from children
     channel_tx: tokio::sync::mpsc::Sender<ActorResult>,
     channel_rx: Arc<Mutex<Option<tokio::sync::mpsc::Receiver<ActorResult>>>>,
-    /// Channel for receiving all ChainEvents from children (via subscription_tx)
-    event_tx: tokio::sync::mpsc::Sender<Result<ChainEvent, ActorError>>,
-    event_rx: Arc<Mutex<Option<tokio::sync::mpsc::Receiver<Result<ChainEvent, ActorError>>>>>,
+    /// Channel for receiving all ChainEvents from children. Each child's
+    /// subscription is tagged with the child's TheaterId before landing
+    /// here, so handle-child-event dispatch can attribute the event to
+    /// the right child even though N children share this single receiver.
+    event_tx: tokio::sync::mpsc::Sender<(TheaterId, Result<ChainEvent, ActorError>)>,
+    event_rx: Arc<
+        Mutex<Option<tokio::sync::mpsc::Receiver<(TheaterId, Result<ChainEvent, ActorError>)>>>,
+    >,
     /// Set of currently active child actor IDs
     children: Arc<Mutex<HashSet<TheaterId>>>,
     /// Theater command sender for stopping children on shutdown
@@ -143,11 +148,15 @@ impl SupervisorHandler {
         self.channel_tx.clone()
     }
 
-    /// Get a clone of the event subscription sender
+    /// Get a clone of the aggregated event subscription sender.
     ///
-    /// This is used when spawning children to subscribe to all their events.
-    /// The supervisor will receive every ChainEvent from its children.
-    pub fn get_event_sender(&self) -> tokio::sync::mpsc::Sender<Result<ChainEvent, ActorError>> {
+    /// Events on this channel are tagged with the source child's
+    /// TheaterId — the handler's per-child forwarders attach the id
+    /// before pushing. External callers wiring a custom event flow
+    /// must do the same tagging.
+    pub fn get_event_sender(
+        &self,
+    ) -> tokio::sync::mpsc::Sender<(TheaterId, Result<ChainEvent, ActorError>)> {
         self.event_tx.clone()
     }
 
@@ -243,19 +252,22 @@ impl SupervisorHandler {
     /// to monitor child activity, implement logging, or trigger reactions.
     async fn process_child_event(
         actor_handle: &ActorHandle,
-        event_result: Result<ChainEvent, ActorError>,
+        event_with_id: (TheaterId, Result<ChainEvent, ActorError>),
         has_child_event: bool,
     ) -> Result<()> {
+        let (child_id, event_result) = event_with_id;
         match event_result {
             Ok(event) => {
                 debug!(
-                    "Supervisor received child event: type={}, data_len={}",
+                    "Supervisor received event from child {}: type={}, data_len={}",
+                    child_id,
                     event.event_type,
                     event.data.len()
                 );
 
                 if has_child_event {
                     let params = Value::Tuple(vec![
+                        Value::String(child_id.to_string()),
                         Value::String(event.event_type.clone()),
                         Value::List {
                             elem_type: ValueType::U8,
@@ -272,7 +284,10 @@ impl SupervisorHandler {
                 }
             }
             Err(e) => {
-                error!("Supervisor received error from child subscription: {}", e);
+                error!(
+                    "Supervisor received error from child {} subscription: {}",
+                    child_id, e
+                );
             }
         }
 
@@ -416,6 +431,11 @@ impl Handler for SupervisorHandler {
                                 None => default_init_state(),
                             },
                         };
+                        // Per-child subscription channel — the runtime sends
+                        // raw events here; once we know the child's id, a
+                        // forwarder task tags each event with it and pushes
+                        // to the shared aggregated event_tx.
+                        let (child_event_tx, mut child_event_rx) = mpsc::channel(1024);
                         // supervisor.spawn means setup + init. The runtime
                         // auto-calls actor.init before responding.
                         let cmd = TheaterCommand::SpawnActor {
@@ -425,7 +445,7 @@ impl Handler for SupervisorHandler {
                             init_state,
                             response_tx,
                             supervisor_tx: Some(supervisor_tx),
-                            subscription_tx: Some(event_tx),
+                            subscription_tx: Some(child_event_tx),
                         };
 
                         if let Err(e) = theater_tx.send(cmd).await {
@@ -448,6 +468,19 @@ impl Handler for SupervisorHandler {
                                     children_guard.insert(actor_id);
                                     debug!("Tracking child {}, total children: {}", actor_id, children_guard.len());
                                 }
+                                // Tag this child's events with its id and
+                                // forward to the shared event channel. The
+                                // forwarder exits when the per-child
+                                // subscription closes (child shutdown) or
+                                // when the aggregated receiver is dropped.
+                                let forwarder_tx = event_tx.clone();
+                                tokio::spawn(async move {
+                                    while let Some(ev) = child_event_rx.recv().await {
+                                        if forwarder_tx.send((actor_id, ev)).await.is_err() {
+                                            break;
+                                        }
+                                    }
+                                });
                                 Ok(Value::String(actor_id.to_string()))
                             }
                             Ok(Err(e)) => Err(Value::String(e.to_string())),
@@ -616,12 +649,15 @@ impl Handler for SupervisorHandler {
                         let theater_tx = store.theater_tx.clone();
 
                         let (response_tx, response_rx) = oneshot::channel();
+                        // Per-child subscription channel — see spawn for the
+                        // tagging-forwarder pattern.
+                        let (child_event_tx, mut child_event_rx) = mpsc::channel(1024);
                         let cmd = TheaterCommand::ResumeActor {
                             manifest_path: manifest,
                             wasm_bytes,
                             response_tx,
                             supervisor_tx: Some(supervisor_tx),
-                            subscription_tx: Some(event_tx),
+                            subscription_tx: Some(child_event_tx),
                         };
 
                         if let Err(e) = theater_tx.send(cmd).await {
@@ -644,6 +680,14 @@ impl Handler for SupervisorHandler {
                                     children_guard.insert(actor_id);
                                     debug!("Tracking resumed child {}, total children: {}", actor_id, children_guard.len());
                                 }
+                                let forwarder_tx = event_tx.clone();
+                                tokio::spawn(async move {
+                                    while let Some(ev) = child_event_rx.recv().await {
+                                        if forwarder_tx.send((actor_id, ev)).await.is_err() {
+                                            break;
+                                        }
+                                    }
+                                });
                                 Ok(Value::String(actor_id.to_string()))
                             }
                             Ok(Err(e)) => Err(Value::String(e.to_string())),
@@ -930,8 +974,9 @@ impl Handler for SupervisorHandler {
                             error!("Error processing child result: {}", e);
                         }
                     }
-                    // Process all chain events from children
-                    Some(event_result) = async {
+                    // Process all chain events from children — tagged with
+                    // the source child's TheaterId by the per-child forwarder.
+                    Some(event_with_id) = async {
                         if let Some(ref mut rx) = event_rx {
                             rx.recv().await
                         } else {
@@ -939,7 +984,7 @@ impl Handler for SupervisorHandler {
                         }
                     } => {
                         if let Err(e) = Self::process_child_event(
-                            &actor_handle, event_result, has_child_event,
+                            &actor_handle, event_with_id, has_child_event,
                         ).await {
                             error!("Error processing child event: {}", e);
                         }
