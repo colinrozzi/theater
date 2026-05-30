@@ -3308,7 +3308,7 @@ dependencies = [
 
 [[package]]
 name = "theater"
-version = "0.3.17"
+version = "0.3.18"
 dependencies = [
  "anyhow",
  "axum",
@@ -3533,7 +3533,7 @@ dependencies = [
 
 [[package]]
 name = "theater-handler-supervisor"
-version = "0.3.11"
+version = "0.3.12"
 dependencies = [
  "anyhow",
  "chrono",
