@@ -1,0 +1,17 @@
+[package]
+name = "wedge-supervisor"
+version = "0.1.0"
+edition = "2021"
+
+[workspace]
+
+[lib]
+name = "wedge_supervisor"
+crate-type = ["cdylib"]
+
+[dependencies]
+packr-guest = { version = "0.6.0", features = ["derive"] }
+
+[profile.release]
+opt-level = "s"
+lto = true

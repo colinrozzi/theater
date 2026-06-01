@@ -1,0 +1,6 @@
+name = "noisy-child"
+version = "0.1.0"
+package = "/home/colin/work/theater/examples/wedge-repro/noisy-child/target/wasm32-unknown-unknown/release/noisy_child.wasm"
+
+[[handler]]
+type = "runtime"
