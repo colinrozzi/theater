@@ -1,0 +1,9 @@
+name = "wedge-supervisor"
+version = "0.1.0"
+package = "./target/wasm32-unknown-unknown/release/wedge_supervisor.wasm"
+
+[[handler]]
+type = "runtime"
+
+[[handler]]
+type = "supervisor"
