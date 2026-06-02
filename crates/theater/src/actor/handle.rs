@@ -12,7 +12,6 @@ use tracing::error;
 use crate::actor::types::{
     ActorError, ActorOperation, WasiHttpResponse, DEFAULT_OPERATION_TIMEOUT,
 };
-use crate::chain::ChainEvent;
 use crate::metrics::ActorMetrics;
 use crate::pack_bridge::{self, InterfaceHash, Value};
 
@@ -257,48 +256,6 @@ impl ActorHandle {
             Err(_) => {
                 error!(
                     "GetState operation timed out after {:?}",
-                    DEFAULT_OPERATION_TIMEOUT
-                );
-                Err(ActorError::OperationTimeout(
-                    DEFAULT_OPERATION_TIMEOUT.as_secs(),
-                ))
-            }
-        }
-    }
-
-    /// Retrieves the event chain for the actor.
-    ///
-    /// ## Purpose
-    ///
-    /// This method returns the history of state changes for the actor,
-    /// which is useful for auditing, debugging, or reconstructing the actor's state evolution.
-    ///
-    /// ## Returns
-    ///
-    /// * `Ok(Vec<ChainEvent>)` - The event chain containing the history of state changes.
-    /// * `Err(ActorError)` - An error occurred while retrieving the chain.
-    pub async fn get_chain(&self) -> Result<Vec<ChainEvent>, ActorError> {
-        let (tx, rx) = oneshot::channel();
-
-        self.info_tx
-            .send(ActorInfo::GetChain { response_tx: tx })
-            .await
-            .map_err(|e| {
-                error!("Failed to send GetChain operation: {}", e);
-                ActorError::ChannelClosed
-            })?;
-
-        match timeout(DEFAULT_OPERATION_TIMEOUT, rx).await {
-            Ok(result) => result.map_err(|e| {
-                error!(
-                    "Channel closed while waiting for GetChain response: {:?}",
-                    e
-                );
-                ActorError::ChannelClosed
-            })?,
-            Err(_) => {
-                error!(
-                    "GetChain operation timed out after {:?}",
                     DEFAULT_OPERATION_TIMEOUT
                 );
                 Err(ActorError::OperationTimeout(

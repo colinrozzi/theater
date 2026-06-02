@@ -79,9 +79,6 @@ pub enum ManagementCommand {
     GetActorState {
         id: TheaterId,
     },
-    GetActorEvents {
-        id: TheaterId,
-    },
     GetActorMetrics {
         id: TheaterId,
     },
@@ -153,10 +150,6 @@ pub enum ManagementResponse {
     ActorState {
         id: TheaterId,
         state: Value,
-    },
-    ActorEvents {
-        id: TheaterId,
-        events: Vec<ChainEvent>,
     },
     ActorMetrics {
         id: TheaterId,
@@ -1114,42 +1107,6 @@ impl TheaterServer {
 
                     let state = cmd_rx.await?;
                     ManagementResponse::ActorState { id, state: state? }
-                }
-                ManagementCommand::GetActorEvents { id } => {
-                    info!("Getting events for actor: {:?}", id);
-                    let (cmd_tx, cmd_rx) = tokio::sync::oneshot::channel();
-                    runtime_tx
-                        .send(TheaterCommand::GetActorEvents {
-                            actor_id: id,
-                            response_tx: cmd_tx,
-                        })
-                        .await?;
-
-                    match cmd_rx.await {
-                        Ok(result) => match result {
-                            Ok(events) => {
-                                debug!(
-                                    "Successfully retrieved {} events for actor {}",
-                                    events.len(),
-                                    id
-                                );
-                                ManagementResponse::ActorEvents { id, events }
-                            }
-                            Err(e) => {
-                                debug!("Error getting events for actor {}: {}", id, e);
-                                ManagementResponse::Error { error: e.into() }
-                            }
-                        },
-                        Err(e) => {
-                            error!("Failed to receive events response: {}", e);
-                            ManagementResponse::Error {
-                                error: ManagementError::CommunicationError(format!(
-                                    "Failed to receive events response: {}",
-                                    e
-                                )),
-                            }
-                        }
-                    }
                 }
                 ManagementCommand::GetActorMetrics { id } => {
                     info!("Getting metrics for actor: {:?}", id);

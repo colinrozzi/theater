@@ -195,54 +195,13 @@ impl ActorStore {
         })
     }
 
-    /// # Verify the integrity of the event chain
+    /// # Get the hash of the most recently emitted event.
     ///
-    /// Checks that the event chain has not been tampered with.
-    ///
-    /// ## Returns
-    ///
-    /// A boolean indicating whether the chain is valid:
-    /// - `true` if the chain integrity is verified
-    /// - `false` if any tampering or inconsistency is detected
-    pub fn verify_chain(&self) -> bool {
+    /// Used by callers that want to know the chain head without subscribing
+    /// to the stream. Returns `None` if no events have been emitted yet.
+    pub fn head_hash(&self) -> Option<Vec<u8>> {
         let chain = self.chain.read().unwrap();
-        chain.verify()
-    }
-
-    /// # Get the most recent event
-    ///
-    /// Retrieves the last event that was added to the chain.
-    ///
-    /// ## Returns
-    ///
-    /// - `Some(ChainEvent)` with the most recent event
-    /// - `None` if the chain is empty
-    pub fn get_last_event(&self) -> Option<ChainEvent> {
-        let chain = self.chain.read().unwrap();
-        chain.get_last_event().cloned()
-    }
-
-    /// # Get all events in the chain
-    ///
-    /// Retrieves all events that have been recorded in the chain.
-    ///
-    /// ## Returns
-    ///
-    /// A Vec<ChainEvent> containing all events in chronological order.
-    pub fn get_all_events(&self) -> Vec<ChainEvent> {
-        let chain = self.chain.read().unwrap();
-        chain.get_events().to_vec()
-    }
-
-    /// # Get the event chain
-    ///
-    /// Alias for get_all_events(), retrieves all events in the chain.
-    ///
-    /// ## Returns
-    ///
-    /// A Vec<ChainEvent> containing all events in chronological order.
-    pub fn get_chain(&self) -> Vec<ChainEvent> {
-        self.get_all_events()
+        chain.head_hash().map(|h| h.to_vec())
     }
 
     /// Subscribe to events as they are recorded to the chain.
@@ -271,24 +230,6 @@ impl ActorStore {
     pub fn subscribe_to_events(&self) -> tokio::sync::broadcast::Receiver<ChainEvent> {
         let chain = self.chain.read().unwrap();
         chain.subscribe()
-    }
-
-    /// # Save the event chain to a file
-    ///
-    /// Persists the entire event chain to a file on disk.
-    ///
-    /// ## Parameters
-    ///
-    /// * `path` - The file path where the chain should be saved
-    ///
-    /// ## Returns
-    ///
-    /// - `Ok(())` if the chain was successfully saved
-    /// - `Err(anyhow::Error)` if an error occurred during saving
-    pub fn save_chain(&self) -> anyhow::Result<()> {
-        let chain = self.chain.read().unwrap();
-        chain.save_chain()?;
-        Ok(())
     }
 
     pub fn get_actor_handle(&self) -> ActorHandle {
@@ -388,68 +329,4 @@ impl ActorStore {
             .map(|b| *b)
     }
 
-    // =========================================================================
-    // Event Query Methods
-    // =========================================================================
-    // These benefit significantly from RwLock's concurrent read access
-
-    /// # Get events by type
-    ///
-    /// Filters events by their event_type field.
-    /// Multiple callers can execute this concurrently without blocking.
-    ///
-    /// ## Parameters
-    ///
-    /// * `event_type` - The event type to filter by
-    ///
-    /// ## Returns
-    ///
-    /// A Vec<ChainEvent> containing only events of the specified type.
-    pub fn get_events_by_type(&self, event_type: &str) -> Vec<ChainEvent> {
-        let chain = self.chain.read().unwrap();
-        chain
-            .get_events()
-            .iter()
-            .filter(|e| e.event_type == event_type)
-            .cloned()
-            .collect()
-    }
-
-    /// # Get recent events
-    ///
-    /// Gets the most recent N events from the chain.
-    /// Useful for monitoring and health checks.
-    ///
-    /// ## Parameters
-    ///
-    /// * `count` - Maximum number of recent events to return
-    ///
-    /// ## Returns
-    ///
-    /// A Vec<ChainEvent> with up to `count` most recent events.
-    pub fn get_recent_events(&self, count: usize) -> Vec<ChainEvent> {
-        let chain = self.chain.read().unwrap();
-        let events = chain.get_events();
-        events.iter().rev().take(count).cloned().collect()
-    }
-
-    /// # Check if chain contains event type
-    ///
-    /// Quick check to see if the chain contains any events of a specific type.
-    /// More efficient than filtering all events when you just need existence.
-    ///
-    /// ## Parameters
-    ///
-    /// * `event_type` - The event type to search for
-    ///
-    /// ## Returns
-    ///
-    /// true if at least one event of this type exists, false otherwise.
-    pub fn has_event_type(&self, event_type: &str) -> bool {
-        let chain = self.chain.read().unwrap();
-        chain
-            .get_events()
-            .iter()
-            .any(|e| e.event_type == event_type)
-    }
 }

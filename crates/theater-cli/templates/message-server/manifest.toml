@@ -2,7 +2,6 @@ name = "{{project_name}}"
 version = "0.1.0"
 package = "./target/wasm32-unknown-unknown/release/{{project_name_snake}}.wasm"
 description = "A Theater actor with message server capabilities"
-save_chain = true
 
 [[handler]]
 type = "message-server"

@@ -7,7 +7,7 @@
 use crate::actor::handle::ActorHandle;
 use crate::actor::runtime::ActorRuntime;
 use crate::actor::types::{ActorControl, ActorError, ActorInfo, ActorOperation};
-use crate::chain::{ChainEvent, ChainReader};
+use crate::chain::ChainEvent;
 use crate::config::actor_manifest::HandlerConfig;
 use crate::handler::HandlerRegistry;
 use crate::id::TheaterId;
@@ -20,7 +20,7 @@ use crate::metrics::ActorMetrics;
 use crate::pack_bridge::{AsyncRuntime, Value};
 use crate::replay::ReplayHandler;
 use crate::shutdown::{ShutdownController, ShutdownType};
-use crate::utils::{self, resolve_reference};
+use crate::utils::resolve_reference;
 use crate::Result;
 use crate::TheaterRuntimeError;
 use crate::{ManifestConfig, StateChain};
@@ -113,8 +113,6 @@ pub struct TheaterRuntime {
     pub handler_registry: HandlerRegistry,
     /// Global event subscribers (receive events from all actors)
     global_subscriptions: Vec<Sender<(TheaterId, Result<ChainEvent, ActorError>)>>,
-    /// Optional directory to write chain files (overrides /tmp/theater/chains/)
-    pub chain_dir: Option<PathBuf>,
 }
 
 /// # ActorProcess
@@ -205,7 +203,6 @@ impl TheaterRuntime {
             pack_runtime,
             handler_registry,
             global_subscriptions: Vec::new(),
-            chain_dir: None,
         })
     }
 
@@ -273,20 +270,6 @@ impl TheaterRuntime {
                     match self.get_actor_state(actor_id).await {
                         Ok(state) => {
                             let _ = response_tx.send(Ok(state));
-                        }
-                        Err(e) => {
-                            let _ = response_tx.send(Err(e));
-                        }
-                    }
-                }
-                TheaterCommand::GetActorEvents {
-                    actor_id,
-                    response_tx,
-                } => {
-                    debug!("Getting events for actor: {:?}", actor_id);
-                    match self.get_actor_events(actor_id).await {
-                        Ok(events) => {
-                            let _ = response_tx.send(Ok(events));
                         }
                         Err(e) => {
                             let _ = response_tx.send(Err(e));
@@ -766,13 +749,7 @@ impl TheaterRuntime {
         let chain = Arc::new(RwLock::new(StateChain::new(
             actor_id,
             self.theater_tx.clone(),
-            self.chain_dir.as_ref(),
         )));
-
-        // Write run metadata for debugging/crash recovery
-        if let Ok(chain_guard) = chain.read() {
-            chain_guard.set_run_meta(Some(actor_name.clone()), None);
-        }
 
         self.chains.insert(actor_id, chain.clone());
 
@@ -1045,28 +1022,9 @@ impl TheaterRuntime {
             return Ok(());
         }
 
-        let proc = match self.actors.get(&actor_id) {
-            Some(proc) => proc,
-            None => {
-                error!("Actor {:?} not found in registry", actor_id);
-                return Ok(());
-            }
-        };
-
-        // Check if this actor should save its chain (based on manifest setting)
-        let should_save_chain = proc
-            .manifest
-            .as_ref()
-            .map(|m| m.save_chain())
-            .unwrap_or(false);
-
-        debug!(
-            "Actor {:?} found, proceeding with shutdown (save_chain: {})",
-            actor_id, should_save_chain
-        );
+        debug!("Actor {:?} found, proceeding with shutdown", actor_id);
 
         'chain_block: {
-            // Get the actor's chain
             let chain = match self.chains.get(&actor_id) {
                 Some(chain) => chain,
                 None => {
@@ -1075,19 +1033,17 @@ impl TheaterRuntime {
                 }
             };
 
-            // Add the final event to the chain
             let mut writable_chain = match chain.write() {
                 Ok(chain) => chain,
                 Err(e) => {
                     error!(
-                        "Failed to acquire write lock on chain for actor {:?}: {}, will not add final event or save chain, continuing with shutdown",
+                        "Failed to acquire write lock on chain for actor {:?}: {}, will not emit shutdown event, continuing with shutdown",
                         actor_id, e
                     );
                     break 'chain_block;
                 }
             };
 
-            debug!("Adding final event to chain for actor {:?}", actor_id);
             writable_chain
                 .add_typed_event(crate::events::ChainEventData {
                     event_type: "shutdown".to_string(),
@@ -1099,14 +1055,6 @@ impl TheaterRuntime {
                     ),
                 })
                 .expect("Failed to record event");
-            debug!("Final event added to chain for actor {:?}", actor_id);
-
-            if should_save_chain {
-                writable_chain.save_chain().map_err(|e| {
-                    error!("Failed to save chain for actor {:?}: {}", actor_id, e);
-                    e
-                })?;
-            }
         }
 
         self.chains.remove(&actor_id);
@@ -1285,43 +1233,6 @@ impl TheaterRuntime {
         }
     }
 
-    async fn get_actor_events(
-        &self,
-        actor_id: TheaterId,
-    ) -> std::result::Result<Vec<ChainEvent>, TheaterRuntimeError> {
-        if let Some(proc) = self.actors.get(&actor_id) {
-            // Send a message to get the actor's events
-            let (tx, rx) = oneshot::channel();
-
-            if let Err(e) = proc
-                .info_tx
-                .send(ActorInfo::GetChain { response_tx: tx })
-                .await
-            {
-                return Err(TheaterRuntimeError::ChannelError(format!(
-                    "Failed to send GetChain operation: {}",
-                    e
-                )));
-            }
-
-            match rx.await {
-                Ok(events) => match events {
-                    Ok(events) => Ok(events),
-                    Err(e) => Err(TheaterRuntimeError::ActorError(e)),
-                },
-                Err(e) => Err(TheaterRuntimeError::ChannelError(format!(
-                    "Failed to receive events: {}",
-                    e
-                ))),
-            }
-        } else {
-            let events = utils::read_events_from_filesystem(&actor_id).map_err(|e| {
-                TheaterRuntimeError::ChannelError(format!("Failed to read events: {}", e))
-            })?;
-            Ok(events)
-        }
-    }
-
     async fn get_actor_metrics(&self, actor_id: TheaterId) -> Result<ActorMetrics> {
         if let Some(proc) = self.actors.get(&actor_id) {
             // Send a message to get the actor's metrics
@@ -1380,11 +1291,19 @@ impl TheaterRuntime {
                     config.chain
                 );
 
-                // Load the chain from the file (supports .chain EVENT format)
+                // Load the chain from a JSON array file. The producer (a
+                // subscriber actor or external tool) is responsible for
+                // writing this file — the runtime no longer emits one.
+                let chain_bytes = std::fs::read(&config.chain).map_err(|e| {
+                    TheaterRuntimeError::ActorInitializationError(format!(
+                        "Failed to read replay chain file {:?}: {}",
+                        config.chain, e
+                    ))
+                })?;
                 let chain_events: Vec<ChainEvent> =
-                    ChainReader::read_file(&config.chain).map_err(|e| {
+                    serde_json::from_slice(&chain_bytes).map_err(|e| {
                         TheaterRuntimeError::ActorInitializationError(format!(
-                            "Failed to read replay chain file {:?}: {}",
+                            "Failed to parse replay chain file {:?}: {}",
                             config.chain, e
                         ))
                     })?;

@@ -72,10 +72,6 @@ pub enum Commands {
     #[command(name = "setup")]
     Setup(commands::setup::SetupArgs),
 
-    /// List, inspect, and manage event chains
-    #[command(name = "chains")]
-    Chains(commands::chains::ChainsArgs),
-
     /// Generate shell completion scripts
     #[command(name = "completion")]
     Completion(commands::completion::CompletionArgs),
@@ -116,9 +112,6 @@ pub async fn run(
                 .await
                 .map_err(anyhow::Error::from),
             Commands::Setup(args) => commands::setup::execute_async(args, &ctx)
-                .await
-                .map_err(anyhow::Error::from),
-            Commands::Chains(args) => commands::chains::execute_async(args, &ctx)
                 .await
                 .map_err(anyhow::Error::from),
             Commands::Completion(args) => commands::completion::execute_async(args, &ctx)

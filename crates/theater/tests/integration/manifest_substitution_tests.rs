@@ -39,7 +39,6 @@ name = "${{app.name}}"
 version = "${{app.version}}"
 package = "${{build.package_path}}"
 description = "Test processor for ${{app.name}}"
-save_chain = ${{features.debug}}
 init_state = "{}"
 
 [[handler]]
@@ -62,8 +61,7 @@ port = ${{server.port}}
     assert_eq!(config.version, "1.0.0");
     assert_eq!(config.package, "./processor.wasm");
     assert_eq!(config.description, Some("Test processor for test-processor".to_string()));
-    assert_eq!(config.save_chain, Some(true));
-    
+
     // Verify handlers
     assert_eq!(config.handlers.len(), 2);
 }
@@ -169,7 +167,6 @@ async fn test_manifest_with_defaults() {
 name = "${app.name:default-app}"
 version = "1.0.0"
 package = "test.wasm"
-save_chain = ${logging.enabled:false}
 
 [[handler]]
 type = "http-server"  
@@ -182,7 +179,6 @@ port = ${server.port:3000}
         .unwrap();
     
     assert_eq!(config.name, "default-app");
-    assert_eq!(config.save_chain, Some(false));
 }
 
 #[tokio::test]

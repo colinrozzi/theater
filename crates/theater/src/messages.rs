@@ -91,7 +91,6 @@ pub fn default_init_state() -> Value {
 use crate::store::ContentStore;
 use crate::ManifestConfig;
 use crate::Result;
-use crate::TheaterRuntimeError;
 use serde::{Deserialize, Serialize};
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
@@ -366,23 +365,6 @@ pub enum TheaterCommand {
         response_tx: oneshot::Sender<Result<Value>>,
     },
 
-    /// # Get actor events
-    ///
-    /// Retrieves the event history of an actor.
-    ///
-    /// ## Parameters
-    ///
-    /// * `actor_id` - ID of the actor to get events for
-    /// * `response_tx` - Channel to receive the result (list of events)
-    ///
-    /// ## Security
-    ///
-    /// This operation is only available to the actor's supervisor or to the system itself.
-    GetActorEvents {
-        actor_id: TheaterId,
-        response_tx: oneshot::Sender<std::result::Result<Vec<ChainEvent>, TheaterRuntimeError>>,
-    },
-
     /// # Get actor metrics
     ///
     /// Retrieves performance and resource usage metrics for an actor.
@@ -510,9 +492,6 @@ impl TheaterCommand {
             }
             TheaterCommand::GetActorState { actor_id, .. } => {
                 format!("GetActorState: {:?}", actor_id)
-            }
-            TheaterCommand::GetActorEvents { actor_id, .. } => {
-                format!("GetActorEvents: {:?}", actor_id)
             }
             TheaterCommand::GetActorMetrics { actor_id, .. } => {
                 format!("GetActorMetrics: {:?}", actor_id)

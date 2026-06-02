@@ -1,7 +1,6 @@
 use anyhow::Result;
 use clap::{Parser, ValueEnum};
 use std::io::Write;
-use std::path::PathBuf;
 use tokio::sync::mpsc;
 use tracing::{debug, error};
 
@@ -55,11 +54,6 @@ pub struct SpawnArgs {
     /// Format for event output (used with --events)
     #[arg(long, value_enum, default_value = "short")]
     pub events_format: EventFormat,
-
-    /// Save the chain to a local directory after the actor exits.
-    /// Defaults to `.chains/` in the current directory.
-    #[arg(long, default_missing_value = ".chains", num_args = 0..=1)]
-    pub save: Option<PathBuf>,
 
     /// Disable actor log output to stdout
     #[arg(long)]
@@ -199,8 +193,6 @@ async fn run(args: &SpawnArgs, ctx: &CommandContext, call_init: bool) -> Result<
         CliError::invalid_manifest(format!("Manifest content is not valid UTF-8: {}", e))
     })?;
 
-    // (Chain writing is handled by the runtime's ChainWriter via runtime.chain_dir)
-
     // Parse the manifest first (needed to check for replay handler)
     let manifest = ManifestConfig::from_toml_str(&manifest_content)
         .map_err(|e| CliError::invalid_manifest(format!("Failed to parse manifest: {}", e)))?;
@@ -217,11 +209,6 @@ async fn run(args: &SpawnArgs, ctx: &CommandContext, call_init: bool) -> Result<
     )
     .await
     .map_err(|e| CliError::server_error(format!("Failed to create runtime: {}", e)))?;
-
-    // Set chain output directory if --save is specified
-    if let Some(ref dir) = args.save {
-        runtime.chain_dir = Some(dir.clone());
-    }
 
     // Set up global event subscription (receives events from ALL actors)
     let (global_events_tx, mut global_events_rx) = mpsc::channel(256);

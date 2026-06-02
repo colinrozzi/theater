@@ -164,7 +164,6 @@ name = "{{app.name}}"
 version = "{{app.version}}"
 package = "{{build.package_path}}"
 description = "Processor for {{workspace.name}}"
-save_chain = {{logging.save_events}}
 
 [[handler]]
 type = "filesystem"
@@ -193,9 +192,6 @@ timeout = {{default api.timeout_ms "5000"}}
                 "endpoint": "https://prod-api.example.com/v1",
                 "timeout_ms": 10000
             },
-            "logging": {
-                "save_events": true
-            },
             "filesystem": {
                 "create_dirs": true
             }
@@ -210,7 +206,6 @@ timeout = {{default api.timeout_ms "5000"}}
         assert!(result.contains(r#"version = "0.1.0""#));
         assert!(result.contains(r#"package = "./dist/processor.wasm""#));
         assert!(result.contains(r#"description = "Processor for production-workspace""#));
-        assert!(result.contains("save_chain = true"));
         assert!(result.contains(r#"path = "/var/data/workspace-prod""#));
         assert!(result.contains("new_dir = true"));
         assert!(result.contains(r#"base_url = ""https://prod-api.example.com/v1"""#));

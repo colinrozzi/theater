@@ -925,59 +925,12 @@ impl ActorRuntime {
                             }
                         }
                     }
-                    ActorInfo::GetChain { response_tx } => {
-                        match &*actor_instance_wrapper.read().await {
-                            None => {
-                                let err =
-                                    ActorError::UnexpectedError("Actor instance not found".to_string());
-                                if let Err(e) = response_tx.send(Err(err)) {
-                                    error!("Failed to send chain error response: {:?}", e);
-                                }
-                                return;
-                            }
-                            Some(instance) => {
-                                let chain = instance.actor_store.get_chain();
-                                if let Err(e) = response_tx.send(Ok(chain)) {
-                                    error!("Failed to send chain response: {:?}", e);
-                                }
-                            }
-                        };
-                    }
                     ActorInfo::GetMetrics { response_tx } => {
                         let metrics = metrics.read().await;
                         let metrics_data = metrics.get_metrics().await;
                         if let Err(e) = response_tx.send(Ok(metrics_data)) {
                             error!("Failed to send metrics response: {:?}", e);
                         }
-                    }
-                    ActorInfo::SaveChain { response_tx } => {
-                        match &*actor_instance_wrapper.read().await {
-                            None => {
-                                let err =
-                                    ActorError::UnexpectedError("Actor instance not found".to_string());
-                                if let Err(e) = response_tx.send(Err(err)) {
-                                    error!("Failed to send save chain error response: {:?}", e);
-                                }
-                                return;
-                            }
-                            Some(instance) => match instance.actor_store.save_chain() {
-                                Ok(_) => {
-                                    if let Err(e) = response_tx.send(Ok(())) {
-                                        error!("Failed to send save chain response: {:?}", e);
-                                    }
-                                }
-                                Err(e) => {
-                                    if let Err(send_err) = response_tx
-                                        .send(Err(ActorError::UnexpectedError(e.to_string())))
-                                    {
-                                        error!(
-                                            "Failed to send save chain error response: {:?}",
-                                            send_err
-                                        );
-                                    }
-                                }
-                            },
-                        };
                     }
                     ActorInfo::GetExportHashes { response_tx } => {
                         match &mut *actor_instance_wrapper.write().await {
