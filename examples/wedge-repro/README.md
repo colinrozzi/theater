@@ -117,11 +117,93 @@ should make this scenario survivable. Use this directory as a regression
 guard once a fix lands — promote the manual run into a `cargo test` in
 `crates/theater-tests/tests/wedge_repro_test.rs`.
 
+## Phase 2 — observability harness
+
+`observer/` is `wedge-observe`: a small Rust binary that embeds the
+theater runtime **in-process** (theater is a library — no subprocess), runs
+the wedge-repro supervisor, and samples runtime metrics every ~250 ms.
+
+The big win over a subprocess + /proc + log-tail approach is direct
+access to the actual saturation signal — `theater_tx.capacity()` reads
+the bounded mpsc channel that fills under the supervisor → child
+amplification. No /proc parsing, no log file grep, no subprocess IPC
+noise.
+
+### Build
+
+```sh
+cd observer && cargo build --release && cd ..
+```
+
+The binary lands at `observer/target/release/wedge-observe`. First
+build compiles theater as a path dep — a few minutes. Subsequent builds
+are incremental.
+
+### Run
+
+From the `examples/wedge-repro` directory:
+
+```sh
+./observer/target/release/wedge-observe \
+  --manifest supervisor/manifest.toml \
+  --output run.tsv \
+  --timeout 60
+```
+
+Output (one TSV row per ~250 ms):
+
+```
+elapsed_ms  rss_kb  ch_depth  ch_cap  warn_total  warn_delta  alive
+250         48312   3         29      0           0           1
+500         52104   32        0       1248        1248        1
+750         55216   32        0       4012        2764        1
+...
+```
+
+- `ch_depth` / `ch_cap` — current queued `TheaterCommand` count and
+  remaining slot count on the bounded `theater_tx` mpsc (capacity 32).
+  This is the channel that fills under the supervisor's recording-
+  amplification of child events. `ch_cap = 0` means fully saturated.
+- `warn_total` / `warn_delta` — running count of "Failed to send event
+  notification" tracing events, captured by a custom `tracing` layer.
+- `rss_kb` — own process RSS from `/proc/self/status` (theater runs in
+  this process now, so this IS theater's memory).
+- `alive` — flips to 0 when the supervisor actor sends its final
+  result.
+
+Trailing comment row records exit reason + final totals.
+
+### What to look for
+
+- **`ch_cap` collapse to 0** — the direct wedge signal. When the
+  supervisor's recording floods the runtime command channel faster than
+  it drains, capacity collapses and stays at 0. The warn count tracks
+  this 1:1 (each saturated `try_send` is one warn).
+- **`warn_delta` inflection** — jumps from 0 to thousands per sample
+  when the burst engages. That's onset.
+- **`rss_kb` growth curve** — in-memory chain accumulation
+  (`StateChain.events: Vec<ChainEvent>`) under load. Manager's prod
+  observation was 2.9 GB on sentinel; this lets you watch the curve
+  approach that on different burst sizes (in a single process now).
+- **`alive=0` early** — supervisor actor exited unexpectedly. Phase 1
+  showed pure 30 s burst does not cause this in the subprocess case;
+  the in-process variant may surface it sooner if the runtime task is
+  shedding work differently.
+
+### Options
+
+| Flag | Default | Purpose |
+|---|---|---|
+| `--manifest PATH` | `supervisor/manifest.toml` | Supervisor manifest to spawn. Resolved relative to CWD. |
+| `--output PATH` | stdout | TSV output destination. |
+| `--timeout SEC` | 60 | Max wall-clock run before exit. |
+| `--rust-log SPEC` | `theater=info,theater_handler_supervisor=debug` | Tracing filter. Tracing also goes to stderr (fmt layer); TSV is separate. |
+
 ## Phase staging
 
-- **Phase 1 (this PR)**: runnable repro artifact. Manual invocation.
-- **Phase 2**: observability harness (memory curve, channel-fill rate,
-  time-to-first-warn, time-to-death). Repeatable measurement.
+- **Phase 1**: runnable repro artifact. Manual invocation. **DONE** (PR #91).
+- **Phase 2 (this PR)**: observability harness (memory curve, warn rate,
+  time-to-first-warn, exit detection). Repeatable measurement.
 - **Phase 3**: cargo integration test asserting fix prevents wedge.
 
 See `theater/notes/wedge-investigation-2026-05-31.md` for the diagnosis +

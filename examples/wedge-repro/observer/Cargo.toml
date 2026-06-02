@@ -1,0 +1,30 @@
+[package]
+name = "wedge-observer"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[workspace]
+
+[[bin]]
+name = "wedge-observe"
+path = "src/main.rs"
+
+# Phase 2 embeds the theater runtime in-process via path deps. The deps
+# below are the minimum needed to run the wedge-repro supervisor + its
+# noisy-child: the runtime handler (provides `log`) and the supervisor
+# handler (provides `spawn`). No store / message-server / tcp / timer
+# handlers — keeping the surface minimal makes the runtime closer to a
+# vanilla wedge-relevant configuration.
+[dependencies]
+theater = { path = "../../../crates/theater" }
+theater-handler-runtime = { path = "../../../crates/theater-handler-runtime" }
+theater-handler-supervisor = { path = "../../../crates/theater-handler-supervisor" }
+tokio = { version = "1.0", features = ["full"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "registry", "fmt"] }
+anyhow = "1.0"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
