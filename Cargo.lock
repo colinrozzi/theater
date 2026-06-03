@@ -3359,10 +3359,12 @@ dependencies = [
  "base64 0.21.7",
  "bytes",
  "chrono",
+ "console",
  "futures",
  "hex",
  "lazy_static",
  "md5",
+ "packr",
  "pin-utils",
  "rand 0.8.6",
  "rand_chacha 0.3.1",
@@ -3382,7 +3384,7 @@ dependencies = [
  "hex",
  "packr",
  "packr-abi",
- "theater",
+ "theater-chain",
 ]
 
 [[package]]

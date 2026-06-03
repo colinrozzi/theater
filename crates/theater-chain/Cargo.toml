@@ -33,3 +33,5 @@ sha1 = "0.10"
 hex = "0.4.3"
 md5 = "0.7.0"
 serde = { workspace = true, features = ["derive"] }
+packr.workspace = true
+console = "0.15"
