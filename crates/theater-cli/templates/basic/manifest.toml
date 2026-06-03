@@ -2,7 +2,6 @@ name = "{{project_name}}"
 version = "0.1.0"
 package = "./target/wasm32-unknown-unknown/release/{{project_name_snake}}.wasm"
 description = "A basic Theater actor"
-save_chain = true
 
 [[handler]]
 type = "runtime"

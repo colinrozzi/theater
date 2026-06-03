@@ -14,7 +14,7 @@ pub fn create_test_event_data(event_type: &str, _data: &[u8]) -> ChainEventData 
         event_type: event_type.to_string(),
         data: ChainEventPayload::Wasm(WasmEventData::WasmCall {
             function_name: "test-function".to_string(),
-            params: vec![],
+            params: theater::Value::Tuple(vec![]),
         }),
     }
 }
@@ -28,7 +28,6 @@ pub fn create_test_manifest(name: &str) -> ManifestConfig {
         description: None,
         long_description: None,
         initial_state: None,
-        save_chain: None,
         permission_policy: Default::default(),
         handlers: Vec::new(),
     };
@@ -44,7 +43,7 @@ pub fn create_test_manifest(name: &str) -> ManifestConfig {
 /// Create a test state chain
 pub async fn create_test_chain(actor_id: TheaterId, num_events: usize) -> StateChain {
     let (tx, _) = mpsc::channel(10);
-    let mut chain = StateChain::new(actor_id, tx, None);
+    let mut chain = StateChain::new(actor_id, tx);
 
     // Add events to the chain
     for i in 0..num_events {

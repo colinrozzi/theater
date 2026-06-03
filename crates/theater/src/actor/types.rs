@@ -241,14 +241,6 @@ pub enum ActorInfo {
         /// Channel to send state back to the caller
         response_tx: oneshot::Sender<Result<Value, ActorError>>,
     },
-    /// Retrieve the actor's event chain (audit log)
-    GetChain {
-        /// Channel to send chain events back to the caller
-        response_tx: oneshot::Sender<Result<Vec<ChainEvent>, ActorError>>,
-    },
-    SaveChain {
-        response_tx: oneshot::Sender<Result<(), ActorError>>,
-    },
     /// Retrieve performance metrics for the actor
     GetMetrics {
         /// Channel to send metrics back to the caller

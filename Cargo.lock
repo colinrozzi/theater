@@ -3376,6 +3376,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "theater-chain-format"
+version = "0.3.10"
+dependencies = [
+ "hex",
+ "packr",
+ "packr-abi",
+ "theater",
+]
+
+[[package]]
 name = "theater-cli"
 version = "0.3.12"
 dependencies = [

@@ -45,9 +45,5 @@ interface supervisor {
 
         // Get a child's current state
         get-child-state: func(child-id: string) -> result<option<list<u8>>, string>
-
-        // Get a child's event chain
-        // Note: chain-event is approximated as list<u8> for interface hashing
-        get-child-events: func(child-id: string) -> result<list<list<u8>>, string>
     }
 }

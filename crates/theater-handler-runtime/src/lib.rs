@@ -122,7 +122,6 @@ impl Handler for RuntimeHandler {
             .interface("theater:simple/runtime")?
             // Log function: log(msg: string)
             // Actor logs are printed directly to stdout (configurable via show_logs).
-            // The call is also recorded as a chain event for persistence/replay.
             .func_typed("log", move |ctx: &mut Ctx<'_, ActorStore>, input: Value| {
                 if show_logs {
                     let msg = match &input {
@@ -137,58 +136,6 @@ impl Handler for RuntimeHandler {
                 }
                 Value::Tuple(vec![])
             })?
-            // Get chain function: get-chain() -> chain
-            .func_typed(
-                "get-chain",
-                |ctx: &mut Ctx<'_, ActorStore>, _input: Value| {
-                    let store = ctx.data();
-                    let events = store.get_all_events();
-
-                    // Convert to WIT format: list<meta-event>
-                    use theater::ValueType;
-                    // meta-event = { hash: u64, event: event }
-                    // event = { event-type: string, parent: option<u64>, data: list<u8> }
-                    let chain_events: Vec<Value> = events
-                        .iter()
-                        .enumerate()
-                        .map(|(i, e)| {
-                            let hash = Value::U64(i as u64);
-                            let parent = if i > 0 {
-                                Value::Option {
-                                    inner_type: ValueType::U64,
-                                    value: Some(Box::new(Value::U64((i - 1) as u64))),
-                                }
-                            } else {
-                                Value::Option {
-                                    inner_type: ValueType::U64,
-                                    value: None,
-                                }
-                            };
-                            let event_type = Value::String(e.event_type.clone());
-                            let data = Value::List {
-                                elem_type: ValueType::U8,
-                                items: e.data.iter().map(|b| Value::U8(*b)).collect(),
-                            };
-
-                            // meta-event record: (hash, (event-type, parent, data))
-                            Value::Tuple(vec![hash, Value::Tuple(vec![event_type, parent, data])])
-                        })
-                        .collect();
-
-                    // Return as chain record: (events,)
-                    Value::Tuple(vec![Value::List {
-                        elem_type: ValueType::Tuple(vec![
-                            ValueType::U64,
-                            ValueType::Tuple(vec![
-                                ValueType::String,
-                                ValueType::Option(Box::new(ValueType::U64)),
-                                ValueType::List(Box::new(ValueType::U8)),
-                            ]),
-                        ]),
-                        items: chain_events,
-                    }])
-                },
-            )?
             // Shutdown function: shutdown(data: option<list<u8>>) -> result<(), string>
             .func_async_result(
                 "shutdown",

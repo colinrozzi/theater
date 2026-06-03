@@ -22,7 +22,6 @@ pub struct ManifestConfig {
     /// Initial state to pass to the actor's init function.
     /// Can be a JSON string that will be converted to bytes.
     pub initial_state: Option<String>,
-    pub save_chain: Option<bool>,
     #[serde(default, skip_serializing_if = "is_default_permission_policy")]
     pub permission_policy: HandlerPermissionPolicy,
     #[serde(default, rename = "handler")]
@@ -33,14 +32,13 @@ impl Display for ManifestConfig {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "ManifestConfig(name: {}, version: {}, package: {}, description: {:?}, long_description: {:?}, initial_state: {:?}, save_chain: {:?}, permission_policy: {:?}, handlers: {:?})",
+            "ManifestConfig(name: {}, version: {}, package: {}, description: {:?}, long_description: {:?}, initial_state: {:?}, permission_policy: {:?}, handlers: {:?})",
             self.name,
             self.version,
             self.package,
             self.description,
             self.long_description,
             self.initial_state,
-            self.save_chain,
             self.permission_policy,
             self.handlers
         )
@@ -685,10 +683,6 @@ impl ManifestConfig {
             .map_err(|e| anyhow::anyhow!("Failed to serialize manifest: {}", e))?;
         debug!("Serialized manifest config: {}", serialized);
         Ok(serialized.into_bytes())
-    }
-
-    pub fn save_chain(&self) -> bool {
-        self.save_chain.unwrap_or(false)
     }
 
     /// Calculate effective permissions based on parent permissions and this manifest's policy

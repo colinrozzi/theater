@@ -1,5 +1,4 @@
 pub mod build;
-pub mod chains;
 pub mod completion;
 pub mod create;
 pub mod dynamic_completion;

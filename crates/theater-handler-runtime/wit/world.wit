@@ -7,7 +7,7 @@ package theater:runtime-handler;
 
 world runtime-handler-host {
     /// Theater simple runtime interface
-    /// Provides logging, event chain access, and shutdown capabilities
+    /// Provides logging and shutdown capabilities
     import theater:simple/runtime;
 
     /// Types used by the runtime interface

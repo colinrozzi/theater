@@ -49,7 +49,6 @@ const SUPERVISOR_PACT: &str = include_str!("../supervisor.pact");
 /// - restart-child(child-id: string) -> result<_, string>
 /// - stop-child(child-id: string) -> result<_, string>
 /// - get-child-state(child-id: string) -> result<option<list<u8>>, string>
-/// - get-child-events(child-id: string) -> result<list<list<u8>>, string>
 ///
 /// Both `spawn` and `spawn-and-wait` are setup + init: the runtime calls
 /// the child's `theater:simple/actor.init` export before returning the
@@ -829,65 +828,6 @@ impl Handler for SupervisorHandler {
                         Ok(Ok(state)) => Ok(state),
                         Ok(Err(e)) => Err(Value::String(e.to_string())),
                         Err(e) => Err(Value::String(format!("Failed to receive state: {}", e))),
-                    }
-                }
-            })?
-            // get-child-events: func(child-id: string) -> result<list<chain-event>, string>
-            .func_async_result("get-child-events", move |ctx: AsyncCtx<ActorStore>, input: Value| {
-                async move {
-                    let child_id_str = match input {
-                        Value::String(s) => s,
-                        Value::Tuple(args) if args.len() == 1 => {
-                            match &args[0] {
-                                Value::String(s) => s.clone(),
-                                _ => return Err(Value::String("Invalid child-id argument".to_string())),
-                            }
-                        }
-                        _ => return Err(Value::String("Invalid get-child-events argument".to_string())),
-                    };
-
-                    let child_id = match child_id_str.parse() {
-                        Ok(id) => id,
-                        Err(e) => return Err(Value::String(format!("Invalid child ID: {}", e))),
-                    };
-
-                    let store = ctx.data();
-                    let theater_tx = store.theater_tx.clone();
-
-                    let (response_tx, response_rx) = oneshot::channel();
-                    let cmd = TheaterCommand::GetActorEvents {
-                        actor_id: child_id,
-                        response_tx,
-                    };
-
-                    if let Err(e) = theater_tx.send(cmd).await {
-                        return Err(Value::String(format!("Failed to send get-events command: {}", e)));
-                    }
-
-                    match response_rx.await {
-                        Ok(Ok(events)) => {
-
-                            // Convert ChainEvents to Value list
-                            let events_values: Vec<Value> = events
-                                .iter()
-                                .map(|e| {
-                                    // ChainEvent as a record: { event-type: string, data: list<u8> }
-                                    Value::Tuple(vec![
-                                        Value::String(e.event_type.clone()),
-                                        Value::List {
-                                            elem_type: ValueType::U8,
-                                            items: e.data.iter().map(|b| Value::U8(*b)).collect(),
-                                        },
-                                    ])
-                                })
-                                .collect();
-                            Ok(Value::List {
-                                elem_type: ValueType::Tuple(vec![ValueType::String, ValueType::List(Box::new(ValueType::U8))]),
-                                items: events_values,
-                            })
-                        }
-                        Ok(Err(e)) => Err(Value::String(e.to_string())),
-                        Err(e) => Err(Value::String(format!("Failed to receive events: {}", e))),
                     }
                 }
             })?;

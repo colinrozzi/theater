@@ -1,5 +1,4 @@
-use tempfile::tempdir;
-use theater::chain::StateChain;
+use theater::chain::{ChainEvent, StateChain};
 use theater::events::wasm::WasmEventData;
 use theater::events::{ChainEventData, ChainEventPayload};
 use theater::id::TheaterId;
@@ -10,7 +9,7 @@ fn create_test_event_data(event_type: &str, _data: &[u8]) -> ChainEventData {
         event_type: event_type.to_string(),
         data: ChainEventPayload::Wasm(WasmEventData::WasmCall {
             function_name: "test-function".to_string(),
-            params: vec![],
+            params: theater::Value::Tuple(vec![]),
         }),
     }
 }
@@ -19,62 +18,94 @@ fn create_test_event_data(event_type: &str, _data: &[u8]) -> ChainEventData {
 async fn test_chain_event_creation() {
     let (tx, _rx) = mpsc::channel(10);
     let actor_id = TheaterId::generate();
-    let mut chain = StateChain::new(actor_id, tx, None);
+    let mut chain = StateChain::new(actor_id, tx);
 
     let event_data = create_test_event_data("test-event", b"test data");
     let event = chain.add_typed_event(event_data).unwrap();
 
     assert_eq!(event.event_type, "test-event");
-    assert!(event.parent_hash.is_none()); // First event has no parent
+    assert!(event.parent_hash.is_none());
     assert!(!event.hash.is_empty());
+    assert_eq!(chain.head_hash(), Some(event.hash.as_slice()));
 }
 
+/// The runtime no longer retains events, so chain integrity is verified by a
+/// subscriber that collects events as they're emitted. This test plays that
+/// subscriber role: it grabs a `subscribe()` receiver, drives the chain, then
+/// asserts that each event's `parent_hash` matches its predecessor's `hash`
+/// and that `head_hash` tracks the last emitted event.
 #[tokio::test]
-async fn test_chain_integrity() {
+async fn test_chain_integrity_via_subscriber() {
     let (tx, _rx) = mpsc::channel(10);
     let actor_id = TheaterId::generate();
-    let mut chain = StateChain::new(actor_id, tx, None);
+    let mut chain = StateChain::new(actor_id, tx);
+    let mut events_rx = chain.subscribe();
 
-    // Add multiple events to build a chain
     for i in 0..5 {
         let data = format!("event data {}", i);
         let event_data = create_test_event_data(&format!("event-{}", i), data.as_bytes());
         chain.add_typed_event(event_data).unwrap();
     }
 
-    // Verify chain integrity
-    assert!(chain.verify());
-    assert_eq!(chain.get_events().len(), 5);
-
-    // Check parent hash links
-    let events = chain.get_events();
-    for i in 1..events.len() {
-        assert_eq!(events[i].parent_hash.as_ref().unwrap(), &events[i - 1].hash);
+    let mut collected: Vec<ChainEvent> = Vec::new();
+    while let Ok(event) = events_rx.try_recv() {
+        collected.push(event);
     }
+    assert_eq!(collected.len(), 5, "subscriber should see all 5 events");
+
+    assert!(
+        collected[0].parent_hash.is_none(),
+        "first event has no parent"
+    );
+    for i in 1..collected.len() {
+        assert_eq!(
+            collected[i].parent_hash.as_ref().unwrap(),
+            &collected[i - 1].hash,
+            "event {} should link to event {}",
+            i,
+            i - 1
+        );
+    }
+
+    assert_eq!(
+        chain.head_hash(),
+        Some(collected.last().unwrap().hash.as_slice()),
+        "head_hash should match the last emitted event"
+    );
 }
 
+/// New subscribers attach mid-flight see only events emitted from the moment
+/// of subscription forward. The runtime does not backfill — that's the
+/// contract subscribers must understand.
 #[tokio::test]
-async fn test_save_and_load_chain() {
+async fn test_subscriber_attaches_after_first_event_sees_only_subsequent() {
     let (tx, _rx) = mpsc::channel(10);
     let actor_id = TheaterId::generate();
-    let mut chain = StateChain::new(actor_id, tx, None);
+    let mut chain = StateChain::new(actor_id, tx);
 
-    // Add events
-    for i in 0..3 {
-        let data = format!("event data {}", i);
-        let event_data = create_test_event_data(&format!("event-{}", i), data.as_bytes());
-        chain.add_typed_event(event_data).unwrap();
+    chain
+        .add_typed_event(create_test_event_data("event-0", b"a"))
+        .unwrap();
+
+    let mut events_rx = chain.subscribe();
+
+    chain
+        .add_typed_event(create_test_event_data("event-1", b"b"))
+        .unwrap();
+    chain
+        .add_typed_event(create_test_event_data("event-2", b"c"))
+        .unwrap();
+
+    let mut collected: Vec<ChainEvent> = Vec::new();
+    while let Ok(event) = events_rx.try_recv() {
+        collected.push(event);
     }
 
-    // Save to temp file
-    let temp_dir = tempdir().unwrap();
-    let file_path = temp_dir.path().join("chain_test.json");
-    chain.save_to_file(&file_path).unwrap();
-
-    // Check file exists with content
-    assert!(file_path.exists());
-    let content = std::fs::read_to_string(&file_path).unwrap();
-    assert!(content.contains("event-0"));
-    assert!(content.contains("event-1"));
-    assert!(content.contains("event-2"));
+    assert_eq!(
+        collected.len(),
+        2,
+        "tail-only: pre-subscribe event excluded"
+    );
+    assert_eq!(collected[0].event_type, "event-1");
+    assert_eq!(collected[1].event_type, "event-2");
 }
