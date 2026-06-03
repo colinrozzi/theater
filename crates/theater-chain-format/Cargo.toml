@@ -1,0 +1,18 @@
+[package]
+name = "theater-chain-format"
+description = "Human-readable text format for Theater chain events. Lossless encode/decode of `ChainEvent` to/from a line-oriented EVENT-block format with embedded Pack Value literals."
+version = "0.3.10"
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+theater = { path = "../theater" }
+packr.workspace = true
+packr-abi.workspace = true
+hex = "0.4.3"
