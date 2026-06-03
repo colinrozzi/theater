@@ -176,4 +176,3 @@ pub fn get_theater_home() -> String {
         )
     })
 }
-

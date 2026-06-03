@@ -328,5 +328,4 @@ impl ActorStore {
             .and_then(|boxed| boxed.downcast::<T>().ok())
             .map(|b| *b)
     }
-
 }

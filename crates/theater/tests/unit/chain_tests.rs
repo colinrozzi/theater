@@ -53,7 +53,10 @@ async fn test_chain_integrity_via_subscriber() {
     }
     assert_eq!(collected.len(), 5, "subscriber should see all 5 events");
 
-    assert!(collected[0].parent_hash.is_none(), "first event has no parent");
+    assert!(
+        collected[0].parent_hash.is_none(),
+        "first event has no parent"
+    );
     for i in 1..collected.len() {
         assert_eq!(
             collected[i].parent_hash.as_ref().unwrap(),
@@ -98,7 +101,11 @@ async fn test_subscriber_attaches_after_first_event_sees_only_subsequent() {
         collected.push(event);
     }
 
-    assert_eq!(collected.len(), 2, "tail-only: pre-subscribe event excluded");
+    assert_eq!(
+        collected.len(),
+        2,
+        "tail-only: pre-subscribe event excluded"
+    );
     assert_eq!(collected[0].event_type, "event-1");
     assert_eq!(collected[1].event_type, "event-2");
 }

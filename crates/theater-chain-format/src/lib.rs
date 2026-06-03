@@ -197,6 +197,9 @@ mod tests {
         assert_eq!(parsed[0].hash, vec![0xaa; 20]);
         assert!(parsed[0].parent_hash.is_none());
         assert_eq!(parsed[1].hash, vec![0xbb; 20]);
-        assert_eq!(parsed[1].parent_hash.as_deref(), Some(vec![0xaa; 20].as_slice()));
+        assert_eq!(
+            parsed[1].parent_hash.as_deref(),
+            Some(vec![0xaa; 20].as_slice())
+        );
     }
 }
