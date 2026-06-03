@@ -3308,7 +3308,7 @@ dependencies = [
 
 [[package]]
 name = "theater"
-version = "0.3.18"
+version = "0.3.19"
 dependencies = [
  "anyhow",
  "axum",
@@ -3377,7 +3377,7 @@ dependencies = [
 
 [[package]]
 name = "theater-chain-format"
-version = "0.3.10"
+version = "0.3.11"
 dependencies = [
  "hex",
  "packr",
@@ -3387,7 +3387,7 @@ dependencies = [
 
 [[package]]
 name = "theater-cli"
-version = "0.3.12"
+version = "0.3.13"
 dependencies = [
  "anyhow",
  "chrono",
@@ -3510,7 +3510,7 @@ dependencies = [
 
 [[package]]
 name = "theater-handler-runtime"
-version = "0.3.10"
+version = "0.3.11"
 dependencies = [
  "anyhow",
  "chrono",
@@ -3543,7 +3543,7 @@ dependencies = [
 
 [[package]]
 name = "theater-handler-supervisor"
-version = "0.3.12"
+version = "0.3.13"
 dependencies = [
  "anyhow",
  "chrono",
@@ -3618,7 +3618,7 @@ dependencies = [
 
 [[package]]
 name = "theater-server"
-version = "0.3.11"
+version = "0.3.12"
 dependencies = [
  "anyhow",
  "axum",
@@ -3657,7 +3657,7 @@ dependencies = [
 
 [[package]]
 name = "theater-tests"
-version = "0.3.11"
+version = "0.3.12"
 dependencies = [
  "anyhow",
  "serde",
