@@ -19,7 +19,7 @@
 //! The Pack Value literal is the canonical text form of the event's CGRF
 //! payload — parsing it and re-encoding to CGRF round-trips back to the
 //! exact bytes that produced the original hash, so a parsed chain file
-//! verifies under [`theater::ChainEvent`]'s hashing rules.
+//! verifies under [`theater_chain::ChainEvent`]'s hashing rules.
 //!
 //! The Theater runtime no longer emits chain files directly; this format is
 //! preserved as a reusable utility for subscribers (replay actors, audit
@@ -30,7 +30,7 @@ use std::fmt::Write as _;
 use std::io::{self, BufRead};
 
 use packr_abi::parse_value;
-use theater::ChainEvent;
+use theater_chain::ChainEvent;
 
 /// Format a chain event as a lossless EVENT block (terminated with a newline).
 pub fn format_event(event: &ChainEvent) -> String {

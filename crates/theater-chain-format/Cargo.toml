@@ -12,7 +12,7 @@ categories.workspace = true
 rust-version.workspace = true
 
 [dependencies]
-theater = { path = "../theater" }
+theater-chain = { workspace = true }
 packr.workspace = true
 packr-abi.workspace = true
 hex = "0.4.3"
