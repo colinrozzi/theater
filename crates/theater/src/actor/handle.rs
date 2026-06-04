@@ -90,10 +90,14 @@ impl ActorHandle {
             Ok(result) => match result {
                 Ok(inner) => {
                     let result_bytes = inner?;
-                    pack_bridge::decode_value(&result_bytes).map_err(|e| {
-                        error!("Failed to decode result: {}", e);
-                        ActorError::SerializationError
-                    })
+                    if result_bytes.is_empty() {
+                        Ok(pack_bridge::Value::Tuple(vec![]))
+                    } else {
+                        pack_bridge::decode_value(&result_bytes).map_err(|e| {
+                            error!("Failed to decode result: {}", e);
+                            ActorError::SerializationError
+                        })
+                    }
                 }
                 Err(e) => {
                     error!("Channel closed while waiting for response: {:?}", e);
