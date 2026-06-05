@@ -149,7 +149,11 @@ pub enum TheaterCommand {
     ///   `Value::Option<list<u8>>::None` if neither is provided.
     /// * `response_tx` - Channel to receive the result (actor ID or error)
     /// * `supervisor_tx` - Optional channel for supervisor to receive lifecycle events
-    /// * `subscription_tx` - Optional channel to subscribe to all actor events
+    /// * `subscription_tx` - Optional channel to subscribe to all actor events.
+    ///   Events are dispatched non-blocking via `try_send`: if the subscriber's
+    ///   channel is full, the event is dropped with a warning. Subscribers must
+    ///   tolerate gaps — drain promptly or accept loss. This guarantees a
+    ///   slow subscriber can never stall the runtime command loop.
     ///
     /// Use [`Self::SetupActor`] for the "setup only, do not call init" variant
     /// (the replay path uses this — the replay handler walks the chain and
@@ -198,7 +202,11 @@ pub enum TheaterCommand {
     /// * `wasm_bytes` - Optional pre-loaded WASM bytes. If None, bytes are resolved from manifest.package
     /// * `response_tx` - Channel to receive the result (actor ID or error)
     /// * `supervisor_tx` - Optional channel for supervisor to receive lifecycle events
-    /// * `subscription_tx` - Optional channel to subscribe to all actor events
+    /// * `subscription_tx` - Optional channel to subscribe to all actor events.
+    ///   Events are dispatched non-blocking via `try_send`: if the subscriber's
+    ///   channel is full, the event is dropped with a warning. Subscribers must
+    ///   tolerate gaps — drain promptly or accept loss. This guarantees a
+    ///   slow subscriber can never stall the runtime command loop.
     ResumeActor {
         manifest_path: String,
         wasm_bytes: Option<Vec<u8>>,
