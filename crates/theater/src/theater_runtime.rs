@@ -891,20 +891,40 @@ impl TheaterRuntime {
     async fn handle_actor_event(&mut self, actor_id: TheaterId, event: ChainEvent) -> Result<()> {
         debug!("Handling event for actor: {:?}", actor_id);
 
+        // Subscriber dispatch is non-blocking: a backed-up subscriber must
+        // not stall the runtime loop. If it did, theater_tx would fill from
+        // unrelated blocking-send producers (supervisor.spawn etc.) and the
+        // whole system would wedge — the failure mode observed in prod
+        // sentinel cutovers. The chain-subscription contract is already
+        // "tail-only broadcast, no backfill" (see chain/mod.rs docs), so
+        // dropping individual events on overflow is consistent with the
+        // documented semantics. Only Closed errors evict the subscriber;
+        // Full errors are logged and the event is dropped.
+        use tokio::sync::mpsc::error::TrySendError;
+
         // Send to global subscribers first
         let mut global_to_remove: Vec<usize> = Vec::new();
         for (index, subscriber) in self.global_subscriptions.iter().enumerate() {
-            if let Err(e) = subscriber.send((actor_id, Ok(event.clone()))).await {
-                error!("Failed to send event to global subscriber: {}", e);
-                global_to_remove.push(index);
+            match subscriber.try_send((actor_id, Ok(event.clone()))) {
+                Ok(()) => {}
+                Err(TrySendError::Full(_)) => {
+                    warn!(
+                        "Global subscriber lagging; dropping event from actor {:?}",
+                        actor_id
+                    );
+                }
+                Err(TrySendError::Closed(_)) => {
+                    error!("Global subscriber closed; removing");
+                    global_to_remove.push(index);
+                }
             }
         }
-        // Remove failed global subscribers in reverse order
+        // Remove closed global subscribers in reverse order
         if !global_to_remove.is_empty() {
             global_to_remove.sort_unstable_by(|a, b| b.cmp(a));
             for index in global_to_remove {
                 self.global_subscriptions.swap_remove(index);
-                debug!("Removed failed global subscriber at index {}", index);
+                debug!("Removed closed global subscriber at index {}", index);
             }
         }
 
@@ -915,20 +935,29 @@ impl TheaterRuntime {
             let subscribers: &mut Vec<Sender<Result<ChainEvent, ActorError>>> = entry.get_mut();
             let mut to_remove: Vec<usize> = Vec::new();
 
-            // Send events and track failures
+            // Send events; drop on Full, evict on Closed.
             for (index, subscriber) in subscribers.iter().enumerate() {
-                if let Err(e) = subscriber.send(Ok(event.clone())).await {
-                    error!("Failed to send event to subscriber: {}", e);
-                    to_remove.push(index);
+                match subscriber.try_send(Ok(event.clone())) {
+                    Ok(()) => {}
+                    Err(TrySendError::Full(_)) => {
+                        warn!(
+                            "Subscriber for actor {:?} lagging; dropping event",
+                            actor_id
+                        );
+                    }
+                    Err(TrySendError::Closed(_)) => {
+                        error!("Subscriber for actor {:?} closed; removing", actor_id);
+                        to_remove.push(index);
+                    }
                 }
             }
 
-            // Remove failed subscribers in reverse order
+            // Remove closed subscribers in reverse order
             if !to_remove.is_empty() {
                 to_remove.sort_unstable_by(|a, b| b.cmp(a));
                 for index in to_remove {
                     subscribers.swap_remove(index);
-                    debug!("Removed failed subscriber at index {}", index);
+                    debug!("Removed closed subscriber at index {}", index);
                 }
             }
 
