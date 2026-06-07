@@ -29,6 +29,7 @@
             "rust-analyzer"
             "clippy"
             "rustfmt"
+            "llvm-tools-preview"
           ];
           targets = [ "wasm32-unknown-unknown" "wasm32-wasip1" ];
         };
@@ -283,6 +284,7 @@
             cargo-expand
             cargo-udeps
             cargo-nextest
+            cargo-llvm-cov
 
             wasmtime
             wasm-tools

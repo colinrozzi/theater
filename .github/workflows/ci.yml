@@ -61,6 +61,49 @@ jobs:
       - name: Handler integration tests
         run: nix develop --command cargo test -p theater-tests
 
+  coverage:
+    name: Coverage
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: DeterminateSystems/nix-installer-action@main
+
+      - uses: DeterminateSystems/magic-nix-cache-action@main
+
+      - name: Build test actors
+        run: |
+          nix develop --command bash -c '
+            for dir in test-actors/*/; do
+              if [ -f "$dir/Cargo.toml" ]; then
+                name=$(basename "$dir")
+                echo "Building $name..."
+                (cd "$dir" && cargo build --target wasm32-unknown-unknown --release)
+              fi
+            done
+          '
+
+      - name: Generate coverage (lib + integration + handler integration)
+        run: |
+          nix develop --command bash -c '
+            cargo llvm-cov clean --workspace
+            cargo llvm-cov --no-report -p theater --lib \
+              --test contract_enforcement_test \
+              --test pact_contract_test \
+              --test golden_chain_test \
+              --test composite_integration_test
+            cargo llvm-cov --no-report -p theater-tests --tests
+            cargo llvm-cov report --lcov --output-path lcov.info
+            echo "=== Coverage summary ==="
+            cargo llvm-cov report --summary-only
+          '
+
+      - name: Upload lcov artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: lcov
+          path: lcov.info
+
   publish-check:
     name: Publish Check
     runs-on: ubuntu-latest
