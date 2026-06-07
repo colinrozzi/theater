@@ -14,8 +14,10 @@
 //! recorded output values from the expected chain (so WASM runs deterministically),
 //! and also records those calls to a new chain (so hashes can be compared).
 
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Arc, Mutex};
+use tokio::sync::RwLock;
 
+use async_trait::async_trait;
 use packr::abi::Value;
 use packr::CallInterceptor;
 
@@ -39,26 +41,34 @@ impl RecordingInterceptor {
     }
 }
 
+#[async_trait]
 impl CallInterceptor for RecordingInterceptor {
-    fn before_import(&self, _interface: &str, _function: &str, _input: &Value) -> Option<Value> {
+    async fn before_import(
+        &self,
+        _interface: &str,
+        _function: &str,
+        _input: &Value,
+    ) -> Option<Value> {
         None // Always proceed with real execution
     }
 
-    fn after_import(&self, interface: &str, function: &str, input: &Value, output: &Value) {
+    async fn after_import(&self, interface: &str, function: &str, input: &Value, output: &Value) {
         let call = HostFunctionCall::new(interface, function, input.clone(), output.clone());
 
-        let mut chain = self.chain.write().unwrap();
-        let _ = chain.add_typed_event(ChainEventData {
-            event_type: format!("{}/{}", interface, function),
-            data: ChainEventPayload::HostFunction(call),
-        });
+        let mut chain = self.chain.write().await;
+        let _ = chain
+            .add_typed_event(ChainEventData {
+                event_type: format!("{}/{}", interface, function),
+                data: ChainEventPayload::HostFunction(call),
+            })
+            .await;
     }
 
-    fn before_export(&self, _function: &str, _input: &Value) -> Option<Value> {
+    async fn before_export(&self, _function: &str, _input: &Value) -> Option<Value> {
         None // Always proceed with real execution
     }
 
-    fn after_export(&self, _function: &str, _input: &Value, _output: &Value) {
+    async fn after_export(&self, _function: &str, _input: &Value, _output: &Value) {
         // Export calls are already recorded by the actor runtime as WasmCall/WasmResult events
     }
 }
@@ -120,29 +130,37 @@ impl ReplayRecordingInterceptor {
     }
 }
 
+#[async_trait]
 impl CallInterceptor for ReplayRecordingInterceptor {
-    fn before_import(&self, interface: &str, function: &str, _input: &Value) -> Option<Value> {
+    async fn before_import(
+        &self,
+        interface: &str,
+        function: &str,
+        _input: &Value,
+    ) -> Option<Value> {
         // Find the next matching host function call and return its recorded output
         self.find_next_host_call(interface, function)
             .map(|call| call.output)
     }
 
-    fn after_import(&self, interface: &str, function: &str, input: &Value, output: &Value) {
+    async fn after_import(&self, interface: &str, function: &str, input: &Value, output: &Value) {
         // Record to the new chain (same as RecordingInterceptor)
         let call = HostFunctionCall::new(interface, function, input.clone(), output.clone());
 
-        let mut chain = self.chain.write().unwrap();
-        let _ = chain.add_typed_event(ChainEventData {
-            event_type: format!("{}/{}", interface, function),
-            data: ChainEventPayload::HostFunction(call),
-        });
+        let mut chain = self.chain.write().await;
+        let _ = chain
+            .add_typed_event(ChainEventData {
+                event_type: format!("{}/{}", interface, function),
+                data: ChainEventPayload::HostFunction(call),
+            })
+            .await;
     }
 
-    fn before_export(&self, _function: &str, _input: &Value) -> Option<Value> {
+    async fn before_export(&self, _function: &str, _input: &Value) -> Option<Value> {
         None // Let exports execute normally during replay
     }
 
-    fn after_export(&self, _function: &str, _input: &Value, _output: &Value) {
+    async fn after_export(&self, _function: &str, _input: &Value, _output: &Value) {
         // Export recording is handled by execute_call
     }
 }

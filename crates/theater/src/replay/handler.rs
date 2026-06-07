@@ -32,8 +32,8 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 
-use tokio::sync::{broadcast, oneshot};
-use tracing::{error, info};
+use tokio::sync::oneshot;
+use tracing::info;
 
 use crate::actor::handle::ActorHandle;
 use crate::actor::store::ActorStore;
@@ -202,7 +202,7 @@ impl Handler for ReplayHandler {
         actor_handle: ActorHandle,
         _actor_instance: SharedActorInstance,
         shutdown_receiver: ShutdownReceiver,
-        mut event_rx: broadcast::Receiver<ChainEvent>,
+        mut event_rx: crate::handler::HandlerEventReceiver,
     ) -> Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send>> {
         let expected_events = (*self.state.events).clone();
 
@@ -247,7 +247,7 @@ impl Handler for ReplayHandler {
 
                 loop {
                     match event_rx.recv().await {
-                        Ok(actual_event) => {
+                        Some((_actor_id, actual_event)) => {
                             if verified_position >= expected_events_for_verify.len() {
                                 // More events than expected
                                 let msg = format!(
@@ -301,12 +301,8 @@ impl Handler for ReplayHandler {
                                 return verified_position;
                             }
                         }
-                        Err(broadcast::error::RecvError::Lagged(n)) => {
-                            // We missed some events - this is a problem for verification
-                            error!("Replay verification lagged by {} events - verification may be incomplete", n);
-                        }
-                        Err(broadcast::error::RecvError::Closed) => {
-                            // Channel closed - verification stops
+                        None => {
+                            // Channel closed — verification stops.
                             return verified_position;
                         }
                     }

@@ -38,42 +38,6 @@ async fn test_actor_message_serialization() {
 }
 
 #[tokio::test]
-async fn test_theater_command_new_event() {
-    use theater::chain::ChainEvent;
-    use tokio::sync::oneshot;
-
-    let actor_id = TheaterId::generate();
-    let event = ChainEvent {
-        hash: vec![1, 2, 3],
-        parent_hash: None,
-        event_type: "test-event".to_string(),
-        data: vec![4, 5, 6],
-        timestamp: 12345,
-        description: Some("test description".to_string()),
-    };
-
-    let command = TheaterCommand::NewEvent {
-        actor_id: actor_id.clone(),
-        event: event.clone(),
-    };
-
-    match command {
-        TheaterCommand::NewEvent {
-            actor_id: id,
-            event: e,
-        } => {
-            assert_eq!(id, actor_id);
-            assert_eq!(e.hash, event.hash);
-            assert_eq!(e.event_type, event.event_type);
-            assert_eq!(e.data, event.data);
-            assert_eq!(e.timestamp, event.timestamp);
-            assert_eq!(e.description, event.description);
-        }
-        _ => panic!("Wrong command type"),
-    }
-}
-
-#[tokio::test]
 async fn test_message_channel_flow() {
     let (tx, mut rx) = mpsc::channel::<ActorMessage>(10);
 

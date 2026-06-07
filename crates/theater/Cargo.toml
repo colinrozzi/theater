@@ -30,6 +30,7 @@ wit-bindgen = "0.36.0"
 # Pack runtime (Graph ABI-based WASM runtime)
 packr.workspace = true
 packr-abi.workspace = true
+async-trait = "0.1"
 
 # Additional core deps
 chrono = { version = "0.4", features = ["serde"] }

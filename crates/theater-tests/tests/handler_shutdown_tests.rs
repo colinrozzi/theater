@@ -40,9 +40,9 @@ fn create_mock_actor_instance() -> SharedActorInstance {
     Arc::new(RwLock::new(None))
 }
 
-/// Create a mock event broadcast channel
-fn create_mock_event_rx() -> tokio::sync::broadcast::Receiver<theater::chain::ChainEvent> {
-    let (tx, rx) = tokio::sync::broadcast::channel(10);
+/// Create a mock chain-event receiver — handlers don't read it in these tests.
+fn create_mock_event_rx() -> theater::handler::HandlerEventReceiver {
+    let (tx, rx) = tokio::sync::mpsc::channel(10);
     drop(tx); // We don't need the sender for these tests
     rx
 }

@@ -27,9 +27,10 @@ use crate::{ManifestConfig, StateChain};
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::path::PathBuf;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 use tokio::sync::mpsc::Receiver;
 use tokio::sync::mpsc::Sender;
+use tokio::sync::RwLock;
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
 use tracing::{debug, error, info, warn};
@@ -99,8 +100,6 @@ pub struct TheaterRuntime {
     theater_tx: Sender<TheaterCommand>,
     /// Receiver for commands to the runtime
     theater_rx: Receiver<TheaterCommand>,
-    /// Map of event subscriptions for actors
-    subscriptions: HashMap<TheaterId, Vec<Sender<Result<ChainEvent, ActorError>>>>,
     /// Map of active communication channels
     channels: HashMap<ChannelId, HashSet<ChannelParticipant>>,
     /// Optional channel to send channel events back to the server
@@ -111,8 +110,12 @@ pub struct TheaterRuntime {
     pack_runtime: AsyncRuntime,
     /// Handler registry
     pub handler_registry: HandlerRegistry,
-    /// Global event subscribers (receive events from all actors)
-    global_subscriptions: Vec<Sender<(TheaterId, Result<ChainEvent, ActorError>)>>,
+    /// Global subscribers — receive tagged events from every actor's chain.
+    /// Each registered Sender is added (as a tagged subscriber) to every
+    /// newly created `StateChain` at spawn time. Useful for top-level
+    /// observers (CLI log streaming, embedded debug consoles) that
+    /// multiplex events from many actors and need to attribute them.
+    global_subscribers: Vec<Sender<(TheaterId, ChainEvent)>>,
 }
 
 /// # ActorProcess
@@ -197,22 +200,26 @@ impl TheaterRuntime {
             theater_rx,
             actors: HashMap::new(),
             chains: HashMap::new(),
-            subscriptions: HashMap::new(),
             channels: HashMap::new(),
             channel_events_tx,
             pack_runtime,
             handler_registry,
-            global_subscriptions: Vec::new(),
+            global_subscribers: Vec::new(),
         })
     }
 
-    /// Add a global event subscriber that receives events from all actors.
-    /// The subscriber receives tuples of (actor_id, event_result).
-    pub fn add_global_subscription(
-        &mut self,
-        tx: Sender<(TheaterId, Result<ChainEvent, ActorError>)>,
-    ) {
-        self.global_subscriptions.push(tx);
+    /// Register a subscriber that will receive events from every actor.
+    ///
+    /// The sender is registered on every chain created from this point on.
+    /// Existing chains are NOT retroactively updated — for that, use
+    /// `TheaterCommand::SubscribeToActor` per actor_id.
+    ///
+    /// Each chain dispatches to this sender via `try_send`, so a backed-up
+    /// subscriber drops events with a warning but does not stall any actor.
+    /// Drain the receiver promptly (or via a drainer task with a local ring
+    /// buffer) to size for your tolerance.
+    pub fn add_global_subscription(&mut self, tx: Sender<(TheaterId, ChainEvent)>) {
+        self.global_subscribers.push(tx);
     }
 
     /// Starts the runtime's main event loop, processing commands until shutdown.
@@ -542,13 +549,6 @@ impl TheaterRuntime {
                         break;
                     }
                 }
-                TheaterCommand::NewEvent { actor_id, event } => {
-                    debug!("Received new event from actor {:?}", actor_id);
-
-                    if let Err(e) = self.handle_actor_event(actor_id, event).await {
-                        error!("Failed to handle actor event: {}", e);
-                    }
-                }
                 TheaterCommand::ActorError { actor_id, error } => {
                     debug!("Received error event from actor {:?}", actor_id);
 
@@ -618,8 +618,14 @@ impl TheaterRuntime {
                 }
                 TheaterCommand::SubscribeToActor { actor_id, event_tx } => {
                     debug!("Subscribing to events for actor: {:?}", actor_id);
-                    self.subscribe_to_actor(actor_id, event_tx)
-                        .expect("Failed to subscribe");
+                    if let Some(chain) = self.chains.get(&actor_id) {
+                        chain.write().await.add_subscriber(event_tx);
+                    } else {
+                        warn!(
+                            "SubscribeToActor: no chain for {:?} (actor not running)",
+                            actor_id
+                        );
+                    }
                 }
                 TheaterCommand::NewStore { response_tx } => {
                     debug!("Creating new content store");
@@ -715,7 +721,7 @@ impl TheaterRuntime {
         init_state: Value,
         call_init: bool,
         supervisor_tx: Option<Sender<ActorResult>>,
-        subscription_tx: Option<Sender<Result<ChainEvent, ActorError>>>,
+        subscription_tx: Option<Sender<(TheaterId, ChainEvent)>>,
         response_tx: oneshot::Sender<Result<TheaterId>>,
     ) {
         let actor_name = name.unwrap_or_else(|| "<unnamed>".to_string());
@@ -741,15 +747,20 @@ impl TheaterRuntime {
         debug!("Initializing actor runtime");
         debug!("Starting actor runtime");
 
-        if let Some(tx) = subscription_tx {
-            self.subscribe_to_actor(actor_id, tx)
-                .expect("Failed to subscribe to actor");
-        }
+        let chain = Arc::new(RwLock::new(StateChain::new(actor_id)));
 
-        let chain = Arc::new(RwLock::new(StateChain::new(
-            actor_id,
-            self.theater_tx.clone(),
-        )));
+        // Register the optional subscription_tx + all global subscribers
+        // BEFORE inserting the chain so no event escapes between actor
+        // init and subscription.
+        {
+            let mut chain_guard = chain.write().await;
+            if let Some(tx) = subscription_tx {
+                chain_guard.add_subscriber(tx);
+            }
+            for global in self.global_subscribers.iter().cloned() {
+                chain_guard.add_subscriber(global);
+            }
+        }
 
         self.chains.insert(actor_id, chain.clone());
 
@@ -875,78 +886,6 @@ impl TheaterRuntime {
         }
     }
 
-    fn subscribe_to_actor(
-        &mut self,
-        actor_id: TheaterId,
-        subscription_tx: Sender<Result<ChainEvent, ActorError>>,
-    ) -> Result<()> {
-        if let Some(subscribers) = self.subscriptions.get_mut(&actor_id) {
-            subscribers.push(subscription_tx);
-        } else {
-            self.subscriptions.insert(actor_id, vec![subscription_tx]);
-        }
-        Ok(())
-    }
-
-    async fn handle_actor_event(&mut self, actor_id: TheaterId, event: ChainEvent) -> Result<()> {
-        debug!("Handling event for actor: {:?}", actor_id);
-
-        // Send to global subscribers first
-        let mut global_to_remove: Vec<usize> = Vec::new();
-        for (index, subscriber) in self.global_subscriptions.iter().enumerate() {
-            if let Err(e) = subscriber.send((actor_id, Ok(event.clone()))).await {
-                error!("Failed to send event to global subscriber: {}", e);
-                global_to_remove.push(index);
-            }
-        }
-        // Remove failed global subscribers in reverse order
-        if !global_to_remove.is_empty() {
-            global_to_remove.sort_unstable_by(|a, b| b.cmp(a));
-            for index in global_to_remove {
-                self.global_subscriptions.swap_remove(index);
-                debug!("Removed failed global subscriber at index {}", index);
-            }
-        }
-
-        // Use entry API to handle the per-actor subscription map
-        let should_remove = if let std::collections::hash_map::Entry::Occupied(mut entry) =
-            self.subscriptions.entry(actor_id)
-        {
-            let subscribers: &mut Vec<Sender<Result<ChainEvent, ActorError>>> = entry.get_mut();
-            let mut to_remove: Vec<usize> = Vec::new();
-
-            // Send events and track failures
-            for (index, subscriber) in subscribers.iter().enumerate() {
-                if let Err(e) = subscriber.send(Ok(event.clone())).await {
-                    error!("Failed to send event to subscriber: {}", e);
-                    to_remove.push(index);
-                }
-            }
-
-            // Remove failed subscribers in reverse order
-            if !to_remove.is_empty() {
-                to_remove.sort_unstable_by(|a, b| b.cmp(a));
-                for index in to_remove {
-                    subscribers.swap_remove(index);
-                    debug!("Removed failed subscriber at index {}", index);
-                }
-            }
-
-            // Check if we should remove the entire entry
-            subscribers.is_empty()
-        } else {
-            false
-        };
-
-        // Remove the entry if needed
-        if should_remove {
-            self.subscriptions.remove(&actor_id);
-            debug!("Removed empty subscription entry for actor {:?}", actor_id);
-        }
-
-        Ok(())
-    }
-
     async fn handle_actor_error(&mut self, actor_id: TheaterId, error: ActorError) -> Result<()> {
         debug!("Handling error event for actor: {:?}", actor_id);
 
@@ -967,18 +906,9 @@ impl TheaterRuntime {
             }
         }
 
-        // notify any actor subscribers
-        if let Some(subscribers) = self.subscriptions.get(&actor_id) {
-            let subscribers_clone = subscribers.clone();
-            let error_clone = error.clone();
-            tokio::spawn(async move {
-                for subscriber in subscribers_clone {
-                    if let Err(e) = subscriber.send(Err(error_clone.clone())).await {
-                        error!("Failed to send error event to subscriber: {}", e);
-                    }
-                }
-            });
-        }
+        // Subscribers see the actor's terminal chain event (`WasmError`
+        // for crashes, `"shutdown"` for normal exit) then `recv() == None`
+        // when the chain drops — no separate notification needed here.
 
         // Immediately shutdown the actor due to error
         debug!("Shutting down actor {:?} due to error", actor_id);
@@ -1033,17 +963,7 @@ impl TheaterRuntime {
                 }
             };
 
-            let mut writable_chain = match chain.write() {
-                Ok(chain) => chain,
-                Err(e) => {
-                    error!(
-                        "Failed to acquire write lock on chain for actor {:?}: {}, will not emit shutdown event, continuing with shutdown",
-                        actor_id, e
-                    );
-                    break 'chain_block;
-                }
-            };
-
+            let mut writable_chain = chain.write().await;
             writable_chain
                 .add_typed_event(crate::events::ChainEventData {
                     event_type: "shutdown".to_string(),
@@ -1054,6 +974,7 @@ impl TheaterRuntime {
                         },
                     ),
                 })
+                .await
                 .expect("Failed to record event");
         }
 

@@ -12,8 +12,9 @@ use crate::messages::TheaterCommand;
 use crate::pack_bridge::Value;
 use std::any::{Any, TypeId};
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Arc, Mutex, RwLock as StdRwLock};
 use tokio::sync::mpsc::Sender;
+use tokio::sync::RwLock;
 use wasmtime::component::ResourceTable;
 
 /// # ActorStore
@@ -52,7 +53,7 @@ pub struct ActorStore {
     /// Extension storage for handlers to store arbitrary data
     /// Keyed by TypeId of the data type for type-safe retrieval
     /// This allows handlers to pass data from setup_host_functions to Host trait implementations
-    pub extensions: Arc<RwLock<HashMap<TypeId, Box<dyn Any + Send + Sync>>>>,
+    pub extensions: Arc<StdRwLock<HashMap<TypeId, Box<dyn Any + Send + Sync>>>>,
 }
 
 impl ActorStore {
@@ -84,7 +85,7 @@ impl ActorStore {
             state: initial_state,
             actor_handle,
             resource_table: Arc::new(Mutex::new(ResourceTable::new())),
-            extensions: Arc::new(RwLock::new(HashMap::new())),
+            extensions: Arc::new(StdRwLock::new(HashMap::new())),
         }
     }
 
@@ -143,10 +144,11 @@ impl ActorStore {
     /// ## Returns
     ///
     /// The ChainEvent that was created and added to the chain.
-    pub fn record_event(&self, event_data: ChainEventData) -> ChainEvent {
-        let mut chain = self.chain.write().unwrap();
+    pub async fn record_event(&self, event_data: ChainEventData) -> ChainEvent {
+        let mut chain = self.chain.write().await;
         chain
             .add_typed_event(event_data)
+            .await
             .expect("Failed to record event")
     }
 
@@ -158,7 +160,7 @@ impl ActorStore {
     ///
     /// * `event_type` - A string identifier for this event (e.g., "wasm-call")
     /// * `data` - The WasmEventData containing the event details
-    pub fn record_wasm_event(
+    pub async fn record_wasm_event(
         &self,
         event_type: String,
         data: crate::events::wasm::WasmEventData,
@@ -167,6 +169,7 @@ impl ActorStore {
             event_type,
             data: ChainEventPayload::Wasm(data),
         })
+        .await
     }
 
     /// Record a theater runtime event (for debugging/audit purposes).
@@ -178,7 +181,7 @@ impl ActorStore {
     ///
     /// * `event_type` - A string identifier for this event
     /// * `data` - The TheaterRuntimeEventData
-    pub fn record_theater_runtime_event(
+    pub async fn record_theater_runtime_event(
         &self,
         event_type: String,
         data: crate::events::theater_runtime::TheaterRuntimeEventData,
@@ -193,43 +196,30 @@ impl ActorStore {
             event_type: format!("theater-runtime/{}", event_type),
             data: ChainEventPayload::Wasm(wasm_data),
         })
+        .await
     }
 
     /// # Get the hash of the most recently emitted event.
     ///
     /// Used by callers that want to know the chain head without subscribing
     /// to the stream. Returns `None` if no events have been emitted yet.
-    pub fn head_hash(&self) -> Option<Vec<u8>> {
-        let chain = self.chain.read().unwrap();
+    pub async fn head_hash(&self) -> Option<Vec<u8>> {
+        let chain = self.chain.read().await;
         chain.head_hash().map(|h| h.to_vec())
     }
 
     /// Subscribe to events as they are recorded to the chain.
     ///
-    /// Returns a broadcast receiver that will receive each event as it's added.
-    /// This is useful for streaming verification during replay - handlers can
-    /// verify each event's hash as it's recorded rather than waiting until the end.
-    ///
-    /// ## Returns
-    ///
-    /// A `tokio::sync::broadcast::Receiver<ChainEvent>` that receives events.
-    ///
-    /// ## Example
-    ///
-    /// ```rust,ignore
-    /// let mut event_rx = actor_store.subscribe_to_events();
-    /// tokio::spawn(async move {
-    ///     while let Ok(event) = event_rx.recv().await {
-    ///         // Verify event hash matches expected
-    ///         if event.hash != expected_hash {
-    ///             // Divergence detected!
-    ///         }
-    ///     }
-    /// });
-    /// ```
-    pub fn subscribe_to_events(&self) -> tokio::sync::broadcast::Receiver<ChainEvent> {
-        let chain = self.chain.read().unwrap();
-        chain.subscribe()
+    /// Registers `tx` as a subscriber on the actor's chain. Each new event
+    /// is dispatched as `(actor_id, event)` via `.send().await` — see
+    /// [`crate::chain::StateChain`] docs for the back-pressure / best-effort
+    /// tradeoff.
+    pub async fn subscribe_to_events(
+        &self,
+        tx: tokio::sync::mpsc::Sender<(crate::TheaterId, ChainEvent)>,
+    ) {
+        let mut chain = self.chain.write().await;
+        chain.add_subscriber(tx);
     }
 
     pub fn get_actor_handle(&self) -> ActorHandle {

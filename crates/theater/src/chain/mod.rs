@@ -6,7 +6,8 @@
 //! Events are **not retained** by the runtime: each `ChainEvent` is hashed,
 //! broadcast to subscribers, used to update the actor's head hash, and dropped.
 //! Anything that wants a durable record (replay, audit, debug tail) must
-//! subscribe via [`StateChain::subscribe`] and persist on its own.
+//! subscribe via [`StateChain::subscribe`] or [`StateChain::add_subscriber`]
+//! and persist on its own.
 //!
 //! ## Core Features
 //!
@@ -17,15 +18,22 @@
 //!   event_type, data))`.
 //! * **Tail-only broadcast**: subscribers see events emitted from the moment
 //!   they subscribe; there is no backfill of historical events.
+//!
+//! ## Subscription topology
+//!
+//! Subscriber dispatch is **direct from the chain**, not routed through the
+//! runtime command channel. This decouples event flow from the runtime's
+//! control plane: a lagging subscriber cannot stall `TheaterRuntime::run()`,
+//! and `theater_tx` (the control channel that carries spawn/stop/etc.) is
+//! never pressured by event traffic. This is the structural fix for the
+//! 2026-06-05 sentinel cutover wedge — see project notes.
 
 use std::fmt;
 
-use tokio::sync::broadcast;
 use tokio::sync::mpsc::Sender;
-use tracing::{debug, warn};
+use tracing::{debug, error};
 
 use crate::events::ChainEventData;
-use crate::messages::TheaterCommand;
 use crate::store::ContentRef;
 use crate::TheaterId;
 
@@ -53,27 +61,40 @@ impl HttpReplayChain {
 
 /// Per-actor chain state.
 ///
-/// Holds only the **head hash** (the hash of the most recently emitted event)
-/// plus the broadcast channel that subscribers tap. Events themselves are not
-/// retained; they are constructed, hashed, broadcast, and dropped.
+/// Holds the head hash and a list of direct mpsc subscribers populated via
+/// [`add_subscriber`]. Events are constructed, hashed, dispatched, and
+/// dropped — no retention.
 ///
 /// ## Subscriber semantics
 ///
-/// `subscribe()` returns a `broadcast::Receiver` that sees events from the
-/// moment of subscription forward. There is no backfill. A subscriber that
-/// wants the full history must subscribe before the actor begins emitting and
-/// retain the events itself.
-#[derive(Clone)]
+/// `add_subscriber(tx)` registers a `tokio::sync::mpsc::Sender`. Each
+/// receives `(actor_id, event)` tuples so a single subscriber can
+/// multiplex from many actors. Emission dispatches via `.send().await`:
+/// a lagging subscriber back-pressures the producer (the actor's host
+/// call awaits subscriber capacity), so chain completeness is preserved.
+/// The subscriber side controls overflow policy by how it drains its
+/// receiver:
+///
+/// * **Strict** — read the mpsc in the main loop; producer back-pressures
+///   on the channel's capacity. The producing actor's host calls block
+///   until the subscriber catches up.
+/// * **Best-effort** — spawn a drainer task that pulls into a local ring
+///   buffer; the mpsc is drained at line rate, drops happen in the
+///   subscriber's own buffer on its own terms — producer never blocks.
+///
+/// A slow subscriber CANNOT stall the runtime command loop — emission is
+/// decoupled from `theater_tx`. It CAN stall the actor whose events it
+/// receives (intentional back-pressure).
 pub struct StateChain {
     /// Hash of the most recently emitted event, or `None` if no event has been
     /// emitted yet. Used as `parent_hash` for the next event.
     current_hash: Option<Vec<u8>>,
-    /// Channel for notifying the Theater runtime of new events.
-    theater_tx: Sender<TheaterCommand>,
-    /// Identifier of the actor that owns this chain.
+    /// Identifier of the actor that owns this chain. Used for diagnostic logs.
     actor_id: TheaterId,
-    /// Broadcast channel for direct event subscription.
-    event_broadcast: broadcast::Sender<ChainEvent>,
+    /// Direct mpsc subscribers registered via `add_subscriber`. Each
+    /// receives `(actor_id, event)` tuples. Emission awaits each sender;
+    /// closed senders are evicted on next emission.
+    subscribers: Vec<Sender<(TheaterId, ChainEvent)>>,
 }
 
 impl fmt::Debug for StateChain {
@@ -81,29 +102,28 @@ impl fmt::Debug for StateChain {
         f.debug_struct("StateChain")
             .field("current_hash", &self.current_hash)
             .field("actor_id", &self.actor_id)
+            .field("subscribers", &self.subscribers.len())
             .finish()
     }
 }
 
 impl StateChain {
     /// Creates a new empty state chain for an actor.
-    pub fn new(actor_id: TheaterId, theater_tx: Sender<TheaterCommand>) -> Self {
-        let (event_broadcast, _) = broadcast::channel(1024);
-
+    pub fn new(actor_id: TheaterId) -> Self {
         Self {
             current_hash: None,
-            theater_tx,
             actor_id,
-            event_broadcast,
+            subscribers: Vec::new(),
         }
     }
 
     /// Adds a new typed event to the chain.
     ///
-    /// Computes the event's hash from the current head, broadcasts it to
-    /// subscribers, advances the head, and drops the event. The runtime is
-    /// notified via `theater_tx` for cross-actor visibility.
-    pub fn add_typed_event(
+    /// Computes the event's hash from the current head, advances the head,
+    /// then dispatches to subscribers via `.send().await`. A lagging
+    /// subscriber back-pressures the caller — chain completeness is
+    /// preserved. Closed senders are evicted.
+    pub async fn add_typed_event(
         &mut self,
         event_data: ChainEventData,
     ) -> Result<ChainEvent, serde_json::Error> {
@@ -116,16 +136,20 @@ impl StateChain {
 
         self.current_hash = Some(event.hash.clone());
 
-        if let Err(e) = self.theater_tx.try_send(TheaterCommand::NewEvent {
-            actor_id: self.actor_id,
-            event: event.clone(),
-        }) {
-            warn!("Failed to send event notification: {}", e);
+        // Dispatch to subscribers with back-pressure. Track closed senders
+        // for eviction after the loop (can't mutate self.subscribers while
+        // iterating over it).
+        let actor_id = self.actor_id;
+        let mut closed_indices: Vec<usize> = Vec::new();
+        for (index, subscriber) in self.subscribers.iter().enumerate() {
+            if subscriber.send((actor_id, event.clone())).await.is_err() {
+                error!("Subscriber for actor {:?} closed; evicting", self.actor_id);
+                closed_indices.push(index);
+            }
         }
-
-        // Broadcast to direct subscribers. Send errors mean no active
-        // subscribers — that's fine, the event is dropped.
-        let _ = self.event_broadcast.send(event.clone());
+        for index in closed_indices.into_iter().rev() {
+            self.subscribers.swap_remove(index);
+        }
 
         debug!(
             "Emitted event {} for actor {}",
@@ -141,11 +165,18 @@ impl StateChain {
         self.current_hash.as_deref()
     }
 
-    /// Subscribe to events as they are emitted.
+    /// Register a direct mpsc subscriber.
     ///
-    /// Returns a broadcast receiver that sees each event from the moment of
-    /// subscription forward. There is no backfill of prior events.
-    pub fn subscribe(&self) -> broadcast::Receiver<ChainEvent> {
-        self.event_broadcast.subscribe()
+    /// The chain dispatches each new event to `tx` via `try_send` as
+    /// `(actor_id, event)`. The subscriber must drain its receiver fast
+    /// enough (or wrap it in a drainer task) to avoid dropped events
+    /// under burst load. See type docs for the back-pressure / best-effort
+    /// tradeoff.
+    ///
+    /// Termination is signaled by the actor's terminal chain event
+    /// (`WasmError` for crashes, `"shutdown"` for normal exit), followed
+    /// by the channel closing — no separate error path.
+    pub fn add_subscriber(&mut self, tx: Sender<(TheaterId, ChainEvent)>) {
+        self.subscribers.push(tx);
     }
 }

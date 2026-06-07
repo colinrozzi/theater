@@ -85,38 +85,6 @@ async fn test_theater_command_spawn_actor() {
 }
 
 #[tokio::test]
-async fn test_theater_command_new_event() {
-    let actor_id = TheaterId::generate();
-    let event = ChainEvent {
-        hash: vec![1, 2, 3],
-        parent_hash: None,
-        event_type: "test-event".to_string(),
-        data: vec![4, 5, 6],
-    };
-
-    let command = TheaterCommand::NewEvent {
-        actor_id,
-        event: event.clone(),
-    };
-
-    match command {
-        TheaterCommand::NewEvent {
-            actor_id: ref id,
-            event: ref e,
-        } => {
-            assert_eq!(*id, actor_id);
-            assert_eq!(e.hash, event.hash);
-            assert_eq!(e.event_type, event.event_type);
-            assert_eq!(e.data, event.data);
-        }
-        _ => panic!("Wrong command type"),
-    }
-
-    // Verify logging output
-    assert_eq!(command.to_log(), format!("NewEvent: {:?}", actor_id));
-}
-
-#[tokio::test]
 async fn test_command_channel() {
     let (tx, mut rx) = mpsc::channel::<TheaterCommand>(10);
 

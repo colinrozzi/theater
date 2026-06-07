@@ -356,33 +356,26 @@ async fn run(args: &SpawnArgs, ctx: &CommandContext, call_init: bool) -> Result<
 
             // Global event subscription (all actors)
             event = global_events_rx.recv() => {
-                if let Some((event_actor_id, event_result)) = event {
-                    match event_result {
-                        Ok(chain_event) => {
-                            // Output events if --events mode is enabled
-                            // (Actor logs are printed directly by RuntimeHandler, not extracted here)
-                            if args.events {
-                                match args.events_format {
-                                    EventFormat::Json => {
-                                        println!("{}", format_event_json(&chain_event, &event_actor_id));
-                                    }
-                                    EventFormat::Short => {
-                                        print!("{}", format_event_short(&chain_event, &event_actor_id));
-                                    }
-                                    EventFormat::Full => {
-                                        print!("{}", format_event_full(&chain_event, &event_actor_id));
-                                    }
-                                }
+                if let Some((event_actor_id, chain_event)) = event {
+                    // Output events if --events mode is enabled
+                    // (Actor logs are printed directly by RuntimeHandler, not extracted here)
+                    if args.events {
+                        match args.events_format {
+                            EventFormat::Json => {
+                                println!("{}", format_event_json(&chain_event, &event_actor_id));
                             }
+                            EventFormat::Short => {
+                                print!("{}", format_event_short(&chain_event, &event_actor_id));
+                            }
+                            EventFormat::Full => {
+                                print!("{}", format_event_full(&chain_event, &event_actor_id));
+                            }
+                        }
+                    }
 
-                            // Check for root actor shutdown
-                            if event_actor_id == actor_id && chain_event.event_type == "shutdown" {
-                                break;
-                            }
-                        }
-                        Err(e) => {
-                            debug!("Actor error event: {:?}", e);
-                        }
+                    // Check for root actor shutdown
+                    if event_actor_id == actor_id && chain_event.event_type == "shutdown" {
+                        break;
                     }
                 }
             }

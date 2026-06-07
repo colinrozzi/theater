@@ -7,7 +7,6 @@
 //! - list-tasks returns all tasks
 
 use std::sync::Arc;
-use std::sync::RwLock as SyncRwLock;
 use theater::actor::handle::ActorHandle;
 use theater::actor::store::ActorStore;
 use theater::chain::StateChain;
@@ -15,6 +14,7 @@ use theater::id::TheaterId;
 use theater::messages::TheaterCommand;
 use theater::pack_bridge::{ActorResult, AsyncRuntime, Ctx, PackInstance, Value};
 use tokio::sync::mpsc;
+use tokio::sync::RwLock as SyncRwLock;
 use tracing::info;
 
 #[tokio::test]
@@ -51,10 +51,7 @@ async fn test_task_manager() {
     let (operation_tx, _operation_rx) = mpsc::channel(10);
     let (info_tx, _info_rx) = mpsc::channel(10);
     let (control_tx, _control_rx) = mpsc::channel(10);
-    let chain = Arc::new(SyncRwLock::new(StateChain::new(
-        actor_id.clone(),
-        theater_tx.clone(),
-    )));
+    let chain = Arc::new(SyncRwLock::new(StateChain::new(actor_id.clone())));
     let actor_handle = ActorHandle::new(operation_tx, info_tx, control_tx);
 
     let actor_store = ActorStore::new(

@@ -10,8 +10,15 @@ use std::collections::HashSet;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
-use tokio::sync::broadcast;
+use tokio::sync::mpsc;
 use tokio::sync::RwLock;
+
+/// Receiver handlers use to observe their actor's chain events. Each
+/// handler gets its own mpsc; the runtime registers the matching sender
+/// on the chain before invoking `setup`. Most handlers ignore this
+/// receiver — the replay handler is the only consumer that actively
+/// reads it for streaming hash verification.
+pub type HandlerEventReceiver = mpsc::Receiver<(TheaterId, ChainEvent)>;
 
 /// Shared reference to an actor instance for handlers that need direct store access
 pub type SharedActorInstance = Arc<RwLock<Option<PackInstance>>>;
@@ -232,7 +239,7 @@ pub trait Handler: Send + Sync + 'static {
     fn run(
         &mut self,
         shutdown_receiver: ShutdownReceiver,
-        _event_rx: broadcast::Receiver<ChainEvent>,
+        _event_rx: HandlerEventReceiver,
     ) -> Pin<Box<dyn Future<Output = Result<()>> + Send>> {
         Box::pin(async move {
             shutdown_receiver.wait_for_shutdown().await;
@@ -249,7 +256,7 @@ pub trait Handler: Send + Sync + 'static {
         actor_handle: ActorHandle,
         actor_instance: SharedActorInstance,
         shutdown_receiver: ShutdownReceiver,
-        event_rx: broadcast::Receiver<ChainEvent>,
+        event_rx: HandlerEventReceiver,
     ) -> Pin<Box<dyn Future<Output = Result<()>> + Send>> {
         // Call init synchronously first
         self.init(actor_handle, actor_instance);

@@ -23,7 +23,6 @@ use crate::ShutdownController;
 use crate::ShutdownType;
 use crate::StateChain;
 use std::sync::Arc;
-use std::sync::RwLock as SyncRwLock;
 use tokio::sync::mpsc::{self, Receiver, Sender};
 use tokio::sync::RwLock;
 use tokio::task::JoinHandle;
@@ -160,7 +159,7 @@ impl ActorRuntime {
         name: String,
         wasm_bytes: Vec<u8>,
         pack_runtime: AsyncRuntime,
-        chain: Arc<SyncRwLock<StateChain>>,
+        chain: Arc<RwLock<StateChain>>,
         handler_registry: HandlerRegistry,
         theater_tx: Sender<TheaterCommand>,
         operation_tx: Sender<ActorOperation>,
@@ -493,11 +492,16 @@ impl ActorRuntime {
             let actor_handle = handler_actor_handle.clone();
             let actor_instance = actor_instance_wrapper.clone();
             let shutdown_receiver = shutdown_controller.subscribe();
-            // Create event subscription for streaming verification
-            let event_rx = {
-                let chain_guard = chain.read().unwrap();
-                chain_guard.subscribe()
-            };
+            // Per-handler chain subscription: a small mpsc whose sender is
+            // registered on the chain before the handler task starts.
+            // Most handlers ignore the receiver; replay handler reads it
+            // for streaming hash verification.
+            let (handler_event_tx, event_rx) =
+                tokio::sync::mpsc::channel::<(crate::TheaterId, crate::chain::ChainEvent)>(1024);
+            {
+                let mut chain_guard = chain.write().await;
+                chain_guard.add_subscriber(handler_event_tx);
+            }
             let handler_task = tokio::spawn(async move {
                 debug!("Handler task running: {}", handler_name);
                 if let Err(e) = handler
@@ -521,7 +525,7 @@ impl ActorRuntime {
         name: String,
         wasm_bytes: Vec<u8>,
         pack_runtime: AsyncRuntime,
-        chain: Arc<SyncRwLock<StateChain>>,
+        chain: Arc<RwLock<StateChain>>,
         handler_registry: HandlerRegistry,
         theater_tx: Sender<TheaterCommand>,
         operation_rx: Receiver<ActorOperation>,
@@ -992,14 +996,17 @@ impl ActorRuntime {
             ActorError::SerializationError
         })?;
 
-        actor_instance.actor_store.record_event(ChainEventData {
-            event_type: "wasm".to_string(),
-            data: WasmEventData::WasmCall {
-                function_name: name.clone(),
-                params: params_value.clone(),
-            }
-            .into(),
-        });
+        actor_instance
+            .actor_store
+            .record_event(ChainEventData {
+                event_type: "wasm".to_string(),
+                data: WasmEventData::WasmCall {
+                    function_name: name.clone(),
+                    params: params_value.clone(),
+                }
+                .into(),
+            })
+            .await;
 
         let (new_state, results) = match actor_instance
             .call_function_with_value(name, state, params_value)
@@ -1011,26 +1018,32 @@ impl ActorRuntime {
                 } else {
                     crate::pack_bridge::decode_value(&result.1).unwrap_or(Value::Tuple(vec![]))
                 };
-                actor_instance.actor_store.record_event(ChainEventData {
-                    event_type: "wasm".to_string(),
-                    data: WasmEventData::WasmResult {
-                        function_name: name.clone(),
-                        state: result.0.clone(),
-                        response: response_value,
-                    }
-                    .into(),
-                });
+                actor_instance
+                    .actor_store
+                    .record_event(ChainEventData {
+                        event_type: "wasm".to_string(),
+                        data: WasmEventData::WasmResult {
+                            function_name: name.clone(),
+                            state: result.0.clone(),
+                            response: response_value,
+                        }
+                        .into(),
+                    })
+                    .await;
                 result
             }
             Err(e) => {
-                let event = actor_instance.actor_store.record_event(ChainEventData {
-                    event_type: "wasm".to_string(),
-                    data: WasmEventData::WasmError {
-                        function_name: name.clone(),
-                        message: format!("{:#}", e),
-                    }
-                    .into(),
-                });
+                let event = actor_instance
+                    .actor_store
+                    .record_event(ChainEventData {
+                        event_type: "wasm".to_string(),
+                        data: WasmEventData::WasmError {
+                            function_name: name.clone(),
+                            message: format!("{:#}", e),
+                        }
+                        .into(),
+                    })
+                    .await;
 
                 error!("Failed to execute function '{}': {:#}", name, e);
                 return Err(ActorError::Internal(event));
