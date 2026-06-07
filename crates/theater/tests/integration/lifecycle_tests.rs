@@ -49,10 +49,7 @@ async fn test_actor_lifecycle() {
     tokio::spawn(async move {
         while let Some(cmd) = theater_rx.recv().await {
             match cmd {
-                TheaterCommand::NewEvent { actor_id, event } => {
-                    println!("New event from actor {}: {:?}", actor_id, event);
-                }
-                _ => println!("Other theater command: {:?}", cmd),
+                _ => println!("Theater command: {:?}", cmd),
             }
         }
     });

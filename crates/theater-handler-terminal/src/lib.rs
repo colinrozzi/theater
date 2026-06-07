@@ -224,7 +224,7 @@ impl Handler for TerminalHandler {
         actor_handle: ActorHandle,
         _actor_instance: SharedActorInstance,
         shutdown_receiver: ShutdownReceiver,
-        _event_rx: tokio::sync::broadcast::Receiver<theater::chain::ChainEvent>,
+        _event_rx: theater::handler::HandlerEventReceiver,
     ) -> Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send>> {
         info!("Terminal handler setup (passive mode)");
 

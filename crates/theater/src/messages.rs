@@ -161,7 +161,7 @@ pub enum TheaterCommand {
         init_state: Value,
         response_tx: oneshot::Sender<Result<TheaterId>>,
         supervisor_tx: Option<Sender<ActorResult>>,
-        subscription_tx: Option<Sender<Result<ChainEvent, ActorError>>>,
+        subscription_tx: Option<Sender<(TheaterId, ChainEvent)>>,
     },
 
     /// # Setup a new actor (setup only, no init)
@@ -184,7 +184,7 @@ pub enum TheaterCommand {
         init_state: Value,
         response_tx: oneshot::Sender<Result<TheaterId>>,
         supervisor_tx: Option<Sender<ActorResult>>,
-        subscription_tx: Option<Sender<Result<ChainEvent, ActorError>>>,
+        subscription_tx: Option<Sender<(TheaterId, ChainEvent)>>,
     },
 
     /// # Resume an existing actor
@@ -204,7 +204,7 @@ pub enum TheaterCommand {
         wasm_bytes: Option<Vec<u8>>,
         response_tx: oneshot::Sender<Result<TheaterId>>,
         supervisor_tx: Option<Sender<ActorResult>>,
-        subscription_tx: Option<Sender<Result<ChainEvent, ActorError>>>,
+        subscription_tx: Option<Sender<(TheaterId, ChainEvent)>>,
     },
 
     /// # Stop an actor
@@ -253,19 +253,6 @@ pub enum TheaterCommand {
     /// Gracefully shuts down the theater runtime and all actors.
     /// The runtime will stop all actors, clean up resources, and exit.
     ShutdownRuntime,
-
-    /// # Record a new event
-    ///
-    /// Records an event in an actor's event chain.
-    ///
-    /// ## Parameters
-    ///
-    /// * `actor_id` - ID of the actor the event relates to
-    /// * `event` - The event to record
-    NewEvent {
-        actor_id: TheaterId,
-        event: ChainEvent,
-    },
 
     /// # Record an actor error
     ///
@@ -392,7 +379,7 @@ pub enum TheaterCommand {
     /// This operation is only available to the actor's supervisor or to the system itself.
     SubscribeToActor {
         actor_id: TheaterId,
-        event_tx: Sender<Result<ChainEvent, ActorError>>,
+        event_tx: Sender<(TheaterId, ChainEvent)>,
     },
 
     /// # Create a new content store
@@ -469,9 +456,6 @@ impl TheaterCommand {
             }
             TheaterCommand::ActorShutdownComplete { actor_id } => {
                 format!("ActorShutdownComplete: {:?}", actor_id)
-            }
-            TheaterCommand::NewEvent { actor_id, .. } => {
-                format!("NewEvent: {:?}", actor_id)
             }
             TheaterCommand::ActorError { actor_id, .. } => {
                 format!("ActorError: {:?}", actor_id)

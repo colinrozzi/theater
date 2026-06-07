@@ -678,17 +678,9 @@ impl TheaterServer {
                         // set up a task to forward events to the client
                         let cmd_client_tx = cmd_client_tx.clone();
                         tokio::spawn(async move {
-                            while let Some(event) = event_rx.recv().await {
+                            while let Some((_actor_id, event)) = event_rx.recv().await {
                                 debug!("Received event for subscription");
-                                let response = match event {
-                                    Ok(event) => ManagementResponse::ActorEvent { event },
-                                    Err(_e) => {
-                                        // Actor errors are already captured in the event chain
-                                        // No need to send duplicate error responses
-                                        debug!("Actor error received, but already in event chain");
-                                        continue;
-                                    }
-                                };
+                                let response = ManagementResponse::ActorEvent { event };
                                 if let Err(e) = cmd_client_tx.send(response).await {
                                     debug!("Failed to forward event to client: {}", e);
                                     break;
@@ -859,17 +851,9 @@ impl TheaterServer {
                             "Starting event forwarder for subscription {}",
                             subscription_id
                         );
-                        while let Some(event) = event_rx.recv().await {
+                        while let Some((_actor_id, event)) = event_rx.recv().await {
                             debug!("Received event for subscription {}", subscription_id);
-                            let response = match event {
-                                Ok(event) => ManagementResponse::ActorEvent { event },
-                                Err(_e) => {
-                                    // Actor errors are already captured in the event chain
-                                    // No need to send duplicate error responses
-                                    debug!("Actor error received, but already in event chain");
-                                    continue;
-                                }
-                            };
+                            let response = ManagementResponse::ActorEvent { event };
                             if let Err(e) = client_tx_clone.send(response).await {
                                 debug!("Failed to forward event to client: {}", e);
                                 break;

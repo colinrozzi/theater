@@ -33,7 +33,6 @@ use theater::messages::{
 use theater::pack_bridge::Value;
 use theater::theater_runtime::TheaterRuntime;
 use theater::utils::resolve_reference;
-use theater::ActorError;
 use theater::ManifestConfig;
 
 use theater_handler_message_server::{MessageRouter, MessageServerHandler};
@@ -258,7 +257,7 @@ pub fn create_supervisor_registry(
 
 /// Collect events from a channel with timeout
 async fn collect_events(
-    event_rx: &mut mpsc::Receiver<Result<ChainEvent, ActorError>>,
+    event_rx: &mut mpsc::Receiver<(theater::TheaterId, ChainEvent)>,
     idle_timeout: Duration,
     max_timeout: Duration,
 ) -> Vec<ChainEvent> {
@@ -268,11 +267,11 @@ async fn collect_events(
 
     while start.elapsed() < max_timeout {
         match timeout(Duration::from_millis(100), event_rx.recv()).await {
-            Ok(Some(Ok(event))) => {
+            Ok(Some((_, event))) => {
                 last_event_time = std::time::Instant::now();
                 events.push(event);
             }
-            Ok(Some(Err(_))) | Ok(None) => break,
+            Ok(None) => break,
             Err(_) => {
                 if last_event_time.elapsed() > idle_timeout {
                     break;

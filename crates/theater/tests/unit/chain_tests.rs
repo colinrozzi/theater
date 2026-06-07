@@ -16,12 +16,11 @@ fn create_test_event_data(event_type: &str, _data: &[u8]) -> ChainEventData {
 
 #[tokio::test]
 async fn test_chain_event_creation() {
-    let (tx, _rx) = mpsc::channel(10);
     let actor_id = TheaterId::generate();
-    let mut chain = StateChain::new(actor_id, tx);
+    let mut chain = StateChain::new(actor_id);
 
     let event_data = create_test_event_data("test-event", b"test data");
-    let event = chain.add_typed_event(event_data).unwrap();
+    let event = chain.add_typed_event(event_data).await.unwrap();
 
     assert_eq!(event.event_type, "test-event");
     assert!(event.parent_hash.is_none());
@@ -31,24 +30,25 @@ async fn test_chain_event_creation() {
 
 /// The runtime no longer retains events, so chain integrity is verified by a
 /// subscriber that collects events as they're emitted. This test plays that
-/// subscriber role: it grabs a `subscribe()` receiver, drives the chain, then
-/// asserts that each event's `parent_hash` matches its predecessor's `hash`
-/// and that `head_hash` tracks the last emitted event.
+/// subscriber role: register an mpsc subscriber, drive the chain, then assert
+/// that each event's `parent_hash` matches its predecessor's `hash` and that
+/// `head_hash` tracks the last emitted event.
 #[tokio::test]
 async fn test_chain_integrity_via_subscriber() {
-    let (tx, _rx) = mpsc::channel(10);
     let actor_id = TheaterId::generate();
-    let mut chain = StateChain::new(actor_id, tx);
-    let mut events_rx = chain.subscribe();
+    let mut chain = StateChain::new(actor_id);
+
+    let (sub_tx, mut sub_rx) = mpsc::channel(16);
+    chain.add_subscriber(sub_tx);
 
     for i in 0..5 {
         let data = format!("event data {}", i);
         let event_data = create_test_event_data(&format!("event-{}", i), data.as_bytes());
-        chain.add_typed_event(event_data).unwrap();
+        chain.add_typed_event(event_data).await.unwrap();
     }
 
     let mut collected: Vec<ChainEvent> = Vec::new();
-    while let Ok(event) = events_rx.try_recv() {
+    while let Ok((_id, event)) = sub_rx.try_recv() {
         collected.push(event);
     }
     assert_eq!(collected.len(), 5, "subscriber should see all 5 events");
@@ -74,30 +74,33 @@ async fn test_chain_integrity_via_subscriber() {
     );
 }
 
-/// New subscribers attach mid-flight see only events emitted from the moment
-/// of subscription forward. The runtime does not backfill — that's the
-/// contract subscribers must understand.
+/// Subscribers that attach mid-flight see only events emitted from the moment
+/// of subscription forward. The chain does not backfill — that's the contract
+/// subscribers must understand.
 #[tokio::test]
 async fn test_subscriber_attaches_after_first_event_sees_only_subsequent() {
-    let (tx, _rx) = mpsc::channel(10);
     let actor_id = TheaterId::generate();
-    let mut chain = StateChain::new(actor_id, tx);
+    let mut chain = StateChain::new(actor_id);
 
     chain
         .add_typed_event(create_test_event_data("event-0", b"a"))
+        .await
         .unwrap();
 
-    let mut events_rx = chain.subscribe();
+    let (sub_tx, mut sub_rx) = mpsc::channel(16);
+    chain.add_subscriber(sub_tx);
 
     chain
         .add_typed_event(create_test_event_data("event-1", b"b"))
+        .await
         .unwrap();
     chain
         .add_typed_event(create_test_event_data("event-2", b"c"))
+        .await
         .unwrap();
 
     let mut collected: Vec<ChainEvent> = Vec::new();
-    while let Ok(event) = events_rx.try_recv() {
+    while let Ok((_id, event)) = sub_rx.try_recv() {
         collected.push(event);
     }
 

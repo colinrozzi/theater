@@ -62,7 +62,7 @@ impl Handler for AssemblerHandler {
         _actor_handle: ActorHandle,
         _actor_instance: SharedActorInstance,
         shutdown_receiver: ShutdownReceiver,
-        _event_rx: tokio::sync::broadcast::Receiver<theater::chain::ChainEvent>,
+        _event_rx: theater::handler::HandlerEventReceiver,
     ) -> Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send>> {
         info!("Assembler handler setup");
 

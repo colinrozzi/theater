@@ -4,7 +4,6 @@
 //! This test verifies the full flow: init, add items, toggle, list.
 
 use std::sync::Arc;
-use std::sync::RwLock as SyncRwLock;
 use theater::actor::handle::ActorHandle;
 use theater::actor::store::ActorStore;
 use theater::chain::StateChain;
@@ -12,6 +11,7 @@ use theater::id::TheaterId;
 use theater::messages::TheaterCommand;
 use theater::pack_bridge::{AsyncRuntime, Ctx, PackInstance, Value};
 use tokio::sync::mpsc;
+use tokio::sync::RwLock as SyncRwLock;
 use tracing::info;
 
 async fn create_instance() -> PackInstance {
@@ -34,10 +34,7 @@ async fn create_instance() -> PackInstance {
     let (operation_tx, _) = mpsc::channel(10);
     let (info_tx, _) = mpsc::channel(10);
     let (control_tx, _) = mpsc::channel(10);
-    let chain = Arc::new(SyncRwLock::new(StateChain::new(
-        actor_id,
-        theater_tx.clone(),
-    )));
+    let chain = Arc::new(SyncRwLock::new(StateChain::new(actor_id)));
     let actor_handle = ActorHandle::new(operation_tx, info_tx, control_tx);
 
     let actor_store = ActorStore::new(
