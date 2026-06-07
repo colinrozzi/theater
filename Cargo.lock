@@ -3310,7 +3310,7 @@ dependencies = [
 
 [[package]]
 name = "theater"
-version = "0.3.23"
+version = "0.3.24"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3392,7 +3392,7 @@ dependencies = [
 
 [[package]]
 name = "theater-cli"
-version = "0.3.14"
+version = "0.3.15"
 dependencies = [
  "anyhow",
  "chrono",
@@ -3450,7 +3450,7 @@ dependencies = [
 
 [[package]]
 name = "theater-handler-assembler"
-version = "0.3.10"
+version = "0.3.11"
 dependencies = [
  "anyhow",
  "test-log",
@@ -3463,7 +3463,7 @@ dependencies = [
 
 [[package]]
 name = "theater-handler-loop"
-version = "0.3.10"
+version = "0.3.11"
 dependencies = [
  "anyhow",
  "theater",
@@ -3474,7 +3474,7 @@ dependencies = [
 
 [[package]]
 name = "theater-handler-message-server"
-version = "0.3.10"
+version = "0.3.11"
 dependencies = [
  "anyhow",
  "chrono",
@@ -3489,7 +3489,7 @@ dependencies = [
 
 [[package]]
 name = "theater-handler-podman"
-version = "0.3.12"
+version = "0.3.13"
 dependencies = [
  "anyhow",
  "serde",
@@ -3502,7 +3502,7 @@ dependencies = [
 
 [[package]]
 name = "theater-handler-rpc"
-version = "0.3.10"
+version = "0.3.11"
 dependencies = [
  "anyhow",
  "serde",
@@ -3515,7 +3515,7 @@ dependencies = [
 
 [[package]]
 name = "theater-handler-runtime"
-version = "0.3.12"
+version = "0.3.13"
 dependencies = [
  "anyhow",
  "chrono",
@@ -3533,7 +3533,7 @@ dependencies = [
 
 [[package]]
 name = "theater-handler-store"
-version = "0.3.10"
+version = "0.3.11"
 dependencies = [
  "anyhow",
  "chrono",
@@ -3548,7 +3548,7 @@ dependencies = [
 
 [[package]]
 name = "theater-handler-supervisor"
-version = "0.3.14"
+version = "0.3.15"
 dependencies = [
  "anyhow",
  "chrono",
@@ -3562,7 +3562,7 @@ dependencies = [
 
 [[package]]
 name = "theater-handler-tcp"
-version = "0.3.19"
+version = "0.3.20"
 dependencies = [
  "anyhow",
  "rcgen",
@@ -3580,7 +3580,7 @@ dependencies = [
 
 [[package]]
 name = "theater-handler-terminal"
-version = "0.3.10"
+version = "0.3.11"
 dependencies = [
  "anyhow",
  "futures-util",
@@ -3594,7 +3594,7 @@ dependencies = [
 
 [[package]]
 name = "theater-handler-timer"
-version = "0.3.12"
+version = "0.3.13"
 dependencies = [
  "anyhow",
  "theater",
@@ -3605,7 +3605,7 @@ dependencies = [
 
 [[package]]
 name = "theater-replay-experimenting"
-version = "0.3.11"
+version = "0.3.12"
 dependencies = [
  "anyhow",
  "hex",
@@ -3623,7 +3623,7 @@ dependencies = [
 
 [[package]]
 name = "theater-server"
-version = "0.3.13"
+version = "0.3.14"
 dependencies = [
  "anyhow",
  "axum",
@@ -3662,7 +3662,7 @@ dependencies = [
 
 [[package]]
 name = "theater-tests"
-version = "0.3.13"
+version = "0.3.14"
 dependencies = [
  "anyhow",
  "serde",
