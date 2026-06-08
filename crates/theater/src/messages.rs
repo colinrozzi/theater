@@ -382,6 +382,19 @@ pub enum TheaterCommand {
         event_tx: Sender<(TheaterId, ChainEvent)>,
     },
 
+    /// # Unsubscribe a previously-registered chain subscriber
+    ///
+    /// Removes the subscriber that points at `event_tx` from `actor_id`'s
+    /// chain. Identity is by `tokio::sync::mpsc::Sender::same_channel` —
+    /// the sender passed here must be a clone of the same Sender originally
+    /// registered via `SubscribeToActor` (or via `SpawnActor`'s
+    /// `subscription_tx`). A no-op if the chain has no matching subscriber
+    /// or the actor is no longer running.
+    UnsubscribeFromActor {
+        actor_id: TheaterId,
+        event_tx: Sender<(TheaterId, ChainEvent)>,
+    },
+
     /// # Create a new content store
     ///
     /// Creates a new content-addressable storage instance.
@@ -482,6 +495,9 @@ impl TheaterCommand {
             }
             TheaterCommand::SubscribeToActor { actor_id, .. } => {
                 format!("SubscribeToActor: {:?}", actor_id)
+            }
+            TheaterCommand::UnsubscribeFromActor { actor_id, .. } => {
+                format!("UnsubscribeFromActor: {:?}", actor_id)
             }
             TheaterCommand::NewStore { .. } => "NewStore".to_string(),
             TheaterCommand::GetActorHandle { actor_id, .. } => {

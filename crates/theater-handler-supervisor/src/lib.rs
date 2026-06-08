@@ -90,9 +90,11 @@ pub enum SupervisorError {
 /// - Spawn new child actors
 /// - Resume child actors from saved state
 /// - List, restart, and stop children
-/// - Get child state and event chains
+/// - Get child state
 /// - Receive notifications when children error, exit, or are stopped
-/// - Subscribe to all events from children (via subscription_tx)
+/// - Opt in to per-child chain-event delivery via `subscribe-to-child`
+///   (default is opt-out: a freshly-spawned child sends no chain
+///   events to its parent until the parent subscribes)
 /// - Clean up children on shutdown
 #[derive(Clone)]
 #[allow(clippy::type_complexity)]
@@ -339,12 +341,10 @@ impl Handler for SupervisorHandler {
             // Spawns a child actor. If wasm-bytes is provided, uses those bytes instead of loading from manifest.package.
             .func_async_result("spawn", {
                 let supervisor_tx = supervisor_tx.clone();
-                let event_tx = event_tx.clone();
                 let children = children.clone();
                 let theater_tx_holder = theater_tx_holder.clone();
                 move |ctx: AsyncCtx<ActorStore>, input: Value| {
                     let supervisor_tx = supervisor_tx.clone();
-                    let event_tx = event_tx.clone();
                     let children = children.clone();
                     let theater_tx_holder = theater_tx_holder.clone();
                     async move {
@@ -416,9 +416,11 @@ impl Handler for SupervisorHandler {
                                 None => default_init_state(),
                             },
                         };
-                        // Subscribe the shared aggregated event_tx directly.
-                        // The chain tags events with the child's TheaterId
-                        // on send, so no per-child mpsc + forwarder needed.
+                        // Default opt-out: a fresh child does not send chain
+                        // events to its parent. Parents that want per-event
+                        // visibility call `subscribe-to-child` after the
+                        // spawn returns. Lifecycle still flows through
+                        // `supervisor_tx`.
                         let cmd = TheaterCommand::SpawnActor {
                             wasm_bytes,
                             name,
@@ -426,7 +428,7 @@ impl Handler for SupervisorHandler {
                             init_state,
                             response_tx,
                             supervisor_tx: Some(supervisor_tx),
-                            subscription_tx: Some(event_tx.clone()),
+                            subscription_tx: None,
                         };
 
                         if let Err(e) = theater_tx.send(cmd).await {
@@ -592,12 +594,10 @@ impl Handler for SupervisorHandler {
             // If wasm-bytes is provided, uses those bytes instead of loading from manifest.package.
             .func_async_result("resume", {
                 let supervisor_tx = supervisor_tx.clone();
-                let event_tx = event_tx.clone();
                 let children = children.clone();
                 let theater_tx_holder = theater_tx_holder.clone();
                 move |ctx: AsyncCtx<ActorStore>, input: Value| {
                     let supervisor_tx = supervisor_tx.clone();
-                    let event_tx = event_tx.clone();
                     let children = children.clone();
                     let theater_tx_holder = theater_tx_holder.clone();
                     async move {
@@ -617,14 +617,16 @@ impl Handler for SupervisorHandler {
                         let theater_tx = store.theater_tx.clone();
 
                         let (response_tx, response_rx) = oneshot::channel();
-                        // Subscribe the shared aggregated event_tx directly
-                        // — the chain tags events with the child's TheaterId.
+                        // Default opt-out: a resumed child does not send
+                        // chain events to its parent. Parents that want
+                        // per-event visibility call `subscribe-to-child`
+                        // after the resume returns.
                         let cmd = TheaterCommand::ResumeActor {
                             manifest_path: manifest,
                             wasm_bytes,
                             response_tx,
                             supervisor_tx: Some(supervisor_tx),
-                            subscription_tx: Some(event_tx.clone()),
+                            subscription_tx: None,
                         };
 
                         if let Err(e) = theater_tx.send(cmd).await {
@@ -788,6 +790,108 @@ impl Handler for SupervisorHandler {
                         Ok(Ok(state)) => Ok(state),
                         Ok(Err(e)) => Err(Value::String(e.to_string())),
                         Err(e) => Err(Value::String(format!("Failed to receive state: {}", e))),
+                    }
+                }
+            })?
+            // subscribe-to-child: func(child-id: string) -> result<_, string>
+            // Opt the calling supervisor in to chain events from the named
+            // child. Subscriptions are idempotent — the chain identifies
+            // subscribers by Sender channel identity, and the per-handler
+            // event_tx is a single Sender cloned across calls, so resubscribing
+            // an already-subscribed child is a no-op at the chain level.
+            .func_async_result("subscribe-to-child", {
+                let event_tx = event_tx.clone();
+                let children = children.clone();
+                move |ctx: AsyncCtx<ActorStore>, input: Value| {
+                    let event_tx = event_tx.clone();
+                    let children = children.clone();
+                    async move {
+                        let child_id_str = match input {
+                            Value::String(s) => s,
+                            Value::Tuple(args) if args.len() == 1 => match &args[0] {
+                                Value::String(s) => s.clone(),
+                                _ => return Err(Value::String("Invalid child-id argument".to_string())),
+                            },
+                            _ => return Err(Value::String("Invalid subscribe-to-child argument".to_string())),
+                        };
+
+                        let child_id: TheaterId = match child_id_str.parse() {
+                            Ok(id) => id,
+                            Err(e) => return Err(Value::String(format!("Invalid child ID: {}", e))),
+                        };
+
+                        // Validate child is one of ours. The chain's
+                        // SubscribeToActor handler tolerates unknown ids
+                        // but a parent subscribing to a non-child is
+                        // almost always a programming error worth surfacing.
+                        {
+                            let children_guard = children.lock().unwrap();
+                            if !children_guard.contains(&child_id) {
+                                return Err(Value::String(format!(
+                                    "subscribe-to-child: {} is not a child of this supervisor",
+                                    child_id
+                                )));
+                            }
+                        }
+
+                        let store = ctx.data();
+                        let theater_tx = store.theater_tx.clone();
+                        let cmd = TheaterCommand::SubscribeToActor {
+                            actor_id: child_id,
+                            event_tx,
+                        };
+                        if let Err(e) = theater_tx.send(cmd).await {
+                            return Err(Value::String(format!("Failed to send subscribe command: {}", e)));
+                        }
+                        Ok(Value::Tuple(vec![]))
+                    }
+                }
+            })?
+            // unsubscribe-from-child: func(child-id: string) -> result<_, string>
+            // Remove this supervisor's subscription from the named child's
+            // chain. Idempotent — a no-op if the supervisor was not subscribed
+            // or if the child is no longer running.
+            .func_async_result("unsubscribe-from-child", {
+                let event_tx = event_tx.clone();
+                let children = children.clone();
+                move |ctx: AsyncCtx<ActorStore>, input: Value| {
+                    let event_tx = event_tx.clone();
+                    let children = children.clone();
+                    async move {
+                        let child_id_str = match input {
+                            Value::String(s) => s,
+                            Value::Tuple(args) if args.len() == 1 => match &args[0] {
+                                Value::String(s) => s.clone(),
+                                _ => return Err(Value::String("Invalid child-id argument".to_string())),
+                            },
+                            _ => return Err(Value::String("Invalid unsubscribe-from-child argument".to_string())),
+                        };
+
+                        let child_id: TheaterId = match child_id_str.parse() {
+                            Ok(id) => id,
+                            Err(e) => return Err(Value::String(format!("Invalid child ID: {}", e))),
+                        };
+
+                        {
+                            let children_guard = children.lock().unwrap();
+                            if !children_guard.contains(&child_id) {
+                                return Err(Value::String(format!(
+                                    "unsubscribe-from-child: {} is not a child of this supervisor",
+                                    child_id
+                                )));
+                            }
+                        }
+
+                        let store = ctx.data();
+                        let theater_tx = store.theater_tx.clone();
+                        let cmd = TheaterCommand::UnsubscribeFromActor {
+                            actor_id: child_id,
+                            event_tx,
+                        };
+                        if let Err(e) = theater_tx.send(cmd).await {
+                            return Err(Value::String(format!("Failed to send unsubscribe command: {}", e)));
+                        }
+                        Ok(Value::Tuple(vec![]))
                     }
                 }
             })?;
