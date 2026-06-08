@@ -83,6 +83,39 @@ interface supervisor {
     // * `Ok(option<list<u8>>)` - Current state of the child (None if no state)
     // * `Err(string)` - Error message if retrieving state fails
     get-child-state: func(child-id: string) -> result<option<list<u8>>, string>;
+
+    // # Subscribe to a child's chain events
+    //
+    // After this call, every event the named child records to its chain
+    // is dispatched to this supervisor's `handle-child-event`. Subscriptions
+    // are opt-in: a freshly-spawned child sends no chain events to its
+    // parent until the parent subscribes. Idempotent.
+    //
+    // ## Parameters
+    //
+    // * `child-id` - ID of the child actor to subscribe to
+    //
+    // ## Returns
+    //
+    // * `Ok(_)` - Subscription installed (or already present)
+    // * `Err(string)` - Error message if the child id is unknown
+    subscribe-to-child: func(child-id: string) -> result<_, string>;
+
+    // # Stop receiving chain events from a child
+    //
+    // After this call, `handle-child-event` no longer fires for this
+    // child. Lifecycle handlers (error, exit, external-stop) are
+    // unaffected — they ride a separate always-on channel. Idempotent.
+    //
+    // ## Parameters
+    //
+    // * `child-id` - ID of the child actor to unsubscribe from
+    //
+    // ## Returns
+    //
+    // * `Ok(_)` - Subscription removed (or was never present)
+    // * `Err(string)` - Error message if the child id is unknown
+    unsubscribe-from-child: func(child-id: string) -> result<_, string>;
 }
 
 interface supervisor-handlers {

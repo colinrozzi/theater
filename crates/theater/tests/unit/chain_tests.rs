@@ -112,3 +112,81 @@ async fn test_subscriber_attaches_after_first_event_sees_only_subsequent() {
     assert_eq!(collected[0].event_type, "event-1");
     assert_eq!(collected[1].event_type, "event-2");
 }
+
+/// `remove_subscriber` identifies the subscriber by mpsc channel identity
+/// (Sender::same_channel), so any clone of the original Sender matches.
+/// After removal, the subscriber stops receiving events; another subscriber
+/// registered alongside still gets them.
+#[tokio::test]
+async fn test_remove_subscriber_stops_delivery_to_matched_channel() {
+    let actor_id = TheaterId::generate();
+    let mut chain = StateChain::new(actor_id);
+
+    let (target_tx, mut target_rx) = mpsc::channel(16);
+    let (other_tx, mut other_rx) = mpsc::channel(16);
+    chain.add_subscriber(target_tx.clone());
+    chain.add_subscriber(other_tx);
+
+    chain
+        .add_typed_event(create_test_event_data("pre-remove", b"a"))
+        .await
+        .unwrap();
+
+    // Remove via a *clone* of the original sender. Channel-identity match
+    // means any clone routing to the same receiver is sufficient.
+    let removed = chain.remove_subscriber(&target_tx.clone());
+    assert!(removed, "matching subscriber should be removed");
+
+    chain
+        .add_typed_event(create_test_event_data("post-remove", b"b"))
+        .await
+        .unwrap();
+
+    let mut target_collected: Vec<ChainEvent> = Vec::new();
+    while let Ok((_id, event)) = target_rx.try_recv() {
+        target_collected.push(event);
+    }
+    let mut other_collected: Vec<ChainEvent> = Vec::new();
+    while let Ok((_id, event)) = other_rx.try_recv() {
+        other_collected.push(event);
+    }
+
+    assert_eq!(
+        target_collected.len(),
+        1,
+        "target sees only the pre-remove event"
+    );
+    assert_eq!(target_collected[0].event_type, "pre-remove");
+    assert_eq!(
+        other_collected.len(),
+        2,
+        "unrelated subscriber still sees both"
+    );
+}
+
+/// Removing a subscriber that was never registered returns `false` and
+/// leaves existing subscribers intact — the host's idempotent
+/// `unsubscribe-from-child` relies on this.
+#[tokio::test]
+async fn test_remove_subscriber_unknown_is_noop() {
+    let actor_id = TheaterId::generate();
+    let mut chain = StateChain::new(actor_id);
+
+    let (kept_tx, mut kept_rx) = mpsc::channel(16);
+    chain.add_subscriber(kept_tx);
+
+    let (stranger_tx, _stranger_rx) = mpsc::channel::<(TheaterId, ChainEvent)>(16);
+    let removed = chain.remove_subscriber(&stranger_tx);
+    assert!(!removed, "no matching subscriber to remove");
+
+    chain
+        .add_typed_event(create_test_event_data("event-0", b"a"))
+        .await
+        .unwrap();
+
+    let mut collected = 0;
+    while kept_rx.try_recv().is_ok() {
+        collected += 1;
+    }
+    assert_eq!(collected, 1, "kept subscriber still receives events");
+}

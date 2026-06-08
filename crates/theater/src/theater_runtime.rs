@@ -627,6 +627,17 @@ impl TheaterRuntime {
                         );
                     }
                 }
+                TheaterCommand::UnsubscribeFromActor { actor_id, event_tx } => {
+                    debug!("Unsubscribing from events for actor: {:?}", actor_id);
+                    if let Some(chain) = self.chains.get(&actor_id) {
+                        chain.write().await.remove_subscriber(&event_tx);
+                    } else {
+                        debug!(
+                            "UnsubscribeFromActor: no chain for {:?} (actor not running)",
+                            actor_id
+                        );
+                    }
+                }
                 TheaterCommand::NewStore { response_tx } => {
                     debug!("Creating new content store");
                     let store_id = crate::store::ContentStore::new();

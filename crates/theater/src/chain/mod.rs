@@ -179,4 +179,26 @@ impl StateChain {
     pub fn add_subscriber(&mut self, tx: Sender<(TheaterId, ChainEvent)>) {
         self.subscribers.push(tx);
     }
+
+    /// Remove a previously-registered subscriber, identified by channel
+    /// identity (`tokio::sync::mpsc::Sender::same_channel`).
+    ///
+    /// The supervisor-side opt-in subscription model registers a clone of
+    /// the parent supervisor handler's single aggregated event sender on
+    /// each subscribed child's chain. `same_channel` matches all clones
+    /// that route to the same receiver, so the parent can unsubscribe from
+    /// a specific child by passing its own event sender.
+    ///
+    /// Idempotent — returns `true` if a subscriber was removed, `false`
+    /// if no matching subscriber existed. Closed senders are also evicted
+    /// passively on the next emission, so calling this for a child whose
+    /// chain has already torn down is harmless.
+    pub fn remove_subscriber(&mut self, tx: &Sender<(TheaterId, ChainEvent)>) -> bool {
+        if let Some(index) = self.subscribers.iter().position(|s| s.same_channel(tx)) {
+            self.subscribers.swap_remove(index);
+            true
+        } else {
+            false
+        }
+    }
 }

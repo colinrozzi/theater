@@ -37,6 +37,7 @@ pack_types! {
         }
         theater:simple/supervisor {
             spawn: func(manifest: string, init-state: option<value>, wasm-bytes: option<list<u8>>) -> result<string, string>,
+            subscribe-to-child: func(child-id: string) -> result<_, string>,
         }
     }
     exports {
@@ -58,12 +59,27 @@ fn supervisor_spawn(
     wasm_bytes: Option<Vec<u8>>,
 ) -> Result<String, String>;
 
+#[import(module = "theater:simple/supervisor", name = "subscribe-to-child")]
+fn supervisor_subscribe_to_child(child_id: String) -> Result<(), String>;
+
 #[export(name = "theater:simple/actor.init")]
 fn init(state: Value) -> Result<(bool, ()), String> {
     log(String::from("[wedge-supervisor] init — spawning noisy-child"));
     let manifest_path = String::from(DEFAULT_CHILD_MANIFEST);
     match supervisor_spawn(manifest_path, None, None) {
         Ok(child_id) => {
+            // Opt in to the full firehose — the wedge repro's whole
+            // point is that `handle-child-event` fires for every child
+            // event so theater records the amplification on this actor's
+            // chain. Post-PR opt-in default, the parent must subscribe
+            // explicitly for that path to engage.
+            if let Err(e) = supervisor_subscribe_to_child(child_id.clone()) {
+                log(format!(
+                    "[wedge-supervisor] subscribe-to-child failed: {}",
+                    e
+                ));
+                return Err(e);
+            }
             log(format!(
                 "[wedge-supervisor] spawned noisy-child {} — waiting for burst events to amplify",
                 child_id

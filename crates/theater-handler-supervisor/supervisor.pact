@@ -45,5 +45,30 @@ interface supervisor {
 
         // Get a child's current state
         get-child-state: func(child-id: string) -> result<option<list<u8>>, string>
+
+        // Subscribe to a child's chain events.
+        //
+        // After this call, every event the named child records to its
+        // chain is dispatched to this supervisor's `handle-child-event`.
+        // Subscriptions are opt-in: a freshly-spawned child sends no
+        // chain events to its parent until the parent subscribes.
+        //
+        // Idempotent — subscribing a child that is already subscribed
+        // is a no-op. Returns an error if the child id is unknown to
+        // the runtime (e.g., it has already exited).
+        subscribe-to-child: func(child-id: string) -> result<_, string>
+
+        // Stop receiving chain events from a child.
+        //
+        // After this call, `handle-child-event` no longer fires for this
+        // child. Lifecycle handlers (`handle-child-error`, `handle-child-exit`,
+        // `handle-child-external-stop`) are unaffected — they ride a
+        // separate always-on channel.
+        //
+        // Idempotent — unsubscribing a child that is not subscribed
+        // is a no-op. Subscriptions are also auto-released when the
+        // child exits; explicit unsubscribe is only needed when the
+        // parent wants to stop observing a still-running child.
+        unsubscribe-from-child: func(child-id: string) -> result<_, string>
     }
 }
