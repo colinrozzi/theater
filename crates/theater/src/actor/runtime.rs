@@ -171,6 +171,12 @@ impl ActorRuntime {
     ) -> Result<(ShutdownController, Vec<JoinHandle<()>>), ActorRuntimeError> {
         // ---------------- Checkpoint Setup Initial ----------------
 
+        // spawn-bench: phases below all run inside the runtime's setup task
+        // (spawn_actor awaits setup_tx). They contribute to the per-spawn
+        // queue-blocking cost — anything slow here is what wedges the runtime
+        // command loop under load.
+        let build_start = Instant::now();
+
         debug!("Setting up actor store");
 
         if !actor_phase_manager.is_phase(ActorPhase::Starting) {
@@ -281,6 +287,7 @@ impl ActorRuntime {
         handler_ctx.actor_id = Some(id);
         let handlers_for_setup = &mut handlers;
 
+        let phase_start = Instant::now();
         let mut actor_instance = PackInstance::new_with_interceptor(
             name.clone(),
             &wasm_bytes,
@@ -288,17 +295,27 @@ impl ActorRuntime {
             actor_store,
             interceptor,
             |builder: &mut HostLinkerBuilder<'_, ActorStore>| {
-                // Set up host functions for each handler
+                // Set up host functions for each handler. The closure runs
+                // sync inside wasmtime's instantiation; per-handler timing
+                // here measures linker-wiring cost not compile cost.
                 for handler in handlers_for_setup.iter_mut() {
                     debug!(
                         "Setting up Composite host functions for handler '{}'",
                         handler.name()
                     );
+                    let handler_setup_start = Instant::now();
                     match handler.setup_host_functions_composite(builder, &mut handler_ctx) {
                         Ok(()) => {
                             debug!(
                                 "Handler '{}' Composite host functions set up successfully",
                                 handler.name()
+                            );
+                            info!(
+                                phase = "runtime.handler_setup",
+                                actor_id = %id,
+                                handler = handler.name(),
+                                elapsed_ms = handler_setup_start.elapsed().as_millis() as u64,
+                                "spawn phase complete",
                             );
                         }
                         Err(e) => {
@@ -323,6 +340,13 @@ impl ActorRuntime {
             }
         })?;
 
+        info!(
+            phase = "runtime.pack_instance_new",
+            actor_id = %id,
+            wasm_bytes = wasm_bytes.len(),
+            elapsed_ms = phase_start.elapsed().as_millis() as u64,
+            "spawn phase complete (compile + linker + instantiate)",
+        );
         debug!("PackInstance created successfully");
         debug!(
             "Handler context satisfied imports: {:?}",
@@ -338,6 +362,7 @@ impl ActorRuntime {
         // `theater:simple/runtime` which provides `log`, `get-chain`, and `shutdown`.
         // In this case, we compute a subset hash from the handler's functions and
         // compare against the actor's declared interface hash.
+        let phase_start = Instant::now();
         match actor_instance.get_metadata_with_hashes().await {
             Ok(metadata) => {
                 let actor_import_hashes = &metadata.import_hashes;
@@ -434,9 +459,16 @@ impl ActorRuntime {
                 }
 
                 info!("All interface hashes verified for actor {}", id);
+                info!(
+                    phase = "runtime.metadata_and_verify",
+                    actor_id = %id,
+                    elapsed_ms = phase_start.elapsed().as_millis() as u64,
+                    "spawn phase complete",
+                );
 
                 // Cache function type info for host-side validation.
                 // This is mandatory — we guarantee type safety to actors.
+                let phase_start = Instant::now();
                 actor_instance.cache_function_types().await.map_err(|e| {
                     ActorRuntimeError::SetupError {
                         message: format!(
@@ -446,6 +478,12 @@ impl ActorRuntime {
                         ),
                     }
                 })?;
+                info!(
+                    phase = "runtime.cache_function_types",
+                    actor_id = %id,
+                    elapsed_ms = phase_start.elapsed().as_millis() as u64,
+                    "spawn phase complete",
+                );
             }
             Err(e) => {
                 // Actor doesn't have __pack_types metadata - FATAL
@@ -483,9 +521,11 @@ impl ActorRuntime {
         }
 
         // Set up handlers - use the shutdown_controller created earlier
+        let phase_start = Instant::now();
         let mut handler_tasks: Vec<JoinHandle<()>> = vec![];
         let handler_actor_handle = actor_handle.clone();
-        debug!("Setting up {} handlers", handlers.len());
+        let handlers_count = handlers.len();
+        debug!("Setting up {} handlers", handlers_count);
         for mut handler in handlers {
             let handler_name = handler.name().to_string();
             debug!("Spawning task for handler: {}", handler_name);
@@ -515,6 +555,19 @@ impl ActorRuntime {
             });
             handler_tasks.push(handler_task);
         }
+        info!(
+            phase = "runtime.spawn_handler_tasks",
+            actor_id = %id,
+            handlers = handlers_count,
+            elapsed_ms = phase_start.elapsed().as_millis() as u64,
+            "spawn phase complete",
+        );
+        info!(
+            phase = "runtime.build_actor_resources_total",
+            actor_id = %id,
+            elapsed_ms = build_start.elapsed().as_millis() as u64,
+            "build_actor_resources total",
+        );
 
         Ok((shutdown_controller, handler_tasks))
     }

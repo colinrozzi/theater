@@ -28,6 +28,7 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Instant;
 use tokio::sync::mpsc::Receiver;
 use tokio::sync::mpsc::Sender;
 use tokio::sync::RwLock;
@@ -739,6 +740,12 @@ impl TheaterRuntime {
         debug!("Starting actor spawn process for: {}", actor_name);
         debug!("WASM bytes: {} bytes", wasm_bytes.len());
 
+        // spawn-bench: timing spans match the supervisor-side names so the
+        // two streams stitch together by actor_id (post-spawn) or by name
+        // (pre-spawn). spawn_actor itself runs in the runtime command loop,
+        // so every elapsed_ms here represents queue-blocking time.
+        let spawn_actor_start = Instant::now();
+
         // Create a shutdown controller for this specific actor
         let mut shutdown_controller = ShutdownController::new();
         let (mailbox_tx, _mailbox_rx) = mpsc::channel(100);
@@ -778,6 +785,8 @@ impl TheaterRuntime {
         // The caller resolved `init_state` ahead of time (manifest precedence,
         // defaults, etc. live in the caller). spawn_actor takes it at face
         // value and stores it as the actor's initial state.
+        let phase_start = Instant::now();
+        let from_manifest = manifest.is_some();
         let handler_registry = if let Some(ref manifest) = manifest {
             match self.create_handler_registry_for_manifest(manifest).await {
                 Ok(r) => r,
@@ -793,6 +802,13 @@ impl TheaterRuntime {
         } else {
             self.handler_registry.clone()
         };
+        info!(
+            phase = "runtime.handler_registry",
+            actor_id = %actor_id,
+            from_manifest,
+            elapsed_ms = phase_start.elapsed().as_millis() as u64,
+            "spawn phase complete",
+        );
         let initial_state = init_state;
 
         // Start the actor in a detached task
@@ -804,6 +820,7 @@ impl TheaterRuntime {
         // Create channel to receive setup result
         let (setup_tx, setup_rx) = tokio::sync::oneshot::channel::<Result<(), String>>();
 
+        let phase_start = Instant::now();
         let actor_runtime_process = tokio::spawn(async move {
             let _actor_runtime = ActorRuntime::start(
                 actor_id_for_task,
@@ -829,6 +846,12 @@ impl TheaterRuntime {
         match setup_rx.await {
             Ok(Ok(())) => {
                 debug!("Actor {} setup completed successfully", actor_id);
+                info!(
+                    phase = "runtime.setup",
+                    actor_id = %actor_id,
+                    elapsed_ms = phase_start.elapsed().as_millis() as u64,
+                    "spawn phase complete",
+                );
             }
             Ok(Err(e)) => {
                 error!("Actor {} setup failed: {}", actor_id, e);
@@ -867,6 +890,15 @@ impl TheaterRuntime {
 
         self.actors.insert(actor_id, process);
         debug!("Actor process registered with runtime");
+        // elapsed_ms here is the total queue-blocking cost: every ms
+        // counted is one ms the runtime command loop spent serialized
+        // on this spawn instead of draining other commands.
+        info!(
+            phase = "runtime.register",
+            actor_id = %actor_id,
+            elapsed_ms = spawn_actor_start.elapsed().as_millis() as u64,
+            "spawn registered (runtime command loop now free)",
+        );
 
         // Setup is complete; the actor is reachable by RPC. From here on we
         // must not hold the runtime command loop. For `call_init = false`,
@@ -876,6 +908,7 @@ impl TheaterRuntime {
         // (the new SpawnActor command for the child can be picked up by the
         // command loop while the parent's init is still mid-flight).
         if call_init {
+            let init_phase_start = Instant::now();
             tokio::spawn(async move {
                 let init_params = Value::Tuple(vec![]);
                 match actor_handle
@@ -884,6 +917,12 @@ impl TheaterRuntime {
                 {
                     Ok(_) => {
                         debug!("Actor {} init completed", actor_id);
+                        info!(
+                            phase = "runtime.init",
+                            actor_id = %actor_id,
+                            elapsed_ms = init_phase_start.elapsed().as_millis() as u64,
+                            "spawn phase complete",
+                        );
                         let _ = response_tx.send(Ok(actor_id));
                     }
                     Err(e) => {

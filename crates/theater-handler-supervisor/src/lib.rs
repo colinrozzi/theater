@@ -26,7 +26,7 @@ use std::collections::HashSet;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use theater::id::TheaterId;
 use thiserror::Error;
 use tokio::sync::{mpsc, oneshot};
@@ -368,13 +368,20 @@ impl Handler for SupervisorHandler {
                             _ => return Err(Value::String("Invalid spawn arguments: expected (string, option<value>, option<list<u8>>)".to_string())),
                         };
 
+                        let wasm_provided = provided_wasm_bytes.is_some();
                         if let Some(ref bytes) = provided_wasm_bytes {
                             debug!("spawn: manifest={}, wasm_bytes={} bytes", manifest_path, bytes.len());
                         } else {
                             debug!("spawn: manifest={}, wasm_bytes=None (will load from manifest.package)", manifest_path);
                         }
 
+                        // spawn-bench: end-to-end + per-phase timing. Each
+                        // phase emits an info! with elapsed_ms; the outer
+                        // total is reported on the success path below.
+                        let spawn_start = Instant::now();
+
                         // Load and parse manifest
+                        let phase_start = Instant::now();
                         let manifest_str = match resolve_reference(&manifest_path).await {
                             Ok(bytes) => match String::from_utf8(bytes) {
                                 Ok(s) => s,
@@ -382,13 +389,28 @@ impl Handler for SupervisorHandler {
                             },
                             Err(e) => return Err(Value::String(format!("Failed to load manifest: {}", e))),
                         };
+                        info!(
+                            phase = "supervisor.manifest_resolve",
+                            manifest = %manifest_path,
+                            bytes = manifest_str.len(),
+                            elapsed_ms = phase_start.elapsed().as_millis() as u64,
+                            "spawn phase complete",
+                        );
 
+                        let phase_start = Instant::now();
                         let manifest = match ManifestConfig::from_toml_str(&manifest_str) {
                             Ok(m) => m,
                             Err(e) => return Err(Value::String(format!("Failed to parse manifest: {}", e))),
                         };
+                        info!(
+                            phase = "supervisor.manifest_parse",
+                            manifest = %manifest_path,
+                            elapsed_ms = phase_start.elapsed().as_millis() as u64,
+                            "spawn phase complete",
+                        );
 
                         // Resolve wasm bytes
+                        let phase_start = Instant::now();
                         let wasm_bytes = match provided_wasm_bytes {
                             Some(bytes) => bytes,
                             None => {
@@ -398,6 +420,14 @@ impl Handler for SupervisorHandler {
                                 }
                             }
                         };
+                        info!(
+                            phase = "supervisor.wasm_resolve",
+                            manifest = %manifest_path,
+                            bytes = wasm_bytes.len(),
+                            provided = wasm_provided,
+                            elapsed_ms = phase_start.elapsed().as_millis() as u64,
+                            "spawn phase complete",
+                        );
 
                         let store = ctx.data();
                         let theater_tx = store.theater_tx.clone();
@@ -431,6 +461,11 @@ impl Handler for SupervisorHandler {
                             subscription_tx: None,
                         };
 
+                        // runtime_setup_and_init covers: send to runtime command
+                        // channel, runtime drains it, build_actor_resources runs,
+                        // detached init fires response_tx. The latency here is
+                        // the runtime command loop's serialized cost per spawn.
+                        let phase_start = Instant::now();
                         if let Err(e) = theater_tx.send(cmd).await {
                             return Err(Value::String(format!("Failed to send spawn command: {}", e)));
                         }
@@ -445,6 +480,21 @@ impl Handler for SupervisorHandler {
 
                         match response_rx.await {
                             Ok(Ok(actor_id)) => {
+                                let setup_elapsed = phase_start.elapsed().as_millis() as u64;
+                                info!(
+                                    phase = "supervisor.runtime_setup_and_init",
+                                    manifest = %manifest_path,
+                                    actor_id = %actor_id,
+                                    elapsed_ms = setup_elapsed,
+                                    "spawn phase complete",
+                                );
+                                info!(
+                                    phase = "supervisor.spawn_total",
+                                    manifest = %manifest_path,
+                                    actor_id = %actor_id,
+                                    elapsed_ms = spawn_start.elapsed().as_millis() as u64,
+                                    "spawn total complete",
+                                );
                                 // Track the child
                                 {
                                     let mut children_guard = children.lock().unwrap();
