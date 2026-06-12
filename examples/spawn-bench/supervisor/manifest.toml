@@ -1,0 +1,9 @@
+name = "spawn-bench-supervisor"
+version = "0.1.0"
+package = "./target/wasm32-unknown-unknown/release/spawn_bench_supervisor.wasm"
+
+[[handler]]
+type = "runtime"
+
+[[handler]]
+type = "supervisor"

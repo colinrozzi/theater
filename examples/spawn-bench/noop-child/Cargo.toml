@@ -1,0 +1,17 @@
+[package]
+name = "spawn-bench-noop-child"
+version = "0.1.0"
+edition = "2021"
+
+[workspace]
+
+[lib]
+name = "spawn_bench_noop_child"
+crate-type = ["cdylib"]
+
+[dependencies]
+packr-guest = { version = "0.6.0", features = ["derive"] }
+
+[profile.release]
+opt-level = "s"
+lto = true
