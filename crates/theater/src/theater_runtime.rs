@@ -17,7 +17,7 @@ use crate::messages::{
 };
 use crate::messages::{ActorMessage, ActorStatus, TheaterCommand};
 use crate::metrics::ActorMetrics;
-use crate::pack_bridge::{AsyncRuntime, Value};
+use crate::pack_bridge::{CachingPackRuntime, Value};
 use crate::replay::ReplayHandler;
 use crate::shutdown::{ShutdownController, ShutdownType};
 use crate::utils::resolve_reference;
@@ -106,15 +106,17 @@ pub struct TheaterRuntime {
     /// Optional channel to send channel events back to the server
     #[allow(dead_code)]
     channel_events_tx: Option<Sender<crate::messages::ChannelEvent>>,
-    /// Shared async runtime for WASM execution.
+    /// Shared async runtime for WASM execution, with the engine-scoped
+    /// module compile cache.
     ///
-    /// Wraps one `wasmtime::Engine`. Shared across every actor so a future
-    /// compiled-module cache can hit across spawns (`wasmtime::Component`
-    /// is engine-scoped — a per-spawn Engine would defeat any cache).
-    /// `AsyncRuntime::new()` configures `async_support + multi_memory`
-    /// only; no per-actor fuel, epoch, or interrupt setup that would
-    /// justify isolation, so a singleton is safe.
-    pack_runtime: Arc<AsyncRuntime>,
+    /// Wraps one `wasmtime::Engine`. Shared across every actor so the
+    /// compile cache hits across spawns (`wasmtime::Module` is
+    /// engine-scoped — a per-spawn Engine would defeat the cache).
+    /// The underlying `AsyncRuntime::new()` configures
+    /// `async_support + multi_memory` only; no per-actor fuel, epoch, or
+    /// interrupt setup that would justify isolation, so a singleton is
+    /// safe.
+    pack_runtime: Arc<CachingPackRuntime>,
     /// Handler registry
     pub handler_registry: HandlerRegistry,
     /// Global subscribers — receive tagged events from every actor's chain.
@@ -200,7 +202,7 @@ impl TheaterRuntime {
         handler_registry: HandlerRegistry,
     ) -> Result<Self> {
         info!("Theater runtime initializing with Composite runtime");
-        let pack_runtime = Arc::new(AsyncRuntime::new());
+        let pack_runtime = Arc::new(CachingPackRuntime::new());
 
         Ok(Self {
             theater_tx,

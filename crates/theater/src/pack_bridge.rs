@@ -19,8 +19,8 @@ use std::sync::Arc;
 pub use packr::abi::{ConversionError, FromValue, Value, ValueType};
 
 pub use packr::{
-    AsyncCtx, AsyncInstance, AsyncRuntime, CallInterceptor, Ctx, HostFunctionProvider,
-    HostLinkerBuilder, InterfaceBuilder, LinkerError,
+    AsyncCompiledModule, AsyncCtx, AsyncInstance, AsyncRuntime, CallInterceptor, Ctx,
+    HostFunctionProvider, HostLinkerBuilder, InterfaceBuilder, LinkerError, Module,
 };
 // Re-export metadata types for querying actor exports/imports
 pub use packr::{
@@ -40,6 +40,93 @@ use std::collections::HashMap;
 
 use crate::actor::store::ActorStore;
 use crate::id::TheaterId;
+
+/// Shared wasm runtime with an engine-scoped compile cache.
+///
+/// Wraps one `AsyncRuntime` (one `wasmtime::Engine`) plus a map from
+/// content hash of wasm bytes to the compiled `Module`. Spawning N actors
+/// from the same wasm pays the cranelift compile cost once; subsequent
+/// spawns wrap the cached module and skip straight to instantiation.
+///
+/// The cache key is the SHA-256 of the raw wasm bytes, so invalidation is
+/// a non-issue: different bytes are a different entry, identical bytes are
+/// identical modules. Entries live for the lifetime of this runtime
+/// (in a theater server, the process lifetime).
+///
+/// Cache and engine are deliberately one struct: a `wasmtime::Module` is
+/// engine-scoped, so a cache keyed only by content hash but shared across
+/// engines would hand out modules that fail instantiation. Owning both
+/// makes that misuse unrepresentable.
+pub struct CachingPackRuntime {
+    runtime: AsyncRuntime,
+    modules: std::sync::RwLock<HashMap<[u8; 32], Module>>,
+}
+
+impl CachingPackRuntime {
+    pub fn new() -> Self {
+        Self {
+            runtime: AsyncRuntime::new(),
+            modules: std::sync::RwLock::new(HashMap::new()),
+        }
+    }
+
+    /// Get-or-compile the module for these bytes.
+    ///
+    /// Returns the wrapped compiled module and whether it was a cache hit.
+    ///
+    /// Concurrent misses on the same bytes both compile and the last
+    /// insert wins — benign (both modules are valid for this engine) and
+    /// preferable to holding the write lock across a multi-millisecond
+    /// cranelift run. For today's stable actor set this is fine because
+    /// cold cache only happens at process start; if burst-on-cold-cache
+    /// ever matters (e.g. an inbound connection storm against a fresh
+    /// host paying N × cranelift instead of 1), the mitigation is to
+    /// change the value type to `Arc<OnceCell<Module>>` so concurrent
+    /// misses on the same bytes share one compile.
+    pub fn load_module_cached(&self, wasm_bytes: &[u8]) -> Result<(AsyncCompiledModule<'_>, bool)> {
+        use sha2::{Digest, Sha256};
+        let hash: [u8; 32] = Sha256::digest(wasm_bytes).into();
+
+        if let Some(module) = self
+            .modules
+            .read()
+            .expect("module cache lock poisoned")
+            .get(&hash)
+        {
+            return Ok((self.runtime.wrap_module(module.clone()), true));
+        }
+
+        let compiled = self
+            .runtime
+            .load_module(wasm_bytes)
+            .context("Failed to load WASM module with Pack runtime")?;
+        self.modules
+            .write()
+            .expect("module cache lock poisoned")
+            .insert(hash, compiled.module().clone());
+        Ok((compiled, false))
+    }
+
+    /// The underlying runtime, for callers that need the uncached path
+    /// or direct engine access.
+    pub fn runtime(&self) -> &AsyncRuntime {
+        &self.runtime
+    }
+
+    /// Number of distinct modules currently cached.
+    pub fn cached_module_count(&self) -> usize {
+        self.modules
+            .read()
+            .expect("module cache lock poisoned")
+            .len()
+    }
+}
+
+impl Default for CachingPackRuntime {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 /// Cached type information for a function's parameters and return types,
 /// used for host-side contract enforcement.
@@ -179,6 +266,49 @@ impl PackInstance {
         let module = runtime
             .load_module(wasm_bytes)
             .context("Failed to load WASM module with Pack runtime")?;
+
+        let instance = module
+            .instantiate_with_host_and_interceptor_async(
+                actor_store.clone(),
+                interceptor,
+                configure,
+            )
+            .await
+            .context("Failed to instantiate Pack module")?;
+
+        Ok(Self {
+            name: name.into(),
+            instance,
+            actor_store,
+            function_types: HashMap::new(),
+        })
+    }
+
+    /// Like [`Self::new_with_interceptor`], but compiles through the
+    /// runtime's module cache: spawning the same wasm bytes repeatedly
+    /// pays the cranelift compile once and instantiates from the cached
+    /// module afterwards.
+    pub async fn new_with_interceptor_cached<F>(
+        name: impl Into<String>,
+        wasm_bytes: &[u8],
+        runtime: &CachingPackRuntime,
+        actor_store: ActorStore,
+        interceptor: Option<Arc<dyn CallInterceptor>>,
+        configure: F,
+    ) -> Result<Self>
+    where
+        F: FnOnce(&mut HostLinkerBuilder<'_, ActorStore>) -> Result<(), LinkerError>,
+    {
+        let compile_start = std::time::Instant::now();
+        let (module, cache_hit) = runtime.load_module_cached(wasm_bytes)?;
+        tracing::info!(
+            phase = "runtime.module_compile",
+            actor_id = %actor_store.id,
+            cache_hit,
+            wasm_bytes = wasm_bytes.len(),
+            elapsed_ms = compile_start.elapsed().as_millis() as u64,
+            "spawn phase complete",
+        );
 
         let instance = module
             .instantiate_with_host_and_interceptor_async(
@@ -781,5 +911,25 @@ mod tests {
             },
             _ => panic!("Expected Ok variant"),
         }
+    }
+
+    #[test]
+    fn module_cache_hits_on_identical_bytes() {
+        let rt = CachingPackRuntime::new();
+        // wasmtime's default `wat` feature accepts text modules.
+        let wat_a = b"(module)";
+        let wat_b = b"(module (func))";
+
+        let (_, hit) = rt.load_module_cached(wat_a).unwrap();
+        assert!(!hit, "first load of A must be a miss");
+        assert_eq!(rt.cached_module_count(), 1);
+
+        let (_, hit) = rt.load_module_cached(wat_a).unwrap();
+        assert!(hit, "second load of A must be a hit");
+        assert_eq!(rt.cached_module_count(), 1);
+
+        let (_, hit) = rt.load_module_cached(wat_b).unwrap();
+        assert!(!hit, "different bytes must be a miss");
+        assert_eq!(rt.cached_module_count(), 2);
     }
 }

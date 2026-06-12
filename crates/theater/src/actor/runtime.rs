@@ -16,7 +16,9 @@ use crate::id::TheaterId;
 use crate::interceptor::{RecordingInterceptor, ReplayRecordingInterceptor};
 use crate::messages::TheaterCommand;
 use crate::metrics::MetricsCollector;
-use crate::pack_bridge::{AsyncRuntime, CallInterceptor, HostLinkerBuilder, PackInstance, Value};
+use crate::pack_bridge::{
+    CachingPackRuntime, CallInterceptor, HostLinkerBuilder, PackInstance, Value,
+};
 
 use crate::Result;
 use crate::ShutdownController;
@@ -158,7 +160,7 @@ impl ActorRuntime {
         id: TheaterId,
         name: String,
         wasm_bytes: Vec<u8>,
-        pack_runtime: Arc<AsyncRuntime>,
+        pack_runtime: Arc<CachingPackRuntime>,
         chain: Arc<RwLock<StateChain>>,
         handler_registry: HandlerRegistry,
         theater_tx: Sender<TheaterCommand>,
@@ -288,7 +290,7 @@ impl ActorRuntime {
         let handlers_for_setup = &mut handlers;
 
         let phase_start = Instant::now();
-        let mut actor_instance = PackInstance::new_with_interceptor(
+        let mut actor_instance = PackInstance::new_with_interceptor_cached(
             name.clone(),
             &wasm_bytes,
             &pack_runtime,
@@ -577,7 +579,7 @@ impl ActorRuntime {
         id: TheaterId,
         name: String,
         wasm_bytes: Vec<u8>,
-        pack_runtime: Arc<AsyncRuntime>,
+        pack_runtime: Arc<CachingPackRuntime>,
         chain: Arc<RwLock<StateChain>>,
         handler_registry: HandlerRegistry,
         theater_tx: Sender<TheaterCommand>,
