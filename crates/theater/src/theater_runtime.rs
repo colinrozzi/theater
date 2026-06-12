@@ -106,9 +106,15 @@ pub struct TheaterRuntime {
     /// Optional channel to send channel events back to the server
     #[allow(dead_code)]
     channel_events_tx: Option<Sender<crate::messages::ChannelEvent>>,
-    /// Composite async runtime for WASM execution
-    #[allow(dead_code)]
-    pack_runtime: AsyncRuntime,
+    /// Shared async runtime for WASM execution.
+    ///
+    /// Wraps one `wasmtime::Engine`. Shared across every actor so a future
+    /// compiled-module cache can hit across spawns (`wasmtime::Component`
+    /// is engine-scoped — a per-spawn Engine would defeat any cache).
+    /// `AsyncRuntime::new()` configures `async_support + multi_memory`
+    /// only; no per-actor fuel, epoch, or interrupt setup that would
+    /// justify isolation, so a singleton is safe.
+    pack_runtime: Arc<AsyncRuntime>,
     /// Handler registry
     pub handler_registry: HandlerRegistry,
     /// Global subscribers — receive tagged events from every actor's chain.
@@ -194,7 +200,7 @@ impl TheaterRuntime {
         handler_registry: HandlerRegistry,
     ) -> Result<Self> {
         info!("Theater runtime initializing with Composite runtime");
-        let pack_runtime = AsyncRuntime::new();
+        let pack_runtime = Arc::new(AsyncRuntime::new());
 
         Ok(Self {
             theater_tx,
@@ -811,11 +817,13 @@ impl TheaterRuntime {
         );
         let initial_state = init_state;
 
-        // Start the actor in a detached task
-        // Each actor gets its own AsyncRuntime for isolation
+        // Start the actor in a detached task. The pack runtime (and the
+        // wasmtime Engine inside it) is shared across every spawn —
+        // `Arc::clone` is cheap and lets a future compile cache hit
+        // across spawns.
         let actor_id_for_task = actor_id;
         let actor_name_for_task = actor_name.clone();
-        let pack_runtime = AsyncRuntime::new();
+        let pack_runtime = self.pack_runtime.clone();
 
         // Create channel to receive setup result
         let (setup_tx, setup_rx) = tokio::sync::oneshot::channel::<Result<(), String>>();
