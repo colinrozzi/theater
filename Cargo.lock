@@ -3310,7 +3310,7 @@ dependencies = [
 
 [[package]]
 name = "theater"
-version = "0.3.25"
+version = "0.3.26"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3549,7 +3549,7 @@ dependencies = [
 
 [[package]]
 name = "theater-handler-supervisor"
-version = "0.3.16"
+version = "0.3.17"
 dependencies = [
  "anyhow",
  "chrono",
