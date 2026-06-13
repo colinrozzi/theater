@@ -52,6 +52,7 @@ rust-version = "1.86.0"
 
 [workspace.dependencies]
 anyhow = "1.0"
+sha2 = "0.10"
 tokio = { version = "1.0", features = ["full"] }
 tokio-util = { version = "0.7.13" }
 serde = { version = "1.0", features = ["derive"] }
@@ -94,8 +95,8 @@ theater-handler-podman = { version = "0.3.13", path = "crates/theater-handler-po
 # theater-handler-timing = { version = "0.3.9", path = "crates/deprecated/theater-handler-timing" }
 
 # Pack runtime integration (Graph ABI-based WASM runtime)
-packr = "0.7"
-packr-abi = "0.7"
+packr = "0.7.1"
+packr-abi = "0.7.1"
 
 # Metadata for Nix crane builds
 [workspace.metadata.crane]

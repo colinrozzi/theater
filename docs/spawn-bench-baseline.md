@@ -114,5 +114,29 @@ spawn instead of draining other commands.
    from the host CLI, each spawning M children. Surface the runtime
    command-channel queue depth under load. Will need either a small
    harness or N CLI invocations.
-3. Once a `Component` cache is prototyped: re-run this baseline, compare
-   `runtime.pack_instance_new` distributions.
+3. ~~Once a `Component` cache is prototyped: re-run this baseline, compare
+   `runtime.pack_instance_new` distributions.~~ Done — see below.
+
+## Compile cache results (engine sharing + module cache, 2026-06-12)
+
+Same bench, same hardware, after the engine-sharing refactor
+(theater #114) and the `CachingPackRuntime` module cache (SHA-256 of
+wasm bytes → `wasmtime::Module`, via packr's `wrap_module` from pack #29).
+
+Cache behavior across the run: **2 misses** (bench supervisor itself +
+first noop-child), **49 hits**.
+
+| Phase (ms)                          |   n |   min |   p50 |   p95 |   p99 |   max |
+|--------------------------------------|----:|------:|------:|------:|------:|------:|
+| supervisor.spawn_total               |  50 |     0 |   **0** |     0 |    11 |    11 |
+| runtime.module_compile               |  51 |     0 |     0 |     0 |    14 |    14 |
+| runtime.pack_instance_new            |  51 |     0 |   **0** |     0 |    14 |    14 |
+| runtime.register (queue-blocking)    |  51 |     0 |   **0** |     0 |    15 |    15 |
+
+Warm-path spawn drops from **~10 ms to sub-millisecond** (elapsed_ms=0
+means <1 ms at this instrumentation resolution). The p99/max entries are
+the two cold compiles — exactly the expected shape. The runtime command
+loop's per-spawn serialization cost on the warm path is now negligible;
+the spawn-rate ceiling moves from ~100/sec to wherever instantiate +
+init-dispatch tops out (>1000/sec; finer-grained instrumentation needed
+to measure precisely).
