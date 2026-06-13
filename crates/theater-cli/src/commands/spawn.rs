@@ -1,6 +1,7 @@
 use anyhow::Result;
 use clap::{Parser, ValueEnum};
 use std::io::Write;
+use std::sync::Arc;
 use tokio::sync::mpsc;
 use tracing::{debug, error};
 
@@ -14,7 +15,7 @@ use theater::handler::HandlerRegistry;
 use theater::messages::{default_init_state, TheaterCommand};
 use theater::pack_bridge::Value;
 use theater::theater_runtime::TheaterRuntime;
-use theater::utils::resolve_reference;
+use theater::utils::{resolve_reference, ResourceCache};
 use theater::ManifestConfig;
 use theater::TheaterId;
 use theater_handler_loop::LoopHandler;
@@ -109,6 +110,7 @@ fn format_event_json(event: &ChainEvent, actor_id: &TheaterId) -> String {
 fn create_handler_registry(
     theater_tx: mpsc::Sender<TheaterCommand>,
     show_actor_logs: bool,
+    resource_cache: Arc<ResourceCache>,
 ) -> Result<HandlerRegistry, CliError> {
     let mut registry = HandlerRegistry::new();
 
@@ -123,9 +125,14 @@ fn create_handler_registry(
     let store_config = StoreHandlerConfig::default();
     registry.register(StoreHandler::new(store_config, None));
 
-    // Supervisor handler - allows spawning/managing child actors
+    // Supervisor handler - allows spawning/managing child actors.
+    // Wired with the CLI process's resource cache so a child whose
+    // manifest sets `static_package = true` hits the cache on repeat
+    // spawns rather than re-fetching its wasm.
     let supervisor_config = SupervisorHostConfig {};
-    registry.register(SupervisorHandler::new(supervisor_config, None));
+    registry.register(
+        SupervisorHandler::new(supervisor_config, None).with_resource_cache(resource_cache),
+    );
 
     // Message server handler - inter-actor messaging
     let message_router = MessageRouter::new();
@@ -199,7 +206,11 @@ async fn run(args: &SpawnArgs, ctx: &CommandContext, call_init: bool) -> Result<
 
     // Create the TheaterRuntime in-process
     let (theater_tx, theater_rx) = mpsc::channel::<TheaterCommand>(32);
-    let handler_registry = create_handler_registry(theater_tx.clone(), !args.no_actor_logs)?;
+    // One URL→bytes cache shared across every supervisor in this CLI
+    // invocation. Lasts until the CLI process exits.
+    let resource_cache = Arc::new(ResourceCache::new());
+    let handler_registry =
+        create_handler_registry(theater_tx.clone(), !args.no_actor_logs, resource_cache)?;
 
     let mut runtime = TheaterRuntime::new(
         theater_tx.clone(),

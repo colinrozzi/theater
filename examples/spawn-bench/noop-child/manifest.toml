@@ -4,6 +4,12 @@ version = "0.1.0"
 # own directory. Bench docs assume `theater spawn ./supervisor/manifest.toml`
 # is run from the spawn-bench/ directory; this path resolves from there.
 package = "./noop-child/target/wasm32-unknown-unknown/release/spawn_bench_noop_child.wasm"
+# Bench is the exact scenario the URL-bytes cache is for: 50 spawns of an
+# unchanging wasm. Operator's assertion that this package is immutable
+# for the lifetime of the theater process; the supervisor's wasm fetch
+# goes through ResourceCache and `supervisor.wasm_resolve` hits after the
+# first miss.
+static_package = true
 
 [[handler]]
 type = "runtime"

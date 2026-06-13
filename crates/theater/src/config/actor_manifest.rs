@@ -22,6 +22,18 @@ pub struct ManifestConfig {
     /// Initial state to pass to the actor's init function.
     /// Can be a JSON string that will be converted to bytes.
     pub initial_state: Option<String>,
+    /// Operator's assertion that `package` is a content-addressed URL
+    /// whose bytes will not change for the lifetime of the theater
+    /// process. When `true`, the supervisor's wasm fetch goes through
+    /// the runtime's [`crate::utils::ResourceCache`] — the first spawn
+    /// pays the round-trip, subsequent spawns hit the cache.
+    ///
+    /// Default `false`: every spawn refetches. Set `true` for release
+    /// assets (`https://github.com/.../releases/download/vX.Y.Z/foo.wasm`)
+    /// or operator-controlled CDN paths; leave `false` for branch-tip
+    /// URLs even if "main rarely changes."
+    #[serde(default)]
+    pub static_package: bool,
     #[serde(default, skip_serializing_if = "is_default_permission_policy")]
     pub permission_policy: HandlerPermissionPolicy,
     #[serde(default, rename = "handler")]

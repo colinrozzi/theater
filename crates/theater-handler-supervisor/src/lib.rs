@@ -13,7 +13,7 @@ use theater::config::permissions::SupervisorPermissions;
 use theater::handler::{Handler, HandlerContext, SharedActorInstance};
 use theater::messages::{default_init_state, ActorResult, TheaterCommand};
 use theater::shutdown::ShutdownReceiver;
-use theater::utils::resolve_reference;
+use theater::utils::{resolve_reference, resolve_reference_cached, ResourceCache};
 use theater::ManifestConfig;
 
 // Pack integration
@@ -112,6 +112,12 @@ pub struct SupervisorHandler {
     children: Arc<Mutex<HashSet<TheaterId>>>,
     /// Theater command sender for stopping children on shutdown
     theater_tx: Arc<Mutex<Option<mpsc::Sender<TheaterCommand>>>>,
+    /// Optional shared URL-bytes cache. When present, spawns of children
+    /// whose manifest sets `static_package = true` fetch the wasm
+    /// through this cache instead of re-resolving every time.
+    /// Constructed once at server bootstrap and shared across every
+    /// supervisor-capable actor; see [`Self::with_resource_cache`].
+    resource_cache: Option<Arc<ResourceCache>>,
     #[allow(dead_code)]
     permissions: Option<SupervisorPermissions>,
 }
@@ -135,8 +141,18 @@ impl SupervisorHandler {
             event_rx: Arc::new(Mutex::new(Some(event_rx))),
             children: Arc::new(Mutex::new(HashSet::new())),
             theater_tx: Arc::new(Mutex::new(None)),
+            resource_cache: None,
             permissions,
         }
+    }
+
+    /// Wire in a shared `ResourceCache` so spawns of children whose
+    /// manifest has `static_package = true` skip the wasm-bytes fetch on
+    /// repeat calls. Without this the handler still works — the
+    /// `static_package` flag is just ignored and every spawn refetches.
+    pub fn with_resource_cache(mut self, cache: Arc<ResourceCache>) -> Self {
+        self.resource_cache = Some(cache);
+        self
     }
 
     /// Get a clone of the supervisor channel sender
@@ -335,6 +351,7 @@ impl Handler for SupervisorHandler {
         let event_tx = self.event_tx.clone();
         let children = self.children.clone();
         let theater_tx_holder = self.theater_tx.clone();
+        let resource_cache = self.resource_cache.clone();
 
         builder.interface("theater:simple/supervisor")?
             // spawn: func(manifest: string, wasm-bytes: option<list<u8>>) -> result<string, string>
@@ -343,10 +360,12 @@ impl Handler for SupervisorHandler {
                 let supervisor_tx = supervisor_tx.clone();
                 let children = children.clone();
                 let theater_tx_holder = theater_tx_holder.clone();
+                let resource_cache = resource_cache.clone();
                 move |ctx: AsyncCtx<ActorStore>, input: Value| {
                     let supervisor_tx = supervisor_tx.clone();
                     let children = children.clone();
                     let theater_tx_holder = theater_tx_holder.clone();
+                    let resource_cache = resource_cache.clone();
                     async move {
                         // Parse input: (string, option<value>, option<list<u8>>)
                         // init-state: None  → fall back to manifest.initial_state
@@ -409,14 +428,42 @@ impl Handler for SupervisorHandler {
                             "spawn phase complete",
                         );
 
-                        // Resolve wasm bytes
+                        // Resolve wasm bytes.
+                        //
+                        // Three paths: caller-provided bytes (no fetch),
+                        // cached fetch (when manifest opts in via
+                        // static_package and the handler was wired with a
+                        // ResourceCache), or plain uncached fetch.
                         let phase_start = Instant::now();
+                        let mut cache_hit = false;
+                        let mut used_cache = false;
                         let wasm_bytes = match provided_wasm_bytes {
                             Some(bytes) => bytes,
                             None => {
-                                match resolve_reference(&manifest.package).await {
-                                    Ok(bytes) => bytes,
-                                    Err(e) => return Err(Value::String(format!("Failed to load WASM: {}", e))),
+                                match (manifest.static_package, resource_cache.as_deref()) {
+                                    (true, Some(cache)) => {
+                                        used_cache = true;
+                                        match resolve_reference_cached(&manifest.package, cache).await {
+                                            Ok((arc, hit)) => {
+                                                cache_hit = hit;
+                                                // Caller expects owned bytes; the
+                                                // cache returns Arc to deduplicate
+                                                // RAM, but the spawn pipeline
+                                                // currently takes Vec<u8> by value
+                                                // into the runtime command. One
+                                                // copy per spawn is the price of
+                                                // not threading Arc through the
+                                                // whole runtime; cheap relative to
+                                                // compile.
+                                                (*arc).clone()
+                                            }
+                                            Err(e) => return Err(Value::String(format!("Failed to load WASM: {}", e))),
+                                        }
+                                    }
+                                    _ => match resolve_reference(&manifest.package).await {
+                                        Ok(bytes) => bytes,
+                                        Err(e) => return Err(Value::String(format!("Failed to load WASM: {}", e))),
+                                    },
                                 }
                             }
                         };
@@ -425,6 +472,8 @@ impl Handler for SupervisorHandler {
                             manifest = %manifest_path,
                             bytes = wasm_bytes.len(),
                             provided = wasm_provided,
+                            used_cache,
+                            cache_hit,
                             elapsed_ms = phase_start.elapsed().as_millis() as u64,
                             "spawn phase complete",
                         );
@@ -515,7 +564,9 @@ impl Handler for SupervisorHandler {
             // returns an error if the child doesn't complete within that time.
             // Same init-state semantics as `spawn` — see that function's docs.
             .func_async_result("spawn-and-wait", {
+                let resource_cache = resource_cache.clone();
                 move |ctx: AsyncCtx<ActorStore>, input: Value| {
+                    let resource_cache = resource_cache.clone();
                     async move {
                         // Parse input: (string, option<value>, option<list<u8>>, option<u64>)
                         let (manifest_path, init_state_override, provided_wasm_bytes, timeout_ms) = match input {
@@ -552,16 +603,45 @@ impl Handler for SupervisorHandler {
                             Err(e) => return Err(Value::String(format!("Failed to parse manifest: {}", e))),
                         };
 
-                        // Resolve wasm bytes
+                        // Resolve wasm bytes — same three paths as `spawn`.
+                        // Emits `supervisor.wasm_resolve` so the
+                        // used_cache / cache_hit observability story
+                        // matches the `spawn` host fn — operators
+                        // inspecting bench logs see the same fields on
+                        // both variants.
+                        let wasm_provided = provided_wasm_bytes.is_some();
+                        let phase_start = Instant::now();
+                        let mut used_cache = false;
+                        let mut cache_hit = false;
                         let wasm_bytes = match provided_wasm_bytes {
                             Some(bytes) => bytes,
-                            None => {
-                                match resolve_reference(&manifest.package).await {
+                            None => match (manifest.static_package, resource_cache.as_deref()) {
+                                (true, Some(cache)) => {
+                                    used_cache = true;
+                                    match resolve_reference_cached(&manifest.package, cache).await {
+                                        Ok((arc, hit)) => {
+                                            cache_hit = hit;
+                                            (*arc).clone()
+                                        }
+                                        Err(e) => return Err(Value::String(format!("Failed to load WASM: {}", e))),
+                                    }
+                                }
+                                _ => match resolve_reference(&manifest.package).await {
                                     Ok(bytes) => bytes,
                                     Err(e) => return Err(Value::String(format!("Failed to load WASM: {}", e))),
-                                }
-                            }
+                                },
+                            },
                         };
+                        info!(
+                            phase = "supervisor.wasm_resolve",
+                            manifest = %manifest_path,
+                            bytes = wasm_bytes.len(),
+                            provided = wasm_provided,
+                            used_cache,
+                            cache_hit,
+                            elapsed_ms = phase_start.elapsed().as_millis() as u64,
+                            "spawn phase complete",
+                        );
 
                         let store = ctx.data();
                         let theater_tx = store.theater_tx.clone();

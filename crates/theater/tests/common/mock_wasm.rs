@@ -130,6 +130,7 @@ impl MockActorComponentFactory {
             description: None,
             long_description: None,
             initial_state: None,
+            static_package: false,
             permission_policy: Default::default(),
         };
 
