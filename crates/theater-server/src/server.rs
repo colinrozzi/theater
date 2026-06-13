@@ -24,7 +24,7 @@ use theater::handler::HandlerRegistry;
 use theater::id::TheaterId;
 use theater::messages::{default_init_state, ChannelId, TheaterCommand};
 use theater::theater_runtime::TheaterRuntime;
-use theater::utils::resolve_reference;
+use theater::utils::{resolve_reference, ResourceCache};
 use theater::TheaterRuntimeError;
 
 // Import Theater-specific handlers only
@@ -309,6 +309,7 @@ struct ChannelSubscription {
 /// to use the MessageRouter for external client messaging.
 fn create_root_handler_registry(
     theater_tx: mpsc::Sender<TheaterCommand>,
+    resource_cache: Arc<ResourceCache>,
 ) -> (
     HandlerRegistry,
     theater_handler_message_server::MessageRouter,
@@ -329,9 +330,14 @@ fn create_root_handler_registry(
     let store_config = StoreHandlerConfig::default();
     registry.register(StoreHandler::new(store_config, None));
 
-    // Supervisor handler - allows actors to spawn and manage child actors
+    // Supervisor handler - allows actors to spawn and manage child actors.
+    // The resource cache is shared across every supervisor-capable actor;
+    // children whose manifests opt in via `static_package = true` skip
+    // the wasm-bytes fetch on repeat spawns.
     let supervisor_config = SupervisorHostConfig {};
-    registry.register(SupervisorHandler::new(supervisor_config, None));
+    registry.register(
+        SupervisorHandler::new(supervisor_config, None).with_resource_cache(resource_cache),
+    );
 
     // Message server handler - provides inter-actor messaging
     let message_router = theater_handler_message_server::MessageRouter::new();
@@ -423,9 +429,23 @@ impl TheaterServer {
         // Create channel for runtime to send channel events back to server
         let (channel_events_tx, channel_events_rx) = mpsc::channel(32);
 
+        // Shared URL→bytes cache; one per theater process. Wired into
+        // the supervisor host fn only — children spawned via
+        // `theater:simple/supervisor.spawn` whose manifest sets
+        // `static_package = true` pay the wasm fetch once per process.
+        // The runtime's other entry points (the top-level `StartActor`
+        // management command below, and `TheaterCommand::ResumeActor`
+        // in `theater_runtime.rs`) still call `resolve_reference`
+        // directly and do not consult this cache. Threading it onto
+        // `TheaterRuntime` is the obvious next layer; the motivating
+        // consumer (frontdoor per-conn-child) goes through the
+        // supervisor path, so it is not in scope here.
+        let resource_cache = Arc::new(ResourceCache::new());
+
         // Create handler registry with all migrated handlers (root permissions)
         // Also get the MessageRouter for external client messaging
-        let (handler_registry, message_router) = create_root_handler_registry(theater_tx.clone());
+        let (handler_registry, message_router) =
+            create_root_handler_registry(theater_tx.clone(), resource_cache.clone());
 
         // Create the runtime with the handler registry
         let runtime = TheaterRuntime::new(

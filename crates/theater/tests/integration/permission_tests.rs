@@ -53,6 +53,7 @@ async fn test_handler_creation_permission_validation() {
         description: None,
         long_description: None,
         initial_state: None,
+        static_package: false,
         permission_policy: Default::default(),
     };
 

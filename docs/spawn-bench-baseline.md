@@ -140,3 +140,31 @@ loop's per-spawn serialization cost on the warm path is now negligible;
 the spawn-rate ceiling moves from ~100/sec to wherever instantiate +
 init-dispatch tops out (>1000/sec; finer-grained instrumentation needed
 to measure precisely).
+
+## URL→bytes cache results (`static_package` opt-in, 2026-06-13)
+
+After flipping `noop-child/manifest.toml` to `static_package = true` and
+re-running the bench against a build that wires
+[`crate::utils::ResourceCache`] through the supervisor handler:
+
+Cache behavior across the run (wasm-bytes path):
+**1 miss + 49 hits**, `used_cache=true` on all 50 spawns.
+
+| Phase (ms)               |   n |   min |   p50 |   p99 |
+|---------------------------|----:|------:|------:|------:|
+| supervisor.wasm_resolve   |  50 |     0 |     0 |     0 |
+| supervisor.spawn_total    |  50 |     0 |     0 |    11 |
+
+Wall-clock on this bench doesn't move because the noop-child WASM lives
+on local disk and the OS page cache is already hot — pre-cache and
+post-cache fetch were both <1 ms. **The win shows up in production**,
+where `supervisor.wasm_resolve` is a network round-trip to a GitHub
+release-asset URL. With `static_package = true`, that round-trip
+happens once per process and never again for the same URL.
+
+The cache is opt-in per child manifest, off by default. Operators
+declaring a URL static commit to its content being addressed by the
+URL for the lifetime of the theater process; a redeploy needs a
+restart to take effect. Frontdoor's per-conn-child shape and any
+similar sentinel-managed prod actor are the intended consumers;
+branch-tip URLs (`/raw/main/x.wasm`) should leave it off.
