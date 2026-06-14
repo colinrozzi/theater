@@ -20,7 +20,7 @@ use crate::metrics::ActorMetrics;
 use crate::pack_bridge::{CachingPackRuntime, Value};
 use crate::replay::ReplayHandler;
 use crate::shutdown::{ShutdownController, ShutdownType};
-use crate::utils::resolve_reference;
+use crate::utils::{resolve_reference, resolve_reference_cached, ResourceCache};
 use crate::Result;
 use crate::TheaterRuntimeError;
 use crate::{ManifestConfig, StateChain};
@@ -50,9 +50,11 @@ use tracing::{debug, error, info, warn};
 /// ## Example
 ///
 /// ```rust,no_run
+/// use std::sync::Arc;
 /// use theater::theater_runtime::TheaterRuntime;
 /// use theater::handler::HandlerRegistry;
 /// use theater::messages::TheaterCommand;
+/// use theater::utils::ResourceCache;
 /// use tokio::sync::mpsc;
 /// use anyhow::Result;
 ///
@@ -61,7 +63,13 @@ use tracing::{debug, error, info, warn};
 ///     let (theater_tx, theater_rx) = mpsc::channel(100);
 ///
 ///     // Initialize the runtime
-///     let mut runtime = TheaterRuntime::new(theater_tx.clone(), theater_rx, None, HandlerRegistry::new()).await?;
+///     let mut runtime = TheaterRuntime::new(
+///         theater_tx.clone(),
+///         theater_rx,
+///         None,
+///         HandlerRegistry::new(),
+///         Arc::new(ResourceCache::new()),
+///     ).await?;
 ///
 ///     // Start a background task to run the runtime
 ///     let runtime_handle = tokio::spawn(async move {
@@ -117,6 +125,15 @@ pub struct TheaterRuntime {
     /// interrupt setup that would justify isolation, so a singleton is
     /// safe.
     pack_runtime: Arc<CachingPackRuntime>,
+    /// Shared URL→bytes cache. Consulted on every wasm-resolve in the
+    /// runtime's own entry points (`ResumeActor`, and by callers of
+    /// [`Self::resource_cache`] for top-level start paths like the
+    /// server's `ManagementCommand::StartActor` or the CLI's
+    /// `theater spawn`). The supervisor host fn uses its own clone of
+    /// the same `Arc<ResourceCache>` so a single process has exactly
+    /// one cache regardless of which entry point a spawn comes from.
+    /// Opt-in per child manifest via `static_package = true`.
+    resource_cache: Arc<ResourceCache>,
     /// Handler registry
     pub handler_registry: HandlerRegistry,
     /// Global subscribers — receive tagged events from every actor's chain.
@@ -183,15 +200,23 @@ impl TheaterRuntime {
     /// ## Example
     ///
     /// ```rust,no_run
+    /// # use std::sync::Arc;
     /// # use theater::theater_runtime::TheaterRuntime;
     /// # use theater::handler::HandlerRegistry;
     /// # use theater::messages::TheaterCommand;
+    /// # use theater::utils::ResourceCache;
     /// # use tokio::sync::mpsc;
     /// # use anyhow::Result;
     /// #
     /// # async fn example() -> Result<()> {
     /// let (theater_tx, theater_rx) = mpsc::channel::<TheaterCommand>(100);
-    /// let runtime = TheaterRuntime::new(theater_tx, theater_rx, None, HandlerRegistry::new()).await?;
+    /// let runtime = TheaterRuntime::new(
+    ///     theater_tx,
+    ///     theater_rx,
+    ///     None,
+    ///     HandlerRegistry::new(),
+    ///     Arc::new(ResourceCache::new()),
+    /// ).await?;
     /// # Ok(())
     /// # }
     /// ```
@@ -200,6 +225,7 @@ impl TheaterRuntime {
         theater_rx: Receiver<TheaterCommand>,
         channel_events_tx: Option<Sender<crate::messages::ChannelEvent>>,
         handler_registry: HandlerRegistry,
+        resource_cache: Arc<ResourceCache>,
     ) -> Result<Self> {
         info!("Theater runtime initializing with Composite runtime");
         let pack_runtime = Arc::new(CachingPackRuntime::new());
@@ -212,9 +238,19 @@ impl TheaterRuntime {
             channels: HashMap::new(),
             channel_events_tx,
             pack_runtime,
+            resource_cache,
             handler_registry,
             global_subscribers: Vec::new(),
         })
+    }
+
+    /// The shared URL→bytes cache. Server top-level start, CLI top-level
+    /// spawn, and any external caller that constructs a `TheaterCommand`
+    /// can clone this to honor a child manifest's `static_package` flag
+    /// — the same cache backing the runtime's own `ResumeActor` path
+    /// and the supervisor host fn.
+    pub fn resource_cache(&self) -> &Arc<ResourceCache> {
+        &self.resource_cache
     }
 
     /// Register a subscriber that will receive events from every actor.
@@ -388,18 +424,46 @@ impl TheaterRuntime {
                         }
                     };
 
-                    // Resolve WASM bytes
+                    // Resolve WASM bytes. Honors the child's
+                    // `static_package` opt-in — when the operator has
+                    // declared the URL content-addressed, the wasm
+                    // fetch goes through this runtime's shared
+                    // ResourceCache (the same one the supervisor host
+                    // fn uses).
                     let wasm_bytes = match wasm_bytes {
                         Some(bytes) => bytes,
-                        None => match resolve_reference(&manifest.package).await {
-                            Ok(bytes) => bytes,
-                            Err(e) => {
-                                error!("Failed to load WASM: {}", e);
-                                let _ = response_tx
-                                    .send(Err(anyhow::anyhow!("Failed to load WASM: {}", e)));
-                                continue;
+                        None => {
+                            if manifest.static_package {
+                                match resolve_reference_cached(
+                                    &manifest.package,
+                                    &self.resource_cache,
+                                )
+                                .await
+                                {
+                                    Ok((arc, _hit)) => (*arc).clone(),
+                                    Err(e) => {
+                                        error!("Failed to load WASM: {}", e);
+                                        let _ = response_tx.send(Err(anyhow::anyhow!(
+                                            "Failed to load WASM: {}",
+                                            e
+                                        )));
+                                        continue;
+                                    }
+                                }
+                            } else {
+                                match resolve_reference(&manifest.package).await {
+                                    Ok(bytes) => bytes,
+                                    Err(e) => {
+                                        error!("Failed to load WASM: {}", e);
+                                        let _ = response_tx.send(Err(anyhow::anyhow!(
+                                            "Failed to load WASM: {}",
+                                            e
+                                        )));
+                                        continue;
+                                    }
+                                }
                             }
-                        },
+                        }
                     };
 
                     let name = Some(manifest.name.clone());

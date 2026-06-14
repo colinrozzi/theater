@@ -15,7 +15,7 @@ use theater::handler::HandlerRegistry;
 use theater::messages::{default_init_state, TheaterCommand};
 use theater::pack_bridge::Value;
 use theater::theater_runtime::TheaterRuntime;
-use theater::utils::{resolve_reference, ResourceCache};
+use theater::utils::{resolve_reference, resolve_reference_cached, ResourceCache};
 use theater::ManifestConfig;
 use theater::TheaterId;
 use theater_handler_loop::LoopHandler;
@@ -206,17 +206,23 @@ async fn run(args: &SpawnArgs, ctx: &CommandContext, call_init: bool) -> Result<
 
     // Create the TheaterRuntime in-process
     let (theater_tx, theater_rx) = mpsc::channel::<TheaterCommand>(32);
-    // One URL→bytes cache shared across every supervisor in this CLI
-    // invocation. Lasts until the CLI process exits.
+    // One URL→bytes cache shared across every entry point in this CLI
+    // invocation: the top-level wasm fetch below, the supervisor host
+    // fn (via `create_handler_registry`), and `ResumeActor` (via
+    // TheaterRuntime). Lasts until the CLI process exits.
     let resource_cache = Arc::new(ResourceCache::new());
-    let handler_registry =
-        create_handler_registry(theater_tx.clone(), !args.no_actor_logs, resource_cache)?;
+    let handler_registry = create_handler_registry(
+        theater_tx.clone(),
+        !args.no_actor_logs,
+        resource_cache.clone(),
+    )?;
 
     let mut runtime = TheaterRuntime::new(
         theater_tx.clone(),
         theater_rx,
         None, // no channel events forwarding needed
         handler_registry,
+        resource_cache.clone(),
     )
     .await
     .map_err(|e| CliError::server_error(format!("Failed to create runtime: {}", e)))?;
@@ -249,10 +255,21 @@ async fn run(args: &SpawnArgs, ctx: &CommandContext, call_init: bool) -> Result<
         }
     };
 
-    // Load WASM bytes
-    let wasm_bytes = resolve_reference(&wasm_path).await.map_err(|e| {
-        CliError::server_error(format!("Failed to load WASM from '{}': {}", wasm_path, e))
-    })?;
+    // Load WASM bytes. Honors the manifest's `static_package` flag by
+    // routing through the same ResourceCache the supervisor and resume
+    // paths use — same-process subsequent fetches of this URL hit.
+    let wasm_bytes = if manifest.static_package {
+        let (arc, _hit) = resolve_reference_cached(&wasm_path, &resource_cache)
+            .await
+            .map_err(|e| {
+                CliError::server_error(format!("Failed to load WASM from '{}': {}", wasm_path, e))
+            })?;
+        (*arc).clone()
+    } else {
+        resolve_reference(&wasm_path).await.map_err(|e| {
+            CliError::server_error(format!("Failed to load WASM from '{}': {}", wasm_path, e))
+        })?
+    };
 
     // Spawn the actor
     let (response_tx, response_rx) = tokio::sync::oneshot::channel();

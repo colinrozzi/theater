@@ -17,12 +17,14 @@ use anyhow::Result;
 use tokio::sync::mpsc;
 use tracing::{info, Level};
 
+use std::sync::Arc;
 use theater::config::actor_manifest::{
     RuntimeHostConfig, StoreHandlerConfig, SupervisorHostConfig,
 };
 use theater::handler::HandlerRegistry;
 use theater::messages::TheaterCommand;
 use theater::theater_runtime::TheaterRuntime;
+use theater::utils::ResourceCache;
 
 // Import Theater-specific handlers
 use theater_handler_message_server::MessageServerHandler;
@@ -104,6 +106,7 @@ async fn main() -> Result<()> {
         theater_rx,
         Some(channel_events_tx),
         handler_registry,
+        Arc::new(ResourceCache::new()),
     )
     .await?;
 

@@ -24,6 +24,7 @@ use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio::time::timeout;
 
+use std::sync::Arc;
 use theater::chain::ChainEvent;
 use theater::config::actor_manifest::{RuntimeHostConfig, SupervisorHostConfig};
 use theater::handler::HandlerRegistry;
@@ -32,7 +33,7 @@ use theater::messages::{
 };
 use theater::pack_bridge::Value;
 use theater::theater_runtime::TheaterRuntime;
-use theater::utils::resolve_reference;
+use theater::utils::{resolve_reference, ResourceCache};
 use theater::ManifestConfig;
 
 use theater_handler_message_server::{MessageRouter, MessageServerHandler};
@@ -314,8 +315,14 @@ pub async fn run_replay_verification(
     let (theater_tx, theater_rx) = mpsc::channel::<TheaterCommand>(32);
     let (handler_registry, message_router) = create_base_registry(theater_tx.clone());
 
-    let mut runtime =
-        TheaterRuntime::new(theater_tx.clone(), theater_rx, None, handler_registry).await?;
+    let mut runtime = TheaterRuntime::new(
+        theater_tx.clone(),
+        theater_rx,
+        None,
+        handler_registry,
+        Arc::new(ResourceCache::new()),
+    )
+    .await?;
 
     let runtime_handle = tokio::spawn(async move { runtime.run().await });
 
@@ -560,8 +567,14 @@ pub async fn run_request_replay_verification(
     let (theater_tx, theater_rx) = mpsc::channel::<TheaterCommand>(32);
     let (handler_registry, message_router) = create_base_registry(theater_tx.clone());
 
-    let mut runtime =
-        TheaterRuntime::new(theater_tx.clone(), theater_rx, None, handler_registry).await?;
+    let mut runtime = TheaterRuntime::new(
+        theater_tx.clone(),
+        theater_rx,
+        None,
+        handler_registry,
+        Arc::new(ResourceCache::new()),
+    )
+    .await?;
 
     let runtime_handle = tokio::spawn(async move { runtime.run().await });
 
@@ -861,8 +874,14 @@ pub async fn run_supervisor_replay_verification(
     let (theater_tx, theater_rx) = mpsc::channel::<TheaterCommand>(32);
     let (handler_registry, message_router) = create_supervisor_registry(theater_tx.clone());
 
-    let mut runtime =
-        TheaterRuntime::new(theater_tx.clone(), theater_rx, None, handler_registry).await?;
+    let mut runtime = TheaterRuntime::new(
+        theater_tx.clone(),
+        theater_rx,
+        None,
+        handler_registry,
+        Arc::new(ResourceCache::new()),
+    )
+    .await?;
     let runtime_handle = tokio::spawn(async move { runtime.run().await });
 
     let (event_tx, mut event_rx) = mpsc::channel(100);
@@ -1235,8 +1254,14 @@ pub async fn run_tcp_replay_verification(
     let (theater_tx, theater_rx) = mpsc::channel::<TheaterCommand>(32);
     let handler_registry = create_tcp_registry(theater_tx.clone());
 
-    let mut runtime =
-        TheaterRuntime::new(theater_tx.clone(), theater_rx, None, handler_registry).await?;
+    let mut runtime = TheaterRuntime::new(
+        theater_tx.clone(),
+        theater_rx,
+        None,
+        handler_registry,
+        Arc::new(ResourceCache::new()),
+    )
+    .await?;
     let runtime_handle = tokio::spawn(async move { runtime.run().await });
 
     let (event_tx, mut event_rx) = mpsc::channel(100);

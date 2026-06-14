@@ -24,7 +24,7 @@ use theater::handler::HandlerRegistry;
 use theater::id::TheaterId;
 use theater::messages::{default_init_state, ChannelId, TheaterCommand};
 use theater::theater_runtime::TheaterRuntime;
-use theater::utils::{resolve_reference, ResourceCache};
+use theater::utils::{resolve_reference, resolve_reference_cached, ResourceCache};
 use theater::TheaterRuntimeError;
 
 // Import Theater-specific handlers only
@@ -429,17 +429,13 @@ impl TheaterServer {
         // Create channel for runtime to send channel events back to server
         let (channel_events_tx, channel_events_rx) = mpsc::channel(32);
 
-        // Shared URL→bytes cache; one per theater process. Wired into
-        // the supervisor host fn only — children spawned via
-        // `theater:simple/supervisor.spawn` whose manifest sets
-        // `static_package = true` pay the wasm fetch once per process.
-        // The runtime's other entry points (the top-level `StartActor`
-        // management command below, and `TheaterCommand::ResumeActor`
-        // in `theater_runtime.rs`) still call `resolve_reference`
-        // directly and do not consult this cache. Threading it onto
-        // `TheaterRuntime` is the obvious next layer; the motivating
-        // consumer (frontdoor per-conn-child) goes through the
-        // supervisor path, so it is not in scope here.
+        // Shared URL→bytes cache; one per theater process. Threaded
+        // through every entry point that fetches an actor's wasm: the
+        // supervisor host fn (via the handler), `ResumeActor` (via
+        // TheaterRuntime), and `ManagementCommand::StartActor` below
+        // (via `self.runtime.resource_cache()`). Opt-in per child
+        // manifest with `static_package = true` — fetch once per
+        // process, hit forever after.
         let resource_cache = Arc::new(ResourceCache::new());
 
         // Create handler registry with all migrated handlers (root permissions)
@@ -453,6 +449,7 @@ impl TheaterServer {
             theater_rx,
             Some(channel_events_tx.clone()),
             handler_registry,
+            resource_cache,
         )
         .await?;
         let management_socket = TcpListener::bind(address).await?;
@@ -482,6 +479,9 @@ impl TheaterServer {
             self.management_socket.local_addr()?
         );
 
+        // Snapshot the cache handle before the runtime moves into its task.
+        let resource_cache = self.runtime.resource_cache().clone();
+
         // Start the theater runtime in its own task
         let runtime_handle = tokio::spawn(async move {
             match self.runtime.run().await {
@@ -500,6 +500,7 @@ impl TheaterServer {
             let subscriptions = self.subscriptions.clone();
             let channel_subscriptions = self.channel_subscriptions.clone();
             let message_router = self.message_router.clone();
+            let resource_cache = resource_cache.clone();
 
             tokio::spawn(async move {
                 if let Err(e) = Self::handle_management_connection(
@@ -508,6 +509,7 @@ impl TheaterServer {
                     subscriptions,
                     channel_subscriptions,
                     message_router,
+                    resource_cache,
                 )
                 .await
                 {
@@ -526,6 +528,7 @@ impl TheaterServer {
         subscriptions: Arc<Mutex<HashMap<TheaterId, HashSet<Subscription>>>>,
         channel_subscriptions: Arc<Mutex<HashMap<String, ChannelSubscription>>>,
         message_router: theater_handler_message_server::MessageRouter,
+        resource_cache: Arc<ResourceCache>,
     ) -> Result<()> {
         // Create a channel for sending responses to this client
         let (client_tx, mut client_rx) = mpsc::channel::<ManagementResponse>(32);
@@ -653,8 +656,17 @@ impl TheaterServer {
                         }
                     };
 
-                    // Load wasm bytes
-                    let wasm_bytes = match resolve_reference(&manifest_config.package).await {
+                    // Load wasm bytes. Cache-respecting when the manifest
+                    // opts in via `static_package = true`; same shared cache
+                    // as `ResumeActor` and the supervisor host fn.
+                    let wasm_bytes_result = if manifest_config.static_package {
+                        resolve_reference_cached(&manifest_config.package, &resource_cache)
+                            .await
+                            .map(|(arc, _)| (*arc).clone())
+                    } else {
+                        resolve_reference(&manifest_config.package).await
+                    };
+                    let wasm_bytes = match wasm_bytes_result {
                         Ok(bytes) => bytes,
                         Err(e) => {
                             error!("Failed to load WASM: {}", e);

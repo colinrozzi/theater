@@ -1,6 +1,11 @@
 name = "spawn-bench-supervisor"
 version = "0.1.0"
 package = "./target/wasm32-unknown-unknown/release/spawn_bench_supervisor.wasm"
+# Exercises the CLI top-level fetch's cache codepath (introduced when
+# the cache was threaded onto TheaterRuntime). The supervisor wasm is
+# fetched exactly once per `theater spawn` invocation, so this never
+# shows a "hit" — it just confirms the new code path doesn't error.
+static_package = true
 
 [[handler]]
 type = "runtime"

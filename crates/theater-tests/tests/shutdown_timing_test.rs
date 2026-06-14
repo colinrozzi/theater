@@ -9,6 +9,7 @@
 //! 3. Stops the actor
 //! 4. Asserts shutdown completes within 2 seconds
 
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 use theater::config::actor_manifest::{
     HandlerConfig, ManifestConfig, RuntimeHostConfig, StoreHandlerConfig, SupervisorHostConfig,
@@ -18,6 +19,7 @@ use theater::config::inheritance::HandlerPermissionPolicy;
 use theater::handler::HandlerRegistry;
 use theater::messages::default_init_state;
 use theater::messages::TheaterCommand;
+use theater::utils::ResourceCache;
 use theater_handler_loop::LoopHandler;
 use theater_handler_message_server::{MessageRouter, MessageServerHandler};
 use theater_handler_rpc::RpcHandler;
@@ -103,6 +105,7 @@ async fn test_actor_shutdown_timing() {
             theater_rx,
             None,
             handler_registry,
+            Arc::new(ResourceCache::new()),
         )
         .await
         .expect("Failed to create runtime");
@@ -235,6 +238,7 @@ async fn test_multiple_actor_shutdown_timing() {
             theater_rx,
             None,
             handler_registry,
+            Arc::new(ResourceCache::new()),
         )
         .await
         .expect("Failed to create runtime");
@@ -385,6 +389,7 @@ async fn test_actor_shutdown_with_supervisor_handler() {
             theater_rx,
             None,
             handler_registry,
+            Arc::new(ResourceCache::new()),
         )
         .await
         .expect("Failed to create runtime");
@@ -555,6 +560,7 @@ async fn test_actor_shutdown_with_all_handlers() {
             theater_rx,
             None,
             handler_registry,
+            Arc::new(ResourceCache::new()),
         )
         .await
         .expect("Failed to create runtime");
