@@ -67,14 +67,14 @@ uuid = { version = "1.6", features = ["v4", "serde"] }
 # `cargo publish -p X` verify-builds against a stale dep from the index
 # and fails on APIs added in the unreleased local source.)
 theater-chain = { version = "0.3.11", path = "crates/theater-chain" }
-theater = { version = "0.3.26", path = "crates/theater" }
+theater = { version = "0.3.27", path = "crates/theater" }
 theater-client = { version = "0.3.10", path = "crates/theater-client" }
-theater-server = { version = "0.3.14", path = "crates/theater-server" }
+theater-server = { version = "0.3.15", path = "crates/theater-server" }
 # Theater-specific handlers
 theater-handler-message-server = { version = "0.3.11", path = "crates/theater-handler-message-server" }
 theater-handler-runtime = { version = "0.3.13", path = "crates/theater-handler-runtime" }
 theater-handler-store = { version = "0.3.11", path = "crates/theater-handler-store" }
-theater-handler-supervisor = { version = "0.3.17", path = "crates/theater-handler-supervisor" }
+theater-handler-supervisor = { version = "0.3.18", path = "crates/theater-handler-supervisor" }
 theater-handler-tcp = { version = "0.3.20", path = "crates/theater-handler-tcp" }
 theater-handler-terminal = { version = "0.3.11", path = "crates/theater-handler-terminal" }
 theater-handler-timer = { version = "0.3.13", path = "crates/theater-handler-timer" }
