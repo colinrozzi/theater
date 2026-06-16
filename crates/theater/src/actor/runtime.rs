@@ -1063,10 +1063,13 @@ impl ActorRuntime {
             })
             .await;
 
-        let (new_state, results) = match actor_instance
+        let exec_start = Instant::now();
+        let call_result = actor_instance
             .call_function_with_value(name, state, params_value)
-            .await
-        {
+            .await;
+        let exec_ms = exec_start.elapsed().as_millis() as u64;
+
+        let (new_state, results) = match call_result {
             Ok(result) => {
                 let response_value = if result.1.is_empty() {
                     Value::Tuple(vec![])
@@ -1101,14 +1104,31 @@ impl ActorRuntime {
                     .await;
 
                 error!("Failed to execute function '{}': {:#}", name, e);
+                let duration = start.elapsed();
+                debug!(
+                    phase = "actor.exec_call",
+                    name = %name,
+                    elapsed_ms = duration.as_millis() as u64,
+                    exec_ms,
+                    ok = false,
+                    "actor exec_call complete",
+                );
+                metrics.record_operation(duration, false).await;
                 return Err(ActorError::Internal(event));
             }
         };
 
-        debug!("Pack call to '{}' completed", name);
         actor_instance.actor_store.set_state(new_state);
 
         let duration = start.elapsed();
+        debug!(
+            phase = "actor.exec_call",
+            name = %name,
+            elapsed_ms = duration.as_millis() as u64,
+            exec_ms,
+            ok = true,
+            "actor exec_call complete",
+        );
         metrics.record_operation(duration, true).await;
 
         Ok(results)
