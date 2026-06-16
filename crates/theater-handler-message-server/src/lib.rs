@@ -46,10 +46,38 @@ use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
+use std::time::Instant;
 use thiserror::Error;
 use tokio::sync::mpsc::{Receiver, Sender};
 use tokio::sync::Notify;
-use tracing::{error, info};
+use tracing::{debug, error, info};
+
+/// Drops at scope exit and emits a `phase=... elapsed_ms=...` debug line.
+/// One line per host fn invocation, on every return path including `?`
+/// short-circuits.
+struct PhaseLog {
+    name: &'static str,
+    start: Instant,
+}
+
+impl PhaseLog {
+    fn new(name: &'static str) -> Self {
+        Self {
+            name,
+            start: Instant::now(),
+        }
+    }
+}
+
+impl Drop for PhaseLog {
+    fn drop(&mut self) {
+        debug!(
+            phase = self.name,
+            elapsed_ms = self.start.elapsed().as_millis() as u64,
+            "message_server phase complete",
+        );
+    }
+}
 use uuid::Uuid;
 
 // Pack integration
@@ -779,6 +807,7 @@ impl Handler for MessageServerHandler {
                 let outstanding_requests = outstanding_requests_for_register.clone();
 
                 async move {
+                    let _ph = PhaseLog::new("message_server.register");
                     // Check if already registered
                     {
                         let mut registered = is_registered.lock().unwrap();
@@ -861,6 +890,7 @@ impl Handler for MessageServerHandler {
             .func_async_result("send", move |_ctx: AsyncCtx<ActorStore>, input: Value| {
                 let router = router.clone();
                 async move {
+                    let _ph = PhaseLog::new("message_server.send");
                     let (address, msg) = parse_address_and_message(&input)?;
 
                     let target_id = match TheaterId::parse(&address) {
@@ -890,6 +920,7 @@ impl Handler for MessageServerHandler {
             .func_async_result("request", move |_ctx: AsyncCtx<ActorStore>, input: Value| {
                 let router = router2.clone();
                 async move {
+                    let _ph = PhaseLog::new("message_server.request");
                     let (address, msg) = parse_address_and_message(&input)?;
 
                     let target_id = match TheaterId::parse(&address) {
@@ -931,6 +962,7 @@ impl Handler for MessageServerHandler {
             })?
             // list-outstanding-requests() -> list<string>
             .func_typed("list-outstanding-requests", move |_ctx: &mut Ctx<'_, ActorStore>, _input: Value| {
+                let _ph = PhaseLog::new("message_server.list_outstanding_requests");
                 let requests = outstanding_requests.lock().unwrap();
                 let ids: Vec<Value> = requests.keys().map(|k| Value::String(k.clone())).collect();
                 Value::List {
@@ -942,6 +974,7 @@ impl Handler for MessageServerHandler {
             .func_async_result("respond-to-request", move |_ctx: AsyncCtx<ActorStore>, input: Value| {
                 let outstanding = outstanding_requests2.clone();
                 async move {
+                    let _ph = PhaseLog::new("message_server.respond_to_request");
                     let (request_id, response_data) = parse_request_id_and_data(&input)?;
 
                     let mut requests = outstanding.lock().unwrap();
@@ -959,6 +992,7 @@ impl Handler for MessageServerHandler {
             .func_async_result("cancel-request", move |_ctx: AsyncCtx<ActorStore>, input: Value| {
                 let outstanding = outstanding_requests3.clone();
                 async move {
+                    let _ph = PhaseLog::new("message_server.cancel_request");
                     let request_id = parse_string(&input)?;
 
                     let mut requests = outstanding.lock().unwrap();
@@ -973,6 +1007,7 @@ impl Handler for MessageServerHandler {
             .func_async_result("open-channel", move |ctx: AsyncCtx<ActorStore>, input: Value| {
                 let router = router3.clone();
                 async move {
+                    let _ph = PhaseLog::new("message_server.open_channel");
                     let (address, initial_msg) = parse_address_and_message(&input)?;
                     let current_actor_id = ctx.data().id;
 
@@ -1017,6 +1052,7 @@ impl Handler for MessageServerHandler {
             .func_async_result("send-on-channel", move |ctx: AsyncCtx<ActorStore>, input: Value| {
                 let router = router4.clone();
                 async move {
+                    let _ph = PhaseLog::new("message_server.send_on_channel");
                     let (channel_id_str, msg) = parse_address_and_message(&input)?;
                     let sender_actor_id = ctx.data().id;
 
@@ -1048,6 +1084,7 @@ impl Handler for MessageServerHandler {
             .func_async_result("close-channel", move |ctx: AsyncCtx<ActorStore>, input: Value| {
                 let router = router5.clone();
                 async move {
+                    let _ph = PhaseLog::new("message_server.close_channel");
                     let channel_id_str = parse_string(&input)?;
                     let sender_actor_id = ctx.data().id;
 
