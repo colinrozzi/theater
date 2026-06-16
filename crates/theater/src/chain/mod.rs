@@ -29,6 +29,7 @@
 //! 2026-06-05 sentinel cutover wedge — see project notes.
 
 use std::fmt;
+use std::time::Instant;
 
 use tokio::sync::mpsc::Sender;
 use tracing::{debug, error};
@@ -127,6 +128,7 @@ impl StateChain {
         &mut self,
         event_data: ChainEventData,
     ) -> Result<ChainEvent, serde_json::Error> {
+        let start = Instant::now();
         let mut event = event_data.to_chain_event(self.current_hash.clone());
 
         let serialized_event = serde_json::to_vec(&event)?;
@@ -140,6 +142,8 @@ impl StateChain {
         // for eviction after the loop (can't mutate self.subscribers while
         // iterating over it).
         let actor_id = self.actor_id;
+        let dispatch_start = Instant::now();
+        let subscribers = self.subscribers.len();
         let mut closed_indices: Vec<usize> = Vec::new();
         for (index, subscriber) in self.subscribers.iter().enumerate() {
             if subscriber.send((actor_id, event.clone())).await.is_err() {
@@ -150,11 +154,16 @@ impl StateChain {
         for index in closed_indices.into_iter().rev() {
             self.subscribers.swap_remove(index);
         }
+        let dispatch_elapsed_ms = dispatch_start.elapsed().as_millis() as u64;
 
         debug!(
-            "Emitted event {} for actor {}",
-            content_ref.hash(),
-            self.actor_id
+            phase = "chain.append",
+            elapsed_ms = start.elapsed().as_millis() as u64,
+            dispatch_ms = dispatch_elapsed_ms,
+            subscribers,
+            actor_id = %self.actor_id,
+            event_hash = content_ref.hash(),
+            "chain append complete",
         );
 
         Ok(event)
