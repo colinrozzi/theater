@@ -57,6 +57,7 @@ use std::net::SocketAddr;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::time::Instant;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::Mutex;
@@ -80,6 +81,33 @@ use theater::pack_bridge::{
 // ============================================================================
 // Interface Declarations
 // ============================================================================
+
+/// Drops at scope exit and emits a `phase=... elapsed_ms=...` debug line.
+/// One line per host fn invocation, regardless of which return path was
+/// taken (incl. `?` short-circuits).
+struct PhaseLog {
+    name: &'static str,
+    start: Instant,
+}
+
+impl PhaseLog {
+    fn new(name: &'static str) -> Self {
+        Self {
+            name,
+            start: Instant::now(),
+        }
+    }
+}
+
+impl Drop for PhaseLog {
+    fn drop(&mut self) {
+        debug!(
+            phase = self.name,
+            elapsed_ms = self.start.elapsed().as_millis() as u64,
+            "tcp phase complete",
+        );
+    }
+}
 
 /// Embedded tcp.pact file content
 const TCP_PACT: &str = include_str!("../tcp.pact");
@@ -550,6 +578,7 @@ impl Handler for TcpHandler {
                     let actor_id = aid_connect;
                     let tls_ctx = tls_for_connect.clone();
                     async move {
+                        let _ph = PhaseLog::new("tcp.connect");
                         let address = parse_string(&input)?;
                         st.check_connection_limit().await?;
                         debug!("tcp connect to {}", address);
@@ -628,6 +657,7 @@ impl Handler for TcpHandler {
                     let tls_ctx = tls_for_listen.clone();
 
                     async move {
+                        let _ph = PhaseLog::new("tcp.listen");
                         let address = parse_string(&input)?;
                         debug!("tcp listen on {}", address);
 
@@ -772,6 +802,7 @@ impl Handler for TcpHandler {
                     let actor_id = aid_accept;
                     let tls_ctx = tls_for_accept.clone();
                     async move {
+                        let _ph = PhaseLog::new("tcp.accept");
                         let listener_id_str = parse_string(&input)?;
                         let listener_id = string_to_id(&listener_id_str)?;
                         debug!("tcp accept on listener={}", listener_id);
@@ -842,6 +873,7 @@ impl Handler for TcpHandler {
                     let st = st_activate.clone();
                     let actor_id = aid_activate;
                     async move {
+                        let _ph = PhaseLog::new("tcp.activate");
                         let conn_id_str = parse_string(&input)?;
                         let conn_id = string_to_id(&conn_id_str)?;
 
@@ -882,6 +914,7 @@ impl Handler for TcpHandler {
                     let actor_handle_arc = actor_handle_for_set_active.clone();
                     let cancel_token = cancel_token_for_set_active.clone();
                     async move {
+                        let _ph = PhaseLog::new("tcp.set_active");
                         let (conn_id_str, mode_str) = parse_two_strings(&input)?;
                         let conn_id = string_to_id(&conn_id_str)?;
 
@@ -1015,6 +1048,7 @@ impl Handler for TcpHandler {
                     let st = st_transfer.clone();
                     let actor_id = aid_transfer;
                     async move {
+                        let _ph = PhaseLog::new("tcp.transfer");
                         let (conn_id_str, target_actor_str) = parse_two_strings(&input)?;
                         let conn_id = string_to_id(&conn_id_str)?;
 
@@ -1092,6 +1126,7 @@ impl Handler for TcpHandler {
                     let st = st_peer.clone();
                     let actor_id = aid_peer;
                     async move {
+                        let _ph = PhaseLog::new("tcp.peer_address");
                         let conn_id_str = parse_string(&input)?;
                         let conn_id = string_to_id(&conn_id_str)?;
 
@@ -1120,6 +1155,7 @@ impl Handler for TcpHandler {
                     let st = st_send.clone();
                     let actor_id = aid_send;
                     async move {
+                        let _ph = PhaseLog::new("tcp.send");
                         let (conn_id_str, data) = parse_string_and_bytes(&input)?;
                         let conn_id = string_to_id(&conn_id_str)?;
                         let len = data.len();
@@ -1188,6 +1224,7 @@ impl Handler for TcpHandler {
                     let actor_id = aid_receive;
                     let cancel_token = cancel_token_for_receive.clone();
                     async move {
+                        let _ph = PhaseLog::new("tcp.receive");
                         let (conn_id_str, max_bytes) = parse_string_and_u32(&input)?;
                         let conn_id = string_to_id(&conn_id_str)?;
 
@@ -1281,6 +1318,7 @@ impl Handler for TcpHandler {
                     let st = st_close.clone();
                     let actor_id = aid_close;
                     async move {
+                        let _ph = PhaseLog::new("tcp.close");
                         let conn_id_str = parse_string(&input)?;
                         let conn_id = string_to_id(&conn_id_str)?;
 
@@ -1354,6 +1392,7 @@ impl Handler for TcpHandler {
                     let actor_id = aid_upgrade_server;
                     let tls_ctx = tls_for_upgrade_server.clone();
                     async move {
+                        let _ph = PhaseLog::new("tcp.upgrade_to_tls_server");
                         let conn_id_str = parse_string(&input)?;
                         let conn_id = string_to_id(&conn_id_str)?;
 
@@ -1460,6 +1499,7 @@ impl Handler for TcpHandler {
                     let actor_id = aid_upgrade_client;
                     let tls_ctx = tls_for_upgrade_client.clone();
                     async move {
+                        let _ph = PhaseLog::new("tcp.upgrade_to_tls_client");
                         let (conn_id_str, server_name_str) = parse_two_strings(&input)?;
                         let conn_id = string_to_id(&conn_id_str)?;
 
@@ -1572,6 +1612,7 @@ impl Handler for TcpHandler {
                     let st = st_close_listener.clone();
                     let actor_id = aid_close_listener;
                     async move {
+                        let _ph = PhaseLog::new("tcp.close_listener");
                         let listener_id_str = parse_string(&input)?;
                         let listener_id = string_to_id(&listener_id_str)?;
 
