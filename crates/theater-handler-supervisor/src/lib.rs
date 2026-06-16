@@ -36,6 +36,35 @@ use tracing::{debug, error, info, warn};
 // Interface Declarations
 // ============================================================================
 
+/// Drops at scope exit and emits a `phase=... elapsed_ms=...` debug line.
+/// One line per host fn invocation, on every return path including `?`
+/// short-circuits. Complements the multi-step `phase = "supervisor.<step>"`
+/// info! lines on the spawn pipeline; this guard is for host fns whose
+/// cost is not interesting enough to merit a multi-phase breakdown.
+struct PhaseLog {
+    name: &'static str,
+    start: Instant,
+}
+
+impl PhaseLog {
+    fn new(name: &'static str) -> Self {
+        Self {
+            name,
+            start: Instant::now(),
+        }
+    }
+}
+
+impl Drop for PhaseLog {
+    fn drop(&mut self) {
+        debug!(
+            phase = self.name,
+            elapsed_ms = self.start.elapsed().as_millis() as u64,
+            "supervisor phase complete",
+        );
+    }
+}
+
 /// Embedded supervisor.pact file content
 const SUPERVISOR_PACT: &str = include_str!("../supervisor.pact");
 
@@ -731,6 +760,7 @@ impl Handler for SupervisorHandler {
                     let children = children.clone();
                     let theater_tx_holder = theater_tx_holder.clone();
                     async move {
+                        let _ph = PhaseLog::new("supervisor.resume");
                         let (manifest, wasm_bytes) = match input {
                             Value::Tuple(args) if args.len() == 2 => {
                                 let manifest = match &args[0] {
@@ -794,6 +824,7 @@ impl Handler for SupervisorHandler {
                 move |_ctx: AsyncCtx<ActorStore>, _input: Value| {
                     let children = children.clone();
                     async move {
+                        let _ph = PhaseLog::new("supervisor.list_children");
                         let children_guard = children.lock().unwrap();
                         let children_values: Vec<Value> = children_guard
                             .iter()
@@ -809,6 +840,7 @@ impl Handler for SupervisorHandler {
             // restart-child: func(child-id: string) -> result<(), string>
             .func_async_result("restart-child", move |ctx: AsyncCtx<ActorStore>, input: Value| {
                 async move {
+                    let _ph = PhaseLog::new("supervisor.restart_child");
                     let child_id_str = match input {
                         Value::String(s) => s,
                         Value::Tuple(args) if args.len() == 1 => {
@@ -848,6 +880,7 @@ impl Handler for SupervisorHandler {
             // stop-child: func(child-id: string) -> result<(), string>
             .func_async_result("stop-child", move |ctx: AsyncCtx<ActorStore>, input: Value| {
                 async move {
+                    let _ph = PhaseLog::new("supervisor.stop_child");
                     let child_id_str = match input {
                         Value::String(s) => s,
                         Value::Tuple(args) if args.len() == 1 => {
@@ -887,6 +920,7 @@ impl Handler for SupervisorHandler {
             // get-child-state: func(child-id: string) -> result<option<list<u8>>, string>
             .func_async_result("get-child-state", move |ctx: AsyncCtx<ActorStore>, input: Value| {
                 async move {
+                    let _ph = PhaseLog::new("supervisor.get_child_state");
                     let child_id_str = match input {
                         Value::String(s) => s,
                         Value::Tuple(args) if args.len() == 1 => {
@@ -936,6 +970,7 @@ impl Handler for SupervisorHandler {
                     let event_tx = event_tx.clone();
                     let children = children.clone();
                     async move {
+                        let _ph = PhaseLog::new("supervisor.subscribe_to_child");
                         let child_id_str = match input {
                             Value::String(s) => s,
                             Value::Tuple(args) if args.len() == 1 => match &args[0] {
@@ -988,6 +1023,7 @@ impl Handler for SupervisorHandler {
                     let event_tx = event_tx.clone();
                     let children = children.clone();
                     async move {
+                        let _ph = PhaseLog::new("supervisor.unsubscribe_from_child");
                         let child_id_str = match input {
                             Value::String(s) => s,
                             Value::Tuple(args) if args.len() == 1 => match &args[0] {
