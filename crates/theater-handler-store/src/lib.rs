@@ -26,8 +26,36 @@ pub mod events;
 
 use std::future::Future;
 use std::pin::Pin;
+use std::time::Instant;
 use thiserror::Error;
 use tracing::{debug, error, info};
+
+/// Drops at scope exit and emits a `phase=... elapsed_ms=...` debug line.
+/// One line per host fn invocation, on every return path including `?`
+/// short-circuits.
+struct PhaseLog {
+    name: &'static str,
+    start: Instant,
+}
+
+impl PhaseLog {
+    fn new(name: &'static str) -> Self {
+        Self {
+            name,
+            start: Instant::now(),
+        }
+    }
+}
+
+impl Drop for PhaseLog {
+    fn drop(&mut self) {
+        debug!(
+            phase = self.name,
+            elapsed_ms = self.start.elapsed().as_millis() as u64,
+            "store phase complete",
+        );
+    }
+}
 
 use theater::actor::handle::ActorHandle;
 use theater::actor::store::ActorStore;
@@ -328,6 +356,7 @@ impl Handler for StoreHandler {
             .func_typed(
                 "new",
                 move |_ctx: &mut Ctx<'_, ActorStore>, _input: Value| {
+                    let _ph = PhaseLog::new("store.new");
                     use theater::ValueType;
                     // If a store_id is configured, use it; otherwise create a new store
                     let store_id = if let Some(ref id) = configured_store_id {
@@ -354,6 +383,7 @@ impl Handler for StoreHandler {
             .func_async_result("store", move |_ctx: AsyncCtx<ActorStore>, input: Value| {
                 let bp = bp_store.clone();
                 async move {
+                    let _ph = PhaseLog::new("store.store");
                     // Parse input tuple: (store_id, content)
                     let (store_id, content) = match input {
                         Value::Tuple(fields) if fields.len() == 2 => {
@@ -400,6 +430,7 @@ impl Handler for StoreHandler {
             .func_async_result("get", move |_ctx: AsyncCtx<ActorStore>, input: Value| {
                 let bp = bp_get.clone();
                 async move {
+                    let _ph = PhaseLog::new("store.get");
                     let (store_id, content_ref) = parse_store_id_and_ref(&input)?;
                     let store = make_store(&store_id, &bp);
 
@@ -423,6 +454,7 @@ impl Handler for StoreHandler {
             .func_async_result("exists", move |_ctx: AsyncCtx<ActorStore>, input: Value| {
                 let bp = bp_exists.clone();
                 async move {
+                    let _ph = PhaseLog::new("store.exists");
                     let (store_id, content_ref) = parse_store_id_and_ref(&input)?;
                     let store = make_store(&store_id, &bp);
 
@@ -435,6 +467,7 @@ impl Handler for StoreHandler {
             .func_async_result("label", move |_ctx: AsyncCtx<ActorStore>, input: Value| {
                 let bp = bp_label.clone();
                 async move {
+                    let _ph = PhaseLog::new("store.label");
                     let (store_id, label_string, content_ref) = parse_store_label_ref(&input)?;
                     let store = make_store(&store_id, &bp);
                     let label = Label::new(label_string);
@@ -457,6 +490,7 @@ impl Handler for StoreHandler {
                 move |_ctx: AsyncCtx<ActorStore>, input: Value| {
                     let bp = bp_get_by_label.clone();
                     async move {
+                        let _ph = PhaseLog::new("store.get_by_label");
                         let (store_id, label_string) = parse_store_id_and_label(&input)?;
                         let store = make_store(&store_id, &bp);
                         let label = Label::new(label_string);
@@ -490,6 +524,7 @@ impl Handler for StoreHandler {
                 move |_ctx: AsyncCtx<ActorStore>, input: Value| {
                     let bp = bp_remove_label.clone();
                     async move {
+                        let _ph = PhaseLog::new("store.remove_label");
                         let (store_id, label_string) = parse_store_id_and_label(&input)?;
                         let store = make_store(&store_id, &bp);
                         let label = Label::new(label_string);
@@ -513,6 +548,7 @@ impl Handler for StoreHandler {
                 move |_ctx: AsyncCtx<ActorStore>, input: Value| {
                     let bp = bp_store_at_label.clone();
                     async move {
+                        let _ph = PhaseLog::new("store.store_at_label");
                         let (store_id, label_string, content) = parse_store_label_content(&input)?;
                         let store = make_store(&store_id, &bp);
                         let label = Label::new(label_string);
@@ -536,6 +572,7 @@ impl Handler for StoreHandler {
                 move |_ctx: AsyncCtx<ActorStore>, input: Value| {
                     let bp = bp_replace_content.clone();
                     async move {
+                        let _ph = PhaseLog::new("store.replace_content_at_label");
                         let (store_id, label_string, content) = parse_store_label_content(&input)?;
                         let store = make_store(&store_id, &bp);
                         let label = Label::new(label_string);
@@ -559,6 +596,7 @@ impl Handler for StoreHandler {
                 move |_ctx: AsyncCtx<ActorStore>, input: Value| {
                     let bp = bp_replace_at.clone();
                     async move {
+                        let _ph = PhaseLog::new("store.replace_at_label");
                         let (store_id, label_string, content_ref) = parse_store_label_ref(&input)?;
                         let store = make_store(&store_id, &bp);
                         let label = Label::new(label_string);
@@ -582,6 +620,7 @@ impl Handler for StoreHandler {
                 move |_ctx: AsyncCtx<ActorStore>, input: Value| {
                     let bp = bp_list_all.clone();
                     async move {
+                        let _ph = PhaseLog::new("store.list_all_content");
                         let store_id = parse_store_id(&input)?;
                         let store = make_store(&store_id, &bp);
 
@@ -612,6 +651,7 @@ impl Handler for StoreHandler {
                 move |_ctx: AsyncCtx<ActorStore>, input: Value| {
                     let bp = bp_calc_size.clone();
                     async move {
+                        let _ph = PhaseLog::new("store.calculate_total_size");
                         let store_id = parse_store_id(&input)?;
                         let store = make_store(&store_id, &bp);
 
@@ -634,6 +674,7 @@ impl Handler for StoreHandler {
                 move |_ctx: AsyncCtx<ActorStore>, input: Value| {
                     let bp = bp_list_labels.clone();
                     async move {
+                        let _ph = PhaseLog::new("store.list_labels");
                         let store_id = parse_store_id(&input)?;
                         let store = make_store(&store_id, &bp);
 
