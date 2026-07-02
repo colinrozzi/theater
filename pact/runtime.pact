@@ -14,6 +14,9 @@ interface runtime {
         // The actual implementation returns the structured chain record.
         get-chain: func() -> list<u8>
 
+        // Return this actor's own id as a string
+        self: func() -> string
+
         // Shutdown the actor with optional final data
         shutdown: func(data: option<list<u8>>) -> result<_, string>
     }
