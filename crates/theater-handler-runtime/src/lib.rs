@@ -32,7 +32,7 @@ const RUNTIME_PACT: &str = include_str!("../runtime.pact");
 ///
 /// Functions:
 /// - log(msg: string) -> ()
-/// - get-chain() -> list<u8> (actual implementation returns structured chain record)
+/// - self() -> string (this actor's own id)
 /// - shutdown(data: option<list<u8>>) -> result<(), string>
 fn runtime_interface() -> InterfaceImpl {
     let pact = parse_pact(RUNTIME_PACT).expect("embedded runtime.pact should be valid");
@@ -136,6 +136,14 @@ impl Handler for RuntimeHandler {
                 }
                 Value::Tuple(vec![])
             })?
+            // Self function: self() -> string
+            // Returns this actor's own id as a string.
+            .func_typed(
+                "self",
+                move |ctx: &mut Ctx<'_, ActorStore>, _input: Value| {
+                    Value::String(ctx.data().id.to_string())
+                },
+            )?
             // Shutdown function: shutdown(data: option<list<u8>>) -> result<(), string>
             .func_async_result(
                 "shutdown",
@@ -302,9 +310,9 @@ mod tests {
             vec![], // returns ()
         ));
         runtime_interface.add_function(Function::with_signature(
-            "get-chain",
+            "self",
             vec![],
-            vec![Type::List(Box::new(Type::U8))], // returns Vec<u8>
+            vec![Type::String], // returns actor id as string
         ));
         runtime_interface.add_function(Function::with_signature(
             "shutdown",
