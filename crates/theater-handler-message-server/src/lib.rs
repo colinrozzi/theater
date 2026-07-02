@@ -635,7 +635,17 @@ impl Handler for MessageServerHandler {
         &self,
         _config: Option<&theater::config::actor_manifest::HandlerConfig>,
     ) -> Box<dyn Handler> {
-        Box::new(self.clone())
+        // Mint fresh per-actor state; only the router (a Sender to the shared
+        // router task) is copied across actors. Cloning `self` here would share
+        // `is_registered` / `actor_handle` / `outstanding_requests` between
+        // every actor in the process, so the first actor to register would be
+        // the only one ever inserted into the router's actors map and every
+        // later actor would short-circuit as "Already registered" and be
+        // unreachable.
+        Box::new(MessageServerHandler::new(
+            self.permissions.clone(),
+            self.router.clone(),
+        ))
     }
 
     fn name(&self) -> &str {
@@ -1311,6 +1321,30 @@ mod tests {
 
         let cloned = handler.create_instance(None);
         assert_eq!(cloned.name(), "message-server");
+    }
+
+    /// Regression: two handlers minted from the same base must have disjoint
+    /// per-actor state, or the first actor to `register()` in a process will
+    /// short-circuit every subsequent actor as "Already registered" and leave
+    /// them out of the router's actors map — unreachable by peer id.
+    #[tokio::test]
+    async fn test_new_produces_disjoint_per_actor_state() {
+        let router = MessageRouter::new();
+        let a = MessageServerHandler::new(None, router.clone());
+        let b = MessageServerHandler::new(None, router.clone());
+
+        assert!(!Arc::ptr_eq(&a.is_registered, &b.is_registered));
+        assert!(!Arc::ptr_eq(&a.actor_handle, &b.actor_handle));
+        assert!(!Arc::ptr_eq(
+            &a.outstanding_requests,
+            &b.outstanding_requests
+        ));
+        assert!(!Arc::ptr_eq(&a.shutdown_receiver, &b.shutdown_receiver));
+        assert!(!Arc::ptr_eq(
+            &a.setup_shutdown_receiver,
+            &b.setup_shutdown_receiver
+        ));
+        assert!(!Arc::ptr_eq(&a.registered_notify, &b.registered_notify));
     }
 
     #[test]
