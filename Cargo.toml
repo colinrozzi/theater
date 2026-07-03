@@ -71,7 +71,7 @@ theater = { version = "0.3.28", path = "crates/theater" }
 theater-client = { version = "0.3.10", path = "crates/theater-client" }
 theater-server = { version = "0.3.16", path = "crates/theater-server" }
 # Theater-specific handlers
-theater-handler-message-server = { version = "0.3.12", path = "crates/theater-handler-message-server" }
+theater-handler-message-server = { version = "0.3.13", path = "crates/theater-handler-message-server" }
 theater-handler-runtime = { version = "0.3.14", path = "crates/theater-handler-runtime" }
 theater-handler-store = { version = "0.3.12", path = "crates/theater-handler-store" }
 theater-handler-supervisor = { version = "0.3.19", path = "crates/theater-handler-supervisor" }
