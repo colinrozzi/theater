@@ -44,6 +44,14 @@ interface tcp {
         // Connection is activated in passive data mode for the target actor
         transfer: func(connection-id: string, target-actor: string) -> result<_, string>
 
+        // Non-blocking transfer: flips ownership to the target and activates the
+        // connection, then dispatches the target's handle-connection-transfer in
+        // a detached task and returns immediately (without awaiting the target's
+        // handler lifecycle). Use when one acceptor hands off many connections and
+        // must not serialize on each target completing. If the target's handler
+        // errors or traps, the connection is closed and dropped.
+        transfer-async: func(connection-id: string, target-actor: string) -> result<_, string>
+
         // Get the peer address of a connection (works in pending or active state)
         peer-address: func(connection-id: string) -> result<string, string>
 

@@ -340,6 +340,126 @@ fn string_to_id(s: &str) -> Result<u64, Value> {
         .map_err(|_| Value::String(format!("Invalid id: {}", s)))
 }
 
+/// Remove a connection from the shared map and gracefully shut down its
+/// stream. Mirrors the `close` host function's teardown, but takes no owner
+/// argument — it is used on error/crash cleanup paths (e.g. a detached
+/// `handle-connection-transfer` that failed) where we just want the
+/// connection gone regardless of who owns it. Errors are non-fatal.
+async fn close_and_remove_connection(st: &Arc<SharedTcpState>, conn_id: u64) {
+    let stream_arc = {
+        let mut connections = st.connections.lock().await;
+        match connections.remove(&conn_id) {
+            Some(entry) => entry.stream,
+            None => return, // already gone
+        }
+    };
+
+    let mut guard = stream_arc.lock().await;
+    let taken = std::mem::replace(&mut *guard, StreamState::Closed);
+    drop(guard);
+    let shutdown_result = match taken {
+        StreamState::Full(mut s) => Some(AsyncWriteExt::shutdown(&mut *s).await),
+        StreamState::WriteOnly(mut w) => Some(AsyncWriteExt::shutdown(&mut w).await),
+        StreamState::Closed => None,
+    };
+    match shutdown_result {
+        Some(Ok(())) => debug!("tcp cleanup conn={} (graceful shutdown ok)", conn_id),
+        Some(Err(e)) => warn!("tcp cleanup conn={} shutdown error: {}", conn_id, e),
+        None => debug!("tcp cleanup conn={} (already closed)", conn_id),
+    }
+}
+
+/// Core logic for the `transfer-async` host function, factored out of the
+/// closure so it can be unit-tested without a wasm guest.
+///
+/// Flips ownership of `conn` (Pending -> Active, owner = target) in the shared
+/// map, then dispatches the target's `handle-connection-transfer` in a
+/// DETACHED task and returns immediately — it does NOT await the target's full
+/// request lifecycle the way `transfer` does. On Err/trap from the detached
+/// call, the connection is closed and removed from the shared map so a failed
+/// handoff can't leak a dangling entry.
+async fn do_transfer_async(
+    st: Arc<SharedTcpState>,
+    actor_id: TheaterId,
+    theater_tx: tokio::sync::mpsc::Sender<theater::messages::TheaterCommand>,
+    input: &Value,
+) -> Result<Value, Value> {
+    let (conn_id_str, target_actor_str) = parse_two_strings(input)?;
+    let conn_id = string_to_id(&conn_id_str)?;
+
+    let target_actor: TheaterId = target_actor_str
+        .parse()
+        .map_err(|e| Value::String(format!("Invalid actor ID: {}", e)))?;
+
+    // Resolve the target's handle up front so a bad target fails the caller
+    // synchronously (before we flip ownership), rather than silently in the
+    // detached task.
+    let (handle_tx, handle_rx) = tokio::sync::oneshot::channel();
+    let get_handle_cmd = theater::messages::TheaterCommand::GetActorHandle {
+        actor_id: target_actor,
+        response_tx: handle_tx,
+    };
+    theater_tx
+        .send(get_handle_cmd)
+        .await
+        .map_err(|e| Value::String(format!("Failed to get target handle: {}", e)))?;
+
+    let target_handle = match handle_rx.await {
+        Ok(Some(handle)) => handle,
+        Ok(None) => return Err(Value::String("Target actor handle not found".to_string())),
+        Err(e) => return Err(Value::String(format!("Failed to receive handle: {}", e))),
+    };
+
+    // Flip ownership + activate under the outer lock.
+    {
+        let mut connections = st.connections.lock().await;
+        let entry = connections
+            .get_mut(&conn_id)
+            .ok_or_else(|| Value::String(format!("Connection not found: {}", conn_id_str)))?;
+
+        if entry.owner != actor_id {
+            return Err(Value::String(format!(
+                "Connection {} not owned by this actor",
+                conn_id_str
+            )));
+        }
+
+        let old_owner = entry.owner;
+        entry.owner = target_actor;
+        entry.state = ConnectionState::Active;
+
+        info!(
+            "tcp transferred (async) conn={} from {} to {} (now active)",
+            conn_id, old_owner, target_actor
+        );
+    }
+
+    // Dispatch handle-connection-transfer WITHOUT awaiting the handler's full
+    // lifecycle. On Err/trap, close and remove the connection so a failed
+    // handoff doesn't leak a dangling entry in the shared map (analogous to
+    // the accept loop's handle-connection cleanup).
+    let st_for_cleanup = st.clone();
+    let conn_id_for_call = conn_id_str.clone();
+    tokio::spawn(async move {
+        let params = Value::String(conn_id_for_call);
+        if let Err(e) = target_handle
+            .call_function(
+                "theater:simple/tcp-client.handle-connection-transfer".to_string(),
+                params,
+            )
+            .await
+        {
+            error!(
+                "handle-connection-transfer (async) failed for conn={}: {:?}; closing",
+                conn_id, e
+            );
+            close_and_remove_connection(&st_for_cleanup, conn_id).await;
+        }
+    });
+
+    Ok(Value::Tuple(vec![]))
+}
+
 // ── Handler implementation ────────────────────────────────────────────────
 
 impl Handler for TcpHandler {
@@ -540,6 +660,9 @@ impl Handler for TcpHandler {
 
         let st_transfer = state.clone();
         let aid_transfer = actor_id_for_closures;
+
+        let st_transfer_async = state.clone();
+        let aid_transfer_async = actor_id_for_closures;
 
         let st_peer = state.clone();
         let aid_peer = actor_id_for_closures;
@@ -1113,6 +1236,31 @@ impl Handler for TcpHandler {
                         }
 
                         Ok::<Value, Value>(Value::Tuple(vec![]))
+                    }
+                },
+            )?
+            // ----------------------------------------------------------------
+            // transfer-async(connection-id: string, target-actor: string) -> result<_, string>
+            //
+            // Non-blocking sibling of `transfer`. Flips ownership (Pending ->
+            // Active, owner = target) in the shared map, then dispatches the
+            // target's handle-connection-transfer in a DETACHED task and
+            // returns immediately — it does NOT await the target's full
+            // request lifecycle the way `transfer` does. This lets a single
+            // acceptor hand off many connections without serializing on each
+            // target's handler completing (see changes/proposals/warm-actor-pool.md,
+            // Gap B). If the detached call returns Err or the target traps, the
+            // connection is closed and removed from the shared map.
+            // ----------------------------------------------------------------
+            .func_async_result(
+                "transfer-async",
+                move |ctx: AsyncCtx<ActorStore>, input: Value| {
+                    let st = st_transfer_async.clone();
+                    let actor_id = aid_transfer_async;
+                    async move {
+                        let _ph = PhaseLog::new("tcp.transfer_async");
+                        let theater_tx = ctx.data().theater_tx.clone();
+                        do_transfer_async(st, actor_id, theater_tx, &input).await
                     }
                 },
             )?
@@ -1809,6 +1957,240 @@ async fn tcp_read_loop(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::AtomicBool;
+    use std::time::{Duration, Instant};
+    use theater::actor::handle::ActorHandle;
+    use theater::actor::types::ActorOperation;
+    use theater::messages::TheaterCommand;
+
+    /// How long the mock target's `handle-connection-transfer` deliberately
+    /// stalls before finishing. `transfer-async` must return well inside this.
+    const HANDLER_DELAY: Duration = Duration::from_millis(300);
+
+    /// Build a `SharedTcpState` holding one PENDING connection whose stream is
+    /// the server side of a fresh loopback TCP pair. Returns the shared state,
+    /// the connection id, the acceptor (current owner) id, and the client end
+    /// of the pair (so the test can drive request/response bytes through it).
+    async fn pending_conn() -> (Arc<SharedTcpState>, u64, TheaterId, tokio::net::TcpStream) {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let client = tokio::net::TcpStream::connect(addr).await.unwrap();
+        let (server, peer_addr) = listener.accept().await.unwrap();
+
+        let st = Arc::new(SharedTcpState::new(None));
+        let acceptor_id = TheaterId::generate();
+        let conn_id = st.next_id();
+        st.connections.lock().await.insert(
+            conn_id,
+            ConnectionEntry {
+                stream: Arc::new(Mutex::new(StreamState::Full(Box::new(
+                    UnifiedStream::Plain(server),
+                )))),
+                peer_addr,
+                owner: acceptor_id,
+                state: ConnectionState::Pending,
+                data_mode: DataMode::Passive,
+            },
+        );
+        (st, conn_id, acceptor_id, client)
+    }
+
+    /// Spawn a task that services `GetActorHandle` on `theater_tx`, answering
+    /// with `handle` for `target_id` (and `None` for anyone else) — the same
+    /// thing `TheaterRuntime` does for a real actor.
+    fn serve_theater_tx(
+        mut rx: tokio::sync::mpsc::Receiver<TheaterCommand>,
+        target_id: TheaterId,
+        handle: ActorHandle,
+    ) {
+        tokio::spawn(async move {
+            while let Some(cmd) = rx.recv().await {
+                if let TheaterCommand::GetActorHandle {
+                    actor_id,
+                    response_tx,
+                } = cmd
+                {
+                    let resp = (actor_id == target_id).then(|| handle.clone());
+                    let _ = response_tx.send(resp);
+                }
+            }
+        });
+    }
+
+    /// (a) `transfer-async` returns before a deliberately slow target finishes
+    ///     its `handle-connection-transfer`, and (b) the target then fully and
+    ///     correctly handles the transferred connection (real ping/pong I/O).
+    #[tokio::test]
+    async fn transfer_async_returns_before_slow_target_finishes() {
+        let (st, conn_id, acceptor_id, mut client) = pending_conn().await;
+
+        // Mock target actor: operation channel serviced by a task that stalls
+        // (HANDLER_DELAY), then does real I/O on the transferred connection.
+        let (op_tx, mut op_rx) = tokio::sync::mpsc::channel::<ActorOperation>(4);
+        let (info_tx, _info_rx) = tokio::sync::mpsc::channel(4);
+        let (ctrl_tx, _ctrl_rx) = tokio::sync::mpsc::channel(4);
+        let target_handle = ActorHandle::new(op_tx, info_tx, ctrl_tx);
+        let target_id = TheaterId::generate();
+
+        let started = Arc::new(AtomicBool::new(false));
+        let finished = Arc::new(AtomicBool::new(false));
+
+        let st_t = st.clone();
+        let started_t = started.clone();
+        let finished_t = finished.clone();
+        let expected = conn_id;
+        let target_task = tokio::spawn(async move {
+            if let Some(ActorOperation::CallFunctionPack {
+                name,
+                params,
+                response_tx,
+            }) = op_rx.recv().await
+            {
+                assert_eq!(name, "theater:simple/tcp-client.handle-connection-transfer");
+                started_t.store(true, Ordering::SeqCst);
+
+                // The runtime hands the target the conn id as its param.
+                let decoded = theater::pack_bridge::decode_value(&params).unwrap();
+                let conn_str = match decoded {
+                    Value::String(s) => s,
+                    Value::Tuple(mut v) => match v.pop() {
+                        Some(Value::String(s)) => s,
+                        other => panic!("unexpected tuple param: {:?}", other),
+                    },
+                    other => panic!("unexpected param: {:?}", other),
+                };
+                assert_eq!(conn_str, expected.to_string());
+
+                // Deliberately slow: the whole point of transfer-async is that
+                // the caller has already returned by now.
+                tokio::time::sleep(HANDLER_DELAY).await;
+
+                // Prove the connection is usable by the target: read the
+                // request the client sent and answer it.
+                let stream_arc = {
+                    let conns = st_t.connections.lock().await;
+                    conns.get(&expected).unwrap().stream.clone()
+                };
+                {
+                    let mut guard = stream_arc.lock().await;
+                    if let StreamState::Full(ref mut s) = *guard {
+                        let mut buf = [0u8; 4];
+                        s.read_exact(&mut buf).await.unwrap();
+                        assert_eq!(&buf, b"ping");
+                        s.write_all(b"pong").await.unwrap();
+                    } else {
+                        panic!("stream not in Full state");
+                    }
+                }
+
+                finished_t.store(true, Ordering::SeqCst);
+                let _ = response_tx.send(Ok(vec![]));
+            }
+        });
+
+        let (theater_tx, theater_rx) = tokio::sync::mpsc::channel::<TheaterCommand>(4);
+        serve_theater_tx(theater_rx, target_id, target_handle);
+
+        // Client parks its request; the target reads it only after its stall.
+        client.write_all(b"ping").await.unwrap();
+
+        let input = Value::Tuple(vec![
+            Value::String(conn_id.to_string()),
+            Value::String(target_id.to_string()),
+        ]);
+
+        let t0 = Instant::now();
+        do_transfer_async(st.clone(), acceptor_id, theater_tx.clone(), &input)
+            .await
+            .expect("transfer-async should succeed");
+        let elapsed = t0.elapsed();
+
+        // (a) It returned well before the target's slow handler could finish.
+        assert!(
+            elapsed < HANDLER_DELAY / 2,
+            "transfer-async blocked {:?}; should return well before handler delay {:?}",
+            elapsed,
+            HANDLER_DELAY
+        );
+        assert!(
+            !finished.load(Ordering::SeqCst),
+            "transfer-async only returned after the target finished handling — it blocked"
+        );
+
+        // Ownership flipped synchronously on the way out.
+        {
+            let conns = st.connections.lock().await;
+            let entry = conns.get(&conn_id).unwrap();
+            assert_eq!(
+                entry.owner, target_id,
+                "ownership should be flipped to target"
+            );
+            assert_eq!(
+                entry.state,
+                ConnectionState::Active,
+                "conn should be active"
+            );
+        }
+
+        // (b) The target still handles the connection to completion afterward.
+        let mut resp = [0u8; 4];
+        client.read_exact(&mut resp).await.unwrap();
+        assert_eq!(&resp, b"pong", "target should have answered over the conn");
+
+        target_task.await.unwrap();
+        assert!(
+            started.load(Ordering::SeqCst) && finished.load(Ordering::SeqCst),
+            "target handler should have run start-to-finish"
+        );
+    }
+
+    /// If the target's `handle-connection-transfer` traps (its operation
+    /// channel drops the response without answering), the detached path must
+    /// close and remove the connection from the shared map.
+    #[tokio::test]
+    async fn transfer_async_cleans_up_on_target_crash() {
+        let (st, conn_id, acceptor_id, _client) = pending_conn().await;
+
+        let (op_tx, mut op_rx) = tokio::sync::mpsc::channel::<ActorOperation>(4);
+        let (info_tx, _info_rx) = tokio::sync::mpsc::channel(4);
+        let (ctrl_tx, _ctrl_rx) = tokio::sync::mpsc::channel(4);
+        let target_handle = ActorHandle::new(op_tx, info_tx, ctrl_tx);
+        let target_id = TheaterId::generate();
+
+        // Crashing target: receive the call, drop the responder without
+        // answering — call_function then observes a closed channel (Err).
+        tokio::spawn(async move {
+            if let Some(ActorOperation::CallFunctionPack { response_tx, .. }) = op_rx.recv().await {
+                drop(response_tx);
+            }
+        });
+
+        let (theater_tx, theater_rx) = tokio::sync::mpsc::channel::<TheaterCommand>(4);
+        serve_theater_tx(theater_rx, target_id, target_handle);
+
+        let input = Value::Tuple(vec![
+            Value::String(conn_id.to_string()),
+            Value::String(target_id.to_string()),
+        ]);
+
+        do_transfer_async(st.clone(), acceptor_id, theater_tx.clone(), &input)
+            .await
+            .expect("transfer-async returns Ok even when the target will crash");
+
+        // The detached task should observe the crash and remove the conn.
+        let mut removed = false;
+        for _ in 0..100 {
+            if st.connections.lock().await.get(&conn_id).is_none() {
+                removed = true;
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert!(
+            removed,
+            "a crashed transfer-async handoff should close + remove the connection"
+        );
+    }
 
     #[test]
     fn test_tcp_handler_creation() {
