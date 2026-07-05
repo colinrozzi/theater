@@ -78,6 +78,12 @@ use theater::pack_bridge::{
     parse_pact, AsyncCtx, HostLinkerBuilder, InterfaceImpl, LinkerError, TypeHash, Value, ValueType,
 };
 
+/// Maximum time a server-side TLS handshake may take before the connection is
+/// dropped. Runs inside the per-connection accept task (never on the accept
+/// loop itself), so a slow-loris or malformed client can only pin its own task,
+/// and only until this deadline fires.
+const TLS_HANDSHAKE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+
 // ============================================================================
 // Interface Declarations
 // ============================================================================
@@ -366,6 +372,144 @@ async fn close_and_remove_connection(st: &Arc<SharedTcpState>, conn_id: u64) {
         Some(Ok(())) => debug!("tcp cleanup conn={} (graceful shutdown ok)", conn_id),
         Some(Err(e)) => warn!("tcp cleanup conn={} shutdown error: {}", conn_id, e),
         None => debug!("tcp cleanup conn={} (already closed)", conn_id),
+    }
+}
+
+/// Background accept loop for a `listen`ing socket. Factored out of the `listen`
+/// closure so it can be unit-tested directly.
+///
+/// The loop only ever awaits `listener.accept()` and a cancellation signal.
+/// Everything per-connection — the TLS handshake, the map insert, and the
+/// `handle-connection` dispatch — is handed to a detached task via
+/// [`handle_accepted_connection`]. This is the whole point of the restructure:
+/// the TLS handshake used to run inline here, so a slow or malformed client
+/// stalled the handshake and wedged every subsequent accept (a bad handshake
+/// stalled prod for ~90s). Now a bad handshake only ties up its own task.
+#[allow(clippy::too_many_arguments)]
+async fn run_accept_loop(
+    listener: TcpListener,
+    listener_id: u64,
+    cancel_token: CancellationToken,
+    tls_ctx: Arc<Option<TlsContext>>,
+    st: Arc<SharedTcpState>,
+    actor_id: TheaterId,
+    actor_handle: ActorHandle,
+    handshake_timeout: std::time::Duration,
+) {
+    info!("TCP accept loop started for listener={}", listener_id);
+
+    loop {
+        tokio::select! {
+            _ = cancel_token.cancelled() => {
+                info!("TCP accept loop cancelled for listener={}", listener_id);
+                break;
+            }
+            result = listener.accept() => {
+                match result {
+                    Ok((tcp_stream, peer_addr)) => {
+                        // Assign the conn id here (a cheap atomic bump) so the
+                        // "accepted" log stays in accept order, then hand the rest
+                        // off to a detached task and immediately loop back to
+                        // accept(). The accept loop must never await anything that
+                        // a remote peer can stall.
+                        let conn_id = st.next_id();
+                        info!(
+                            "tcp accepted conn={} from {} on listener={}",
+                            conn_id, peer_addr, listener_id
+                        );
+                        tokio::spawn(handle_accepted_connection(
+                            conn_id,
+                            tcp_stream,
+                            peer_addr,
+                            tls_ctx.clone(),
+                            st.clone(),
+                            actor_id,
+                            actor_handle.clone(),
+                            handshake_timeout,
+                        ));
+                    }
+                    Err(e) => {
+                        error!("TCP accept error on listener={}: {}", listener_id, e);
+                    }
+                }
+            }
+        }
+    }
+
+    info!("TCP accept loop stopped for listener={}", listener_id);
+}
+
+/// Handle a single accepted connection off the accept loop: perform the TLS
+/// handshake (bounded by `handshake_timeout` so a slow-loris client cannot pin
+/// the task forever), insert the connection into the shared map in PENDING
+/// state, then dispatch `handle-connection`.
+///
+/// On handshake failure or timeout we simply return: the connection was never
+/// inserted into the map, so there is nothing to clean up. The map insert MUST
+/// happen before `handle-connection` is dispatched so the actor can reference
+/// `conn_id` in its callbacks.
+#[allow(clippy::too_many_arguments)]
+async fn handle_accepted_connection(
+    conn_id: u64,
+    tcp_stream: TcpStream,
+    peer_addr: SocketAddr,
+    tls_ctx: Arc<Option<TlsContext>>,
+    st: Arc<SharedTcpState>,
+    actor_id: TheaterId,
+    actor_handle: ActorHandle,
+    handshake_timeout: std::time::Duration,
+) {
+    let unified_stream = if let Some(ref ctx) = *tls_ctx {
+        if let Some(ref acceptor) = ctx.server_acceptor {
+            debug!("tcp accept: performing TLS handshake for conn={}", conn_id);
+            match tokio::time::timeout(handshake_timeout, acceptor.accept(tcp_stream)).await {
+                Ok(Ok(tls_stream)) => {
+                    info!("tcp accept: TLS handshake complete for conn={}", conn_id);
+                    UnifiedStream::ServerTls(tls_stream)
+                }
+                Ok(Err(e)) => {
+                    error!("TLS handshake failed for conn={}: {}", conn_id, e);
+                    return; // Drop the connection
+                }
+                Err(_) => {
+                    warn!(
+                        "TLS handshake timed out after {:?} for conn={} from {}; dropping",
+                        handshake_timeout, conn_id, peer_addr
+                    );
+                    return; // Drop the connection
+                }
+            }
+        } else {
+            UnifiedStream::Plain(tcp_stream)
+        }
+    } else {
+        UnifiedStream::Plain(tcp_stream)
+    };
+
+    st.connections.lock().await.insert(
+        conn_id,
+        ConnectionEntry {
+            stream: Arc::new(Mutex::new(StreamState::Full(Box::new(unified_stream)))),
+            peer_addr,
+            owner: actor_id,
+            state: ConnectionState::Pending,
+            data_mode: DataMode::Passive,
+        },
+    );
+
+    let params = Value::Tuple(vec![Value::String(id_to_string(conn_id))]);
+    if let Err(e) = actor_handle
+        .call_function(
+            "theater:simple/tcp-client.handle-connection".to_string(),
+            params,
+        )
+        .await
+    {
+        error!(
+            "Failed to call handle-connection for conn={}: {}",
+            conn_id, e
+        );
+        st.connections.lock().await.remove(&conn_id);
     }
 }
 
@@ -812,103 +956,21 @@ impl Handler for TcpHandler {
                         // Clone state for the background task
                         let st_for_task = st.clone();
                         let actor_id_for_task = actor_id;
+                        let tls_ctx_for_task = tls_ctx.clone();
 
-                        // Spawn background accept loop with cancellation support
-                        tokio::spawn(async move {
-                            info!("TCP accept loop started for listener={}", listener_id);
-
-                            loop {
-                                tokio::select! {
-                                    _ = cancel_token.cancelled() => {
-                                        info!("TCP accept loop cancelled for listener={}", listener_id);
-                                        break;
-                                    }
-                                    result = listener.accept() => {
-                                        match result {
-                                            Ok((tcp_stream, peer_addr)) => {
-                                                let conn_id = st_for_task.next_id();
-                                                info!(
-                                                    "tcp accepted conn={} from {} on listener={}",
-                                                    conn_id, peer_addr, listener_id
-                                                );
-
-                                                // Apply TLS if configured
-                                                let unified_stream = if let Some(ref ctx) = *tls_ctx {
-                                                    if let Some(ref acceptor) = ctx.server_acceptor {
-                                                        debug!("tcp accept: performing TLS handshake for conn={}", conn_id);
-                                                        match acceptor.accept(tcp_stream).await {
-                                                            Ok(tls_stream) => {
-                                                                info!("tcp accept: TLS handshake complete for conn={}", conn_id);
-                                                                UnifiedStream::ServerTls(tls_stream)
-                                                            }
-                                                            Err(e) => {
-                                                                error!("TLS handshake failed for conn={}: {}", conn_id, e);
-                                                                continue; // Skip this connection
-                                                            }
-                                                        }
-                                                    } else {
-                                                        UnifiedStream::Plain(tcp_stream)
-                                                    }
-                                                } else {
-                                                    UnifiedStream::Plain(tcp_stream)
-                                                };
-
-                                                // Store connection in PENDING state
-                                                st_for_task.connections.lock().await.insert(
-                                                    conn_id,
-                                                    ConnectionEntry {
-                                                        stream: Arc::new(Mutex::new(
-                                                            StreamState::Full(Box::new(unified_stream)),
-                                                        )),
-                                                        peer_addr,
-                                                        owner: actor_id_for_task,
-                                                        state: ConnectionState::Pending,
-                                                        data_mode: DataMode::Passive,
-                                                    },
-                                                );
-
-                                                // Detach so a slow/blocked handle-connection in the actor
-                                                // cannot wedge the accept loop and saturate the kernel SYN queue.
-                                                let conn_id_str = id_to_string(conn_id);
-                                                let params =
-                                                    Value::Tuple(vec![Value::String(conn_id_str)]);
-                                                let actor_handle_for_call = actor_handle.clone();
-                                                let st_for_cleanup = st_for_task.clone();
-                                                tokio::spawn(async move {
-                                                    if let Err(e) = actor_handle_for_call
-                                                        .call_function(
-                                                            "theater:simple/tcp-client.handle-connection"
-                                                                .to_string(),
-                                                            params,
-                                                        )
-                                                        .await
-                                                    {
-                                                        error!(
-                                                            "Failed to call handle-connection for conn={}: {}",
-                                                            conn_id, e
-                                                        );
-                                                        // Clean up the pending connection
-                                                        st_for_cleanup
-                                                            .connections
-                                                            .lock()
-                                                            .await
-                                                            .remove(&conn_id);
-                                                    }
-                                                });
-                                            }
-                                            Err(e) => {
-                                                error!(
-                                                    "TCP accept error on listener={}: {}",
-                                                    listener_id, e
-                                                );
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-
-                            info!("TCP accept loop stopped for listener={}", listener_id);
-                        });
+                        // Spawn background accept loop with cancellation support.
+                        // The loop body lives in run_accept_loop (a free fn) so it
+                        // can be unit-tested directly.
+                        tokio::spawn(run_accept_loop(
+                            listener,
+                            listener_id,
+                            cancel_token,
+                            tls_ctx_for_task,
+                            st_for_task,
+                            actor_id_for_task,
+                            actor_handle,
+                            TLS_HANDSHAKE_TIMEOUT,
+                        ));
 
                         Ok::<Value, Value>(Value::String(id_to_string(listener_id)))
                     }
@@ -2190,6 +2252,167 @@ mod tests {
             removed,
             "a crashed transfer-async handoff should close + remove the connection"
         );
+    }
+
+    /// Build a matching server `TlsAcceptor` + client `TlsConnector` from a
+    /// fresh self-signed cert for "localhost". The client skips verification
+    /// (reuses the handler's own `NoVerifier`), which is fine for a loopback
+    /// test — we only care that the handshake completes.
+    fn test_tls_pair() -> (tokio_rustls::TlsAcceptor, tokio_rustls::TlsConnector) {
+        use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
+
+        let certified = rcgen::generate_simple_self_signed(vec!["localhost".to_string()]).unwrap();
+        let cert_der = CertificateDer::from(certified.cert.der().to_vec());
+        let key_der = PrivatePkcs8KeyDer::from(certified.key_pair.serialize_der());
+
+        let server_config = rustls::ServerConfig::builder()
+            .with_no_client_auth()
+            .with_single_cert(vec![cert_der], PrivateKeyDer::Pkcs8(key_der))
+            .unwrap();
+        let acceptor = tokio_rustls::TlsAcceptor::from(Arc::new(server_config));
+
+        let client_config = rustls::ClientConfig::builder()
+            .dangerous()
+            .with_custom_certificate_verifier(Arc::new(tls::NoVerifier))
+            .with_no_client_auth();
+        let connector = tokio_rustls::TlsConnector::from(Arc::new(client_config));
+
+        (acceptor, connector)
+    }
+
+    /// A stalling TLS client (opens the TCP connection but never sends a
+    /// ClientHello) must NOT wedge the accept loop: a well-behaved client that
+    /// connects afterward is still accepted and served promptly, and the bad
+    /// connection is dropped once the bounded handshake timeout fires.
+    ///
+    /// This is the regression test for the S1 bug where the TLS handshake ran
+    /// inline on the accept loop, so one slow/malformed client stalled every
+    /// subsequent accept (a bad handshake stalled prod ~90s).
+    #[tokio::test]
+    async fn stalled_tls_handshake_does_not_wedge_accept_loop() {
+        // Short handshake timeout so the slow-loris path resolves fast in-test.
+        const HANDSHAKE_TIMEOUT: Duration = Duration::from_millis(500);
+
+        let (acceptor, connector) = test_tls_pair();
+        let tls_ctx = Arc::new(Some(TlsContext {
+            client_connector: Some(connector.clone()),
+            server_acceptor: Some(acceptor),
+            client_auto_handshake: true,
+        }));
+
+        let st = Arc::new(SharedTcpState::new(None));
+        let actor_id = TheaterId::generate();
+
+        // Mock actor: records every handle-connection dispatch (proves the conn
+        // was accepted, handshaked, inserted, and dispatched).
+        let (op_tx, mut op_rx) = tokio::sync::mpsc::channel::<ActorOperation>(8);
+        let (info_tx, _info_rx) = tokio::sync::mpsc::channel(4);
+        let (ctrl_tx, _ctrl_rx) = tokio::sync::mpsc::channel(4);
+        let actor_handle = ActorHandle::new(op_tx, info_tx, ctrl_tx);
+
+        let served = Arc::new(tokio::sync::Mutex::new(Vec::<String>::new()));
+        let served_t = served.clone();
+        tokio::spawn(async move {
+            while let Some(op) = op_rx.recv().await {
+                if let ActorOperation::CallFunctionPack {
+                    name,
+                    params,
+                    response_tx,
+                } = op
+                {
+                    assert_eq!(name, "theater:simple/tcp-client.handle-connection");
+                    let decoded = theater::pack_bridge::decode_value(&params).unwrap();
+                    let conn_str = match decoded {
+                        Value::String(s) => s,
+                        Value::Tuple(mut v) => match v.pop() {
+                            Some(Value::String(s)) => s,
+                            other => panic!("unexpected tuple param: {:?}", other),
+                        },
+                        other => panic!("unexpected param: {:?}", other),
+                    };
+                    served_t.lock().await.push(conn_str);
+                    let _ = response_tx.send(Ok(vec![]));
+                }
+            }
+        });
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let cancel = CancellationToken::new();
+        tokio::spawn(run_accept_loop(
+            listener,
+            1, // listener_id
+            cancel.clone(),
+            tls_ctx.clone(),
+            st.clone(),
+            actor_id,
+            actor_handle,
+            HANDSHAKE_TIMEOUT,
+        ));
+
+        // Connection A: slow loris — establish TCP, then send nothing. The
+        // server accepts the TCP connection and its per-conn task stalls in the
+        // TLS handshake.
+        let mut a = TcpStream::connect(addr).await.unwrap();
+        // Let the accept loop pick up A and start its (stalling) handshake.
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        // Connection B: a well-behaved TLS client opened WHILE A is stalling.
+        let t0 = Instant::now();
+        let b_tcp = TcpStream::connect(addr).await.unwrap();
+        let server_name = rustls::pki_types::ServerName::try_from("localhost").unwrap();
+        let mut b_tls = connector.connect(server_name, b_tcp).await.unwrap();
+
+        // B must be served promptly — well before A's handshake timeout could
+        // fire. If the accept loop were blocked on A's inline handshake (the old
+        // bug), B would not be accepted until A resolved (i.e. the timeout).
+        let mut served_b = false;
+        while t0.elapsed() < Duration::from_millis(300) {
+            if !served.lock().await.is_empty() {
+                served_b = true;
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert!(
+            served_b,
+            "well-behaved client B was not served while A stalled — accept loop wedged"
+        );
+        assert!(
+            t0.elapsed() < HANDSHAKE_TIMEOUT,
+            "B was served only after A's handshake-timeout window ({:?}) — accept loop was blocked",
+            HANDSHAKE_TIMEOUT
+        );
+        assert_eq!(
+            served.lock().await.len(),
+            1,
+            "exactly one connection (B) should have been served; A never completed its handshake"
+        );
+
+        // Slow-loris timeout: once A's handshake times out, its per-conn task
+        // returns and drops A's socket. The client observes EOF (or a reset).
+        let mut buf = [0u8; 1];
+        match tokio::time::timeout(Duration::from_secs(2), a.read(&mut buf)).await {
+            Ok(Ok(0)) => {}  // clean EOF — server dropped the timed-out conn
+            Ok(Err(_)) => {} // reset is also an acceptable "dropped" signal
+            Ok(Ok(n)) => panic!(
+                "expected EOF on the timed-out slow-loris conn, got {} bytes",
+                n
+            ),
+            Err(_) => panic!(
+                "slow-loris connection was not dropped within 2s — handshake timeout did not fire"
+            ),
+        }
+
+        // A was dropped and never inserted; the map holds only the served conn B.
+        assert_eq!(
+            st.connections.lock().await.len(),
+            1,
+            "connections map should hold only B; the stalled conn A must have been dropped, not inserted"
+        );
+
+        cancel.cancel();
+        let _ = b_tls.shutdown().await;
     }
 
     #[test]

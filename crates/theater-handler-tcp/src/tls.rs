@@ -245,7 +245,7 @@ pub fn parse_server_name(name: &str) -> Result<ServerName<'static>, TlsError> {
 /// This is only used when `skip_verify` is enabled in the client config,
 /// which should only be used for development/testing.
 #[derive(Debug)]
-struct NoVerifier;
+pub(crate) struct NoVerifier;
 
 impl rustls::client::danger::ServerCertVerifier for NoVerifier {
     fn verify_server_cert(
