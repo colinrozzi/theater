@@ -32,7 +32,7 @@ use std::fmt;
 use std::time::Instant;
 
 use tokio::sync::mpsc::Sender;
-use tracing::{debug, error};
+use tracing::debug;
 
 use crate::events::ChainEventData;
 use crate::store::ContentRef;
@@ -147,7 +147,10 @@ impl StateChain {
         let mut closed_indices: Vec<usize> = Vec::new();
         for (index, subscriber) in self.subscribers.iter().enumerate() {
             if subscriber.send((actor_id, event.clone())).await.is_err() {
-                error!("Subscriber for actor {:?} closed; evicting", self.actor_id);
+                // A closed subscriber is normal — e.g. a per-connection actor that
+                // has finished and dropped its chain-event receiver. Evict quietly;
+                // at ERROR this floods the log (128M in prod) on routine shutdowns.
+                debug!("Subscriber for actor {:?} closed; evicting", self.actor_id);
                 closed_indices.push(index);
             }
         }
