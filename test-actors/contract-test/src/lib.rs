@@ -150,16 +150,11 @@ fn init(_input: Value) -> Value {
 }
 
 #[export(name = "theater:contract-test/actions.move-to")]
-fn move_to(input: Value) -> Value {
-    let (state, target) = match &input {
-        Value::Tuple(items) if items.len() >= 2 => (&items[0], &items[1]),
-        _ => return err_result("Expected tuple with state and target"),
-    };
-
-    let (name, _pos, _status, step_count) = extract_state_fields(state);
+fn move_to(state: Value, target: Value) -> Value {
+    let (name, _pos, _status, step_count) = extract_state_fields(&state);
 
     // Extract target position
-    let (tx, ty) = match target {
+    let (tx, ty) = match &target {
         Value::Record { fields, .. } => {
             let mut x = 0.0f64;
             let mut y = 0.0f64;
@@ -185,27 +180,17 @@ fn move_to(input: Value) -> Value {
 }
 
 #[export(name = "theater:contract-test/actions.get-status")]
-fn get_status(input: Value) -> Value {
-    let state = match &input {
-        Value::Tuple(items) if !items.is_empty() => &items[0],
-        _ => return err_result("Expected tuple with state"),
-    };
-
-    let (_name, _pos, status, _step_count) = extract_state_fields(state);
+fn get_status(state: Value) -> Value {
+    let (_name, _pos, status, _step_count) = extract_state_fields(&state);
     log(format!("[contract-test] get-status"));
 
     ok_result(Value::Tuple(vec![state.clone(), status]))
 }
 
 #[export(name = "theater:contract-test/actions.set-error")]
-fn set_error(input: Value) -> Value {
-    let (state, msg) = match &input {
-        Value::Tuple(items) if items.len() >= 2 => (&items[0], &items[1]),
-        _ => return err_result("Expected tuple with state and msg"),
-    };
-
-    let (name, pos, _status, step_count) = extract_state_fields(state);
-    let error_msg = match msg {
+fn set_error(state: Value, msg: Value) -> Value {
+    let (name, pos, _status, step_count) = extract_state_fields(&state);
+    let error_msg = match &msg {
         Value::String(s) => s.clone(),
         _ => return err_result("Expected string message"),
     };

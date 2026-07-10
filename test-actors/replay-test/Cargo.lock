@@ -65,17 +65,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "dlmalloc"
-version = "0.2.12"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6738d2e996274e499bc7b0d693c858b7720b9cd2543a0643a3087e6cb0a4fa16"
-dependencies = [
- "cfg-if",
- "libc",
- "windows-sys",
-]
-
-[[package]]
 name = "generic-array"
 version = "0.14.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -108,27 +97,32 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "42f5e15c9953c5e4ccceeb2e7382a716482c34515315f7b03532b8b4e8393d2d"
 
 [[package]]
-name = "pack-abi"
-version = "0.1.0"
+name = "packr-abi"
+version = "0.8.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9cb5440ce243342a4cd7a3d5aba18b13e6c819c0df4c876f136e30cca51f9cd5"
 dependencies = [
  "hashbrown",
  "sha2",
 ]
 
 [[package]]
-name = "pack-guest"
-version = "0.1.0"
+name = "packr-guest"
+version = "0.8.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cbe1077cd9c0ca2b087b8d8e9a481b68241c1508c3cfa3f71a3c4f7389f7fb11"
 dependencies = [
- "dlmalloc",
- "pack-abi",
- "pack-guest-macros",
+ "packr-abi",
+ "packr-guest-macros",
 ]
 
 [[package]]
-name = "pack-guest-macros"
-version = "0.1.0"
+name = "packr-guest-macros"
+version = "0.8.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6f6aa3fdb2fc5afde05510dbed41ce6f5e58519293eacb8e0370023770914aa4"
 dependencies = [
- "pack-abi",
+ "packr-abi",
  "proc-macro2",
  "quote",
  "syn",
@@ -156,7 +150,7 @@ dependencies = [
 name = "replay-test-actor"
 version = "0.1.0"
 dependencies = [
- "pack-guest",
+ "packr-guest",
 ]
 
 [[package]]
@@ -200,21 +194,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
-name = "windows-link"
-version = "0.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f0805222e57f7521d6a62e36fa9163bc891acd422f971defe97d64e70d0a4fe5"
-
-[[package]]
-name = "windows-sys"
-version = "0.61.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ae137229bcbd6cdf0f7b80a31df61766145077ddf49416a728b02cb3921ff3fc"
-dependencies = [
- "windows-link",
-]
-
-[[package]]
 name = "zerocopy"
 version = "0.8.37"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -233,7 +212,3 @@ dependencies = [
  "quote",
  "syn",
 ]
-
-[[patch.unused]]
-name = "pack"
-version = "0.2.0"
