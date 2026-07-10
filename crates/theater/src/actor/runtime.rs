@@ -335,7 +335,11 @@ impl ActorRuntime {
         )
         .await
         .map_err(|e| {
-            let error_message = format!("Failed to instantiate actor {}: {}", id, e);
+            // `{:#}` prints the full anyhow chain (all contexts + root cause),
+            // so an instantiation failure shows e.g. "Failed to instantiate Pack
+            // module: unknown import GOT.mem::__data_end" instead of just the
+            // top wrapper — critical for diagnosing PIC/version-skew deploys.
+            let error_message = format!("Failed to instantiate actor {}: {:#}", id, e);
             error!("{}", error_message);
             ActorRuntimeError::SetupError {
                 message: error_message,
