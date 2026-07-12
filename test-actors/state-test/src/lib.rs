@@ -101,14 +101,8 @@ fn init(_input: Value) -> Value {
 
 /// Increment the counter and return the new count
 #[export(name = "theater:simple/state-test.increment")]
-fn increment(input: Value) -> Value {
-    // Input is Tuple([state, ...params]) — state is first element
-    let state = match &input {
-        Value::Tuple(items) if !items.is_empty() => &items[0],
-        _ => return err_result("Expected tuple with state"),
-    };
-
-    let count = get_count_from_state(state);
+fn increment(state: Value) -> Value {
+    let count = get_count_from_state(&state);
     let new_count = count + 1;
 
     log(format!("state-test: count incremented to {}", new_count));
@@ -119,13 +113,8 @@ fn increment(input: Value) -> Value {
 
 /// Get the current count without modifying state
 #[export(name = "theater:simple/state-test.get-count")]
-fn get_count(input: Value) -> Value {
-    let state = match &input {
-        Value::Tuple(items) if !items.is_empty() => &items[0],
-        _ => return err_result("Expected tuple with state"),
-    };
-
-    let count = get_count_from_state(state);
+fn get_count(state: Value) -> Value {
+    let count = get_count_from_state(&state);
     log(format!("state-test: current count = {}", count));
 
     // Return tuple<same_state, count>

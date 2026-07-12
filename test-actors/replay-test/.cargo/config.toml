@@ -1,2 +1,2 @@
-[build]
-target = "wasm32-unknown-unknown"
+[target.wasm32-unknown-unknown]
+rustflags = ["-C","relocation-model=pic","-C","link-arg=--experimental-pic","-C","link-arg=-shared","-C","link-arg=--import-memory","-C","link-arg=--export=__wasm_call_ctors"]

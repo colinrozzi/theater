@@ -97,14 +97,9 @@ fn init(_input: Value) -> Value {
 }
 
 #[export(name = "theater:todo/actions.add")]
-fn add(input: Value) -> Value {
-    let (state, title) = match &input {
-        Value::Tuple(items) if items.len() >= 2 => (&items[0], &items[1]),
-        _ => return err_result("Expected tuple with state and title"),
-    };
-
-    let (mut items, next_id) = extract_state(state);
-    let title_str = match title {
+fn add(state: Value, title: Value) -> Value {
+    let (mut items, next_id) = extract_state(&state);
+    let title_str = match &title {
         Value::String(s) => s.clone(),
         _ => return err_result("Expected string title"),
     };
@@ -119,18 +114,13 @@ fn add(input: Value) -> Value {
 }
 
 #[export(name = "theater:todo/actions.toggle")]
-fn toggle(input: Value) -> Value {
-    let (state, id_val) = match &input {
-        Value::Tuple(items) if items.len() >= 2 => (&items[0], &items[1]),
-        _ => return err_result("Expected tuple with state and id"),
-    };
-
-    let target_id = match id_val {
+fn toggle(state: Value, id_val: Value) -> Value {
+    let target_id = match &id_val {
         Value::U32(n) => *n,
         _ => return err_result("Expected u32 id"),
     };
 
-    let (items, next_id) = extract_state(state);
+    let (items, next_id) = extract_state(&state);
 
     log(format!("[todo] toggle id={}", target_id));
 
@@ -172,13 +162,8 @@ fn toggle(input: Value) -> Value {
 }
 
 #[export(name = "theater:todo/actions.list")]
-fn list(input: Value) -> Value {
-    let state = match &input {
-        Value::Tuple(items) if !items.is_empty() => &items[0],
-        _ => return err_result("Expected tuple with state"),
-    };
-
-    let (items, _next_id) = extract_state(state);
+fn list(state: Value) -> Value {
+    let (items, _next_id) = extract_state(&state);
 
     log(format!("[todo] list: {} items", items.len()));
 

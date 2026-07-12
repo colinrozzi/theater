@@ -95,8 +95,8 @@ theater-handler-podman = { version = "0.3.13", path = "crates/theater-handler-po
 # theater-handler-timing = { version = "0.3.9", path = "crates/deprecated/theater-handler-timing" }
 
 # Pack runtime integration (Graph ABI-based WASM runtime)
-packr = "0.7.3"
-packr-abi = "0.7.3"
+packr = "0.8.1"
+packr-abi = "0.8.1"
 
 # Metadata for Nix crane builds
 [workspace.metadata.crane]
