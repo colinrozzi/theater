@@ -16,7 +16,9 @@ use tokio::sync::mpsc;
 use tokio::sync::RwLock as SyncRwLock;
 use tracing::info;
 
-#[tokio::test]
+mod common;
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_composite_instance_basic() {
     // Initialize tracing for test output
     let _ = tracing_subscriber::fmt().with_env_filter("info").try_init();
@@ -27,7 +29,7 @@ async fn test_composite_instance_basic() {
         "/../../test-actors/composite-test/target/wasm32-unknown-unknown/release/composite_test_actor.wasm"
     );
 
-    let wasm_bytes = match std::fs::read(wasm_path) {
+    let member = match std::fs::read(wasm_path) {
         Ok(bytes) => bytes,
         Err(e) => {
             panic!(
@@ -38,6 +40,9 @@ async fn test_composite_instance_basic() {
             );
         }
     };
+    // Link the fixed-base member + bundled allocator into a self-contained
+    // composite loadable by the 0.10.x self-contained loader.
+    let wasm_bytes = common::helpers::link_self_contained(member);
 
     info!("Loaded WASM bytes: {} bytes", wasm_bytes.len());
 

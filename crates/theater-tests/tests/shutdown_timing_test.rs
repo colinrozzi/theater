@@ -31,6 +31,29 @@ use theater_handler_timer::TimerHandler;
 use tokio::sync::{mpsc, oneshot};
 use tracing::info;
 
+/// Link a fixed-base actor member + the packr bundled allocator into a
+/// self-contained composite loadable by the 0.10.x self-contained loader.
+/// Requires `wasm-merge` (binaryen) on PATH.
+fn link_self_contained(member: Vec<u8>) -> Vec<u8> {
+    packr::link(
+        vec![
+            packr::LinkBinary {
+                alias: "alloc".into(),
+                wasm: packr::DEFAULT_ALLOCATOR_WASM.to_vec(),
+                allocator: true,
+            },
+            packr::LinkBinary {
+                alias: "actor".into(),
+                wasm: member,
+                allocator: false,
+            },
+        ],
+        &[],
+        packr::Layout::default(),
+    )
+    .expect("link shutdown-test member + bundled allocator into a self-contained composite")
+}
+
 /// Maximum acceptable shutdown time - if it takes longer, we have a bug
 const MAX_SHUTDOWN_TIME: Duration = Duration::from_secs(2);
 
@@ -54,7 +77,7 @@ fn create_test_manifest(name: &str, wasm_path: &str) -> ManifestConfig {
     }
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_actor_shutdown_timing() {
     // Initialize tracing for test output
     let _ = tracing_subscriber::fmt()
@@ -71,7 +94,7 @@ async fn test_actor_shutdown_timing() {
         "/../../test-actors/shutdown-test/target/wasm32-unknown-unknown/release/shutdown_test_actor.wasm"
     );
 
-    let wasm_bytes = match std::fs::read(wasm_path) {
+    let member = match std::fs::read(wasm_path) {
         Ok(bytes) => bytes,
         Err(e) => {
             panic!(
@@ -82,6 +105,7 @@ async fn test_actor_shutdown_timing() {
             );
         }
     };
+    let wasm_bytes = link_self_contained(member);
 
     info!("Loaded shutdown-test WASM: {} bytes", wasm_bytes.len());
 
@@ -194,7 +218,7 @@ async fn test_actor_shutdown_timing() {
     let _ = tokio::time::timeout(Duration::from_secs(2), runtime_handle).await;
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_multiple_actor_shutdown_timing() {
     // Initialize tracing for test output
     let _ = tracing_subscriber::fmt()
@@ -211,7 +235,7 @@ async fn test_multiple_actor_shutdown_timing() {
         "/../../test-actors/shutdown-test/target/wasm32-unknown-unknown/release/shutdown_test_actor.wasm"
     );
 
-    let wasm_bytes = match std::fs::read(wasm_path) {
+    let member = match std::fs::read(wasm_path) {
         Ok(bytes) => bytes,
         Err(e) => {
             panic!(
@@ -220,6 +244,7 @@ async fn test_multiple_actor_shutdown_timing() {
             );
         }
     };
+    let wasm_bytes = link_self_contained(member);
 
     // Create theater runtime
     let (theater_tx, theater_rx) = mpsc::channel::<TheaterCommand>(100);
@@ -336,7 +361,7 @@ async fn test_multiple_actor_shutdown_timing() {
 /// Test shutdown timing with supervisor handler registered.
 /// The supervisor handler has more complex shutdown handling including
 /// cloned instances that need to properly respond to shutdown signals.
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_actor_shutdown_with_supervisor_handler() {
     // Initialize tracing for test output
     let _ = tracing_subscriber::fmt()
@@ -353,7 +378,7 @@ async fn test_actor_shutdown_with_supervisor_handler() {
         "/../../test-actors/shutdown-test/target/wasm32-unknown-unknown/release/shutdown_test_actor.wasm"
     );
 
-    let wasm_bytes = match std::fs::read(wasm_path) {
+    let member = match std::fs::read(wasm_path) {
         Ok(bytes) => bytes,
         Err(e) => {
             panic!(
@@ -362,6 +387,7 @@ async fn test_actor_shutdown_with_supervisor_handler() {
             );
         }
     };
+    let wasm_bytes = link_self_contained(member);
 
     info!("Loaded shutdown-test WASM: {} bytes", wasm_bytes.len());
 
@@ -486,7 +512,7 @@ async fn test_actor_shutdown_with_supervisor_handler() {
 
 /// Test shutdown timing with ALL handlers registered.
 /// This is a comprehensive test to ensure all handlers properly respond to shutdown.
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_actor_shutdown_with_all_handlers() {
     // Initialize tracing for test output
     let _ = tracing_subscriber::fmt()
@@ -503,7 +529,7 @@ async fn test_actor_shutdown_with_all_handlers() {
         "/../../test-actors/shutdown-test/target/wasm32-unknown-unknown/release/shutdown_test_actor.wasm"
     );
 
-    let wasm_bytes = match std::fs::read(wasm_path) {
+    let member = match std::fs::read(wasm_path) {
         Ok(bytes) => bytes,
         Err(e) => {
             panic!(
@@ -512,6 +538,7 @@ async fn test_actor_shutdown_with_all_handlers() {
             );
         }
     };
+    let wasm_bytes = link_self_contained(member);
 
     info!("Loaded shutdown-test WASM: {} bytes", wasm_bytes.len());
 
