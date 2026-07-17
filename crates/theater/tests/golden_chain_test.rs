@@ -15,6 +15,8 @@ use tokio::sync::mpsc;
 use tokio::sync::RwLock as SyncRwLock;
 use tracing::info;
 
+mod common;
+
 /// Test that state tracking works correctly across multiple function calls.
 ///
 /// This test:
@@ -22,7 +24,7 @@ use tracing::info;
 /// 2. Calls init, increment (x2), get-count
 /// 3. Verifies the state is correctly passed between calls
 /// 4. Uses the new typed API (call_typed + ActorResult)
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_state_tracking_typed_api() {
     // Initialize tracing for test output
     let _ = tracing_subscriber::fmt().with_env_filter("info").try_init();
@@ -33,7 +35,7 @@ async fn test_state_tracking_typed_api() {
         "/../../test-actors/state-test/target/wasm32-unknown-unknown/release/state_test_actor.wasm"
     );
 
-    let wasm_bytes = match std::fs::read(wasm_path) {
+    let member = match std::fs::read(wasm_path) {
         Ok(bytes) => bytes,
         Err(e) => {
             panic!(
@@ -44,6 +46,9 @@ async fn test_state_tracking_typed_api() {
             );
         }
     };
+    // Link the fixed-base member + bundled allocator into a self-contained
+    // composite loadable by the 0.10.x self-contained loader.
+    let wasm_bytes = common::helpers::link_self_contained(member);
 
     info!("Loaded WASM bytes: {} bytes", wasm_bytes.len());
 

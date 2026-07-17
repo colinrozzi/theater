@@ -26,3 +26,5 @@ tempfile = "3.8.1"
 test-log = "0.2"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+# Link fixture members + bundled allocator into self-contained composites in-test.
+packr.workspace = true

@@ -1,2 +1,13 @@
 [target.wasm32-unknown-unknown]
-rustflags = ["-C","relocation-model=pic","-C","link-arg=--experimental-pic","-C","link-arg=-shared","-C","link-arg=--import-memory","-C","link-arg=--export=__wasm_call_ctors"]
+# Fixed-base self-contained member (packr 0.10.2). packr::link internalizes
+# pack:alloc + memory into an own-memory composite. --no-merge-data-segments
+# keeps the CGRF __pack_types metadata as its own segment so read_surface finds it.
+rustflags = [
+    "-C", "link-arg=--import-memory",
+    "-C", "link-arg=--initial-memory=8388608",
+    "-C", "link-arg=--stack-first",
+    "-C", "link-arg=-zstack-size=262144",
+    "-C", "link-arg=--global-base=327680",
+    "-C", "link-arg=--no-entry",
+    "-C", "link-arg=--no-merge-data-segments",
+]

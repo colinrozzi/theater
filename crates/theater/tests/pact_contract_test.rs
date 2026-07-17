@@ -14,19 +14,22 @@ use tokio::sync::mpsc;
 use tokio::sync::RwLock as SyncRwLock;
 use tracing::info;
 
+mod common;
+
 async fn create_instance() -> PackInstance {
     let wasm_path = concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/../../test-actors/pact-contract-test/target/wasm32-unknown-unknown/release/pact_contract_test_actor.wasm"
     );
 
-    let wasm_bytes = std::fs::read(wasm_path).unwrap_or_else(|e| {
+    let member = std::fs::read(wasm_path).unwrap_or_else(|e| {
         panic!(
             "Failed to read WASM from {}: {}. \
              Build first: cd test-actors/pact-contract-test && cargo build --release --target wasm32-unknown-unknown",
             wasm_path, e
         );
     });
+    let wasm_bytes = common::helpers::link_self_contained(member);
 
     let runtime = AsyncRuntime::new();
     let actor_id = TheaterId::generate();
@@ -75,7 +78,7 @@ async fn create_instance() -> PackInstance {
     instance
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_pact_file_todo_actor() {
     let _ = tracing_subscriber::fmt().with_env_filter("info").try_init();
 
@@ -149,7 +152,7 @@ async fn test_pact_file_todo_actor() {
     info!("Pact file contract test passed!");
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_pact_file_rejects_wrong_types() {
     let _ = tracing_subscriber::fmt().with_env_filter("info").try_init();
 

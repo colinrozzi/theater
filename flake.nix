@@ -289,6 +289,7 @@
             wasmtime
             wasm-tools
             wit-bindgen
+            binaryen # wasm-merge — packr::link shells out to it to fuse self-contained composites
 
             pkg-config
             openssl

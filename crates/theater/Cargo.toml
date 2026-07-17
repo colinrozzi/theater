@@ -73,3 +73,6 @@ test-log = "0.2"
 pretty_assertions = "1.4"
 tempfile = "3.8.1"
 mockall = "0.11.4"
+# For the self-contained gate test: link a fixture member + bundled allocator
+# into a self-contained composite in-test (packr::link, DEFAULT_ALLOCATOR_WASM).
+packr.workspace = true

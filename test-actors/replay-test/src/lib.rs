@@ -1,4 +1,4 @@
-//! Replay test actor for Pack runtime.
+//! Replay test actor for Pack runtime (self-contained / packr 0.10.0).
 //!
 //! A simple deterministic actor that:
 //! - Imports `theater:simple/runtime.log`
@@ -6,7 +6,12 @@
 //! - Exports all 5 `theater:simple/message-server-client` handlers
 //! - Calls `log` several times during init and when handling messages
 //!
-//! Used to test full lifecycle replay with hash verification.
+//! Used to test full lifecycle replay with hash verification. The `log` calls
+//! carry STATIC string literals on purpose: they exercise the .rodata/static-data
+//! marshalling path through the interceptor (numeric fixtures hide data bugs).
+//!
+//! Handlers use the flat/positional param ABI (0.8+): each pact param is a
+//! separate `Value` arg — `fn handler(state, ..params)` — not a wrapped tuple.
 
 #![no_std]
 
@@ -49,19 +54,11 @@ fn log(msg: String);
 fn message_server_register() -> Result<(), String>;
 
 // ============================================================================
-// Actor export: init
+// Actor export: init  (pact: func(state))
 // ============================================================================
 
 #[export(name = "theater:simple/actor.init")]
-fn init(input: Value) -> Value {
-    // Extract state from input tuple: (state, params)
-    let state = match input {
-        Value::Tuple(items) if !items.is_empty() => items.into_iter().next().unwrap(),
-        _ => {
-            return err_result("Invalid input format");
-        }
-    };
-
+fn init(state: Value) -> Value {
     log(String::from("Replay test actor: init called"));
     log(String::from("Replay test actor: message 1"));
     log(String::from("Replay test actor: message 2"));
@@ -81,19 +78,11 @@ fn init(input: Value) -> Value {
 }
 
 // ============================================================================
-// Actor export: handle-send
+// Actor export: handle-send  (pact: func(state, params))
 // ============================================================================
 
 #[export(name = "theater:simple/message-server-client.handle-send")]
-fn handle_send(input: Value) -> Value {
-    // Extract state from input tuple: (state, params)
-    let state = match input {
-        Value::Tuple(items) if !items.is_empty() => items.into_iter().next().unwrap(),
-        _ => {
-            return err_result("Invalid input format");
-        }
-    };
-
+fn handle_send(state: Value, _params: Value) -> Value {
     log(String::from("Replay test actor: handle-send called"));
     log(String::from("Replay test actor: processing message"));
 
@@ -102,23 +91,11 @@ fn handle_send(input: Value) -> Value {
 }
 
 // ============================================================================
-// Actor export: handle-request
+// Actor export: handle-request  (pact: func(state, params))
 // ============================================================================
 
 #[export(name = "theater:simple/message-server-client.handle-request")]
-fn handle_request(input: Value) -> Value {
-    // Extract (state, params) from input tuple
-    let (state, params) = match input {
-        Value::Tuple(mut items) if items.len() >= 2 => {
-            let params = items.remove(1);
-            let state = items.remove(0);
-            (state, params)
-        }
-        _ => {
-            return err_result("Invalid input format");
-        }
-    };
-
+fn handle_request(state: Value, params: Value) -> Value {
     log(String::from("Replay test actor: handle-request called"));
 
     // Extract data from params: tuple<string, list<u8>>
@@ -154,18 +131,11 @@ fn handle_request(input: Value) -> Value {
 }
 
 // ============================================================================
-// Actor export: handle-channel-open
+// Actor export: handle-channel-open  (pact: func(state, params))
 // ============================================================================
 
 #[export(name = "theater:simple/message-server-client.handle-channel-open")]
-fn handle_channel_open(input: Value) -> Value {
-    let state = match input {
-        Value::Tuple(items) if !items.is_empty() => items.into_iter().next().unwrap(),
-        _ => {
-            return err_result("Invalid input format");
-        }
-    };
-
+fn handle_channel_open(state: Value, _params: Value) -> Value {
     log(String::from("Replay test actor: handle-channel-open called"));
 
     // Return Ok((state, (channel-accept,)))
@@ -190,18 +160,11 @@ fn handle_channel_open(input: Value) -> Value {
 }
 
 // ============================================================================
-// Actor export: handle-channel-message
+// Actor export: handle-channel-message  (pact: func(state, params))
 // ============================================================================
 
 #[export(name = "theater:simple/message-server-client.handle-channel-message")]
-fn handle_channel_message(input: Value) -> Value {
-    let state = match input {
-        Value::Tuple(items) if !items.is_empty() => items.into_iter().next().unwrap(),
-        _ => {
-            return err_result("Invalid input format");
-        }
-    };
-
+fn handle_channel_message(state: Value, _params: Value) -> Value {
     log(String::from("Replay test actor: handle-channel-message called"));
 
     // Return Ok((state,))
@@ -209,18 +172,11 @@ fn handle_channel_message(input: Value) -> Value {
 }
 
 // ============================================================================
-// Actor export: handle-channel-close
+// Actor export: handle-channel-close  (pact: func(state, params))
 // ============================================================================
 
 #[export(name = "theater:simple/message-server-client.handle-channel-close")]
-fn handle_channel_close(input: Value) -> Value {
-    let state = match input {
-        Value::Tuple(items) if !items.is_empty() => items.into_iter().next().unwrap(),
-        _ => {
-            return err_result("Invalid input format");
-        }
-    };
-
+fn handle_channel_close(state: Value, _params: Value) -> Value {
     log(String::from("Replay test actor: handle-channel-close called"));
 
     // Return Ok((state,))

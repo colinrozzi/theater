@@ -16,6 +16,8 @@ use tokio::sync::mpsc;
 use tokio::sync::RwLock as SyncRwLock;
 use tracing::info;
 
+mod common;
+
 /// Helper to create a PackInstance from the contract-test actor
 async fn create_instance() -> PackInstance {
     let wasm_path = concat!(
@@ -23,13 +25,14 @@ async fn create_instance() -> PackInstance {
         "/../../test-actors/contract-test/target/wasm32-unknown-unknown/release/contract_test_actor.wasm"
     );
 
-    let wasm_bytes = std::fs::read(wasm_path).unwrap_or_else(|e| {
+    let member = std::fs::read(wasm_path).unwrap_or_else(|e| {
         panic!(
             "Failed to read contract-test WASM from {}: {}. \
              Build it first: cd test-actors/contract-test && cargo build --release --target wasm32-unknown-unknown",
             wasm_path, e
         );
     });
+    let wasm_bytes = common::helpers::link_self_contained(member);
 
     let runtime = AsyncRuntime::new();
     let actor_id = TheaterId::generate();
@@ -80,7 +83,7 @@ async fn create_instance() -> PackInstance {
     instance
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_valid_typed_calls() {
     let _ = tracing_subscriber::fmt().with_env_filter("info").try_init();
 
@@ -153,7 +156,7 @@ async fn test_valid_typed_calls() {
     info!("All valid typed calls succeeded!");
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_invalid_state_type_rejected() {
     let _ = tracing_subscriber::fmt().with_env_filter("info").try_init();
 
@@ -191,7 +194,7 @@ async fn test_invalid_state_type_rejected() {
     );
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_missing_record_field_rejected() {
     let _ = tracing_subscriber::fmt().with_env_filter("info").try_init();
 
@@ -231,7 +234,7 @@ async fn test_missing_record_field_rejected() {
     );
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_wrong_field_type_rejected() {
     let _ = tracing_subscriber::fmt().with_env_filter("info").try_init();
 

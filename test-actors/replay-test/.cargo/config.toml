@@ -1,2 +1,18 @@
 [target.wasm32-unknown-unknown]
-rustflags = ["-C","relocation-model=pic","-C","link-arg=--experimental-pic","-C","link-arg=-shared","-C","link-arg=--import-memory","-C","link-arg=--export=__wasm_call_ctors"]
+# Fixed-base composition member (packr 0.10.0). Built non-PIC at an absolute
+# base so data needs no relocation; packr::link then unifies the imported memory
+# + internalizes pack:alloc into one own-memory self-contained composite.
+# Single actor package -> first package slot (0x50000); Layout::default() places
+# the allocator at 0xE0000 and the heap at 0xF0000+.
+rustflags = [
+    "-C", "link-arg=--import-memory",
+    "-C", "link-arg=--initial-memory=8388608",
+    "-C", "link-arg=--stack-first",
+    "-C", "link-arg=-zstack-size=262144",
+    "-C", "link-arg=--global-base=327680",
+    "-C", "link-arg=--no-entry",
+    # Keep the CGRF __pack_types metadata as its own data segment (starting with
+    # the magic) so packr::link's read_surface can find it — wasm-ld merges data
+    # segments by default, which would bury it inside .rodata.
+    "-C", "link-arg=--no-merge-data-segments",
+]
