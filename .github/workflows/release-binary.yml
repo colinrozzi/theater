@@ -1,0 +1,132 @@
+name: Release Binary
+
+# Builds the reproducible `theater` host binary (packr 0.10.2 self-contained)
+# for the fleet processes to run on, and publishes it: prints the store path +
+# closure size to the run summary, and either nix-copies it straight to the VPS
+# (when a deploy key is configured) or uploads the closure as a downloadable
+# artifact as a no-secret fallback.
+#
+# The dev box + agent sandboxes 403 on crate *tarballs*, so the binary is built
+# HERE (GitHub Actions reaches crates.io) and shipped by store path — same
+# CI-build + nix-copy flow as the 0.8.1 binary, now first-class + reproducible.
+#
+# Trigger it manually: Actions -> "Release Binary" -> Run workflow (pick a ref),
+# or `gh workflow run release-binary.yml --ref <branch-or-sha>`.
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Git ref (branch/tag/sha) to build. Defaults to the ref the workflow runs on."
+        required: false
+        default: ""
+  push:
+    tags:
+      - "binary-*"
+
+jobs:
+  build-binary:
+    name: Build + publish theater binary
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.ref || github.ref }}
+
+      - uses: DeterminateSystems/nix-installer-action@main
+      - uses: DeterminateSystems/magic-nix-cache-action@main
+
+      - name: Build theater binary
+        id: build
+        run: |
+          set -euo pipefail
+          OUT=$(nix build --no-link --print-out-paths .#theater)
+          echo "out=$OUT" >> "$GITHUB_OUTPUT"
+          echo "theater binary store path: $OUT"
+          test -x "$OUT/bin/theater" || { echo "::error::no theater binary at $OUT/bin/theater"; exit 1; }
+
+      - name: Report store path + closure size
+        run: |
+          set -euo pipefail
+          OUT='${{ steps.build.outputs.out }}'
+          SIZE=$(nix path-info -Sh "$OUT" | awk '{print $NF}')
+          {
+            echo "## theater host binary (packr 0.10.2 self-contained)"
+            echo ""
+            echo "- **commit:** \`${{ github.sha }}\`"
+            echo "- **store path:** \`$OUT\`"
+            echo "- **closure size:** \`$SIZE\`"
+            echo ""
+            echo "### Top closure contributors"
+            echo '```'
+            nix path-info -rSh "$OUT" | sort -k2 -h | tail -15
+            echo '```'
+            echo ""
+            echo "### Get it onto the VPS (from any box that has this store path)"
+            echo '```sh'
+            echo "nix copy --to ssh://USER@VPS $OUT"
+            echo "# then on the VPS: symlink \$OUT/bin/theater into the process run dir"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # Decide the delivery mechanism based on whether a deploy key is configured.
+      # (secrets can't be read directly in `if:`, so gate on a step output.)
+      - name: Check deploy config
+        id: cfg
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.NIX_DEPLOY_SSH_KEY }}
+        run: |
+          if [ -n "${DEPLOY_SSH_KEY:-}" ]; then
+            echo "deploy=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "deploy=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Preferred path: push the closure straight to the VPS store over SSH.
+      - name: Copy binary to VPS
+        if: steps.cfg.outputs.deploy == 'true'
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.NIX_DEPLOY_SSH_KEY }}
+          DEPLOY_HOST: ${{ secrets.NIX_DEPLOY_HOST }} # e.g. user@vps.example.com
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/id_deploy
+          chmod 600 ~/.ssh/id_deploy
+          host_only="${DEPLOY_HOST#*@}"
+          ssh-keyscan -H "$host_only" >> ~/.ssh/known_hosts 2>/dev/null || true
+          export NIX_SSHOPTS="-i ~/.ssh/id_deploy -o IdentitiesOnly=yes"
+          nix copy --to "ssh://$DEPLOY_HOST" '${{ steps.build.outputs.out }}'
+          echo "Copied ${{ steps.build.outputs.out }} to $DEPLOY_HOST"
+          echo "Copied to \`$DEPLOY_HOST\` via nix-copy over SSH." >> "$GITHUB_STEP_SUMMARY"
+
+      # Fallback when no deploy key: export the closure as a downloadable
+      # binary-cache dir. Fetch it, then on any nix box:
+      #   nix copy --from file://$PWD/nix-export --to ssh://USER@VPS <store-path>
+      - name: Export closure (no deploy key configured)
+        if: steps.cfg.outputs.deploy == 'false'
+        run: |
+          set -euo pipefail
+          OUT='${{ steps.build.outputs.out }}'
+          nix copy --to "file://$PWD/nix-export?compression=zstd" "$OUT"
+          printf '%s\n' "$OUT" > nix-export/store-path.txt
+          {
+            echo ""
+            echo "No deploy key configured — the closure is attached as the"
+            echo "**theater-binary-closure** artifact. To install it:"
+            echo '```sh'
+            echo "# download + unzip the artifact, then from a box that can reach the VPS:"
+            echo "nix copy --from file://\$PWD/nix-export --to ssh://USER@VPS \$(cat nix-export/store-path.txt)"
+            echo '```'
+            echo ""
+            echo "To enable direct CI->VPS delivery, set repo secrets"
+            echo "\`NIX_DEPLOY_SSH_KEY\` (private key) and \`NIX_DEPLOY_HOST\` (user@host)."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload closure artifact
+        if: steps.cfg.outputs.deploy == 'false'
+        uses: actions/upload-artifact@v4
+        with:
+          name: theater-binary-closure
+          path: nix-export
+          retention-days: 14
