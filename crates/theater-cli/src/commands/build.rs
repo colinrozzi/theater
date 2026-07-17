@@ -21,6 +21,12 @@ pub struct BuildArgs {
     /// Clean the target directory before building
     #[arg(short, long, default_value = "false")]
     pub clean: bool,
+
+    /// Skip self-contained composition and emit the bare cargo member only.
+    /// The bare member is NOT loadable by theater (its loader requires a
+    /// self-contained composite) — for debugging the member build only.
+    #[arg(long, default_value = "false")]
+    pub no_compose: bool,
 }
 
 /// Execute the build command asynchronously (modernized)
@@ -111,6 +117,54 @@ pub async fn execute_async(args: &BuildArgs, ctx: &CommandContext) -> Result<(),
         )));
     }
 
+    // --- Self-contained composition (packr 0.10.x cutover) ---
+    // theater's loader requires a self-contained composite (member + bundled
+    // allocator, host imports residual); a bare cargo member will not load.
+    // Link + verify at build time so a bad artifact fails the build, not boot.
+    let artifact_path = if args.no_compose {
+        info!(
+            "--no-compose: skipping composition; the bare member is NOT loadable by theater: {}",
+            wasm_path.display()
+        );
+        wasm_path.clone()
+    } else {
+        let member_bytes = fs::read(&wasm_path).map_err(|e| {
+            CliError::file_operation_failed(
+                "read built member wasm",
+                wasm_path.display().to_string(),
+                e,
+            )
+        })?;
+
+        let composite = super::compose::compose_self_contained(member_bytes).map_err(|e| {
+            CliError::build_failed(format!("Self-contained composition failed: {e}"))
+        })?;
+
+        let composite_path =
+            wasm_path.with_file_name(format!("{}.composite.wasm", package_name.replace('-', "_")));
+        fs::write(&composite_path, &composite).map_err(|e| {
+            CliError::file_operation_failed(
+                "write self-contained composite",
+                composite_path.display().to_string(),
+                e,
+            )
+        })?;
+
+        // Post-compose gate: reject a non-self-contained artifact here.
+        super::compose::verify_self_contained(&composite_path).map_err(|e| {
+            CliError::build_failed(format!(
+                "Self-contained verification failed for {}: {e}",
+                composite_path.display()
+            ))
+        })?;
+
+        info!(
+            "Composed + verified self-contained actor: {}",
+            composite_path.display()
+        );
+        composite_path
+    };
+
     // Update the manifest.toml with the new component path if it exists
     if manifest_exists {
         let manifest_content = fs::read_to_string(&manifest_path).map_err(|e| {
@@ -125,8 +179,9 @@ pub async fn execute_async(args: &BuildArgs, ctx: &CommandContext) -> Result<(),
             CliError::invalid_manifest(format!("Failed to parse manifest.toml: {}", e))
         })?;
 
-        // Update the package path - use absolute path to the wasm file
-        manifest.package = wasm_path.to_string_lossy().to_string();
+        // Update the package path - point at the self-contained composite
+        // (the deployable artifact), using an absolute path.
+        manifest.package = artifact_path.to_string_lossy().to_string();
 
         // Write the updated manifest
         let updated_manifest = toml::to_string(&manifest).map_err(|e| {
@@ -143,7 +198,7 @@ pub async fn execute_async(args: &BuildArgs, ctx: &CommandContext) -> Result<(),
 
         info!(
             "Updated manifest with component path: {}",
-            wasm_path.display()
+            artifact_path.display()
         );
     }
 
@@ -151,7 +206,7 @@ pub async fn execute_async(args: &BuildArgs, ctx: &CommandContext) -> Result<(),
     let result = BuildResult {
         success: true,
         project_dir,
-        wasm_path: Some(wasm_path),
+        wasm_path: Some(artifact_path),
         manifest_exists,
         manifest_path: Some(manifest_path),
         build_type: build_type.to_string(),
