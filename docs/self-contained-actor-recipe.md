@@ -74,6 +74,24 @@ Requires **`wasm-merge`** (binaryen) and **`wasm-tools`** on PATH — both are i
 the theater dev shell (`nix develop`). `--no-compose` emits the bare member only
 (not loadable; debugging).
 
+### Crane / cargo-workspace builds → `theater compose`
+
+`theater build` re-runs `cargo` and assumes a **standalone crate** (its own
+`target/` dir). It does **not** fit a crane flake or a cargo **workspace member**
+(whose `target/` is at the workspace root). For those, build the member however
+you already do (crane `buildPackage`, offline/sandboxed cargo, …), then compose
+the **prebuilt member** with the standalone subcommand:
+
+```sh
+theater compose <member.wasm> [-o <name>.composite.wasm]     # verifies by default; --no-verify to skip
+```
+
+It links the member + the bundled allocator (single-package, base `0x50000`),
+runs the same verification, writes the composite, and prints its path to stdout.
+Same PATH tools (`wasm-merge`, `wasm-tools`). Typical crane `installPhase`:
+crane builds the bare members → `theater compose` each → install the composites.
+Deploy the composite, never the bare member.
+
 ## 5. Verify (done automatically by `theater build`; manual check)
 
 ```sh

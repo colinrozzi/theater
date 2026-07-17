@@ -12,10 +12,81 @@
 //!   - `wasm-tools`            — the post-compose verification gate.
 
 use anyhow::{anyhow, bail, Context, Result};
-use std::path::Path;
+use clap::Parser;
+use std::fs;
+use std::path::{Path, PathBuf};
 use std::process::Command;
+use tracing::info;
 
 use packr::{link, Layout, LinkBinary, DEFAULT_ALLOCATOR_WASM};
+
+use crate::{error::CliError, CommandContext};
+
+/// `theater compose <member.wasm>` — compose a PREBUILT actor member into a
+/// self-contained composite (member + bundled allocator, host imports residual).
+///
+/// This is the standalone counterpart to `theater build` (which re-runs cargo):
+/// it takes an already-built member `.wasm` and composes it, which is what
+/// crane / cargo-workspace builds need — they build the members themselves
+/// (offline/sandboxed), then compose each. `theater build` can't be used there
+/// because it assumes a standalone crate with its own `target/` dir.
+#[derive(Debug, Parser)]
+pub struct ComposeArgs {
+    /// Path to a cargo-built actor member `.wasm` (the bare member — NOT a composite).
+    pub member: PathBuf,
+
+    /// Output path for the self-contained composite
+    /// (default: `<member-dir>/<name>.composite.wasm`).
+    #[arg(short, long)]
+    pub output: Option<PathBuf>,
+
+    /// Skip the post-compose self-contained verification gate.
+    #[arg(long, default_value = "false")]
+    pub no_verify: bool,
+}
+
+/// Execute `theater compose`: read the member, link it with the bundled
+/// allocator, verify, and write the composite. Prints the composite path to
+/// stdout so build scripts can capture it.
+pub async fn execute_compose(args: &ComposeArgs, _ctx: &CommandContext) -> Result<(), CliError> {
+    let member = fs::read(&args.member).map_err(|e| {
+        CliError::file_operation_failed("read member wasm", args.member.display().to_string(), e)
+    })?;
+
+    let composite = compose_self_contained(member)
+        .map_err(|e| CliError::build_failed(format!("Self-contained composition failed: {e}")))?;
+
+    let out = args.output.clone().unwrap_or_else(|| {
+        let stem = args
+            .member
+            .file_stem()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "actor".to_string());
+        args.member.with_file_name(format!("{stem}.composite.wasm"))
+    });
+
+    fs::write(&out, &composite).map_err(|e| {
+        CliError::file_operation_failed("write composite wasm", out.display().to_string(), e)
+    })?;
+
+    if !args.no_verify {
+        verify_self_contained(&out).map_err(|e| {
+            CliError::build_failed(format!(
+                "Self-contained verification failed for {}: {e}",
+                out.display()
+            ))
+        })?;
+    }
+
+    info!(
+        "composed self-contained actor: {} ({} bytes)",
+        out.display(),
+        composite.len()
+    );
+    // The composite path on stdout is the machine-readable result.
+    println!("{}", out.display());
+    Ok(())
+}
 
 /// Link an actor member + the packr bundled allocator into a self-contained
 /// composite. Single-package actor: no `[[link]]` edges, so the composite's

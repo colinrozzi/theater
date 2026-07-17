@@ -179,6 +179,22 @@ jobs:
             echo "all residual imports are host theater:simple/* — composite is self-contained"
           '
 
+      # Crane/workspace path: compose the already-built member with the standalone
+      # `theater compose` subcommand (what crane-built fleet actors use, since
+      # `theater build` re-runs cargo and assumes a standalone crate).
+      - name: theater compose (crane-style, on the prebuilt member)
+        run: |
+          nix develop --command bash -c '
+            set -euo pipefail
+            member=test-actors/state-test/target/wasm32-unknown-unknown/release/state_test_actor.wasm
+            out=$(./target/release/theater compose "$member" -o /tmp/state_test.composite.wasm)
+            test -f /tmp/state_test.composite.wasm || { echo "::error::theater compose produced no output"; exit 1; }
+            wasm-tools validate /tmp/state_test.composite.wasm
+            bad=$(wasm-tools print /tmp/state_test.composite.wasm | grep -E "^[[:space:]]*\(import " | grep -v "theater:simple/" || true)
+            if [ -n "$bad" ]; then echo "::error::theater compose output is not self-contained:"; echo "$bad"; exit 1; fi
+            echo "theater compose produced a verified self-contained composite: $out"
+          '
+
       - name: Spawn on the 0.10.2 runtime (assert_self_contained + init runs)
         run: |
           nix develop --command bash -c '
