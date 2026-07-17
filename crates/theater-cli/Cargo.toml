@@ -37,6 +37,10 @@ theater-handler-podman.workspace = true
 
 # Core dependencies
 anyhow.workspace = true
+# Self-contained composition: `theater build` links the actor member + the
+# bundled allocator (packr::link / DEFAULT_ALLOCATOR_WASM) into a self-contained
+# composite (packr 0.10.x cutover).
+packr.workspace = true
 tokio.workspace = true
 serde.workspace = true
 serde_json.workspace = true
