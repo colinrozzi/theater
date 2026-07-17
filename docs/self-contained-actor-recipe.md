@@ -22,12 +22,25 @@ and verifies it in one command — no Rust link harness.
 crate-type = ["cdylib"]
 
 [dependencies]
-packr-guest = "0.10.2"        # NO features — the `pic` feature is gone
+# Drop the `pic` feature. Two cases:
+#   - Value-style state (build Value::Record by hand, like state-test): bare, no features.
+packr-guest = "0.10.2"
+#   - #[derive(GraphValue)] typed-state (most 0.7/0.8-era actors): KEEP the derive feature.
+# packr-guest = { version = "0.10.2", features = ["derive"] }
 
 [profile.release]
 opt-level = "s"
 lto = true                    # keep the member small
 ```
+
+> **`derive` vs bare.** `GraphValue` is `#[cfg(feature = "derive")]`, and `derive`
+> is **non-default** in 0.10.2 (it doesn't show on docs.rs). If your actor uses
+> `#[derive(GraphValue)]` / `#[derive(Clone, GraphValue)] #[graph(crate = "packr_guest::composite_abi")]`
+> on its state, keep `features = ["derive"]` — that alone is the migration (no
+> source rewrite). Symptom if you forget it: `E0432 unresolved import GraphValue`
+> → `E0277 Value: From<State> not satisfied`. Only actors that hand-build
+> `Value::Record` (like the state-test example below) stay bare. `derive` is
+> confirmed working under the self-contained model (shipped by tickets-ui).
 
 ## 2. `.cargo/config.toml` — the fixed-base recipe
 
@@ -74,13 +87,25 @@ Requires **`wasm-merge`** (binaryen) and **`wasm-tools`** on PATH — both are i
 the theater dev shell (`nix develop`). `--no-compose` emits the bare member only
 (not loadable; debugging).
 
+> **Workspace member?** `theater build` looks for the member wasm at
+> `<actor-dir>/target/…`, but a cargo **workspace** builds to the workspace-**root**
+> `target/`, so `theater build <member-dir>` finds nothing. If you still want the
+> one-command path, redirect cargo's output to where `theater build` looks:
+> ```sh
+> CARGO_TARGET_DIR="$PWD/<member-dir>/target" theater build --release <member-dir>
+> ```
+> Or use `theater compose` on the prebuilt member (next section) — better for
+> crane/offline builds that don't run `theater build` at all.
+
 ### Crane / cargo-workspace builds → `theater compose`
 
 `theater build` re-runs `cargo` and assumes a **standalone crate** (its own
 `target/` dir). It does **not** fit a crane flake or a cargo **workspace member**
-(whose `target/` is at the workspace root). For those, build the member however
-you already do (crane `buildPackage`, offline/sandboxed cargo, …), then compose
-the **prebuilt member** with the standalone subcommand:
+(whose `target/` is at the workspace root — see the `CARGO_TARGET_DIR` note above
+if you want to keep using `theater build`). For crane / offline / sandboxed
+builds, build the member however you already do (crane `buildPackage`,
+offline/sandboxed cargo, …), then compose the **prebuilt member** with the
+standalone subcommand:
 
 ```sh
 theater compose <member.wasm> [-o <name>.composite.wasm]     # verifies by default; --no-verify to skip
