@@ -136,8 +136,9 @@ pub async fn execute_async(args: &BuildArgs, ctx: &CommandContext) -> Result<(),
             )
         })?;
 
-        let composite = super::compose::compose_self_contained(member_bytes)
-            .map_err(|e| CliError::build_failed(format!("Self-contained composition failed: {e}")))?;
+        let composite = super::compose::compose_self_contained(member_bytes).map_err(|e| {
+            CliError::build_failed(format!("Self-contained composition failed: {e}"))
+        })?;
 
         let composite_path =
             wasm_path.with_file_name(format!("{}.composite.wasm", package_name.replace('-', "_")));
