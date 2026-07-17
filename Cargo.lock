@@ -3441,6 +3441,7 @@ dependencies = [
  "handlebars",
  "hex",
  "indicatif",
+ "packr",
  "serde",
  "serde_json",
  "serde_yaml",
