@@ -21,6 +21,12 @@ jobs:
 
       - uses: DeterminateSystems/magic-nix-cache-action@main
 
+      - name: Cargo.lock is up to date
+        # --locked fails if Cargo.lock is stale, so a dep added to a Cargo.toml
+        # without regenerating the lock is caught here at PR time rather than
+        # slipping through to the crane/publish builds (which use --locked).
+        run: nix develop --command cargo metadata --format-version 1 --locked > /dev/null
+
       - name: Check
         run: nix develop --command cargo check --workspace
 
