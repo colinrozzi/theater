@@ -74,6 +74,20 @@ impl ActorHandle {
             ActorError::SerializationError
         })?;
 
+        // Diagnostic: dump the exact packr-encoded init params (the bytes the
+        // guest's composite_abi decoder receives) so a hanging/pathological
+        // decode input can be captured verbatim for packr. Off by default; the
+        // `trace!` only fires — and the hex-encode only runs — when this target
+        // is enabled: RUST_LOG=theater::init_encode_dump=trace
+        if name == "theater:simple/actor.init" {
+            tracing::trace!(
+                target: "theater::init_encode_dump",
+                len = params_bytes.len(),
+                hex = %hex::encode(&params_bytes),
+                "actor.init encoded params (packr encode_value bytes)"
+            );
+        }
+
         self.operation_tx
             .send(ActorOperation::CallFunctionPack {
                 name,
