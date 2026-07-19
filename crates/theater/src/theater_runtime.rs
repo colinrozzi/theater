@@ -28,13 +28,26 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use tokio::sync::mpsc::Receiver;
 use tokio::sync::mpsc::Sender;
 use tokio::sync::RwLock;
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
 use tracing::{debug, error, info, warn};
+
+/// How long `actor.init` may run before the runtime starts emitting periodic
+/// "init has not returned" warnings.
+///
+/// A self-contained composite can pass every load-time check
+/// (`assert_self_contained`) yet spin or thrash in its packr entry path — the
+/// `composite_abi` decode of the init arg, or the first bundled-allocator
+/// growth — *before* any guest code runs, with no trap and no logs. wasmtime is
+/// configured here without fuel/epoch, so the runtime cannot interrupt such a
+/// loop; this watchdog at least makes the hang **legible** (a loud, periodic
+/// warning naming the spinning actor) instead of the actor silently never
+/// becoming ready. It does not change init's success/failure semantics.
+const INIT_WATCHDOG_WARN_INTERVAL: Duration = Duration::from_secs(30);
 
 /// # TheaterRuntime
 ///
@@ -985,10 +998,37 @@ impl TheaterRuntime {
             let init_phase_start = Instant::now();
             tokio::spawn(async move {
                 let init_params = Value::Tuple(vec![]);
-                match actor_handle
-                    .call_function("theater:simple/actor.init".to_string(), init_params)
-                    .await
-                {
+                let init_fut = actor_handle
+                    .call_function("theater:simple/actor.init".to_string(), init_params);
+                tokio::pin!(init_fut);
+
+                // Watchdog: warn loudly and periodically while init has not
+                // returned, so a runaway/thrashing entry decode (which wasmtime
+                // can't interrupt here — no fuel/epoch) surfaces as a legible
+                // signal instead of an actor that silently never becomes ready.
+                // A normal fast init completes on the first select and never
+                // trips the timer.
+                let mut watchdog = tokio::time::interval(INIT_WATCHDOG_WARN_INTERVAL);
+                watchdog.tick().await; // first tick is immediate; discard it
+                let result = loop {
+                    tokio::select! {
+                        r = &mut init_fut => break r,
+                        _ = watchdog.tick() => {
+                            warn!(
+                                phase = "runtime.init",
+                                actor_id = %actor_id,
+                                elapsed_ms = init_phase_start.elapsed().as_millis() as u64,
+                                "actor.init has not returned after {}s and the actor is not yet \
+                                 serving — the guest may be spinning or thrashing in its entry/init \
+                                 (e.g. a runaway composite_abi decode or bundled-allocator growth); \
+                                 check for a runaway init",
+                                init_phase_start.elapsed().as_secs(),
+                            );
+                        }
+                    }
+                };
+
+                match result {
                     Ok(_) => {
                         debug!("Actor {} init completed", actor_id);
                         info!(
