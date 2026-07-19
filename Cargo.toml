@@ -95,8 +95,12 @@ theater-handler-podman = { version = "0.3.13", path = "crates/theater-handler-po
 # theater-handler-timing = { version = "0.3.9", path = "crates/deprecated/theater-handler-timing" }
 
 # Pack runtime integration (Graph ABI-based WASM runtime)
-packr = "0.10.2"
-packr-abi = "0.10.2"
+# 0.10.3: fit_layout in packr::link — auto-raises the allocator metadata/heap
+# above each member's __data_end, fixing the fixed-Layout metadata_base (0x51400)
+# overrun that hung big-rodata actors. Host-ABI unchanged vs 0.10.2 (compose-side
+# only), so this is a no-op compile for the runtime and old composites still load.
+packr = "0.10.3"
+packr-abi = "0.10.3"
 
 # Metadata for Nix crane builds
 [workspace.metadata.crane]
