@@ -501,6 +501,21 @@ impl PackInstance {
             other => Value::Tuple(vec![state, other]),
         };
 
+        // Diagnostic: capture the EXACT encoded actor.init input (the flattened
+        // Tuple[state, ..params] the guest's composite_abi decoder receives) so a
+        // hanging/pathological decode input can be handed to packr verbatim. This
+        // is the real wasm-boundary input — unlike the CLI's empty init params,
+        // it includes the actor's `state` (e.g. a restart's persisted state).
+        // Off by default; the hex-encode (and re-encode) only run when enabled:
+        //   RUST_LOG=theater::init_encode_dump=trace
+        if function_name == "theater:simple/actor.init" {
+            tracing::trace!(
+                target: "theater::init_encode_dump",
+                hex = %hex::encode(encode_value(&input).unwrap_or_default()),
+                "actor.init encoded input bytes (packr encode of Tuple[state, ..params])"
+            );
+        }
+
         let output = self
             .instance
             .call_with_value_async(function_name, &input)
