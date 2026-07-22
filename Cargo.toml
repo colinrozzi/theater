@@ -101,8 +101,17 @@ theater-handler-podman = { version = "0.3.13", path = "crates/theater-handler-po
 # (inbox mailbox load_state of a ~1MB MailboxState). Host bump is ALIGNMENT-only
 # (host memory is native/uncapped); the load-bearing fix is guests recompiling
 # against packr-guest 0.10.4. Wire format unchanged; no data migration.
-packr = "0.10.4"
-packr-abi = "0.10.4"
+# 0.10.5: epoch guardrail — AsyncRuntime enables wasmtime epoch_interruption;
+# theater drives engine().increment_epoch() on a 1/sec ticker + arms a per-call
+# set_epoch_deadline, so a runaway guest (a decode/loop/etc.) TRAPS on the
+# deadline instead of pegging a core forever. Makes a spinning actor.init fail
+# clean -> the parent skips it -> the spine comes up degraded, not wedged.
+# 0.10.6: fixes the instantiate-path u64::MAX "never-trap" default, which
+# overflowed current_epoch()+delta once the ticker advanced the epoch past 0
+# (panic in debug, wrap-to-garbage in release) — default is now u64::MAX/2.
+# Required for the epoch arming above to actually work; 0.10.5 could not ship armed.
+packr = "0.10.6"
+packr-abi = "0.10.6"
 
 # Metadata for Nix crane builds
 [workspace.metadata.crane]

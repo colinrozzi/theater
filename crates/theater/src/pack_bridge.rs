@@ -13,6 +13,21 @@
 
 use anyhow::{Context, Result};
 use std::sync::Arc;
+use std::time::Duration;
+
+/// How often the epoch ticker advances the shared engine's epoch. Guest
+/// deadlines are expressed in ticks, so with a 1s tick, N ticks ~= N seconds.
+const EPOCH_TICK_INTERVAL: Duration = Duration::from_secs(1);
+
+/// Per-call epoch deadline for `actor.init` (ticks ~= seconds). Init is the
+/// spine-wedging path (a runaway init sticks the parent's synchronous spawn),
+/// so it gets a tight ceiling — the init-watchdog warns at 30s, epoch traps here.
+const INIT_EPOCH_DEADLINE_TICKS: u64 = 60;
+
+/// Per-call epoch deadline for all other guest calls (ticks ~= seconds). A
+/// generous hard ceiling: legit calls are milliseconds (a 1MB decode is ~4ms),
+/// so this never false-trips but stops a true runaway from pegging a core.
+const DEFAULT_EPOCH_DEADLINE_TICKS: u64 = 300;
 
 // Re-export Pack types for convenient use throughout Theater
 // Now unified: pack re-exports from pack_abi, so Value/FromValue/ConversionError are consistent
@@ -64,8 +79,28 @@ pub struct CachingPackRuntime {
 
 impl CachingPackRuntime {
     pub fn new() -> Self {
+        let runtime = AsyncRuntime::new();
+
+        // Epoch ticker: advance the shared engine's epoch once per second so a
+        // per-call `set_epoch_deadline` can trap a runaway guest (a decode, a
+        // loop, anything) instead of letting it peg a core forever. One ticker
+        // for the singleton engine. Guarded on Handle::try_current so building
+        // the runtime outside a tokio context (e.g. a sync unit test) doesn't
+        // panic — without a ticker the epoch never advances, so no call traps,
+        // which is the correct behavior for a non-async harness.
+        if let Ok(handle) = tokio::runtime::Handle::try_current() {
+            let engine = runtime.engine().clone();
+            handle.spawn(async move {
+                let mut ticker = tokio::time::interval(EPOCH_TICK_INTERVAL);
+                loop {
+                    ticker.tick().await;
+                    engine.increment_epoch();
+                }
+            });
+        }
+
         Self {
-            runtime: AsyncRuntime::new(),
+            runtime,
             modules: std::sync::RwLock::new(HashMap::new()),
         }
     }
@@ -500,6 +535,22 @@ impl PackInstance {
             }
             other => Value::Tuple(vec![state, other]),
         };
+
+        // Arm the epoch deadline before entering the guest: with the 1/sec
+        // ticker above, a runaway call traps once `ticks` seconds pass and
+        // returns Err (an epoch trap) instead of pegging a core. Tight on
+        // actor.init (the spine-wedging path), generous otherwise. The deadline
+        // is per-call, so a legitimately slow call just needs a bigger budget.
+        let epoch_ticks = if function_name == "theater:simple/actor.init" {
+            INIT_EPOCH_DEADLINE_TICKS
+        } else {
+            DEFAULT_EPOCH_DEADLINE_TICKS
+        };
+        // Armed on packr >=0.10.6: pack-dev's u64::MAX "never-trap" default
+        // (which overflowed current_epoch()+delta once the ticker advanced the
+        // epoch past 0) is fixed to u64::MAX/2, so this computes cleanly and
+        // traps a runaway call at the deadline instead of pegging a core.
+        self.instance.set_epoch_deadline(epoch_ticks);
 
         // Diagnostic: capture the EXACT encoded actor.init input (the flattened
         // Tuple[state, ..params] the guest's composite_abi decoder receives) so a
