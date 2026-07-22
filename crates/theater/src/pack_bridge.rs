@@ -541,12 +541,20 @@ impl PackInstance {
         // returns Err (an epoch trap) instead of pegging a core. Tight on
         // actor.init (the spine-wedging path), generous otherwise. The deadline
         // is per-call, so a legitimately slow call just needs a bigger budget.
-        let epoch_ticks = if function_name == "theater:simple/actor.init" {
+        let _epoch_ticks = if function_name == "theater:simple/actor.init" {
             INIT_EPOCH_DEADLINE_TICKS
         } else {
             DEFAULT_EPOCH_DEADLINE_TICKS
         };
-        self.instance.set_epoch_deadline(epoch_ticks);
+        // FALLBACK (re-flip #3): arming is DISABLED pending packr's per-actor
+        // store-epoch fix (>=0.10.6). On packr 0.10.5 the actor Store lacks
+        // epoch_interruption, so `set_epoch_deadline` computes current_epoch()
+        // (a near-u64::MAX sentinel) + ticks and overflows — panic in debug,
+        // wrap-to-garbage-deadline in release (would trap every actor). The
+        // 1/sec ticker above is harmless and stays armed; the init-watchdog
+        // still names a wedged init. Re-enable this single line once the store
+        // path has epoch on — that restores the trap-the-runaway backstop:
+        //   self.instance.set_epoch_deadline(_epoch_ticks);
 
         // Diagnostic: capture the EXACT encoded actor.init input (the flattened
         // Tuple[state, ..params] the guest's composite_abi decoder receives) so a
