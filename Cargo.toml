@@ -106,8 +106,12 @@ theater-handler-podman = { version = "0.3.13", path = "crates/theater-handler-po
 # set_epoch_deadline, so a runaway guest (a decode/loop/etc.) TRAPS on the
 # deadline instead of pegging a core forever. Makes a spinning actor.init fail
 # clean -> the parent skips it -> the spine comes up degraded, not wedged.
-packr = "0.10.5"
-packr-abi = "0.10.5"
+# 0.10.6: fixes the instantiate-path u64::MAX "never-trap" default, which
+# overflowed current_epoch()+delta once the ticker advanced the epoch past 0
+# (panic in debug, wrap-to-garbage in release) — default is now u64::MAX/2.
+# Required for the epoch arming above to actually work; 0.10.5 could not ship armed.
+packr = "0.10.6"
+packr-abi = "0.10.6"
 
 # Metadata for Nix crane builds
 [workspace.metadata.crane]
