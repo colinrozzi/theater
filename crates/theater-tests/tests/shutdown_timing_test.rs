@@ -31,27 +31,13 @@ use theater_handler_timer::TimerHandler;
 use tokio::sync::{mpsc, oneshot};
 use tracing::info;
 
-/// Link a fixed-base actor member + the packr bundled allocator into a
-/// self-contained composite loadable by the 0.10.x self-contained loader.
-/// Requires `wasm-merge` (binaryen) on PATH.
+/// Return an actor member's wasm as-is. As of packr 0.11.0 an actor is a plain
+/// cargo build (`setup_guest!()` links the allocator in), so a plain-built
+/// member is directly loadable — no composition step. Identity shim kept so the
+/// tests below read unchanged; the shutdown-test actor must be built plain
+/// (packr-guest 0.11.0, no fixed-base recipe).
 fn link_self_contained(member: Vec<u8>) -> Vec<u8> {
-    packr::link(
-        vec![
-            packr::LinkBinary {
-                alias: "alloc".into(),
-                wasm: packr::DEFAULT_ALLOCATOR_WASM.to_vec(),
-                allocator: true,
-            },
-            packr::LinkBinary {
-                alias: "actor".into(),
-                wasm: member,
-                allocator: false,
-            },
-        ],
-        &[],
-        packr::Layout::default(),
-    )
-    .expect("link shutdown-test member + bundled allocator into a self-contained composite")
+    member
 }
 
 /// Maximum acceptable shutdown time - if it takes longer, we have a bug

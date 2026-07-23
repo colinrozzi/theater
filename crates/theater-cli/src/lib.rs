@@ -63,13 +63,6 @@ pub enum Commands {
     #[command(name = "build")]
     Build(commands::build::BuildArgs),
 
-    /// Compose a prebuilt actor member into a self-contained composite
-    /// (member + bundled allocator). For crane / cargo-workspace builds
-    /// where the member is already built and `theater build` (which re-runs
-    /// cargo and assumes a standalone crate) doesn't fit.
-    #[command(name = "compose")]
-    Compose(commands::compose::ComposeArgs),
-
     /// Spawn an actor with a local runtime (setup + init)
     #[command(name = "spawn")]
     Spawn(commands::spawn::SpawnArgs),
@@ -113,9 +106,6 @@ pub async fn run(
                 .await
                 .map_err(anyhow::Error::from),
             Commands::Build(args) => commands::build::execute_async(args, &ctx)
-                .await
-                .map_err(anyhow::Error::from),
-            Commands::Compose(args) => commands::compose::execute_compose(args, &ctx)
                 .await
                 .map_err(anyhow::Error::from),
             Commands::Spawn(args) => commands::spawn::execute_spawn(args, &ctx)
