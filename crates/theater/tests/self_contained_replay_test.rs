@@ -22,7 +22,6 @@
 use std::sync::{Arc, Mutex};
 
 use packr::abi::ValueType;
-use packr::{link, Layout, LinkBinary, DEFAULT_ALLOCATOR_WASM};
 
 use theater::actor::handle::ActorHandle;
 use theater::actor::store::ActorStore;
@@ -35,38 +34,23 @@ use theater::pack_bridge::{ActorResult, AsyncRuntime, CallInterceptor, Ctx, Pack
 use tokio::sync::mpsc;
 use tokio::sync::RwLock as SyncRwLock;
 
-/// Link the `replay-test` member + the bundled allocator into a self-contained
-/// composite. No `[[link]]` edges: the only residual imports are host functions.
+/// Read the plain-built `replay-test` actor wasm. As of packr 0.11.0 an actor
+/// is a plain cargo build (`setup_guest!()` links the allocator in), so the
+/// member is directly loadable — no composition step. The member must be built
+/// plain first (packr-guest 0.11.0, no fixed-base recipe):
+///   cd test-actors/replay-test && cargo build --target wasm32-unknown-unknown --release
 fn link_replay_composite() -> Vec<u8> {
     let member_path = concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/../../test-actors/replay-test/target/wasm32-unknown-unknown/release/replay_test_actor.wasm"
     );
-    let member = std::fs::read(member_path).unwrap_or_else(|e| {
+    std::fs::read(member_path).unwrap_or_else(|e| {
         panic!(
             "read replay-test member {}: {}. Build it first: \
              cd test-actors/replay-test && cargo build --target wasm32-unknown-unknown --release",
             member_path, e
         )
-    });
-
-    link(
-        vec![
-            LinkBinary {
-                alias: "alloc".into(),
-                wasm: DEFAULT_ALLOCATOR_WASM.to_vec(),
-                allocator: true,
-            },
-            LinkBinary {
-                alias: "actor".into(),
-                wasm: member,
-                allocator: false,
-            },
-        ],
-        &[],
-        Layout::default(),
-    )
-    .expect("link replay-test + bundled allocator into a self-contained composite")
+    })
 }
 
 /// Result of one `handle-send` drive.

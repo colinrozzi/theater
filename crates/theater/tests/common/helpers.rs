@@ -1,4 +1,3 @@
-use packr::{link, Layout, LinkBinary, DEFAULT_ALLOCATOR_WASM};
 use theater::chain::StateChain;
 use theater::events::wasm::WasmEventData;
 use theater::events::{ChainEventData, ChainEventPayload};
@@ -9,34 +8,17 @@ use theater::{HandlerConfig, ManifestConfig, MessageServerConfig};
 use theater::{ShutdownController, ShutdownReceiver};
 use tokio::sync::mpsc;
 
-/// Link a cargo-built actor member + the packr **bundled** allocator
-/// (`DEFAULT_ALLOCATOR_WASM`) into a self-contained composite loadable by the
-/// 0.10.x self-contained loader.
+/// Return an actor member's wasm as-is.
 ///
-/// Test fixtures are single-package: no `[[link]]` edges, so the composite's
-/// residual imports are exactly the actor's host interfaces (`theater:simple/*`);
-/// `pack:alloc` + the memory are internalized. The member must be built with the
-/// fixed-base recipe (see any `test-actors/*/.cargo/config.toml`).
-///
-/// Requires `wasm-merge` (binaryen) on PATH — `packr::link` shells out to it.
+/// As of packr 0.11.0 there is no composition step: `packr_guest::setup_guest!()`
+/// links the allocator into the cdylib, so a plain cargo-built member already
+/// exports its own (growable) memory + `__pack_alloc`/`__pack_free` + lifecycle
+/// and imports only host `theater:simple/*` — it is directly loadable by
+/// theater's runtime. This identity shim is kept so existing tests read
+/// unchanged; the test-actors must be built plain (packr-guest 0.11.0, no
+/// fixed-base recipe).
 pub fn link_self_contained(member: Vec<u8>) -> Vec<u8> {
-    link(
-        vec![
-            LinkBinary {
-                alias: "alloc".into(),
-                wasm: DEFAULT_ALLOCATOR_WASM.to_vec(),
-                allocator: true,
-            },
-            LinkBinary {
-                alias: "actor".into(),
-                wasm: member,
-                allocator: false,
-            },
-        ],
-        &[],
-        Layout::default(),
-    )
-    .expect("link actor member + bundled allocator into a self-contained composite")
+    member
 }
 
 /// Create a test event data object for testing

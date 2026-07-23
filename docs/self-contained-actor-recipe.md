@@ -1,4 +1,40 @@
-# Self-contained actor recipe (packr 0.10.2)
+# Self-contained actor recipe
+
+> **⚠️ RETIRED as of packr 0.11.0 — this fixed-base + composition recipe no longer applies.**
+>
+> packr 0.11.0 removed all composition/fuse machinery (`packr::link`,
+> `DEFAULT_ALLOCATOR_WASM`, the `--import-memory` fixed-base recipe, `theater
+> compose`). An actor is now a **plain cargo build**:
+>
+> ```toml
+> # Cargo.toml
+> [lib]
+> crate-type = ["cdylib"]
+> [dependencies]
+> packr-guest = "0.11.0"          # setup_guest!() links dlmalloc in
+> ```
+> ```toml
+> # .cargo/config.toml
+> [target.wasm32-unknown-unknown]
+> rustflags = [
+>     "-C", "link-arg=--export-memory",
+>     "-C", "link-arg=--no-entry",
+> ]
+> ```
+> ```sh
+> cargo build --target wasm32-unknown-unknown --release
+> # the resulting <name>.wasm is directly loadable — no compose step.
+> ```
+>
+> The cdylib exports its own **growable** memory + `__pack_alloc`/`__pack_free` +
+> lifecycle and imports only host `theater:simple/*`. `theater build --release`
+> still verifies the import surface. Worked example: `test-actors/state-test`,
+> driven in CI by the **Reference actor (self-contained e2e)** job. The
+> historical 0.10.2 composite recipe below is kept for reference only.
+
+---
+
+# Self-contained actor recipe (packr 0.10.2) — HISTORICAL
 
 The canonical, copy-me reference for building a fleet actor against the packr
 **0.10.2 self-contained** model (PIC removed). Worked example: `test-actors/state-test`

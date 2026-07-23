@@ -1,157 +1,55 @@
-//! Build-time self-contained composition for the packr 0.10.x cutover.
+//! Self-contained **verification** for the packr 0.11.0 plain-build model.
 //!
-//! `theater build` links the cargo-built actor member with the packr **bundled**
-//! allocator (`DEFAULT_ALLOCATOR_WASM`) into a **self-contained composite** — own
-//! memory, internalized `pack:alloc`, with the actor's host `theater:simple/*`
-//! imports left **residual**. That composite is the artifact theater's 0.10.x
-//! loader (`assert_self_contained`) accepts; a bare cargo-built member (imported
-//! memory, unresolved `pack:alloc`) is *not* self-contained and will not load.
+//! As of packr 0.11.0 there is no composition step: an actor is a PLAIN cargo
+//! build. `packr_guest::setup_guest!()` links the allocator (dlmalloc) into the
+//! cdylib, so the built `.wasm` already exports its own (growable) memory +
+//! `__pack_alloc`/`__pack_free` + lifecycle and imports only host
+//! `theater:simple/*` interfaces. That bare `.wasm` is what theater's loader
+//! accepts directly — no `packr::link`, no bundled allocator, no fixed-base
+//! recipe. (Historically this module linked member + `DEFAULT_ALLOCATOR_WASM`
+//! into a composite; all of that machinery was removed in 0.11.0.)
 //!
-//! Requires two external tools on PATH (both are in the theater dev shell):
-//!   - `wasm-merge` (binaryen) — `packr::link` shells out to it to fuse the composite;
-//!   - `wasm-tools`            — the post-compose verification gate.
+//! What remains is the post-build **gate**: assert the built artifact is
+//! genuinely self-contained (imports only host functions), so a bad build fails
+//! the build instead of failing at boot. Uses `wasm-tools` on PATH.
 
-use anyhow::{anyhow, bail, Context, Result};
-use clap::Parser;
-use std::fs;
-use std::path::{Path, PathBuf};
+use anyhow::{bail, Context, Result};
+use std::path::Path;
 use std::process::Command;
-use tracing::info;
 
-use packr::{link, Layout, LinkBinary, DEFAULT_ALLOCATOR_WASM};
-
-use crate::{error::CliError, CommandContext};
-
-/// `theater compose <member.wasm>` — compose a PREBUILT actor member into a
-/// self-contained composite (member + bundled allocator, host imports residual).
-///
-/// This is the standalone counterpart to `theater build` (which re-runs cargo):
-/// it takes an already-built member `.wasm` and composes it, which is what
-/// crane / cargo-workspace builds need — they build the members themselves
-/// (offline/sandboxed), then compose each. `theater build` can't be used there
-/// because it assumes a standalone crate with its own `target/` dir.
-#[derive(Debug, Parser)]
-pub struct ComposeArgs {
-    /// Path to a cargo-built actor member `.wasm` (the bare member — NOT a composite).
-    pub member: PathBuf,
-
-    /// Output path for the self-contained composite
-    /// (default: `<member-dir>/<name>.composite.wasm`).
-    #[arg(short, long)]
-    pub output: Option<PathBuf>,
-
-    /// Skip the post-compose self-contained verification gate.
-    #[arg(long, default_value = "false")]
-    pub no_verify: bool,
-}
-
-/// Execute `theater compose`: read the member, link it with the bundled
-/// allocator, verify, and write the composite. Prints the composite path to
-/// stdout so build scripts can capture it.
-pub async fn execute_compose(args: &ComposeArgs, _ctx: &CommandContext) -> Result<(), CliError> {
-    let member = fs::read(&args.member).map_err(|e| {
-        CliError::file_operation_failed("read member wasm", args.member.display().to_string(), e)
-    })?;
-
-    let composite = compose_self_contained(member)
-        .map_err(|e| CliError::build_failed(format!("Self-contained composition failed: {e}")))?;
-
-    let out = args.output.clone().unwrap_or_else(|| {
-        let stem = args
-            .member
-            .file_stem()
-            .map(|s| s.to_string_lossy().into_owned())
-            .unwrap_or_else(|| "actor".to_string());
-        args.member.with_file_name(format!("{stem}.composite.wasm"))
-    });
-
-    fs::write(&out, &composite).map_err(|e| {
-        CliError::file_operation_failed("write composite wasm", out.display().to_string(), e)
-    })?;
-
-    if !args.no_verify {
-        verify_self_contained(&out).map_err(|e| {
-            CliError::build_failed(format!(
-                "Self-contained verification failed for {}: {e}",
-                out.display()
-            ))
-        })?;
-    }
-
-    info!(
-        "composed self-contained actor: {} ({} bytes)",
-        out.display(),
-        composite.len()
-    );
-    // The composite path on stdout is the machine-readable result.
-    println!("{}", out.display());
-    Ok(())
-}
-
-/// Link an actor member + the packr bundled allocator into a self-contained
-/// composite. Single-package actor: no `[[link]]` edges, so the composite's
-/// residual imports are exactly the actor's host interfaces (`theater:simple/*`);
-/// `pack:alloc` and the memory are internalized.
-///
-/// The member must have been built with the fixed-base recipe (see any
-/// `test-actors/*/.cargo/config.toml`). Needs `wasm-merge` (binaryen) on PATH.
-pub fn compose_self_contained(member: Vec<u8>) -> Result<Vec<u8>> {
-    link(
-        vec![
-            LinkBinary {
-                alias: "alloc".into(),
-                wasm: DEFAULT_ALLOCATOR_WASM.to_vec(),
-                allocator: true,
-            },
-            LinkBinary {
-                alias: "actor".into(),
-                wasm: member,
-                allocator: false,
-            },
-        ],
-        &[],
-        Layout::default(),
-    )
-    .map_err(|e| {
-        anyhow!(
-            "failed to link actor member + bundled allocator into a self-contained composite: {e}. \
-             Is `wasm-merge` (binaryen) on PATH? Was the member built with the fixed-base recipe \
-             (test-actors/*/.cargo/config.toml)?"
-        )
-    })
-}
-
-/// Post-compose gate: assert the composite is genuinely self-contained, so a
-/// bad artifact fails the **build** instead of failing at boot.
+/// Post-build gate: assert a plain-built actor `.wasm` is genuinely
+/// self-contained, so a bad artifact fails the **build** instead of at boot.
 ///
 /// The definitive structural check is the import surface: a self-contained
-/// actor composite imports **only** host `theater:simple/*` functions — never
-/// memory, never the allocator. (`compose_self_contained` succeeding already
-/// implies the CGRF `__pack_types` surface survived, since `packr::link`'s
-/// `read_surface` would have failed otherwise.)
+/// actor imports **only** host `theater:simple/*` functions — never memory,
+/// never an allocator (`pack:alloc`). On the 0.11.0 plain-build model the
+/// allocator + memory are internal to the cdylib, so a correct build yields no
+/// offending imports; an imported memory or `pack:alloc` means the actor was
+/// built wrong (e.g. with the retired fixed-base `--import-memory` recipe).
 ///
 /// Uses `wasm-tools` on PATH.
-pub fn verify_self_contained(composite_path: &Path) -> Result<()> {
+pub fn verify_self_contained(actor_path: &Path) -> Result<()> {
     // 1) Structural validity.
     let validate = Command::new("wasm-tools")
         .arg("validate")
-        .arg(composite_path)
+        .arg(actor_path)
         .output()
         .context("failed to run `wasm-tools validate` — is `wasm-tools` on PATH?")?;
     if !validate.status.success() {
         bail!(
-            "composite failed `wasm-tools validate`:\n{}",
+            "actor wasm failed `wasm-tools validate`:\n{}",
             String::from_utf8_lossy(&validate.stderr)
         );
     }
 
-    // 2) Import surface: every residual import must be a host `theater:simple/*`
+    // 2) Import surface: every import must be a host `theater:simple/*`
     //    function. Anything else — an imported memory (`env`/`memory`), the
-    //    allocator (`pack:alloc`), `__linear_memory`, etc. — means the allocator
-    //    or memory was not internalized (i.e. a bare member was deployed).
+    //    allocator (`pack:alloc`), `__linear_memory`, etc. — means the actor is
+    //    not self-contained (a bare member built with the retired --import-memory
+    //    recipe instead of the plain 0.11.0 build).
     let printed = Command::new("wasm-tools")
         .arg("print")
-        .arg(composite_path)
+        .arg(actor_path)
         .output()
         .context("failed to run `wasm-tools print` — is `wasm-tools` on PATH?")?;
     if !printed.status.success() {
@@ -165,10 +63,10 @@ pub fn verify_self_contained(composite_path: &Path) -> Result<()> {
 
     if !offenders.is_empty() {
         bail!(
-            "composite is NOT self-contained: found imports other than host \
-             `theater:simple/*` — the allocator/memory was not internalized \
-             (did a bare member get built without the fixed-base recipe, or \
-             composition get skipped?):\n  {}",
+            "actor is NOT self-contained: found imports other than host \
+             `theater:simple/*` — memory or the allocator was not internalized \
+             (was it built plain with packr-guest 0.11.0, or did an old \
+             --import-memory member slip in?):\n  {}",
             offenders.join("\n  ")
         );
     }
@@ -178,7 +76,7 @@ pub fn verify_self_contained(composite_path: &Path) -> Result<()> {
 
 /// Scan `wasm-tools print` WAT output and return every import declaration whose
 /// module is not a host `theater:simple/*` interface. A self-contained actor
-/// composite must yield none: an imported memory (`env`/`memory`), the allocator
+/// must yield none: an imported memory (`env`/`memory`), the allocator
 /// (`pack:alloc`), `__linear_memory`, etc. all carry non-`theater:simple/`
 /// modules and so surface here.
 fn non_host_imports(wat: &str) -> Vec<String> {

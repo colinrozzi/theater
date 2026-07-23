@@ -22,11 +22,10 @@ pub struct BuildArgs {
     #[arg(short, long, default_value = "false")]
     pub clean: bool,
 
-    /// Skip self-contained composition and emit the bare cargo member only.
-    /// The bare member is NOT loadable by theater (its loader requires a
-    /// self-contained composite) — for debugging the member build only.
+    /// Skip the post-build self-contained verification gate (emit the built
+    /// wasm without asserting its import surface). Debugging only.
     #[arg(long, default_value = "false")]
-    pub no_compose: bool,
+    pub no_verify: bool,
 }
 
 /// Execute the build command asynchronously (modernized)
@@ -117,53 +116,29 @@ pub async fn execute_async(args: &BuildArgs, ctx: &CommandContext) -> Result<(),
         )));
     }
 
-    // --- Self-contained composition (packr 0.10.x cutover) ---
-    // theater's loader requires a self-contained composite (member + bundled
-    // allocator, host imports residual); a bare cargo member will not load.
-    // Link + verify at build time so a bad artifact fails the build, not boot.
-    let artifact_path = if args.no_compose {
+    // --- Self-contained verification (packr 0.11.0 plain-build model) ---
+    // There is no composition step anymore: packr_guest::setup_guest!() links
+    // the allocator into the cdylib, so the plain cargo-built `.wasm` already
+    // exports its own (growable) memory + __pack_alloc/__pack_free + lifecycle
+    // and imports only host theater:simple/*. That bare wasm IS the loadable
+    // artifact. We still gate it: assert the import surface is host-only so a
+    // mis-built actor (e.g. one built with the retired --import-memory recipe)
+    // fails the build instead of failing at boot.
+    let artifact_path = wasm_path.clone();
+    if args.no_verify {
         info!(
-            "--no-compose: skipping composition; the bare member is NOT loadable by theater: {}",
+            "--no-verify: skipping the self-contained verification gate for {}",
             wasm_path.display()
         );
-        wasm_path.clone()
     } else {
-        let member_bytes = fs::read(&wasm_path).map_err(|e| {
-            CliError::file_operation_failed(
-                "read built member wasm",
-                wasm_path.display().to_string(),
-                e,
-            )
-        })?;
-
-        let composite = super::compose::compose_self_contained(member_bytes).map_err(|e| {
-            CliError::build_failed(format!("Self-contained composition failed: {e}"))
-        })?;
-
-        let composite_path =
-            wasm_path.with_file_name(format!("{}.composite.wasm", package_name.replace('-', "_")));
-        fs::write(&composite_path, &composite).map_err(|e| {
-            CliError::file_operation_failed(
-                "write self-contained composite",
-                composite_path.display().to_string(),
-                e,
-            )
-        })?;
-
-        // Post-compose gate: reject a non-self-contained artifact here.
-        super::compose::verify_self_contained(&composite_path).map_err(|e| {
+        super::compose::verify_self_contained(&wasm_path).map_err(|e| {
             CliError::build_failed(format!(
                 "Self-contained verification failed for {}: {e}",
-                composite_path.display()
+                wasm_path.display()
             ))
         })?;
-
-        info!(
-            "Composed + verified self-contained actor: {}",
-            composite_path.display()
-        );
-        composite_path
-    };
+        info!("Verified self-contained actor: {}", wasm_path.display());
+    }
 
     // Update the manifest.toml with the new component path if it exists
     if manifest_exists {

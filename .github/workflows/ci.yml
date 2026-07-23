@@ -142,17 +142,17 @@ jobs:
         run: |
           nix develop --command cargo package --workspace --allow-dirty
 
-  # End-to-end reference for the packr 0.10.2 self-contained fleet rebuild:
+  # End-to-end reference for the packr 0.11.0 plain-build fleet model:
   # drive a single-package actor (state-test) all the way through the real
-  # tooling — `theater build --release` (compose + verify-in-build) -> the
-  # emitted composite -> `theater spawn` on the runtime (assert_self_contained
-  # + init runs). This is the exact path every fleet actor follows, validated
-  # on one actor so the fan-out can copy it.
+  # tooling — `theater build --release` (plain cargo build + verify-in-build) ->
+  # the plain-built `.wasm` -> `theater spawn` on the runtime (loads a
+  # self-contained plain actor + init runs). This is the exact path every fleet
+  # actor follows, validated on one actor so the fan-out can copy it.
   reference-actor:
     name: Reference actor (self-contained e2e)
     runs-on: ubuntu-latest
     env:
-      COMPOSITE: test-actors/state-test/target/wasm32-unknown-unknown/release/state_test_actor.composite.wasm
+      ACTOR_WASM: test-actors/state-test/target/wasm32-unknown-unknown/release/state_test_actor.wasm
     steps:
       - uses: actions/checkout@v4
       - uses: DeterminateSystems/nix-installer-action@main
@@ -161,41 +161,25 @@ jobs:
       - name: Build the theater CLI
         run: nix develop --command cargo build -p theater-cli --release
 
-      - name: theater build --release (compose + verify-in-build)
+      - name: theater build --release (plain build + verify-in-build)
         run: |
           set -euo pipefail
           nix develop --command ./target/release/theater build --release test-actors/state-test
-          test -f "$COMPOSITE" || { echo "::error::composite not emitted at $COMPOSITE"; exit 1; }
-          echo "composite emitted: $COMPOSITE ($(stat -c%s "$COMPOSITE") bytes)"
+          test -f "$ACTOR_WASM" || { echo "::error::actor wasm not emitted at $ACTOR_WASM"; exit 1; }
+          echo "actor wasm emitted: $ACTOR_WASM ($(stat -c%s "$ACTOR_WASM") bytes)"
           echo "manifest now points at:"; grep '^package' test-actors/state-test/manifest.toml
 
-      - name: Assert composite is self-contained (imports host-only)
+      - name: Assert actor is self-contained (imports host-only)
         run: |
           nix develop --command bash -c '
             set -euo pipefail
-            wasm-tools validate "$COMPOSITE"
-            bad=$(wasm-tools print "$COMPOSITE" | grep -E "^[[:space:]]*\(import " | grep -v "theater:simple/" || true)
+            wasm-tools validate "$ACTOR_WASM"
+            bad=$(wasm-tools print "$ACTOR_WASM" | grep -E "^[[:space:]]*\(import " | grep -v "theater:simple/" || true)
             if [ -n "$bad" ]; then echo "::error::non-host imports (not self-contained):"; echo "$bad"; exit 1; fi
-            echo "all residual imports are host theater:simple/* — composite is self-contained"
+            echo "all imports are host theater:simple/* — plain-built actor is self-contained"
           '
 
-      # Crane/workspace path: compose the already-built member with the standalone
-      # `theater compose` subcommand (what crane-built fleet actors use, since
-      # `theater build` re-runs cargo and assumes a standalone crate).
-      - name: theater compose (crane-style, on the prebuilt member)
-        run: |
-          nix develop --command bash -c '
-            set -euo pipefail
-            member=test-actors/state-test/target/wasm32-unknown-unknown/release/state_test_actor.wasm
-            out=$(./target/release/theater compose "$member" -o /tmp/state_test.composite.wasm)
-            test -f /tmp/state_test.composite.wasm || { echo "::error::theater compose produced no output"; exit 1; }
-            wasm-tools validate /tmp/state_test.composite.wasm
-            bad=$(wasm-tools print /tmp/state_test.composite.wasm | grep -E "^[[:space:]]*\(import " | grep -v "theater:simple/" || true)
-            if [ -n "$bad" ]; then echo "::error::theater compose output is not self-contained:"; echo "$bad"; exit 1; fi
-            echo "theater compose produced a verified self-contained composite: $out"
-          '
-
-      - name: Spawn on the 0.10.2 runtime (assert_self_contained + init runs)
+      - name: Spawn on the runtime (loads plain actor + init runs)
         run: |
           nix develop --command bash -c '
             set -uo pipefail

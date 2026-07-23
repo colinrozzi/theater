@@ -110,8 +110,15 @@ theater-handler-podman = { version = "0.3.13", path = "crates/theater-handler-po
 # overflowed current_epoch()+delta once the ticker advanced the epoch past 0
 # (panic in debug, wrap-to-garbage in release) — default is now u64::MAX/2.
 # Required for the epoch arming above to actually work; 0.10.5 could not ship armed.
-packr = "0.10.6"
-packr-abi = "0.10.6"
+# 0.11.0: HARD BREAK — all composition/fuse machinery retired (link, Layout,
+# LinkBinary, DEFAULT_ALLOCATOR_WASM, internalize, `theater compose`). An actor is
+# now a PLAIN cargo build: setup_guest!() links dlmalloc in, the cdylib exports its
+# own (GROWABLE) memory + __pack_alloc/__pack_free + lifecycle, imports only host
+# theater:simple/*. Growable memory deletes the capped-heap OOM class (the mail-spine
+# wedge). The runtime loader (Runtime/AsyncRuntime/Module) is unchanged — it already
+# loads plain-built actors — so this is a build/CLI change, not a loader change.
+packr = "0.11.0"
+packr-abi = "0.11.0"
 
 # Metadata for Nix crane builds
 [workspace.metadata.crane]
