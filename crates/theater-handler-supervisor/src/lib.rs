@@ -125,6 +125,13 @@ pub enum SupervisorError {
 ///   (default is opt-out: a freshly-spawned child sends no chain
 ///   events to its parent until the parent subscribes)
 /// - Clean up children on shutdown
+///
+/// NOTE: the derived `Clone` shares `channel_tx`/`channel_rx`/`children`
+/// (and the event channels) via `Arc`/`Sender`. That sharing is deliberately
+/// NOT used for per-actor instantiation — `create_instance` calls [`Self::fresh`]
+/// so each supervisor-capable actor gets its own channels and children set and
+/// thus its own monitor loop. Do not swap that back to `self.clone()`, or every
+/// non-root actor's supervisor loop goes dark and only the root can supervise.
 #[derive(Clone)]
 #[allow(clippy::type_complexity)]
 pub struct SupervisorHandler {
@@ -327,12 +334,46 @@ impl SupervisorHandler {
     }
 }
 
+impl SupervisorHandler {
+    /// Build a genuinely independent supervisor instance: fresh lifecycle
+    /// and event channels, and a fresh (empty) children set. Only
+    /// process-global config — the URL-bytes [`ResourceCache`] and the
+    /// permissions — is carried forward from `self`.
+    ///
+    /// This is what per-actor instantiation must use. A plain `self.clone()`
+    /// (the derived `Clone`) shares `channel_tx`/`channel_rx`/`children` via
+    /// `Arc`/`Sender` across *every* supervisor-capable actor, so only the
+    /// first instance to run `setup` wins the `channel_rx.take()` and runs
+    /// the single monitor loop — collapsing any multi-level supervision tree
+    /// to one root-only supervisor. A `fresh` instance instead gets its own
+    /// `channel_rx` (its own monitor loop starts) and its own `channel_tx`
+    /// (the `supervisor_tx` handed to *its* children routes their lifecycle
+    /// events back to *its* handle-child-* exports), giving real hierarchical
+    /// supervision.
+    fn fresh(&self) -> Self {
+        let (channel_tx, channel_rx) = tokio::sync::mpsc::channel(100);
+        let (event_tx, event_rx) = tokio::sync::mpsc::channel(1024);
+        Self {
+            channel_tx,
+            channel_rx: Arc::new(Mutex::new(Some(channel_rx))),
+            event_tx,
+            event_rx: Arc::new(Mutex::new(Some(event_rx))),
+            children: Arc::new(Mutex::new(HashSet::new())),
+            theater_tx: Arc::new(Mutex::new(None)),
+            resource_cache: self.resource_cache.clone(),
+            permissions: self.permissions.clone(),
+        }
+    }
+}
+
 impl Handler for SupervisorHandler {
     fn create_instance(
         &self,
         _config: Option<&theater::config::actor_manifest::HandlerConfig>,
     ) -> Box<dyn Handler> {
-        Box::new(self.clone())
+        // Each actor must get an INDEPENDENT supervisor — see `fresh`. A
+        // shared clone would make only the root actor's monitor loop run.
+        Box::new(self.fresh())
     }
 
     fn name(&self) -> &str {
@@ -1371,6 +1412,38 @@ mod tests {
         let interface1 = supervisor_interface();
         let interface2 = supervisor_interface();
         assert_eq!(interface1.hash(), interface2.hash());
+    }
+
+    #[test]
+    fn test_create_instance_yields_independent_supervisors() {
+        // Regression: the derived `Clone` shared channel_rx/children across
+        // every supervisor-capable actor, so only the first `setup` won the
+        // `channel_rx.take()` and ran the single monitor loop — collapsing
+        // multi-level supervision trees to one root-only supervisor. Each
+        // per-actor instance must instead be fully independent.
+        let base = SupervisorHandler::new(SupervisorHostConfig {}, None);
+        let a = base.fresh();
+        let b = base.fresh();
+
+        // Each instance owns its own (untaken) lifecycle receiver, so each
+        // one's monitor loop will start rather than log "no receiver".
+        assert!(a.channel_rx.lock().unwrap().is_some());
+        assert!(b.channel_rx.lock().unwrap().is_some());
+        assert!(a.event_rx.lock().unwrap().is_some());
+        assert!(b.event_rx.lock().unwrap().is_some());
+
+        // Distinct lifecycle channels: a child's `supervisor_tx` (a clone of
+        // its parent's `channel_tx`) must route only to that parent's loop.
+        assert!(!a.channel_tx.same_channel(&b.channel_tx));
+        assert!(!a.channel_tx.same_channel(&base.channel_tx));
+        assert!(!a.event_tx.same_channel(&b.event_tx));
+
+        // Independent children sets: one supervisor tracking a child must not
+        // leak that child into another supervisor's view.
+        a.children.lock().unwrap().insert(TheaterId::generate());
+        assert_eq!(a.children.lock().unwrap().len(), 1);
+        assert_eq!(b.children.lock().unwrap().len(), 0);
+        assert_eq!(base.children.lock().unwrap().len(), 0);
     }
 
     #[test]
