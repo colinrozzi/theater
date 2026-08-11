@@ -109,9 +109,15 @@ gh pr merge <N> --auto --squash
 
 Colin is the sole maintainer and approves implicitly by setting up auto-merge. Once CI passes, the PR merges itself.
 
-### Releases
+### Releases & deploys
 
-Released crates use **independent versioning** — only crates with code changes since the last release get bumped. The release script handles detection:
+There are **two independent "release" concepts** — don't conflate them. Most
+changes need one, not both, and an ABI-neutral runtime fix (e.g. a handler
+wiring bug) needs only the host binary.
+
+**1. Crate release → crates.io (goes through a release PR).**
+Released crates use **independent versioning** — only crates with code changes
+since the last release tag get bumped. The release script handles detection:
 
 ```sh
 nix run .#release -- patch
@@ -119,11 +125,39 @@ nix run .#release -- patch
 
 This:
 1. Detects which crates changed since the last release tag
-2. Bumps versions in `Cargo.toml` of each
+2. Bumps versions in `Cargo.toml` of each and regenerates `Cargo.lock`
+   (`cargo update --workspace`)
 3. Creates a `release-<date>` branch + PR
-4. Merging the PR triggers `cargo publish --workspace`
+4. Merging the PR triggers `publish.yml` → `cargo publish --workspace` and cuts
+   the `release-<date>-<sha>` tag
 
-Tags are date-based (`release-20260512`). The `release-<date>` branch can be reused if multiple releases happen in a day (it moves sideways).
+Tags are date-based (`release-20260512`). The `release-<date>` branch can be
+reused if multiple releases happen in a day (it moves sideways). Note: because
+this runs `cargo update`, it needs a cargo toolchain **and** crates.io tarball
+access — so it runs on the dev box / CI, not inside a toolchain-less agent
+container.
+
+**2. Host binary → the fleet (a direct `workflow_dispatch`, no PR).**
+The deployable `theater` host binary that the fleet processes run is the
+`.#theater` flake output. It is **not** released through a PR — every host cut
+in history is a manual dispatch of `release-binary.yml` on `main`:
+
+```sh
+gh workflow run release-binary.yml --ref main
+```
+
+That CI job runs `nix build .#theater` (reaches crates.io, unlike the sandbox),
+prints the `/nix/store/...-theater-<ver>` path + closure size to the run
+summary, and either `nix copy`s the closure straight to the VPS store (when the
+`NIX_DEPLOY_SSH_KEY` secret is set) or uploads it as the downloadable
+`theater-binary-closure` artifact. Either way it only **stages** the binary —
+the prod **flip** (symlink the new store path into the process run dir +
+restart) is a separate, deliberately manual step. Locally the same build is just
+`nix build .#theater`.
+
+Because the fix lives in the host, an ABI-neutral change reaches every actor by
+rebuilding + flipping the host — the actors' own wasm does **not** need
+rebuilding.
 
 ### Build, test, lint
 
