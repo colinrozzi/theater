@@ -8,6 +8,10 @@ target/
 /chains
 /events
 
+# Agent workflow guide — internal, not for the public repo (kept in git history).
+# Anchored so it only ignores the top-level file, not crates/*/CLAUDE.md.
+/CLAUDE.md
+
 # Editor and tool files
 .aider*
 .env
