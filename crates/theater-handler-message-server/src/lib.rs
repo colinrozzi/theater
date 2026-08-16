@@ -1221,7 +1221,9 @@ fn parse_option_bytes(value: &Value) -> Option<Vec<u8>> {
 fn parse_channel_accept(value: &Value) -> bool {
     // Unwrap the result<...> wrapper (an Err = rejected open).
     let inner = match value {
-        Value::Result { value: Ok(inner), .. } => inner.as_ref(),
+        Value::Result {
+            value: Ok(inner), ..
+        } => inner.as_ref(),
         Value::Result { value: Err(_), .. } => return false,
         // Backward-compat: some paths hand back a bare tuple, not a Result.
         Value::Tuple(_) => value,
