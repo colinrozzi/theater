@@ -77,6 +77,14 @@ pub enum Commands {
     #[command(name = "message")]
     Message(commands::message::MessageArgs),
 
+    /// Start an actor from a manifest INTO a running server (prints its id)
+    #[command(name = "start")]
+    Start(commands::message::StartArgs),
+
+    /// List the actors running in a server
+    #[command(name = "actors")]
+    Actors(commands::message::ActorsArgs),
+
     /// Generate shell completion scripts
     #[command(name = "completion")]
     Completion(commands::completion::CompletionArgs),
@@ -120,6 +128,12 @@ pub async fn run(
                 .await
                 .map_err(anyhow::Error::from),
             Commands::Message(args) => commands::message::execute_async(args, &ctx)
+                .await
+                .map_err(anyhow::Error::from),
+            Commands::Start(args) => commands::message::execute_start(args, &ctx)
+                .await
+                .map_err(anyhow::Error::from),
+            Commands::Actors(args) => commands::message::execute_actors(args, &ctx)
                 .await
                 .map_err(anyhow::Error::from),
             Commands::Completion(args) => commands::completion::execute_async(args, &ctx)

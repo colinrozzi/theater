@@ -222,3 +222,99 @@ async fn watch_loop(conn: &mut TheaterConnection, ctx: &CommandContext) -> Resul
     }
     Ok(())
 }
+
+/// Connect to the server (address arg override, else the configured default).
+async fn open(
+    address: Option<SocketAddr>,
+    ctx: &CommandContext,
+) -> Result<TheaterConnection, CliError> {
+    let address = address.unwrap_or(ctx.config.server.default_address);
+    debug!("Connecting to Theater server at {}", address);
+    let mut conn = TheaterConnection::new(address);
+    conn.connect()
+        .await
+        .map_err(|e| server_err(&format!("failed to connect to {address}"), e))?;
+    Ok(conn)
+}
+
+#[derive(Debug, Parser)]
+pub struct StartArgs {
+    /// Path or URL to the actor manifest. Resolved by the SERVER, not the CLI —
+    /// it (and manifest.package) must be reachable by the server process.
+    pub manifest: String,
+
+    /// Address of the running Theater server (defaults to the configured server address)
+    #[arg(short, long)]
+    pub address: Option<SocketAddr>,
+
+    /// Wire the management client as the actor's parent (receive its lifecycle)
+    #[arg(long)]
+    pub parent: bool,
+
+    /// Subscribe to the actor's chain events after it starts
+    #[arg(long)]
+    pub subscribe: bool,
+}
+
+/// Start an actor from a manifest INTO a running server (`ManagementCommand::StartActor`)
+/// and print its id. Unlike `theater spawn` (a local runtime), this spawns into the
+/// already-running server the CLI connects to.
+///
+/// Note: the server currently ignores any command-supplied initial-state — put the
+/// actor's initial state in the manifest's `initial_state` field.
+pub async fn execute_start(args: &StartArgs, ctx: &CommandContext) -> Result<(), CliError> {
+    let mut conn = open(args.address, ctx).await?;
+    let resp = conn
+        .send_and_receive(ManagementCommand::StartActor {
+            manifest: args.manifest.clone(),
+            initial_state: None,
+            parent: args.parent,
+            subscribe: args.subscribe,
+        })
+        .await
+        .map_err(|e| server_err("start failed", e))?;
+    match resp {
+        ManagementResponse::ActorStarted { id } => {
+            ctx.output.success(&format!("started actor {id}"))?;
+            // id alone on stdout so `id=$(theater start ...)` is scriptable
+            println!("{id}");
+        }
+        ManagementResponse::Error { error } => {
+            return Err(server_err("start failed", format!("{error:?}")));
+        }
+        other => ctx.output.info(&format!("unexpected response: {other:?}"))?,
+    }
+    Ok(())
+}
+
+#[derive(Debug, Parser)]
+pub struct ActorsArgs {
+    /// Address of the running Theater server (defaults to the configured server address)
+    #[arg(short, long)]
+    pub address: Option<SocketAddr>,
+}
+
+/// List the actors running in a server (`ManagementCommand::ListActors`).
+/// Prints one `id<TAB>name` per line.
+pub async fn execute_actors(args: &ActorsArgs, ctx: &CommandContext) -> Result<(), CliError> {
+    let mut conn = open(args.address, ctx).await?;
+    let resp = conn
+        .send_and_receive(ManagementCommand::ListActors)
+        .await
+        .map_err(|e| server_err("list actors failed", e))?;
+    match resp {
+        ManagementResponse::ActorList { actors } => {
+            if actors.is_empty() {
+                ctx.output.info("no actors running")?;
+            }
+            for (id, name) in actors {
+                println!("{id}\t{name}");
+            }
+        }
+        ManagementResponse::Error { error } => {
+            return Err(server_err("list actors failed", format!("{error:?}")));
+        }
+        other => ctx.output.info(&format!("unexpected response: {other:?}"))?,
+    }
+    Ok(())
+}
