@@ -595,7 +595,8 @@ impl MessageServerHandler {
                         params,
                     )
                     .await?;
-                // Result is tuple<channel-accept> where channel-accept is record {accepted: bool, message: option<list<u8>>}
+                // Result is result<tuple<actor-state, tuple<channel-accept>>, string>
+                // (state-threaded); parse_channel_accept unwraps that shape.
                 let accepted = parse_channel_accept(&result);
                 let _ = response_tx.send(Ok(accepted));
             }
@@ -1203,17 +1204,46 @@ fn parse_option_bytes(value: &Value) -> Option<Vec<u8>> {
     }
 }
 
-/// Parse a channel-accept record from the result Value.
-/// The result is tuple<channel-accept> where channel-accept is
-/// record { accepted: bool, message: option<list<u8>> }.
-/// Records are encoded as Tuples in Pack's Graph ABI.
+/// Parse a channel-accept record from `handle-channel-open`'s return Value.
+///
+/// State-threaded actors (the normal case — see `handle-channel-open` in
+/// message-server-client.pact) return
+///   `result<tuple<actor-state, tuple<channel-accept>>, string>`
+/// so the decoded Value is `Result(Ok(Tuple([state, Tuple([channel-accept])])))`:
+/// element 0 is the new state, element 1 is the `tuple<channel-accept>`. This
+/// mirrors `parse_option_bytes_from_tuple` for `handle-request`.
+///
+/// A missing/rejected/errored accept (or any unexpected shape) is treated as
+/// "not accepted" — the safe default is to not open the channel.
+///
+/// channel-accept is `record { accepted: bool, message: option<list<u8>> }`,
+/// encoded as a Tuple (or Record) in Pack's Graph ABI.
 fn parse_channel_accept(value: &Value) -> bool {
-    // Result is tuple<channel-accept>
-    let accept_value = match value {
+    // Unwrap the result<...> wrapper (an Err = rejected open).
+    let inner = match value {
+        Value::Result {
+            value: Ok(inner), ..
+        } => inner.as_ref(),
+        Value::Result { value: Err(_), .. } => return false,
+        // Backward-compat: some paths hand back a bare tuple, not a Result.
+        Value::Tuple(_) => value,
+        _ => return false,
+    };
+
+    // Locate the channel-accept record:
+    //   state-threaded: tuple<actor-state, tuple<channel-accept>> -> element 1
+    //                   is `tuple<channel-accept>`; unwrap it to the record.
+    //   legacy/bare:    tuple<channel-accept> -> element 0 is the record.
+    let accept_value = match inner {
+        Value::Tuple(items) if items.len() >= 2 => match &items[1] {
+            Value::Tuple(inner) if !inner.is_empty() => &inner[0],
+            other => other,
+        },
         Value::Tuple(items) if !items.is_empty() => &items[0],
         _ => return false,
     };
-    // channel-accept as Tuple: [bool, option<list<u8>>]
+
+    // channel-accept as Tuple: [accepted: bool, message: option<list<u8>>]
     match accept_value {
         Value::Tuple(fields) if !fields.is_empty() => {
             matches!(&fields[0], Value::Bool(true))
@@ -1297,6 +1327,97 @@ fn parse_request_id_and_data(input: &Value) -> Result<(String, Vec<u8>), Value> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // --- parse_channel_accept -------------------------------------------------
+
+    /// Wrap an ok-body in `result<_, string>` the way call_function returns it.
+    fn ok_result(inner: Value) -> Value {
+        Value::Result {
+            ok_type: ValueType::Tuple(vec![]),
+            err_type: ValueType::String,
+            value: Ok(Box::new(inner)),
+        }
+    }
+
+    /// channel-accept record encoded as a Tuple [accepted, message].
+    fn channel_accept_tuple(accepted: bool) -> Value {
+        Value::Tuple(vec![
+            Value::Bool(accepted),
+            Value::Option {
+                inner_type: ValueType::List(Box::new(ValueType::U8)),
+                value: None,
+            },
+        ])
+    }
+
+    /// The real shape from a state-threaded actor:
+    /// result<tuple<actor-state, tuple<channel-accept>>, string>.
+    #[test]
+    fn channel_accept_state_threaded_accepted() {
+        let state = Value::Option {
+            inner_type: ValueType::List(Box::new(ValueType::U8)),
+            value: None,
+        };
+        let v = ok_result(Value::Tuple(vec![
+            state,
+            Value::Tuple(vec![channel_accept_tuple(true)]),
+        ]));
+        assert!(parse_channel_accept(&v));
+    }
+
+    #[test]
+    fn channel_accept_state_threaded_rejected() {
+        let v = ok_result(Value::Tuple(vec![
+            Value::Tuple(vec![]), // state placeholder
+            Value::Tuple(vec![channel_accept_tuple(false)]),
+        ]));
+        assert!(!parse_channel_accept(&v));
+    }
+
+    #[test]
+    fn channel_accept_record_encoding() {
+        let accept = Value::Record {
+            type_name: "channel-accept".to_string(),
+            fields: vec![
+                ("accepted".to_string(), Value::Bool(true)),
+                (
+                    "message".to_string(),
+                    Value::Option {
+                        inner_type: ValueType::List(Box::new(ValueType::U8)),
+                        value: None,
+                    },
+                ),
+            ],
+        };
+        let v = ok_result(Value::Tuple(vec![
+            Value::Tuple(vec![]),
+            Value::Tuple(vec![accept]),
+        ]));
+        assert!(parse_channel_accept(&v));
+    }
+
+    #[test]
+    fn channel_accept_err_is_rejected() {
+        let v = Value::Result {
+            ok_type: ValueType::Tuple(vec![]),
+            err_type: ValueType::String,
+            value: Err(Box::new(Value::String("nope".to_string()))),
+        };
+        assert!(!parse_channel_accept(&v));
+    }
+
+    #[test]
+    fn channel_accept_legacy_bare_tuple() {
+        // Backward-compat: a bare tuple<channel-accept> (no Result, no state).
+        let v = Value::Tuple(vec![channel_accept_tuple(true)]);
+        assert!(parse_channel_accept(&v));
+    }
+
+    #[test]
+    fn channel_accept_garbage_is_rejected() {
+        assert!(!parse_channel_accept(&Value::Bool(true)));
+        assert!(!parse_channel_accept(&Value::Tuple(vec![])));
+    }
 
     #[tokio::test]
     async fn test_message_server_handler_creation() {
