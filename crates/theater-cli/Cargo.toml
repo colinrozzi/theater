@@ -34,6 +34,9 @@ theater-handler-terminal.workspace = true
 theater-handler-timer.workspace = true
 theater-handler-loop.workspace = true
 theater-handler-podman.workspace = true
+# Management-socket client for the `theater message` command (re-exports
+# ManagementCommand/Response, so no separate theater-server dep needed).
+theater-client.workspace = true
 
 # Core dependencies
 anyhow.workspace = true
