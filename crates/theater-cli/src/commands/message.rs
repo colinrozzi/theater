@@ -1,16 +1,21 @@
-//! `theater message` — poke a *running* actor from the command line.
+//! `theater message` / `start` / `actors` — talk to a *running* Theater server.
 //!
-//! Unlike `spawn`/`setup` (which stand up a local runtime), these subcommands
-//! connect to an already-running Theater runtime over its management TCP socket
-//! and address a live actor by id. It's a debug/inspection tool — the same
+//! DEPRECATED / TRANSITIONAL: these drive the runtime over the `theater-server`
+//! management TCP socket (`theater-client`), which is the legacy "talk directly
+//! to the runtime over TCP" model. The direction is sentinel-first (a supervisor
+//! actor as the runtime hook), so this surface is slated to be replaced — see
+//! <https://github.com/colinrozzi/theater/issues/158>. Fine as a stopgap; don't
+//! build anything deep on it.
+//!
+//! Unlike `spawn`/`setup` (which stand up a local runtime), these connect to an
+//! already-running server and address a live actor by id — the same
 //! `ManagementCommand`s an embedding client (e.g. a chat CLI via
 //! `theater_client::TheaterConnection`) would send:
 //!
-//! - `send`      → `SendActorMessage`     (fire-and-forget; actor runs handle-send)
-//! - `request`   → `RequestActorMessage`  (request/response; actor runs handle-request)
-//! - `subscribe` → `SubscribeToActor`     (stream the actor's chain events)
-//! - `channel`   → `OpenChannel`          (open a channel as an External participant,
-//!                                          optionally post one message, watch replies)
+//! - `send` → `SendActorMessage` (fire-and-forget; actor runs handle-send)
+//! - `request` → `RequestActorMessage` (request/response; actor runs handle-request)
+//! - `subscribe` → `SubscribeToActor` (stream the actor's chain events)
+//! - `channel` → `OpenChannel` (open a channel as an External participant, watch replies)
 //!
 //! The target actor must run the message-server handler and implement the
 //! matching `theater:simple/message-server-client` exports, or the runtime has
@@ -75,7 +80,7 @@ fn server_err(context: &str, e: impl std::fmt::Display) -> CliError {
 
 fn parse_id(id: &str) -> Result<TheaterId, CliError> {
     id.parse::<TheaterId>()
-        .map_err(|e| CliError::invalid_input("actor-id", id, &format!("not a valid actor id: {e}")))
+        .map_err(|e| CliError::invalid_input("actor-id", id, format!("not a valid actor id: {e}")))
 }
 
 /// Render response payload bytes for human eyes: UTF-8 if it is valid, else a
