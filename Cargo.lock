@@ -3413,6 +3413,7 @@ dependencies = [
  "tempfile",
  "term_size",
  "theater",
+ "theater-client",
  "theater-handler-loop",
  "theater-handler-message-server",
  "theater-handler-podman",
