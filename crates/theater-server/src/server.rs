@@ -19,6 +19,7 @@ use uuid::Uuid;
 
 use theater::config::actor_manifest::{
     RuntimeHostConfig, StoreHandlerConfig, SupervisorHostConfig, TcpHandlerConfig,
+    TimerHandlerConfig,
 };
 use theater::handler::HandlerRegistry;
 use theater::id::TheaterId;
@@ -30,10 +31,12 @@ use theater::TheaterRuntimeError;
 // Import Theater-specific handlers only
 // DEPRECATED: WASI handlers (environment, filesystem, http, io, etc.) moved to crates/deprecated/
 use theater_handler_message_server::MessageServerHandler;
+use theater_handler_rpc::RpcHandler;
 use theater_handler_runtime::RuntimeHandler;
 use theater_handler_store::StoreHandler;
 use theater_handler_supervisor::SupervisorHandler;
 use theater_handler_tcp::TcpHandler;
+use theater_handler_timer::TimerHandler;
 
 use crate::fragmenting_codec::FragmentingCodec;
 
@@ -351,7 +354,19 @@ fn create_root_handler_registry(
     };
     registry.register(TcpHandler::new(tcp_config));
 
-    info!("✓ 5 Theater-specific handlers registered");
+    // theater-server must register the SAME handler set actors are allowed to
+    // declare, or an actor whose manifest imports one we skipped fails to
+    // instantiate ("unknown import theater:simple/timer::set-interval ..."). It
+    // had drifted to a 5-handler subset — timer + rpc were missing — so any
+    // timer/rpc-using actor (e.g. a mesh driver) couldn't run via StartActor,
+    // even though `theater spawn` (which wires the full set) ran it fine.
+    // Keep this in sync with the CLI spawn path (theater-cli/commands/spawn.rs).
+    // A proper cross-crate dedupe of the two registration lists is deferred:
+    // theater-server is on the deprecation path (sentinel-first, issue #158).
+    registry.register(TimerHandler::new(TimerHandlerConfig::default()));
+    registry.register(RpcHandler::new(theater_tx.clone()));
+
+    info!("✓ 7 Theater-specific handlers registered");
     info!("NOTE: WASI handlers are deprecated - see crates/deprecated/");
 
     (registry, message_router)
@@ -725,12 +740,27 @@ impl TheaterServer {
                     } else {
                         None
                     };
+                    // StartActor must match `theater spawn` (theater-cli/commands/spawn.rs)
+                    // so an actor started over the mgmt socket behaves identically to one
+                    // started by the CLI. Two fixes here:
+                    // 1. Resolve init_state from the manifest's initial_state (it was hardcoded
+                    //    to default_init_state(), so the actor's init got EMPTY state and hit its
+                    //    missing-config error path -> Err -> torn down). The command's own
+                    //    initial_state arg stays ignored — the manifest is the config source on
+                    //    this path; structured/typed config is a supervisor.spawn story (#158).
+                    // 2. Send SpawnActor (setup + auto-init), not SetupActor (setup only):
+                    //    StartActor was never driving the actor's init, so it set up + registered
+                    //    then sat un-inited. `theater spawn` uses SpawnActor.
+                    let init_state = match manifest_config.initial_state.as_ref() {
+                        Some(s) => Value::String(s.clone()),
+                        None => default_init_state(),
+                    };
                     match runtime_tx
-                        .send(TheaterCommand::SetupActor {
+                        .send(TheaterCommand::SpawnActor {
                             wasm_bytes,
                             name: Some(manifest_config.name.clone()),
                             manifest: Some(manifest_config),
-                            init_state: default_init_state(),
+                            init_state,
                             response_tx: cmd_tx,
                             supervisor_tx,
                             subscription_tx,
