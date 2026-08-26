@@ -231,14 +231,22 @@ fn parse_http_request(input: &Value) -> Result<HttpRequestParts, Value> {
                 parts.body = parse_body(v);
             }
         }
-        _ => return Err(Value::String("http-client: expected http-request record".to_string())),
+        _ => {
+            return Err(Value::String(
+                "http-client: expected http-request record".to_string(),
+            ))
+        }
     }
 
     if parts.method.is_empty() {
-        return Err(Value::String("http-client: http-request.method is required".to_string()));
+        return Err(Value::String(
+            "http-client: http-request.method is required".to_string(),
+        ));
     }
     if parts.url.is_empty() {
-        return Err(Value::String("http-client: http-request.url is required".to_string()));
+        return Err(Value::String(
+            "http-client: http-request.url is required".to_string(),
+        ));
     }
     Ok(parts)
 }
@@ -278,7 +286,9 @@ fn parse_headers(v: &Value) -> Vec<(String, String)> {
 /// defensively as a present body.
 fn parse_body(v: &Value) -> Option<Vec<u8>> {
     match v {
-        Value::Option { value: Some(inner), .. } => bytes_from_list(inner),
+        Value::Option {
+            value: Some(inner), ..
+        } => bytes_from_list(inner),
         Value::Option { value: None, .. } => None,
         Value::List { .. } => bytes_from_list(v),
         _ => None,
@@ -304,16 +314,26 @@ fn bytes_from_list(v: &Value) -> Option<Vec<u8>> {
 
 async fn do_request(client: &reqwest::Client, parts: HttpRequestParts) -> Result<Value, Value> {
     let method = reqwest::Method::from_bytes(parts.method.as_bytes()).map_err(|e| {
-        Value::String(format!("http-client: invalid method '{}': {}", parts.method, e))
+        Value::String(format!(
+            "http-client: invalid method '{}': {}",
+            parts.method, e
+        ))
     })?;
 
     let mut req = client.request(method, parts.url);
     for (name, value) in &parts.headers {
-        let header_name = reqwest::header::HeaderName::from_bytes(name.as_bytes()).map_err(|e| {
-            Value::String(format!("http-client: invalid header name '{}': {}", name, e))
-        })?;
+        let header_name =
+            reqwest::header::HeaderName::from_bytes(name.as_bytes()).map_err(|e| {
+                Value::String(format!(
+                    "http-client: invalid header name '{}': {}",
+                    name, e
+                ))
+            })?;
         let header_value = reqwest::header::HeaderValue::from_str(value).map_err(|e| {
-            Value::String(format!("http-client: invalid header value for '{}': {}", name, e))
+            Value::String(format!(
+                "http-client: invalid header value for '{}': {}",
+                name, e
+            ))
         })?;
         req = req.header(header_name, header_value);
     }
