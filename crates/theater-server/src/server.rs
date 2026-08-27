@@ -18,7 +18,8 @@ use tracing::{debug, error, info};
 use uuid::Uuid;
 
 use theater::config::actor_manifest::{
-    RuntimeHostConfig, StoreHandlerConfig, SupervisorHostConfig, TcpHandlerConfig,
+    HttpClientHandlerConfig, RuntimeHostConfig, StoreHandlerConfig, SupervisorHostConfig,
+    TcpHandlerConfig,
 };
 use theater::handler::HandlerRegistry;
 use theater::id::TheaterId;
@@ -29,6 +30,7 @@ use theater::TheaterRuntimeError;
 
 // Import Theater-specific handlers only
 // DEPRECATED: WASI handlers (environment, filesystem, http, io, etc.) moved to crates/deprecated/
+use theater_handler_http_client::HttpClientHandler;
 use theater_handler_message_server::MessageServerHandler;
 use theater_handler_runtime::RuntimeHandler;
 use theater_handler_store::StoreHandler;
@@ -351,7 +353,12 @@ fn create_root_handler_registry(
     };
     registry.register(TcpHandler::new(tcp_config));
 
-    info!("✓ 5 Theater-specific handlers registered");
+    // HTTP client handler - outbound HTTP(S) requests, gated per-manifest by
+    // allowed_hosts (pulled from each actor's manifest via create_instance).
+    let http_client_config = HttpClientHandlerConfig::default();
+    registry.register(HttpClientHandler::new(http_client_config));
+
+    info!("✓ 6 Theater-specific handlers registered");
     info!("NOTE: WASI handlers are deprecated - see crates/deprecated/");
 
     (registry, message_router)

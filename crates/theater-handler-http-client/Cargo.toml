@@ -1,0 +1,27 @@
+[package]
+name = "theater-handler-http-client"
+version = "0.3.0"
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+rust-version.workspace = true
+
+description = "Outbound HTTP client handler for Theater WebAssembly runtime"
+
+[dependencies]
+theater = { workspace = true }
+anyhow.workspace = true
+tracing.workspace = true
+tokio.workspace = true
+
+# Outbound HTTP via reqwest. rustls-tls (NOT native-tls/openssl) so the crate
+# stays free of a system OpenSSL dependency. default-features are off so we do
+# not pull the native-tls stack.
+reqwest = { version = "0.11", default-features = false, features = ["rustls-tls", "json"] }
+
+[dev-dependencies]
+tracing-subscriber.workspace = true

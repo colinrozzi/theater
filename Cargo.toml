@@ -19,6 +19,7 @@ members = [
     "crates/theater-handler-rpc",
     "crates/theater-handler-loop",
     "crates/theater-handler-podman",
+    "crates/theater-handler-http-client",
     "crates/theater-replay-experimenting",
     "crates/theater-tests",
 ]
@@ -82,6 +83,7 @@ theater-handler-assembler = { version = "0.3.11", path = "crates/theater-handler
 theater-handler-rpc = { version = "0.3.11", path = "crates/theater-handler-rpc" }
 theater-handler-loop = { version = "0.3.11", path = "crates/theater-handler-loop" }
 theater-handler-podman = { version = "0.3.13", path = "crates/theater-handler-podman" }
+theater-handler-http-client = { version = "0.3.0", path = "crates/theater-handler-http-client" }
 # DEPRECATED: WASI handlers (moved to crates/deprecated/)
 # theater-handler-environment = { version = "0.3.9", path = "crates/deprecated/theater-handler-environment" }
 # theater-handler-filesystem = { version = "0.3.9", path = "crates/deprecated/theater-handler-filesystem" }

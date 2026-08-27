@@ -18,6 +18,7 @@ use theater::theater_runtime::TheaterRuntime;
 use theater::utils::{resolve_reference, resolve_reference_cached, ResourceCache};
 use theater::ManifestConfig;
 use theater::TheaterId;
+use theater_handler_http_client::HttpClientHandler;
 use theater_handler_loop::LoopHandler;
 use theater_handler_message_server::{MessageRouter, MessageServerHandler};
 use theater_handler_podman::PodmanHandler;
@@ -163,6 +164,13 @@ fn create_handler_registry(
     // Podman handler - container management via the podman CLI
     let podman_config = theater::config::actor_manifest::PodmanHandlerConfig::default();
     registry.register(PodmanHandler::new(podman_config));
+
+    // HTTP client handler - outbound HTTP(S) requests, gated per-manifest by
+    // allowed_hosts. The registered instance holds an empty allowlist; the
+    // real allowed_hosts are pulled from each actor's manifest via
+    // create_instance(HandlerConfig::HttpClient { .. }).
+    let http_client_config = theater::config::actor_manifest::HttpClientHandlerConfig::default();
+    registry.register(HttpClientHandler::new(http_client_config));
 
     Ok(registry)
 }

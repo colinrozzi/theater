@@ -364,8 +364,14 @@ pub struct FileSystemHandlerConfig {
     pub allowed_commands: Option<Vec<String>>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct HttpClientHandlerConfig {}
+/// Configuration for the outbound HTTP client handler.
+/// `allowed_hosts` is a per-manifest allowlist: an actor may only reach hosts
+/// named here. An empty (or absent) allowlist rejects every outbound request.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+pub struct HttpClientHandlerConfig {
+    #[serde(default)]
+    pub allowed_hosts: Vec<String>,
+}
 
 /// Configuration for the WASI HTTP handler
 /// This handler provides both incoming (server) and outgoing (client) HTTP capabilities
