@@ -3451,6 +3451,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "theater-handler-runtime"
+version = "0.3.0"
+dependencies = [
+ "anyhow",
+ "serde",
+ "serde_json",
+ "theater",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "theater-handler-self"
 version = "0.3.14"
 dependencies = [

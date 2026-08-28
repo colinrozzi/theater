@@ -126,6 +126,13 @@ pub enum HandlerConfig {
         #[serde(flatten)]
         config: SelfHostConfig,
     },
+    /// The runtime-wide CONTROL interface (theater:simple/runtime): inspect
+    /// and drive any actor by id. Capability-gated by RuntimePermissions.
+    #[serde(rename = "runtime")]
+    Runtime {
+        #[serde(flatten)]
+        config: RuntimeHostConfig,
+    },
     #[serde(rename = "supervisor")]
     Supervisor {
         #[serde(flatten)]
@@ -208,6 +215,7 @@ impl HandlerConfig {
             HandlerConfig::HttpClient { .. } => "http-client",
             HandlerConfig::HttpFramework { .. } => "http-framework",
             HandlerConfig::SelfHandler { .. } => "self",
+            HandlerConfig::Runtime { .. } => "runtime",
             HandlerConfig::Supervisor { .. } => "supervisor",
             HandlerConfig::Store { .. } => "store",
             HandlerConfig::Timing { .. } => "timing",
@@ -325,6 +333,12 @@ pub struct SupervisorHostConfig {}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct SelfHostConfig {}
+
+/// Configuration for the runtime CONTROL handler (theater:simple/runtime).
+/// Runtime-wide control plane (inspect/drive any actor); capability-gated by
+/// RuntimePermissions { inspect, mutate }. No fields today.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct RuntimeHostConfig {}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct TimingHostConfig {

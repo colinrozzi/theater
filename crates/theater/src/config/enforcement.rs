@@ -95,6 +95,15 @@ pub fn validate_manifest_permissions(
                     });
                 }
             }
+            HandlerConfig::Runtime { .. } => {
+                // The runtime-wide CONTROL interface requires the RuntimePermissions
+                // capability (inspect/mutate enforced per-op in the handler).
+                if effective_permissions.runtime.is_none() {
+                    return Err(PermissionError::HandlerNotPermitted {
+                        handler_type: "runtime".to_string(),
+                    });
+                }
+            }
             HandlerConfig::Supervisor { .. } => {
                 if effective_permissions.supervisor.is_none() {
                     return Err(PermissionError::HandlerNotPermitted {
