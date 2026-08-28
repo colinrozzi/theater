@@ -74,7 +74,7 @@ async fn test_composite_instance_basic() {
         actor_store,
         |builder| {
             // Register the log host function
-            builder.interface("theater:simple/runtime")?.func_typed(
+            builder.interface("theater:simple/self")?.func_typed(
                 "log",
                 |_ctx: &mut Ctx<'_, ActorStore>, input: Value| {
                     // Extract the message from the Value

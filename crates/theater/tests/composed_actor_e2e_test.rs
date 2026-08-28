@@ -6,7 +6,7 @@
 //! compose` — two ISOLATED components (each with its own memory) fused into one
 //! module by a bridging shim. The entry component exports
 //! `theater:simple/actor.init` and imports `math.double` from the provider
-//! component; the composite's only residual import is `theater:simple/runtime.log`.
+//! component; the composite's only residual import is `theater:simple/self.log`.
 //!
 //! `init` calls `double(21)` across the component gap and stores the result in
 //! state. A green run proves theater's own loader (`PackInstance` →
@@ -68,14 +68,14 @@ async fn composed_multimemory_actor_runs_under_theater() {
     );
 
     // Instantiate through theater's own loader, providing the residual host
-    // import `theater:simple/runtime.log`.
+    // import `theater:simple/self.log`.
     let mut instance = PackInstance::new(
         "composed-actor-e2e",
         &wasm_bytes,
         &runtime,
         actor_store,
         |builder| {
-            builder.interface("theater:simple/runtime")?.func_typed(
+            builder.interface("theater:simple/self")?.func_typed(
                 "log",
                 |_ctx: &mut Ctx<'_, ActorStore>, input: Value| {
                     let msg = match input {

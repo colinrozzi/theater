@@ -1,8 +1,8 @@
 package theater:simple;
 
-/// # Runtime Interface
+/// # Self Interface
 ///
-/// The `runtime` interface provides core runtime capabilities to actors in the Theater system.
+/// The `self` interface provides core runtime capabilities to actors in the Theater system.
 /// It allows actors to access their environment, log messages, and retrieve their event chain.
 ///
 /// ## Purpose
@@ -15,7 +15,7 @@ package theater:simple;
 ///
 /// ```wit
 /// // Using the runtime interface in a WIT definition
-/// use theater:simple/runtime;
+/// use theater:simple/self;
 ///
 /// // Using the runtime interface in a Rust implementation
 /// runtime::log("Actor initialized successfully");
@@ -34,7 +34,7 @@ package theater:simple;
 /// provided to all actors. No special configuration is required to use it, though
 /// logging behavior can be controlled through manifest settings.
 
-interface runtime {
+interface self {
     use types.{chain, actor-id};
 
     /// Logs a message to the actor's log stream.

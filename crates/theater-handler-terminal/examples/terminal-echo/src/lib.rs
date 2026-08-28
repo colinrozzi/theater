@@ -1,7 +1,7 @@
 //! Terminal echo test actor for Pack runtime.
 //!
 //! A simple actor that demonstrates terminal I/O:
-//! - Imports `theater:simple/runtime.log` for logging
+//! - Imports `theater:simple/self.log` for logging
 //! - Imports `theater:simple/terminal.{write-stdout, write-stderr, set-raw-mode, get-size}` for terminal I/O
 //! - Exports `theater:simple/actor.init`
 //! - Exports `theater:simple/terminal.{handle-input, handle-signal, handle-resize}`
@@ -29,10 +29,10 @@ pack_types!(file = "actor.types");
 //   - indirect-pointer calling convention
 // ============================================================================
 
-#[import(module = "theater:simple/runtime", name = "log")]
+#[import(module = "theater:simple/self", name = "log")]
 fn log(msg: String);
 
-#[import(module = "theater:simple/runtime", name = "shutdown")]
+#[import(module = "theater:simple/self", name = "shutdown")]
 fn shutdown(data: Option<Vec<u8>>) -> Result<(), String>;
 
 #[import(module = "theater:simple/terminal", name = "write-stdout")]

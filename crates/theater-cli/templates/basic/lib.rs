@@ -14,11 +14,11 @@ use pack_guest::{export, import};
 // Set up allocator and panic handler for no_std WASM
 pack_guest::setup_guest!();
 
-// Import host functions from theater:simple/runtime
-#[import(wit = "theater:simple/runtime.log")]
+// Import host functions from theater:simple/self
+#[import(wit = "theater:simple/self.log")]
 fn log(msg: String);
 
-#[import(wit = "theater:simple/runtime.shutdown")]
+#[import(wit = "theater:simple/self.shutdown")]
 fn shutdown(data: Option<Vec<u8>>) -> Result<(), String>;
 
 /// Initialize the actor.

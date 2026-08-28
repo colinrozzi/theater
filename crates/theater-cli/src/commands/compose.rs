@@ -102,7 +102,7 @@ mod tests {
     fn accepts_only_host_imports() {
         let wat = r#"
         (module
-          (import "theater:simple/runtime" "log" (func (param i32 i32)))
+          (import "theater:simple/self" "log" (func (param i32 i32)))
           (import "theater:simple/message-server-host" "register" (func (result i32)))
           (func $f)
         )"#;
@@ -114,7 +114,7 @@ mod tests {
         let wat = r#"
         (module
           (import "env" "memory" (memory 1))
-          (import "theater:simple/runtime" "log" (func (param i32 i32)))
+          (import "theater:simple/self" "log" (func (param i32 i32)))
         )"#;
         let bad = non_host_imports(wat);
         assert_eq!(bad.len(), 1);

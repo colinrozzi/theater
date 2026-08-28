@@ -103,7 +103,7 @@ async fn drive_handle_send(
         Some(interceptor),
         move |builder| {
             let cap_log = cap.clone();
-            builder.interface("theater:simple/runtime")?.func_typed(
+            builder.interface("theater:simple/self")?.func_typed(
                 "log",
                 move |_ctx: &mut Ctx<'_, ActorStore>, input: Value| {
                     if let Value::String(s) = &input {

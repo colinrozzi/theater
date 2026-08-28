@@ -13,7 +13,7 @@
 //! ---
 //! hash: b9aa0dcb36a9e1fb4c4842611cfa272c8f629016
 //! parent: 752f94aee6d7d32bccb1794cd22d62ad0f579709
-//! chain-event-payload::host-function(host-function-call{interface: "theater:simple/runtime", function: "log", input: "[hello] init", output: ()})
+//! chain-event-payload::host-function(host-function-call{interface: "theater:simple/self", function: "log", input: "[hello] init", output: ()})
 //! ```
 //!
 //! The Pack Value literal is the canonical text form of the event's CGRF

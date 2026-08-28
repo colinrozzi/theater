@@ -1,7 +1,7 @@
 //! TCP echo test actor for Pack runtime.
 //!
 //! A simple actor that:
-//! - Imports `theater:simple/runtime.log` for logging
+//! - Imports `theater:simple/self.log` for logging
 //! - Imports `theater:simple/tcp.{send, receive, close}` for TCP I/O
 //! - Exports `theater:simple/actor.init`
 //! - Exports `theater:simple/tcp-client.handle-connection`
@@ -29,7 +29,7 @@ pack_types!(file = "actor.types");
 //   - indirect-pointer calling convention
 // ============================================================================
 
-#[import(module = "theater:simple/runtime", name = "log")]
+#[import(module = "theater:simple/self", name = "log")]
 fn log(msg: String);
 
 #[import(module = "theater:simple/tcp", name = "send")]

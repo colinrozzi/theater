@@ -365,7 +365,7 @@ impl ActorRuntime {
         //
         // PARTIAL INTERFACE MATCHING: An actor may import only a subset of functions
         // from an interface. For example, an actor might import only `log` from
-        // `theater:simple/runtime` which provides `log`, `get-chain`, and `shutdown`.
+        // `theater:simple/self` which provides `log`, `get-chain`, and `shutdown`.
         // In this case, we compute a subset hash from the handler's functions and
         // compare against the actor's declared interface hash.
         let phase_start = Instant::now();

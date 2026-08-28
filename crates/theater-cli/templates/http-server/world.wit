@@ -1,7 +1,7 @@
 package component:{{project_name}};
 
 world default {
-    import theater:simple/runtime;
+    import theater:simple/self;
     import theater:simple/http-framework;
     import theater:simple/http-types;
     import theater:simple/websocket-types;

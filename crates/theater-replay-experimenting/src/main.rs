@@ -1849,7 +1849,7 @@ mod tests {
         assert!(
             event_types
                 .iter()
-                .any(|t| t.contains("theater:simple/runtime/log")),
+                .any(|t| t.contains("theater:simple/self/log")),
             "Should have runtime/log events"
         );
     }

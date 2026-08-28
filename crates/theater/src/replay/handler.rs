@@ -63,7 +63,7 @@ impl ReplayState {
             .iter()
             .filter_map(|event| {
                 // Parse event_type to extract interface
-                // Format: "interface/function" (e.g., "theater:simple/runtime/log")
+                // Format: "interface/function" (e.g., "theater:simple/self/log")
                 if event.event_type.contains('/') {
                     // Split off the function name, keep interface
                     let parts: Vec<&str> = event.event_type.rsplitn(2, '/').collect();
@@ -421,7 +421,7 @@ mod tests {
         let events = vec![ChainEvent {
             hash: vec![1, 2, 3, 4],
             parent_hash: None,
-            event_type: "theater:simple/runtime/log".to_string(),
+            event_type: "theater:simple/self/log".to_string(),
             data: vec![],
         }];
 
@@ -431,7 +431,7 @@ mod tests {
         assert!(!state.is_complete());
 
         let interfaces = state.interfaces();
-        assert!(interfaces.contains(&"theater:simple/runtime".to_string()));
+        assert!(interfaces.contains(&"theater:simple/self".to_string()));
     }
 
     #[test]
@@ -467,7 +467,7 @@ mod tests {
         let events = vec![ChainEvent {
             hash: vec![1, 2, 3, 4],
             parent_hash: None,
-            event_type: "theater:simple/runtime/log".to_string(),
+            event_type: "theater:simple/self/log".to_string(),
             data: vec![],
         }];
 
@@ -484,7 +484,7 @@ mod tests {
         let events = vec![ChainEvent {
             hash: vec![1, 2, 3, 4],
             parent_hash: None,
-            event_type: "theater:simple/runtime/log".to_string(),
+            event_type: "theater:simple/self/log".to_string(),
             data: vec![],
         }];
 
