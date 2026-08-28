@@ -2,9 +2,6 @@
 members = [
     "crates/theater",
     "crates/theater-cli",
-    "crates/theater-server",
-    "crates/theater-server-cli",
-    "crates/theater-client",
     "crates/theater-chain",
     "crates/theater-chain-format",
     # Theater-specific handlers (to be migrated to Composite)
@@ -69,8 +66,6 @@ uuid = { version = "1.6", features = ["v4", "serde"] }
 # and fails on APIs added in the unreleased local source.)
 theater-chain = { version = "0.3.11", path = "crates/theater-chain" }
 theater = { version = "0.3.28", path = "crates/theater" }
-theater-client = { version = "0.3.10", path = "crates/theater-client" }
-theater-server = { version = "0.3.16", path = "crates/theater-server" }
 # Theater-specific handlers
 theater-handler-message-server = { version = "0.3.13", path = "crates/theater-handler-message-server" }
 theater-handler-runtime = { version = "0.3.14", path = "crates/theater-handler-runtime" }

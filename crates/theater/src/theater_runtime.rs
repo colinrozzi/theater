@@ -140,8 +140,7 @@ pub struct TheaterRuntime {
     pack_runtime: Arc<CachingPackRuntime>,
     /// Shared URL→bytes cache. Consulted on every wasm-resolve in the
     /// runtime's own entry points (`ResumeActor`, and by callers of
-    /// [`Self::resource_cache`] for top-level start paths like the
-    /// server's `ManagementCommand::StartActor` or the CLI's
+    /// [`Self::resource_cache`] for top-level start paths like the CLI's
     /// `theater spawn`). The supervisor host fn uses its own clone of
     /// the same `Arc<ResourceCache>` so a single process has exactly
     /// one cache regardless of which entry point a spawn comes from.
