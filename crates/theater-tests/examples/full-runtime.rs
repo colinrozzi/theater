@@ -18,9 +18,7 @@ use tokio::sync::mpsc;
 use tracing::{info, Level};
 
 use std::sync::Arc;
-use theater::config::actor_manifest::{
-    RuntimeHostConfig, StoreHandlerConfig, SupervisorHostConfig,
-};
+use theater::config::actor_manifest::{SelfHostConfig, StoreHandlerConfig, SupervisorHostConfig};
 use theater::handler::HandlerRegistry;
 use theater::messages::TheaterCommand;
 use theater::theater_runtime::TheaterRuntime;
@@ -28,7 +26,7 @@ use theater::utils::ResourceCache;
 
 // Import Theater-specific handlers
 use theater_handler_message_server::MessageServerHandler;
-use theater_handler_runtime::RuntimeHandler;
+use theater_handler_self::SelfHandler;
 use theater_handler_store::StoreHandler;
 use theater_handler_supervisor::SupervisorHandler;
 
@@ -42,8 +40,8 @@ fn create_handler_registry(
 
     // Runtime handler - provides actor runtime information and control
     info!("  - Registering runtime handler");
-    let runtime_config = RuntimeHostConfig {};
-    registry.register(RuntimeHandler::new(runtime_config, theater_tx, None));
+    let runtime_config = SelfHostConfig {};
+    registry.register(SelfHandler::new(runtime_config, theater_tx, None));
 
     // Store handler - provides key-value storage for actors
     info!("  - Registering store handler");

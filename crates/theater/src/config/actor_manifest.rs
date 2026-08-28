@@ -121,10 +121,10 @@ pub enum HandlerConfig {
         #[serde(flatten)]
         config: HttpFrameworkHandlerConfig,
     },
-    #[serde(rename = "runtime")]
-    Runtime {
+    #[serde(rename = "self")]
+    SelfHandler {
         #[serde(flatten)]
-        config: RuntimeHostConfig,
+        config: SelfHostConfig,
     },
     #[serde(rename = "supervisor")]
     Supervisor {
@@ -207,7 +207,7 @@ impl HandlerConfig {
             HandlerConfig::FileSystem { .. } => "filesystem",
             HandlerConfig::HttpClient { .. } => "http-client",
             HandlerConfig::HttpFramework { .. } => "http-framework",
-            HandlerConfig::Runtime { .. } => "runtime",
+            HandlerConfig::SelfHandler { .. } => "self",
             HandlerConfig::Supervisor { .. } => "supervisor",
             HandlerConfig::Store { .. } => "store",
             HandlerConfig::Timing { .. } => "timing",
@@ -324,7 +324,7 @@ pub struct PodmanHandlerConfig {}
 pub struct SupervisorHostConfig {}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct RuntimeHostConfig {}
+pub struct SelfHostConfig {}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct TimingHostConfig {

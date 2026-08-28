@@ -8,7 +8,7 @@ use tracing::{debug, error};
 use crate::{error::CliError, CommandContext};
 use theater::chain::ChainEvent;
 use theater::config::actor_manifest::{
-    RuntimeHostConfig, StoreHandlerConfig, SupervisorHostConfig, TcpHandlerConfig,
+    SelfHostConfig, StoreHandlerConfig, SupervisorHostConfig, TcpHandlerConfig,
     TerminalHandlerConfig, TimerHandlerConfig,
 };
 use theater::handler::HandlerRegistry;
@@ -23,7 +23,7 @@ use theater_handler_loop::LoopHandler;
 use theater_handler_message_server::{MessageRouter, MessageServerHandler};
 use theater_handler_podman::PodmanHandler;
 use theater_handler_rpc::RpcHandler;
-use theater_handler_runtime::RuntimeHandler;
+use theater_handler_self::SelfHandler;
 use theater_handler_store::StoreHandler;
 use theater_handler_supervisor::SupervisorHandler;
 use theater_handler_tcp::TcpHandler;
@@ -116,10 +116,9 @@ fn create_handler_registry(
     let mut registry = HandlerRegistry::new();
 
     // Runtime handler - provides log, get-chain, shutdown
-    let runtime_config = RuntimeHostConfig {};
+    let runtime_config = SelfHostConfig {};
     registry.register(
-        RuntimeHandler::new(runtime_config, theater_tx.clone(), None)
-            .with_show_logs(show_actor_logs),
+        SelfHandler::new(runtime_config, theater_tx.clone(), None).with_show_logs(show_actor_logs),
     );
 
     // Store handler - provides content storage
@@ -394,7 +393,7 @@ async fn run(args: &SpawnArgs, ctx: &CommandContext, call_init: bool) -> Result<
             event = global_events_rx.recv() => {
                 if let Some((event_actor_id, chain_event)) = event {
                     // Output events if --events mode is enabled
-                    // (Actor logs are printed directly by RuntimeHandler, not extracted here)
+                    // (Actor logs are printed directly by SelfHandler, not extracted here)
                     if args.events {
                         match args.events_format {
                             EventFormat::Json => {

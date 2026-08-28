@@ -3359,7 +3359,7 @@ dependencies = [
  "theater-handler-message-server",
  "theater-handler-podman",
  "theater-handler-rpc",
- "theater-handler-runtime",
+ "theater-handler-self",
  "theater-handler-store",
  "theater-handler-supervisor",
  "theater-handler-tcp",
@@ -3451,7 +3451,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "theater-handler-runtime"
+name = "theater-handler-self"
 version = "0.3.14"
 dependencies = [
  "anyhow",
@@ -3550,7 +3550,7 @@ dependencies = [
  "serde_json",
  "theater",
  "theater-handler-message-server",
- "theater-handler-runtime",
+ "theater-handler-self",
  "theater-handler-supervisor",
  "theater-handler-tcp",
  "tokio",
@@ -3572,7 +3572,7 @@ dependencies = [
  "theater-handler-loop",
  "theater-handler-message-server",
  "theater-handler-rpc",
- "theater-handler-runtime",
+ "theater-handler-self",
  "theater-handler-store",
  "theater-handler-supervisor",
  "theater-handler-tcp",

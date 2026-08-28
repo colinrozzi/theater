@@ -9,7 +9,7 @@ use tracing::info;
 
 use theater::actor::handle::ActorHandle;
 use theater::actor::store::ActorStore;
-use theater::config::actor_manifest::RuntimeHostConfig;
+use theater::config::actor_manifest::SelfHostConfig;
 use theater::config::permissions::RuntimePermissions;
 use theater::handler::{Handler, HandlerContext, SharedActorInstance};
 use theater::messages::TheaterCommand;
@@ -26,9 +26,9 @@ use theater::pack_bridge::{
 // ============================================================================
 
 /// Embedded runtime.pact file content
-const RUNTIME_PACT: &str = include_str!("../runtime.pact");
+const RUNTIME_PACT: &str = include_str!("../self.pact");
 
-/// Declare the theater:simple/runtime interface from the pact file.
+/// Declare the theater:simple/self interface from the pact file.
 ///
 /// Functions:
 /// - log(msg: string) -> ()
@@ -41,9 +41,9 @@ fn runtime_interface() -> InterfaceImpl {
 
 /// Handler for providing runtime information and control to WebAssembly actors
 #[derive(Clone)]
-pub struct RuntimeHandler {
+pub struct SelfHandler {
     #[allow(dead_code)]
-    config: RuntimeHostConfig,
+    config: SelfHostConfig,
     theater_tx: Sender<TheaterCommand>,
     #[allow(dead_code)]
     permissions: Option<RuntimePermissions>,
@@ -51,9 +51,9 @@ pub struct RuntimeHandler {
     show_logs: bool,
 }
 
-impl RuntimeHandler {
+impl SelfHandler {
     pub fn new(
-        config: RuntimeHostConfig,
+        config: SelfHostConfig,
         theater_tx: Sender<TheaterCommand>,
         permissions: Option<RuntimePermissions>,
     ) -> Self {
@@ -77,7 +77,7 @@ impl RuntimeHandler {
     }
 }
 
-impl Handler for RuntimeHandler {
+impl Handler for SelfHandler {
     fn create_instance(
         &self,
         _config: Option<&theater::config::actor_manifest::HandlerConfig>,
@@ -110,8 +110,8 @@ impl Handler for RuntimeHandler {
         info!("Setting up runtime host functions (Pack)");
 
         // Check if the interface is already satisfied by another handler
-        if ctx.is_satisfied("theater:simple/runtime") {
-            info!("theater:simple/runtime already satisfied by another handler, skipping");
+        if ctx.is_satisfied("theater:simple/self") {
+            info!("theater:simple/self already satisfied by another handler, skipping");
             return Ok(());
         }
 
@@ -119,7 +119,7 @@ impl Handler for RuntimeHandler {
         let show_logs = self.show_logs;
 
         builder
-            .interface("theater:simple/runtime")?
+            .interface("theater:simple/self")?
             // Log function: log(msg: string)
             // Actor logs are printed directly to stdout (configurable via show_logs).
             .func_typed("log", move |ctx: &mut Ctx<'_, ActorStore>, input: Value| {
@@ -205,7 +205,7 @@ impl Handler for RuntimeHandler {
                 },
             )?;
 
-        ctx.mark_satisfied("theater:simple/runtime");
+        ctx.mark_satisfied("theater:simple/self");
         Ok(())
     }
 
@@ -214,7 +214,7 @@ impl Handler for RuntimeHandler {
     }
 
     fn name(&self) -> &str {
-        "runtime"
+        "self"
     }
 
     fn imports(&self) -> Option<Vec<String>> {
@@ -247,7 +247,7 @@ impl Handler for RuntimeHandler {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use theater::config::actor_manifest::RuntimeHostConfig;
+    use theater::config::actor_manifest::SelfHostConfig;
     use theater::pack_bridge::{
         decode_metadata_with_hashes, encode_metadata_with_hashes, Arena, Function, Param, Type,
     };
@@ -255,14 +255,14 @@ mod tests {
 
     #[test]
     fn test_runtime_handler_creation() {
-        let config = RuntimeHostConfig {};
+        let config = SelfHostConfig {};
         let (tx, _rx) = mpsc::channel(100);
 
-        let handler = RuntimeHandler::new(config, tx, None);
-        assert_eq!(handler.name(), "runtime");
+        let handler = SelfHandler::new(config, tx, None);
+        assert_eq!(handler.name(), "self");
 
         let imports = handler.imports().unwrap();
-        assert!(imports.contains(&"theater:simple/runtime".to_string()));
+        assert!(imports.contains(&"theater:simple/self".to_string()));
         assert!(imports.contains(&"theater:simple/types".to_string()));
 
         assert_eq!(
@@ -281,13 +281,13 @@ mod tests {
 
     #[test]
     fn test_runtime_handler_interface_hashes() {
-        let config = RuntimeHostConfig {};
+        let config = SelfHostConfig {};
         let (tx, _rx) = mpsc::channel(100);
-        let handler = RuntimeHandler::new(config, tx, None);
+        let handler = SelfHandler::new(config, tx, None);
 
         let hashes = handler.interface_hashes();
         assert_eq!(hashes.len(), 1);
-        assert_eq!(hashes[0].0, "theater:simple/runtime");
+        assert_eq!(hashes[0].0, "theater:simple/self");
 
         // Hash should be non-zero
         assert!(!hashes[0].1.as_bytes().iter().all(|&b| b == 0));
@@ -295,13 +295,13 @@ mod tests {
 
     #[test]
     fn test_hash_matching_between_actor_and_handler() {
-        // Build an Arena representing an actor that imports theater:simple/runtime
-        // with the same function signatures as RuntimeHandler provides
+        // Build an Arena representing an actor that imports theater:simple/self
+        // with the same function signatures as SelfHandler provides
         let mut package = Arena::new("package");
 
         // Build imports section
         let mut imports_section = Arena::new("imports");
-        let mut runtime_interface = Arena::new("theater:simple/runtime");
+        let mut runtime_interface = Arena::new("theater:simple/self");
 
         // Add functions matching the runtime interface definition
         runtime_interface.add_function(Function::with_signature(
@@ -342,7 +342,7 @@ mod tests {
         let decoded =
             decode_metadata_with_hashes(&encoded).expect("should decode metadata with hashes");
 
-        // The decoded import hashes should include theater:simple/runtime
+        // The decoded import hashes should include theater:simple/self
         assert!(
             !decoded.import_hashes.is_empty(),
             "should have import hashes"
@@ -351,19 +351,19 @@ mod tests {
         let actor_runtime_hash = decoded
             .import_hashes
             .iter()
-            .find(|h| h.name == "theater:simple/runtime")
-            .expect("should have theater:simple/runtime import hash");
+            .find(|h| h.name == "theater:simple/self")
+            .expect("should have theater:simple/self import hash");
 
         // Get the handler's interface hash
-        let config = RuntimeHostConfig {};
+        let config = SelfHostConfig {};
         let (tx, _rx) = mpsc::channel(100);
-        let handler = RuntimeHandler::new(config, tx, None);
+        let handler = SelfHandler::new(config, tx, None);
         let handler_hashes = handler.interface_hashes();
 
         let handler_runtime_hash = handler_hashes
             .iter()
-            .find(|(name, _)| name == "theater:simple/runtime")
-            .expect("handler should provide theater:simple/runtime");
+            .find(|(name, _)| name == "theater:simple/self")
+            .expect("handler should provide theater:simple/self");
 
         // The hashes should match!
         assert_eq!(
@@ -379,7 +379,7 @@ mod tests {
         let mut package = Arena::new("package");
 
         let mut imports_section = Arena::new("imports");
-        let mut runtime_interface = Arena::new("theater:simple/runtime");
+        let mut runtime_interface = Arena::new("theater:simple/self");
 
         // Add a function with WRONG signature (wrong param type)
         runtime_interface.add_function(Function::with_signature(
@@ -399,13 +399,13 @@ mod tests {
         let actor_hash = decoded
             .import_hashes
             .iter()
-            .find(|h| h.name == "theater:simple/runtime")
+            .find(|h| h.name == "theater:simple/self")
             .expect("should have import hash");
 
         // Get handler hash
-        let config = RuntimeHostConfig {};
+        let config = SelfHostConfig {};
         let (tx, _rx) = mpsc::channel(100);
-        let handler = RuntimeHandler::new(config, tx, None);
+        let handler = SelfHandler::new(config, tx, None);
         let handler_hash = &handler.interface_hashes()[0].1;
 
         // Hashes should NOT match due to different function signature

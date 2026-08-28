@@ -88,7 +88,7 @@ pub fn validate_manifest_permissions(
                     });
                 }
             }
-            HandlerConfig::Runtime { .. } => {
+            HandlerConfig::SelfHandler { .. } => {
                 if effective_permissions.runtime.is_none() {
                     return Err(PermissionError::HandlerNotPermitted {
                         handler_type: "runtime".to_string(),

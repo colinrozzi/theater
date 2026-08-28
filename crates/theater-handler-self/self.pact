@@ -2,7 +2,7 @@
 //
 // Core runtime capabilities for actors: logging and shutdown.
 
-interface runtime {
+interface self {
     @package: string = "theater:simple"
 
     exports {
