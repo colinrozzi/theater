@@ -340,6 +340,7 @@ pub async fn run_replay_verification(
             response_tx,
             supervisor_tx: None,
             subscription_tx: Some(event_tx),
+            parent_id: None,
         })
         .await?;
 
@@ -471,6 +472,7 @@ pub async fn run_replay_verification(
             response_tx: response_tx2,
             supervisor_tx: None,
             subscription_tx: Some(replay_event_tx),
+            parent_id: None,
         })
         .await?;
 
@@ -590,6 +592,7 @@ pub async fn run_request_replay_verification(
             response_tx,
             supervisor_tx: None,
             subscription_tx: Some(event_tx),
+            parent_id: None,
         })
         .await?;
 
@@ -758,6 +761,7 @@ pub async fn run_request_replay_verification(
             response_tx: response_tx2,
             supervisor_tx: None,
             subscription_tx: Some(replay_event_tx),
+            parent_id: None,
         })
         .await?;
 
@@ -897,6 +901,7 @@ pub async fn run_supervisor_replay_verification(
             response_tx,
             supervisor_tx: None,
             subscription_tx: Some(event_tx),
+            parent_id: None,
         })
         .await?;
 
@@ -1082,6 +1087,7 @@ pub async fn run_supervisor_replay_verification(
             response_tx: response_tx2,
             supervisor_tx: None,
             subscription_tx: Some(replay_event_tx),
+            parent_id: None,
         })
         .await?;
 
@@ -1277,6 +1283,7 @@ pub async fn run_tcp_replay_verification(
             response_tx,
             supervisor_tx: None,
             subscription_tx: Some(event_tx),
+            parent_id: None,
         })
         .await?;
 
@@ -1453,6 +1460,7 @@ pub async fn run_tcp_replay_verification(
             response_tx: response_tx2,
             supervisor_tx: None,
             subscription_tx: Some(replay_event_tx),
+            parent_id: None,
         })
         .await?;
 

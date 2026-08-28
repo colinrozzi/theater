@@ -193,6 +193,9 @@ pub struct ActorProcess {
     pub shutdown_controller: ShutdownController,
     /// Optional supervisor channel for actor supervision
     pub supervisor_tx: Option<Sender<ActorResult>>,
+    /// Id of the actor that spawned this one (the supervisor parent).
+    /// `None` for top-level/root actors.
+    pub parent_id: Option<TheaterId>,
 }
 
 impl TheaterRuntime {
@@ -348,6 +351,7 @@ impl TheaterRuntime {
                     response_tx,
                     supervisor_tx,
                     subscription_tx,
+                    parent_id,
                 } => {
                     let actor_name = name.clone().unwrap_or_else(|| "<unnamed>".to_string());
                     debug!("Processing SpawnActor command for: {}", actor_name);
@@ -359,6 +363,7 @@ impl TheaterRuntime {
                         /* call_init = */ true,
                         supervisor_tx,
                         subscription_tx,
+                        parent_id,
                         response_tx,
                     )
                     .await;
@@ -371,6 +376,7 @@ impl TheaterRuntime {
                     response_tx,
                     supervisor_tx,
                     subscription_tx,
+                    parent_id,
                 } => {
                     let actor_name = name.clone().unwrap_or_else(|| "<unnamed>".to_string());
                     debug!("Processing SetupActor command for: {}", actor_name);
@@ -382,6 +388,7 @@ impl TheaterRuntime {
                         /* call_init = */ false,
                         supervisor_tx,
                         subscription_tx,
+                        parent_id,
                         response_tx,
                     )
                     .await;
@@ -490,6 +497,10 @@ impl TheaterRuntime {
                         /* call_init = */ false,
                         supervisor_tx,
                         subscription_tx,
+                        // Resume does not re-establish the supervision parent
+                        // (ResumeActor carries no parent_id); a resumed actor
+                        // shows no parent until re-subscribed. TODO if needed.
+                        None,
                         response_tx,
                     )
                     .await;
@@ -649,7 +660,7 @@ impl TheaterRuntime {
                     let actor_info: Vec<_> = self
                         .actors
                         .iter()
-                        .map(|(id, proc)| (*id, proc.name.clone()))
+                        .map(|(id, proc)| (*id, proc.name.clone(), proc.parent_id))
                         .collect();
                     if let Err(e) = response_tx.send(Ok(actor_info)) {
                         error!("Failed to send actor info list: {:?}", e);
@@ -818,6 +829,7 @@ impl TheaterRuntime {
         call_init: bool,
         supervisor_tx: Option<Sender<ActorResult>>,
         subscription_tx: Option<Sender<(TheaterId, ChainEvent)>>,
+        parent_id: Option<TheaterId>,
         response_tx: oneshot::Sender<Result<TheaterId>>,
     ) {
         let actor_name = name.unwrap_or_else(|| "<unnamed>".to_string());
@@ -972,6 +984,7 @@ impl TheaterRuntime {
             manifest,
             shutdown_controller,
             supervisor_tx,
+            parent_id,
         };
 
         self.actors.insert(actor_id, process);

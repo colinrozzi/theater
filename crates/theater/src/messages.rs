@@ -162,6 +162,10 @@ pub enum TheaterCommand {
         response_tx: oneshot::Sender<Result<TheaterId>>,
         supervisor_tx: Option<Sender<ActorResult>>,
         subscription_tx: Option<Sender<(TheaterId, ChainEvent)>>,
+        /// Id of the actor that spawned this one (the supervisor parent).
+        /// `None` for top-level/root actors. Recorded on the `ActorProcess`
+        /// so `GetActors` can render the supervision tree.
+        parent_id: Option<TheaterId>,
     },
 
     /// # Setup a new actor (setup only, no init)
@@ -185,6 +189,10 @@ pub enum TheaterCommand {
         response_tx: oneshot::Sender<Result<TheaterId>>,
         supervisor_tx: Option<Sender<ActorResult>>,
         subscription_tx: Option<Sender<(TheaterId, ChainEvent)>>,
+        /// Id of the actor that spawned this one (the supervisor parent).
+        /// `None` for top-level/root actors. Recorded on the `ActorProcess`
+        /// so `GetActors` can render the supervision tree.
+        parent_id: Option<TheaterId>,
     },
 
     /// # Resume an existing actor
@@ -279,7 +287,9 @@ pub enum TheaterCommand {
     ///
     /// * `response_tx` - Channel to receive the result (list of actor IDs)
     GetActors {
-        response_tx: oneshot::Sender<Result<Vec<(TheaterId, String)>>>,
+        /// Returns `(actor-id, name, parent-id)` for every live actor.
+        /// `parent-id` is the spawning supervisor (`None` for root actors).
+        response_tx: oneshot::Sender<Result<Vec<(TheaterId, String, Option<TheaterId>)>>>,
     },
 
     GetActorManifest {

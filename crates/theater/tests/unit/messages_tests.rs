@@ -71,6 +71,7 @@ async fn test_theater_command_spawn_actor() {
         response_tx: tx,
         supervisor_tx: None,
         subscription_tx: None,
+        parent_id: None,
     };
 
     match command {

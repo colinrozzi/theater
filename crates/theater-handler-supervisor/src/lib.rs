@@ -578,6 +578,8 @@ impl Handler for SupervisorHandler {
                             response_tx,
                             supervisor_tx: Some(supervisor_tx),
                             subscription_tx: None,
+                            // This child is spawned by the calling actor.
+                            parent_id: Some(store.id),
                         };
 
                         // runtime_setup_and_init covers: send to runtime command
@@ -738,6 +740,8 @@ impl Handler for SupervisorHandler {
                             response_tx,
                             supervisor_tx: Some(result_tx),
                             subscription_tx: None,
+                            // This child is spawned by the calling actor.
+                            parent_id: Some(store.id),
                         };
 
                         if let Err(e) = theater_tx.send(cmd).await {

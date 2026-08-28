@@ -137,6 +137,7 @@ async fn test_actor_shutdown_timing() {
             response_tx: spawn_tx,
             supervisor_tx: None,
             subscription_tx: None,
+            parent_id: None,
         })
         .await
         .expect("Failed to send spawn command");
@@ -268,6 +269,7 @@ async fn test_multiple_actor_shutdown_timing() {
                 response_tx: spawn_tx,
                 supervisor_tx: None,
                 subscription_tx: None,
+                parent_id: None,
             })
             .await
             .expect("Failed to send spawn command");
@@ -431,6 +433,7 @@ async fn test_actor_shutdown_with_supervisor_handler() {
             response_tx: spawn_tx,
             supervisor_tx: None,
             subscription_tx: None,
+            parent_id: None,
         })
         .await
         .expect("Failed to send spawn command");
@@ -587,6 +590,7 @@ async fn test_actor_shutdown_with_all_handlers() {
             response_tx: spawn_tx,
             supervisor_tx: None,
             subscription_tx: None,
+            parent_id: None,
         })
         .await
         .expect("Failed to send spawn command");

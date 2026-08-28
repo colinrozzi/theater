@@ -309,6 +309,7 @@ async fn run(args: &SpawnArgs, ctx: &CommandContext, call_init: bool) -> Result<
             response_tx,
             supervisor_tx: Some(supervisor_tx),
             subscription_tx: None, // Using global subscription instead
+            parent_id: None,
         }
     } else {
         TheaterCommand::SetupActor {
@@ -319,6 +320,7 @@ async fn run(args: &SpawnArgs, ctx: &CommandContext, call_init: bool) -> Result<
             response_tx,
             supervisor_tx: Some(supervisor_tx),
             subscription_tx: None, // Using global subscription instead
+            parent_id: None,
         }
     };
 
