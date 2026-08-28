@@ -1290,7 +1290,7 @@ impl Handler for SupervisorHandler {
 /// WIT: record wit-actor-error { error-type: wit-error-type, data: option<list<u8>> }
 /// WIT enum wit-error-type has cases: operation-timeout(0), channel-closed(1),
 /// shutting-down(2), function-not-found(3), type-mismatch(4), internal(5),
-/// serialization-error(6), update-component-error(7), paused(8)
+/// serialization-error(6), paused(7)
 fn actor_error_to_value(error: ActorError) -> Value {
     let (tag, case_name) = match &error {
         ActorError::OperationTimeout(_) => (0, "operation-timeout"),
@@ -1300,8 +1300,7 @@ fn actor_error_to_value(error: ActorError) -> Value {
         ActorError::TypeMismatch(_) => (4, "type-mismatch"),
         ActorError::Internal(_) => (5, "internal"),
         ActorError::SerializationError => (6, "serialization-error"),
-        ActorError::UpdatePackageError(_) => (7, "update-component-error"),
-        ActorError::Paused => (8, "paused"),
+        ActorError::Paused => (7, "paused"),
         _ => (5, "internal"), // fallback
     };
 

@@ -69,11 +69,6 @@ pub enum ActorError {
     #[component(name = "serialization-error")]
     SerializationError,
 
-    /// Failed to update the actor's WebAssembly package
-    #[error("Failed to update package: {0}")]
-    #[component(name = "update-package-error")]
-    UpdatePackageError(String),
-
     /// Actor is paused
     #[error("Actor is paused")]
     #[component(name = "actor-paused")]
@@ -83,10 +78,7 @@ pub enum ActorError {
     #[error("Actor is not paused")]
     #[component(name = "actor-not-paused")]
     NotPaused,
-    // Failed to update actor due to permission or validation error
-    //#[error("Actor update failed: {0}")]
-    //#[component(name = "update-error")]
-    //UpdateError(String),
+
     #[error("Handler error: {0}")]
     #[component(name = "handler-error")]
     HandlerError(String),
@@ -118,12 +110,8 @@ pub enum WitErrorType {
     Internal,
     #[component(name = "serialization-error")]
     SerializationError,
-    #[component(name = "update-package-error")]
-    UpdatePackageError,
     #[component(name = "paused")]
     Paused,
-    //#[component(name = "update-error")]
-    //UpdateError,
 }
 
 impl From<ActorError> for WitActorError {
@@ -144,14 +132,10 @@ impl From<ActorError> for WitActorError {
                 Some(serde_json::to_vec(&data).unwrap()),
             ),
             ActorError::SerializationError => (WitErrorType::SerializationError, None),
-            ActorError::UpdatePackageError(data) => {
-                (WitErrorType::UpdatePackageError, Some(data.into_bytes()))
-            }
             ActorError::Paused => (WitErrorType::Paused, None),
             ActorError::NotPaused => (WitErrorType::Paused, None),
             ActorError::UnexpectedError(data) => (WitErrorType::Internal, Some(data.into_bytes())),
             ActorError::HandlerError(data) => (WitErrorType::Internal, Some(data.into_bytes())),
-            //        ActorError::UpdateError(data) => (WitErrorType::UpdateError, Some(data.into_bytes())),
         };
         Self { error_type, data }
     }

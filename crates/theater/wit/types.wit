@@ -129,7 +129,6 @@ interface types {
         type-mismatch,
         internal,
         serialization-error,
-        update-component-error,
         paused
     }
 }
