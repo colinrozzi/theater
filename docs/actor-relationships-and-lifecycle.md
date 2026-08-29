@@ -95,15 +95,43 @@ in the filter, not a special case.
 
 ## 3. What the runtime stores and does
 
-The runtime owns the **subscription table** and, for dispatch, a **reverse index**
-keyed by subject: *for each B, who is subscribed to it.* (This reverse index is
-the generalization of PR #164's `children` map — "X's children" becomes "who
-fate-attaches to X.")
+Subscriptions are stored **on the subject** — one map per actor, on its
+`ActorProcess`, keyed by subscriber:
+
+```rust
+struct ActorProcess {
+    // ...
+    subscribers: HashMap<TheaterId, Subscription>,  // who attaches to ME
+}
+```
+
+This is a deliberate **single source of truth** — *not* a central table plus a
+reverse index. A parallel `subscriber -> subjects` index would be pure
+denormalized bookkeeping that every add/remove must touch in lockstep or it
+drifts (the exact class of bug we're designing out). Instead:
+
+- **Dispatch is O(1) and in-place:** when we handle B's event we already hold B's
+  `ActorProcess`, so `B.subscribers` is right there.
+- **Subject death is self-cleaning:** `deregister_actor(B)` drops B's process and
+  its `subscribers` map with it — nothing else to remember to clean.
+- **Subscriber death is lazy:** we don't keep a reverse index to eagerly prune a
+  dead subscriber from every subject it watched. When we dispatch to a subscriber
+  that is no longer a live actor, we skip and drop it in place. Correct in every
+  ordering (dead subscriber → `stop-self` is a no-op; monitor delivery is
+  skipped), and it only leaves a bounded set of dead entries that are pruned on
+  contact. (The one thing this doesn't give cheaply is "list *my own* outgoing
+  links" — an O(N) scan — but that's introspection, not a hot path.)
+
+This is Erlang's shape: links live in each process's own control block, not a
+central registry. And PR #164's `children` map is exactly the `target ==
+stop-self` subset of `ActorProcess.subscribers` — "X's children" is "who
+fate-attaches to X" — so the tree work folds in rather than sitting beside it.
 
 On each chain event `e` emitted by subject `B`:
 
-1. Look up B's subscribers (reverse index).
+1. Take `B.subscribers` (in hand already).
 2. For each, test `e` against its `filter` (host-side; cheap set membership).
+   Drop any subscriber that is no longer live (lazy prune).
 3. Dispatch matches by `target`:
    - `stop-self` → the runtime stops the subscriber. **No handler, no wasm.**
    - `deliver-to-wasm` → deliver `e` to the subscriber via the lifecycle handler
@@ -169,7 +197,7 @@ Everything else recasts as a *consumer* of this substrate:
 
 | Layer | Owns |
 |---|---|
-| **Runtime core** | subscription table + reverse index; host-side filtering; dispatch; the one action `stop-self`; the single death/chain-event stream. |
+| **Runtime core** | subscriptions on each `ActorProcess` (`subscribers`, single source of truth, lazy prune); host-side filtering; dispatch; the one action `stop-self`; the single death/chain-event stream. |
 | **`lifecycle` handler** | actor-facing capability (`link`/`monitor` + filter), `handle-lifecycle-event` delivery. |
 | **`supervisor` handler** | policy only — restart strategy/ordering, view-scope — as a consumer of the above. |
 
@@ -198,8 +226,10 @@ Everything else recasts as a *consumer* of this substrate:
 
 - **PR #164** (runtime-owned tree: `parent_id` + strict-live-inverse `children`
   index + `IsDescendant`/`GetDescendants`) is the **first instance** of this
-  model: the `children` index is the fate-link reverse index; `is-descendant` is
-  fate-reachability. It folds in unchanged.
+  model: `children[parent]` becomes the `target == stop-self` subset of
+  `parent`'s `ActorProcess.subscribers`, and `is-descendant` is fate-reachability
+  over it. When the subscription substrate lands, the central `children` map is
+  absorbed into per-process `subscribers` rather than kept alongside it.
 - **Next threads**, in dependency order:
   1. The single death/terminal chain event (shared with structured-errors /
      consolidation).
