@@ -80,7 +80,7 @@ async fn test_state_tracking_typed_api() {
         actor_store,
         |builder| {
             // Register the log host function
-            builder.interface("theater:simple/runtime")?.func_typed(
+            builder.interface("theater:simple/self")?.func_typed(
                 "log",
                 |_ctx: &mut Ctx<'_, ActorStore>, input: Value| {
                     // Extract the message from the Value

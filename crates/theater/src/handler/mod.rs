@@ -164,18 +164,24 @@ impl HandlerRegistry {
             .collect()
     }
 
-    /// Clone the registry and apply per-actor configs from a manifest.
+    /// Clone the registry and apply per-actor configs + granted permissions.
     ///
-    /// For each handler config in the list, finds the matching handler by name
-    /// and creates a new instance with that config.
-    pub fn clone_with_configs(&self, configs: &[HandlerConfig]) -> Self {
+    /// For each handler, creates a fresh instance with its matching config, then
+    /// bakes in the actor's effective permissions (via `set_permissions`) so the
+    /// runtime-side capability gate has the actor's grant. `permissions` is the
+    /// effective `HandlerPermission` computed from the manifest's policy; `None`
+    /// means no grants (default-deny for the gated handlers).
+    pub fn clone_with_configs(
+        &self,
+        configs: &[HandlerConfig],
+        permissions: Option<&crate::config::permissions::HandlerPermission>,
+    ) -> Self {
         let mut new_registry = HandlerRegistry::new();
         for handler in &self.handlers {
-            // Check if there's a config for this handler
             let matching_config = configs.iter().find(|c| c.handler_name() == handler.name());
-            new_registry
-                .handlers
-                .push(handler.create_instance(matching_config));
+            let mut instance = handler.create_instance(matching_config);
+            instance.set_permissions(permissions);
+            new_registry.handlers.push(instance);
         }
         // Preserve replay chain if set
         if let Some(chain) = &self.replay_chain {
@@ -211,6 +217,19 @@ pub trait Handler: Send + Sync + 'static {
     /// If `config` is `Some` and matches this handler's type, creates a new instance
     /// with that config. Otherwise, clones the current instance.
     fn create_instance(&self, config: Option<&HandlerConfig>) -> Box<dyn Handler>;
+
+    /// Bake the actor's granted permissions into this (freshly created) instance.
+    ///
+    /// The registry calls this right after `create_instance`, per actor, with the
+    /// actor's effective `HandlerPermission`. Handlers that gate on permissions
+    /// (supervisor, runtime) extract their own slice and store it; handlers that
+    /// don't need nothing — the default is a no-op. This is how the runtime-side
+    /// capability gate receives each actor's grant (default-deny when absent).
+    fn set_permissions(
+        &mut self,
+        _permissions: Option<&crate::config::permissions::HandlerPermission>,
+    ) {
+    }
 
     /// Synchronous initialization called BEFORE the actor can receive any calls.
     ///

@@ -1,11 +1,15 @@
-//! # Runtime Handler
+//! Theater Runtime Handler
 //!
-//! Provides runtime information and control capabilities to WebAssembly actors in the Theater system.
-//! This handler allows actors to log messages, get state information, and request shutdown.
-
-use std::future::Future;
-use std::pin::Pin;
-use tracing::info;
+//! The thin SYSTEM-level interface `theater:simple/runtime`: operate on / observe
+//! the runtime as a WHOLE, not individual actors (that is supervisor's job).
+//!
+//! - `shutdown-runtime` — shut the whole runtime down (mutate)
+//! - `subscribe-to-spawns` / `unsubscribe-from-spawns` — observe the actor
+//!   population: every actor spawned anywhere is delivered to this actor's
+//!   `handle-actor-spawn` export (births only; a death rides that actor's own
+//!   chain subscription via supervisor.subscribe-to-actor). (inspect)
+//!
+//! Capability-gated by RuntimePermissions { inspect, mutate }.
 
 use theater::actor::handle::ActorHandle;
 use theater::actor::store::ActorStore;
@@ -14,66 +18,105 @@ use theater::config::permissions::RuntimePermissions;
 use theater::handler::{Handler, HandlerContext, SharedActorInstance};
 use theater::messages::TheaterCommand;
 use theater::shutdown::ShutdownReceiver;
-use tokio::sync::mpsc::Sender;
 
-// Pack integration
 use theater::pack_bridge::{
-    parse_pact, AsyncCtx, Ctx, HostLinkerBuilder, InterfaceImpl, LinkerError, TypeHash, Value,
+    parse_pact, AsyncCtx, HostLinkerBuilder, InterfaceImpl, LinkerError, TypeHash, Value, ValueType,
 };
 
-// ============================================================================
-// Interface Declarations
-// ============================================================================
+use anyhow::Result;
+use std::future::Future;
+use std::pin::Pin;
+use std::sync::{Arc, Mutex};
+use theater::id::TheaterId;
+use thiserror::Error;
+use tokio::sync::mpsc;
+use tracing::{debug, error, info};
 
 /// Embedded runtime.pact file content
 const RUNTIME_PACT: &str = include_str!("../runtime.pact");
 
-/// Declare the theater:simple/runtime interface from the pact file.
-///
-/// Functions:
-/// - log(msg: string) -> ()
-/// - self() -> string (this actor's own id)
-/// - shutdown(data: option<list<u8>>) -> result<(), string>
 fn runtime_interface() -> InterfaceImpl {
     let pact = parse_pact(RUNTIME_PACT).expect("embedded runtime.pact should be valid");
     InterfaceImpl::from_pact(&pact)
 }
 
-/// Handler for providing runtime information and control to WebAssembly actors
+/// Interface error for `theater:simple/runtime` — mirrors the `runtime-error`
+/// pact variant. Fully enumerable: this thin interface can only ever fail two
+/// ways, so there is no `internal(string)` catch-all. A normal Rust enum; the
+/// single `From<RuntimeError> for Value` below is the only place a pact error
+/// value is built.
+#[derive(Debug, Error)]
+pub enum RuntimeError {
+    #[error("permission denied: {0}")]
+    PermissionDenied(String),
+    /// `theater_tx.send` failed — the runtime's command channel is closed, i.e.
+    /// the runtime is shutting down / no longer accepting commands.
+    #[error("runtime unavailable (shutting down)")]
+    RuntimeUnavailable,
+}
+
+impl From<RuntimeError> for Value {
+    fn from(e: RuntimeError) -> Value {
+        let (tag, case, payload) = match e {
+            RuntimeError::PermissionDenied(m) => (0, "permission-denied", vec![Value::String(m)]),
+            RuntimeError::RuntimeUnavailable => (1, "runtime-unavailable", vec![]),
+        };
+        Value::Variant {
+            type_name: "runtime-error".to_string(),
+            case_name: case.to_string(),
+            tag,
+            payload,
+        }
+    }
+}
+
+/// Enforce the runtime capability. `mutate` = shutdown-runtime; otherwise
+/// inspect (subscribe-to-spawns). Default-deny when the capability is absent.
+fn require(perms: &Option<RuntimePermissions>, mutate: bool) -> Result<(), RuntimeError> {
+    let p = perms
+        .as_ref()
+        .ok_or_else(|| RuntimeError::PermissionDenied("runtime capability not granted".into()))?;
+    let granted = if mutate { p.mutate } else { p.inspect };
+    if granted {
+        Ok(())
+    } else {
+        Err(RuntimeError::PermissionDenied(format!(
+            "runtime '{}' capability not granted",
+            if mutate { "mutate" } else { "inspect" }
+        )))
+    }
+}
+
+type SpawnEvent = (TheaterId, String, Option<TheaterId>);
+
+/// The RuntimeHandler exposes the thin system interface to a granted actor.
+///
+/// Per-actor instantiation goes through [`Self::fresh`] (via `create_instance`)
+/// so each actor gets its own spawn-event channel.
 #[derive(Clone)]
 pub struct RuntimeHandler {
-    #[allow(dead_code)]
-    config: RuntimeHostConfig,
-    theater_tx: Sender<TheaterCommand>,
-    #[allow(dead_code)]
+    event_tx: mpsc::Sender<SpawnEvent>,
+    event_rx: Arc<Mutex<Option<mpsc::Receiver<SpawnEvent>>>>,
     permissions: Option<RuntimePermissions>,
-    /// Whether to print actor logs to stdout
-    show_logs: bool,
 }
 
 impl RuntimeHandler {
-    pub fn new(
-        config: RuntimeHostConfig,
-        theater_tx: Sender<TheaterCommand>,
-        permissions: Option<RuntimePermissions>,
-    ) -> Self {
+    pub fn new(_config: RuntimeHostConfig, permissions: Option<RuntimePermissions>) -> Self {
+        let (event_tx, event_rx) = mpsc::channel(1024);
         Self {
-            config,
-            theater_tx,
+            event_tx,
+            event_rx: Arc::new(Mutex::new(Some(event_rx))),
             permissions,
-            show_logs: true, // Default to showing logs
         }
     }
 
-    /// Set whether to print actor logs to stdout
-    pub fn with_show_logs(mut self, show_logs: bool) -> Self {
-        self.show_logs = show_logs;
-        self
-    }
-
-    /// Get the interface declarations for this handler.
-    pub fn interfaces(&self) -> Vec<InterfaceImpl> {
-        vec![runtime_interface()]
+    fn fresh(&self) -> Self {
+        let (event_tx, event_rx) = mpsc::channel(1024);
+        Self {
+            event_tx,
+            event_rx: Arc::new(Mutex::new(Some(event_rx))),
+            permissions: self.permissions.clone(),
+        }
     }
 }
 
@@ -82,135 +125,16 @@ impl Handler for RuntimeHandler {
         &self,
         _config: Option<&theater::config::actor_manifest::HandlerConfig>,
     ) -> Box<dyn Handler> {
-        Box::new(self.clone())
+        Box::new(self.fresh())
     }
 
-    fn setup(
+    fn set_permissions(
         &mut self,
-        _actor_handle: ActorHandle,
-        _actor_instance: SharedActorInstance,
-        shutdown_receiver: ShutdownReceiver,
-        _event_rx: theater::handler::HandlerEventReceiver,
-    ) -> Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send>> {
-        info!("Runtime handler setup");
-
-        Box::pin(async {
-            // Runtime handler doesn't need a background task, but we should wait for shutdown
-            shutdown_receiver.wait_for_shutdown().await;
-            info!("Runtime handler received shutdown signal");
-            Ok(())
-        })
-    }
-
-    fn setup_host_functions_composite(
-        &mut self,
-        builder: &mut HostLinkerBuilder<'_, ActorStore>,
-        ctx: &mut HandlerContext,
-    ) -> Result<(), LinkerError> {
-        info!("Setting up runtime host functions (Pack)");
-
-        // Check if the interface is already satisfied by another handler
-        if ctx.is_satisfied("theater:simple/runtime") {
-            info!("theater:simple/runtime already satisfied by another handler, skipping");
-            return Ok(());
-        }
-
-        let theater_tx = self.theater_tx.clone();
-        let show_logs = self.show_logs;
-
-        builder
-            .interface("theater:simple/runtime")?
-            // Log function: log(msg: string)
-            // Actor logs are printed directly to stdout (configurable via show_logs).
-            .func_typed("log", move |ctx: &mut Ctx<'_, ActorStore>, input: Value| {
-                if show_logs {
-                    let msg = match &input {
-                        Value::String(s) => s.as_str(),
-                        _ => return Value::Tuple(vec![]),
-                    };
-                    let store = ctx.data();
-                    let id = &store.id;
-                    // Print to stdout with short actor ID prefix
-                    let short_id = &id.to_string()[..8.min(id.to_string().len())];
-                    println!("[{}] {}", short_id, msg);
-                }
-                Value::Tuple(vec![])
-            })?
-            // Self function: self() -> string
-            // Returns this actor's own id as a string.
-            .func_typed(
-                "self",
-                move |ctx: &mut Ctx<'_, ActorStore>, _input: Value| {
-                    Value::String(ctx.data().id.to_string())
-                },
-            )?
-            // Shutdown function: shutdown(data: option<list<u8>>) -> result<(), string>
-            .func_async_result(
-                "shutdown",
-                move |ctx: AsyncCtx<ActorStore>, input: Value| {
-                    let theater_tx = theater_tx.clone();
-
-                    async move {
-                        // Parse input: option<list<u8>>
-                        let data: Option<Vec<u8>> = match input {
-                            Value::Option {
-                                value: Some(inner), ..
-                            } => match *inner {
-                                Value::List { items, .. } => {
-                                    let result: Result<Vec<u8>, _> = items
-                                        .into_iter()
-                                        .map(|v| match v {
-                                            Value::U8(b) => Ok(b),
-                                            _ => Err("expected u8"),
-                                        })
-                                        .collect();
-                                    result.ok()
-                                }
-                                _ => None,
-                            },
-                            Value::Option { value: None, .. } => None,
-                            _ => None,
-                        };
-
-                        let store = ctx.data();
-                        let actor_id = store.id;
-
-                        info!("[ACTOR] [{}] Shutdown requested: {:?}", actor_id, data);
-
-                        // Spawn the shutdown command send as a fire-and-forget task.
-                        // This prevents a deadlock where:
-                        // 1. shutdown() awaits send(), yielding to tokio
-                        // 2. Theater receives ShuttingDown, calls stop_actor
-                        // 3. stop_actor sends Shutdown to handler's control loop
-                        // 4. Control loop tries to join operation_handle
-                        // 5. But operation_handle is blocked waiting for shutdown() to return
-                        //
-                        // By spawning, shutdown() returns immediately, allowing the
-                        // operation to complete before the theater processes ShuttingDown.
-                        tokio::spawn(async move {
-                            if let Err(e) = theater_tx
-                                .send(TheaterCommand::ShuttingDown { actor_id, data })
-                                .await
-                            {
-                                tracing::error!(
-                                    "[ACTOR] [{}] Failed to send ShuttingDown: {}",
-                                    actor_id,
-                                    e
-                                );
-                            }
-                        });
-
-                        Ok::<Value, Value>(Value::Tuple(vec![]))
-                    }
-                },
-            )?;
-
-        ctx.mark_satisfied("theater:simple/runtime");
-        Ok(())
-    }
-
-    fn supports_composite(&self) -> bool {
-        true
+        permissions: Option<&theater::config::permissions::HandlerPermission>,
+    ) {
+        // Bake in this actor's granted runtime capability (the gate reads
+        // self.permissions). `None` -> default-deny.
+        self.permissions = permissions.and_then(|p| p.runtime.clone());
     }
 
     fn name(&self) -> &str {
@@ -218,18 +142,16 @@ impl Handler for RuntimeHandler {
     }
 
     fn imports(&self) -> Option<Vec<String>> {
-        let mut imports: Vec<String> = self
-            .interfaces()
-            .iter()
-            .map(|i| i.name().to_string())
-            .collect();
-        // Add additional interface dependencies
-        imports.push("theater:simple/types".to_string());
-        Some(imports)
+        Some(
+            self.interfaces()
+                .iter()
+                .map(|i| i.name().to_string())
+                .collect(),
+        )
     }
 
     fn exports(&self) -> Option<Vec<String>> {
-        Some(vec!["theater:simple/actor".to_string()])
+        Some(vec!["theater:simple/runtime-handlers".to_string()])
     }
 
     fn interface_hashes(&self) -> Vec<(String, TypeHash)> {
@@ -239,179 +161,193 @@ impl Handler for RuntimeHandler {
             .collect()
     }
 
-    fn interfaces(&self) -> Vec<theater::pack_bridge::InterfaceImpl> {
+    fn interfaces(&self) -> Vec<InterfaceImpl> {
         vec![runtime_interface()]
+    }
+
+    fn setup_host_functions_composite(
+        &mut self,
+        builder: &mut HostLinkerBuilder<'_, ActorStore>,
+        ctx: &mut HandlerContext,
+    ) -> Result<(), LinkerError> {
+        info!("Setting up runtime (system) host functions (Pack)");
+        if ctx.is_satisfied("theater:simple/runtime") {
+            info!("theater:simple/runtime already satisfied by another handler, skipping");
+            return Ok(());
+        }
+
+        let event_tx = self.event_tx.clone();
+        let permissions = self.permissions.clone();
+
+        builder
+            .interface("theater:simple/runtime")?
+            // shutdown-runtime: func() -> result<_, runtime-error>   (mutate)
+            .func_async_result("shutdown-runtime", {
+                let permissions = permissions.clone();
+                move |ctx: AsyncCtx<ActorStore>, _input: Value| {
+                    let permissions = permissions.clone();
+                    async move {
+                        require(&permissions, true)?;
+                        let tx = ctx.data().theater_tx.clone();
+                        if tx.send(TheaterCommand::ShutdownRuntime).await.is_err() {
+                            return Err(Value::from(RuntimeError::RuntimeUnavailable));
+                        }
+                        Ok(Value::Tuple(vec![]))
+                    }
+                }
+            })?
+            // subscribe-to-spawns: func() -> result<_, runtime-error>   (inspect)
+            .func_async_result("subscribe-to-spawns", {
+                let event_tx = event_tx.clone();
+                let permissions = permissions.clone();
+                move |ctx: AsyncCtx<ActorStore>, _input: Value| {
+                    let event_tx = event_tx.clone();
+                    let permissions = permissions.clone();
+                    async move {
+                        require(&permissions, false)?;
+                        let tx = ctx.data().theater_tx.clone();
+                        if tx
+                            .send(TheaterCommand::SubscribeToSpawns { event_tx })
+                            .await
+                            .is_err()
+                        {
+                            return Err(Value::from(RuntimeError::RuntimeUnavailable));
+                        }
+                        Ok(Value::Tuple(vec![]))
+                    }
+                }
+            })?
+            // unsubscribe-from-spawns: func() -> result<_, runtime-error>
+            .func_async_result("unsubscribe-from-spawns", {
+                let event_tx = event_tx.clone();
+                let permissions = permissions.clone();
+                move |ctx: AsyncCtx<ActorStore>, _input: Value| {
+                    let event_tx = event_tx.clone();
+                    let permissions = permissions.clone();
+                    async move {
+                        require(&permissions, false)?;
+                        let tx = ctx.data().theater_tx.clone();
+                        if tx
+                            .send(TheaterCommand::UnsubscribeFromSpawns { event_tx })
+                            .await
+                            .is_err()
+                        {
+                            return Err(Value::from(RuntimeError::RuntimeUnavailable));
+                        }
+                        Ok(Value::Tuple(vec![]))
+                    }
+                }
+            })?;
+
+        ctx.mark_satisfied("theater:simple/runtime");
+        Ok(())
+    }
+
+    fn supports_composite(&self) -> bool {
+        true
+    }
+
+    fn setup(
+        &mut self,
+        actor_handle: ActorHandle,
+        actor_instance: SharedActorInstance,
+        mut shutdown_receiver: ShutdownReceiver,
+        _event_rx: theater::handler::HandlerEventReceiver,
+    ) -> Pin<Box<dyn Future<Output = Result<()>> + Send>> {
+        info!("Runtime (system) handler setup");
+        let event_rx_opt = self.event_rx.lock().unwrap().take();
+
+        Box::pin(async move {
+            let Some(mut event_rx) = event_rx_opt else {
+                info!("Runtime handler has no receiver (cloned instance), not starting");
+                shutdown_receiver.wait_for_shutdown().await;
+                return Ok(());
+            };
+
+            // Does the actor implement the spawn-notification export?
+            let has_spawn = {
+                let mut instance_guard = actor_instance.write().await;
+                if let Some(instance) = instance_guard.as_mut() {
+                    instance
+                        .has_export("theater:simple/runtime-handlers", "handle-actor-spawn")
+                        .await
+                        .unwrap_or(false)
+                } else {
+                    false
+                }
+            };
+
+            loop {
+                tokio::select! {
+                    Some((id, name, parent)) = event_rx.recv() => {
+                        if has_spawn {
+                            let params = Value::Tuple(vec![
+                                Value::String(id.to_string()),
+                                Value::String(name),
+                                Value::Option {
+                                    inner_type: ValueType::String,
+                                    value: parent.map(|p| Box::new(Value::String(p.to_string()))),
+                                },
+                            ]);
+                            if let Err(e) = actor_handle
+                                .call_function(
+                                    "theater:simple/runtime-handlers.handle-actor-spawn".to_string(),
+                                    params,
+                                )
+                                .await
+                            {
+                                error!("handle-actor-spawn failed: {}", e);
+                            }
+                        }
+                    }
+                    _ = &mut shutdown_receiver.receiver => {
+                        debug!("Runtime handler shutdown");
+                        break;
+                    }
+                }
+            }
+            Ok(())
+        })
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use theater::config::actor_manifest::RuntimeHostConfig;
-    use theater::pack_bridge::{
-        decode_metadata_with_hashes, encode_metadata_with_hashes, Arena, Function, Param, Type,
-    };
-    use tokio::sync::mpsc;
-
-    #[test]
-    fn test_runtime_handler_creation() {
-        let config = RuntimeHostConfig {};
-        let (tx, _rx) = mpsc::channel(100);
-
-        let handler = RuntimeHandler::new(config, tx, None);
-        assert_eq!(handler.name(), "runtime");
-
-        let imports = handler.imports().unwrap();
-        assert!(imports.contains(&"theater:simple/runtime".to_string()));
-        assert!(imports.contains(&"theater:simple/types".to_string()));
-
-        assert_eq!(
-            handler.exports(),
-            Some(vec!["theater:simple/actor".to_string()])
-        );
-    }
 
     #[test]
     fn test_runtime_interface_hash_determinism() {
-        // Creating the interface twice should produce the same hash
-        let interface1 = runtime_interface();
-        let interface2 = runtime_interface();
-        assert_eq!(interface1.hash(), interface2.hash());
+        let a = runtime_interface();
+        let b = runtime_interface();
+        assert_eq!(a.hash(), b.hash());
+        assert_eq!(a.name(), "theater:simple/runtime");
     }
 
     #[test]
-    fn test_runtime_handler_interface_hashes() {
-        let config = RuntimeHostConfig {};
-        let (tx, _rx) = mpsc::channel(100);
-        let handler = RuntimeHandler::new(config, tx, None);
-
-        let hashes = handler.interface_hashes();
-        assert_eq!(hashes.len(), 1);
-        assert_eq!(hashes[0].0, "theater:simple/runtime");
-
-        // Hash should be non-zero
-        assert!(!hashes[0].1.as_bytes().iter().all(|&b| b == 0));
-    }
-
-    #[test]
-    fn test_hash_matching_between_actor_and_handler() {
-        // Build an Arena representing an actor that imports theater:simple/runtime
-        // with the same function signatures as RuntimeHandler provides
-        let mut package = Arena::new("package");
-
-        // Build imports section
-        let mut imports_section = Arena::new("imports");
-        let mut runtime_interface = Arena::new("theater:simple/runtime");
-
-        // Add functions matching the runtime interface definition
-        runtime_interface.add_function(Function::with_signature(
-            "log",
-            vec![Param::new("msg", Type::String)],
-            vec![], // returns ()
-        ));
-        runtime_interface.add_function(Function::with_signature(
-            "self",
-            vec![],
-            vec![Type::String], // returns actor id as string
-        ));
-        runtime_interface.add_function(Function::with_signature(
-            "shutdown",
-            vec![Param::new(
-                "data",
-                Type::Option(Box::new(Type::List(Box::new(Type::U8)))),
-            )],
-            // Note: result<_, string> uses Bool for ok type to match pack-guest-macros convention
-            vec![Type::Result {
-                ok: Box::new(Type::Bool),
-                err: Box::new(Type::String),
-            }],
-        ));
-
-        imports_section.add_child(runtime_interface);
-        package.add_child(imports_section);
-
-        // Add empty exports section
-        let exports_section = Arena::new("exports");
-        package.add_child(exports_section);
-
-        // Encode metadata with hashes
-        let encoded =
-            encode_metadata_with_hashes(&package).expect("should encode metadata with hashes");
-
-        // Decode and get import hashes
-        let decoded =
-            decode_metadata_with_hashes(&encoded).expect("should decode metadata with hashes");
-
-        // The decoded import hashes should include theater:simple/runtime
-        assert!(
-            !decoded.import_hashes.is_empty(),
-            "should have import hashes"
-        );
-
-        let actor_runtime_hash = decoded
-            .import_hashes
-            .iter()
-            .find(|h| h.name == "theater:simple/runtime")
-            .expect("should have theater:simple/runtime import hash");
-
-        // Get the handler's interface hash
-        let config = RuntimeHostConfig {};
-        let (tx, _rx) = mpsc::channel(100);
-        let handler = RuntimeHandler::new(config, tx, None);
-        let handler_hashes = handler.interface_hashes();
-
-        let handler_runtime_hash = handler_hashes
-            .iter()
-            .find(|(name, _)| name == "theater:simple/runtime")
-            .expect("handler should provide theater:simple/runtime");
-
-        // The hashes should match!
+    fn test_handler_name_and_exports() {
+        let h = RuntimeHandler::new(RuntimeHostConfig {}, None);
+        assert_eq!(h.name(), "runtime");
         assert_eq!(
-            actor_runtime_hash.hash, handler_runtime_hash.1,
-            "Actor's import hash should match handler's interface hash"
+            h.exports(),
+            Some(vec!["theater:simple/runtime-handlers".to_string()])
         );
     }
 
     #[test]
-    fn test_hash_mismatch_detection() {
-        // Build an Arena with a DIFFERENT function signature
-        // This should produce a different hash, demonstrating mismatch detection
-        let mut package = Arena::new("package");
-
-        let mut imports_section = Arena::new("imports");
-        let mut runtime_interface = Arena::new("theater:simple/runtime");
-
-        // Add a function with WRONG signature (wrong param type)
-        runtime_interface.add_function(Function::with_signature(
-            "log",
-            vec![Param::new("msg", Type::S32)], // WRONG: should be String
-            vec![],
-        ));
-
-        imports_section.add_child(runtime_interface);
-        package.add_child(imports_section);
-        package.add_child(Arena::new("exports"));
-
-        // Encode and decode
-        let encoded = encode_metadata_with_hashes(&package).expect("encode");
-        let decoded = decode_metadata_with_hashes(&encoded).expect("decode");
-
-        let actor_hash = decoded
-            .import_hashes
-            .iter()
-            .find(|h| h.name == "theater:simple/runtime")
-            .expect("should have import hash");
-
-        // Get handler hash
-        let config = RuntimeHostConfig {};
-        let (tx, _rx) = mpsc::channel(100);
-        let handler = RuntimeHandler::new(config, tx, None);
-        let handler_hash = &handler.interface_hashes()[0].1;
-
-        // Hashes should NOT match due to different function signature
-        assert_ne!(
-            actor_hash.hash, *handler_hash,
-            "Mismatched signatures should produce different hashes"
-        );
+    fn test_require_gate() {
+        assert!(require(&None, false).is_err());
+        assert!(require(&None, true).is_err());
+        let ro = Some(RuntimePermissions {
+            inspect: true,
+            mutate: false,
+        });
+        assert!(require(&ro, false).is_ok());
+        assert!(require(&ro, true).is_err());
+        let rw = Some(RuntimePermissions {
+            inspect: true,
+            mutate: true,
+        });
+        assert!(require(&rw, false).is_ok());
+        assert!(require(&rw, true).is_ok());
     }
 }

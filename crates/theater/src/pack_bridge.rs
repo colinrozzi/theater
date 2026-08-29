@@ -228,7 +228,7 @@ fn extract_functions_from_arena(
 ///     &runtime,
 ///     actor_store,
 ///     |builder| {
-///         builder.interface("theater:simple/runtime")?
+///         builder.interface("theater:simple/self")?
 ///             .func_typed("log", |ctx, msg: String| { ... })?;
 ///         Ok(())
 ///     }

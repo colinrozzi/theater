@@ -11,22 +11,20 @@ use crate::chain::ChainEvent;
 use crate::config::actor_manifest::HandlerConfig;
 use crate::handler::HandlerRegistry;
 use crate::id::TheaterId;
+use crate::messages::{ActorMessage, ActorStatus, ActorTreeRow, TheaterCommand};
 use crate::messages::{
-    default_init_state, ActorResult, ChannelId, ChannelParticipant, ChildError, ChildExternalStop,
-    ChildResult,
+    ActorResult, ChannelId, ChannelParticipant, ChildError, ChildExternalStop, ChildResult,
 };
-use crate::messages::{ActorMessage, ActorStatus, TheaterCommand};
 use crate::metrics::ActorMetrics;
 use crate::pack_bridge::{CachingPackRuntime, Value};
 use crate::replay::ReplayHandler;
 use crate::shutdown::{ShutdownController, ShutdownType};
-use crate::utils::{resolve_reference, resolve_reference_cached, ResourceCache};
+use crate::utils::ResourceCache;
 use crate::Result;
 use crate::TheaterRuntimeError;
 use crate::{ManifestConfig, StateChain};
 use std::collections::HashMap;
 use std::collections::HashSet;
-use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc::Receiver;
@@ -118,15 +116,16 @@ pub struct TheaterRuntime {
     actors: HashMap<TheaterId, ActorProcess>,
     /// Map of chains index by actor ID
     chains: HashMap<TheaterId, Arc<RwLock<StateChain>>>,
+    /// Runtime-wide spawn-notification subscribers. Every actor spawned
+    /// anywhere is delivered to each as `(id, name, parent-id)`. Backs
+    /// `theater:simple/runtime.subscribe-to-spawns`.
+    spawn_subscribers: Vec<Sender<ActorTreeRow>>,
     /// Sender for commands to the runtime
     theater_tx: Sender<TheaterCommand>,
     /// Receiver for commands to the runtime
     theater_rx: Receiver<TheaterCommand>,
     /// Map of active communication channels
     channels: HashMap<ChannelId, HashSet<ChannelParticipant>>,
-    /// Optional channel to send channel events back to the server
-    #[allow(dead_code)]
-    channel_events_tx: Option<Sender<crate::messages::ChannelEvent>>,
     /// Shared async runtime for WASM execution, with the engine-scoped
     /// module compile cache.
     ///
@@ -139,9 +138,9 @@ pub struct TheaterRuntime {
     /// safe.
     pack_runtime: Arc<CachingPackRuntime>,
     /// Shared URL→bytes cache. Consulted on every wasm-resolve in the
-    /// runtime's own entry points (`ResumeActor`, and by callers of
-    /// [`Self::resource_cache`] for top-level start paths like the CLI's
-    /// `theater spawn`). The supervisor host fn uses its own clone of
+    /// runtime's own entry points (callers of [`Self::resource_cache`] for
+    /// top-level start paths like the CLI's `theater spawn`). The supervisor
+    /// host fn uses its own clone of
     /// the same `Arc<ResourceCache>` so a single process has exactly
     /// one cache regardless of which entry point a spawn comes from.
     /// Opt-in per child manifest via `static_package = true`.
@@ -193,6 +192,9 @@ pub struct ActorProcess {
     pub shutdown_controller: ShutdownController,
     /// Optional supervisor channel for actor supervision
     pub supervisor_tx: Option<Sender<ActorResult>>,
+    /// Id of the actor that spawned this one (the supervisor parent).
+    /// `None` for top-level/root actors.
+    pub parent_id: Option<TheaterId>,
 }
 
 impl TheaterRuntime {
@@ -202,8 +204,6 @@ impl TheaterRuntime {
     ///
     /// * `theater_tx` - Sender for commands to the runtime
     /// * `theater_rx` - Receiver for commands to the runtime
-    /// * `channel_events_tx` - Optional channel for sending events to external systems
-    /// * `message_lifecycle_tx` - Optional channel for sending actor lifecycle events to message-server
     ///
     /// ## Returns
     ///
@@ -225,7 +225,6 @@ impl TheaterRuntime {
     /// let runtime = TheaterRuntime::new(
     ///     theater_tx,
     ///     theater_rx,
-    ///     None,
     ///     HandlerRegistry::new(),
     ///     Arc::new(ResourceCache::new()),
     /// ).await?;
@@ -235,7 +234,6 @@ impl TheaterRuntime {
     pub async fn new(
         theater_tx: Sender<TheaterCommand>,
         theater_rx: Receiver<TheaterCommand>,
-        channel_events_tx: Option<Sender<crate::messages::ChannelEvent>>,
         handler_registry: HandlerRegistry,
         resource_cache: Arc<ResourceCache>,
     ) -> Result<Self> {
@@ -247,8 +245,8 @@ impl TheaterRuntime {
             theater_rx,
             actors: HashMap::new(),
             chains: HashMap::new(),
+            spawn_subscribers: Vec::new(),
             channels: HashMap::new(),
-            channel_events_tx,
             pack_runtime,
             resource_cache,
             handler_registry,
@@ -259,8 +257,7 @@ impl TheaterRuntime {
     /// The shared URL→bytes cache. Server top-level start, CLI top-level
     /// spawn, and any external caller that constructs a `TheaterCommand`
     /// can clone this to honor a child manifest's `static_package` flag
-    /// — the same cache backing the runtime's own `ResumeActor` path
-    /// and the supervisor host fn.
+    /// — the same cache backing the supervisor host fn.
     pub fn resource_cache(&self) -> &Arc<ResourceCache> {
         &self.resource_cache
     }
@@ -348,6 +345,7 @@ impl TheaterRuntime {
                     response_tx,
                     supervisor_tx,
                     subscription_tx,
+                    parent_id,
                 } => {
                     let actor_name = name.clone().unwrap_or_else(|| "<unnamed>".to_string());
                     debug!("Processing SpawnActor command for: {}", actor_name);
@@ -359,6 +357,7 @@ impl TheaterRuntime {
                         /* call_init = */ true,
                         supervisor_tx,
                         subscription_tx,
+                        parent_id,
                         response_tx,
                     )
                     .await;
@@ -371,6 +370,7 @@ impl TheaterRuntime {
                     response_tx,
                     supervisor_tx,
                     subscription_tx,
+                    parent_id,
                 } => {
                     let actor_name = name.clone().unwrap_or_else(|| "<unnamed>".to_string());
                     debug!("Processing SetupActor command for: {}", actor_name);
@@ -382,114 +382,7 @@ impl TheaterRuntime {
                         /* call_init = */ false,
                         supervisor_tx,
                         subscription_tx,
-                        response_tx,
-                    )
-                    .await;
-                }
-                TheaterCommand::ResumeActor {
-                    manifest_path,
-                    wasm_bytes,
-                    response_tx,
-                    supervisor_tx,
-                    subscription_tx,
-                } => {
-                    debug!(
-                        "Processing ResumeActor command for manifest: {:?}",
-                        manifest_path
-                    );
-                    // ResumeActor loads manifest from path for replay config
-                    // Load manifest
-                    let manifest_result: Result<ManifestConfig, TheaterRuntimeError> = async {
-                        let manifest_str = if manifest_path.starts_with("store:")
-                            || manifest_path.starts_with("https:")
-                            || PathBuf::from(&manifest_path).exists()
-                        {
-                            let manifest_bytes =
-                                resolve_reference(&manifest_path).await.map_err(|e| {
-                                    TheaterRuntimeError::ActorInitializationError(format!(
-                                        "Failed to load manifest: {}",
-                                        e
-                                    ))
-                                })?;
-                            String::from_utf8(manifest_bytes).map_err(|e| {
-                                TheaterRuntimeError::ActorInitializationError(e.to_string())
-                            })?
-                        } else {
-                            manifest_path.clone()
-                        };
-
-                        ManifestConfig::from_toml_str(&manifest_str).map_err(|e| {
-                            TheaterRuntimeError::ActorInitializationError(format!(
-                                "Failed to parse manifest: {}",
-                                e
-                            ))
-                        })
-                    }
-                    .await;
-
-                    let manifest = match manifest_result {
-                        Ok(m) => m,
-                        Err(e) => {
-                            error!("Failed to load manifest: {}", e);
-                            let _ = response_tx.send(Err(e.into()));
-                            continue;
-                        }
-                    };
-
-                    // Resolve WASM bytes. Honors the child's
-                    // `static_package` opt-in — when the operator has
-                    // declared the URL content-addressed, the wasm
-                    // fetch goes through this runtime's shared
-                    // ResourceCache (the same one the supervisor host
-                    // fn uses).
-                    let wasm_bytes = match wasm_bytes {
-                        Some(bytes) => bytes,
-                        None => {
-                            if manifest.static_package {
-                                match resolve_reference_cached(
-                                    &manifest.package,
-                                    &self.resource_cache,
-                                )
-                                .await
-                                {
-                                    Ok((arc, _hit)) => (*arc).clone(),
-                                    Err(e) => {
-                                        error!("Failed to load WASM: {}", e);
-                                        let _ = response_tx.send(Err(anyhow::anyhow!(
-                                            "Failed to load WASM: {}",
-                                            e
-                                        )));
-                                        continue;
-                                    }
-                                }
-                            } else {
-                                match resolve_reference(&manifest.package).await {
-                                    Ok(bytes) => bytes,
-                                    Err(e) => {
-                                        error!("Failed to load WASM: {}", e);
-                                        let _ = response_tx.send(Err(anyhow::anyhow!(
-                                            "Failed to load WASM: {}",
-                                            e
-                                        )));
-                                        continue;
-                                    }
-                                }
-                            }
-                        }
-                    };
-
-                    let name = Some(manifest.name.clone());
-                    // Resume goes through the replay path; the replay handler
-                    // walks the recorded chain (including the original init
-                    // call), so `spawn_actor` must NOT auto-init.
-                    self.spawn_actor(
-                        wasm_bytes,
-                        name,
-                        Some(manifest),
-                        default_init_state(),
-                        /* call_init = */ false,
-                        supervisor_tx,
-                        subscription_tx,
+                        parent_id,
                         response_tx,
                     )
                     .await;
@@ -649,7 +542,7 @@ impl TheaterRuntime {
                     let actor_info: Vec<_> = self
                         .actors
                         .iter()
-                        .map(|(id, proc)| (*id, proc.name.clone()))
+                        .map(|(id, proc)| (*id, proc.name.clone(), proc.parent_id))
                         .collect();
                     if let Err(e) = response_tx.send(Ok(actor_info)) {
                         error!("Failed to send actor info list: {:?}", e);
@@ -722,6 +615,15 @@ impl TheaterRuntime {
                             actor_id
                         );
                     }
+                }
+                TheaterCommand::SubscribeToSpawns { event_tx } => {
+                    debug!("Adding runtime-wide spawn subscriber");
+                    self.spawn_subscribers.push(event_tx);
+                }
+                TheaterCommand::UnsubscribeFromSpawns { event_tx } => {
+                    debug!("Removing runtime-wide spawn subscriber");
+                    self.spawn_subscribers
+                        .retain(|s| !s.same_channel(&event_tx));
                 }
                 TheaterCommand::NewStore { response_tx } => {
                     debug!("Creating new content store");
@@ -818,6 +720,7 @@ impl TheaterRuntime {
         call_init: bool,
         supervisor_tx: Option<Sender<ActorResult>>,
         subscription_tx: Option<Sender<(TheaterId, ChainEvent)>>,
+        parent_id: Option<TheaterId>,
         response_tx: oneshot::Sender<Result<TheaterId>>,
     ) {
         let actor_name = name.unwrap_or_else(|| "<unnamed>".to_string());
@@ -972,10 +875,27 @@ impl TheaterRuntime {
             manifest,
             shutdown_controller,
             supervisor_tx,
+            parent_id,
         };
 
         self.actors.insert(actor_id, process);
         debug!("Actor process registered with runtime");
+
+        // Notify runtime-wide spawn subscribers (births only); reap closed ones.
+        if !self.spawn_subscribers.is_empty() {
+            let name = self
+                .actors
+                .get(&actor_id)
+                .map(|p| p.name.clone())
+                .unwrap_or_default();
+            let note = (actor_id, name, parent_id);
+            self.spawn_subscribers.retain(|s| {
+                !matches!(
+                    s.try_send(note.clone()),
+                    Err(tokio::sync::mpsc::error::TrySendError::Closed(_))
+                )
+            });
+        }
         // elapsed_ms here is the total queue-blocking cost: every ms
         // counted is one ms the runtime command loop spent serialized
         // on this spawn instead of draining other commands.
@@ -1364,8 +1284,18 @@ impl TheaterRuntime {
         &self,
         manifest: &ManifestConfig,
     ) -> Result<HandlerRegistry> {
-        // Clone the registry with per-actor configs applied
-        let mut registry = self.handler_registry.clone_with_configs(&manifest.handlers);
+        // Compute this actor's effective permissions from its manifest policy
+        // against a root (fully-privileged) parent, then apply configs + grants.
+        // Control caps (runtime/supervisor) default-deny, so an actor gets them
+        // only by declaring an explicit restrict grant. (Full parent-chain
+        // inheritance — child cannot exceed its spawner — is a follow-up.)
+        let effective =
+            manifest.calculate_effective_permissions(
+                &crate::config::permissions::HandlerPermission::root(),
+            );
+        let mut registry = self
+            .handler_registry
+            .clone_with_configs(&manifest.handlers, Some(&effective));
 
         // Special handling for replay handler - needs to load chain file
         for handler_config in &manifest.handlers {

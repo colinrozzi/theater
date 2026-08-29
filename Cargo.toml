@@ -7,6 +7,7 @@ members = [
     # Theater-specific handlers (to be migrated to Composite)
     "crates/theater-handler-message-server",
     "crates/theater-handler-runtime",
+    "crates/theater-handler-self",
     "crates/theater-handler-store",
     "crates/theater-handler-supervisor",
     "crates/theater-handler-tcp",
@@ -68,7 +69,8 @@ theater-chain = { version = "0.3.11", path = "crates/theater-chain" }
 theater = { version = "0.3.28", path = "crates/theater" }
 # Theater-specific handlers
 theater-handler-message-server = { version = "0.3.13", path = "crates/theater-handler-message-server" }
-theater-handler-runtime = { version = "0.3.14", path = "crates/theater-handler-runtime" }
+theater-handler-runtime = { version = "0.3.0", path = "crates/theater-handler-runtime" }
+theater-handler-self = { version = "0.3.14", path = "crates/theater-handler-self" }
 theater-handler-store = { version = "0.3.12", path = "crates/theater-handler-store" }
 theater-handler-supervisor = { version = "0.3.19", path = "crates/theater-handler-supervisor" }
 theater-handler-tcp = { version = "0.3.21", path = "crates/theater-handler-tcp" }
@@ -114,8 +116,8 @@ theater-handler-http-client = { version = "0.3.0", path = "crates/theater-handle
 # theater:simple/*. Growable memory deletes the capped-heap OOM class (the mail-spine
 # wedge). The runtime loader (Runtime/AsyncRuntime/Module) is unchanged — it already
 # loads plain-built actors — so this is a build/CLI change, not a loader change.
-packr = "0.11.0"
-packr-abi = "0.11.0"
+packr = "0.21.0"
+packr-abi = "0.21.0"
 
 # Metadata for Nix crane builds
 [workspace.metadata.crane]

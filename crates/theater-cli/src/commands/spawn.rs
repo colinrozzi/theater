@@ -8,7 +8,7 @@ use tracing::{debug, error};
 use crate::{error::CliError, CommandContext};
 use theater::chain::ChainEvent;
 use theater::config::actor_manifest::{
-    RuntimeHostConfig, StoreHandlerConfig, SupervisorHostConfig, TcpHandlerConfig,
+    RuntimeHostConfig, SelfHostConfig, StoreHandlerConfig, SupervisorHostConfig, TcpHandlerConfig,
     TerminalHandlerConfig, TimerHandlerConfig,
 };
 use theater::handler::HandlerRegistry;
@@ -24,6 +24,7 @@ use theater_handler_message_server::{MessageRouter, MessageServerHandler};
 use theater_handler_podman::PodmanHandler;
 use theater_handler_rpc::RpcHandler;
 use theater_handler_runtime::RuntimeHandler;
+use theater_handler_self::SelfHandler;
 use theater_handler_store::StoreHandler;
 use theater_handler_supervisor::SupervisorHandler;
 use theater_handler_tcp::TcpHandler;
@@ -115,11 +116,10 @@ fn create_handler_registry(
 ) -> Result<HandlerRegistry, CliError> {
     let mut registry = HandlerRegistry::new();
 
-    // Runtime handler - provides log, get-chain, shutdown
-    let runtime_config = RuntimeHostConfig {};
+    // Self handler - the per-actor handle: log, self, shutdown
+    let self_config = SelfHostConfig {};
     registry.register(
-        RuntimeHandler::new(runtime_config, theater_tx.clone(), None)
-            .with_show_logs(show_actor_logs),
+        SelfHandler::new(self_config, theater_tx.clone(), None).with_show_logs(show_actor_logs),
     );
 
     // Store handler - provides content storage
@@ -134,6 +134,11 @@ fn create_handler_registry(
     registry.register(
         SupervisorHandler::new(supervisor_config, None).with_resource_cache(resource_cache),
     );
+
+    // Runtime (system) handler - shutdown-runtime + subscribe-to-spawns.
+    // Capability-gated, default-deny: an actor needs an explicit
+    // [permission_policy.runtime] grant to use it.
+    registry.register(RuntimeHandler::new(RuntimeHostConfig {}, None));
 
     // Message server handler - inter-actor messaging
     let message_router = MessageRouter::new();
@@ -215,9 +220,8 @@ async fn run(args: &SpawnArgs, ctx: &CommandContext, call_init: bool) -> Result<
     // Create the TheaterRuntime in-process
     let (theater_tx, theater_rx) = mpsc::channel::<TheaterCommand>(32);
     // One URL→bytes cache shared across every entry point in this CLI
-    // invocation: the top-level wasm fetch below, the supervisor host
-    // fn (via `create_handler_registry`), and `ResumeActor` (via
-    // TheaterRuntime). Lasts until the CLI process exits.
+    // invocation: the top-level wasm fetch below and the supervisor host
+    // fn (via `create_handler_registry`). Lasts until the CLI process exits.
     let resource_cache = Arc::new(ResourceCache::new());
     let handler_registry = create_handler_registry(
         theater_tx.clone(),
@@ -228,7 +232,6 @@ async fn run(args: &SpawnArgs, ctx: &CommandContext, call_init: bool) -> Result<
     let mut runtime = TheaterRuntime::new(
         theater_tx.clone(),
         theater_rx,
-        None, // no channel events forwarding needed
         handler_registry,
         resource_cache.clone(),
     )
@@ -310,6 +313,7 @@ async fn run(args: &SpawnArgs, ctx: &CommandContext, call_init: bool) -> Result<
             response_tx,
             supervisor_tx: Some(supervisor_tx),
             subscription_tx: None, // Using global subscription instead
+            parent_id: None,
         }
     } else {
         TheaterCommand::SetupActor {
@@ -320,6 +324,7 @@ async fn run(args: &SpawnArgs, ctx: &CommandContext, call_init: bool) -> Result<
             response_tx,
             supervisor_tx: Some(supervisor_tx),
             subscription_tx: None, // Using global subscription instead
+            parent_id: None,
         }
     };
 
@@ -394,7 +399,7 @@ async fn run(args: &SpawnArgs, ctx: &CommandContext, call_init: bool) -> Result<
             event = global_events_rx.recv() => {
                 if let Some((event_actor_id, chain_event)) = event {
                     // Output events if --events mode is enabled
-                    // (Actor logs are printed directly by RuntimeHandler, not extracted here)
+                    // (Actor logs are printed directly by SelfHandler, not extracted here)
                     if args.events {
                         match args.events_format {
                             EventFormat::Json => {

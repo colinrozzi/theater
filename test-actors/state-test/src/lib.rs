@@ -27,7 +27,7 @@ pack_types! {
     }
 
     imports {
-        theater:simple/runtime {
+        theater:simple/self {
             log: func(msg: string),
         }
     }
@@ -39,7 +39,7 @@ pack_types! {
 }
 
 // Import the log function from the host
-#[import(module = "theater:simple/runtime", name = "log")]
+#[import(module = "theater:simple/self", name = "log")]
 fn log(msg: String);
 
 /// Build a state record Value from a count

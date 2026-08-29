@@ -10,7 +10,7 @@ record actor-state {
 }
 
 imports {
-    theater:simple/runtime {
+    theater:simple/self {
         log: func(msg: string),
     }
 }

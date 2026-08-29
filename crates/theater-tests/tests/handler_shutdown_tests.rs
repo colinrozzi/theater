@@ -12,7 +12,7 @@ use tokio::sync::{mpsc, RwLock};
 
 use theater::actor::handle::ActorHandle;
 use theater::actor::types::{ActorControl, ActorInfo, ActorOperation};
-use theater::config::actor_manifest::{RuntimeHostConfig, SupervisorHostConfig};
+use theater::config::actor_manifest::{SelfHostConfig, SupervisorHostConfig};
 use theater::handler::{Handler, SharedActorInstance};
 use theater::messages::TheaterCommand;
 use theater::shutdown::{ShutdownController, ShutdownType};
@@ -105,11 +105,11 @@ async fn verify_handler_shutdown<H: Handler>(
 
 #[tokio::test]
 async fn test_runtime_handler_shutdown() {
-    use theater_handler_runtime::RuntimeHandler;
+    use theater_handler_self::SelfHandler;
 
     let (theater_tx, _): (mpsc::Sender<TheaterCommand>, _) = mpsc::channel(10);
-    let config = RuntimeHostConfig {};
-    let handler = RuntimeHandler::new(config, theater_tx, None);
+    let config = SelfHostConfig {};
+    let handler = SelfHandler::new(config, theater_tx, None);
 
     verify_handler_shutdown(handler, "Runtime")
         .await

@@ -9,7 +9,7 @@ use theater::actor::store::ActorStore;
 use theater::actor::types::ActorError;
 use theater::chain::ChainEvent;
 use theater::config::actor_manifest::SupervisorHostConfig;
-use theater::config::permissions::SupervisorPermissions;
+use theater::config::permissions::{SupervisorPermissions, ViewScope};
 use theater::handler::{Handler, HandlerContext, SharedActorInstance};
 use theater::messages::{default_init_state, ActorResult, TheaterCommand};
 use theater::shutdown::ShutdownReceiver;
@@ -70,29 +70,23 @@ const SUPERVISOR_PACT: &str = include_str!("../supervisor.pact");
 
 /// Declare the theater:simple/supervisor interface from the pact file.
 ///
-/// Functions for spawning and managing child actors:
-/// - spawn(manifest: string, init-state: option<value>, wasm-bytes: option<list<u8>>) -> result<string, string>
-/// - spawn-and-wait(manifest: string, init-state: option<value>, wasm-bytes: option<list<u8>>, timeout-ms: option<u64>) -> result<option<list<u8>>, string>
-/// - resume(manifest: string, state-bytes: option<list<u8>>, wasm-bytes: option<list<u8>>) -> result<string, string>
-/// - list-children() -> list<string>
-/// - restart-child(child-id: string) -> result<_, string>
-/// - stop-child(child-id: string) -> result<_, string>
-/// - get-child-state(child-id: string) -> result<option<list<u8>>, string>
+/// Actor-management, scoped to the caller's VIEW (its subtree, or `all` for a
+/// control actor — see [`SupervisorPermissions`]). Every op is evaluated against
+/// that view; a target outside it is rejected with `out-of-view`. Ops:
+/// - spawn / spawn-and-wait — create a child of the caller (setup + init)
+/// - list-actors -> list<actor-info> — every actor in view
+/// - get-actor-status / -state / -manifest / -metrics (id)
+/// - stop-actor (graceful) / kill-actor (force) (id)
+/// - subscribe-to-actor / unsubscribe-from-actor (id) — chain events to the
+///   caller's `handle-actor-event` export
 ///
-/// Both `spawn` and `spawn-and-wait` are setup + init: the runtime calls
-/// the child's `theater:simple/actor.init` export before returning the
-/// child id.
+/// `spawn` / `spawn-and-wait` are setup + init: the runtime calls the child's
+/// `theater:simple/actor.init` export before returning the child id. `init-state`:
+///   - `none` falls back to the child's `manifest.initial_state`.
+///   - `some(v)` overrides unconditionally (even `some(none)` = "explicitly no state").
 ///
-/// `init-state` semantics on both:
-///   - `none` falls back to the child's `manifest.initial_state` field.
-///     Generic supervisors (sentinel etc.) pass `none` to let the child's
-///     own manifest carry its secrets.
-///   - `some(v)` overrides the manifest unconditionally — even
-///     `some(option<...>::none)` means "explicitly no state."
-///
-/// Callers that need staged init (replay, custom init params) should use
-/// the runtime's `SetupActor` command directly via the theater crate API
-/// rather than the wasm-facing supervisor.spawn.
+/// Recovery is just `spawn` of a fresh actor; there is no `resume` here — reading
+/// or replaying persisted history is the recorder's domain, not this interface's.
 ///
 /// Note: chain-event is approximated as list<u8> for interface hashing.
 fn supervisor_interface() -> InterfaceImpl {
@@ -100,17 +94,187 @@ fn supervisor_interface() -> InterfaceImpl {
     InterfaceImpl::from_pact(&pact)
 }
 
-/// Errors that can occur during supervisor operations
-#[derive(Error, Debug)]
+/// Interface error for `theater:simple/supervisor` — mirrors the
+/// `supervisor-error` pact variant. A normal Rust enum used with `?` throughout
+/// the ops; the single `From<SupervisorError> for Value` below is the only
+/// place a pact error value is built.
+#[derive(Debug, Error)]
 pub enum SupervisorError {
-    #[error("Handler error: {0}")]
-    HandlerError(String),
+    #[error("actor not found: {0}")]
+    ActorNotFound(String),
+    #[error("out of view: {0}")]
+    OutOfView(String),
+    #[error("permission denied: {0}")]
+    PermissionDenied(String),
+    #[error("invalid argument: {0}")]
+    InvalidArgument(String),
+    #[error("spawn failed: {0}")]
+    SpawnFailed(String),
+    /// `theater_tx.send` or a response `recv` failed — the runtime's command
+    /// channel is closed, i.e. the runtime is shutting down. A distinct,
+    /// nameable condition, not an open-ended internal.
+    #[error("runtime unavailable (shutting down)")]
+    RuntimeUnavailable,
+    /// Opaque runtime op error not yet structured. This is deliberately the
+    /// LAST resort: the runtime failed an op (e.g. a `spawn`/get race) with an
+    /// error we can't yet classify because it crosses the command boundary as a
+    /// string. See the `structured-runtime-errors` follow-up project — surfacing
+    /// `TheaterRuntimeError` through the boundary is what replaces this.
+    #[error("internal error: {0}")]
+    Internal(String),
+}
 
-    #[error("Actor error: {0}")]
-    ActorError(#[from] ActorError),
+/// The single translation from the Rust error to the `supervisor-error` pact
+/// variant. Tags match the declaration order in supervisor.pact.
+impl From<SupervisorError> for Value {
+    fn from(e: SupervisorError) -> Value {
+        let (tag, case, payload) = match e {
+            SupervisorError::ActorNotFound(m) => (0, "actor-not-found", vec![Value::String(m)]),
+            SupervisorError::OutOfView(m) => (1, "out-of-view", vec![Value::String(m)]),
+            SupervisorError::PermissionDenied(m) => {
+                (2, "permission-denied", vec![Value::String(m)])
+            }
+            SupervisorError::InvalidArgument(m) => (3, "invalid-argument", vec![Value::String(m)]),
+            SupervisorError::SpawnFailed(m) => (4, "spawn-failed", vec![Value::String(m)]),
+            SupervisorError::RuntimeUnavailable => (5, "runtime-unavailable", vec![]),
+            SupervisorError::Internal(m) => (6, "internal", vec![Value::String(m)]),
+        };
+        Value::Variant {
+            type_name: "supervisor-error".to_string(),
+            case_name: case.to_string(),
+            tag,
+            payload,
+        }
+    }
+}
 
-    #[error("Serialization error: {0}")]
-    SerializationError(#[from] serde_json::Error),
+/// Parse a wire `actor-id` (a string, decoded by packr from the typed param)
+/// into a TheaterId.
+fn parse_actor_id(id: &str) -> Result<TheaterId, SupervisorError> {
+    id.parse()
+        .map_err(|e| SupervisorError::InvalidArgument(format!("invalid actor id '{}': {}", id, e)))
+}
+
+/// Fetch the runtime's actor list: (id, name, parent-id).
+async fn get_actors(
+    theater_tx: &mpsc::Sender<TheaterCommand>,
+) -> Result<Vec<(TheaterId, String, Option<TheaterId>)>, SupervisorError> {
+    let (tx, rx) = oneshot::channel();
+    theater_tx
+        .send(TheaterCommand::GetActors { response_tx: tx })
+        .await
+        .map_err(|_| SupervisorError::RuntimeUnavailable)?;
+    match rx.await {
+        Ok(Ok(v)) => Ok(v),
+        Ok(Err(e)) => Err(SupervisorError::Internal(e.to_string())),
+        Err(_) => Err(SupervisorError::RuntimeUnavailable),
+    }
+}
+
+/// Is `target` in `caller`'s subtree (caller a strict ancestor of target)?
+fn in_subtree(
+    actors: &[(TheaterId, String, Option<TheaterId>)],
+    caller: TheaterId,
+    target: TheaterId,
+) -> bool {
+    let parent: std::collections::HashMap<TheaterId, Option<TheaterId>> =
+        actors.iter().map(|(id, _, p)| (*id, *p)).collect();
+    let mut cur = parent.get(&target).copied().flatten();
+    let mut guard = 0;
+    while let Some(c) = cur {
+        if c == caller {
+            return true;
+        }
+        cur = parent.get(&c).copied().flatten();
+        guard += 1;
+        if guard > 10_000 {
+            break; // cycle safety
+        }
+    }
+    false
+}
+
+/// The set of `root`'s strict descendants (its subtree, excluding `root`).
+/// Built in a single O(N) pass — child-adjacency + one traversal — so a scoped
+/// `list-actors` filters by O(1) set membership instead of rebuilding the parent
+/// map (via `in_subtree`) once per actor, which was O(N²).
+fn subtree_ids(
+    actors: &[(TheaterId, String, Option<TheaterId>)],
+    root: TheaterId,
+) -> std::collections::HashSet<TheaterId> {
+    let mut children: std::collections::HashMap<TheaterId, Vec<TheaterId>> =
+        std::collections::HashMap::new();
+    for (id, _, parent) in actors {
+        if let Some(p) = parent {
+            children.entry(*p).or_default().push(*id);
+        }
+    }
+    let mut out = std::collections::HashSet::new();
+    let mut stack: Vec<TheaterId> = children.get(&root).cloned().unwrap_or_default();
+    while let Some(id) = stack.pop() {
+        if out.insert(id) {
+            if let Some(kids) = children.get(&id) {
+                stack.extend(kids.iter().copied());
+            }
+        }
+    }
+    out
+}
+
+/// The capability half of the gate: the caller must hold the capability the op
+/// needs — `inspect` for reads/subscribe, `mutate` for lifecycle. Returns the
+/// granted permission (so callers can read its `scope`). Default-deny when the
+/// capability is absent. Used directly by no-target ops (list-actors, spawn) and
+/// reused by [`authorize`] for single-target ops.
+fn require_capability(
+    perms: &Option<SupervisorPermissions>,
+    mutate: bool,
+) -> Result<&SupervisorPermissions, SupervisorError> {
+    let p = perms.as_ref().ok_or_else(|| {
+        SupervisorError::PermissionDenied("supervisor capability not granted".into())
+    })?;
+    let granted = if mutate { p.mutate } else { p.inspect };
+    if granted {
+        Ok(p)
+    } else {
+        Err(SupervisorError::PermissionDenied(format!(
+            "supervisor '{}' capability not granted",
+            if mutate { "mutate" } else { "inspect" }
+        )))
+    }
+}
+
+/// The full gate for a single-target op: capability (via [`require_capability`])
+/// AND view — the target must be in the caller's view.
+async fn authorize(
+    theater_tx: &mpsc::Sender<TheaterCommand>,
+    perms: &Option<SupervisorPermissions>,
+    caller: TheaterId,
+    target: TheaterId,
+    mutate: bool,
+) -> Result<(), SupervisorError> {
+    let scope = require_capability(perms, mutate)?.scope;
+    let actors = get_actors(theater_tx).await?;
+    match scope {
+        ViewScope::All => {
+            // Full visibility: an absent target is honestly actor-not-found.
+            if actors.iter().any(|(id, _, _)| *id == target) {
+                Ok(())
+            } else {
+                Err(SupervisorError::ActorNotFound(target.to_string()))
+            }
+        }
+        ViewScope::Subtree => {
+            // Uniform out-of-view: do NOT distinguish "doesn't exist" from "not
+            // in your subtree". Distinguishing them would leak the existence of
+            // actors outside the caller's view across the view boundary.
+            if in_subtree(&actors, caller, target) {
+                Ok(())
+            } else {
+                Err(SupervisorError::OutOfView(target.to_string()))
+            }
+        }
+    }
 }
 
 /// The SupervisorHandler provides child actor management capabilities.
@@ -121,7 +285,7 @@ pub enum SupervisorError {
 /// - List, restart, and stop children
 /// - Get child state
 /// - Receive notifications when children error, exit, or are stopped
-/// - Opt in to per-child chain-event delivery via `subscribe-to-child`
+/// - Opt in to per-child chain-event delivery via `subscribe-to-actor`
 ///   (default is opt-out: a freshly-spawned child sends no chain
 ///   events to its parent until the parent subscribes)
 /// - Clean up children on shutdown
@@ -140,7 +304,7 @@ pub struct SupervisorHandler {
     channel_rx: Arc<Mutex<Option<tokio::sync::mpsc::Receiver<ActorResult>>>>,
     /// Channel for receiving all ChainEvents from children. Each child's
     /// subscription is tagged with the child's TheaterId before landing
-    /// here, so handle-child-event dispatch can attribute the event to
+    /// here, so handle-actor-event dispatch can attribute the event to
     /// the right child even though N children share this single receiver.
     event_tx: tokio::sync::mpsc::Sender<(TheaterId, ChainEvent)>,
     event_rx: Arc<Mutex<Option<tokio::sync::mpsc::Receiver<(TheaterId, ChainEvent)>>>>,
@@ -256,7 +420,7 @@ impl SupervisorHandler {
                     ]);
                     actor_handle
                         .call_function(
-                            "theater:simple/supervisor-handlers.handle-child-error".to_string(),
+                            "theater:simple/supervisor-handlers.handle-actor-error".to_string(),
                             params,
                         )
                         .await?;
@@ -271,7 +435,7 @@ impl SupervisorHandler {
                     ]);
                     actor_handle
                         .call_function(
-                            "theater:simple/supervisor-handlers.handle-child-exit".to_string(),
+                            "theater:simple/supervisor-handlers.handle-actor-exit".to_string(),
                             params,
                         )
                         .await?;
@@ -283,7 +447,7 @@ impl SupervisorHandler {
                     let params = Value::Tuple(vec![Value::String(stop_data.actor_id.to_string())]);
                     actor_handle
                         .call_function(
-                            "theater:simple/supervisor-handlers.handle-child-external-stop"
+                            "theater:simple/supervisor-handlers.handle-actor-external-stop"
                                 .to_string(),
                             params,
                         )
@@ -324,7 +488,7 @@ impl SupervisorHandler {
 
             actor_handle
                 .call_function(
-                    "theater:simple/supervisor-handlers.handle-child-event".to_string(),
+                    "theater:simple/supervisor-handlers.handle-actor-event".to_string(),
                     params,
                 )
                 .await?;
@@ -348,7 +512,7 @@ impl SupervisorHandler {
     /// to one root-only supervisor. A `fresh` instance instead gets its own
     /// `channel_rx` (its own monitor loop starts) and its own `channel_tx`
     /// (the `supervisor_tx` handed to *its* children routes their lifecycle
-    /// events back to *its* handle-child-* exports), giving real hierarchical
+    /// events back to *its* handle-actor-* exports), giving real hierarchical
     /// supervision.
     fn fresh(&self) -> Self {
         let (channel_tx, channel_rx) = tokio::sync::mpsc::channel(100);
@@ -374,6 +538,15 @@ impl Handler for SupervisorHandler {
         // Each actor must get an INDEPENDENT supervisor — see `fresh`. A
         // shared clone would make only the root actor's monitor loop run.
         Box::new(self.fresh())
+    }
+
+    fn set_permissions(
+        &mut self,
+        permissions: Option<&theater::config::permissions::HandlerPermission>,
+    ) {
+        // Bake in this actor's granted supervisor capability (the gate reads
+        // self.permissions). `None` -> default-deny.
+        self.permissions = permissions.and_then(|p| p.supervisor.clone());
     }
 
     fn name(&self) -> &str {
@@ -422,6 +595,7 @@ impl Handler for SupervisorHandler {
         let children = self.children.clone();
         let theater_tx_holder = self.theater_tx.clone();
         let resource_cache = self.resource_cache.clone();
+        let permissions = self.permissions.clone();
 
         builder.interface("theater:simple/supervisor")?
             // spawn: func(manifest: string, wasm-bytes: option<list<u8>>) -> result<string, string>
@@ -431,12 +605,16 @@ impl Handler for SupervisorHandler {
                 let children = children.clone();
                 let theater_tx_holder = theater_tx_holder.clone();
                 let resource_cache = resource_cache.clone();
+                let permissions = permissions.clone();
                 move |ctx: AsyncCtx<ActorStore>, input: Value| {
                     let supervisor_tx = supervisor_tx.clone();
                     let children = children.clone();
                     let theater_tx_holder = theater_tx_holder.clone();
                     let resource_cache = resource_cache.clone();
+                    let permissions = permissions.clone();
                     async move {
+                        // spawn creates a new actor parented to the caller; needs mutate.
+                        require_capability(&permissions, true)?;
                         // Parse input: (string, option<value>, option<list<u8>>)
                         // init-state: None  → fall back to manifest.initial_state
                         //             Some(v) → use v verbatim (even if v is Value::Option::None)
@@ -446,15 +624,15 @@ impl Handler for SupervisorHandler {
                                 let init_state_override = match args.remove(1) {
                                     Value::Option { value: None, .. } => None,
                                     Value::Option { value: Some(inner), .. } => Some(*inner),
-                                    _ => return Err(Value::String("Invalid init-state argument: expected option<value>".to_string())),
+                                    _ => return Err(Value::from(SupervisorError::InvalidArgument("init-state must be option<value>".to_string()))),
                                 };
                                 let manifest = match args.remove(0) {
                                     Value::String(s) => s,
-                                    _ => return Err(Value::String("Invalid manifest argument".to_string())),
+                                    _ => return Err(Value::from(SupervisorError::InvalidArgument("invalid manifest argument".to_string()))),
                                 };
                                 (manifest, init_state_override, wasm_bytes)
                             }
-                            _ => return Err(Value::String("Invalid spawn arguments: expected (string, option<value>, option<list<u8>>)".to_string())),
+                            _ => return Err(Value::from(SupervisorError::InvalidArgument("expected (manifest, option<value>, option<list<u8>>)".to_string()))),
                         };
 
                         let wasm_provided = provided_wasm_bytes.is_some();
@@ -474,9 +652,9 @@ impl Handler for SupervisorHandler {
                         let manifest_str = match resolve_reference(&manifest_path).await {
                             Ok(bytes) => match String::from_utf8(bytes) {
                                 Ok(s) => s,
-                                Err(e) => return Err(Value::String(format!("Invalid manifest encoding: {}", e))),
+                                Err(e) => return Err(Value::from(SupervisorError::SpawnFailed(format!("invalid manifest encoding: {}", e)))),
                             },
-                            Err(e) => return Err(Value::String(format!("Failed to load manifest: {}", e))),
+                            Err(e) => return Err(Value::from(SupervisorError::SpawnFailed(format!("failed to load manifest: {}", e)))),
                         };
                         info!(
                             phase = "supervisor.manifest_resolve",
@@ -489,7 +667,7 @@ impl Handler for SupervisorHandler {
                         let phase_start = Instant::now();
                         let manifest = match ManifestConfig::from_toml_str(&manifest_str) {
                             Ok(m) => m,
-                            Err(e) => return Err(Value::String(format!("Failed to parse manifest: {}", e))),
+                            Err(e) => return Err(Value::from(SupervisorError::SpawnFailed(format!("failed to parse manifest: {}", e)))),
                         };
                         info!(
                             phase = "supervisor.manifest_parse",
@@ -527,12 +705,12 @@ impl Handler for SupervisorHandler {
                                                 // compile.
                                                 (*arc).clone()
                                             }
-                                            Err(e) => return Err(Value::String(format!("Failed to load WASM: {}", e))),
+                                            Err(e) => return Err(Value::from(SupervisorError::SpawnFailed(format!("failed to load WASM: {}", e)))),
                                         }
                                     }
                                     _ => match resolve_reference(&manifest.package).await {
                                         Ok(bytes) => bytes,
-                                        Err(e) => return Err(Value::String(format!("Failed to load WASM: {}", e))),
+                                        Err(e) => return Err(Value::from(SupervisorError::SpawnFailed(format!("failed to load WASM: {}", e)))),
                                     },
                                 }
                             }
@@ -567,7 +745,7 @@ impl Handler for SupervisorHandler {
                         };
                         // Default opt-out: a fresh child does not send chain
                         // events to its parent. Parents that want per-event
-                        // visibility call `subscribe-to-child` after the
+                        // visibility call `subscribe-to-actor` after the
                         // spawn returns. Lifecycle still flows through
                         // `supervisor_tx`.
                         let cmd = TheaterCommand::SpawnActor {
@@ -578,6 +756,8 @@ impl Handler for SupervisorHandler {
                             response_tx,
                             supervisor_tx: Some(supervisor_tx),
                             subscription_tx: None,
+                            // This child is spawned by the calling actor.
+                            parent_id: Some(store.id),
                         };
 
                         // runtime_setup_and_init covers: send to runtime command
@@ -585,8 +765,8 @@ impl Handler for SupervisorHandler {
                         // detached init fires response_tx. The latency here is
                         // the runtime command loop's serialized cost per spawn.
                         let phase_start = Instant::now();
-                        if let Err(e) = theater_tx.send(cmd).await {
-                            return Err(Value::String(format!("Failed to send spawn command: {}", e)));
+                        if theater_tx.send(cmd).await.is_err() {
+                            return Err(Value::from(SupervisorError::RuntimeUnavailable));
                         }
 
                         // Store theater_tx for shutdown (first spawn stores it)
@@ -622,8 +802,8 @@ impl Handler for SupervisorHandler {
                                 }
                                 Ok(Value::String(actor_id.to_string()))
                             }
-                            Ok(Err(e)) => Err(Value::String(e.to_string())),
-                            Err(e) => Err(Value::String(format!("Failed to receive response: {}", e))),
+                            Ok(Err(e)) => Err(Value::from(SupervisorError::SpawnFailed(e.to_string()))),
+                            Err(_) => Err(Value::from(SupervisorError::RuntimeUnavailable)),
                         }
                     }
                 }
@@ -635,9 +815,13 @@ impl Handler for SupervisorHandler {
             // Same init-state semantics as `spawn` — see that function's docs.
             .func_async_result("spawn-and-wait", {
                 let resource_cache = resource_cache.clone();
+                let permissions = permissions.clone();
                 move |ctx: AsyncCtx<ActorStore>, input: Value| {
                     let resource_cache = resource_cache.clone();
+                    let permissions = permissions.clone();
                     async move {
+                        // spawn-and-wait creates a new actor parented to the caller; needs mutate.
+                        require_capability(&permissions, true)?;
                         // Parse input: (string, option<value>, option<list<u8>>, option<u64>)
                         let (manifest_path, init_state_override, provided_wasm_bytes, timeout_ms) = match input {
                             Value::Tuple(mut args) if args.len() == 4 => {
@@ -646,15 +830,15 @@ impl Handler for SupervisorHandler {
                                 let init_state_override = match args.remove(1) {
                                     Value::Option { value: None, .. } => None,
                                     Value::Option { value: Some(inner), .. } => Some(*inner),
-                                    _ => return Err(Value::String("Invalid init-state argument: expected option<value>".to_string())),
+                                    _ => return Err(Value::from(SupervisorError::InvalidArgument("init-state must be option<value>".to_string()))),
                                 };
                                 let manifest = match args.remove(0) {
                                     Value::String(s) => s,
-                                    _ => return Err(Value::String("Invalid manifest argument".to_string())),
+                                    _ => return Err(Value::from(SupervisorError::InvalidArgument("invalid manifest argument".to_string()))),
                                 };
                                 (manifest, init_state_override, wasm_bytes, timeout_ms)
                             }
-                            _ => return Err(Value::String("Invalid spawn-and-wait arguments: expected (string, option<value>, option<list<u8>>, option<u64>)".to_string())),
+                            _ => return Err(Value::from(SupervisorError::InvalidArgument("expected (manifest, option<value>, option<list<u8>>, option<u64>)".to_string()))),
                         };
 
                         debug!("spawn-and-wait: manifest={}, timeout={:?}ms", manifest_path, timeout_ms);
@@ -663,14 +847,14 @@ impl Handler for SupervisorHandler {
                         let manifest_str = match resolve_reference(&manifest_path).await {
                             Ok(bytes) => match String::from_utf8(bytes) {
                                 Ok(s) => s,
-                                Err(e) => return Err(Value::String(format!("Invalid manifest encoding: {}", e))),
+                                Err(e) => return Err(Value::from(SupervisorError::SpawnFailed(format!("invalid manifest encoding: {}", e)))),
                             },
-                            Err(e) => return Err(Value::String(format!("Failed to load manifest: {}", e))),
+                            Err(e) => return Err(Value::from(SupervisorError::SpawnFailed(format!("failed to load manifest: {}", e)))),
                         };
 
                         let manifest = match ManifestConfig::from_toml_str(&manifest_str) {
                             Ok(m) => m,
-                            Err(e) => return Err(Value::String(format!("Failed to parse manifest: {}", e))),
+                            Err(e) => return Err(Value::from(SupervisorError::SpawnFailed(format!("failed to parse manifest: {}", e)))),
                         };
 
                         // Resolve wasm bytes — same three paths as `spawn`.
@@ -693,12 +877,12 @@ impl Handler for SupervisorHandler {
                                             cache_hit = hit;
                                             (*arc).clone()
                                         }
-                                        Err(e) => return Err(Value::String(format!("Failed to load WASM: {}", e))),
+                                        Err(e) => return Err(Value::from(SupervisorError::SpawnFailed(format!("failed to load WASM: {}", e)))),
                                     }
                                 }
                                 _ => match resolve_reference(&manifest.package).await {
                                     Ok(bytes) => bytes,
-                                    Err(e) => return Err(Value::String(format!("Failed to load WASM: {}", e))),
+                                    Err(e) => return Err(Value::from(SupervisorError::SpawnFailed(format!("failed to load WASM: {}", e)))),
                                 },
                             },
                         };
@@ -738,17 +922,19 @@ impl Handler for SupervisorHandler {
                             response_tx,
                             supervisor_tx: Some(result_tx),
                             subscription_tx: None,
+                            // This child is spawned by the calling actor.
+                            parent_id: Some(store.id),
                         };
 
-                        if let Err(e) = theater_tx.send(cmd).await {
-                            return Err(Value::String(format!("Failed to send spawn command: {}", e)));
+                        if theater_tx.send(cmd).await.is_err() {
+                            return Err(Value::from(SupervisorError::RuntimeUnavailable));
                         }
 
                         // Wait for the actor to spawn
                         let actor_id = match response_rx.await {
                             Ok(Ok(id)) => id,
-                            Ok(Err(e)) => return Err(Value::String(format!("Failed to spawn actor: {}", e))),
-                            Err(e) => return Err(Value::String(format!("Failed to receive spawn response: {}", e))),
+                            Ok(Err(e)) => return Err(Value::from(SupervisorError::SpawnFailed(format!("failed to spawn actor: {}", e)))),
+                            Err(_) => return Err(Value::from(SupervisorError::RuntimeUnavailable)),
                         };
 
                         debug!("spawn-and-wait: child {} spawned, waiting for completion", actor_id);
@@ -767,13 +953,13 @@ impl Handler for SupervisorHandler {
                                 Ok(option_bytes_to_value(child_result.result))
                             }
                             Ok(Some(ActorResult::Error(child_error))) => {
-                                Err(Value::String(format!("Child actor {} failed: {}", child_error.actor_id, child_error.error)))
+                                Err(Value::from(SupervisorError::SpawnFailed(format!("child actor {} failed: {}", child_error.actor_id, child_error.error))))
                             }
                             Ok(Some(ActorResult::ExternalStop(stop))) => {
-                                Err(Value::String(format!("Child actor {} was stopped externally", stop.actor_id)))
+                                Err(Value::from(SupervisorError::SpawnFailed(format!("child actor {} was stopped externally", stop.actor_id))))
                             }
                             Ok(None) => {
-                                Err(Value::String(format!("Child actor {} result channel closed unexpectedly", actor_id)))
+                                Err(Value::from(SupervisorError::Internal(format!("child actor {} result channel closed", actor_id))))
                             }
                             Err(_) => {
                                 // Timeout - stop the child actor
@@ -783,320 +969,255 @@ impl Handler for SupervisorHandler {
                                     actor_id,
                                     response_tx: stop_tx,
                                 }).await;
-                                Err(Value::String(format!("Timeout waiting for child actor {} to complete", actor_id)))
+                                Err(Value::from(SupervisorError::SpawnFailed(format!("timeout waiting for child actor {} to complete", actor_id))))
                             }
                         }
                     }
                 }
             })?
-            // resume: func(manifest: string, wasm-bytes: option<list<u8>>) -> result<string, string>
-            // Resumes an actor from a manifest with replay handler configured.
-            // If wasm-bytes is provided, uses those bytes instead of loading from manifest.package.
-            .func_async_result("resume", {
-                let supervisor_tx = supervisor_tx.clone();
-                let children = children.clone();
-                let theater_tx_holder = theater_tx_holder.clone();
-                move |ctx: AsyncCtx<ActorStore>, input: Value| {
-                    let supervisor_tx = supervisor_tx.clone();
-                    let children = children.clone();
-                    let theater_tx_holder = theater_tx_holder.clone();
+            // list-actors: func() -> result<list<actor-info>, supervisor-error>
+            // Every actor in the caller's view (subtree, or all).
+            .func_async_result("list-actors", {
+                let permissions = permissions.clone();
+                move |ctx: AsyncCtx<ActorStore>, _input: Value| {
+                    let permissions = permissions.clone();
                     async move {
-                        let _ph = PhaseLog::new("supervisor.resume");
-                        let (manifest, wasm_bytes) = match input {
-                            Value::Tuple(args) if args.len() == 2 => {
-                                let manifest = match &args[0] {
-                                    Value::String(s) => s.clone(),
-                                    _ => return Err(Value::String("Invalid manifest argument".to_string())),
-                                };
-                                let wasm_bytes = parse_optional_bytes(&args[1]);
-                                (manifest, wasm_bytes)
-                            }
-                            _ => return Err(Value::String("Invalid resume arguments: expected (string, option<list<u8>>)".to_string())),
+                        let scope = require_capability(&permissions, false)?.scope;
+                        let caller = ctx.data().id;
+                        let tx = ctx.data().theater_tx.clone();
+                        let actors = get_actors(&tx).await?;
+                        // Compute the caller's view once (O(N)); then filtering is
+                        // O(1) per actor. `None` = scope:all = every actor.
+                        let view = match scope {
+                            ViewScope::All => None,
+                            ViewScope::Subtree => Some(subtree_ids(&actors, caller)),
                         };
-
-                        let store = ctx.data();
-                        let theater_tx = store.theater_tx.clone();
-
-                        let (response_tx, response_rx) = oneshot::channel();
-                        // Default opt-out: a resumed child does not send
-                        // chain events to its parent. Parents that want
-                        // per-event visibility call `subscribe-to-child`
-                        // after the resume returns.
-                        let cmd = TheaterCommand::ResumeActor {
-                            manifest_path: manifest,
-                            wasm_bytes,
-                            response_tx,
-                            supervisor_tx: Some(supervisor_tx),
-                            subscription_tx: None,
-                        };
-
-                        if let Err(e) = theater_tx.send(cmd).await {
-                            return Err(Value::String(format!("Failed to send resume command: {}", e)));
-                        }
-
-                        // Store theater_tx for shutdown
-                        {
-                            let mut holder = theater_tx_holder.lock().unwrap();
-                            if holder.is_none() {
-                                *holder = Some(theater_tx);
-                            }
-                        }
-
-                        match response_rx.await {
-                            Ok(Ok(actor_id)) => {
-                                // Track the child
-                                {
-                                    let mut children_guard = children.lock().unwrap();
-                                    children_guard.insert(actor_id);
-                                    debug!("Tracking resumed child {}, total children: {}", actor_id, children_guard.len());
-                                }
-                                Ok(Value::String(actor_id.to_string()))
-                            }
-                            Ok(Err(e)) => Err(Value::String(e.to_string())),
-                            Err(e) => Err(Value::String(format!("Failed to receive response: {}", e))),
-                        }
-                    }
-                }
-            })?
-            // list-children: func() -> list<string>
-            // Returns the handler's internal tracking of children (not the runtime's)
-            .func_async_result("list-children", {
-                let children = children.clone();
-                move |_ctx: AsyncCtx<ActorStore>, _input: Value| {
-                    let children = children.clone();
-                    async move {
-                        let _ph = PhaseLog::new("supervisor.list_children");
-                        let children_guard = children.lock().unwrap();
-                        let children_values: Vec<Value> = children_guard
+                        let items: Vec<Value> = actors
                             .iter()
-                            .map(|id| Value::String(id.to_string()))
+                            .filter(|(id, _, _)| view.as_ref().is_none_or(|v| v.contains(id)))
+                            .map(|(id, name, parent)| Value::Record {
+                                type_name: "actor-info".to_string(),
+                                fields: vec![
+                                    ("id".to_string(), Value::String(id.to_string())),
+                                    ("name".to_string(), Value::String(name.clone())),
+                                    (
+                                        "parent-id".to_string(),
+                                        Value::Option {
+                                            inner_type: ValueType::String,
+                                            value: parent
+                                                .map(|p| Box::new(Value::String(p.to_string()))),
+                                        },
+                                    ),
+                                ],
+                            })
                             .collect();
                         Ok::<Value, Value>(Value::List {
-                            elem_type: ValueType::String,
-                            items: children_values,
+                            elem_type: ValueType::Record("actor-info".to_string()),
+                            items,
                         })
                     }
                 }
             })?
-            // restart-child: func(child-id: string) -> result<(), string>
-            .func_async_result("restart-child", move |ctx: AsyncCtx<ActorStore>, input: Value| {
-                async move {
-                    let _ph = PhaseLog::new("supervisor.restart_child");
-                    let child_id_str = match input {
-                        Value::String(s) => s,
-                        Value::Tuple(args) if args.len() == 1 => {
-                            match &args[0] {
-                                Value::String(s) => s.clone(),
-                                _ => return Err(Value::String("Invalid child-id argument".to_string())),
-                            }
-                        }
-                        _ => return Err(Value::String("Invalid restart-child argument".to_string())),
-                    };
-
-                    let child_id = match child_id_str.parse() {
-                        Ok(id) => id,
-                        Err(e) => return Err(Value::String(format!("Invalid child ID: {}", e))),
-                    };
-
-                    let store = ctx.data();
-                    let theater_tx = store.theater_tx.clone();
-
-                    let (response_tx, response_rx) = oneshot::channel();
-                    let cmd = TheaterCommand::RestartActor {
-                        actor_id: child_id,
-                        response_tx,
-                    };
-
-                    if let Err(e) = theater_tx.send(cmd).await {
-                        return Err(Value::String(format!("Failed to send restart command: {}", e)));
-                    }
-
-                    match response_rx.await {
-                        Ok(Ok(())) => Ok(Value::Tuple(vec![])),
-                        Ok(Err(e)) => Err(Value::String(e.to_string())),
-                        Err(e) => Err(Value::String(format!("Failed to receive restart response: {}", e))),
-                    }
-                }
-            })?
-            // stop-child: func(child-id: string) -> result<(), string>
-            .func_async_result("stop-child", move |ctx: AsyncCtx<ActorStore>, input: Value| {
-                async move {
-                    let _ph = PhaseLog::new("supervisor.stop_child");
-                    let child_id_str = match input {
-                        Value::String(s) => s,
-                        Value::Tuple(args) if args.len() == 1 => {
-                            match &args[0] {
-                                Value::String(s) => s.clone(),
-                                _ => return Err(Value::String("Invalid child-id argument".to_string())),
-                            }
-                        }
-                        _ => return Err(Value::String("Invalid stop-child argument".to_string())),
-                    };
-
-                    let child_id = match child_id_str.parse() {
-                        Ok(id) => id,
-                        Err(e) => return Err(Value::String(format!("Invalid child ID: {}", e))),
-                    };
-
-                    let store = ctx.data();
-                    let theater_tx = store.theater_tx.clone();
-
-                    let (response_tx, response_rx) = oneshot::channel();
-                    let cmd = TheaterCommand::StopActor {
-                        actor_id: child_id,
-                        response_tx,
-                    };
-
-                    if let Err(e) = theater_tx.send(cmd).await {
-                        return Err(Value::String(format!("Failed to send stop command: {}", e)));
-                    }
-
-                    match response_rx.await {
-                        Ok(Ok(())) => Ok(Value::Tuple(vec![])),
-                        Ok(Err(e)) => Err(Value::String(e.to_string())),
-                        Err(e) => Err(Value::String(format!("Failed to receive stop response: {}", e))),
-                    }
-                }
-            })?
-            // get-child-state: func(child-id: string) -> result<option<list<u8>>, string>
-            .func_async_result("get-child-state", move |ctx: AsyncCtx<ActorStore>, input: Value| {
-                async move {
-                    let _ph = PhaseLog::new("supervisor.get_child_state");
-                    let child_id_str = match input {
-                        Value::String(s) => s,
-                        Value::Tuple(args) if args.len() == 1 => {
-                            match &args[0] {
-                                Value::String(s) => s.clone(),
-                                _ => return Err(Value::String("Invalid child-id argument".to_string())),
-                            }
-                        }
-                        _ => return Err(Value::String("Invalid get-child-state argument".to_string())),
-                    };
-
-                    let child_id = match child_id_str.parse() {
-                        Ok(id) => id,
-                        Err(e) => return Err(Value::String(format!("Invalid child ID: {}", e))),
-                    };
-
-                    let store = ctx.data();
-                    let theater_tx = store.theater_tx.clone();
-
-                    let (response_tx, response_rx) = oneshot::channel();
-                    let cmd = TheaterCommand::GetActorState {
-                        actor_id: child_id,
-                        response_tx,
-                    };
-
-                    if let Err(e) = theater_tx.send(cmd).await {
-                        return Err(Value::String(format!("Failed to send get-state command: {}", e)));
-                    }
-
-                    match response_rx.await {
-                        Ok(Ok(state)) => Ok(state),
-                        Ok(Err(e)) => Err(Value::String(e.to_string())),
-                        Err(e) => Err(Value::String(format!("Failed to receive state: {}", e))),
-                    }
-                }
-            })?
-            // subscribe-to-child: func(child-id: string) -> result<_, string>
-            // Opt the calling supervisor in to chain events from the named
-            // child. Subscriptions are idempotent — the chain identifies
-            // subscribers by Sender channel identity, and the per-handler
-            // event_tx is a single Sender cloned across calls, so resubscribing
-            // an already-subscribed child is a no-op at the chain level.
-            .func_async_result("subscribe-to-child", {
-                let event_tx = event_tx.clone();
-                let children = children.clone();
-                move |ctx: AsyncCtx<ActorStore>, input: Value| {
-                    let event_tx = event_tx.clone();
-                    let children = children.clone();
+            // get-actor-status: func(id: string) -> result<string, supervisor-error>
+            .func_async_result("get-actor-status", {
+                let permissions = permissions.clone();
+                move |ctx: AsyncCtx<ActorStore>, id: String| {
+                    let permissions = permissions.clone();
                     async move {
-                        let _ph = PhaseLog::new("supervisor.subscribe_to_child");
-                        let child_id_str = match input {
-                            Value::String(s) => s,
-                            Value::Tuple(args) if args.len() == 1 => match &args[0] {
-                                Value::String(s) => s.clone(),
-                                _ => return Err(Value::String("Invalid child-id argument".to_string())),
-                            },
-                            _ => return Err(Value::String("Invalid subscribe-to-child argument".to_string())),
-                        };
-
-                        let child_id: TheaterId = match child_id_str.parse() {
-                            Ok(id) => id,
-                            Err(e) => return Err(Value::String(format!("Invalid child ID: {}", e))),
-                        };
-
-                        // Validate child is one of ours. The chain's
-                        // SubscribeToActor handler tolerates unknown ids
-                        // but a parent subscribing to a non-child is
-                        // almost always a programming error worth surfacing.
-                        {
-                            let children_guard = children.lock().unwrap();
-                            if !children_guard.contains(&child_id) {
-                                return Err(Value::String(format!(
-                                    "subscribe-to-child: {} is not a child of this supervisor",
-                                    child_id
-                                )));
-                            }
+                        let target = parse_actor_id(&id)?;
+                        let tx = ctx.data().theater_tx.clone();
+                        authorize(&tx, &permissions, ctx.data().id, target, false).await?;
+                        let (rtx, rrx) = oneshot::channel();
+                        tx.send(TheaterCommand::GetActorStatus {
+                            actor_id: target,
+                            response_tx: rtx,
+                        })
+                        .await
+                        .map_err(|_| SupervisorError::RuntimeUnavailable)?;
+                        match rrx.await {
+                            Ok(Ok(status)) => Ok(Value::String(format!("{:?}", status))),
+                            Ok(Err(e)) => Err(Value::from(SupervisorError::Internal(e.to_string()))),
+                            Err(_) => Err(Value::from(SupervisorError::RuntimeUnavailable)),
                         }
-
-                        let store = ctx.data();
-                        let theater_tx = store.theater_tx.clone();
-                        let cmd = TheaterCommand::SubscribeToActor {
-                            actor_id: child_id,
-                            event_tx,
-                        };
-                        if let Err(e) = theater_tx.send(cmd).await {
-                            return Err(Value::String(format!("Failed to send subscribe command: {}", e)));
+                    }
+                }
+            })?
+            // get-actor-state: func(id: string) -> result<option<list<u8>>, supervisor-error>
+            .func_async_result("get-actor-state", {
+                let permissions = permissions.clone();
+                move |ctx: AsyncCtx<ActorStore>, id: String| {
+                    let permissions = permissions.clone();
+                    async move {
+                        let target = parse_actor_id(&id)?;
+                        let tx = ctx.data().theater_tx.clone();
+                        authorize(&tx, &permissions, ctx.data().id, target, false).await?;
+                        let (rtx, rrx) = oneshot::channel();
+                        tx.send(TheaterCommand::GetActorState {
+                            actor_id: target,
+                            response_tx: rtx,
+                        })
+                        .await
+                        .map_err(|_| SupervisorError::RuntimeUnavailable)?;
+                        match rrx.await {
+                            Ok(Ok(state)) => Ok(state),
+                            Ok(Err(e)) => Err(Value::from(SupervisorError::Internal(e.to_string()))),
+                            Err(_) => Err(Value::from(SupervisorError::RuntimeUnavailable)),
+                        }
+                    }
+                }
+            })?
+            // get-actor-manifest: func(id: string) -> result<string, supervisor-error>
+            .func_async_result("get-actor-manifest", {
+                let permissions = permissions.clone();
+                move |ctx: AsyncCtx<ActorStore>, id: String| {
+                    let permissions = permissions.clone();
+                    async move {
+                        let target = parse_actor_id(&id)?;
+                        let tx = ctx.data().theater_tx.clone();
+                        authorize(&tx, &permissions, ctx.data().id, target, false).await?;
+                        let (rtx, rrx) = oneshot::channel();
+                        tx.send(TheaterCommand::GetActorManifest {
+                            actor_id: target,
+                            response_tx: rtx,
+                        })
+                        .await
+                        .map_err(|_| SupervisorError::RuntimeUnavailable)?;
+                        match rrx.await {
+                            Ok(Ok(m)) => serde_json::to_string(&m).map(Value::String).map_err(|e| {
+                                SupervisorError::Internal(format!("serialize manifest: {}", e)).into()
+                            }),
+                            Ok(Err(e)) => Err(Value::from(SupervisorError::Internal(e.to_string()))),
+                            Err(_) => Err(Value::from(SupervisorError::RuntimeUnavailable)),
+                        }
+                    }
+                }
+            })?
+            // get-actor-metrics: func(id: string) -> result<string, supervisor-error>
+            .func_async_result("get-actor-metrics", {
+                let permissions = permissions.clone();
+                move |ctx: AsyncCtx<ActorStore>, id: String| {
+                    let permissions = permissions.clone();
+                    async move {
+                        let target = parse_actor_id(&id)?;
+                        let tx = ctx.data().theater_tx.clone();
+                        authorize(&tx, &permissions, ctx.data().id, target, false).await?;
+                        let (rtx, rrx) = oneshot::channel();
+                        tx.send(TheaterCommand::GetActorMetrics {
+                            actor_id: target,
+                            response_tx: rtx,
+                        })
+                        .await
+                        .map_err(|_| SupervisorError::RuntimeUnavailable)?;
+                        match rrx.await {
+                            Ok(Ok(m)) => serde_json::to_string(&m).map(Value::String).map_err(|e| {
+                                SupervisorError::Internal(format!("serialize metrics: {}", e)).into()
+                            }),
+                            Ok(Err(e)) => Err(Value::from(SupervisorError::Internal(e.to_string()))),
+                            Err(_) => Err(Value::from(SupervisorError::RuntimeUnavailable)),
+                        }
+                    }
+                }
+            })?
+            // stop-actor: func(id: string) -> result<_, supervisor-error>   (graceful)
+            .func_async_result("stop-actor", {
+                let permissions = permissions.clone();
+                move |ctx: AsyncCtx<ActorStore>, id: String| {
+                    let permissions = permissions.clone();
+                    async move {
+                        let target = parse_actor_id(&id)?;
+                        let tx = ctx.data().theater_tx.clone();
+                        authorize(&tx, &permissions, ctx.data().id, target, true).await?;
+                        let (rtx, rrx) = oneshot::channel();
+                        tx.send(TheaterCommand::StopActor {
+                            actor_id: target,
+                            response_tx: rtx,
+                        })
+                        .await
+                        .map_err(|_| SupervisorError::RuntimeUnavailable)?;
+                        match rrx.await {
+                            Ok(Ok(())) => Ok(Value::Tuple(vec![])),
+                            Ok(Err(e)) => Err(Value::from(SupervisorError::Internal(e.to_string()))),
+                            Err(_) => Err(Value::from(SupervisorError::RuntimeUnavailable)),
+                        }
+                    }
+                }
+            })?
+            // kill-actor: func(id: string) -> result<_, supervisor-error>   (force)
+            .func_async_result("kill-actor", {
+                let permissions = permissions.clone();
+                move |ctx: AsyncCtx<ActorStore>, id: String| {
+                    let permissions = permissions.clone();
+                    async move {
+                        let target = parse_actor_id(&id)?;
+                        let tx = ctx.data().theater_tx.clone();
+                        authorize(&tx, &permissions, ctx.data().id, target, true).await?;
+                        let (rtx, rrx) = oneshot::channel();
+                        tx.send(TheaterCommand::TerminateActor {
+                            actor_id: target,
+                            response_tx: rtx,
+                        })
+                        .await
+                        .map_err(|_| SupervisorError::RuntimeUnavailable)?;
+                        match rrx.await {
+                            Ok(Ok(())) => Ok(Value::Tuple(vec![])),
+                            Ok(Err(e)) => Err(Value::from(SupervisorError::Internal(e.to_string()))),
+                            Err(_) => Err(Value::from(SupervisorError::RuntimeUnavailable)),
+                        }
+                    }
+                }
+            })?
+            // subscribe-to-actor: func(id: string) -> result<_, supervisor-error>
+            // Opt in to chain events from an actor in the caller's view. Events
+            // are delivered to this actor's handle-actor-event export. Idempotent
+            // (the chain identifies subscribers by Sender channel identity).
+            .func_async_result("subscribe-to-actor", {
+                let event_tx = event_tx.clone();
+                let permissions = permissions.clone();
+                move |ctx: AsyncCtx<ActorStore>, id: String| {
+                    let event_tx = event_tx.clone();
+                    let permissions = permissions.clone();
+                    async move {
+                        let _ph = PhaseLog::new("supervisor.subscribe_to_actor");
+                        let target = parse_actor_id(&id)?;
+                        let tx = ctx.data().theater_tx.clone();
+                        authorize(&tx, &permissions, ctx.data().id, target, false).await?;
+                        if tx
+                            .send(TheaterCommand::SubscribeToActor {
+                                actor_id: target,
+                                event_tx,
+                            })
+                            .await
+                            .is_err()
+                        {
+                            return Err(Value::from(SupervisorError::RuntimeUnavailable));
                         }
                         Ok(Value::Tuple(vec![]))
                     }
                 }
             })?
-            // unsubscribe-from-child: func(child-id: string) -> result<_, string>
-            // Remove this supervisor's subscription from the named child's
-            // chain. Idempotent — a no-op if the supervisor was not subscribed
-            // or if the child is no longer running.
-            .func_async_result("unsubscribe-from-child", {
+            // unsubscribe-from-actor: func(id: string) -> result<_, supervisor-error>
+            // Stop receiving chain events from an actor. Idempotent; also
+            // auto-released when the actor exits.
+            .func_async_result("unsubscribe-from-actor", {
                 let event_tx = event_tx.clone();
-                let children = children.clone();
-                move |ctx: AsyncCtx<ActorStore>, input: Value| {
+                let permissions = permissions.clone();
+                move |ctx: AsyncCtx<ActorStore>, id: String| {
                     let event_tx = event_tx.clone();
-                    let children = children.clone();
+                    let permissions = permissions.clone();
                     async move {
-                        let _ph = PhaseLog::new("supervisor.unsubscribe_from_child");
-                        let child_id_str = match input {
-                            Value::String(s) => s,
-                            Value::Tuple(args) if args.len() == 1 => match &args[0] {
-                                Value::String(s) => s.clone(),
-                                _ => return Err(Value::String("Invalid child-id argument".to_string())),
-                            },
-                            _ => return Err(Value::String("Invalid unsubscribe-from-child argument".to_string())),
-                        };
-
-                        let child_id: TheaterId = match child_id_str.parse() {
-                            Ok(id) => id,
-                            Err(e) => return Err(Value::String(format!("Invalid child ID: {}", e))),
-                        };
-
+                        let _ph = PhaseLog::new("supervisor.unsubscribe_from_actor");
+                        let target = parse_actor_id(&id)?;
+                        let tx = ctx.data().theater_tx.clone();
+                        authorize(&tx, &permissions, ctx.data().id, target, false).await?;
+                        if tx
+                            .send(TheaterCommand::UnsubscribeFromActor {
+                                actor_id: target,
+                                event_tx,
+                            })
+                            .await
+                            .is_err()
                         {
-                            let children_guard = children.lock().unwrap();
-                            if !children_guard.contains(&child_id) {
-                                return Err(Value::String(format!(
-                                    "unsubscribe-from-child: {} is not a child of this supervisor",
-                                    child_id
-                                )));
-                            }
-                        }
-
-                        let store = ctx.data();
-                        let theater_tx = store.theater_tx.clone();
-                        let cmd = TheaterCommand::UnsubscribeFromActor {
-                            actor_id: child_id,
-                            event_tx,
-                        };
-                        if let Err(e) = theater_tx.send(cmd).await {
-                            return Err(Value::String(format!("Failed to send unsubscribe command: {}", e)));
+                            return Err(Value::from(SupervisorError::RuntimeUnavailable));
                         }
                         Ok(Value::Tuple(vec![]))
                     }
@@ -1143,19 +1264,19 @@ impl Handler for SupervisorHandler {
                 if let Some(instance) = instance_guard.as_mut() {
                     let iface = "theater:simple/supervisor-handlers";
                     let e1 = instance
-                        .has_export(iface, "handle-child-event")
+                        .has_export(iface, "handle-actor-event")
                         .await
                         .unwrap_or(false);
                     let e2 = instance
-                        .has_export(iface, "handle-child-error")
+                        .has_export(iface, "handle-actor-error")
                         .await
                         .unwrap_or(false);
                     let e3 = instance
-                        .has_export(iface, "handle-child-exit")
+                        .has_export(iface, "handle-actor-exit")
                         .await
                         .unwrap_or(false);
                     let e4 = instance
-                        .has_export(iface, "handle-child-external-stop")
+                        .has_export(iface, "handle-actor-external-stop")
                         .await
                         .unwrap_or(false);
                     (e1, e2, e3, e4)
@@ -1290,40 +1411,34 @@ impl Handler for SupervisorHandler {
 /// WIT: record wit-actor-error { error-type: wit-error-type, data: option<list<u8>> }
 /// WIT enum wit-error-type has cases: operation-timeout(0), channel-closed(1),
 /// shutting-down(2), function-not-found(3), type-mismatch(4), internal(5),
-/// serialization-error(6), update-component-error(7), paused(8)
+/// serialization-error(6), paused(7)
+/// Convert an ActorError to the `actor-error` pact variant
+/// (supervisor-handlers.pact). Tags match the declaration order there. Cases
+/// with detail carry a message string; the rest are unit. `internal` is the
+/// catch-all for unexpected/uncommon errors.
 fn actor_error_to_value(error: ActorError) -> Value {
-    let (tag, case_name) = match &error {
-        ActorError::OperationTimeout(_) => (0, "operation-timeout"),
-        ActorError::ChannelClosed => (1, "channel-closed"),
-        ActorError::ShuttingDown => (2, "shutting-down"),
-        ActorError::FunctionNotFound(_) => (3, "function-not-found"),
-        ActorError::TypeMismatch(_) => (4, "type-mismatch"),
-        ActorError::Internal(_) => (5, "internal"),
-        ActorError::SerializationError => (6, "serialization-error"),
-        ActorError::UpdatePackageError(_) => (7, "update-component-error"),
-        ActorError::Paused => (8, "paused"),
-        _ => (5, "internal"), // fallback
+    let (tag, case, payload): (_, &str, Vec<Value>) = match &error {
+        ActorError::OperationTimeout(_) => (
+            0,
+            "operation-timeout",
+            vec![Value::String(error.to_string())],
+        ),
+        ActorError::ChannelClosed => (1, "channel-closed", vec![]),
+        ActorError::ShuttingDown => (2, "shutting-down", vec![]),
+        ActorError::FunctionNotFound(m) => {
+            (3, "function-not-found", vec![Value::String(m.clone())])
+        }
+        ActorError::TypeMismatch(m) => (4, "type-mismatch", vec![Value::String(m.clone())]),
+        ActorError::SerializationError => (5, "serialization-error", vec![]),
+        ActorError::Paused => (6, "paused", vec![]),
+        _ => (7, "internal", vec![Value::String(error.to_string())]),
     };
-
-    let error_type_value = Value::Variant {
-        type_name: "wit-error-type".to_string(),
-        case_name: case_name.to_string(),
+    Value::Variant {
+        type_name: "actor-error".to_string(),
+        case_name: case.to_string(),
         tag,
-        payload: vec![],
-    };
-
-    // Encode error message as optional data bytes
-    let error_msg = format!("{}", error);
-    let data_value = Value::Option {
-        inner_type: ValueType::List(Box::new(ValueType::U8)),
-        value: Some(Box::new(Value::List {
-            elem_type: ValueType::U8,
-            items: error_msg.into_bytes().into_iter().map(Value::U8).collect(),
-        })),
-    };
-
-    // Record encoded as Tuple: [error-type, data]
-    Value::Tuple(vec![error_type_value, data_value])
+        payload,
+    }
 }
 
 /// Convert Option<Vec<u8>> to a Pack Value matching option<list<u8>>

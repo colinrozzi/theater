@@ -2,7 +2,7 @@
 //!
 //! This actor:
 //! 1. Exports `init` function for the theater:simple/actor interface
-//! 2. Imports `log` function from theater:simple/runtime interface
+//! 2. Imports `log` function from theater:simple/self interface
 //! 3. Demonstrates typed state — init receives empty state, returns a record
 
 #![no_std]
@@ -20,7 +20,7 @@ packr_guest::setup_guest!();
 // Embed interface metadata for hash verification
 pack_types! {
     imports {
-        theater:simple/runtime {
+        theater:simple/self {
             log: func(msg: string),
         }
     }
@@ -30,7 +30,7 @@ pack_types! {
 }
 
 // Import the log function from the host
-#[import(module = "theater:simple/runtime", name = "log")]
+#[import(module = "theater:simple/self", name = "log")]
 fn log(msg: String);
 
 /// The init function for theater:simple/actor interface.

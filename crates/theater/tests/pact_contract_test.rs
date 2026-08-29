@@ -54,7 +54,7 @@ async fn create_instance() -> PackInstance {
         &runtime,
         actor_store,
         |builder| {
-            builder.interface("theater:simple/runtime")?.func_typed(
+            builder.interface("theater:simple/self")?.func_typed(
                 "log",
                 |_ctx: &mut Ctx<'_, ActorStore>, input: Value| {
                     let msg = match input {

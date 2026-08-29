@@ -1,14 +1,14 @@
 /// WIT world for the Runtime Handler
 ///
 /// This world defines what the host provides to actors that import
-/// the theater:simple/runtime interface for core runtime capabilities.
+/// the theater:simple/self interface for core runtime capabilities.
 
-package theater:runtime-handler;
+package theater:self-handler;
 
-world runtime-handler-host {
+world self-handler-host {
     /// Theater simple runtime interface
     /// Provides logging and shutdown capabilities
-    import theater:simple/runtime;
+    import theater:simple/self;
 
     /// Types used by the runtime interface
     import theater:simple/types;

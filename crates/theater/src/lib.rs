@@ -65,7 +65,6 @@ pub use config::actor_manifest::{
 };
 pub use errors::TheaterRuntimeError;
 pub use id::TheaterId;
-pub use messages::ChannelEvent;
 pub use metrics::{
     ActorMetrics, MetricsCollector, OperationMetrics, OperationStats, ResourceMetrics,
 };

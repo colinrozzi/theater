@@ -147,8 +147,14 @@ mod tests {
     }
 }
 
-/// Per-handler permission inheritance policies
-#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+/// Per-handler permission inheritance policies.
+///
+/// Most capabilities default to `Inherit` (a child inherits the parent's grant).
+/// The CONTROL capabilities — `runtime` and `supervisor` — default to `Disallow`:
+/// an actor gets them only by explicitly declaring a `restrict` grant. This is
+/// the runtime-side capability gate's default-deny (see the custom `Default`
+/// impl below and `disallow_*` serde field defaults).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct HandlerPermissionPolicy {
     #[serde(default, skip_serializing_if = "is_inherit_message_server")]
     pub message_server: HandlerInheritance<crate::config::permissions::MessageServerPermissions>,
@@ -158,9 +164,15 @@ pub struct HandlerPermissionPolicy {
     pub http_client: HandlerInheritance<crate::config::permissions::HttpClientPermissions>,
     #[serde(default, skip_serializing_if = "is_inherit_http_framework")]
     pub http_framework: HandlerInheritance<crate::config::permissions::HttpFrameworkPermissions>,
-    #[serde(default, skip_serializing_if = "is_inherit_runtime")]
+    #[serde(
+        default = "disallow_runtime",
+        skip_serializing_if = "is_inherit_runtime"
+    )]
     pub runtime: HandlerInheritance<crate::config::permissions::RuntimePermissions>,
-    #[serde(default, skip_serializing_if = "is_inherit_supervisor")]
+    #[serde(
+        default = "disallow_supervisor",
+        skip_serializing_if = "is_inherit_supervisor"
+    )]
     pub supervisor: HandlerInheritance<crate::config::permissions::SupervisorPermissions>,
     #[serde(default, skip_serializing_if = "is_inherit_store")]
     pub store: HandlerInheritance<crate::config::permissions::StorePermissions>,
@@ -172,6 +184,34 @@ pub struct HandlerPermissionPolicy {
     pub environment: HandlerInheritance<crate::config::permissions::EnvironmentPermissions>,
     #[serde(default, skip_serializing_if = "is_inherit_random")]
     pub random: HandlerInheritance<crate::config::permissions::RandomPermissions>,
+}
+
+fn disallow_runtime() -> HandlerInheritance<crate::config::permissions::RuntimePermissions> {
+    HandlerInheritance::Disallow
+}
+fn disallow_supervisor() -> HandlerInheritance<crate::config::permissions::SupervisorPermissions> {
+    HandlerInheritance::Disallow
+}
+
+impl Default for HandlerPermissionPolicy {
+    fn default() -> Self {
+        // Most caps inherit the parent's grant; the control caps (runtime,
+        // supervisor) default-DENY — an actor gets them only via an explicit
+        // restrict grant.
+        Self {
+            message_server: HandlerInheritance::Inherit,
+            file_system: HandlerInheritance::Inherit,
+            http_client: HandlerInheritance::Inherit,
+            http_framework: HandlerInheritance::Inherit,
+            runtime: HandlerInheritance::Disallow,
+            supervisor: HandlerInheritance::Disallow,
+            store: HandlerInheritance::Inherit,
+            timing: HandlerInheritance::Inherit,
+            process: HandlerInheritance::Inherit,
+            environment: HandlerInheritance::Inherit,
+            random: HandlerInheritance::Inherit,
+        }
+    }
 }
 
 /// Apply inheritance policy to calculate effective permissions

@@ -401,8 +401,8 @@ impl MessageRouter {
                             }
                         }
                         ChannelParticipant::External => {
-                            // External participants receive messages via the channel events mechanism
-                            // The server handles this separately via channel_events_tx
+                            // No external participants exist now that the management
+                            // socket is gone; nothing to deliver to.
                             let _ = response_tx.send(Ok(()));
                         }
                     }

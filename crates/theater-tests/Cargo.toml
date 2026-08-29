@@ -8,7 +8,7 @@ publish = false
 # Needed for examples
 theater.workspace = true
 theater-handler-message-server.workspace = true
-theater-handler-runtime.workspace = true
+theater-handler-self.workspace = true
 theater-handler-store.workspace = true
 theater-handler-supervisor.workspace = true
 theater-handler-tcp.workspace = true

@@ -97,6 +97,12 @@ use std::hash::{Hash, Hasher};
 use tokio::sync::mpsc::Sender;
 use tokio::sync::oneshot;
 
+/// One row of the actor supervision tree: `(actor-id, name, parent-id)`.
+/// `parent-id` is the spawning supervisor (`None` for root actors). Carried by
+/// `GetActors` responses and by spawn-subscription notifications so consumers
+/// can render the tree.
+pub type ActorTreeRow = (TheaterId, String, Option<TheaterId>);
+
 /// # Theater Command
 ///
 /// Commands sent to the Theater runtime to manage actors and system resources.
@@ -162,6 +168,10 @@ pub enum TheaterCommand {
         response_tx: oneshot::Sender<Result<TheaterId>>,
         supervisor_tx: Option<Sender<ActorResult>>,
         subscription_tx: Option<Sender<(TheaterId, ChainEvent)>>,
+        /// Id of the actor that spawned this one (the supervisor parent).
+        /// `None` for top-level/root actors. Recorded on the `ActorProcess`
+        /// so `GetActors` can render the supervision tree.
+        parent_id: Option<TheaterId>,
     },
 
     /// # Setup a new actor (setup only, no init)
@@ -185,26 +195,10 @@ pub enum TheaterCommand {
         response_tx: oneshot::Sender<Result<TheaterId>>,
         supervisor_tx: Option<Sender<ActorResult>>,
         subscription_tx: Option<Sender<(TheaterId, ChainEvent)>>,
-    },
-
-    /// # Resume an existing actor
-    ///
-    /// Restarts an actor from a manifest. State restoration happens via the
-    /// replay handler configured in the manifest.
-    ///
-    /// ## Parameters
-    ///
-    /// * `manifest_path` - Path to the actor's manifest file
-    /// * `wasm_bytes` - Optional pre-loaded WASM bytes. If None, bytes are resolved from manifest.package
-    /// * `response_tx` - Channel to receive the result (actor ID or error)
-    /// * `supervisor_tx` - Optional channel for supervisor to receive lifecycle events
-    /// * `subscription_tx` - Optional channel to subscribe to all actor events
-    ResumeActor {
-        manifest_path: String,
-        wasm_bytes: Option<Vec<u8>>,
-        response_tx: oneshot::Sender<Result<TheaterId>>,
-        supervisor_tx: Option<Sender<ActorResult>>,
-        subscription_tx: Option<Sender<(TheaterId, ChainEvent)>>,
+        /// Id of the actor that spawned this one (the supervisor parent).
+        /// `None` for top-level/root actors. Recorded on the `ActorProcess`
+        /// so `GetActors` can render the supervision tree.
+        parent_id: Option<TheaterId>,
     },
 
     /// # Stop an actor
@@ -279,7 +273,9 @@ pub enum TheaterCommand {
     ///
     /// * `response_tx` - Channel to receive the result (list of actor IDs)
     GetActors {
-        response_tx: oneshot::Sender<Result<Vec<(TheaterId, String)>>>,
+        /// Returns `(actor-id, name, parent-id)` for every live actor.
+        /// `parent-id` is the spawning supervisor (`None` for root actors).
+        response_tx: oneshot::Sender<Result<Vec<ActorTreeRow>>>,
     },
 
     GetActorManifest {
@@ -395,6 +391,24 @@ pub enum TheaterCommand {
         event_tx: Sender<(TheaterId, ChainEvent)>,
     },
 
+    /// # Subscribe to actor-spawned notifications (runtime-wide)
+    ///
+    /// After this call, every actor spawned ANYWHERE in the runtime is
+    /// delivered to `event_tx` as `(id, name, parent-id)`. Births only —
+    /// deaths ride each actor's own chain subscription (`SubscribeToActor`).
+    /// This backs `theater:simple/runtime.subscribe-to-spawns`.
+    SubscribeToSpawns {
+        event_tx: Sender<ActorTreeRow>,
+    },
+
+    /// # Unsubscribe a previously-registered spawn subscriber
+    ///
+    /// Identity is by `Sender::same_channel` (pass a clone of the sender used
+    /// to subscribe). No-op if not subscribed.
+    UnsubscribeFromSpawns {
+        event_tx: Sender<ActorTreeRow>,
+    },
+
     /// # Create a new content store
     ///
     /// Creates a new content-addressable storage instance.
@@ -451,9 +465,6 @@ impl TheaterCommand {
             TheaterCommand::SetupActor { name, .. } => {
                 format!("SetupActor: {}", name.as_deref().unwrap_or("<unnamed>"))
             }
-            TheaterCommand::ResumeActor { manifest_path, .. } => {
-                format!("ResumeActor: {}", manifest_path)
-            }
             TheaterCommand::StopActor { actor_id, .. } => {
                 format!("StopActor: {:?}", actor_id)
             }
@@ -499,6 +510,8 @@ impl TheaterCommand {
             TheaterCommand::UnsubscribeFromActor { actor_id, .. } => {
                 format!("UnsubscribeFromActor: {:?}", actor_id)
             }
+            TheaterCommand::SubscribeToSpawns { .. } => "SubscribeToSpawns".to_string(),
+            TheaterCommand::UnsubscribeFromSpawns { .. } => "UnsubscribeFromSpawns".to_string(),
             TheaterCommand::NewStore { .. } => "NewStore".to_string(),
             TheaterCommand::GetActorHandle { actor_id, .. } => {
                 format!("GetActorHandle: {:?}", actor_id)
@@ -673,26 +686,6 @@ impl std::fmt::Display for ChannelParticipant {
             ChannelParticipant::External => write!(f, "External"),
         }
     }
-}
-
-/// # Channel Event
-///
-/// Event types for communication between the runtime and server regarding channels.
-///
-/// ## Purpose
-///
-/// ChannelEvent represents events that occur on communication channels that need
-/// to be communicated from the runtime to the server for management and monitoring.
-#[derive(Debug)]
-pub enum ChannelEvent {
-    /// A message was sent on a channel
-    Message {
-        channel_id: ChannelId,
-        sender_id: ChannelParticipant,
-        message: Vec<u8>,
-    },
-    /// A channel was closed
-    Close { channel_id: ChannelId },
 }
 
 #[derive(Debug, Clone)]

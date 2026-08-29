@@ -1,0 +1,40 @@
+[package]
+name = "theater-handler-self"
+description = "Core runtime handler for Theater WebAssembly runtime - logging, state, lifecycle"
+version = "0.3.14"
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+# Core theater dependencies
+theater.workspace = true
+
+# Async runtime
+tokio = { version = "1.0", features = ["full"] }
+
+# Error handling
+anyhow = "1.0"
+thiserror = "1.0"
+
+# Logging
+tracing = "0.1"
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Utilities
+chrono = "0.4"
+
+[dev-dependencies]
+test-log = "0.2"
+pretty_assertions = "1.4"
+tempfile = "3.8.1"
+tracing-subscriber = "0.3"
+serde_json = "1.0"

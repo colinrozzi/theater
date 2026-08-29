@@ -1,7 +1,7 @@
 //! Replay test actor for Pack runtime (self-contained / packr 0.10.0).
 //!
 //! A simple deterministic actor that:
-//! - Imports `theater:simple/runtime.log`
+//! - Imports `theater:simple/self.log`
 //! - Exports `theater:simple/actor.init`
 //! - Exports all 5 `theater:simple/message-server-client` handlers
 //! - Calls `log` several times during init and when handling messages
@@ -26,7 +26,7 @@ packr_guest::setup_guest!();
 // Embed interface metadata for hash verification
 pack_types! {
     imports {
-        theater:simple/runtime {
+        theater:simple/self {
             log: func(msg: string),
         }
         theater:simple/message-server-host {
@@ -47,7 +47,7 @@ pack_types! {
 // Host imports
 // ============================================================================
 
-#[import(module = "theater:simple/runtime", name = "log")]
+#[import(module = "theater:simple/self", name = "log")]
 fn log(msg: String);
 
 #[import(module = "theater:simple/message-server-host", name = "register")]

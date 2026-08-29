@@ -26,7 +26,7 @@ use tokio::time::timeout;
 
 use std::sync::Arc;
 use theater::chain::ChainEvent;
-use theater::config::actor_manifest::{RuntimeHostConfig, SupervisorHostConfig};
+use theater::config::actor_manifest::{SelfHostConfig, SupervisorHostConfig};
 use theater::handler::HandlerRegistry;
 use theater::messages::{
     default_init_state, ActorMessage, ActorRequest, ActorSend, MessageCommand, TheaterCommand,
@@ -37,7 +37,7 @@ use theater::utils::{resolve_reference, ResourceCache};
 use theater::ManifestConfig;
 
 use theater_handler_message_server::{MessageRouter, MessageServerHandler};
-use theater_handler_runtime::RuntimeHandler;
+use theater_handler_self::SelfHandler;
 use theater_handler_supervisor::SupervisorHandler;
 use theater_handler_tcp::TcpHandler;
 
@@ -159,14 +159,14 @@ async fn load_manifest_and_wasm(manifest_str: &str) -> Result<(ManifestConfig, V
     Ok((manifest, wasm_bytes))
 }
 
-/// Creates a handler registry with RuntimeHandler and MessageServerHandler.
+/// Creates a handler registry with SelfHandler and MessageServerHandler.
 /// Returns both the registry and the MessageRouter for sending messages.
 pub fn create_base_registry(
     theater_tx: mpsc::Sender<TheaterCommand>,
 ) -> (HandlerRegistry, MessageRouter) {
     let mut registry = HandlerRegistry::new();
-    let runtime_config = RuntimeHostConfig {};
-    registry.register(RuntimeHandler::new(runtime_config, theater_tx, None));
+    let runtime_config = SelfHostConfig {};
+    registry.register(SelfHandler::new(runtime_config, theater_tx, None));
 
     let message_router = MessageRouter::new();
     registry.register(MessageServerHandler::new(None, message_router.clone()));
@@ -239,13 +239,13 @@ type = "supervisor"
     )
 }
 
-/// Creates a handler registry with RuntimeHandler, MessageServerHandler, and SupervisorHandler.
+/// Creates a handler registry with SelfHandler, MessageServerHandler, and SupervisorHandler.
 pub fn create_supervisor_registry(
     theater_tx: mpsc::Sender<TheaterCommand>,
 ) -> (HandlerRegistry, MessageRouter) {
     let mut registry = HandlerRegistry::new();
-    let runtime_config = RuntimeHostConfig {};
-    registry.register(RuntimeHandler::new(runtime_config, theater_tx, None));
+    let runtime_config = SelfHostConfig {};
+    registry.register(SelfHandler::new(runtime_config, theater_tx, None));
 
     let message_router = MessageRouter::new();
     registry.register(MessageServerHandler::new(None, message_router.clone()));
@@ -318,7 +318,6 @@ pub async fn run_replay_verification(
     let mut runtime = TheaterRuntime::new(
         theater_tx.clone(),
         theater_rx,
-        None,
         handler_registry,
         Arc::new(ResourceCache::new()),
     )
@@ -340,6 +339,7 @@ pub async fn run_replay_verification(
             response_tx,
             supervisor_tx: None,
             subscription_tx: Some(event_tx),
+            parent_id: None,
         })
         .await?;
 
@@ -471,6 +471,7 @@ pub async fn run_replay_verification(
             response_tx: response_tx2,
             supervisor_tx: None,
             subscription_tx: Some(replay_event_tx),
+            parent_id: None,
         })
         .await?;
 
@@ -570,7 +571,6 @@ pub async fn run_request_replay_verification(
     let mut runtime = TheaterRuntime::new(
         theater_tx.clone(),
         theater_rx,
-        None,
         handler_registry,
         Arc::new(ResourceCache::new()),
     )
@@ -590,6 +590,7 @@ pub async fn run_request_replay_verification(
             response_tx,
             supervisor_tx: None,
             subscription_tx: Some(event_tx),
+            parent_id: None,
         })
         .await?;
 
@@ -758,6 +759,7 @@ pub async fn run_request_replay_verification(
             response_tx: response_tx2,
             supervisor_tx: None,
             subscription_tx: Some(replay_event_tx),
+            parent_id: None,
         })
         .await?;
 
@@ -877,7 +879,6 @@ pub async fn run_supervisor_replay_verification(
     let mut runtime = TheaterRuntime::new(
         theater_tx.clone(),
         theater_rx,
-        None,
         handler_registry,
         Arc::new(ResourceCache::new()),
     )
@@ -897,6 +898,7 @@ pub async fn run_supervisor_replay_verification(
             response_tx,
             supervisor_tx: None,
             subscription_tx: Some(event_tx),
+            parent_id: None,
         })
         .await?;
 
@@ -1082,6 +1084,7 @@ pub async fn run_supervisor_replay_verification(
             response_tx: response_tx2,
             supervisor_tx: None,
             subscription_tx: Some(replay_event_tx),
+            parent_id: None,
         })
         .await?;
 
@@ -1207,12 +1210,12 @@ type = "tcp"
     )
 }
 
-/// Creates a handler registry with RuntimeHandler and TcpHandler.
+/// Creates a handler registry with SelfHandler and TcpHandler.
 pub fn create_tcp_registry(theater_tx: mpsc::Sender<TheaterCommand>) -> HandlerRegistry {
     use theater::config::actor_manifest::TcpHandlerConfig;
     let mut registry = HandlerRegistry::new();
-    let runtime_config = RuntimeHostConfig {};
-    registry.register(RuntimeHandler::new(runtime_config, theater_tx, None));
+    let runtime_config = SelfHostConfig {};
+    registry.register(SelfHandler::new(runtime_config, theater_tx, None));
     registry.register(TcpHandler::new(TcpHandlerConfig::default()));
     registry
 }
@@ -1257,7 +1260,6 @@ pub async fn run_tcp_replay_verification(
     let mut runtime = TheaterRuntime::new(
         theater_tx.clone(),
         theater_rx,
-        None,
         handler_registry,
         Arc::new(ResourceCache::new()),
     )
@@ -1277,6 +1279,7 @@ pub async fn run_tcp_replay_verification(
             response_tx,
             supervisor_tx: None,
             subscription_tx: Some(event_tx),
+            parent_id: None,
         })
         .await?;
 
@@ -1453,6 +1456,7 @@ pub async fn run_tcp_replay_verification(
             response_tx: response_tx2,
             supervisor_tx: None,
             subscription_tx: Some(replay_event_tx),
+            parent_id: None,
         })
         .await?;
 
@@ -1841,7 +1845,7 @@ mod tests {
         assert!(
             event_types
                 .iter()
-                .any(|t| t.contains("theater:simple/runtime/log")),
+                .any(|t| t.contains("theater:simple/self/log")),
             "Should have runtime/log events"
         );
     }

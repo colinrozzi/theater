@@ -12,7 +12,7 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use theater::config::actor_manifest::{
-    HandlerConfig, ManifestConfig, RuntimeHostConfig, StoreHandlerConfig, SupervisorHostConfig,
+    HandlerConfig, ManifestConfig, SelfHostConfig, StoreHandlerConfig, SupervisorHostConfig,
     TcpHandlerConfig, TimerHandlerConfig,
 };
 use theater::config::inheritance::HandlerPermissionPolicy;
@@ -23,7 +23,7 @@ use theater::utils::ResourceCache;
 use theater_handler_loop::LoopHandler;
 use theater_handler_message_server::{MessageRouter, MessageServerHandler};
 use theater_handler_rpc::RpcHandler;
-use theater_handler_runtime::RuntimeHandler;
+use theater_handler_self::SelfHandler;
 use theater_handler_store::StoreHandler;
 use theater_handler_supervisor::SupervisorHandler;
 use theater_handler_tcp::TcpHandler;
@@ -57,8 +57,8 @@ fn create_test_manifest(name: &str, wasm_path: &str) -> ManifestConfig {
         initial_state: None,
         static_package: false,
         permission_policy: HandlerPermissionPolicy::default(),
-        handlers: vec![HandlerConfig::Runtime {
-            config: RuntimeHostConfig {},
+        handlers: vec![HandlerConfig::SelfHandler {
+            config: SelfHostConfig {},
         }],
     }
 }
@@ -101,19 +101,14 @@ async fn test_actor_shutdown_timing() {
 
     // Create handler registry with runtime handler
     let mut handler_registry = HandlerRegistry::new();
-    let runtime_config = RuntimeHostConfig {};
-    handler_registry.register(RuntimeHandler::new(
-        runtime_config,
-        theater_tx.clone(),
-        None,
-    ));
+    let runtime_config = SelfHostConfig {};
+    handler_registry.register(SelfHandler::new(runtime_config, theater_tx.clone(), None));
 
     // Create and start the theater runtime
     let runtime_handle = tokio::spawn(async move {
         let mut runtime = theater::theater_runtime::TheaterRuntime::new(
             theater_tx_clone,
             theater_rx,
-            None,
             handler_registry,
             Arc::new(ResourceCache::new()),
         )
@@ -141,6 +136,7 @@ async fn test_actor_shutdown_timing() {
             response_tx: spawn_tx,
             supervisor_tx: None,
             subscription_tx: None,
+            parent_id: None,
         })
         .await
         .expect("Failed to send spawn command");
@@ -236,18 +232,13 @@ async fn test_multiple_actor_shutdown_timing() {
     let (theater_tx, theater_rx) = mpsc::channel::<TheaterCommand>(100);
     let theater_tx_clone = theater_tx.clone();
     let mut handler_registry = HandlerRegistry::new();
-    let runtime_config = RuntimeHostConfig {};
-    handler_registry.register(RuntimeHandler::new(
-        runtime_config,
-        theater_tx.clone(),
-        None,
-    ));
+    let runtime_config = SelfHostConfig {};
+    handler_registry.register(SelfHandler::new(runtime_config, theater_tx.clone(), None));
 
     let runtime_handle = tokio::spawn(async move {
         let mut runtime = theater::theater_runtime::TheaterRuntime::new(
             theater_tx_clone,
             theater_rx,
-            None,
             handler_registry,
             Arc::new(ResourceCache::new()),
         )
@@ -276,6 +267,7 @@ async fn test_multiple_actor_shutdown_timing() {
                 response_tx: spawn_tx,
                 supervisor_tx: None,
                 subscription_tx: None,
+                parent_id: None,
             })
             .await
             .expect("Failed to send spawn command");
@@ -383,12 +375,8 @@ async fn test_actor_shutdown_with_supervisor_handler() {
 
     // Create handler registry with runtime AND supervisor handlers
     let mut handler_registry = HandlerRegistry::new();
-    let runtime_config = RuntimeHostConfig {};
-    handler_registry.register(RuntimeHandler::new(
-        runtime_config,
-        theater_tx.clone(),
-        None,
-    ));
+    let runtime_config = SelfHostConfig {};
+    handler_registry.register(SelfHandler::new(runtime_config, theater_tx.clone(), None));
 
     // Add supervisor handler - this was identified as potentially problematic
     let supervisor_config = SupervisorHostConfig {};
@@ -399,7 +387,6 @@ async fn test_actor_shutdown_with_supervisor_handler() {
         let mut runtime = theater::theater_runtime::TheaterRuntime::new(
             theater_tx_clone,
             theater_rx,
-            None,
             handler_registry,
             Arc::new(ResourceCache::new()),
         )
@@ -422,8 +409,8 @@ async fn test_actor_shutdown_with_supervisor_handler() {
         static_package: false,
         permission_policy: HandlerPermissionPolicy::default(),
         handlers: vec![
-            HandlerConfig::Runtime {
-                config: RuntimeHostConfig {},
+            HandlerConfig::SelfHandler {
+                config: SelfHostConfig {},
             },
             HandlerConfig::Supervisor {
                 config: SupervisorHostConfig {},
@@ -443,6 +430,7 @@ async fn test_actor_shutdown_with_supervisor_handler() {
             response_tx: spawn_tx,
             supervisor_tx: None,
             subscription_tx: None,
+            parent_id: None,
         })
         .await
         .expect("Failed to send spawn command");
@@ -536,8 +524,8 @@ async fn test_actor_shutdown_with_all_handlers() {
     let mut handler_registry = HandlerRegistry::new();
 
     // Runtime handler
-    handler_registry.register(RuntimeHandler::new(
-        RuntimeHostConfig {},
+    handler_registry.register(SelfHandler::new(
+        SelfHostConfig {},
         theater_tx.clone(),
         None,
     ));
@@ -571,7 +559,6 @@ async fn test_actor_shutdown_with_all_handlers() {
         let mut runtime = theater::theater_runtime::TheaterRuntime::new(
             theater_tx_clone,
             theater_rx,
-            None,
             handler_registry,
             Arc::new(ResourceCache::new()),
         )
@@ -599,6 +586,7 @@ async fn test_actor_shutdown_with_all_handlers() {
             response_tx: spawn_tx,
             supervisor_tx: None,
             subscription_tx: None,
+            parent_id: None,
         })
         .await
         .expect("Failed to send spawn command");

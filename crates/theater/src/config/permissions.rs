@@ -364,19 +364,77 @@ impl PartialOrd for MessageServerPermissions {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct RuntimePermissions;
+/// Capability to drive the runtime-wide CONTROL interface (`theater:simple/runtime`):
+/// managing/inspecting *any* actor by id, not just one's own children. Granular so a
+/// read-only monitor (`inspect`) is distinct from a full controller (`inspect` + `mutate`).
+/// The plain per-actor handle (`theater:simple/self`: log/self/shutdown) is ungated and
+/// does NOT require this. An empty `runtime = {}` grants nothing (safe default).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub struct RuntimePermissions {
+    /// Read-only control: list-actors, get-actor-chain, get-actor-state/manifest/metrics,
+    /// subscribe-to-actor.
+    #[serde(default)]
+    pub inspect: bool,
+    /// Mutating control: spawn / resume / stop / kill / restart any actor.
+    #[serde(default)]
+    pub mutate: bool,
+}
 impl PartialOrd for RuntimePermissions {
-    fn partial_cmp(&self, _other: &Self) -> Option<Ordering> {
-        Some(Ordering::Equal)
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        // parent (self) must grant everything the child (other) requests; the child
+        // exceeds the parent if it wants a capability the parent lacks.
+        if (other.inspect && !self.inspect) || (other.mutate && !self.mutate) {
+            return None;
+        }
+        Some(if self == other {
+            Ordering::Equal
+        } else {
+            Ordering::Greater
+        })
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct SupervisorPermissions;
+/// The set of actors a supervisor-capable actor may see and act on.
+/// Ordered least-to-most privilege: `Subtree` < `All`, so a child may not
+/// widen its scope past its parent.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum ViewScope {
+    /// The caller's own subtree — its descendants. Least privilege; the default.
+    #[default]
+    Subtree,
+    /// Every actor in the runtime.
+    All,
+}
+
+/// Capability to drive the supervisor (actor-management) interface, scoped to a
+/// view. `inspect` gates the read/observe ops (list-actors, get-actor-*,
+/// subscribe-to-actor); `mutate` gates the lifecycle ops (spawn, stop, kill);
+/// `scope` sets which actors are in view, enforced per-op by the handler.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub struct SupervisorPermissions {
+    #[serde(default)]
+    pub scope: ViewScope,
+    #[serde(default)]
+    pub inspect: bool,
+    #[serde(default)]
+    pub mutate: bool,
+}
 impl PartialOrd for SupervisorPermissions {
-    fn partial_cmp(&self, _other: &Self) -> Option<Ordering> {
-        Some(Ordering::Equal)
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        // parent (self) must grant everything the child (other) requests: the
+        // child cannot widen scope beyond the parent, nor add a capability.
+        if other.scope > self.scope
+            || (other.inspect && !self.inspect)
+            || (other.mutate && !self.mutate)
+        {
+            return None;
+        }
+        Some(if self == other {
+            Ordering::Equal
+        } else {
+            Ordering::Greater
+        })
     }
 }
 
@@ -431,8 +489,15 @@ impl HandlerPermission {
                 allowed_methods: None,
                 max_request_size: None,
             }),
-            runtime: Some(RuntimePermissions),
-            supervisor: Some(SupervisorPermissions),
+            runtime: Some(RuntimePermissions {
+                inspect: true,
+                mutate: true,
+            }),
+            supervisor: Some(SupervisorPermissions {
+                scope: ViewScope::All,
+                inspect: true,
+                mutate: true,
+            }),
             store: Some(StorePermissions),
             timing: Some(TimingPermissions {
                 max_sleep_duration: u64::MAX,
@@ -658,14 +723,24 @@ impl RestrictWith<MessageServerPermissions> for MessageServerPermissions {
 }
 
 impl RestrictWith<RuntimePermissions> for RuntimePermissions {
-    fn restrict_with(&self, _restriction: &RuntimePermissions) -> Self {
-        self.clone()
+    fn restrict_with(&self, restriction: &RuntimePermissions) -> Self {
+        // Intersect: a restricted grant keeps a capability only if BOTH allow it.
+        RuntimePermissions {
+            inspect: self.inspect && restriction.inspect,
+            mutate: self.mutate && restriction.mutate,
+        }
     }
 }
 
 impl RestrictWith<SupervisorPermissions> for SupervisorPermissions {
-    fn restrict_with(&self, _restriction: &SupervisorPermissions) -> Self {
-        self.clone()
+    fn restrict_with(&self, restriction: &SupervisorPermissions) -> Self {
+        // Intersect: the narrower scope wins, and each capability must be
+        // granted by both.
+        SupervisorPermissions {
+            scope: self.scope.min(restriction.scope),
+            inspect: self.inspect && restriction.inspect,
+            mutate: self.mutate && restriction.mutate,
+        }
     }
 }
 
@@ -678,6 +753,57 @@ impl RestrictWith<StorePermissions> for StorePermissions {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_runtime_permissions_hierarchy() {
+        let full = RuntimePermissions {
+            inspect: true,
+            mutate: true,
+        };
+        let inspect_only = RuntimePermissions {
+            inspect: true,
+            mutate: false,
+        };
+        let none = RuntimePermissions::default();
+
+        // Parent covers child -> Some(Greater/Equal); child exceeds parent -> None.
+        assert_eq!(full.partial_cmp(&full), Some(std::cmp::Ordering::Equal));
+        assert_eq!(
+            full.partial_cmp(&inspect_only),
+            Some(std::cmp::Ordering::Greater)
+        );
+        assert_eq!(full.partial_cmp(&none), Some(std::cmp::Ordering::Greater));
+        assert_eq!(
+            inspect_only.partial_cmp(&none),
+            Some(std::cmp::Ordering::Greater)
+        );
+        // inspect-only cannot grant mutate; none cannot grant inspect.
+        assert_eq!(inspect_only.partial_cmp(&full), None);
+        assert_eq!(none.partial_cmp(&inspect_only), None);
+    }
+
+    #[test]
+    fn test_runtime_permissions_restrict_with_intersects() {
+        let full = RuntimePermissions {
+            inspect: true,
+            mutate: true,
+        };
+        let inspect_only = RuntimePermissions {
+            inspect: true,
+            mutate: false,
+        };
+        let mutate_only = RuntimePermissions {
+            inspect: false,
+            mutate: true,
+        };
+        // Restricting full by inspect-only yields inspect-only.
+        assert_eq!(full.restrict_with(&inspect_only), inspect_only);
+        // Restricting inspect-only by mutate-only yields nothing (disjoint).
+        assert_eq!(
+            inspect_only.restrict_with(&mutate_only),
+            RuntimePermissions::default()
+        );
+    }
 
     // Helper function to create a full-capability filesystem permission
     fn full_filesystem_permissions() -> FileSystemPermissions {

@@ -1,6 +1,6 @@
 package component:{{project_name}};
 
 world default {
-    import theater:simple/runtime;
+    import theater:simple/self;
     export theater:simple/actor;
 }
