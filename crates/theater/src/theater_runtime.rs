@@ -5,7 +5,7 @@
 //! the entire system.
 
 use crate::actor::handle::ActorHandle;
-use crate::actor::runtime::ActorRuntime;
+use crate::actor::runtime::{ActorRuntime, ActorRuntimeError};
 use crate::actor::types::{ActorControl, ActorError, ActorInfo, ActorOperation};
 use crate::chain::ChainEvent;
 use crate::config::actor_manifest::HandlerConfig;
@@ -807,7 +807,7 @@ impl TheaterRuntime {
         let pack_runtime = self.pack_runtime.clone();
 
         // Create channel to receive setup result
-        let (setup_tx, setup_rx) = tokio::sync::oneshot::channel::<Result<(), String>>();
+        let (setup_tx, setup_rx) = tokio::sync::oneshot::channel::<Result<(), ActorRuntimeError>>();
 
         let phase_start = Instant::now();
         let actor_runtime_process = tokio::spawn(async move {
@@ -844,7 +844,10 @@ impl TheaterRuntime {
             }
             Ok(Err(e)) => {
                 error!("Actor {} setup failed: {}", actor_id, e);
-                let _ = response_tx.send(Err(anyhow::anyhow!("Actor setup failed: {}", e)));
+                // Preserve the structured ActorRuntimeError as the anyhow source
+                // (downcastable) instead of flattening it to a string. Step 3
+                // re-types response_tx to carry it without the anyhow wrapper.
+                let _ = response_tx.send(Err(anyhow::Error::new(e).context("Actor setup failed")));
                 return;
             }
             Err(_) => {

@@ -626,7 +626,7 @@ impl ActorRuntime {
         control_rx: Receiver<ActorControl>,
         control_tx: Sender<ActorControl>,
         initial_state: Value,
-        setup_result_tx: Option<tokio::sync::oneshot::Sender<Result<(), String>>>,
+        setup_result_tx: Option<tokio::sync::oneshot::Sender<Result<(), ActorRuntimeError>>>,
     ) {
         info!("Actor runtime starting communication loops");
         let actor_phase_manager = ActorPhaseManager::new();
@@ -687,14 +687,14 @@ impl ActorRuntime {
                         }
                     }
                     Err(e) => {
-                        let error_msg = format!("{}", e);
-                        error!("Failed to set up actor runtime: {}", error_msg);
+                        error!("Failed to set up actor runtime: {}", e);
                         // Set phase to ShuttingDown so operation_loop and other loops can exit
                         actor_phase_manager.set_phase(ActorPhase::ShuttingDown);
 
-                        // Signal failure to spawn_actor
+                        // Signal failure to spawn_actor with the structured error
+                        // (Display is unchanged; the variant now survives the channel).
                         if let Some(tx) = setup_result_tx {
-                            let _ = tx.send(Err(error_msg));
+                            let _ = tx.send(Err(e));
                         }
                     }
                 }
