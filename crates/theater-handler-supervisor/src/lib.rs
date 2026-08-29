@@ -1156,105 +1156,62 @@ impl Handler for SupervisorHandler {
                     }
                 }
             })?
-            // subscribe-to-child: func(child-id: string) -> result<_, string>
-            // Opt the calling supervisor in to chain events from the named
-            // child. Subscriptions are idempotent — the chain identifies
-            // subscribers by Sender channel identity, and the per-handler
-            // event_tx is a single Sender cloned across calls, so resubscribing
-            // an already-subscribed child is a no-op at the chain level.
-            .func_async_result("subscribe-to-child", {
+            // subscribe-to-actor: func(id: string) -> result<_, supervisor-error>
+            // Opt in to chain events from an actor in the caller's view. Events
+            // are delivered to this actor's handle-actor-event export. Idempotent
+            // (the chain identifies subscribers by Sender channel identity).
+            .func_async_result("subscribe-to-actor", {
                 let event_tx = event_tx.clone();
-                let children = children.clone();
+                let permissions = permissions.clone();
                 move |ctx: AsyncCtx<ActorStore>, input: Value| {
                     let event_tx = event_tx.clone();
-                    let children = children.clone();
+                    let permissions = permissions.clone();
                     async move {
-                        let _ph = PhaseLog::new("supervisor.subscribe_to_child");
-                        let child_id_str = match input {
-                            Value::String(s) => s,
-                            Value::Tuple(args) if args.len() == 1 => match &args[0] {
-                                Value::String(s) => s.clone(),
-                                _ => return Err(Value::String("Invalid child-id argument".to_string())),
-                            },
-                            _ => return Err(Value::String("Invalid subscribe-to-child argument".to_string())),
-                        };
-
-                        let child_id: TheaterId = match child_id_str.parse() {
-                            Ok(id) => id,
-                            Err(e) => return Err(Value::String(format!("Invalid child ID: {}", e))),
-                        };
-
-                        // Validate child is one of ours. The chain's
-                        // SubscribeToActor handler tolerates unknown ids
-                        // but a parent subscribing to a non-child is
-                        // almost always a programming error worth surfacing.
+                        let _ph = PhaseLog::new("supervisor.subscribe_to_actor");
+                        let target = parse_id_arg(input, "subscribe-to-actor")?;
+                        let tx = ctx.data().theater_tx.clone();
+                        authorize(&tx, &permissions, ctx.data().id, target, false).await?;
+                        if let Err(e) = tx
+                            .send(TheaterCommand::SubscribeToActor {
+                                actor_id: target,
+                                event_tx,
+                            })
+                            .await
                         {
-                            let children_guard = children.lock().unwrap();
-                            if !children_guard.contains(&child_id) {
-                                return Err(Value::String(format!(
-                                    "subscribe-to-child: {} is not a child of this supervisor",
-                                    child_id
-                                )));
-                            }
-                        }
-
-                        let store = ctx.data();
-                        let theater_tx = store.theater_tx.clone();
-                        let cmd = TheaterCommand::SubscribeToActor {
-                            actor_id: child_id,
-                            event_tx,
-                        };
-                        if let Err(e) = theater_tx.send(cmd).await {
-                            return Err(Value::String(format!("Failed to send subscribe command: {}", e)));
+                            return Err(Value::from(SupervisorError::Internal(format!(
+                                "failed to send subscribe: {}",
+                                e
+                            ))));
                         }
                         Ok(Value::Tuple(vec![]))
                     }
                 }
             })?
-            // unsubscribe-from-child: func(child-id: string) -> result<_, string>
-            // Remove this supervisor's subscription from the named child's
-            // chain. Idempotent — a no-op if the supervisor was not subscribed
-            // or if the child is no longer running.
-            .func_async_result("unsubscribe-from-child", {
+            // unsubscribe-from-actor: func(id: string) -> result<_, supervisor-error>
+            // Stop receiving chain events from an actor. Idempotent; also
+            // auto-released when the actor exits.
+            .func_async_result("unsubscribe-from-actor", {
                 let event_tx = event_tx.clone();
-                let children = children.clone();
+                let permissions = permissions.clone();
                 move |ctx: AsyncCtx<ActorStore>, input: Value| {
                     let event_tx = event_tx.clone();
-                    let children = children.clone();
+                    let permissions = permissions.clone();
                     async move {
-                        let _ph = PhaseLog::new("supervisor.unsubscribe_from_child");
-                        let child_id_str = match input {
-                            Value::String(s) => s,
-                            Value::Tuple(args) if args.len() == 1 => match &args[0] {
-                                Value::String(s) => s.clone(),
-                                _ => return Err(Value::String("Invalid child-id argument".to_string())),
-                            },
-                            _ => return Err(Value::String("Invalid unsubscribe-from-child argument".to_string())),
-                        };
-
-                        let child_id: TheaterId = match child_id_str.parse() {
-                            Ok(id) => id,
-                            Err(e) => return Err(Value::String(format!("Invalid child ID: {}", e))),
-                        };
-
+                        let _ph = PhaseLog::new("supervisor.unsubscribe_from_actor");
+                        let target = parse_id_arg(input, "unsubscribe-from-actor")?;
+                        let tx = ctx.data().theater_tx.clone();
+                        authorize(&tx, &permissions, ctx.data().id, target, false).await?;
+                        if let Err(e) = tx
+                            .send(TheaterCommand::UnsubscribeFromActor {
+                                actor_id: target,
+                                event_tx,
+                            })
+                            .await
                         {
-                            let children_guard = children.lock().unwrap();
-                            if !children_guard.contains(&child_id) {
-                                return Err(Value::String(format!(
-                                    "unsubscribe-from-child: {} is not a child of this supervisor",
-                                    child_id
-                                )));
-                            }
-                        }
-
-                        let store = ctx.data();
-                        let theater_tx = store.theater_tx.clone();
-                        let cmd = TheaterCommand::UnsubscribeFromActor {
-                            actor_id: child_id,
-                            event_tx,
-                        };
-                        if let Err(e) = theater_tx.send(cmd).await {
-                            return Err(Value::String(format!("Failed to send unsubscribe command: {}", e)));
+                            return Err(Value::from(SupervisorError::Internal(format!(
+                                "failed to send unsubscribe: {}",
+                                e
+                            ))));
                         }
                         Ok(Value::Tuple(vec![]))
                     }
