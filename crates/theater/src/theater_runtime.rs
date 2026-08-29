@@ -1042,15 +1042,19 @@ impl TheaterRuntime {
                 }
             };
 
+            // The typed terminal lifecycle event: a graceful stop is `Stopped`,
+            // a force terminate is `Killed`. This is the one event fate-links +
+            // monitors key on (replacing the old ad-hoc `"shutdown"` string).
+            let cause = match shutdown_type {
+                ShutdownType::Graceful => crate::events::lifecycle::TerminationCause::Stopped,
+                ShutdownType::Force => crate::events::lifecycle::TerminationCause::Killed,
+            };
             let mut writable_chain = chain.write().await;
             writable_chain
                 .add_typed_event(crate::events::ChainEventData {
-                    event_type: "shutdown".to_string(),
-                    data: crate::events::ChainEventPayload::Wasm(
-                        crate::events::wasm::WasmEventData::WasmCall {
-                            function_name: "shutdown".to_string(),
-                            params: Value::Tuple(vec![]),
-                        },
+                    event_type: "terminated".to_string(),
+                    data: crate::events::ChainEventPayload::Lifecycle(
+                        crate::events::lifecycle::ActorLifecycleEvent::Terminated { cause },
                     ),
                 })
                 .await
