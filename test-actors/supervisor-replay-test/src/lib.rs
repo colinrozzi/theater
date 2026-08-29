@@ -2,14 +2,14 @@
 //!
 //! A deterministic actor that exercises supervisor host functions:
 //! - Imports `theater:simple/self.log`
-//! - Imports `theater:simple/supervisor.{spawn, list-children, stop-child}`
+//! - Imports `theater:simple/supervisor.{spawn, list-actors, stop-actor}`
 //! - Exports `theater:simple/actor.init`
 //! - Exports `theater:simple/message-server-client.handle-send`
-//! - Exports `theater:simple/supervisor-handlers.handle-child-external-stop`
+//! - Exports `theater:simple/supervisor-handlers.handle-actor-external-stop`
 //!
 //! Commands (sent as message bytes in handle-send):
 //! - `"spawn:<manifest_path>"` → spawn a child, store child_id in state
-//! - `"list"` → list children, log the count
+//! - `"list"` → list actors in view, log the count
 //! - `"stop"` → read child_id from state, stop it
 //!
 //! Used to test supervisor lifecycle replay with hash verification.
@@ -25,16 +25,35 @@ use packr_guest::{export, import, pack_types, Value, ValueType};
 
 packr_guest::setup_guest!();
 
-// Embed interface metadata for hash verification
+// Embed interface metadata for hash verification. The supervisor types below
+// mirror theater:simple/supervisor exactly (field/case names + order) so the
+// host's interface subset hash matches — get this wrong and the actor compiles
+// but fails to instantiate.
 pack_types! {
+    record actor-info {
+        id: string,
+        name: string,
+        parent-id: option<string>,
+    }
+
+    variant supervisor-error {
+        actor-not-found(string),
+        out-of-view(string),
+        permission-denied(string),
+        invalid-argument(string),
+        spawn-failed(string),
+        runtime-unavailable,
+        internal(string),
+    }
+
     imports {
         theater:simple/self {
             log: func(msg: string),
         }
         theater:simple/supervisor {
-            spawn: func(manifest: string, init-bytes: option<list<u8>>, wasm-bytes: option<list<u8>>) -> result<string, string>,
-            list-children: func() -> list<string>,
-            stop-child: func(child-id: string) -> result<_, string>,
+            spawn: func(manifest: string, init-state: option<value>, wasm-bytes: option<list<u8>>) -> result<string, supervisor-error>,
+            list-actors: func() -> result<list<actor-info>, supervisor-error>,
+            stop-actor: func(id: string) -> result<_, supervisor-error>,
         }
         theater:simple/message-server-host {
             register: func() -> result<_, string>,
@@ -43,7 +62,7 @@ pack_types! {
     exports {
         theater:simple/actor.init: func(state: option<list<u8>>) -> result<tuple<option<list<u8>>>, string>,
         theater:simple/message-server-client.handle-send: func(state: option<list<u8>>, params: tuple<string, list<u8>>) -> result<tuple<option<list<u8>>>, string>,
-        theater:simple/supervisor-handlers.handle-child-external-stop: func(state: option<list<u8>>, params: tuple<string>) -> result<tuple<option<list<u8>>>, string>,
+        theater:simple/supervisor-handlers.handle-actor-external-stop: func(state: option<list<u8>>, params: tuple<string>) -> result<tuple<option<list<u8>>>, string>,
     }
 }
 
@@ -54,14 +73,67 @@ pack_types! {
 #[import(module = "theater:simple/self", name = "log")]
 fn log(msg: String);
 
+// The supervisor ops return `result<T, supervisor-error>`; import them raw and
+// parse the Value so the actor can react to the structured error case.
 #[import(module = "theater:simple/supervisor", name = "spawn")]
-fn supervisor_spawn(manifest_path: String, init_bytes: Option<Vec<u8>>, wasm_bytes: Option<Vec<u8>>) -> Result<String, String>;
+fn supervisor_spawn_raw(
+    manifest_path: String,
+    init_state: Option<Value>,
+    wasm_bytes: Option<Vec<u8>>,
+) -> Value;
 
-#[import(module = "theater:simple/supervisor", name = "list-children")]
-fn supervisor_list_children() -> Vec<String>;
+#[import(module = "theater:simple/supervisor", name = "list-actors")]
+fn supervisor_list_actors_raw() -> Value;
 
-#[import(module = "theater:simple/supervisor", name = "stop-child")]
-fn supervisor_stop_child(child_id: String) -> Result<(), String>;
+#[import(module = "theater:simple/supervisor", name = "stop-actor")]
+fn supervisor_stop_actor_raw(id: String) -> Value;
+
+/// Render a `supervisor-error` variant Value as its case name.
+fn supervisor_error_case(v: Option<Value>) -> String {
+    match v {
+        Some(Value::Variant { case_name, .. }) => case_name,
+        _ => String::from("unknown"),
+    }
+}
+
+/// spawn -> Ok(child-id) | Err(case-name)
+fn supervisor_spawn(manifest_path: String) -> Result<String, String> {
+    match supervisor_spawn_raw(manifest_path, None, None) {
+        Value::Variant { tag: 0, payload, .. } => match payload.into_iter().next() {
+            Some(Value::String(id)) => Ok(id),
+            _ => Err(String::from("unexpected ok payload")),
+        },
+        Value::Variant { tag: 1, payload, .. } => {
+            Err(supervisor_error_case(payload.into_iter().next()))
+        }
+        _ => Err(String::from("unexpected result format")),
+    }
+}
+
+/// list-actors -> Ok(count) | Err(case-name)
+fn supervisor_list_actors_count() -> Result<usize, String> {
+    match supervisor_list_actors_raw() {
+        Value::Variant { tag: 0, payload, .. } => match payload.into_iter().next() {
+            Some(Value::List { items, .. }) => Ok(items.len()),
+            _ => Err(String::from("unexpected ok payload")),
+        },
+        Value::Variant { tag: 1, payload, .. } => {
+            Err(supervisor_error_case(payload.into_iter().next()))
+        }
+        _ => Err(String::from("unexpected result format")),
+    }
+}
+
+/// stop-actor -> Ok(()) | Err(case-name)
+fn supervisor_stop_actor(id: String) -> Result<(), String> {
+    match supervisor_stop_actor_raw(id) {
+        Value::Variant { tag: 0, .. } => Ok(()),
+        Value::Variant { tag: 1, payload, .. } => {
+            Err(supervisor_error_case(payload.into_iter().next()))
+        }
+        _ => Err(String::from("unexpected result format")),
+    }
+}
 
 #[import(module = "theater:simple/message-server-host", name = "register")]
 fn message_server_register() -> Result<(), String>;
@@ -69,6 +141,14 @@ fn message_server_register() -> Result<(), String>;
 // ============================================================================
 // State helpers
 // ============================================================================
+
+/// An empty actor state (`none`), used when init receives no prior state.
+fn empty_state() -> Value {
+    Value::Option {
+        inner_type: ValueType::List(alloc::boxed::Box::new(ValueType::U8)),
+        value: None,
+    }
+}
 
 /// Store the child_id string as state bytes.
 fn state_with_child_id(child_id: &str) -> Value {
@@ -106,11 +186,11 @@ fn child_id_from_state(state: &Value) -> Option<String> {
 
 #[export(name = "theater:simple/actor.init")]
 fn init(input: Value) -> Value {
+    // The runtime calls init with an empty params tuple; there is no prior
+    // state on first init, so default to an empty (none) state.
     let state = match input {
-        Value::Tuple(items) if !items.is_empty() => items.into_iter().next().unwrap(),
-        _ => {
-            return err_result("Invalid input format");
-        }
+        Value::Tuple(mut items) if !items.is_empty() => items.remove(0),
+        _ => empty_state(),
     };
 
     log(String::from("supervisor-replay-test: init called"));
@@ -160,7 +240,7 @@ fn handle_send(input: Value) -> Value {
             "supervisor-replay-test: spawning child from {}",
             manifest_path
         ));
-        match supervisor_spawn(String::from(manifest_path), None, None) {
+        match supervisor_spawn(String::from(manifest_path)) {
             Ok(child_id) => {
                 log(format!(
                     "supervisor-replay-test: spawned child {}",
@@ -175,12 +255,11 @@ fn handle_send(input: Value) -> Value {
             }
         }
     } else if msg == "list" {
-        log(String::from("supervisor-replay-test: listing children"));
-        let children = supervisor_list_children();
-        log(format!(
-            "supervisor-replay-test: children count: {}",
-            children.len()
-        ));
+        log(String::from("supervisor-replay-test: listing actors in view"));
+        match supervisor_list_actors_count() {
+            Ok(n) => log(format!("supervisor-replay-test: actor count: {}", n)),
+            Err(e) => log(format!("supervisor-replay-test: list error: {}", e)),
+        }
         return ok_state(state);
     } else if msg == "stop" {
         match child_id_from_state(&state) {
@@ -189,9 +268,9 @@ fn handle_send(input: Value) -> Value {
                     "supervisor-replay-test: stopping child {}",
                     child_id
                 ));
-                match supervisor_stop_child(child_id) {
+                match supervisor_stop_actor(child_id) {
                     Ok(()) => {
-                        log(String::from("supervisor-replay-test: stop-child succeeded"));
+                        log(String::from("supervisor-replay-test: stop-actor succeeded"));
                     }
                     Err(e) => {
                         log(format!("supervisor-replay-test: stop error: {}", e));
@@ -209,8 +288,8 @@ fn handle_send(input: Value) -> Value {
     ok_state(state)
 }
 
-#[export(name = "theater:simple/supervisor-handlers.handle-child-external-stop")]
-fn handle_child_external_stop(input: Value) -> Value {
+#[export(name = "theater:simple/supervisor-handlers.handle-actor-external-stop")]
+fn handle_actor_external_stop(input: Value) -> Value {
     let (state, params) = match input {
         Value::Tuple(mut items) if items.len() >= 2 => {
             let params = items.remove(1);
