@@ -266,7 +266,7 @@ fn authorize_cap(
 /// - List, restart, and stop children
 /// - Get child state
 /// - Receive notifications when children error, exit, or are stopped
-/// - Opt in to per-child chain-event delivery via `subscribe-to-child`
+/// - Opt in to per-child chain-event delivery via `subscribe-to-actor`
 ///   (default is opt-out: a freshly-spawned child sends no chain
 ///   events to its parent until the parent subscribes)
 /// - Clean up children on shutdown
@@ -726,7 +726,7 @@ impl Handler for SupervisorHandler {
                         };
                         // Default opt-out: a fresh child does not send chain
                         // events to its parent. Parents that want per-event
-                        // visibility call `subscribe-to-child` after the
+                        // visibility call `subscribe-to-actor` after the
                         // spawn returns. Lifecycle still flows through
                         // `supervisor_tx`.
                         let cmd = TheaterCommand::SpawnActor {

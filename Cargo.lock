@@ -3456,8 +3456,6 @@ name = "theater-handler-runtime"
 version = "0.3.0"
 dependencies = [
  "anyhow",
- "serde",
- "serde_json",
  "theater",
  "thiserror 2.0.18",
  "tokio",
