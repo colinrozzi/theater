@@ -1,6 +1,32 @@
+use crate::actor::runtime::ActorRuntimeError;
 use crate::actor::ActorError;
 use crate::id::TheaterId;
 use thiserror::Error;
+
+/// Why an actor failed to spawn. Carries the structured cause from the phase
+/// that failed so callers (the supervisor handler) can react to the specific
+/// reason instead of substring-matching a flattened string. Sent back over
+/// `SpawnActor`/`SetupActor`'s `response_tx`.
+#[derive(Debug, Error)]
+pub enum SpawnError {
+    /// Building the actor's handler registry from its manifest failed.
+    #[error("failed to build handler registry: {0}")]
+    HandlerRegistry(String),
+
+    /// The actor failed to set up — wasm instantiation, interface-hash
+    /// verification, missing `__pack_types` metadata, etc. (see the variant).
+    #[error(transparent)]
+    Setup(#[from] ActorRuntimeError),
+
+    /// The setup task ended without reporting a result (it panicked or was
+    /// dropped before signalling success or failure).
+    #[error("actor setup task ended without reporting a result")]
+    SetupChannelClosed,
+
+    /// The actor's `init` export returned an error or trapped.
+    #[error("actor.init failed: {0}")]
+    Init(#[from] ActorError),
+}
 
 /// # Theater Runtime Error
 ///

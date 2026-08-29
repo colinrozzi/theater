@@ -165,7 +165,7 @@ pub enum TheaterCommand {
         name: Option<String>,
         manifest: Option<ManifestConfig>,
         init_state: Value,
-        response_tx: oneshot::Sender<Result<TheaterId>>,
+        response_tx: oneshot::Sender<std::result::Result<TheaterId, crate::errors::SpawnError>>,
         supervisor_tx: Option<Sender<ActorResult>>,
         subscription_tx: Option<Sender<(TheaterId, ChainEvent)>>,
         /// Id of the actor that spawned this one (the supervisor parent).
@@ -192,7 +192,7 @@ pub enum TheaterCommand {
         name: Option<String>,
         manifest: Option<ManifestConfig>,
         init_state: Value,
-        response_tx: oneshot::Sender<Result<TheaterId>>,
+        response_tx: oneshot::Sender<std::result::Result<TheaterId, crate::errors::SpawnError>>,
         supervisor_tx: Option<Sender<ActorResult>>,
         subscription_tx: Option<Sender<(TheaterId, ChainEvent)>>,
         /// Id of the actor that spawned this one (the supervisor parent).

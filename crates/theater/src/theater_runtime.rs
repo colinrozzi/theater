@@ -5,7 +5,7 @@
 //! the entire system.
 
 use crate::actor::handle::ActorHandle;
-use crate::actor::runtime::ActorRuntime;
+use crate::actor::runtime::{ActorRuntime, ActorRuntimeError};
 use crate::actor::types::{ActorControl, ActorError, ActorInfo, ActorOperation};
 use crate::chain::ChainEvent;
 use crate::config::actor_manifest::HandlerConfig;
@@ -21,8 +21,8 @@ use crate::replay::ReplayHandler;
 use crate::shutdown::{ShutdownController, ShutdownType};
 use crate::utils::ResourceCache;
 use crate::Result;
-use crate::TheaterRuntimeError;
 use crate::{ManifestConfig, StateChain};
+use crate::{SpawnError, TheaterRuntimeError};
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -77,7 +77,6 @@ const INIT_WATCHDOG_WARN_INTERVAL: Duration = Duration::from_secs(30);
 ///     let mut runtime = TheaterRuntime::new(
 ///         theater_tx.clone(),
 ///         theater_rx,
-///         None,
 ///         HandlerRegistry::new(),
 ///         Arc::new(ResourceCache::new()),
 ///     ).await?;
@@ -721,7 +720,7 @@ impl TheaterRuntime {
         supervisor_tx: Option<Sender<ActorResult>>,
         subscription_tx: Option<Sender<(TheaterId, ChainEvent)>>,
         parent_id: Option<TheaterId>,
-        response_tx: oneshot::Sender<Result<TheaterId>>,
+        response_tx: oneshot::Sender<std::result::Result<TheaterId, SpawnError>>,
     ) {
         let actor_name = name.unwrap_or_else(|| "<unnamed>".to_string());
         debug!("Starting actor spawn process for: {}", actor_name);
@@ -779,10 +778,7 @@ impl TheaterRuntime {
                 Ok(r) => r,
                 Err(e) => {
                     error!("Failed to build handler registry: {}", e);
-                    let _ = response_tx.send(Err(anyhow::anyhow!(
-                        "Failed to build handler registry: {}",
-                        e
-                    )));
+                    let _ = response_tx.send(Err(SpawnError::HandlerRegistry(format!("{}", e))));
                     return;
                 }
             }
@@ -807,7 +803,7 @@ impl TheaterRuntime {
         let pack_runtime = self.pack_runtime.clone();
 
         // Create channel to receive setup result
-        let (setup_tx, setup_rx) = tokio::sync::oneshot::channel::<Result<(), String>>();
+        let (setup_tx, setup_rx) = tokio::sync::oneshot::channel::<Result<(), ActorRuntimeError>>();
 
         let phase_start = Instant::now();
         let actor_runtime_process = tokio::spawn(async move {
@@ -844,13 +840,13 @@ impl TheaterRuntime {
             }
             Ok(Err(e)) => {
                 error!("Actor {} setup failed: {}", actor_id, e);
-                let _ = response_tx.send(Err(anyhow::anyhow!("Actor setup failed: {}", e)));
+                // The structured setup error rides response_tx directly now.
+                let _ = response_tx.send(Err(SpawnError::Setup(e)));
                 return;
             }
             Err(_) => {
                 error!("Actor {} setup channel closed unexpectedly", actor_id);
-                let _ =
-                    response_tx.send(Err(anyhow::anyhow!("Actor setup failed: channel closed")));
+                let _ = response_tx.send(Err(SpawnError::SetupChannelClosed));
                 return;
             }
         }
@@ -960,7 +956,7 @@ impl TheaterRuntime {
                     }
                     Err(e) => {
                         error!("Actor {} init failed: {}", actor_id, e);
-                        let _ = response_tx.send(Err(anyhow::anyhow!("actor.init failed: {}", e)));
+                        let _ = response_tx.send(Err(SpawnError::Init(e)));
                     }
                 }
             });

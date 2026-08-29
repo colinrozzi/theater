@@ -63,7 +63,7 @@ pub use config::actor_manifest::{
     HandlerConfig, HttpServerHandlerConfig, InterfacesConfig, ManifestConfig, MessageServerConfig,
     RandomHandlerConfig,
 };
-pub use errors::TheaterRuntimeError;
+pub use errors::{SpawnError, TheaterRuntimeError};
 pub use id::TheaterId;
 pub use metrics::{
     ActorMetrics, MetricsCollector, OperationMetrics, OperationStats, ResourceMetrics,
