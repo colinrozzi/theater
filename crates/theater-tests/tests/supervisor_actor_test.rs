@@ -329,3 +329,58 @@ async fn runtime_serves_the_supervision_tree() {
     assert_eq!(get_descendants(&theater_tx, child).await.len(), 1);
     assert!(get_descendants(&theater_tx, grandchild).await.is_empty());
 }
+
+async fn stop_actor(theater_tx: &mpsc::Sender<TheaterCommand>, id: theater::id::TheaterId) {
+    let (tx, rx) = oneshot::channel();
+    theater_tx
+        .send(TheaterCommand::StopActor {
+            actor_id: id,
+            response_tx: tx,
+        })
+        .await
+        .expect("send StopActor");
+    // StopActor deregisters the actor before it responds.
+    let _ = tokio::time::timeout(SPAWN_TIMEOUT, rx)
+        .await
+        .expect("stop timed out");
+}
+
+/// The maintained `parent -> children` index stays a faithful inverse of the
+/// live parent_id edges as actors die. Stopping a mid-tree node (which runs no
+/// supervisor handler, so nothing cascades) detaches it from its parent's
+/// subtree and leaves its child orphaned — exactly the gap the authoritative
+/// cascade will close.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn runtime_tree_index_updates_on_actor_death() {
+    let _ = tracing_subscriber::fmt().with_env_filter("info").try_init();
+    let temp = tempfile::tempdir().expect("temp dir");
+    std::env::set_var("THEATER_HOME", temp.path());
+
+    let theater_tx = start_runtime();
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    let path = wasm_path("state-test", "state_test_actor.wasm");
+    let wasm = std::fs::read(&path).unwrap_or_else(|e| panic!("read {}: {}", path, e));
+
+    let parent = spawn_with_parent(&theater_tx, wasm.clone(), "d-parent", None).await;
+    let child = spawn_with_parent(&theater_tx, wasm.clone(), "d-child", Some(parent)).await;
+    let grandchild =
+        spawn_with_parent(&theater_tx, wasm.clone(), "d-grandchild", Some(child)).await;
+
+    assert_eq!(get_descendants(&theater_tx, parent).await.len(), 2);
+
+    // Kill the middle node; its state-test child runs no supervisor handler, so
+    // there is no cascade — the grandchild is orphaned.
+    stop_actor(&theater_tx, child).await;
+
+    let after = get_descendants(&theater_tx, parent).await;
+    assert!(
+        !after.contains(&child),
+        "dead child detached from parent's subtree"
+    );
+    assert!(
+        !after.contains(&grandchild),
+        "grandchild orphaned under the dead child (no cascade yet)"
+    );
+    assert!(!is_descendant(&theater_tx, parent, child).await);
+}

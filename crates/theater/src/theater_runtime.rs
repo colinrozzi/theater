@@ -113,6 +113,12 @@ const INIT_WATCHDOG_WARN_INTERVAL: Duration = Duration::from_secs(30);
 pub struct TheaterRuntime {
     /// Map of active actors indexed by their ID
     actors: HashMap<TheaterId, ActorProcess>,
+    /// Maintained `parent -> direct children` index: the live inverse of the
+    /// `parent_id` edges on [`ActorProcess`]. Kept in sync at the two choke
+    /// points [`Self::register_actor`] / [`Self::deregister_actor`] so subtree
+    /// queries (and, later, the cascade) are O(subtree) instead of an O(N)
+    /// rebuild per call. `actors` + this index are the supervision tree.
+    children: HashMap<TheaterId, HashSet<TheaterId>>,
     /// Map of chains index by actor ID
     chains: HashMap<TheaterId, Arc<RwLock<StateChain>>>,
     /// Runtime-wide spawn-notification subscribers. Every actor spawned
@@ -243,6 +249,7 @@ impl TheaterRuntime {
             theater_tx,
             theater_rx,
             actors: HashMap::new(),
+            children: HashMap::new(),
             chains: HashMap::new(),
             spawn_subscribers: Vec::new(),
             channels: HashMap::new(),
@@ -500,7 +507,7 @@ impl TheaterRuntime {
                     info!("ActorShutdownComplete for {:?}, cleaning up", actor_id);
 
                     // Signal handlers to shut down and remove from maps
-                    if let Some(proc) = self.actors.remove(&actor_id) {
+                    if let Some(proc) = self.deregister_actor(&actor_id) {
                         proc.shutdown_controller
                             .signal_shutdown(ShutdownType::Graceful)
                             .await;
@@ -709,29 +716,57 @@ impl TheaterRuntime {
         false
     }
 
-    /// Collect `root`'s strict descendants as `(id, name, parent-id)` rows.
-    /// Builds child-adjacency in one O(N) pass, then traverses the subtree.
+    /// Collect `root`'s strict descendants as `(id, name, parent-id)` rows by
+    /// walking the maintained `children` index. O(subtree) — no per-call rebuild.
+    /// The `seen` set is defensive only; the parent_id edges form a tree.
     fn descendants_of(&self, root: &TheaterId) -> Vec<ActorTreeRow> {
-        let mut children: HashMap<TheaterId, Vec<TheaterId>> = HashMap::new();
-        for (id, proc) in &self.actors {
-            if let Some(p) = proc.parent_id {
-                children.entry(p).or_default().push(*id);
-            }
-        }
         let mut out = Vec::new();
         let mut seen = HashSet::new();
-        let mut stack: Vec<TheaterId> = children.get(root).cloned().unwrap_or_default();
+        let mut stack: Vec<TheaterId> = self
+            .children
+            .get(root)
+            .map(|kids| kids.iter().copied().collect())
+            .unwrap_or_default();
         while let Some(id) = stack.pop() {
             if seen.insert(id) {
                 if let Some(proc) = self.actors.get(&id) {
                     out.push((id, proc.name.clone(), proc.parent_id));
                 }
-                if let Some(kids) = children.get(&id) {
+                if let Some(kids) = self.children.get(&id) {
                     stack.extend(kids.iter().copied());
                 }
             }
         }
         out
+    }
+
+    /// Insert an actor and maintain the `children` index. Together with
+    /// [`Self::deregister_actor`] these are the ONLY places the supervision tree
+    /// mutates — route every actor add/remove through them or the index drifts.
+    fn register_actor(&mut self, process: ActorProcess) {
+        let id = process.actor_id;
+        if let Some(parent) = process.parent_id {
+            self.children.entry(parent).or_default().insert(id);
+        }
+        self.actors.insert(id, process);
+    }
+
+    /// Remove an actor and maintain the `children` index: detach it from its
+    /// parent's child set. Its OWN `children` entry is intentionally left — any
+    /// (now orphaned) children still carry `parent_id == actor_id` and are
+    /// pruned as they each exit; it's also exactly the set a cascade would stop.
+    /// Returns the removed process, if the actor was present.
+    fn deregister_actor(&mut self, actor_id: &TheaterId) -> Option<ActorProcess> {
+        let proc = self.actors.remove(actor_id)?;
+        if let Some(parent) = proc.parent_id {
+            if let Some(set) = self.children.get_mut(&parent) {
+                set.remove(actor_id);
+                if set.is_empty() {
+                    self.children.remove(&parent);
+                }
+            }
+        }
+        Some(proc)
     }
 
     /// Spawns a new actor from WASM bytes.
@@ -930,7 +965,7 @@ impl TheaterRuntime {
             parent_id,
         };
 
-        self.actors.insert(actor_id, process);
+        self.register_actor(process);
         debug!("Actor process registered with runtime");
 
         // Notify runtime-wide spawn subscribers (births only); reap closed ones.
@@ -1179,7 +1214,7 @@ impl TheaterRuntime {
 
         // Remove from map now, after actor runtime has shut down but before waiting on handlers
         // This ensures the actor is removed from the registry while handlers clean up
-        let proc = self.actors.remove(&actor_id).unwrap(); // Safe - we just checked it exists
+        let proc = self.deregister_actor(&actor_id).unwrap(); // Safe - we just checked it exists
 
         proc.shutdown_controller
             .signal_shutdown(shutdown_type)
