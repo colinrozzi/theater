@@ -206,3 +206,181 @@ async fn supervisor_replay_actor_instantiates_against_reshaped_supervisor() {
         result.err()
     );
 }
+
+/// Spawn a plain state-test actor with an explicit parent, to build a tree.
+async fn spawn_with_parent(
+    theater_tx: &mpsc::Sender<TheaterCommand>,
+    wasm: Vec<u8>,
+    name: &str,
+    parent: Option<theater::id::TheaterId>,
+) -> theater::id::TheaterId {
+    let manifest = ManifestConfig {
+        name: name.to_string(),
+        version: "0.1.0".to_string(),
+        package: String::new(),
+        description: None,
+        long_description: None,
+        initial_state: None,
+        static_package: false,
+        permission_policy: HandlerPermissionPolicy::default(),
+        handlers: vec![HandlerConfig::SelfHandler {
+            config: SelfHostConfig {},
+        }],
+    };
+    let (tx, rx) = oneshot::channel();
+    theater_tx
+        .send(TheaterCommand::SpawnActor {
+            wasm_bytes: wasm,
+            name: Some(name.to_string()),
+            manifest: Some(manifest),
+            init_state: default_init_state(),
+            response_tx: tx,
+            supervisor_tx: None,
+            subscription_tx: None,
+            parent_id: parent,
+        })
+        .await
+        .expect("send SpawnActor");
+    tokio::time::timeout(SPAWN_TIMEOUT, rx)
+        .await
+        .expect("spawn timed out")
+        .expect("spawn channel closed")
+        .expect("spawn failed")
+}
+
+async fn is_descendant(
+    theater_tx: &mpsc::Sender<TheaterCommand>,
+    ancestor: theater::id::TheaterId,
+    target: theater::id::TheaterId,
+) -> bool {
+    let (tx, rx) = oneshot::channel();
+    theater_tx
+        .send(TheaterCommand::IsDescendant {
+            ancestor,
+            target,
+            response_tx: tx,
+        })
+        .await
+        .expect("send IsDescendant");
+    rx.await.expect("recv").expect("is_descendant ok")
+}
+
+async fn get_descendants(
+    theater_tx: &mpsc::Sender<TheaterCommand>,
+    root: theater::id::TheaterId,
+) -> std::collections::HashSet<theater::id::TheaterId> {
+    let (tx, rx) = oneshot::channel();
+    theater_tx
+        .send(TheaterCommand::GetDescendants {
+            root,
+            response_tx: tx,
+        })
+        .await
+        .expect("send GetDescendants");
+    rx.await
+        .expect("recv")
+        .expect("get_descendants ok")
+        .into_iter()
+        .map(|(id, _, _)| id)
+        .collect()
+}
+
+/// The runtime owns + serves the supervision tree: IsDescendant / GetDescendants
+/// answered from its own actor map over a real 3-level tree (parent → child →
+/// grandchild) built via SpawnActor's parent_id.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn runtime_serves_the_supervision_tree() {
+    let _ = tracing_subscriber::fmt().with_env_filter("info").try_init();
+    let temp = tempfile::tempdir().expect("temp dir");
+    std::env::set_var("THEATER_HOME", temp.path());
+
+    let theater_tx = start_runtime();
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    let path = wasm_path("state-test", "state_test_actor.wasm");
+    let wasm = std::fs::read(&path).unwrap_or_else(|e| panic!("read {}: {}", path, e));
+
+    let parent = spawn_with_parent(&theater_tx, wasm.clone(), "tree-parent", None).await;
+    let child = spawn_with_parent(&theater_tx, wasm.clone(), "tree-child", Some(parent)).await;
+    let grandchild =
+        spawn_with_parent(&theater_tx, wasm.clone(), "tree-grandchild", Some(child)).await;
+
+    // is-descendant: transitive down, never up.
+    assert!(is_descendant(&theater_tx, parent, child).await);
+    assert!(is_descendant(&theater_tx, parent, grandchild).await);
+    assert!(is_descendant(&theater_tx, child, grandchild).await);
+    assert!(!is_descendant(&theater_tx, child, parent).await);
+    assert!(!is_descendant(&theater_tx, grandchild, parent).await);
+    assert!(!is_descendant(&theater_tx, parent, parent).await); // strict
+
+    // get-descendants: strict subtree.
+    let from_parent = get_descendants(&theater_tx, parent).await;
+    assert_eq!(
+        from_parent.len(),
+        2,
+        "parent's subtree = child + grandchild"
+    );
+    assert!(from_parent.contains(&child) && from_parent.contains(&grandchild));
+    assert!(
+        !from_parent.contains(&parent),
+        "descendants exclude the root"
+    );
+
+    assert_eq!(get_descendants(&theater_tx, child).await.len(), 1);
+    assert!(get_descendants(&theater_tx, grandchild).await.is_empty());
+}
+
+async fn stop_actor(theater_tx: &mpsc::Sender<TheaterCommand>, id: theater::id::TheaterId) {
+    let (tx, rx) = oneshot::channel();
+    theater_tx
+        .send(TheaterCommand::StopActor {
+            actor_id: id,
+            response_tx: tx,
+        })
+        .await
+        .expect("send StopActor");
+    // StopActor deregisters the actor before it responds.
+    let _ = tokio::time::timeout(SPAWN_TIMEOUT, rx)
+        .await
+        .expect("stop timed out");
+}
+
+/// The maintained `parent -> children` index stays a faithful inverse of the
+/// live parent_id edges as actors die. Stopping a mid-tree node (which runs no
+/// supervisor handler, so nothing cascades) detaches it from its parent's
+/// subtree and leaves its child orphaned — exactly the gap the authoritative
+/// cascade will close.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn runtime_tree_index_updates_on_actor_death() {
+    let _ = tracing_subscriber::fmt().with_env_filter("info").try_init();
+    let temp = tempfile::tempdir().expect("temp dir");
+    std::env::set_var("THEATER_HOME", temp.path());
+
+    let theater_tx = start_runtime();
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    let path = wasm_path("state-test", "state_test_actor.wasm");
+    let wasm = std::fs::read(&path).unwrap_or_else(|e| panic!("read {}: {}", path, e));
+
+    let parent = spawn_with_parent(&theater_tx, wasm.clone(), "d-parent", None).await;
+    let child = spawn_with_parent(&theater_tx, wasm.clone(), "d-child", Some(parent)).await;
+    let grandchild =
+        spawn_with_parent(&theater_tx, wasm.clone(), "d-grandchild", Some(child)).await;
+
+    assert_eq!(get_descendants(&theater_tx, parent).await.len(), 2);
+
+    // Kill the middle node; its state-test child runs no supervisor handler, so
+    // there is no cascade — the grandchild is orphaned.
+    stop_actor(&theater_tx, child).await;
+
+    let after = get_descendants(&theater_tx, parent).await;
+    assert!(
+        !after.contains(&child),
+        "dead child detached from parent's subtree"
+    );
+    assert!(
+        !after.contains(&grandchild),
+        "grandchild orphaned under the dead child (no cascade yet)"
+    );
+    assert!(!is_descendant(&theater_tx, parent, child).await);
+}
