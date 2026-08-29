@@ -7,7 +7,7 @@
 //!
 //! Capability-gated by [`RuntimePermissions`] `{ inspect, mutate }` — the first
 //! real runtime-side permission enforcement. inspect = list/get/subscribe;
-//! mutate = spawn/resume/stop/kill/restart. History is NOT served here: the
+//! mutate = spawn/stop/kill/restart. History is NOT served here: the
 //! runtime retains no chain, so a subscriber accumulates chain events live via
 //! `subscribe-to-actor` (delivered to its `handle-actor-event` export) and
 //! persists them itself. A terminal event always reaches subscribers before the
@@ -538,49 +538,6 @@ impl Handler for RuntimeHandler {
                             })
                             .await
                             .map_err(|e| Value::String(format!("Failed to send spawn: {}", e)))?;
-                        match response_rx.await {
-                            Ok(Ok(id)) => Ok(Value::String(id.to_string())),
-                            Ok(Err(e)) => Err(Value::String(e.to_string())),
-                            Err(e) => Err(Value::String(format!("Failed to receive: {}", e))),
-                        }
-                    }
-                }
-            })?
-            // resume: func(manifest: string, option<list<u8>>) -> result<string, string>
-            .func_async_result("resume", {
-                let permissions = permissions.clone();
-                move |ctx: AsyncCtx<ActorStore>, input: Value| {
-                    let permissions = permissions.clone();
-                    async move {
-                        require(&permissions, true)?;
-                        let (manifest_path, wasm_bytes) = match input {
-                            Value::Tuple(args) if args.len() == 2 => {
-                                let wasm = parse_optional_bytes(&args[1]);
-                                let manifest = match &args[0] {
-                                    Value::String(s) => s.clone(),
-                                    _ => return Err(Value::String("Invalid manifest argument".to_string())),
-                                };
-                                (manifest, wasm)
-                            }
-                            _ => {
-                                return Err(Value::String(
-                                    "Invalid resume arguments: expected (string, option<list<u8>>)"
-                                        .to_string(),
-                                ))
-                            }
-                        };
-                        let theater_tx = ctx.data().theater_tx.clone();
-                        let (response_tx, response_rx) = oneshot::channel();
-                        theater_tx
-                            .send(TheaterCommand::ResumeActor {
-                                manifest_path,
-                                wasm_bytes,
-                                response_tx,
-                                supervisor_tx: None,
-                                subscription_tx: None,
-                            })
-                            .await
-                            .map_err(|e| Value::String(format!("Failed to send resume: {}", e)))?;
                         match response_rx.await {
                             Ok(Ok(id)) => Ok(Value::String(id.to_string())),
                             Ok(Err(e)) => Err(Value::String(e.to_string())),

@@ -45,11 +45,11 @@ interface runtime {
         // --- MUTATE (requires RuntimePermissions.mutate) ---
 
         // Spawn a new actor from a manifest (setup + init); returns its id.
+        // Recovery is just a spawn: to bring an actor back, start a NEW one
+        // (its manifest may configure replay to rebuild prior state). Reading
+        // or replaying persisted history is the recorder's domain, not the
+        // runtime's — hence no `resume` and no `get-actor-chain` here.
         spawn: func(manifest: string, init-state: option<value>, wasm-bytes: option<list<u8>>) -> result<string, string>
-
-        // Resume an actor: state is rebuilt by REPLAYING the recorded chain
-        // via the manifest's replay handler (not a state blob). Returns the id.
-        resume: func(manifest: string, wasm-bytes: option<list<u8>>) -> result<string, string>
 
         // Single-actor lifecycle control by id.
         stop-actor: func(id: string) -> result<_, string>
