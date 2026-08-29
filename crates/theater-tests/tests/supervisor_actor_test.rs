@@ -87,7 +87,7 @@ async fn spawn_actor(
     name: &str,
     wasm_path: &str,
     manifest: ManifestConfig,
-) -> anyhow::Result<theater::id::TheaterId> {
+) -> std::result::Result<theater::id::TheaterId, theater::SpawnError> {
     let wasm_bytes = std::fs::read(wasm_path).unwrap_or_else(|e| {
         panic!(
             "Failed to read {} wasm at {}: {}. Build it: \

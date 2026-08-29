@@ -21,8 +21,8 @@ use crate::replay::ReplayHandler;
 use crate::shutdown::{ShutdownController, ShutdownType};
 use crate::utils::ResourceCache;
 use crate::Result;
-use crate::TheaterRuntimeError;
 use crate::{ManifestConfig, StateChain};
+use crate::{SpawnError, TheaterRuntimeError};
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -720,7 +720,7 @@ impl TheaterRuntime {
         supervisor_tx: Option<Sender<ActorResult>>,
         subscription_tx: Option<Sender<(TheaterId, ChainEvent)>>,
         parent_id: Option<TheaterId>,
-        response_tx: oneshot::Sender<Result<TheaterId>>,
+        response_tx: oneshot::Sender<std::result::Result<TheaterId, SpawnError>>,
     ) {
         let actor_name = name.unwrap_or_else(|| "<unnamed>".to_string());
         debug!("Starting actor spawn process for: {}", actor_name);
@@ -778,10 +778,7 @@ impl TheaterRuntime {
                 Ok(r) => r,
                 Err(e) => {
                     error!("Failed to build handler registry: {}", e);
-                    let _ = response_tx.send(Err(anyhow::anyhow!(
-                        "Failed to build handler registry: {}",
-                        e
-                    )));
+                    let _ = response_tx.send(Err(SpawnError::HandlerRegistry(format!("{}", e))));
                     return;
                 }
             }
@@ -843,16 +840,13 @@ impl TheaterRuntime {
             }
             Ok(Err(e)) => {
                 error!("Actor {} setup failed: {}", actor_id, e);
-                // Preserve the structured ActorRuntimeError as the anyhow source
-                // (downcastable) instead of flattening it to a string. Step 3
-                // re-types response_tx to carry it without the anyhow wrapper.
-                let _ = response_tx.send(Err(anyhow::Error::new(e).context("Actor setup failed")));
+                // The structured setup error rides response_tx directly now.
+                let _ = response_tx.send(Err(SpawnError::Setup(e)));
                 return;
             }
             Err(_) => {
                 error!("Actor {} setup channel closed unexpectedly", actor_id);
-                let _ =
-                    response_tx.send(Err(anyhow::anyhow!("Actor setup failed: channel closed")));
+                let _ = response_tx.send(Err(SpawnError::SetupChannelClosed));
                 return;
             }
         }
@@ -962,7 +956,7 @@ impl TheaterRuntime {
                     }
                     Err(e) => {
                         error!("Actor {} init failed: {}", actor_id, e);
-                        let _ = response_tx.send(Err(anyhow::anyhow!("actor.init failed: {}", e)));
+                        let _ = response_tx.send(Err(SpawnError::Init(e)));
                     }
                 }
             });
