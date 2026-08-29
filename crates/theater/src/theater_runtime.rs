@@ -77,7 +77,6 @@ const INIT_WATCHDOG_WARN_INTERVAL: Duration = Duration::from_secs(30);
 ///     let mut runtime = TheaterRuntime::new(
 ///         theater_tx.clone(),
 ///         theater_rx,
-///         None,
 ///         HandlerRegistry::new(),
 ///         Arc::new(ResourceCache::new()),
 ///     ).await?;
