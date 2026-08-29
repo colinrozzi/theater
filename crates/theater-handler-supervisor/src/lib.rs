@@ -9,7 +9,7 @@ use theater::actor::store::ActorStore;
 use theater::actor::types::ActorError;
 use theater::chain::ChainEvent;
 use theater::config::actor_manifest::SupervisorHostConfig;
-use theater::config::permissions::SupervisorPermissions;
+use theater::config::permissions::{SupervisorPermissions, ViewScope};
 use theater::handler::{Handler, HandlerContext, SharedActorInstance};
 use theater::messages::{default_init_state, ActorResult, TheaterCommand};
 use theater::shutdown::ShutdownReceiver;
@@ -100,17 +100,168 @@ fn supervisor_interface() -> InterfaceImpl {
     InterfaceImpl::from_pact(&pact)
 }
 
-/// Errors that can occur during supervisor operations
-#[derive(Error, Debug)]
+/// Interface error for `theater:simple/supervisor` — mirrors the
+/// `supervisor-error` pact variant. A normal Rust enum used with `?` throughout
+/// the ops; the single `From<SupervisorError> for Value` below is the only
+/// place a pact error value is built.
+#[derive(Debug, Error)]
 pub enum SupervisorError {
-    #[error("Handler error: {0}")]
-    HandlerError(String),
+    #[error("actor not found: {0}")]
+    ActorNotFound(String),
+    #[error("out of view: {0}")]
+    OutOfView(String),
+    #[error("permission denied: {0}")]
+    PermissionDenied(String),
+    #[error("invalid argument: {0}")]
+    InvalidArgument(String),
+    #[error("spawn failed: {0}")]
+    SpawnFailed(String),
+    #[error("internal error: {0}")]
+    Internal(String),
+}
 
-    #[error("Actor error: {0}")]
-    ActorError(#[from] ActorError),
+/// The single translation from the Rust error to the `supervisor-error` pact
+/// variant. Tags match the declaration order in supervisor.pact.
+impl From<SupervisorError> for Value {
+    fn from(e: SupervisorError) -> Value {
+        let (tag, case, msg) = match e {
+            SupervisorError::ActorNotFound(m) => (0, "actor-not-found", m),
+            SupervisorError::OutOfView(m) => (1, "out-of-view", m),
+            SupervisorError::PermissionDenied(m) => (2, "permission-denied", m),
+            SupervisorError::InvalidArgument(m) => (3, "invalid-argument", m),
+            SupervisorError::SpawnFailed(m) => (4, "spawn-failed", m),
+            SupervisorError::Internal(m) => (5, "internal", m),
+        };
+        Value::Variant {
+            type_name: "supervisor-error".to_string(),
+            case_name: case.to_string(),
+            tag,
+            payload: vec![Value::String(msg)],
+        }
+    }
+}
 
-    #[error("Serialization error: {0}")]
-    SerializationError(#[from] serde_json::Error),
+/// Parse a single `id: string` arg (bare or 1-tuple) into a TheaterId.
+fn parse_id_arg(input: Value, op: &str) -> Result<TheaterId, SupervisorError> {
+    let s = match input {
+        Value::String(s) => s,
+        Value::Tuple(a) if a.len() == 1 => match &a[0] {
+            Value::String(s) => s.clone(),
+            _ => {
+                return Err(SupervisorError::InvalidArgument(format!(
+                    "{}: expected an actor id string",
+                    op
+                )))
+            }
+        },
+        _ => {
+            return Err(SupervisorError::InvalidArgument(format!(
+                "{}: expected an actor id string",
+                op
+            )))
+        }
+    };
+    s.parse()
+        .map_err(|e| SupervisorError::InvalidArgument(format!("invalid actor id: {}", e)))
+}
+
+/// Fetch the runtime's actor list: (id, name, parent-id).
+async fn get_actors(
+    theater_tx: &mpsc::Sender<TheaterCommand>,
+) -> Result<Vec<(TheaterId, String, Option<TheaterId>)>, SupervisorError> {
+    let (tx, rx) = oneshot::channel();
+    theater_tx
+        .send(TheaterCommand::GetActors { response_tx: tx })
+        .await
+        .map_err(|e| SupervisorError::Internal(format!("failed to query actors: {}", e)))?;
+    match rx.await {
+        Ok(Ok(v)) => Ok(v),
+        Ok(Err(e)) => Err(SupervisorError::Internal(e.to_string())),
+        Err(e) => Err(SupervisorError::Internal(format!(
+            "failed to receive actor list: {}",
+            e
+        ))),
+    }
+}
+
+/// Is `target` in `caller`'s subtree (caller a strict ancestor of target)?
+fn in_subtree(
+    actors: &[(TheaterId, String, Option<TheaterId>)],
+    caller: TheaterId,
+    target: TheaterId,
+) -> bool {
+    let parent: std::collections::HashMap<TheaterId, Option<TheaterId>> =
+        actors.iter().map(|(id, _, p)| (*id, *p)).collect();
+    let mut cur = parent.get(&target).copied().flatten();
+    let mut guard = 0;
+    while let Some(c) = cur {
+        if c == caller {
+            return true;
+        }
+        cur = parent.get(&c).copied().flatten();
+        guard += 1;
+        if guard > 10_000 {
+            break; // cycle safety
+        }
+    }
+    false
+}
+
+/// Capability + scope gate for a single-target op. `scope: all` short-circuits;
+/// `scope: subtree` walks the tree and rejects targets outside the caller's view.
+async fn authorize(
+    theater_tx: &mpsc::Sender<TheaterCommand>,
+    perms: &Option<SupervisorPermissions>,
+    caller: TheaterId,
+    target: TheaterId,
+    mutate: bool,
+) -> Result<(), SupervisorError> {
+    let p = perms
+        .as_ref()
+        .ok_or_else(|| SupervisorError::PermissionDenied("supervisor capability not granted".into()))?;
+    if mutate && !p.mutate {
+        return Err(SupervisorError::PermissionDenied(
+            "mutate capability not granted".into(),
+        ));
+    }
+    if !mutate && !p.inspect {
+        return Err(SupervisorError::PermissionDenied(
+            "inspect capability not granted".into(),
+        ));
+    }
+    if p.scope == ViewScope::All {
+        return Ok(());
+    }
+    let actors = get_actors(theater_tx).await?;
+    if in_subtree(&actors, caller, target) {
+        Ok(())
+    } else {
+        Err(SupervisorError::OutOfView(format!(
+            "actor {} is not in the caller's view",
+            target
+        )))
+    }
+}
+
+/// Capability gate for a no-target op (list-actors). Returns the granted perms.
+fn authorize_cap(
+    perms: &Option<SupervisorPermissions>,
+    mutate: bool,
+) -> Result<&SupervisorPermissions, SupervisorError> {
+    let p = perms
+        .as_ref()
+        .ok_or_else(|| SupervisorError::PermissionDenied("supervisor capability not granted".into()))?;
+    if mutate && !p.mutate {
+        return Err(SupervisorError::PermissionDenied(
+            "mutate capability not granted".into(),
+        ));
+    }
+    if !mutate && !p.inspect {
+        return Err(SupervisorError::PermissionDenied(
+            "inspect capability not granted".into(),
+        ));
+    }
+    Ok(p)
 }
 
 /// The SupervisorHandler provides child actor management capabilities.
@@ -422,6 +573,7 @@ impl Handler for SupervisorHandler {
         let children = self.children.clone();
         let theater_tx_holder = self.theater_tx.clone();
         let resource_cache = self.resource_cache.clone();
+        let permissions = self.permissions.clone();
 
         builder.interface("theater:simple/supervisor")?
             // spawn: func(manifest: string, wasm-bytes: option<list<u8>>) -> result<string, string>
@@ -793,212 +945,214 @@ impl Handler for SupervisorHandler {
                     }
                 }
             })?
-            // resume: func(manifest: string, wasm-bytes: option<list<u8>>) -> result<string, string>
-            // Resumes an actor from a manifest with replay handler configured.
-            // If wasm-bytes is provided, uses those bytes instead of loading from manifest.package.
-            .func_async_result("resume", {
-                let supervisor_tx = supervisor_tx.clone();
-                let children = children.clone();
-                let theater_tx_holder = theater_tx_holder.clone();
-                move |ctx: AsyncCtx<ActorStore>, input: Value| {
-                    let supervisor_tx = supervisor_tx.clone();
-                    let children = children.clone();
-                    let theater_tx_holder = theater_tx_holder.clone();
+            // list-actors: func() -> result<list<actor-info>, supervisor-error>
+            // Every actor in the caller's view (subtree, or all).
+            .func_async_result("list-actors", {
+                let permissions = permissions.clone();
+                move |ctx: AsyncCtx<ActorStore>, _input: Value| {
+                    let permissions = permissions.clone();
                     async move {
-                        let _ph = PhaseLog::new("supervisor.resume");
-                        let (manifest, wasm_bytes) = match input {
-                            Value::Tuple(args) if args.len() == 2 => {
-                                let manifest = match &args[0] {
-                                    Value::String(s) => s.clone(),
-                                    _ => return Err(Value::String("Invalid manifest argument".to_string())),
-                                };
-                                let wasm_bytes = parse_optional_bytes(&args[1]);
-                                (manifest, wasm_bytes)
-                            }
-                            _ => return Err(Value::String("Invalid resume arguments: expected (string, option<list<u8>>)".to_string())),
-                        };
-
-                        let store = ctx.data();
-                        let theater_tx = store.theater_tx.clone();
-
-                        let (response_tx, response_rx) = oneshot::channel();
-                        // Default opt-out: a resumed child does not send
-                        // chain events to its parent. Parents that want
-                        // per-event visibility call `subscribe-to-child`
-                        // after the resume returns.
-                        let cmd = TheaterCommand::ResumeActor {
-                            manifest_path: manifest,
-                            wasm_bytes,
-                            response_tx,
-                            supervisor_tx: Some(supervisor_tx),
-                            subscription_tx: None,
-                        };
-
-                        if let Err(e) = theater_tx.send(cmd).await {
-                            return Err(Value::String(format!("Failed to send resume command: {}", e)));
-                        }
-
-                        // Store theater_tx for shutdown
-                        {
-                            let mut holder = theater_tx_holder.lock().unwrap();
-                            if holder.is_none() {
-                                *holder = Some(theater_tx);
-                            }
-                        }
-
-                        match response_rx.await {
-                            Ok(Ok(actor_id)) => {
-                                // Track the child
-                                {
-                                    let mut children_guard = children.lock().unwrap();
-                                    children_guard.insert(actor_id);
-                                    debug!("Tracking resumed child {}, total children: {}", actor_id, children_guard.len());
-                                }
-                                Ok(Value::String(actor_id.to_string()))
-                            }
-                            Ok(Err(e)) => Err(Value::String(e.to_string())),
-                            Err(e) => Err(Value::String(format!("Failed to receive response: {}", e))),
-                        }
-                    }
-                }
-            })?
-            // list-children: func() -> list<string>
-            // Returns the handler's internal tracking of children (not the runtime's)
-            .func_async_result("list-children", {
-                let children = children.clone();
-                move |_ctx: AsyncCtx<ActorStore>, _input: Value| {
-                    let children = children.clone();
-                    async move {
-                        let _ph = PhaseLog::new("supervisor.list_children");
-                        let children_guard = children.lock().unwrap();
-                        let children_values: Vec<Value> = children_guard
+                        let scope = authorize_cap(&permissions, false)?.scope;
+                        let caller = ctx.data().id;
+                        let tx = ctx.data().theater_tx.clone();
+                        let actors = get_actors(&tx).await?;
+                        let items: Vec<Value> = actors
                             .iter()
-                            .map(|id| Value::String(id.to_string()))
+                            .filter(|(id, _, _)| {
+                                scope == ViewScope::All || in_subtree(&actors, caller, *id)
+                            })
+                            .map(|(id, name, parent)| Value::Record {
+                                type_name: "actor-info".to_string(),
+                                fields: vec![
+                                    ("id".to_string(), Value::String(id.to_string())),
+                                    ("name".to_string(), Value::String(name.clone())),
+                                    (
+                                        "parent-id".to_string(),
+                                        Value::Option {
+                                            inner_type: ValueType::String,
+                                            value: parent
+                                                .map(|p| Box::new(Value::String(p.to_string()))),
+                                        },
+                                    ),
+                                ],
+                            })
                             .collect();
                         Ok::<Value, Value>(Value::List {
-                            elem_type: ValueType::String,
-                            items: children_values,
+                            elem_type: ValueType::Record("actor-info".to_string()),
+                            items,
                         })
                     }
                 }
             })?
-            // restart-child: func(child-id: string) -> result<(), string>
-            .func_async_result("restart-child", move |ctx: AsyncCtx<ActorStore>, input: Value| {
-                async move {
-                    let _ph = PhaseLog::new("supervisor.restart_child");
-                    let child_id_str = match input {
-                        Value::String(s) => s,
-                        Value::Tuple(args) if args.len() == 1 => {
-                            match &args[0] {
-                                Value::String(s) => s.clone(),
-                                _ => return Err(Value::String("Invalid child-id argument".to_string())),
-                            }
+            // get-actor-status: func(id: string) -> result<string, supervisor-error>
+            .func_async_result("get-actor-status", {
+                let permissions = permissions.clone();
+                move |ctx: AsyncCtx<ActorStore>, input: Value| {
+                    let permissions = permissions.clone();
+                    async move {
+                        let target = parse_id_arg(input, "get-actor-status")?;
+                        let tx = ctx.data().theater_tx.clone();
+                        authorize(&tx, &permissions, ctx.data().id, target, false).await?;
+                        let (rtx, rrx) = oneshot::channel();
+                        tx.send(TheaterCommand::GetActorStatus {
+                            actor_id: target,
+                            response_tx: rtx,
+                        })
+                        .await
+                        .map_err(|e| SupervisorError::Internal(format!("failed to send: {}", e)))?;
+                        match rrx.await {
+                            Ok(Ok(status)) => Ok(Value::String(format!("{:?}", status))),
+                            Ok(Err(e)) => Err(Value::from(SupervisorError::Internal(e.to_string()))),
+                            Err(e) => Err(SupervisorError::Internal(format!(
+                                "failed to receive: {}",
+                                e
+                            ))
+                            .into()),
                         }
-                        _ => return Err(Value::String("Invalid restart-child argument".to_string())),
-                    };
-
-                    let child_id = match child_id_str.parse() {
-                        Ok(id) => id,
-                        Err(e) => return Err(Value::String(format!("Invalid child ID: {}", e))),
-                    };
-
-                    let store = ctx.data();
-                    let theater_tx = store.theater_tx.clone();
-
-                    let (response_tx, response_rx) = oneshot::channel();
-                    let cmd = TheaterCommand::RestartActor {
-                        actor_id: child_id,
-                        response_tx,
-                    };
-
-                    if let Err(e) = theater_tx.send(cmd).await {
-                        return Err(Value::String(format!("Failed to send restart command: {}", e)));
-                    }
-
-                    match response_rx.await {
-                        Ok(Ok(())) => Ok(Value::Tuple(vec![])),
-                        Ok(Err(e)) => Err(Value::String(e.to_string())),
-                        Err(e) => Err(Value::String(format!("Failed to receive restart response: {}", e))),
                     }
                 }
             })?
-            // stop-child: func(child-id: string) -> result<(), string>
-            .func_async_result("stop-child", move |ctx: AsyncCtx<ActorStore>, input: Value| {
-                async move {
-                    let _ph = PhaseLog::new("supervisor.stop_child");
-                    let child_id_str = match input {
-                        Value::String(s) => s,
-                        Value::Tuple(args) if args.len() == 1 => {
-                            match &args[0] {
-                                Value::String(s) => s.clone(),
-                                _ => return Err(Value::String("Invalid child-id argument".to_string())),
-                            }
+            // get-actor-state: func(id: string) -> result<option<list<u8>>, supervisor-error>
+            .func_async_result("get-actor-state", {
+                let permissions = permissions.clone();
+                move |ctx: AsyncCtx<ActorStore>, input: Value| {
+                    let permissions = permissions.clone();
+                    async move {
+                        let target = parse_id_arg(input, "get-actor-state")?;
+                        let tx = ctx.data().theater_tx.clone();
+                        authorize(&tx, &permissions, ctx.data().id, target, false).await?;
+                        let (rtx, rrx) = oneshot::channel();
+                        tx.send(TheaterCommand::GetActorState {
+                            actor_id: target,
+                            response_tx: rtx,
+                        })
+                        .await
+                        .map_err(|e| SupervisorError::Internal(format!("failed to send: {}", e)))?;
+                        match rrx.await {
+                            Ok(Ok(state)) => Ok(state),
+                            Ok(Err(e)) => Err(Value::from(SupervisorError::Internal(e.to_string()))),
+                            Err(e) => Err(SupervisorError::Internal(format!(
+                                "failed to receive: {}",
+                                e
+                            ))
+                            .into()),
                         }
-                        _ => return Err(Value::String("Invalid stop-child argument".to_string())),
-                    };
-
-                    let child_id = match child_id_str.parse() {
-                        Ok(id) => id,
-                        Err(e) => return Err(Value::String(format!("Invalid child ID: {}", e))),
-                    };
-
-                    let store = ctx.data();
-                    let theater_tx = store.theater_tx.clone();
-
-                    let (response_tx, response_rx) = oneshot::channel();
-                    let cmd = TheaterCommand::StopActor {
-                        actor_id: child_id,
-                        response_tx,
-                    };
-
-                    if let Err(e) = theater_tx.send(cmd).await {
-                        return Err(Value::String(format!("Failed to send stop command: {}", e)));
-                    }
-
-                    match response_rx.await {
-                        Ok(Ok(())) => Ok(Value::Tuple(vec![])),
-                        Ok(Err(e)) => Err(Value::String(e.to_string())),
-                        Err(e) => Err(Value::String(format!("Failed to receive stop response: {}", e))),
                     }
                 }
             })?
-            // get-child-state: func(child-id: string) -> result<option<list<u8>>, string>
-            .func_async_result("get-child-state", move |ctx: AsyncCtx<ActorStore>, input: Value| {
-                async move {
-                    let _ph = PhaseLog::new("supervisor.get_child_state");
-                    let child_id_str = match input {
-                        Value::String(s) => s,
-                        Value::Tuple(args) if args.len() == 1 => {
-                            match &args[0] {
-                                Value::String(s) => s.clone(),
-                                _ => return Err(Value::String("Invalid child-id argument".to_string())),
-                            }
+            // get-actor-manifest: func(id: string) -> result<string, supervisor-error>
+            .func_async_result("get-actor-manifest", {
+                let permissions = permissions.clone();
+                move |ctx: AsyncCtx<ActorStore>, input: Value| {
+                    let permissions = permissions.clone();
+                    async move {
+                        let target = parse_id_arg(input, "get-actor-manifest")?;
+                        let tx = ctx.data().theater_tx.clone();
+                        authorize(&tx, &permissions, ctx.data().id, target, false).await?;
+                        let (rtx, rrx) = oneshot::channel();
+                        tx.send(TheaterCommand::GetActorManifest {
+                            actor_id: target,
+                            response_tx: rtx,
+                        })
+                        .await
+                        .map_err(|e| SupervisorError::Internal(format!("failed to send: {}", e)))?;
+                        match rrx.await {
+                            Ok(Ok(m)) => serde_json::to_string(&m).map(Value::String).map_err(|e| {
+                                SupervisorError::Internal(format!("serialize manifest: {}", e)).into()
+                            }),
+                            Ok(Err(e)) => Err(Value::from(SupervisorError::Internal(e.to_string()))),
+                            Err(e) => Err(SupervisorError::Internal(format!(
+                                "failed to receive: {}",
+                                e
+                            ))
+                            .into()),
                         }
-                        _ => return Err(Value::String("Invalid get-child-state argument".to_string())),
-                    };
-
-                    let child_id = match child_id_str.parse() {
-                        Ok(id) => id,
-                        Err(e) => return Err(Value::String(format!("Invalid child ID: {}", e))),
-                    };
-
-                    let store = ctx.data();
-                    let theater_tx = store.theater_tx.clone();
-
-                    let (response_tx, response_rx) = oneshot::channel();
-                    let cmd = TheaterCommand::GetActorState {
-                        actor_id: child_id,
-                        response_tx,
-                    };
-
-                    if let Err(e) = theater_tx.send(cmd).await {
-                        return Err(Value::String(format!("Failed to send get-state command: {}", e)));
                     }
-
-                    match response_rx.await {
-                        Ok(Ok(state)) => Ok(state),
-                        Ok(Err(e)) => Err(Value::String(e.to_string())),
-                        Err(e) => Err(Value::String(format!("Failed to receive state: {}", e))),
+                }
+            })?
+            // get-actor-metrics: func(id: string) -> result<string, supervisor-error>
+            .func_async_result("get-actor-metrics", {
+                let permissions = permissions.clone();
+                move |ctx: AsyncCtx<ActorStore>, input: Value| {
+                    let permissions = permissions.clone();
+                    async move {
+                        let target = parse_id_arg(input, "get-actor-metrics")?;
+                        let tx = ctx.data().theater_tx.clone();
+                        authorize(&tx, &permissions, ctx.data().id, target, false).await?;
+                        let (rtx, rrx) = oneshot::channel();
+                        tx.send(TheaterCommand::GetActorMetrics {
+                            actor_id: target,
+                            response_tx: rtx,
+                        })
+                        .await
+                        .map_err(|e| SupervisorError::Internal(format!("failed to send: {}", e)))?;
+                        match rrx.await {
+                            Ok(Ok(m)) => serde_json::to_string(&m).map(Value::String).map_err(|e| {
+                                SupervisorError::Internal(format!("serialize metrics: {}", e)).into()
+                            }),
+                            Ok(Err(e)) => Err(Value::from(SupervisorError::Internal(e.to_string()))),
+                            Err(e) => Err(SupervisorError::Internal(format!(
+                                "failed to receive: {}",
+                                e
+                            ))
+                            .into()),
+                        }
+                    }
+                }
+            })?
+            // stop-actor: func(id: string) -> result<_, supervisor-error>   (graceful)
+            .func_async_result("stop-actor", {
+                let permissions = permissions.clone();
+                move |ctx: AsyncCtx<ActorStore>, input: Value| {
+                    let permissions = permissions.clone();
+                    async move {
+                        let target = parse_id_arg(input, "stop-actor")?;
+                        let tx = ctx.data().theater_tx.clone();
+                        authorize(&tx, &permissions, ctx.data().id, target, true).await?;
+                        let (rtx, rrx) = oneshot::channel();
+                        tx.send(TheaterCommand::StopActor {
+                            actor_id: target,
+                            response_tx: rtx,
+                        })
+                        .await
+                        .map_err(|e| SupervisorError::Internal(format!("failed to send: {}", e)))?;
+                        match rrx.await {
+                            Ok(Ok(())) => Ok(Value::Tuple(vec![])),
+                            Ok(Err(e)) => Err(Value::from(SupervisorError::Internal(e.to_string()))),
+                            Err(e) => Err(SupervisorError::Internal(format!(
+                                "failed to receive: {}",
+                                e
+                            ))
+                            .into()),
+                        }
+                    }
+                }
+            })?
+            // kill-actor: func(id: string) -> result<_, supervisor-error>   (force)
+            .func_async_result("kill-actor", {
+                let permissions = permissions.clone();
+                move |ctx: AsyncCtx<ActorStore>, input: Value| {
+                    let permissions = permissions.clone();
+                    async move {
+                        let target = parse_id_arg(input, "kill-actor")?;
+                        let tx = ctx.data().theater_tx.clone();
+                        authorize(&tx, &permissions, ctx.data().id, target, true).await?;
+                        let (rtx, rrx) = oneshot::channel();
+                        tx.send(TheaterCommand::TerminateActor {
+                            actor_id: target,
+                            response_tx: rtx,
+                        })
+                        .await
+                        .map_err(|e| SupervisorError::Internal(format!("failed to send: {}", e)))?;
+                        match rrx.await {
+                            Ok(Ok(())) => Ok(Value::Tuple(vec![])),
+                            Ok(Err(e)) => Err(Value::from(SupervisorError::Internal(e.to_string()))),
+                            Err(e) => Err(SupervisorError::Internal(format!(
+                                "failed to receive: {}",
+                                e
+                            ))
+                            .into()),
+                        }
                     }
                 }
             })?
