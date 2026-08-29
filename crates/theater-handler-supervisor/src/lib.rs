@@ -5,6 +5,7 @@
 pub mod events;
 
 use theater::actor::handle::ActorHandle;
+use theater::actor::runtime::ActorRuntimeError;
 use theater::actor::store::ActorStore;
 use theater::actor::types::ActorError;
 use theater::chain::ChainEvent;
@@ -15,6 +16,7 @@ use theater::messages::{default_init_state, ActorResult, TheaterCommand};
 use theater::shutdown::ShutdownReceiver;
 use theater::utils::{resolve_reference, resolve_reference_cached, ResourceCache};
 use theater::ManifestConfig;
+use theater::SpawnError;
 
 // Pack integration
 use theater::pack_bridge::{
@@ -122,6 +124,31 @@ pub enum SupervisorError {
     /// `TheaterRuntimeError` through the boundary is what replaces this.
     #[error("internal error: {0}")]
     Internal(String),
+
+    // ---- Structured spawn-failure causes surfaced from the runtime boundary
+    // (theater::SpawnError). These let the calling actor react to *why* a spawn
+    // failed — a bad manifest, a broken binary, a contract mismatch, or the
+    // actor's own init — instead of substring-matching one opaque string.
+    /// Building the actor's handler registry from its manifest failed.
+    #[error("handler registry build failed: {0}")]
+    HandlerRegistryFailed(String),
+    /// The actor's wasm module failed to instantiate (bad binary, unresolved
+    /// host import, PIC/packr-version skew).
+    #[error("wasm invalid: {0}")]
+    WasmInvalid(String),
+    /// An imported interface's hash did not match the host's implementation.
+    #[error("interface mismatch: {0}")]
+    InterfaceMismatch(String),
+    /// No handler provides an interface the actor imports (often a missing
+    /// capability grant in the manifest).
+    #[error("missing interface: {0}")]
+    MissingInterface(String),
+    /// The actor exports no `__pack_types` metadata — not a valid Pack actor.
+    #[error("missing interface metadata: {0}")]
+    MissingMetadata(String),
+    /// The actor's `init` export returned an error or trapped.
+    #[error("init failed: {0}")]
+    InitFailed(String),
 }
 
 /// The single translation from the Rust error to the `supervisor-error` pact
@@ -138,12 +165,64 @@ impl From<SupervisorError> for Value {
             SupervisorError::SpawnFailed(m) => (4, "spawn-failed", vec![Value::String(m)]),
             SupervisorError::RuntimeUnavailable => (5, "runtime-unavailable", vec![]),
             SupervisorError::Internal(m) => (6, "internal", vec![Value::String(m)]),
+            SupervisorError::HandlerRegistryFailed(m) => {
+                (7, "handler-registry-failed", vec![Value::String(m)])
+            }
+            SupervisorError::WasmInvalid(m) => (8, "wasm-invalid", vec![Value::String(m)]),
+            SupervisorError::InterfaceMismatch(m) => {
+                (9, "interface-mismatch", vec![Value::String(m)])
+            }
+            SupervisorError::MissingInterface(m) => {
+                (10, "missing-interface", vec![Value::String(m)])
+            }
+            SupervisorError::MissingMetadata(m) => (11, "missing-metadata", vec![Value::String(m)]),
+            SupervisorError::InitFailed(m) => (12, "init-failed", vec![Value::String(m)]),
         };
         Value::Variant {
             type_name: "supervisor-error".to_string(),
             case_name: case.to_string(),
             tag,
             payload,
+        }
+    }
+}
+
+/// Map the runtime's structured spawn failure onto the supervisor-error the
+/// calling actor sees. This is the seam that pushes handling into the actor
+/// layer: each distinguishable runtime cause becomes its own case (the actor
+/// decides what to do), and only genuinely host-internal conditions fall back to
+/// `internal`. The `Display` detail is preserved as the case payload.
+impl From<SpawnError> for SupervisorError {
+    fn from(e: SpawnError) -> SupervisorError {
+        match e {
+            SpawnError::HandlerRegistry(m) => SupervisorError::HandlerRegistryFailed(m),
+            SpawnError::SetupChannelClosed => SupervisorError::Internal(
+                "actor setup task ended without reporting a result".to_string(),
+            ),
+            SpawnError::Init(err) => SupervisorError::InitFailed(err.to_string()),
+            SpawnError::Setup(setup) => {
+                let detail = setup.to_string();
+                match setup {
+                    ActorRuntimeError::WasmInstantiationFailed { .. } => {
+                        SupervisorError::WasmInvalid(detail)
+                    }
+                    ActorRuntimeError::InterfaceHashMismatch { .. } => {
+                        SupervisorError::InterfaceMismatch(detail)
+                    }
+                    ActorRuntimeError::NoHandlerForInterface { .. } => {
+                        SupervisorError::MissingInterface(detail)
+                    }
+                    ActorRuntimeError::MissingInterfaceMetadata { .. } => {
+                        SupervisorError::MissingMetadata(detail)
+                    }
+                    // Host-internal setup failures the actor can't act on.
+                    ActorRuntimeError::FunctionTypeCacheFailed { .. }
+                    | ActorRuntimeError::ActorInstanceNotFound { .. }
+                    | ActorRuntimeError::ActorPhaseError { .. }
+                    | ActorRuntimeError::ActorError(_)
+                    | ActorRuntimeError::UnknownError(_) => SupervisorError::Internal(detail),
+                }
+            }
         }
     }
 }
@@ -802,7 +881,7 @@ impl Handler for SupervisorHandler {
                                 }
                                 Ok(Value::String(actor_id.to_string()))
                             }
-                            Ok(Err(e)) => Err(Value::from(SupervisorError::SpawnFailed(e.to_string()))),
+                            Ok(Err(e)) => Err(Value::from(SupervisorError::from(e))),
                             Err(_) => Err(Value::from(SupervisorError::RuntimeUnavailable)),
                         }
                     }
@@ -933,7 +1012,7 @@ impl Handler for SupervisorHandler {
                         // Wait for the actor to spawn
                         let actor_id = match response_rx.await {
                             Ok(Ok(id)) => id,
-                            Ok(Err(e)) => return Err(Value::from(SupervisorError::SpawnFailed(format!("failed to spawn actor: {}", e)))),
+                            Ok(Err(e)) => return Err(Value::from(SupervisorError::from(e))),
                             Err(_) => return Err(Value::from(SupervisorError::RuntimeUnavailable)),
                         };
 

@@ -36,6 +36,12 @@ pack_types! {
         spawn-failed(string),
         runtime-unavailable,
         internal(string),
+        handler-registry-failed(string),
+        wasm-invalid(string),
+        interface-mismatch(string),
+        missing-interface(string),
+        missing-metadata(string),
+        init-failed(string),
     }
 
     imports {

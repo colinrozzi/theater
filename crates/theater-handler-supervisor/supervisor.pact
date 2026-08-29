@@ -35,9 +35,18 @@ interface supervisor {
         out-of-view(string),        // target is outside the caller's scope
         permission-denied(string),  // required inspect/mutate not granted
         invalid-argument(string),   // bad id / manifest / etc.
-        spawn-failed(string),       // spawn or init failure detail
+        spawn-failed(string),       // handler-side spawn prep failure (manifest/wasm fetch)
         runtime-unavailable,        // the runtime is shutting down / not accepting commands
-        internal(string),           // opaque runtime op error, not yet structured
+        internal(string),           // genuinely host-internal failure (runtime bug/invariant)
+        // Structured spawn-failure causes surfaced from the runtime boundary, so
+        // the calling actor can react to WHY a spawn failed rather than
+        // substring-matching one opaque string:
+        handler-registry-failed(string), // building handlers from the manifest failed
+        wasm-invalid(string),            // wasm failed to instantiate (bad binary / ABI skew)
+        interface-mismatch(string),      // an imported interface's hash != the host's
+        missing-interface(string),       // no handler provides a required interface (grant?)
+        missing-metadata(string),        // actor has no __pack_types — not a valid Pack actor
+        init-failed(string),             // the actor's own init export errored or trapped
     }
 
     exports {
