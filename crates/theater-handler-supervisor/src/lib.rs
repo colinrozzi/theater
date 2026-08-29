@@ -111,7 +111,7 @@ pub enum SupervisorError {
     #[error("invalid argument: {0}")]
     InvalidArgument(String),
     #[error("spawn failed: {0}")]
-    SpawnFailed(String),
+    SpawnFailed(SpawnFailure),
     /// `theater_tx.send` or a response `recv` failed — the runtime's command
     /// channel is closed, i.e. the runtime is shutting down. A distinct,
     /// nameable condition, not an open-ended internal.
@@ -124,23 +124,31 @@ pub enum SupervisorError {
     /// `TheaterRuntimeError` through the boundary is what replaces this.
     #[error("internal error: {0}")]
     Internal(String),
+}
 
-    // ---- Structured spawn-failure causes surfaced from the runtime boundary
-    // (theater::SpawnError). These let the calling actor react to *why* a spawn
-    // failed — a bad manifest, a broken binary, a contract mismatch, or the
-    // actor's own init — instead of substring-matching one opaque string.
+/// Why a spawn failed — the structured payload of `supervisor-error.spawn-failed`.
+/// Every distinguishable way a `spawn`/`spawn-and-wait` can fail gets its own
+/// case so the calling actor can react to the cause instead of substring-
+/// matching a string. `Display` detail is preserved as the payload.
+#[derive(Debug, Error)]
+pub enum SpawnFailure {
+    /// The manifest string could not be decoded, loaded, or parsed.
+    #[error("bad manifest: {0}")]
+    BadManifest(String),
+    /// The actor's wasm bytes could not be fetched/loaded.
+    #[error("wasm fetch failed: {0}")]
+    WasmFetch(String),
     /// Building the actor's handler registry from its manifest failed.
     #[error("handler registry build failed: {0}")]
-    HandlerRegistryFailed(String),
-    /// The actor's wasm module failed to instantiate (bad binary, unresolved
-    /// host import, PIC/packr-version skew).
+    HandlerRegistry(String),
+    /// The wasm module failed to instantiate (bad binary, unresolved host
+    /// import, PIC/packr-version skew).
     #[error("wasm invalid: {0}")]
     WasmInvalid(String),
     /// An imported interface's hash did not match the host's implementation.
     #[error("interface mismatch: {0}")]
     InterfaceMismatch(String),
-    /// No handler provides an interface the actor imports (often a missing
-    /// capability grant in the manifest).
+    /// No handler provides an interface the actor imports (missing grant?).
     #[error("missing interface: {0}")]
     MissingInterface(String),
     /// The actor exports no `__pack_types` metadata — not a valid Pack actor.
@@ -149,6 +157,81 @@ pub enum SupervisorError {
     /// The actor's `init` export returned an error or trapped.
     #[error("init failed: {0}")]
     InitFailed(String),
+    /// (spawn-and-wait) the child actor errored while we waited for it.
+    #[error("child failed: {0}")]
+    ChildFailed(String),
+    /// (spawn-and-wait) the child was stopped by something else while waiting.
+    #[error("child stopped externally: {0}")]
+    ChildStopped(String),
+    /// (spawn-and-wait) the child did not complete within the timeout.
+    #[error("timeout: {0}")]
+    Timeout(String),
+    /// A spawn-time host-internal failure (function-type cache, phase invariant,
+    /// unknown) the actor can't act on. Detail preserved.
+    #[error("internal: {0}")]
+    Internal(String),
+}
+
+impl From<SpawnFailure> for Value {
+    fn from(e: SpawnFailure) -> Value {
+        let (tag, case, m) = match e {
+            SpawnFailure::BadManifest(m) => (0, "bad-manifest", m),
+            SpawnFailure::WasmFetch(m) => (1, "wasm-fetch", m),
+            SpawnFailure::HandlerRegistry(m) => (2, "handler-registry", m),
+            SpawnFailure::WasmInvalid(m) => (3, "wasm-invalid", m),
+            SpawnFailure::InterfaceMismatch(m) => (4, "interface-mismatch", m),
+            SpawnFailure::MissingInterface(m) => (5, "missing-interface", m),
+            SpawnFailure::MissingMetadata(m) => (6, "missing-metadata", m),
+            SpawnFailure::InitFailed(m) => (7, "init-failed", m),
+            SpawnFailure::ChildFailed(m) => (8, "child-failed", m),
+            SpawnFailure::ChildStopped(m) => (9, "child-stopped", m),
+            SpawnFailure::Timeout(m) => (10, "timeout", m),
+            SpawnFailure::Internal(m) => (11, "internal", m),
+        };
+        Value::Variant {
+            type_name: "spawn-failure".to_string(),
+            case_name: case.to_string(),
+            tag,
+            payload: vec![Value::String(m)],
+        }
+    }
+}
+
+/// Map the runtime's structured spawn failure onto a `spawn-failure` cause. Each
+/// distinguishable runtime cause becomes its own case; only genuinely
+/// host-internal conditions fall back to `internal`, detail preserved.
+impl From<SpawnError> for SpawnFailure {
+    fn from(e: SpawnError) -> SpawnFailure {
+        match e {
+            SpawnError::HandlerRegistry(m) => SpawnFailure::HandlerRegistry(m),
+            SpawnError::SetupChannelClosed => SpawnFailure::Internal(
+                "actor setup task ended without reporting a result".to_string(),
+            ),
+            SpawnError::Init(err) => SpawnFailure::InitFailed(err.to_string()),
+            SpawnError::Setup(setup) => {
+                let detail = setup.to_string();
+                match setup {
+                    ActorRuntimeError::WasmInstantiationFailed { .. } => {
+                        SpawnFailure::WasmInvalid(detail)
+                    }
+                    ActorRuntimeError::InterfaceHashMismatch { .. } => {
+                        SpawnFailure::InterfaceMismatch(detail)
+                    }
+                    ActorRuntimeError::NoHandlerForInterface { .. } => {
+                        SpawnFailure::MissingInterface(detail)
+                    }
+                    ActorRuntimeError::MissingInterfaceMetadata { .. } => {
+                        SpawnFailure::MissingMetadata(detail)
+                    }
+                    ActorRuntimeError::FunctionTypeCacheFailed { .. }
+                    | ActorRuntimeError::ActorInstanceNotFound { .. }
+                    | ActorRuntimeError::ActorPhaseError { .. }
+                    | ActorRuntimeError::ActorError(_)
+                    | ActorRuntimeError::UnknownError(_) => SpawnFailure::Internal(detail),
+                }
+            }
+        }
+    }
 }
 
 /// The single translation from the Rust error to the `supervisor-error` pact
@@ -162,21 +245,9 @@ impl From<SupervisorError> for Value {
                 (2, "permission-denied", vec![Value::String(m)])
             }
             SupervisorError::InvalidArgument(m) => (3, "invalid-argument", vec![Value::String(m)]),
-            SupervisorError::SpawnFailed(m) => (4, "spawn-failed", vec![Value::String(m)]),
+            SupervisorError::SpawnFailed(sf) => (4, "spawn-failed", vec![Value::from(sf)]),
             SupervisorError::RuntimeUnavailable => (5, "runtime-unavailable", vec![]),
             SupervisorError::Internal(m) => (6, "internal", vec![Value::String(m)]),
-            SupervisorError::HandlerRegistryFailed(m) => {
-                (7, "handler-registry-failed", vec![Value::String(m)])
-            }
-            SupervisorError::WasmInvalid(m) => (8, "wasm-invalid", vec![Value::String(m)]),
-            SupervisorError::InterfaceMismatch(m) => {
-                (9, "interface-mismatch", vec![Value::String(m)])
-            }
-            SupervisorError::MissingInterface(m) => {
-                (10, "missing-interface", vec![Value::String(m)])
-            }
-            SupervisorError::MissingMetadata(m) => (11, "missing-metadata", vec![Value::String(m)]),
-            SupervisorError::InitFailed(m) => (12, "init-failed", vec![Value::String(m)]),
         };
         Value::Variant {
             type_name: "supervisor-error".to_string(),
@@ -192,41 +263,6 @@ impl From<SupervisorError> for Value {
 /// layer: each distinguishable runtime cause becomes its own case (the actor
 /// decides what to do), and only genuinely host-internal conditions fall back to
 /// `internal`. The `Display` detail is preserved as the case payload.
-impl From<SpawnError> for SupervisorError {
-    fn from(e: SpawnError) -> SupervisorError {
-        match e {
-            SpawnError::HandlerRegistry(m) => SupervisorError::HandlerRegistryFailed(m),
-            SpawnError::SetupChannelClosed => SupervisorError::Internal(
-                "actor setup task ended without reporting a result".to_string(),
-            ),
-            SpawnError::Init(err) => SupervisorError::InitFailed(err.to_string()),
-            SpawnError::Setup(setup) => {
-                let detail = setup.to_string();
-                match setup {
-                    ActorRuntimeError::WasmInstantiationFailed { .. } => {
-                        SupervisorError::WasmInvalid(detail)
-                    }
-                    ActorRuntimeError::InterfaceHashMismatch { .. } => {
-                        SupervisorError::InterfaceMismatch(detail)
-                    }
-                    ActorRuntimeError::NoHandlerForInterface { .. } => {
-                        SupervisorError::MissingInterface(detail)
-                    }
-                    ActorRuntimeError::MissingInterfaceMetadata { .. } => {
-                        SupervisorError::MissingMetadata(detail)
-                    }
-                    // Host-internal setup failures the actor can't act on.
-                    ActorRuntimeError::FunctionTypeCacheFailed { .. }
-                    | ActorRuntimeError::ActorInstanceNotFound { .. }
-                    | ActorRuntimeError::ActorPhaseError { .. }
-                    | ActorRuntimeError::ActorError(_)
-                    | ActorRuntimeError::UnknownError(_) => SupervisorError::Internal(detail),
-                }
-            }
-        }
-    }
-}
-
 /// Parse a wire `actor-id` (a string, decoded by packr from the typed param)
 /// into a TheaterId.
 fn parse_actor_id(id: &str) -> Result<TheaterId, SupervisorError> {
@@ -731,9 +767,9 @@ impl Handler for SupervisorHandler {
                         let manifest_str = match resolve_reference(&manifest_path).await {
                             Ok(bytes) => match String::from_utf8(bytes) {
                                 Ok(s) => s,
-                                Err(e) => return Err(Value::from(SupervisorError::SpawnFailed(format!("invalid manifest encoding: {}", e)))),
+                                Err(e) => return Err(Value::from(SupervisorError::SpawnFailed(SpawnFailure::BadManifest(format!("invalid manifest encoding: {}", e))))),
                             },
-                            Err(e) => return Err(Value::from(SupervisorError::SpawnFailed(format!("failed to load manifest: {}", e)))),
+                            Err(e) => return Err(Value::from(SupervisorError::SpawnFailed(SpawnFailure::BadManifest(format!("failed to load manifest: {}", e))))),
                         };
                         info!(
                             phase = "supervisor.manifest_resolve",
@@ -746,7 +782,7 @@ impl Handler for SupervisorHandler {
                         let phase_start = Instant::now();
                         let manifest = match ManifestConfig::from_toml_str(&manifest_str) {
                             Ok(m) => m,
-                            Err(e) => return Err(Value::from(SupervisorError::SpawnFailed(format!("failed to parse manifest: {}", e)))),
+                            Err(e) => return Err(Value::from(SupervisorError::SpawnFailed(SpawnFailure::BadManifest(format!("failed to parse manifest: {}", e))))),
                         };
                         info!(
                             phase = "supervisor.manifest_parse",
@@ -784,12 +820,12 @@ impl Handler for SupervisorHandler {
                                                 // compile.
                                                 (*arc).clone()
                                             }
-                                            Err(e) => return Err(Value::from(SupervisorError::SpawnFailed(format!("failed to load WASM: {}", e)))),
+                                            Err(e) => return Err(Value::from(SupervisorError::SpawnFailed(SpawnFailure::WasmFetch(format!("failed to load WASM: {}", e))))),
                                         }
                                     }
                                     _ => match resolve_reference(&manifest.package).await {
                                         Ok(bytes) => bytes,
-                                        Err(e) => return Err(Value::from(SupervisorError::SpawnFailed(format!("failed to load WASM: {}", e)))),
+                                        Err(e) => return Err(Value::from(SupervisorError::SpawnFailed(SpawnFailure::WasmFetch(format!("failed to load WASM: {}", e))))),
                                     },
                                 }
                             }
@@ -881,7 +917,7 @@ impl Handler for SupervisorHandler {
                                 }
                                 Ok(Value::String(actor_id.to_string()))
                             }
-                            Ok(Err(e)) => Err(Value::from(SupervisorError::from(e))),
+                            Ok(Err(e)) => Err(Value::from(SupervisorError::SpawnFailed(SpawnFailure::from(e)))),
                             Err(_) => Err(Value::from(SupervisorError::RuntimeUnavailable)),
                         }
                     }
@@ -926,14 +962,14 @@ impl Handler for SupervisorHandler {
                         let manifest_str = match resolve_reference(&manifest_path).await {
                             Ok(bytes) => match String::from_utf8(bytes) {
                                 Ok(s) => s,
-                                Err(e) => return Err(Value::from(SupervisorError::SpawnFailed(format!("invalid manifest encoding: {}", e)))),
+                                Err(e) => return Err(Value::from(SupervisorError::SpawnFailed(SpawnFailure::BadManifest(format!("invalid manifest encoding: {}", e))))),
                             },
-                            Err(e) => return Err(Value::from(SupervisorError::SpawnFailed(format!("failed to load manifest: {}", e)))),
+                            Err(e) => return Err(Value::from(SupervisorError::SpawnFailed(SpawnFailure::BadManifest(format!("failed to load manifest: {}", e))))),
                         };
 
                         let manifest = match ManifestConfig::from_toml_str(&manifest_str) {
                             Ok(m) => m,
-                            Err(e) => return Err(Value::from(SupervisorError::SpawnFailed(format!("failed to parse manifest: {}", e)))),
+                            Err(e) => return Err(Value::from(SupervisorError::SpawnFailed(SpawnFailure::BadManifest(format!("failed to parse manifest: {}", e))))),
                         };
 
                         // Resolve wasm bytes — same three paths as `spawn`.
@@ -956,12 +992,12 @@ impl Handler for SupervisorHandler {
                                             cache_hit = hit;
                                             (*arc).clone()
                                         }
-                                        Err(e) => return Err(Value::from(SupervisorError::SpawnFailed(format!("failed to load WASM: {}", e)))),
+                                        Err(e) => return Err(Value::from(SupervisorError::SpawnFailed(SpawnFailure::WasmFetch(format!("failed to load WASM: {}", e))))),
                                     }
                                 }
                                 _ => match resolve_reference(&manifest.package).await {
                                     Ok(bytes) => bytes,
-                                    Err(e) => return Err(Value::from(SupervisorError::SpawnFailed(format!("failed to load WASM: {}", e)))),
+                                    Err(e) => return Err(Value::from(SupervisorError::SpawnFailed(SpawnFailure::WasmFetch(format!("failed to load WASM: {}", e))))),
                                 },
                             },
                         };
@@ -1012,7 +1048,7 @@ impl Handler for SupervisorHandler {
                         // Wait for the actor to spawn
                         let actor_id = match response_rx.await {
                             Ok(Ok(id)) => id,
-                            Ok(Err(e)) => return Err(Value::from(SupervisorError::from(e))),
+                            Ok(Err(e)) => return Err(Value::from(SupervisorError::SpawnFailed(SpawnFailure::from(e)))),
                             Err(_) => return Err(Value::from(SupervisorError::RuntimeUnavailable)),
                         };
 
@@ -1032,10 +1068,10 @@ impl Handler for SupervisorHandler {
                                 Ok(option_bytes_to_value(child_result.result))
                             }
                             Ok(Some(ActorResult::Error(child_error))) => {
-                                Err(Value::from(SupervisorError::SpawnFailed(format!("child actor {} failed: {}", child_error.actor_id, child_error.error))))
+                                Err(Value::from(SupervisorError::SpawnFailed(SpawnFailure::ChildFailed(format!("child actor {} failed: {}", child_error.actor_id, child_error.error)))))
                             }
                             Ok(Some(ActorResult::ExternalStop(stop))) => {
-                                Err(Value::from(SupervisorError::SpawnFailed(format!("child actor {} was stopped externally", stop.actor_id))))
+                                Err(Value::from(SupervisorError::SpawnFailed(SpawnFailure::ChildStopped(format!("child actor {} was stopped externally", stop.actor_id)))))
                             }
                             Ok(None) => {
                                 Err(Value::from(SupervisorError::Internal(format!("child actor {} result channel closed", actor_id))))
@@ -1048,7 +1084,7 @@ impl Handler for SupervisorHandler {
                                     actor_id,
                                     response_tx: stop_tx,
                                 }).await;
-                                Err(Value::from(SupervisorError::SpawnFailed(format!("timeout waiting for child actor {} to complete", actor_id))))
+                                Err(Value::from(SupervisorError::SpawnFailed(SpawnFailure::Timeout(format!("timeout waiting for child actor {} to complete", actor_id)))))
                             }
                         }
                     }

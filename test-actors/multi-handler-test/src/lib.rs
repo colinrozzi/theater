@@ -28,20 +28,29 @@ pack_types! {
         parent-id: option<string>,
     }
 
-    variant supervisor-error {
-        actor-not-found(string),
-        out-of-view(string),
-        permission-denied(string),
-        invalid-argument(string),
-        spawn-failed(string),
-        runtime-unavailable,
-        internal(string),
-        handler-registry-failed(string),
+    variant spawn-failure {
+        bad-manifest(string),
+        wasm-fetch(string),
+        handler-registry(string),
         wasm-invalid(string),
         interface-mismatch(string),
         missing-interface(string),
         missing-metadata(string),
         init-failed(string),
+        child-failed(string),
+        child-stopped(string),
+        timeout(string),
+        internal(string),
+    }
+
+    variant supervisor-error {
+        actor-not-found(string),
+        out-of-view(string),
+        permission-denied(string),
+        invalid-argument(string),
+        spawn-failed(spawn-failure),
+        runtime-unavailable,
+        internal(string),
     }
 
     imports {
