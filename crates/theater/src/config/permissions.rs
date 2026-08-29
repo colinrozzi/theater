@@ -397,9 +397,7 @@ impl PartialOrd for RuntimePermissions {
 /// The set of actors a supervisor-capable actor may see and act on.
 /// Ordered least-to-most privilege: `Subtree` < `All`, so a child may not
 /// widen its scope past its parent.
-#[derive(
-    Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Default,
-)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Default)]
 #[serde(rename_all = "kebab-case")]
 pub enum ViewScope {
     /// The caller's own subtree — its descendants. Least privilege; the default.
