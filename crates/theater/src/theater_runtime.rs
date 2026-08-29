@@ -1005,13 +1005,11 @@ impl TheaterRuntime {
             }
         }
 
-        // Subscribers see the actor's terminal chain event (`WasmError`
-        // for crashes, `"shutdown"` for normal exit) then `recv() == None`
-        // when the chain drops — no separate notification needed here.
-
-        // Immediately shutdown the actor due to error
+        // The actor crashed — tear it down forcefully (its wasm is broken; do
+        // NOT run its graceful shutdown handlers / wait on a corpse) and record
+        // the terminal event as `Failed{error}`.
         debug!("Shutting down actor {:?} due to error", actor_id);
-        self.stop_actor(actor_id, ShutdownType::Graceful)
+        self.stop_actor(actor_id, ShutdownType::Failed(error.to_string()))
             .await
             .map_err(|e| {
                 error!("Failed to stop actor after error: {}", e);
@@ -1062,12 +1060,16 @@ impl TheaterRuntime {
                 }
             };
 
-            // The typed terminal lifecycle event: a graceful stop is `Stopped`,
-            // a force terminate is `Killed`. This is the one event fate-links +
-            // monitors key on (replacing the old ad-hoc `"shutdown"` string).
-            let cause = match shutdown_type {
+            // The typed terminal lifecycle event, derived 1:1 from the shutdown
+            // kind: graceful stop -> `Stopped`, force kill -> `Killed`, crash ->
+            // `Failed`. This is the one event fate-links + monitors key on
+            // (replacing the old ad-hoc `"shutdown"` string).
+            let cause = match &shutdown_type {
                 ShutdownType::Graceful => crate::events::lifecycle::TerminationCause::Stopped,
                 ShutdownType::Force => crate::events::lifecycle::TerminationCause::Killed,
+                ShutdownType::Failed(error) => crate::events::lifecycle::TerminationCause::Failed {
+                    error: error.clone(),
+                },
             };
             let mut writable_chain = chain.write().await;
             writable_chain
