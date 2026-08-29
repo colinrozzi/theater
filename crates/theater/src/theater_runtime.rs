@@ -547,6 +547,18 @@ impl TheaterRuntime {
                         error!("Failed to send actor info list: {:?}", e);
                     }
                 }
+                TheaterCommand::IsDescendant {
+                    ancestor,
+                    target,
+                    response_tx,
+                } => {
+                    let ans = self.is_descendant(&ancestor, &target);
+                    let _ = response_tx.send(Ok(ans));
+                }
+                TheaterCommand::GetDescendants { root, response_tx } => {
+                    let rows = self.descendants_of(&root);
+                    let _ = response_tx.send(Ok(rows));
+                }
                 TheaterCommand::GetActorManifest {
                     actor_id,
                     response_tx,
@@ -676,6 +688,50 @@ impl TheaterRuntime {
         }
         info!("Theater runtime shutting down");
         Ok(())
+    }
+
+    /// Is `target` a strict descendant of `ancestor` in the supervision tree?
+    /// Walks `target`'s parent chain up through the actor map. O(depth); the
+    /// cycle guard is defensive only (spawn always sets a live parent).
+    fn is_descendant(&self, ancestor: &TheaterId, target: &TheaterId) -> bool {
+        let mut cur = self.actors.get(target).and_then(|p| p.parent_id);
+        let mut guard = 0;
+        while let Some(c) = cur {
+            if &c == ancestor {
+                return true;
+            }
+            cur = self.actors.get(&c).and_then(|p| p.parent_id);
+            guard += 1;
+            if guard > 10_000 {
+                break;
+            }
+        }
+        false
+    }
+
+    /// Collect `root`'s strict descendants as `(id, name, parent-id)` rows.
+    /// Builds child-adjacency in one O(N) pass, then traverses the subtree.
+    fn descendants_of(&self, root: &TheaterId) -> Vec<ActorTreeRow> {
+        let mut children: HashMap<TheaterId, Vec<TheaterId>> = HashMap::new();
+        for (id, proc) in &self.actors {
+            if let Some(p) = proc.parent_id {
+                children.entry(p).or_default().push(*id);
+            }
+        }
+        let mut out = Vec::new();
+        let mut seen = HashSet::new();
+        let mut stack: Vec<TheaterId> = children.get(root).cloned().unwrap_or_default();
+        while let Some(id) = stack.pop() {
+            if seen.insert(id) {
+                if let Some(proc) = self.actors.get(&id) {
+                    out.push((id, proc.name.clone(), proc.parent_id));
+                }
+                if let Some(kids) = children.get(&id) {
+                    stack.extend(kids.iter().copied());
+                }
+            }
+        }
+        out
     }
 
     /// Spawns a new actor from WASM bytes.

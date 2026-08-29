@@ -278,6 +278,25 @@ pub enum TheaterCommand {
         response_tx: oneshot::Sender<Result<Vec<ActorTreeRow>>>,
     },
 
+    /// Is `target` a (strict) descendant of `ancestor` in the supervision tree?
+    /// The runtime walks its own actor map to answer, so a scoped supervisor op
+    /// no longer fetches the whole actor list and rebuilds the tree handler-side.
+    /// A pure tree fact — the runtime stays permission-dumb; the handler owns the
+    /// policy of what a "view" means.
+    IsDescendant {
+        ancestor: TheaterId,
+        target: TheaterId,
+        response_tx: oneshot::Sender<Result<bool>>,
+    },
+
+    /// Every (strict) descendant of `root`, as `(id, name, parent-id)` rows,
+    /// walked from the runtime's own actor map. Backs a `scope: subtree`
+    /// `list-actors` without the full-list transfer + handler-side rebuild.
+    GetDescendants {
+        root: TheaterId,
+        response_tx: oneshot::Sender<Result<Vec<ActorTreeRow>>>,
+    },
+
     GetActorManifest {
         actor_id: TheaterId,
         response_tx: oneshot::Sender<Result<ManifestConfig>>,
@@ -486,6 +505,8 @@ impl TheaterCommand {
             }
             TheaterCommand::ActorRuntimeError { .. } => "ActorRuntimeError".to_string(),
             TheaterCommand::GetActors { .. } => "GetActors".to_string(),
+            TheaterCommand::IsDescendant { .. } => "IsDescendant".to_string(),
+            TheaterCommand::GetDescendants { .. } => "GetDescendants".to_string(),
             TheaterCommand::GetActorManifest { actor_id, .. } => {
                 format!("GetActorManifest: {:?}", actor_id)
             }

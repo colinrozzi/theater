@@ -287,53 +287,49 @@ async fn get_actors(
 }
 
 /// Is `target` in `caller`'s subtree (caller a strict ancestor of target)?
-fn in_subtree(
-    actors: &[(TheaterId, String, Option<TheaterId>)],
-    caller: TheaterId,
+/// Ask the runtime whether `target` is a strict descendant of `ancestor`. The
+/// runtime owns the supervision tree and walks it from its own actor map, so the
+/// handler no longer fetches the full actor list and rebuilds the tree per op.
+async fn is_descendant(
+    theater_tx: &mpsc::Sender<TheaterCommand>,
+    ancestor: TheaterId,
     target: TheaterId,
-) -> bool {
-    let parent: std::collections::HashMap<TheaterId, Option<TheaterId>> =
-        actors.iter().map(|(id, _, p)| (*id, *p)).collect();
-    let mut cur = parent.get(&target).copied().flatten();
-    let mut guard = 0;
-    while let Some(c) = cur {
-        if c == caller {
-            return true;
-        }
-        cur = parent.get(&c).copied().flatten();
-        guard += 1;
-        if guard > 10_000 {
-            break; // cycle safety
-        }
+) -> Result<bool, SupervisorError> {
+    let (tx, rx) = oneshot::channel();
+    theater_tx
+        .send(TheaterCommand::IsDescendant {
+            ancestor,
+            target,
+            response_tx: tx,
+        })
+        .await
+        .map_err(|_| SupervisorError::RuntimeUnavailable)?;
+    match rx.await {
+        Ok(Ok(b)) => Ok(b),
+        Ok(Err(e)) => Err(SupervisorError::Internal(e.to_string())),
+        Err(_) => Err(SupervisorError::RuntimeUnavailable),
     }
-    false
 }
 
-/// The set of `root`'s strict descendants (its subtree, excluding `root`).
-/// Built in a single O(N) pass — child-adjacency + one traversal — so a scoped
-/// `list-actors` filters by O(1) set membership instead of rebuilding the parent
-/// map (via `in_subtree`) once per actor, which was O(N²).
-fn subtree_ids(
-    actors: &[(TheaterId, String, Option<TheaterId>)],
+/// Ask the runtime for `root`'s strict descendants as `(id, name, parent-id)`
+/// rows — the scope: subtree `list-actors` view, walked from the runtime's tree.
+async fn get_descendants(
+    theater_tx: &mpsc::Sender<TheaterCommand>,
     root: TheaterId,
-) -> std::collections::HashSet<TheaterId> {
-    let mut children: std::collections::HashMap<TheaterId, Vec<TheaterId>> =
-        std::collections::HashMap::new();
-    for (id, _, parent) in actors {
-        if let Some(p) = parent {
-            children.entry(*p).or_default().push(*id);
-        }
+) -> Result<Vec<(TheaterId, String, Option<TheaterId>)>, SupervisorError> {
+    let (tx, rx) = oneshot::channel();
+    theater_tx
+        .send(TheaterCommand::GetDescendants {
+            root,
+            response_tx: tx,
+        })
+        .await
+        .map_err(|_| SupervisorError::RuntimeUnavailable)?;
+    match rx.await {
+        Ok(Ok(v)) => Ok(v),
+        Ok(Err(e)) => Err(SupervisorError::Internal(e.to_string())),
+        Err(_) => Err(SupervisorError::RuntimeUnavailable),
     }
-    let mut out = std::collections::HashSet::new();
-    let mut stack: Vec<TheaterId> = children.get(&root).cloned().unwrap_or_default();
-    while let Some(id) = stack.pop() {
-        if out.insert(id) {
-            if let Some(kids) = children.get(&id) {
-                stack.extend(kids.iter().copied());
-            }
-        }
-    }
-    out
 }
 
 /// The capability half of the gate: the caller must hold the capability the op
@@ -369,11 +365,14 @@ async fn authorize(
     mutate: bool,
 ) -> Result<(), SupervisorError> {
     let scope = require_capability(perms, mutate)?.scope;
-    let actors = get_actors(theater_tx).await?;
     match scope {
         ViewScope::All => {
             // Full visibility: an absent target is honestly actor-not-found.
-            if actors.iter().any(|(id, _, _)| *id == target) {
+            if get_actors(theater_tx)
+                .await?
+                .iter()
+                .any(|(id, _, _)| *id == target)
+            {
                 Ok(())
             } else {
                 Err(SupervisorError::ActorNotFound(target.to_string()))
@@ -383,7 +382,7 @@ async fn authorize(
             // Uniform out-of-view: do NOT distinguish "doesn't exist" from "not
             // in your subtree". Distinguishing them would leak the existence of
             // actors outside the caller's view across the view boundary.
-            if in_subtree(&actors, caller, target) {
+            if is_descendant(theater_tx, caller, target).await? {
                 Ok(())
             } else {
                 Err(SupervisorError::OutOfView(target.to_string()))
@@ -1100,16 +1099,15 @@ impl Handler for SupervisorHandler {
                         let scope = require_capability(&permissions, false)?.scope;
                         let caller = ctx.data().id;
                         let tx = ctx.data().theater_tx.clone();
-                        let actors = get_actors(&tx).await?;
-                        // Compute the caller's view once (O(N)); then filtering is
-                        // O(1) per actor. `None` = scope:all = every actor.
-                        let view = match scope {
-                            ViewScope::All => None,
-                            ViewScope::Subtree => Some(subtree_ids(&actors, caller)),
+                        // The runtime serves the caller's view directly — every
+                        // actor (scope: all) or the caller's descendants (subtree)
+                        // — so there is no full-list fetch + handler-side filter.
+                        let actors = match scope {
+                            ViewScope::All => get_actors(&tx).await?,
+                            ViewScope::Subtree => get_descendants(&tx, caller).await?,
                         };
                         let items: Vec<Value> = actors
                             .iter()
-                            .filter(|(id, _, _)| view.as_ref().is_none_or(|v| v.contains(id)))
                             .map(|(id, name, parent)| Value::Record {
                                 type_name: "actor-info".to_string(),
                                 fields: vec![
