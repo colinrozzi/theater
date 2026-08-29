@@ -21,7 +21,7 @@ packr_guest::setup_guest!();
 // Load type definitions from external .pact file
 pack_types!(file = "types.pact");
 
-#[import(module = "theater:simple/runtime", name = "log")]
+#[import(module = "theater:simple/self", name = "log")]
 fn log(msg: String);
 
 fn make_todo(id: u32, title: String, done: bool) -> Value {

@@ -16,7 +16,7 @@ packr_guest::setup_guest!();
 
 pack_types! {
     imports {
-        theater:simple/runtime {
+        theater:simple/self {
             log: func(msg: string),
         }
     }
@@ -25,7 +25,7 @@ pack_types! {
     }
 }
 
-#[import(module = "theater:simple/runtime", name = "log")]
+#[import(module = "theater:simple/self", name = "log")]
 fn log(msg: String);
 
 #[export(name = "theater:simple/actor.init")]

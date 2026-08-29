@@ -1,7 +1,7 @@
 //! Supervisor replay test actor for Pack runtime.
 //!
 //! A deterministic actor that exercises supervisor host functions:
-//! - Imports `theater:simple/runtime.log`
+//! - Imports `theater:simple/self.log`
 //! - Imports `theater:simple/supervisor.{spawn, list-children, stop-child}`
 //! - Exports `theater:simple/actor.init`
 //! - Exports `theater:simple/message-server-client.handle-send`
@@ -28,7 +28,7 @@ packr_guest::setup_guest!();
 // Embed interface metadata for hash verification
 pack_types! {
     imports {
-        theater:simple/runtime {
+        theater:simple/self {
             log: func(msg: string),
         }
         theater:simple/supervisor {
@@ -51,7 +51,7 @@ pack_types! {
 // Host imports
 // ============================================================================
 
-#[import(module = "theater:simple/runtime", name = "log")]
+#[import(module = "theater:simple/self", name = "log")]
 fn log(msg: String);
 
 #[import(module = "theater:simple/supervisor", name = "spawn")]

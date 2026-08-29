@@ -35,7 +35,7 @@ pack_types! {
     }
 
     imports {
-        theater:simple/runtime {
+        theater:simple/self {
             log: func(msg: string),
         }
     }
@@ -47,7 +47,7 @@ pack_types! {
     }
 }
 
-#[import(module = "theater:simple/runtime", name = "log")]
+#[import(module = "theater:simple/self", name = "log")]
 fn log(msg: String);
 
 fn make_position(x: f64, y: f64) -> Value {

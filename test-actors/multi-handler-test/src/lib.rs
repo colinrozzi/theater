@@ -20,7 +20,7 @@ packr_guest::setup_guest!();
 // Embed interface metadata for hash verification
 pack_types! {
     imports {
-        theater:simple/runtime {
+        theater:simple/self {
             log: func(msg: string),
         }
         theater:simple/store {
@@ -43,7 +43,7 @@ pack_types! {
 // Runtime handler imports
 // ============================================================================
 
-#[import(module = "theater:simple/runtime", name = "log")]
+#[import(module = "theater:simple/self", name = "log")]
 fn log(msg: String);
 
 // ============================================================================
