@@ -7,7 +7,7 @@
 //! relationship-scoped `ActorResult` (`Success`/`Error`/`ExternalStop`) into one
 //! place. See `docs/actor-relationships-and-lifecycle.md`.
 
-use crate::pack_bridge::{ConversionError, IntoValue, Value, ValueType};
+use crate::pack_bridge::{ConversionError, FromValue, IntoValue, Value};
 use serde::{Deserialize, Serialize};
 
 /// A structural transition in an actor's lifecycle.
@@ -23,8 +23,9 @@ pub enum ActorLifecycleEvent {
     Terminated { cause: TerminationCause },
 }
 
-/// Why an actor terminated. Fate-links propagate on `Failed` / `Stopped` /
-/// `Killed`, but **not** `Completed` (a clean exit doesn't tear down fate-peers).
+/// Why an actor terminated. This is neutral data — *which* causes a given
+/// subscriber reacts to (errors only, any termination, …) is a per-subscription
+/// filter decision, made where dispatch happens, not a property of the event.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum TerminationCause {
     /// Clean, self-driven exit: init returned, self-shutdown, or a graceful stop
@@ -52,51 +53,14 @@ impl ActorLifecycleEvent {
             ActorLifecycleEvent::Terminated { .. } => "terminated",
         }
     }
-
-    /// Does this event tear down fate-linked actors? Only an abnormal or
-    /// externally-driven termination does — a clean `Completed` exit does not.
-    pub fn propagates_fate(&self) -> bool {
-        matches!(
-            self,
-            ActorLifecycleEvent::Terminated {
-                cause: TerminationCause::Failed { .. }
-                    | TerminationCause::Stopped
-                    | TerminationCause::Killed,
-            }
-        )
-    }
-}
-
-fn bytes_to_value(bytes: Vec<u8>) -> Value {
-    Value::List {
-        elem_type: ValueType::U8,
-        items: bytes.into_iter().map(Value::U8).collect(),
-    }
-}
-
-fn value_to_bytes(v: Value) -> Option<Vec<u8>> {
-    match v {
-        Value::List { items, .. } => Some(
-            items
-                .into_iter()
-                .filter_map(|x| if let Value::U8(b) = x { Some(b) } else { None })
-                .collect(),
-        ),
-        _ => None,
-    }
 }
 
 impl IntoValue for TerminationCause {
     fn into_value(self) -> Value {
         let (tag, case, payload) = match self {
-            TerminationCause::Completed { final_state } => (
-                0,
-                "completed",
-                vec![Value::Option {
-                    inner_type: ValueType::List(Box::new(ValueType::U8)),
-                    value: final_state.map(|b| Box::new(bytes_to_value(b))),
-                }],
-            ),
+            TerminationCause::Completed { final_state } => {
+                (0, "completed", vec![final_state.into_value()])
+            }
             TerminationCause::Failed { error } => (1, "failed", vec![Value::String(error)]),
             TerminationCause::Stopped => (2, "stopped", vec![]),
             TerminationCause::Killed => (3, "killed", vec![]),
@@ -118,13 +82,13 @@ impl TryFrom<Value> for TerminationCause {
                 case_name, payload, ..
             } => match case_name.as_str() {
                 "completed" => {
-                    let final_state = match payload.into_iter().next() {
-                        Some(Value::Option {
-                            value: Some(inner), ..
-                        }) => value_to_bytes(*inner),
-                        _ => None,
-                    };
-                    Ok(TerminationCause::Completed { final_state })
+                    let v = payload
+                        .into_iter()
+                        .next()
+                        .ok_or_else(|| ConversionError::MissingField("final_state".into()))?;
+                    Ok(TerminationCause::Completed {
+                        final_state: Option::<Vec<u8>>::from_value(v)?,
+                    })
                 }
                 "failed" => {
                     let error = match payload.into_iter().next() {
@@ -227,21 +191,5 @@ mod tests {
         roundtrip(ActorLifecycleEvent::Terminated {
             cause: TerminationCause::Killed,
         });
-    }
-
-    #[test]
-    fn only_abnormal_termination_propagates_fate() {
-        assert!(!ActorLifecycleEvent::Spawned.propagates_fate());
-        assert!(!ActorLifecycleEvent::Terminated {
-            cause: TerminationCause::Completed { final_state: None }
-        }
-        .propagates_fate());
-        for cause in [
-            TerminationCause::Failed { error: "e".into() },
-            TerminationCause::Stopped,
-            TerminationCause::Killed,
-        ] {
-            assert!(ActorLifecycleEvent::Terminated { cause }.propagates_fate());
-        }
     }
 }
