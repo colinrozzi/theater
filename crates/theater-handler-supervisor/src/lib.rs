@@ -994,7 +994,7 @@ impl Handler for SupervisorHandler {
                         };
                         let items: Vec<Value> = actors
                             .iter()
-                            .filter(|(id, _, _)| view.as_ref().map_or(true, |v| v.contains(id)))
+                            .filter(|(id, _, _)| view.as_ref().is_none_or(|v| v.contains(id)))
                             .map(|(id, name, parent)| Value::Record {
                                 type_name: "actor-info".to_string(),
                                 fields: vec![
