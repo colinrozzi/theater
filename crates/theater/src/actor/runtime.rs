@@ -63,8 +63,37 @@ pub enum StartActorResult {
 
 #[derive(Debug, thiserror::Error)]
 pub enum ActorRuntimeError {
-    #[error("Setup error: {message}")]
-    SetupError { message: String },
+    /// The actor's wasm module failed to instantiate — an unresolved host
+    /// import, PIC/packr-version skew, or a trap during instantiation. `detail`
+    /// is the full anyhow cause chain.
+    #[error("Failed to instantiate actor {id}: {detail}")]
+    WasmInstantiationFailed { id: TheaterId, detail: String },
+
+    /// An imported interface's hash did not match any registered handler's —
+    /// the actor's function signatures don't match the host implementation.
+    /// `detail` carries the actor/handler hashes for diagnosis.
+    #[error("{detail}")]
+    InterfaceHashMismatch { interface: String, detail: String },
+
+    /// No registered handler provides an interface the actor imports.
+    #[error("No handler provides interface '{interface}' required by actor {id}")]
+    NoHandlerForInterface { id: TheaterId, interface: String },
+
+    /// The actor exports no `__pack_types` metadata, so its imported interfaces
+    /// can't be hash-verified. Fatal — all Pack actors must embed it.
+    #[error(
+        "Actor {id} has no interface metadata (__pack_types). All actors must embed \
+         type metadata for interface verification. Error: {detail}"
+    )]
+    MissingInterfaceMetadata { id: TheaterId, detail: String },
+
+    /// Caching the actor's function type info (mandatory for host-side type
+    /// safety) failed.
+    #[error(
+        "Failed to cache function types for actor {id}: {detail}. All actors must \
+         have valid type metadata."
+    )]
+    FunctionTypeCacheFailed { id: TheaterId, detail: String },
 
     #[error("Actor instance not found: {message}")]
     ActorInstanceNotFound { message: String },
@@ -339,11 +368,12 @@ impl ActorRuntime {
             // so an instantiation failure shows e.g. "Failed to instantiate Pack
             // module: unknown import GOT.mem::__data_end" instead of just the
             // top wrapper — critical for diagnosing PIC/version-skew deploys.
-            let error_message = format!("Failed to instantiate actor {}: {:#}", id, e);
-            error!("{}", error_message);
-            ActorRuntimeError::SetupError {
-                message: error_message,
-            }
+            let err = ActorRuntimeError::WasmInstantiationFailed {
+                id,
+                detail: format!("{:#}", e),
+            };
+            error!("{}", err);
+            err
         })?;
 
         info!(
@@ -452,15 +482,21 @@ impl ActorRuntime {
                     }
 
                     if !interface_verified {
-                        // No handler could satisfy this interface
-                        let error_msg = last_error.unwrap_or_else(|| {
-                            format!(
-                                "No handler provides interface '{}' required by actor {}",
-                                interface_name, id
-                            )
-                        });
-                        error!("{}", error_msg);
-                        return Err(ActorRuntimeError::SetupError { message: error_msg });
+                        // A `last_error` means a handler matched the interface by
+                        // name but its hash differed (signature mismatch); its
+                        // absence means no handler provides the interface at all.
+                        let err = match last_error {
+                            Some(detail) => ActorRuntimeError::InterfaceHashMismatch {
+                                interface: interface_name.clone(),
+                                detail,
+                            },
+                            None => ActorRuntimeError::NoHandlerForInterface {
+                                id,
+                                interface: interface_name.clone(),
+                            },
+                        };
+                        error!("{}", err);
+                        return Err(err);
                     }
                 }
 
@@ -476,12 +512,9 @@ impl ActorRuntime {
                 // This is mandatory — we guarantee type safety to actors.
                 let phase_start = Instant::now();
                 actor_instance.cache_function_types().await.map_err(|e| {
-                    ActorRuntimeError::SetupError {
-                        message: format!(
-                            "Failed to cache function types for actor {}: {:?}. \
-                             All actors must have valid type metadata.",
-                            id, e
-                        ),
+                    ActorRuntimeError::FunctionTypeCacheFailed {
+                        id,
+                        detail: format!("{:?}", e),
                     }
                 })?;
                 info!(
@@ -494,13 +527,12 @@ impl ActorRuntime {
             Err(e) => {
                 // Actor doesn't have __pack_types metadata - FATAL
                 // All Pack actors MUST export __pack_types with interface hashes
-                let error_msg = format!(
-                    "Actor {} has no interface metadata (__pack_types). \
-                    All actors must embed type metadata for interface verification. Error: {:?}",
-                    id, e
-                );
-                error!("{}", error_msg);
-                return Err(ActorRuntimeError::SetupError { message: error_msg });
+                let err = ActorRuntimeError::MissingInterfaceMetadata {
+                    id,
+                    detail: format!("{:?}", e),
+                };
+                error!("{}", err);
+                return Err(err);
             }
         }
 
