@@ -232,7 +232,6 @@ async fn run(args: &SpawnArgs, ctx: &CommandContext, call_init: bool) -> Result<
     let mut runtime = TheaterRuntime::new(
         theater_tx.clone(),
         theater_rx,
-        None, // no channel events forwarding needed
         handler_registry,
         resource_cache.clone(),
     )

@@ -11,7 +11,7 @@ use crate::chain::ChainEvent;
 use crate::config::actor_manifest::HandlerConfig;
 use crate::handler::HandlerRegistry;
 use crate::id::TheaterId;
-use crate::messages::{ActorMessage, ActorStatus, TheaterCommand};
+use crate::messages::{ActorMessage, ActorStatus, ActorTreeRow, TheaterCommand};
 use crate::messages::{
     ActorResult, ChannelId, ChannelParticipant, ChildError, ChildExternalStop, ChildResult,
 };
@@ -119,16 +119,13 @@ pub struct TheaterRuntime {
     /// Runtime-wide spawn-notification subscribers. Every actor spawned
     /// anywhere is delivered to each as `(id, name, parent-id)`. Backs
     /// `theater:simple/runtime.subscribe-to-spawns`.
-    spawn_subscribers: Vec<Sender<(TheaterId, String, Option<TheaterId>)>>,
+    spawn_subscribers: Vec<Sender<ActorTreeRow>>,
     /// Sender for commands to the runtime
     theater_tx: Sender<TheaterCommand>,
     /// Receiver for commands to the runtime
     theater_rx: Receiver<TheaterCommand>,
     /// Map of active communication channels
     channels: HashMap<ChannelId, HashSet<ChannelParticipant>>,
-    /// Optional channel to send channel events back to the server
-    #[allow(dead_code)]
-    channel_events_tx: Option<Sender<crate::messages::ChannelEvent>>,
     /// Shared async runtime for WASM execution, with the engine-scoped
     /// module compile cache.
     ///
@@ -207,8 +204,6 @@ impl TheaterRuntime {
     ///
     /// * `theater_tx` - Sender for commands to the runtime
     /// * `theater_rx` - Receiver for commands to the runtime
-    /// * `channel_events_tx` - Optional channel for sending events to external systems
-    /// * `message_lifecycle_tx` - Optional channel for sending actor lifecycle events to message-server
     ///
     /// ## Returns
     ///
@@ -230,7 +225,6 @@ impl TheaterRuntime {
     /// let runtime = TheaterRuntime::new(
     ///     theater_tx,
     ///     theater_rx,
-    ///     None,
     ///     HandlerRegistry::new(),
     ///     Arc::new(ResourceCache::new()),
     /// ).await?;
@@ -240,7 +234,6 @@ impl TheaterRuntime {
     pub async fn new(
         theater_tx: Sender<TheaterCommand>,
         theater_rx: Receiver<TheaterCommand>,
-        channel_events_tx: Option<Sender<crate::messages::ChannelEvent>>,
         handler_registry: HandlerRegistry,
         resource_cache: Arc<ResourceCache>,
     ) -> Result<Self> {
@@ -254,7 +247,6 @@ impl TheaterRuntime {
             chains: HashMap::new(),
             spawn_subscribers: Vec::new(),
             channels: HashMap::new(),
-            channel_events_tx,
             pack_runtime,
             resource_cache,
             handler_registry,

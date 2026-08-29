@@ -318,7 +318,6 @@ pub async fn run_replay_verification(
     let mut runtime = TheaterRuntime::new(
         theater_tx.clone(),
         theater_rx,
-        None,
         handler_registry,
         Arc::new(ResourceCache::new()),
     )
@@ -572,7 +571,6 @@ pub async fn run_request_replay_verification(
     let mut runtime = TheaterRuntime::new(
         theater_tx.clone(),
         theater_rx,
-        None,
         handler_registry,
         Arc::new(ResourceCache::new()),
     )
@@ -881,7 +879,6 @@ pub async fn run_supervisor_replay_verification(
     let mut runtime = TheaterRuntime::new(
         theater_tx.clone(),
         theater_rx,
-        None,
         handler_registry,
         Arc::new(ResourceCache::new()),
     )
@@ -1263,7 +1260,6 @@ pub async fn run_tcp_replay_verification(
     let mut runtime = TheaterRuntime::new(
         theater_tx.clone(),
         theater_rx,
-        None,
         handler_registry,
         Arc::new(ResourceCache::new()),
     )

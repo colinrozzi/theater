@@ -97,6 +97,12 @@ use std::hash::{Hash, Hasher};
 use tokio::sync::mpsc::Sender;
 use tokio::sync::oneshot;
 
+/// One row of the actor supervision tree: `(actor-id, name, parent-id)`.
+/// `parent-id` is the spawning supervisor (`None` for root actors). Carried by
+/// `GetActors` responses and by spawn-subscription notifications so consumers
+/// can render the tree.
+pub type ActorTreeRow = (TheaterId, String, Option<TheaterId>);
+
 /// # Theater Command
 ///
 /// Commands sent to the Theater runtime to manage actors and system resources.
@@ -269,7 +275,7 @@ pub enum TheaterCommand {
     GetActors {
         /// Returns `(actor-id, name, parent-id)` for every live actor.
         /// `parent-id` is the spawning supervisor (`None` for root actors).
-        response_tx: oneshot::Sender<Result<Vec<(TheaterId, String, Option<TheaterId>)>>>,
+        response_tx: oneshot::Sender<Result<Vec<ActorTreeRow>>>,
     },
 
     GetActorManifest {
@@ -392,7 +398,7 @@ pub enum TheaterCommand {
     /// deaths ride each actor's own chain subscription (`SubscribeToActor`).
     /// This backs `theater:simple/runtime.subscribe-to-spawns`.
     SubscribeToSpawns {
-        event_tx: Sender<(TheaterId, String, Option<TheaterId>)>,
+        event_tx: Sender<ActorTreeRow>,
     },
 
     /// # Unsubscribe a previously-registered spawn subscriber
@@ -400,7 +406,7 @@ pub enum TheaterCommand {
     /// Identity is by `Sender::same_channel` (pass a clone of the sender used
     /// to subscribe). No-op if not subscribed.
     UnsubscribeFromSpawns {
-        event_tx: Sender<(TheaterId, String, Option<TheaterId>)>,
+        event_tx: Sender<ActorTreeRow>,
     },
 
     /// # Create a new content store
@@ -680,26 +686,6 @@ impl std::fmt::Display for ChannelParticipant {
             ChannelParticipant::External => write!(f, "External"),
         }
     }
-}
-
-/// # Channel Event
-///
-/// Event types for communication between the runtime and server regarding channels.
-///
-/// ## Purpose
-///
-/// ChannelEvent represents events that occur on communication channels that need
-/// to be communicated from the runtime to the server for management and monitoring.
-#[derive(Debug)]
-pub enum ChannelEvent {
-    /// A message was sent on a channel
-    Message {
-        channel_id: ChannelId,
-        sender_id: ChannelParticipant,
-        message: Vec<u8>,
-    },
-    /// A channel was closed
-    Close { channel_id: ChannelId },
 }
 
 #[derive(Debug, Clone)]

@@ -109,7 +109,6 @@ async fn test_actor_shutdown_timing() {
         let mut runtime = theater::theater_runtime::TheaterRuntime::new(
             theater_tx_clone,
             theater_rx,
-            None,
             handler_registry,
             Arc::new(ResourceCache::new()),
         )
@@ -240,7 +239,6 @@ async fn test_multiple_actor_shutdown_timing() {
         let mut runtime = theater::theater_runtime::TheaterRuntime::new(
             theater_tx_clone,
             theater_rx,
-            None,
             handler_registry,
             Arc::new(ResourceCache::new()),
         )
@@ -389,7 +387,6 @@ async fn test_actor_shutdown_with_supervisor_handler() {
         let mut runtime = theater::theater_runtime::TheaterRuntime::new(
             theater_tx_clone,
             theater_rx,
-            None,
             handler_registry,
             Arc::new(ResourceCache::new()),
         )
@@ -562,7 +559,6 @@ async fn test_actor_shutdown_with_all_handlers() {
         let mut runtime = theater::theater_runtime::TheaterRuntime::new(
             theater_tx_clone,
             theater_rx,
-            None,
             handler_registry,
             Arc::new(ResourceCache::new()),
         )

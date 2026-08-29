@@ -89,9 +89,6 @@ async fn main() -> Result<()> {
     // Create communication channels
     let (theater_tx, theater_rx) = mpsc::channel::<TheaterCommand>(32);
 
-    // Optional: Create channel for runtime events
-    let (channel_events_tx, _channel_events_rx) = mpsc::channel(32);
-
     // Create handler registry with Theater-specific handlers
     let handler_registry = create_handler_registry(theater_tx.clone());
 
@@ -102,7 +99,6 @@ async fn main() -> Result<()> {
     let mut runtime: TheaterRuntime = TheaterRuntime::new(
         theater_tx.clone(),
         theater_rx,
-        Some(channel_events_tx),
         handler_registry,
         Arc::new(ResourceCache::new()),
     )
