@@ -127,6 +127,15 @@ impl Handler for RuntimeHandler {
         Box::new(self.fresh())
     }
 
+    fn set_permissions(
+        &mut self,
+        permissions: Option<&theater::config::permissions::HandlerPermission>,
+    ) {
+        // Bake in this actor's granted runtime capability (the gate reads
+        // self.permissions). `None` -> default-deny.
+        self.permissions = permissions.and_then(|p| p.runtime.clone());
+    }
+
     fn name(&self) -> &str {
         "runtime"
     }

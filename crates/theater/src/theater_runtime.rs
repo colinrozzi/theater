@@ -1407,8 +1407,18 @@ impl TheaterRuntime {
         &self,
         manifest: &ManifestConfig,
     ) -> Result<HandlerRegistry> {
-        // Clone the registry with per-actor configs applied
-        let mut registry = self.handler_registry.clone_with_configs(&manifest.handlers);
+        // Compute this actor's effective permissions from its manifest policy
+        // against a root (fully-privileged) parent, then apply configs + grants.
+        // Control caps (runtime/supervisor) default-deny, so an actor gets them
+        // only by declaring an explicit restrict grant. (Full parent-chain
+        // inheritance — child cannot exceed its spawner — is a follow-up.)
+        let effective =
+            manifest.calculate_effective_permissions(
+                &crate::config::permissions::HandlerPermission::root(),
+            );
+        let mut registry = self
+            .handler_registry
+            .clone_with_configs(&manifest.handlers, Some(&effective));
 
         // Special handling for replay handler - needs to load chain file
         for handler_config in &manifest.handlers {

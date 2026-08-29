@@ -527,6 +527,15 @@ impl Handler for SupervisorHandler {
         Box::new(self.fresh())
     }
 
+    fn set_permissions(
+        &mut self,
+        permissions: Option<&theater::config::permissions::HandlerPermission>,
+    ) {
+        // Bake in this actor's granted supervisor capability (the gate reads
+        // self.permissions). `None` -> default-deny.
+        self.permissions = permissions.and_then(|p| p.supervisor.clone());
+    }
+
     fn name(&self) -> &str {
         "supervisor"
     }
