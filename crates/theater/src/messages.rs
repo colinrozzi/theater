@@ -195,26 +195,6 @@ pub enum TheaterCommand {
         parent_id: Option<TheaterId>,
     },
 
-    /// # Resume an existing actor
-    ///
-    /// Restarts an actor from a manifest. State restoration happens via the
-    /// replay handler configured in the manifest.
-    ///
-    /// ## Parameters
-    ///
-    /// * `manifest_path` - Path to the actor's manifest file
-    /// * `wasm_bytes` - Optional pre-loaded WASM bytes. If None, bytes are resolved from manifest.package
-    /// * `response_tx` - Channel to receive the result (actor ID or error)
-    /// * `supervisor_tx` - Optional channel for supervisor to receive lifecycle events
-    /// * `subscription_tx` - Optional channel to subscribe to all actor events
-    ResumeActor {
-        manifest_path: String,
-        wasm_bytes: Option<Vec<u8>>,
-        response_tx: oneshot::Sender<Result<TheaterId>>,
-        supervisor_tx: Option<Sender<ActorResult>>,
-        subscription_tx: Option<Sender<(TheaterId, ChainEvent)>>,
-    },
-
     /// # Stop an actor
     ///
     /// Gracefully stops a running actor.
@@ -478,9 +458,6 @@ impl TheaterCommand {
             }
             TheaterCommand::SetupActor { name, .. } => {
                 format!("SetupActor: {}", name.as_deref().unwrap_or("<unnamed>"))
-            }
-            TheaterCommand::ResumeActor { manifest_path, .. } => {
-                format!("ResumeActor: {}", manifest_path)
             }
             TheaterCommand::StopActor { actor_id, .. } => {
                 format!("StopActor: {:?}", actor_id)

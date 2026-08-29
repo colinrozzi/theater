@@ -11,22 +11,20 @@ use crate::chain::ChainEvent;
 use crate::config::actor_manifest::HandlerConfig;
 use crate::handler::HandlerRegistry;
 use crate::id::TheaterId;
-use crate::messages::{
-    default_init_state, ActorResult, ChannelId, ChannelParticipant, ChildError, ChildExternalStop,
-    ChildResult,
-};
 use crate::messages::{ActorMessage, ActorStatus, TheaterCommand};
+use crate::messages::{
+    ActorResult, ChannelId, ChannelParticipant, ChildError, ChildExternalStop, ChildResult,
+};
 use crate::metrics::ActorMetrics;
 use crate::pack_bridge::{CachingPackRuntime, Value};
 use crate::replay::ReplayHandler;
 use crate::shutdown::{ShutdownController, ShutdownType};
-use crate::utils::{resolve_reference, resolve_reference_cached, ResourceCache};
+use crate::utils::ResourceCache;
 use crate::Result;
 use crate::TheaterRuntimeError;
 use crate::{ManifestConfig, StateChain};
 use std::collections::HashMap;
 use std::collections::HashSet;
-use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc::Receiver;
@@ -143,9 +141,9 @@ pub struct TheaterRuntime {
     /// safe.
     pack_runtime: Arc<CachingPackRuntime>,
     /// Shared URL→bytes cache. Consulted on every wasm-resolve in the
-    /// runtime's own entry points (`ResumeActor`, and by callers of
-    /// [`Self::resource_cache`] for top-level start paths like the CLI's
-    /// `theater spawn`). The supervisor host fn uses its own clone of
+    /// runtime's own entry points (callers of [`Self::resource_cache`] for
+    /// top-level start paths like the CLI's `theater spawn`). The supervisor
+    /// host fn uses its own clone of
     /// the same `Arc<ResourceCache>` so a single process has exactly
     /// one cache regardless of which entry point a spawn comes from.
     /// Opt-in per child manifest via `static_package = true`.
@@ -267,8 +265,7 @@ impl TheaterRuntime {
     /// The shared URL→bytes cache. Server top-level start, CLI top-level
     /// spawn, and any external caller that constructs a `TheaterCommand`
     /// can clone this to honor a child manifest's `static_package` flag
-    /// — the same cache backing the runtime's own `ResumeActor` path
-    /// and the supervisor host fn.
+    /// — the same cache backing the supervisor host fn.
     pub fn resource_cache(&self) -> &Arc<ResourceCache> {
         &self.resource_cache
     }
@@ -394,118 +391,6 @@ impl TheaterRuntime {
                         supervisor_tx,
                         subscription_tx,
                         parent_id,
-                        response_tx,
-                    )
-                    .await;
-                }
-                TheaterCommand::ResumeActor {
-                    manifest_path,
-                    wasm_bytes,
-                    response_tx,
-                    supervisor_tx,
-                    subscription_tx,
-                } => {
-                    debug!(
-                        "Processing ResumeActor command for manifest: {:?}",
-                        manifest_path
-                    );
-                    // ResumeActor loads manifest from path for replay config
-                    // Load manifest
-                    let manifest_result: Result<ManifestConfig, TheaterRuntimeError> = async {
-                        let manifest_str = if manifest_path.starts_with("store:")
-                            || manifest_path.starts_with("https:")
-                            || PathBuf::from(&manifest_path).exists()
-                        {
-                            let manifest_bytes =
-                                resolve_reference(&manifest_path).await.map_err(|e| {
-                                    TheaterRuntimeError::ActorInitializationError(format!(
-                                        "Failed to load manifest: {}",
-                                        e
-                                    ))
-                                })?;
-                            String::from_utf8(manifest_bytes).map_err(|e| {
-                                TheaterRuntimeError::ActorInitializationError(e.to_string())
-                            })?
-                        } else {
-                            manifest_path.clone()
-                        };
-
-                        ManifestConfig::from_toml_str(&manifest_str).map_err(|e| {
-                            TheaterRuntimeError::ActorInitializationError(format!(
-                                "Failed to parse manifest: {}",
-                                e
-                            ))
-                        })
-                    }
-                    .await;
-
-                    let manifest = match manifest_result {
-                        Ok(m) => m,
-                        Err(e) => {
-                            error!("Failed to load manifest: {}", e);
-                            let _ = response_tx.send(Err(e.into()));
-                            continue;
-                        }
-                    };
-
-                    // Resolve WASM bytes. Honors the child's
-                    // `static_package` opt-in — when the operator has
-                    // declared the URL content-addressed, the wasm
-                    // fetch goes through this runtime's shared
-                    // ResourceCache (the same one the supervisor host
-                    // fn uses).
-                    let wasm_bytes = match wasm_bytes {
-                        Some(bytes) => bytes,
-                        None => {
-                            if manifest.static_package {
-                                match resolve_reference_cached(
-                                    &manifest.package,
-                                    &self.resource_cache,
-                                )
-                                .await
-                                {
-                                    Ok((arc, _hit)) => (*arc).clone(),
-                                    Err(e) => {
-                                        error!("Failed to load WASM: {}", e);
-                                        let _ = response_tx.send(Err(anyhow::anyhow!(
-                                            "Failed to load WASM: {}",
-                                            e
-                                        )));
-                                        continue;
-                                    }
-                                }
-                            } else {
-                                match resolve_reference(&manifest.package).await {
-                                    Ok(bytes) => bytes,
-                                    Err(e) => {
-                                        error!("Failed to load WASM: {}", e);
-                                        let _ = response_tx.send(Err(anyhow::anyhow!(
-                                            "Failed to load WASM: {}",
-                                            e
-                                        )));
-                                        continue;
-                                    }
-                                }
-                            }
-                        }
-                    };
-
-                    let name = Some(manifest.name.clone());
-                    // Resume goes through the replay path; the replay handler
-                    // walks the recorded chain (including the original init
-                    // call), so `spawn_actor` must NOT auto-init.
-                    self.spawn_actor(
-                        wasm_bytes,
-                        name,
-                        Some(manifest),
-                        default_init_state(),
-                        /* call_init = */ false,
-                        supervisor_tx,
-                        subscription_tx,
-                        // Resume does not re-establish the supervision parent
-                        // (ResumeActor carries no parent_id); a resumed actor
-                        // shows no parent until re-subscribed. TODO if needed.
-                        None,
                         response_tx,
                     )
                     .await;

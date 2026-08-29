@@ -220,9 +220,8 @@ async fn run(args: &SpawnArgs, ctx: &CommandContext, call_init: bool) -> Result<
     // Create the TheaterRuntime in-process
     let (theater_tx, theater_rx) = mpsc::channel::<TheaterCommand>(32);
     // One URL→bytes cache shared across every entry point in this CLI
-    // invocation: the top-level wasm fetch below, the supervisor host
-    // fn (via `create_handler_registry`), and `ResumeActor` (via
-    // TheaterRuntime). Lasts until the CLI process exits.
+    // invocation: the top-level wasm fetch below and the supervisor host
+    // fn (via `create_handler_registry`). Lasts until the CLI process exits.
     let resource_cache = Arc::new(ResourceCache::new());
     let handler_registry = create_handler_registry(
         theater_tx.clone(),
