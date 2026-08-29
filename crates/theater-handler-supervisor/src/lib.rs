@@ -70,29 +70,23 @@ const SUPERVISOR_PACT: &str = include_str!("../supervisor.pact");
 
 /// Declare the theater:simple/supervisor interface from the pact file.
 ///
-/// Functions for spawning and managing child actors:
-/// - spawn(manifest: string, init-state: option<value>, wasm-bytes: option<list<u8>>) -> result<string, string>
-/// - spawn-and-wait(manifest: string, init-state: option<value>, wasm-bytes: option<list<u8>>, timeout-ms: option<u64>) -> result<option<list<u8>>, string>
-/// - resume(manifest: string, state-bytes: option<list<u8>>, wasm-bytes: option<list<u8>>) -> result<string, string>
-/// - list-children() -> list<string>
-/// - restart-child(child-id: string) -> result<_, string>
-/// - stop-child(child-id: string) -> result<_, string>
-/// - get-child-state(child-id: string) -> result<option<list<u8>>, string>
+/// Actor-management, scoped to the caller's VIEW (its subtree, or `all` for a
+/// control actor — see [`SupervisorPermissions`]). Every op is evaluated against
+/// that view; a target outside it is rejected with `out-of-view`. Ops:
+/// - spawn / spawn-and-wait — create a child of the caller (setup + init)
+/// - list-actors -> list<actor-info> — every actor in view
+/// - get-actor-status / -state / -manifest / -metrics (id)
+/// - stop-actor (graceful) / kill-actor (force) (id)
+/// - subscribe-to-actor / unsubscribe-from-actor (id) — chain events to the
+///   caller's `handle-actor-event` export
 ///
-/// Both `spawn` and `spawn-and-wait` are setup + init: the runtime calls
-/// the child's `theater:simple/actor.init` export before returning the
-/// child id.
+/// `spawn` / `spawn-and-wait` are setup + init: the runtime calls the child's
+/// `theater:simple/actor.init` export before returning the child id. `init-state`:
+///   - `none` falls back to the child's `manifest.initial_state`.
+///   - `some(v)` overrides unconditionally (even `some(none)` = "explicitly no state").
 ///
-/// `init-state` semantics on both:
-///   - `none` falls back to the child's `manifest.initial_state` field.
-///     Generic supervisors (sentinel etc.) pass `none` to let the child's
-///     own manifest carry its secrets.
-///   - `some(v)` overrides the manifest unconditionally — even
-///     `some(option<...>::none)` means "explicitly no state."
-///
-/// Callers that need staged init (replay, custom init params) should use
-/// the runtime's `SetupActor` command directly via the theater crate API
-/// rather than the wasm-facing supervisor.spawn.
+/// Recovery is just `spawn` of a fresh actor; there is no `resume` here — reading
+/// or replaying persisted history is the recorder's domain, not this interface's.
 ///
 /// Note: chain-event is approximated as list<u8> for interface hashing.
 fn supervisor_interface() -> InterfaceImpl {

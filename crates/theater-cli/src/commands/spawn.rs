@@ -8,7 +8,7 @@ use tracing::{debug, error};
 use crate::{error::CliError, CommandContext};
 use theater::chain::ChainEvent;
 use theater::config::actor_manifest::{
-    SelfHostConfig, StoreHandlerConfig, SupervisorHostConfig, TcpHandlerConfig,
+    RuntimeHostConfig, SelfHostConfig, StoreHandlerConfig, SupervisorHostConfig, TcpHandlerConfig,
     TerminalHandlerConfig, TimerHandlerConfig,
 };
 use theater::handler::HandlerRegistry;
@@ -23,6 +23,7 @@ use theater_handler_loop::LoopHandler;
 use theater_handler_message_server::{MessageRouter, MessageServerHandler};
 use theater_handler_podman::PodmanHandler;
 use theater_handler_rpc::RpcHandler;
+use theater_handler_runtime::RuntimeHandler;
 use theater_handler_self::SelfHandler;
 use theater_handler_store::StoreHandler;
 use theater_handler_supervisor::SupervisorHandler;
@@ -115,10 +116,10 @@ fn create_handler_registry(
 ) -> Result<HandlerRegistry, CliError> {
     let mut registry = HandlerRegistry::new();
 
-    // Runtime handler - provides log, get-chain, shutdown
-    let runtime_config = SelfHostConfig {};
+    // Self handler - the per-actor handle: log, self, shutdown
+    let self_config = SelfHostConfig {};
     registry.register(
-        SelfHandler::new(runtime_config, theater_tx.clone(), None).with_show_logs(show_actor_logs),
+        SelfHandler::new(self_config, theater_tx.clone(), None).with_show_logs(show_actor_logs),
     );
 
     // Store handler - provides content storage
@@ -133,6 +134,11 @@ fn create_handler_registry(
     registry.register(
         SupervisorHandler::new(supervisor_config, None).with_resource_cache(resource_cache),
     );
+
+    // Runtime (system) handler - shutdown-runtime + subscribe-to-spawns.
+    // Capability-gated, default-deny: an actor needs an explicit
+    // [permission_policy.runtime] grant to use it.
+    registry.register(RuntimeHandler::new(RuntimeHostConfig {}, None));
 
     // Message server handler - inter-actor messaging
     let message_router = MessageRouter::new();

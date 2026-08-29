@@ -3359,6 +3359,7 @@ dependencies = [
  "theater-handler-message-server",
  "theater-handler-podman",
  "theater-handler-rpc",
+ "theater-handler-runtime",
  "theater-handler-self",
  "theater-handler-store",
  "theater-handler-supervisor",

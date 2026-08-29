@@ -24,6 +24,7 @@ path = "src/main.rs"
 [dependencies]
 # Internal dependencies
 theater.workspace = true
+theater-handler-runtime.workspace = true
 theater-handler-self.workspace = true
 theater-handler-store.workspace = true
 theater-handler-supervisor.workspace = true
