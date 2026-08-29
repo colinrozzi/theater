@@ -118,6 +118,10 @@ pub struct TheaterRuntime {
     actors: HashMap<TheaterId, ActorProcess>,
     /// Map of chains index by actor ID
     chains: HashMap<TheaterId, Arc<RwLock<StateChain>>>,
+    /// Runtime-wide spawn-notification subscribers. Every actor spawned
+    /// anywhere is delivered to each as `(id, name, parent-id)`. Backs
+    /// `theater:simple/runtime.subscribe-to-spawns`.
+    spawn_subscribers: Vec<Sender<(TheaterId, String, Option<TheaterId>)>>,
     /// Sender for commands to the runtime
     theater_tx: Sender<TheaterCommand>,
     /// Receiver for commands to the runtime
@@ -250,6 +254,7 @@ impl TheaterRuntime {
             theater_rx,
             actors: HashMap::new(),
             chains: HashMap::new(),
+            spawn_subscribers: Vec::new(),
             channels: HashMap::new(),
             channel_events_tx,
             pack_runtime,
@@ -734,6 +739,15 @@ impl TheaterRuntime {
                         );
                     }
                 }
+                TheaterCommand::SubscribeToSpawns { event_tx } => {
+                    debug!("Adding runtime-wide spawn subscriber");
+                    self.spawn_subscribers.push(event_tx);
+                }
+                TheaterCommand::UnsubscribeFromSpawns { event_tx } => {
+                    debug!("Removing runtime-wide spawn subscriber");
+                    self.spawn_subscribers
+                        .retain(|s| !s.same_channel(&event_tx));
+                }
                 TheaterCommand::NewStore { response_tx } => {
                     debug!("Creating new content store");
                     let store_id = crate::store::ContentStore::new();
@@ -989,6 +1003,22 @@ impl TheaterRuntime {
 
         self.actors.insert(actor_id, process);
         debug!("Actor process registered with runtime");
+
+        // Notify runtime-wide spawn subscribers (births only); reap closed ones.
+        if !self.spawn_subscribers.is_empty() {
+            let name = self
+                .actors
+                .get(&actor_id)
+                .map(|p| p.name.clone())
+                .unwrap_or_default();
+            let note = (actor_id, name, parent_id);
+            self.spawn_subscribers.retain(|s| {
+                !matches!(
+                    s.try_send(note.clone()),
+                    Err(tokio::sync::mpsc::error::TrySendError::Closed(_))
+                )
+            });
+        }
         // elapsed_ms here is the total queue-blocking cost: every ms
         // counted is one ms the runtime command loop spent serialized
         // on this spawn instead of draining other commands.

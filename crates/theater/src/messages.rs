@@ -405,6 +405,24 @@ pub enum TheaterCommand {
         event_tx: Sender<(TheaterId, ChainEvent)>,
     },
 
+    /// # Subscribe to actor-spawned notifications (runtime-wide)
+    ///
+    /// After this call, every actor spawned ANYWHERE in the runtime is
+    /// delivered to `event_tx` as `(id, name, parent-id)`. Births only —
+    /// deaths ride each actor's own chain subscription (`SubscribeToActor`).
+    /// This backs `theater:simple/runtime.subscribe-to-spawns`.
+    SubscribeToSpawns {
+        event_tx: Sender<(TheaterId, String, Option<TheaterId>)>,
+    },
+
+    /// # Unsubscribe a previously-registered spawn subscriber
+    ///
+    /// Identity is by `Sender::same_channel` (pass a clone of the sender used
+    /// to subscribe). No-op if not subscribed.
+    UnsubscribeFromSpawns {
+        event_tx: Sender<(TheaterId, String, Option<TheaterId>)>,
+    },
+
     /// # Create a new content store
     ///
     /// Creates a new content-addressable storage instance.
@@ -509,6 +527,8 @@ impl TheaterCommand {
             TheaterCommand::UnsubscribeFromActor { actor_id, .. } => {
                 format!("UnsubscribeFromActor: {:?}", actor_id)
             }
+            TheaterCommand::SubscribeToSpawns { .. } => "SubscribeToSpawns".to_string(),
+            TheaterCommand::UnsubscribeFromSpawns { .. } => "UnsubscribeFromSpawns".to_string(),
             TheaterCommand::NewStore { .. } => "NewStore".to_string(),
             TheaterCommand::GetActorHandle { actor_id, .. } => {
                 format!("GetActorHandle: {:?}", actor_id)
