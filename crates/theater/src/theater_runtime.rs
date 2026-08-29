@@ -751,13 +751,16 @@ impl TheaterRuntime {
         self.actors.insert(id, process);
     }
 
-    /// Remove an actor and maintain the `children` index: detach it from its
-    /// parent's child set. Its OWN `children` entry is intentionally left — any
-    /// (now orphaned) children still carry `parent_id == actor_id` and are
-    /// pruned as they each exit; it's also exactly the set a cascade would stop.
-    /// Returns the removed process, if the actor was present.
+    /// Remove an actor, keeping `children` a STRICT live-inverse of the
+    /// `parent_id` edges: detach it from its parent's child set AND drop its own
+    /// entry, so no key ever outlives its actor. Any children it had keep
+    /// `parent_id == actor_id` but are simply no longer reachable through the
+    /// index — which matches reality (they're orphaned). The coming cascade
+    /// reads a node's child set *before* calling this, so dropping the entry
+    /// here is safe. Returns the removed process, if the actor was present.
     fn deregister_actor(&mut self, actor_id: &TheaterId) -> Option<ActorProcess> {
         let proc = self.actors.remove(actor_id)?;
+        self.children.remove(actor_id);
         if let Some(parent) = proc.parent_id {
             if let Some(set) = self.children.get_mut(&parent) {
                 set.remove(actor_id);
