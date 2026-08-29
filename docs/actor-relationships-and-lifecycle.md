@@ -157,6 +157,37 @@ as a **ripple**. This covers *all* death paths uniformly (graceful stop,
 self-shutdown, crash) because it hooks the death **event**, not a specific call,
 and there is only one mechanism so nothing races.
 
+### The lifecycle-event vocabulary (decided)
+
+Lifecycle transitions get a **fixed, typed vocabulary** — a new
+`ChainEventPayload::Lifecycle` variant in `crates/theater/src/events/`, replacing
+the ad-hoc `"shutdown"` / `"wasm"`-for-death `event_type` strings (and retiring
+the dead `RuntimeEventData` / `TheaterRuntimeEventData` enums). It consolidates
+the existing `ActorResult` (`Success` / `Error` / `ExternalStop`) into one place
+that fires on **every** path.
+
+```rust
+pub enum ActorLifecycleEvent {
+    Spawned,                             // setup + init done; actor is live
+    Paused,
+    Resumed,
+    Terminated { cause: TerminationCause },
+}
+
+pub enum TerminationCause {
+    Completed { final_state: Option<Vec<u8>> }, // clean self-driven exit  (← Success)
+    Failed    { error: ActorError },            // guest error / trap      (← Error)
+    Stopped,                                     // graceful external stop  (← ExternalStop)
+    Killed,                                      // brutal force-kill
+}
+```
+
+**Fate propagation default (resolves §7.2):** `Failed`, `Stopped`, and `Killed`
+propagate a fate-link; **`Completed` does not** — a child finishing its job
+cleanly must not tear down its fate-peers. That's the Erlang default ("normal
+exit doesn't propagate"), expressed as a filter over the cause rather than a
+special case.
+
 ## 4. Lineage, spawn, and view-scope
 
 - **Spawn** records two things: the **ownership** fact (`parent_id`, kept — it's
@@ -203,13 +234,12 @@ Everything else recasts as a *consumer* of this substrate:
 
 ## 7. Open questions / decisions to make
 
-1. **Filter representation.** Concretely how a filter references chain-event
-   types (the `ChainEventPayload` variants / `event_type` strings), and how the
-   **terminal/death event** is named so a link can key on it. (This is coupled to
-   consolidation defining that terminal event.)
-2. **Normal vs abnormal death.** Do spawn-time fate-links propagate on *any*
-   death or only abnormal (Erlang)? Expressible as the default filter; pick the
-   default.
+1. ~~**Terminal event.**~~ **RESOLVED** — see the lifecycle-event vocabulary in
+   §3: one typed `Terminated { cause }` event, fired on every death path.
+   (Filter *representation* — how a subscription names a set of these types on
+   the wire — is still to pin when the substrate is built.)
+2. ~~**Normal vs abnormal death.**~~ **RESOLVED** — `Failed`/`Stopped`/`Killed`
+   propagate fate; `Completed` does not (§3).
 3. **Permissions.** Who may `link`/`monitor` whom — is it view-scoped like the
    supervisor ops (you can only attach within your view), unrestricted, or its
    own grant? Links create fate coupling, so this needs a real answer.
