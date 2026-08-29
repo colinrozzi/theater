@@ -10,10 +10,12 @@
 interface runtime {
     @package: string = "theater:simple"
 
+    // Fully enumerable — every op is argument-less and does exactly one
+    // fallible thing beyond the permission check (send a command to the
+    // runtime), so there is no invalid-argument and no open-ended tail.
     variant runtime-error {
         permission-denied(string),   // required inspect/mutate not granted
-        invalid-argument(string),
-        internal(string),            // catch-all / unexpected
+        runtime-unavailable,         // the runtime is shutting down / not accepting commands
     }
 
     exports {

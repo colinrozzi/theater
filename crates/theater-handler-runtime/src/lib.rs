@@ -41,30 +41,31 @@ fn runtime_interface() -> InterfaceImpl {
 }
 
 /// Interface error for `theater:simple/runtime` — mirrors the `runtime-error`
-/// pact variant. A normal Rust enum; the single `From<RuntimeError> for Value`
-/// below is the only place a pact error value is built.
+/// pact variant. Fully enumerable: this thin interface can only ever fail two
+/// ways, so there is no `internal(string)` catch-all. A normal Rust enum; the
+/// single `From<RuntimeError> for Value` below is the only place a pact error
+/// value is built.
 #[derive(Debug, Error)]
 pub enum RuntimeError {
     #[error("permission denied: {0}")]
     PermissionDenied(String),
-    #[error("invalid argument: {0}")]
-    InvalidArgument(String),
-    #[error("internal error: {0}")]
-    Internal(String),
+    /// `theater_tx.send` failed — the runtime's command channel is closed, i.e.
+    /// the runtime is shutting down / no longer accepting commands.
+    #[error("runtime unavailable (shutting down)")]
+    RuntimeUnavailable,
 }
 
 impl From<RuntimeError> for Value {
     fn from(e: RuntimeError) -> Value {
-        let (tag, case, msg) = match e {
-            RuntimeError::PermissionDenied(m) => (0, "permission-denied", m),
-            RuntimeError::InvalidArgument(m) => (1, "invalid-argument", m),
-            RuntimeError::Internal(m) => (2, "internal", m),
+        let (tag, case, payload) = match e {
+            RuntimeError::PermissionDenied(m) => (0, "permission-denied", vec![Value::String(m)]),
+            RuntimeError::RuntimeUnavailable => (1, "runtime-unavailable", vec![]),
         };
         Value::Variant {
             type_name: "runtime-error".to_string(),
             case_name: case.to_string(),
             tag,
-            payload: vec![Value::String(msg)],
+            payload,
         }
     }
 }
@@ -188,11 +189,8 @@ impl Handler for RuntimeHandler {
                     async move {
                         require(&permissions, true)?;
                         let tx = ctx.data().theater_tx.clone();
-                        if let Err(e) = tx.send(TheaterCommand::ShutdownRuntime).await {
-                            return Err(Value::from(RuntimeError::Internal(format!(
-                                "failed to send shutdown: {}",
-                                e
-                            ))));
+                        if tx.send(TheaterCommand::ShutdownRuntime).await.is_err() {
+                            return Err(Value::from(RuntimeError::RuntimeUnavailable));
                         }
                         Ok(Value::Tuple(vec![]))
                     }
@@ -208,14 +206,12 @@ impl Handler for RuntimeHandler {
                     async move {
                         require(&permissions, false)?;
                         let tx = ctx.data().theater_tx.clone();
-                        if let Err(e) = tx
+                        if tx
                             .send(TheaterCommand::SubscribeToSpawns { event_tx })
                             .await
+                            .is_err()
                         {
-                            return Err(Value::from(RuntimeError::Internal(format!(
-                                "failed to send subscribe: {}",
-                                e
-                            ))));
+                            return Err(Value::from(RuntimeError::RuntimeUnavailable));
                         }
                         Ok(Value::Tuple(vec![]))
                     }
@@ -231,14 +227,12 @@ impl Handler for RuntimeHandler {
                     async move {
                         require(&permissions, false)?;
                         let tx = ctx.data().theater_tx.clone();
-                        if let Err(e) = tx
+                        if tx
                             .send(TheaterCommand::UnsubscribeFromSpawns { event_tx })
                             .await
+                            .is_err()
                         {
-                            return Err(Value::from(RuntimeError::Internal(format!(
-                                "failed to send unsubscribe: {}",
-                                e
-                            ))));
+                            return Err(Value::from(RuntimeError::RuntimeUnavailable));
                         }
                         Ok(Value::Tuple(vec![]))
                     }
