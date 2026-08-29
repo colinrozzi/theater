@@ -216,9 +216,9 @@ async fn authorize(
     target: TheaterId,
     mutate: bool,
 ) -> Result<(), SupervisorError> {
-    let p = perms
-        .as_ref()
-        .ok_or_else(|| SupervisorError::PermissionDenied("supervisor capability not granted".into()))?;
+    let p = perms.as_ref().ok_or_else(|| {
+        SupervisorError::PermissionDenied("supervisor capability not granted".into())
+    })?;
     if mutate && !p.mutate {
         return Err(SupervisorError::PermissionDenied(
             "mutate capability not granted".into(),
@@ -248,9 +248,9 @@ fn authorize_cap(
     perms: &Option<SupervisorPermissions>,
     mutate: bool,
 ) -> Result<&SupervisorPermissions, SupervisorError> {
-    let p = perms
-        .as_ref()
-        .ok_or_else(|| SupervisorError::PermissionDenied("supervisor capability not granted".into()))?;
+    let p = perms.as_ref().ok_or_else(|| {
+        SupervisorError::PermissionDenied("supervisor capability not granted".into())
+    })?;
     if mutate && !p.mutate {
         return Err(SupervisorError::PermissionDenied(
             "mutate capability not granted".into(),
@@ -583,12 +583,16 @@ impl Handler for SupervisorHandler {
                 let children = children.clone();
                 let theater_tx_holder = theater_tx_holder.clone();
                 let resource_cache = resource_cache.clone();
+                let permissions = permissions.clone();
                 move |ctx: AsyncCtx<ActorStore>, input: Value| {
                     let supervisor_tx = supervisor_tx.clone();
                     let children = children.clone();
                     let theater_tx_holder = theater_tx_holder.clone();
                     let resource_cache = resource_cache.clone();
+                    let permissions = permissions.clone();
                     async move {
+                        // spawn creates a new actor parented to the caller; needs mutate.
+                        authorize_cap(&permissions, true)?;
                         // Parse input: (string, option<value>, option<list<u8>>)
                         // init-state: None  → fall back to manifest.initial_state
                         //             Some(v) → use v verbatim (even if v is Value::Option::None)
@@ -598,15 +602,15 @@ impl Handler for SupervisorHandler {
                                 let init_state_override = match args.remove(1) {
                                     Value::Option { value: None, .. } => None,
                                     Value::Option { value: Some(inner), .. } => Some(*inner),
-                                    _ => return Err(Value::String("Invalid init-state argument: expected option<value>".to_string())),
+                                    _ => return Err(Value::from(SupervisorError::InvalidArgument("init-state must be option<value>".to_string()))),
                                 };
                                 let manifest = match args.remove(0) {
                                     Value::String(s) => s,
-                                    _ => return Err(Value::String("Invalid manifest argument".to_string())),
+                                    _ => return Err(Value::from(SupervisorError::InvalidArgument("invalid manifest argument".to_string()))),
                                 };
                                 (manifest, init_state_override, wasm_bytes)
                             }
-                            _ => return Err(Value::String("Invalid spawn arguments: expected (string, option<value>, option<list<u8>>)".to_string())),
+                            _ => return Err(Value::from(SupervisorError::InvalidArgument("expected (manifest, option<value>, option<list<u8>>)".to_string()))),
                         };
 
                         let wasm_provided = provided_wasm_bytes.is_some();
@@ -626,9 +630,9 @@ impl Handler for SupervisorHandler {
                         let manifest_str = match resolve_reference(&manifest_path).await {
                             Ok(bytes) => match String::from_utf8(bytes) {
                                 Ok(s) => s,
-                                Err(e) => return Err(Value::String(format!("Invalid manifest encoding: {}", e))),
+                                Err(e) => return Err(Value::from(SupervisorError::SpawnFailed(format!("invalid manifest encoding: {}", e)))),
                             },
-                            Err(e) => return Err(Value::String(format!("Failed to load manifest: {}", e))),
+                            Err(e) => return Err(Value::from(SupervisorError::SpawnFailed(format!("failed to load manifest: {}", e)))),
                         };
                         info!(
                             phase = "supervisor.manifest_resolve",
@@ -641,7 +645,7 @@ impl Handler for SupervisorHandler {
                         let phase_start = Instant::now();
                         let manifest = match ManifestConfig::from_toml_str(&manifest_str) {
                             Ok(m) => m,
-                            Err(e) => return Err(Value::String(format!("Failed to parse manifest: {}", e))),
+                            Err(e) => return Err(Value::from(SupervisorError::SpawnFailed(format!("failed to parse manifest: {}", e)))),
                         };
                         info!(
                             phase = "supervisor.manifest_parse",
@@ -679,12 +683,12 @@ impl Handler for SupervisorHandler {
                                                 // compile.
                                                 (*arc).clone()
                                             }
-                                            Err(e) => return Err(Value::String(format!("Failed to load WASM: {}", e))),
+                                            Err(e) => return Err(Value::from(SupervisorError::SpawnFailed(format!("failed to load WASM: {}", e)))),
                                         }
                                     }
                                     _ => match resolve_reference(&manifest.package).await {
                                         Ok(bytes) => bytes,
-                                        Err(e) => return Err(Value::String(format!("Failed to load WASM: {}", e))),
+                                        Err(e) => return Err(Value::from(SupervisorError::SpawnFailed(format!("failed to load WASM: {}", e)))),
                                     },
                                 }
                             }
@@ -740,7 +744,7 @@ impl Handler for SupervisorHandler {
                         // the runtime command loop's serialized cost per spawn.
                         let phase_start = Instant::now();
                         if let Err(e) = theater_tx.send(cmd).await {
-                            return Err(Value::String(format!("Failed to send spawn command: {}", e)));
+                            return Err(Value::from(SupervisorError::Internal(format!("failed to send spawn command: {}", e))));
                         }
 
                         // Store theater_tx for shutdown (first spawn stores it)
@@ -776,8 +780,8 @@ impl Handler for SupervisorHandler {
                                 }
                                 Ok(Value::String(actor_id.to_string()))
                             }
-                            Ok(Err(e)) => Err(Value::String(e.to_string())),
-                            Err(e) => Err(Value::String(format!("Failed to receive response: {}", e))),
+                            Ok(Err(e)) => Err(Value::from(SupervisorError::SpawnFailed(e.to_string()))),
+                            Err(e) => Err(Value::from(SupervisorError::Internal(format!("failed to receive response: {}", e)))),
                         }
                     }
                 }
@@ -789,9 +793,13 @@ impl Handler for SupervisorHandler {
             // Same init-state semantics as `spawn` — see that function's docs.
             .func_async_result("spawn-and-wait", {
                 let resource_cache = resource_cache.clone();
+                let permissions = permissions.clone();
                 move |ctx: AsyncCtx<ActorStore>, input: Value| {
                     let resource_cache = resource_cache.clone();
+                    let permissions = permissions.clone();
                     async move {
+                        // spawn-and-wait creates a new actor parented to the caller; needs mutate.
+                        authorize_cap(&permissions, true)?;
                         // Parse input: (string, option<value>, option<list<u8>>, option<u64>)
                         let (manifest_path, init_state_override, provided_wasm_bytes, timeout_ms) = match input {
                             Value::Tuple(mut args) if args.len() == 4 => {
@@ -800,15 +808,15 @@ impl Handler for SupervisorHandler {
                                 let init_state_override = match args.remove(1) {
                                     Value::Option { value: None, .. } => None,
                                     Value::Option { value: Some(inner), .. } => Some(*inner),
-                                    _ => return Err(Value::String("Invalid init-state argument: expected option<value>".to_string())),
+                                    _ => return Err(Value::from(SupervisorError::InvalidArgument("init-state must be option<value>".to_string()))),
                                 };
                                 let manifest = match args.remove(0) {
                                     Value::String(s) => s,
-                                    _ => return Err(Value::String("Invalid manifest argument".to_string())),
+                                    _ => return Err(Value::from(SupervisorError::InvalidArgument("invalid manifest argument".to_string()))),
                                 };
                                 (manifest, init_state_override, wasm_bytes, timeout_ms)
                             }
-                            _ => return Err(Value::String("Invalid spawn-and-wait arguments: expected (string, option<value>, option<list<u8>>, option<u64>)".to_string())),
+                            _ => return Err(Value::from(SupervisorError::InvalidArgument("expected (manifest, option<value>, option<list<u8>>, option<u64>)".to_string()))),
                         };
 
                         debug!("spawn-and-wait: manifest={}, timeout={:?}ms", manifest_path, timeout_ms);
@@ -817,14 +825,14 @@ impl Handler for SupervisorHandler {
                         let manifest_str = match resolve_reference(&manifest_path).await {
                             Ok(bytes) => match String::from_utf8(bytes) {
                                 Ok(s) => s,
-                                Err(e) => return Err(Value::String(format!("Invalid manifest encoding: {}", e))),
+                                Err(e) => return Err(Value::from(SupervisorError::SpawnFailed(format!("invalid manifest encoding: {}", e)))),
                             },
-                            Err(e) => return Err(Value::String(format!("Failed to load manifest: {}", e))),
+                            Err(e) => return Err(Value::from(SupervisorError::SpawnFailed(format!("failed to load manifest: {}", e)))),
                         };
 
                         let manifest = match ManifestConfig::from_toml_str(&manifest_str) {
                             Ok(m) => m,
-                            Err(e) => return Err(Value::String(format!("Failed to parse manifest: {}", e))),
+                            Err(e) => return Err(Value::from(SupervisorError::SpawnFailed(format!("failed to parse manifest: {}", e)))),
                         };
 
                         // Resolve wasm bytes — same three paths as `spawn`.
@@ -847,12 +855,12 @@ impl Handler for SupervisorHandler {
                                             cache_hit = hit;
                                             (*arc).clone()
                                         }
-                                        Err(e) => return Err(Value::String(format!("Failed to load WASM: {}", e))),
+                                        Err(e) => return Err(Value::from(SupervisorError::SpawnFailed(format!("failed to load WASM: {}", e)))),
                                     }
                                 }
                                 _ => match resolve_reference(&manifest.package).await {
                                     Ok(bytes) => bytes,
-                                    Err(e) => return Err(Value::String(format!("Failed to load WASM: {}", e))),
+                                    Err(e) => return Err(Value::from(SupervisorError::SpawnFailed(format!("failed to load WASM: {}", e)))),
                                 },
                             },
                         };
@@ -897,14 +905,14 @@ impl Handler for SupervisorHandler {
                         };
 
                         if let Err(e) = theater_tx.send(cmd).await {
-                            return Err(Value::String(format!("Failed to send spawn command: {}", e)));
+                            return Err(Value::from(SupervisorError::Internal(format!("failed to send spawn command: {}", e))));
                         }
 
                         // Wait for the actor to spawn
                         let actor_id = match response_rx.await {
                             Ok(Ok(id)) => id,
-                            Ok(Err(e)) => return Err(Value::String(format!("Failed to spawn actor: {}", e))),
-                            Err(e) => return Err(Value::String(format!("Failed to receive spawn response: {}", e))),
+                            Ok(Err(e)) => return Err(Value::from(SupervisorError::SpawnFailed(format!("failed to spawn actor: {}", e)))),
+                            Err(e) => return Err(Value::from(SupervisorError::Internal(format!("failed to receive spawn response: {}", e)))),
                         };
 
                         debug!("spawn-and-wait: child {} spawned, waiting for completion", actor_id);
@@ -923,13 +931,13 @@ impl Handler for SupervisorHandler {
                                 Ok(option_bytes_to_value(child_result.result))
                             }
                             Ok(Some(ActorResult::Error(child_error))) => {
-                                Err(Value::String(format!("Child actor {} failed: {}", child_error.actor_id, child_error.error)))
+                                Err(Value::from(SupervisorError::SpawnFailed(format!("child actor {} failed: {}", child_error.actor_id, child_error.error))))
                             }
                             Ok(Some(ActorResult::ExternalStop(stop))) => {
-                                Err(Value::String(format!("Child actor {} was stopped externally", stop.actor_id)))
+                                Err(Value::from(SupervisorError::SpawnFailed(format!("child actor {} was stopped externally", stop.actor_id))))
                             }
                             Ok(None) => {
-                                Err(Value::String(format!("Child actor {} result channel closed unexpectedly", actor_id)))
+                                Err(Value::from(SupervisorError::Internal(format!("child actor {} result channel closed", actor_id))))
                             }
                             Err(_) => {
                                 // Timeout - stop the child actor
@@ -939,7 +947,7 @@ impl Handler for SupervisorHandler {
                                     actor_id,
                                     response_tx: stop_tx,
                                 }).await;
-                                Err(Value::String(format!("Timeout waiting for child actor {} to complete", actor_id)))
+                                Err(Value::from(SupervisorError::SpawnFailed(format!("timeout waiting for child actor {} to complete", actor_id))))
                             }
                         }
                     }
@@ -1406,38 +1414,33 @@ impl Handler for SupervisorHandler {
 /// WIT enum wit-error-type has cases: operation-timeout(0), channel-closed(1),
 /// shutting-down(2), function-not-found(3), type-mismatch(4), internal(5),
 /// serialization-error(6), paused(7)
+/// Convert an ActorError to the `actor-error` pact variant
+/// (supervisor-handlers.pact). Tags match the declaration order there. Cases
+/// with detail carry a message string; the rest are unit. `internal` is the
+/// catch-all for unexpected/uncommon errors.
 fn actor_error_to_value(error: ActorError) -> Value {
-    let (tag, case_name) = match &error {
-        ActorError::OperationTimeout(_) => (0, "operation-timeout"),
-        ActorError::ChannelClosed => (1, "channel-closed"),
-        ActorError::ShuttingDown => (2, "shutting-down"),
-        ActorError::FunctionNotFound(_) => (3, "function-not-found"),
-        ActorError::TypeMismatch(_) => (4, "type-mismatch"),
-        ActorError::Internal(_) => (5, "internal"),
-        ActorError::SerializationError => (6, "serialization-error"),
-        ActorError::Paused => (7, "paused"),
-        _ => (5, "internal"), // fallback
+    let (tag, case, payload): (_, &str, Vec<Value>) = match &error {
+        ActorError::OperationTimeout(_) => (
+            0,
+            "operation-timeout",
+            vec![Value::String(error.to_string())],
+        ),
+        ActorError::ChannelClosed => (1, "channel-closed", vec![]),
+        ActorError::ShuttingDown => (2, "shutting-down", vec![]),
+        ActorError::FunctionNotFound(m) => {
+            (3, "function-not-found", vec![Value::String(m.clone())])
+        }
+        ActorError::TypeMismatch(m) => (4, "type-mismatch", vec![Value::String(m.clone())]),
+        ActorError::SerializationError => (5, "serialization-error", vec![]),
+        ActorError::Paused => (6, "paused", vec![]),
+        _ => (7, "internal", vec![Value::String(error.to_string())]),
     };
-
-    let error_type_value = Value::Variant {
-        type_name: "wit-error-type".to_string(),
-        case_name: case_name.to_string(),
+    Value::Variant {
+        type_name: "actor-error".to_string(),
+        case_name: case.to_string(),
         tag,
-        payload: vec![],
-    };
-
-    // Encode error message as optional data bytes
-    let error_msg = format!("{}", error);
-    let data_value = Value::Option {
-        inner_type: ValueType::List(Box::new(ValueType::U8)),
-        value: Some(Box::new(Value::List {
-            elem_type: ValueType::U8,
-            items: error_msg.into_bytes().into_iter().map(Value::U8).collect(),
-        })),
-    };
-
-    // Record encoded as Tuple: [error-type, data]
-    Value::Tuple(vec![error_type_value, data_value])
+        payload,
+    }
 }
 
 /// Convert Option<Vec<u8>> to a Pack Value matching option<list<u8>>
