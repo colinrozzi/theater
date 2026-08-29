@@ -140,7 +140,7 @@ pub struct SupervisorHandler {
     channel_rx: Arc<Mutex<Option<tokio::sync::mpsc::Receiver<ActorResult>>>>,
     /// Channel for receiving all ChainEvents from children. Each child's
     /// subscription is tagged with the child's TheaterId before landing
-    /// here, so handle-child-event dispatch can attribute the event to
+    /// here, so handle-actor-event dispatch can attribute the event to
     /// the right child even though N children share this single receiver.
     event_tx: tokio::sync::mpsc::Sender<(TheaterId, ChainEvent)>,
     event_rx: Arc<Mutex<Option<tokio::sync::mpsc::Receiver<(TheaterId, ChainEvent)>>>>,
@@ -256,7 +256,7 @@ impl SupervisorHandler {
                     ]);
                     actor_handle
                         .call_function(
-                            "theater:simple/supervisor-handlers.handle-child-error".to_string(),
+                            "theater:simple/supervisor-handlers.handle-actor-error".to_string(),
                             params,
                         )
                         .await?;
@@ -271,7 +271,7 @@ impl SupervisorHandler {
                     ]);
                     actor_handle
                         .call_function(
-                            "theater:simple/supervisor-handlers.handle-child-exit".to_string(),
+                            "theater:simple/supervisor-handlers.handle-actor-exit".to_string(),
                             params,
                         )
                         .await?;
@@ -283,7 +283,7 @@ impl SupervisorHandler {
                     let params = Value::Tuple(vec![Value::String(stop_data.actor_id.to_string())]);
                     actor_handle
                         .call_function(
-                            "theater:simple/supervisor-handlers.handle-child-external-stop"
+                            "theater:simple/supervisor-handlers.handle-actor-external-stop"
                                 .to_string(),
                             params,
                         )
@@ -324,7 +324,7 @@ impl SupervisorHandler {
 
             actor_handle
                 .call_function(
-                    "theater:simple/supervisor-handlers.handle-child-event".to_string(),
+                    "theater:simple/supervisor-handlers.handle-actor-event".to_string(),
                     params,
                 )
                 .await?;
@@ -348,7 +348,7 @@ impl SupervisorHandler {
     /// to one root-only supervisor. A `fresh` instance instead gets its own
     /// `channel_rx` (its own monitor loop starts) and its own `channel_tx`
     /// (the `supervisor_tx` handed to *its* children routes their lifecycle
-    /// events back to *its* handle-child-* exports), giving real hierarchical
+    /// events back to *its* handle-actor-* exports), giving real hierarchical
     /// supervision.
     fn fresh(&self) -> Self {
         let (channel_tx, channel_rx) = tokio::sync::mpsc::channel(100);
@@ -1147,19 +1147,19 @@ impl Handler for SupervisorHandler {
                 if let Some(instance) = instance_guard.as_mut() {
                     let iface = "theater:simple/supervisor-handlers";
                     let e1 = instance
-                        .has_export(iface, "handle-child-event")
+                        .has_export(iface, "handle-actor-event")
                         .await
                         .unwrap_or(false);
                     let e2 = instance
-                        .has_export(iface, "handle-child-error")
+                        .has_export(iface, "handle-actor-error")
                         .await
                         .unwrap_or(false);
                     let e3 = instance
-                        .has_export(iface, "handle-child-exit")
+                        .has_export(iface, "handle-actor-exit")
                         .await
                         .unwrap_or(false);
                     let e4 = instance
-                        .has_export(iface, "handle-child-external-stop")
+                        .has_export(iface, "handle-actor-external-stop")
                         .await
                         .unwrap_or(false);
                     (e1, e2, e3, e4)
