@@ -28,11 +28,20 @@ impl Drop for ShutdownSignal {
     }
 }
 
-/// Type of shutdown to perform
-#[derive(Debug, Clone, Copy)]
+/// How an actor is being torn down — and, since these paths are 1:1 with the
+/// recorded terminal cause, effectively *why* it died.
+#[derive(Debug, Clone)]
 pub enum ShutdownType {
+    /// Run the actor's shutdown handlers and wait for cleanup — a deliberate,
+    /// orderly stop. Recorded as `Stopped`.
     Graceful,
+    /// Brutal, immediate teardown — a deliberate force-kill. Recorded as
+    /// `Killed`.
     Force,
+    /// The actor crashed. Tear it down forcefully (its wasm is broken — same
+    /// teardown as `Force`, never the graceful corpse-shutdown path) and carry
+    /// the error as the termination cause. Recorded as `Failed`.
+    Failed(String),
 }
 
 /// Controller that can broadcast shutdown signals to multiple receivers.
@@ -83,7 +92,7 @@ impl ShutdownController {
             let (responder, receiver) = tokio::sync::oneshot::channel();
             receivers.push(receiver);
             match sender.send(ShutdownSignal {
-                shutdown_type,
+                shutdown_type: shutdown_type.clone(),
                 sender: Some(responder),
             }) {
                 Ok(_) => {

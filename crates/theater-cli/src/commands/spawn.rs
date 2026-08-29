@@ -414,8 +414,8 @@ async fn run(args: &SpawnArgs, ctx: &CommandContext, call_init: bool) -> Result<
                         }
                     }
 
-                    // Check for root actor shutdown
-                    if event_actor_id == actor_id && chain_event.event_type == "shutdown" {
+                    // Check for root actor termination (the typed lifecycle event).
+                    if event_actor_id == actor_id && chain_event.event_type == "terminated" {
                         break;
                     }
                 }

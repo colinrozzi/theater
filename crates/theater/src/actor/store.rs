@@ -172,33 +172,6 @@ impl ActorStore {
         .await
     }
 
-    /// Record a theater runtime event (for debugging/audit purposes).
-    ///
-    /// Note: These events are recorded as Wasm events with a special event type
-    /// since they're primarily for debugging and not essential for replay.
-    ///
-    /// ## Parameters
-    ///
-    /// * `event_type` - A string identifier for this event
-    /// * `data` - The TheaterRuntimeEventData
-    pub async fn record_theater_runtime_event(
-        &self,
-        event_type: String,
-        data: crate::events::theater_runtime::TheaterRuntimeEventData,
-    ) -> ChainEvent {
-        // Convert theater runtime events to Wasm events for storage
-        // These are primarily for debugging/audit and not essential for replay
-        let wasm_data = crate::events::wasm::WasmEventData::WasmCall {
-            function_name: event_type.clone(),
-            params: Value::String(serde_json::to_string(&data).unwrap_or_default()),
-        };
-        self.record_event(ChainEventData {
-            event_type: format!("theater-runtime/{}", event_type),
-            data: ChainEventPayload::Wasm(wasm_data),
-        })
-        .await
-    }
-
     /// # Get the hash of the most recently emitted event.
     ///
     /// Used by callers that want to know the chain head without subscribing
