@@ -211,6 +211,33 @@ fn in_subtree(
     false
 }
 
+/// The set of `root`'s strict descendants (its subtree, excluding `root`).
+/// Built in a single O(N) pass — child-adjacency + one traversal — so a scoped
+/// `list-actors` filters by O(1) set membership instead of rebuilding the parent
+/// map (via `in_subtree`) once per actor, which was O(N²).
+fn subtree_ids(
+    actors: &[(TheaterId, String, Option<TheaterId>)],
+    root: TheaterId,
+) -> std::collections::HashSet<TheaterId> {
+    let mut children: std::collections::HashMap<TheaterId, Vec<TheaterId>> =
+        std::collections::HashMap::new();
+    for (id, _, parent) in actors {
+        if let Some(p) = parent {
+            children.entry(*p).or_default().push(*id);
+        }
+    }
+    let mut out = std::collections::HashSet::new();
+    let mut stack: Vec<TheaterId> = children.get(&root).cloned().unwrap_or_default();
+    while let Some(id) = stack.pop() {
+        if out.insert(id) {
+            if let Some(kids) = children.get(&id) {
+                stack.extend(kids.iter().copied());
+            }
+        }
+    }
+    out
+}
+
 /// Capability + scope gate for a single-target op. `scope: all` short-circuits;
 /// `scope: subtree` walks the tree and rejects targets outside the caller's view.
 async fn authorize(
@@ -986,11 +1013,15 @@ impl Handler for SupervisorHandler {
                         let caller = ctx.data().id;
                         let tx = ctx.data().theater_tx.clone();
                         let actors = get_actors(&tx).await?;
+                        // Compute the caller's view once (O(N)); then filtering is
+                        // O(1) per actor. `None` = scope:all = every actor.
+                        let view = match scope {
+                            ViewScope::All => None,
+                            ViewScope::Subtree => Some(subtree_ids(&actors, caller)),
+                        };
                         let items: Vec<Value> = actors
                             .iter()
-                            .filter(|(id, _, _)| {
-                                scope == ViewScope::All || in_subtree(&actors, caller, *id)
-                            })
+                            .filter(|(id, _, _)| view.as_ref().map_or(true, |v| v.contains(id)))
                             .map(|(id, name, parent)| Value::Record {
                                 type_name: "actor-info".to_string(),
                                 fields: vec![
