@@ -394,11 +394,49 @@ impl PartialOrd for RuntimePermissions {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct SupervisorPermissions;
+/// The set of actors a supervisor-capable actor may see and act on.
+/// Ordered least-to-most privilege: `Subtree` < `All`, so a child may not
+/// widen its scope past its parent.
+#[derive(
+    Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Default,
+)]
+#[serde(rename_all = "kebab-case")]
+pub enum ViewScope {
+    /// The caller's own subtree — its descendants. Least privilege; the default.
+    #[default]
+    Subtree,
+    /// Every actor in the runtime.
+    All,
+}
+
+/// Capability to drive the supervisor (actor-management) interface, scoped to a
+/// view. `inspect` gates the read/observe ops (list-actors, get-actor-*,
+/// subscribe-to-actor); `mutate` gates the lifecycle ops (spawn, stop, kill);
+/// `scope` sets which actors are in view, enforced per-op by the handler.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub struct SupervisorPermissions {
+    #[serde(default)]
+    pub scope: ViewScope,
+    #[serde(default)]
+    pub inspect: bool,
+    #[serde(default)]
+    pub mutate: bool,
+}
 impl PartialOrd for SupervisorPermissions {
-    fn partial_cmp(&self, _other: &Self) -> Option<Ordering> {
-        Some(Ordering::Equal)
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        // parent (self) must grant everything the child (other) requests: the
+        // child cannot widen scope beyond the parent, nor add a capability.
+        if other.scope > self.scope
+            || (other.inspect && !self.inspect)
+            || (other.mutate && !self.mutate)
+        {
+            return None;
+        }
+        Some(if self == other {
+            Ordering::Equal
+        } else {
+            Ordering::Greater
+        })
     }
 }
 
@@ -457,7 +495,11 @@ impl HandlerPermission {
                 inspect: true,
                 mutate: true,
             }),
-            supervisor: Some(SupervisorPermissions),
+            supervisor: Some(SupervisorPermissions {
+                scope: ViewScope::All,
+                inspect: true,
+                mutate: true,
+            }),
             store: Some(StorePermissions),
             timing: Some(TimingPermissions {
                 max_sleep_duration: u64::MAX,
@@ -693,8 +735,14 @@ impl RestrictWith<RuntimePermissions> for RuntimePermissions {
 }
 
 impl RestrictWith<SupervisorPermissions> for SupervisorPermissions {
-    fn restrict_with(&self, _restriction: &SupervisorPermissions) -> Self {
-        self.clone()
+    fn restrict_with(&self, restriction: &SupervisorPermissions) -> Self {
+        // Intersect: the narrower scope wins, and each capability must be
+        // granted by both.
+        SupervisorPermissions {
+            scope: self.scope.min(restriction.scope),
+            inspect: self.inspect && restriction.inspect,
+            mutate: self.mutate && restriction.mutate,
+        }
     }
 }
 
