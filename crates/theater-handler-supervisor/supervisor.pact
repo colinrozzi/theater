@@ -22,15 +22,18 @@ interface supervisor {
 
     // How any op on this interface can fail. Structured so callers can react
     // (escalate vs give up vs retry) instead of substring-matching. `internal`
-    // is the catch-all for uncommon/unexpected failures (keeps a new failure
-    // mode from forcing an interface-hash bump for every detail).
+    // is the LAST-resort catch-all — an opaque runtime op error we can't yet
+    // classify because it crosses the command boundary as a string (the
+    // structured-runtime-errors follow-up replaces it with surfaced runtime
+    // failures).
     variant supervisor-error {
-        actor-not-found(string),    // id is not a live actor
+        actor-not-found(string),    // id is not a live actor (only revealed at scope=all)
         out-of-view(string),        // target is outside the caller's scope
         permission-denied(string),  // required inspect/mutate not granted
         invalid-argument(string),   // bad id / manifest / etc.
         spawn-failed(string),       // spawn or init failure detail
-        internal(string),           // catch-all / unexpected
+        runtime-unavailable,        // the runtime is shutting down / not accepting commands
+        internal(string),           // opaque runtime op error, not yet structured
     }
 
     exports {

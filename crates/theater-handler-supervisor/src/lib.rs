@@ -110,6 +110,16 @@ pub enum SupervisorError {
     InvalidArgument(String),
     #[error("spawn failed: {0}")]
     SpawnFailed(String),
+    /// `theater_tx.send` or a response `recv` failed — the runtime's command
+    /// channel is closed, i.e. the runtime is shutting down. A distinct,
+    /// nameable condition, not an open-ended internal.
+    #[error("runtime unavailable (shutting down)")]
+    RuntimeUnavailable,
+    /// Opaque runtime op error not yet structured. This is deliberately the
+    /// LAST resort: the runtime failed an op (e.g. a `spawn`/get race) with an
+    /// error we can't yet classify because it crosses the command boundary as a
+    /// string. See the `structured-runtime-errors` follow-up project — surfacing
+    /// `TheaterRuntimeError` through the boundary is what replaces this.
     #[error("internal error: {0}")]
     Internal(String),
 }
@@ -118,19 +128,22 @@ pub enum SupervisorError {
 /// variant. Tags match the declaration order in supervisor.pact.
 impl From<SupervisorError> for Value {
     fn from(e: SupervisorError) -> Value {
-        let (tag, case, msg) = match e {
-            SupervisorError::ActorNotFound(m) => (0, "actor-not-found", m),
-            SupervisorError::OutOfView(m) => (1, "out-of-view", m),
-            SupervisorError::PermissionDenied(m) => (2, "permission-denied", m),
-            SupervisorError::InvalidArgument(m) => (3, "invalid-argument", m),
-            SupervisorError::SpawnFailed(m) => (4, "spawn-failed", m),
-            SupervisorError::Internal(m) => (5, "internal", m),
+        let (tag, case, payload) = match e {
+            SupervisorError::ActorNotFound(m) => (0, "actor-not-found", vec![Value::String(m)]),
+            SupervisorError::OutOfView(m) => (1, "out-of-view", vec![Value::String(m)]),
+            SupervisorError::PermissionDenied(m) => {
+                (2, "permission-denied", vec![Value::String(m)])
+            }
+            SupervisorError::InvalidArgument(m) => (3, "invalid-argument", vec![Value::String(m)]),
+            SupervisorError::SpawnFailed(m) => (4, "spawn-failed", vec![Value::String(m)]),
+            SupervisorError::RuntimeUnavailable => (5, "runtime-unavailable", vec![]),
+            SupervisorError::Internal(m) => (6, "internal", vec![Value::String(m)]),
         };
         Value::Variant {
             type_name: "supervisor-error".to_string(),
             case_name: case.to_string(),
             tag,
-            payload: vec![Value::String(msg)],
+            payload,
         }
     }
 }
@@ -167,14 +180,11 @@ async fn get_actors(
     theater_tx
         .send(TheaterCommand::GetActors { response_tx: tx })
         .await
-        .map_err(|e| SupervisorError::Internal(format!("failed to query actors: {}", e)))?;
+        .map_err(|_| SupervisorError::RuntimeUnavailable)?;
     match rx.await {
         Ok(Ok(v)) => Ok(v),
         Ok(Err(e)) => Err(SupervisorError::Internal(e.to_string())),
-        Err(e) => Err(SupervisorError::Internal(format!(
-            "failed to receive actor list: {}",
-            e
-        ))),
+        Err(_) => Err(SupervisorError::RuntimeUnavailable),
     }
 }
 
@@ -223,17 +233,26 @@ async fn authorize(
             "inspect capability not granted".into(),
         ));
     }
-    if p.scope == ViewScope::All {
-        return Ok(());
-    }
     let actors = get_actors(theater_tx).await?;
-    if in_subtree(&actors, caller, target) {
-        Ok(())
-    } else {
-        Err(SupervisorError::OutOfView(format!(
-            "actor {} is not in the caller's view",
-            target
-        )))
+    match p.scope {
+        ViewScope::All => {
+            // Full visibility: an absent target is honestly actor-not-found.
+            if actors.iter().any(|(id, _, _)| *id == target) {
+                Ok(())
+            } else {
+                Err(SupervisorError::ActorNotFound(target.to_string()))
+            }
+        }
+        ViewScope::Subtree => {
+            // Uniform out-of-view: do NOT distinguish "doesn't exist" from "not
+            // in your subtree". Distinguishing them would leak the existence of
+            // actors outside the caller's view across the view boundary.
+            if in_subtree(&actors, caller, target) {
+                Ok(())
+            } else {
+                Err(SupervisorError::OutOfView(target.to_string()))
+            }
+        }
     }
 }
 
@@ -746,8 +765,8 @@ impl Handler for SupervisorHandler {
                         // detached init fires response_tx. The latency here is
                         // the runtime command loop's serialized cost per spawn.
                         let phase_start = Instant::now();
-                        if let Err(e) = theater_tx.send(cmd).await {
-                            return Err(Value::from(SupervisorError::Internal(format!("failed to send spawn command: {}", e))));
+                        if theater_tx.send(cmd).await.is_err() {
+                            return Err(Value::from(SupervisorError::RuntimeUnavailable));
                         }
 
                         // Store theater_tx for shutdown (first spawn stores it)
@@ -784,7 +803,7 @@ impl Handler for SupervisorHandler {
                                 Ok(Value::String(actor_id.to_string()))
                             }
                             Ok(Err(e)) => Err(Value::from(SupervisorError::SpawnFailed(e.to_string()))),
-                            Err(e) => Err(Value::from(SupervisorError::Internal(format!("failed to receive response: {}", e)))),
+                            Err(_) => Err(Value::from(SupervisorError::RuntimeUnavailable)),
                         }
                     }
                 }
@@ -907,15 +926,15 @@ impl Handler for SupervisorHandler {
                             parent_id: Some(store.id),
                         };
 
-                        if let Err(e) = theater_tx.send(cmd).await {
-                            return Err(Value::from(SupervisorError::Internal(format!("failed to send spawn command: {}", e))));
+                        if theater_tx.send(cmd).await.is_err() {
+                            return Err(Value::from(SupervisorError::RuntimeUnavailable));
                         }
 
                         // Wait for the actor to spawn
                         let actor_id = match response_rx.await {
                             Ok(Ok(id)) => id,
                             Ok(Err(e)) => return Err(Value::from(SupervisorError::SpawnFailed(format!("failed to spawn actor: {}", e)))),
-                            Err(e) => return Err(Value::from(SupervisorError::Internal(format!("failed to receive spawn response: {}", e)))),
+                            Err(_) => return Err(Value::from(SupervisorError::RuntimeUnavailable)),
                         };
 
                         debug!("spawn-and-wait: child {} spawned, waiting for completion", actor_id);
@@ -1010,15 +1029,11 @@ impl Handler for SupervisorHandler {
                             response_tx: rtx,
                         })
                         .await
-                        .map_err(|e| SupervisorError::Internal(format!("failed to send: {}", e)))?;
+                        .map_err(|_| SupervisorError::RuntimeUnavailable)?;
                         match rrx.await {
                             Ok(Ok(status)) => Ok(Value::String(format!("{:?}", status))),
                             Ok(Err(e)) => Err(Value::from(SupervisorError::Internal(e.to_string()))),
-                            Err(e) => Err(SupervisorError::Internal(format!(
-                                "failed to receive: {}",
-                                e
-                            ))
-                            .into()),
+                            Err(_) => Err(Value::from(SupervisorError::RuntimeUnavailable)),
                         }
                     }
                 }
@@ -1038,15 +1053,11 @@ impl Handler for SupervisorHandler {
                             response_tx: rtx,
                         })
                         .await
-                        .map_err(|e| SupervisorError::Internal(format!("failed to send: {}", e)))?;
+                        .map_err(|_| SupervisorError::RuntimeUnavailable)?;
                         match rrx.await {
                             Ok(Ok(state)) => Ok(state),
                             Ok(Err(e)) => Err(Value::from(SupervisorError::Internal(e.to_string()))),
-                            Err(e) => Err(SupervisorError::Internal(format!(
-                                "failed to receive: {}",
-                                e
-                            ))
-                            .into()),
+                            Err(_) => Err(Value::from(SupervisorError::RuntimeUnavailable)),
                         }
                     }
                 }
@@ -1066,17 +1077,13 @@ impl Handler for SupervisorHandler {
                             response_tx: rtx,
                         })
                         .await
-                        .map_err(|e| SupervisorError::Internal(format!("failed to send: {}", e)))?;
+                        .map_err(|_| SupervisorError::RuntimeUnavailable)?;
                         match rrx.await {
                             Ok(Ok(m)) => serde_json::to_string(&m).map(Value::String).map_err(|e| {
                                 SupervisorError::Internal(format!("serialize manifest: {}", e)).into()
                             }),
                             Ok(Err(e)) => Err(Value::from(SupervisorError::Internal(e.to_string()))),
-                            Err(e) => Err(SupervisorError::Internal(format!(
-                                "failed to receive: {}",
-                                e
-                            ))
-                            .into()),
+                            Err(_) => Err(Value::from(SupervisorError::RuntimeUnavailable)),
                         }
                     }
                 }
@@ -1096,17 +1103,13 @@ impl Handler for SupervisorHandler {
                             response_tx: rtx,
                         })
                         .await
-                        .map_err(|e| SupervisorError::Internal(format!("failed to send: {}", e)))?;
+                        .map_err(|_| SupervisorError::RuntimeUnavailable)?;
                         match rrx.await {
                             Ok(Ok(m)) => serde_json::to_string(&m).map(Value::String).map_err(|e| {
                                 SupervisorError::Internal(format!("serialize metrics: {}", e)).into()
                             }),
                             Ok(Err(e)) => Err(Value::from(SupervisorError::Internal(e.to_string()))),
-                            Err(e) => Err(SupervisorError::Internal(format!(
-                                "failed to receive: {}",
-                                e
-                            ))
-                            .into()),
+                            Err(_) => Err(Value::from(SupervisorError::RuntimeUnavailable)),
                         }
                     }
                 }
@@ -1126,15 +1129,11 @@ impl Handler for SupervisorHandler {
                             response_tx: rtx,
                         })
                         .await
-                        .map_err(|e| SupervisorError::Internal(format!("failed to send: {}", e)))?;
+                        .map_err(|_| SupervisorError::RuntimeUnavailable)?;
                         match rrx.await {
                             Ok(Ok(())) => Ok(Value::Tuple(vec![])),
                             Ok(Err(e)) => Err(Value::from(SupervisorError::Internal(e.to_string()))),
-                            Err(e) => Err(SupervisorError::Internal(format!(
-                                "failed to receive: {}",
-                                e
-                            ))
-                            .into()),
+                            Err(_) => Err(Value::from(SupervisorError::RuntimeUnavailable)),
                         }
                     }
                 }
@@ -1154,15 +1153,11 @@ impl Handler for SupervisorHandler {
                             response_tx: rtx,
                         })
                         .await
-                        .map_err(|e| SupervisorError::Internal(format!("failed to send: {}", e)))?;
+                        .map_err(|_| SupervisorError::RuntimeUnavailable)?;
                         match rrx.await {
                             Ok(Ok(())) => Ok(Value::Tuple(vec![])),
                             Ok(Err(e)) => Err(Value::from(SupervisorError::Internal(e.to_string()))),
-                            Err(e) => Err(SupervisorError::Internal(format!(
-                                "failed to receive: {}",
-                                e
-                            ))
-                            .into()),
+                            Err(_) => Err(Value::from(SupervisorError::RuntimeUnavailable)),
                         }
                     }
                 }
@@ -1182,17 +1177,15 @@ impl Handler for SupervisorHandler {
                         let target = parse_id_arg(input, "subscribe-to-actor")?;
                         let tx = ctx.data().theater_tx.clone();
                         authorize(&tx, &permissions, ctx.data().id, target, false).await?;
-                        if let Err(e) = tx
+                        if tx
                             .send(TheaterCommand::SubscribeToActor {
                                 actor_id: target,
                                 event_tx,
                             })
                             .await
+                            .is_err()
                         {
-                            return Err(Value::from(SupervisorError::Internal(format!(
-                                "failed to send subscribe: {}",
-                                e
-                            ))));
+                            return Err(Value::from(SupervisorError::RuntimeUnavailable));
                         }
                         Ok(Value::Tuple(vec![]))
                     }
@@ -1212,17 +1205,15 @@ impl Handler for SupervisorHandler {
                         let target = parse_id_arg(input, "unsubscribe-from-actor")?;
                         let tx = ctx.data().theater_tx.clone();
                         authorize(&tx, &permissions, ctx.data().id, target, false).await?;
-                        if let Err(e) = tx
+                        if tx
                             .send(TheaterCommand::UnsubscribeFromActor {
                                 actor_id: target,
                                 event_tx,
                             })
                             .await
+                            .is_err()
                         {
-                            return Err(Value::from(SupervisorError::Internal(format!(
-                                "failed to send unsubscribe: {}",
-                                e
-                            ))));
+                            return Err(Value::from(SupervisorError::RuntimeUnavailable));
                         }
                         Ok(Value::Tuple(vec![]))
                     }
