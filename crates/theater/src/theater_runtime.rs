@@ -426,6 +426,26 @@ impl TheaterRuntime {
                         "TheaterCommand::ShuttingDown received for actor: {:?}",
                         actor_id
                     );
+                    // The typed terminal event for a clean, self-driven exit —
+                    // carrying the actor's final state. A distinct path from
+                    // stop_actor (external stop/kill), so there's no double-emit.
+                    if let Some(chain) = self.chains.get(&actor_id) {
+                        let _ = chain
+                            .write()
+                            .await
+                            .add_typed_event(crate::events::ChainEventData {
+                                event_type: "terminated".to_string(),
+                                data: crate::events::ChainEventPayload::Lifecycle(
+                                    crate::events::lifecycle::ActorLifecycleEvent::Terminated {
+                                        cause:
+                                            crate::events::lifecycle::TerminationCause::Completed {
+                                                final_state: data.clone(),
+                                            },
+                                    },
+                                ),
+                            })
+                            .await;
+                    }
                     // Notify supervisor before spawning the async shutdown
                     if let Some(proc) = self.actors.get(&actor_id) {
                         if let Some(supervisor_tx) = &proc.supervisor_tx {
