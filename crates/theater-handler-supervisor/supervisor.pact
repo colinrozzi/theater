@@ -20,6 +20,10 @@ interface supervisor {
         parent-id: option<string>,
     }
 
+    // An actor id (an opaque string handle). Named for clarity; still a string
+    // on the wire.
+    type actor-id = string;
+
     // How any op on this interface can fail. Structured so callers can react
     // (escalate vs give up vs retry) instead of substring-matching. `internal`
     // is the LAST-resort catch-all — an opaque runtime op error we can't yet
@@ -56,23 +60,23 @@ interface supervisor {
         list-actors: func() -> result<list<actor-info>, supervisor-error>
 
         // Live single-actor reads (err if outside view, or the actor is gone).
-        get-actor-status: func(id: string) -> result<string, supervisor-error>
-        get-actor-state: func(id: string) -> result<option<list<u8>>, supervisor-error>
-        get-actor-manifest: func(id: string) -> result<string, supervisor-error>
-        get-actor-metrics: func(id: string) -> result<string, supervisor-error>
+        get-actor-status: func(id: actor-id) -> result<string, supervisor-error>
+        get-actor-state: func(id: actor-id) -> result<option<list<u8>>, supervisor-error>
+        get-actor-manifest: func(id: actor-id) -> result<string, supervisor-error>
+        get-actor-metrics: func(id: actor-id) -> result<string, supervisor-error>
 
         // Lifecycle control of one actor in view.
-        stop-actor: func(id: string) -> result<_, supervisor-error>
-        kill-actor: func(id: string) -> result<_, supervisor-error>
+        stop-actor: func(id: actor-id) -> result<_, supervisor-error>
+        kill-actor: func(id: actor-id) -> result<_, supervisor-error>
 
         // Subscribe to an actor's chain events. After this call, every event
         // that actor records is dispatched to this actor's `handle-actor-event`
         // export. Opt-in and idempotent. A terminal event (shutdown/error) is
         // always delivered before the subscription closes.
-        subscribe-to-actor: func(id: string) -> result<_, supervisor-error>
+        subscribe-to-actor: func(id: actor-id) -> result<_, supervisor-error>
 
         // Stop receiving chain events from an actor. Idempotent; subscriptions
         // are also auto-released when the actor exits.
-        unsubscribe-from-actor: func(id: string) -> result<_, supervisor-error>
+        unsubscribe-from-actor: func(id: actor-id) -> result<_, supervisor-error>
     }
 }

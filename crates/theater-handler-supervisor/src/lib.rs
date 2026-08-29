@@ -148,28 +148,11 @@ impl From<SupervisorError> for Value {
     }
 }
 
-/// Parse a single `id: string` arg (bare or 1-tuple) into a TheaterId.
-fn parse_id_arg(input: Value, op: &str) -> Result<TheaterId, SupervisorError> {
-    let s = match input {
-        Value::String(s) => s,
-        Value::Tuple(a) if a.len() == 1 => match &a[0] {
-            Value::String(s) => s.clone(),
-            _ => {
-                return Err(SupervisorError::InvalidArgument(format!(
-                    "{}: expected an actor id string",
-                    op
-                )))
-            }
-        },
-        _ => {
-            return Err(SupervisorError::InvalidArgument(format!(
-                "{}: expected an actor id string",
-                op
-            )))
-        }
-    };
-    s.parse()
-        .map_err(|e| SupervisorError::InvalidArgument(format!("invalid actor id: {}", e)))
+/// Parse a wire `actor-id` (a string, decoded by packr from the typed param)
+/// into a TheaterId.
+fn parse_actor_id(id: &str) -> Result<TheaterId, SupervisorError> {
+    id.parse()
+        .map_err(|e| SupervisorError::InvalidArgument(format!("invalid actor id '{}': {}", id, e)))
 }
 
 /// Fetch the runtime's actor list: (id, name, parent-id).
@@ -238,8 +221,31 @@ fn subtree_ids(
     out
 }
 
-/// Capability + scope gate for a single-target op. `scope: all` short-circuits;
-/// `scope: subtree` walks the tree and rejects targets outside the caller's view.
+/// The capability half of the gate: the caller must hold the capability the op
+/// needs — `inspect` for reads/subscribe, `mutate` for lifecycle. Returns the
+/// granted permission (so callers can read its `scope`). Default-deny when the
+/// capability is absent. Used directly by no-target ops (list-actors, spawn) and
+/// reused by [`authorize`] for single-target ops.
+fn require_capability(
+    perms: &Option<SupervisorPermissions>,
+    mutate: bool,
+) -> Result<&SupervisorPermissions, SupervisorError> {
+    let p = perms.as_ref().ok_or_else(|| {
+        SupervisorError::PermissionDenied("supervisor capability not granted".into())
+    })?;
+    let granted = if mutate { p.mutate } else { p.inspect };
+    if granted {
+        Ok(p)
+    } else {
+        Err(SupervisorError::PermissionDenied(format!(
+            "supervisor '{}' capability not granted",
+            if mutate { "mutate" } else { "inspect" }
+        )))
+    }
+}
+
+/// The full gate for a single-target op: capability (via [`require_capability`])
+/// AND view — the target must be in the caller's view.
 async fn authorize(
     theater_tx: &mpsc::Sender<TheaterCommand>,
     perms: &Option<SupervisorPermissions>,
@@ -247,21 +253,9 @@ async fn authorize(
     target: TheaterId,
     mutate: bool,
 ) -> Result<(), SupervisorError> {
-    let p = perms.as_ref().ok_or_else(|| {
-        SupervisorError::PermissionDenied("supervisor capability not granted".into())
-    })?;
-    if mutate && !p.mutate {
-        return Err(SupervisorError::PermissionDenied(
-            "mutate capability not granted".into(),
-        ));
-    }
-    if !mutate && !p.inspect {
-        return Err(SupervisorError::PermissionDenied(
-            "inspect capability not granted".into(),
-        ));
-    }
+    let scope = require_capability(perms, mutate)?.scope;
     let actors = get_actors(theater_tx).await?;
-    match p.scope {
+    match scope {
         ViewScope::All => {
             // Full visibility: an absent target is honestly actor-not-found.
             if actors.iter().any(|(id, _, _)| *id == target) {
@@ -281,27 +275,6 @@ async fn authorize(
             }
         }
     }
-}
-
-/// Capability gate for a no-target op (list-actors). Returns the granted perms.
-fn authorize_cap(
-    perms: &Option<SupervisorPermissions>,
-    mutate: bool,
-) -> Result<&SupervisorPermissions, SupervisorError> {
-    let p = perms.as_ref().ok_or_else(|| {
-        SupervisorError::PermissionDenied("supervisor capability not granted".into())
-    })?;
-    if mutate && !p.mutate {
-        return Err(SupervisorError::PermissionDenied(
-            "mutate capability not granted".into(),
-        ));
-    }
-    if !mutate && !p.inspect {
-        return Err(SupervisorError::PermissionDenied(
-            "inspect capability not granted".into(),
-        ));
-    }
-    Ok(p)
 }
 
 /// The SupervisorHandler provides child actor management capabilities.
@@ -641,7 +614,7 @@ impl Handler for SupervisorHandler {
                     let permissions = permissions.clone();
                     async move {
                         // spawn creates a new actor parented to the caller; needs mutate.
-                        authorize_cap(&permissions, true)?;
+                        require_capability(&permissions, true)?;
                         // Parse input: (string, option<value>, option<list<u8>>)
                         // init-state: None  → fall back to manifest.initial_state
                         //             Some(v) → use v verbatim (even if v is Value::Option::None)
@@ -848,7 +821,7 @@ impl Handler for SupervisorHandler {
                     let permissions = permissions.clone();
                     async move {
                         // spawn-and-wait creates a new actor parented to the caller; needs mutate.
-                        authorize_cap(&permissions, true)?;
+                        require_capability(&permissions, true)?;
                         // Parse input: (string, option<value>, option<list<u8>>, option<u64>)
                         let (manifest_path, init_state_override, provided_wasm_bytes, timeout_ms) = match input {
                             Value::Tuple(mut args) if args.len() == 4 => {
@@ -1009,7 +982,7 @@ impl Handler for SupervisorHandler {
                 move |ctx: AsyncCtx<ActorStore>, _input: Value| {
                     let permissions = permissions.clone();
                     async move {
-                        let scope = authorize_cap(&permissions, false)?.scope;
+                        let scope = require_capability(&permissions, false)?.scope;
                         let caller = ctx.data().id;
                         let tx = ctx.data().theater_tx.clone();
                         let actors = get_actors(&tx).await?;
@@ -1048,10 +1021,10 @@ impl Handler for SupervisorHandler {
             // get-actor-status: func(id: string) -> result<string, supervisor-error>
             .func_async_result("get-actor-status", {
                 let permissions = permissions.clone();
-                move |ctx: AsyncCtx<ActorStore>, input: Value| {
+                move |ctx: AsyncCtx<ActorStore>, id: String| {
                     let permissions = permissions.clone();
                     async move {
-                        let target = parse_id_arg(input, "get-actor-status")?;
+                        let target = parse_actor_id(&id)?;
                         let tx = ctx.data().theater_tx.clone();
                         authorize(&tx, &permissions, ctx.data().id, target, false).await?;
                         let (rtx, rrx) = oneshot::channel();
@@ -1072,10 +1045,10 @@ impl Handler for SupervisorHandler {
             // get-actor-state: func(id: string) -> result<option<list<u8>>, supervisor-error>
             .func_async_result("get-actor-state", {
                 let permissions = permissions.clone();
-                move |ctx: AsyncCtx<ActorStore>, input: Value| {
+                move |ctx: AsyncCtx<ActorStore>, id: String| {
                     let permissions = permissions.clone();
                     async move {
-                        let target = parse_id_arg(input, "get-actor-state")?;
+                        let target = parse_actor_id(&id)?;
                         let tx = ctx.data().theater_tx.clone();
                         authorize(&tx, &permissions, ctx.data().id, target, false).await?;
                         let (rtx, rrx) = oneshot::channel();
@@ -1096,10 +1069,10 @@ impl Handler for SupervisorHandler {
             // get-actor-manifest: func(id: string) -> result<string, supervisor-error>
             .func_async_result("get-actor-manifest", {
                 let permissions = permissions.clone();
-                move |ctx: AsyncCtx<ActorStore>, input: Value| {
+                move |ctx: AsyncCtx<ActorStore>, id: String| {
                     let permissions = permissions.clone();
                     async move {
-                        let target = parse_id_arg(input, "get-actor-manifest")?;
+                        let target = parse_actor_id(&id)?;
                         let tx = ctx.data().theater_tx.clone();
                         authorize(&tx, &permissions, ctx.data().id, target, false).await?;
                         let (rtx, rrx) = oneshot::channel();
@@ -1122,10 +1095,10 @@ impl Handler for SupervisorHandler {
             // get-actor-metrics: func(id: string) -> result<string, supervisor-error>
             .func_async_result("get-actor-metrics", {
                 let permissions = permissions.clone();
-                move |ctx: AsyncCtx<ActorStore>, input: Value| {
+                move |ctx: AsyncCtx<ActorStore>, id: String| {
                     let permissions = permissions.clone();
                     async move {
-                        let target = parse_id_arg(input, "get-actor-metrics")?;
+                        let target = parse_actor_id(&id)?;
                         let tx = ctx.data().theater_tx.clone();
                         authorize(&tx, &permissions, ctx.data().id, target, false).await?;
                         let (rtx, rrx) = oneshot::channel();
@@ -1148,10 +1121,10 @@ impl Handler for SupervisorHandler {
             // stop-actor: func(id: string) -> result<_, supervisor-error>   (graceful)
             .func_async_result("stop-actor", {
                 let permissions = permissions.clone();
-                move |ctx: AsyncCtx<ActorStore>, input: Value| {
+                move |ctx: AsyncCtx<ActorStore>, id: String| {
                     let permissions = permissions.clone();
                     async move {
-                        let target = parse_id_arg(input, "stop-actor")?;
+                        let target = parse_actor_id(&id)?;
                         let tx = ctx.data().theater_tx.clone();
                         authorize(&tx, &permissions, ctx.data().id, target, true).await?;
                         let (rtx, rrx) = oneshot::channel();
@@ -1172,10 +1145,10 @@ impl Handler for SupervisorHandler {
             // kill-actor: func(id: string) -> result<_, supervisor-error>   (force)
             .func_async_result("kill-actor", {
                 let permissions = permissions.clone();
-                move |ctx: AsyncCtx<ActorStore>, input: Value| {
+                move |ctx: AsyncCtx<ActorStore>, id: String| {
                     let permissions = permissions.clone();
                     async move {
-                        let target = parse_id_arg(input, "kill-actor")?;
+                        let target = parse_actor_id(&id)?;
                         let tx = ctx.data().theater_tx.clone();
                         authorize(&tx, &permissions, ctx.data().id, target, true).await?;
                         let (rtx, rrx) = oneshot::channel();
@@ -1200,12 +1173,12 @@ impl Handler for SupervisorHandler {
             .func_async_result("subscribe-to-actor", {
                 let event_tx = event_tx.clone();
                 let permissions = permissions.clone();
-                move |ctx: AsyncCtx<ActorStore>, input: Value| {
+                move |ctx: AsyncCtx<ActorStore>, id: String| {
                     let event_tx = event_tx.clone();
                     let permissions = permissions.clone();
                     async move {
                         let _ph = PhaseLog::new("supervisor.subscribe_to_actor");
-                        let target = parse_id_arg(input, "subscribe-to-actor")?;
+                        let target = parse_actor_id(&id)?;
                         let tx = ctx.data().theater_tx.clone();
                         authorize(&tx, &permissions, ctx.data().id, target, false).await?;
                         if tx
@@ -1228,12 +1201,12 @@ impl Handler for SupervisorHandler {
             .func_async_result("unsubscribe-from-actor", {
                 let event_tx = event_tx.clone();
                 let permissions = permissions.clone();
-                move |ctx: AsyncCtx<ActorStore>, input: Value| {
+                move |ctx: AsyncCtx<ActorStore>, id: String| {
                     let event_tx = event_tx.clone();
                     let permissions = permissions.clone();
                     async move {
                         let _ph = PhaseLog::new("supervisor.unsubscribe_from_actor");
-                        let target = parse_id_arg(input, "unsubscribe-from-actor")?;
+                        let target = parse_actor_id(&id)?;
                         let tx = ctx.data().theater_tx.clone();
                         authorize(&tx, &permissions, ctx.data().id, target, false).await?;
                         if tx
