@@ -410,6 +410,27 @@ pub enum TheaterCommand {
         event_tx: Sender<(TheaterId, ChainEvent)>,
     },
 
+    /// # Register a lifecycle subscription on a subject
+    ///
+    /// Adds `subscription` to `subject`'s `subscribers` map (see
+    /// [`crate::subscription`]) — the one primitive behind the `lifecycle`
+    /// handler's `link` (target = `StopSelf`) and `monitor` (target =
+    /// `DeliverToWasm`). Keyed by `subscription.subscriber`, so re-subscribing
+    /// replaces. No-op if `subject` is not a live actor.
+    Subscribe {
+        subject: TheaterId,
+        subscription: crate::subscription::Subscription,
+    },
+
+    /// # Remove a lifecycle subscription
+    ///
+    /// Removes `subscriber`'s subscription from `subject`. Backs `unlink` /
+    /// `unmonitor`. No-op if absent or `subject` is gone.
+    Unsubscribe {
+        subject: TheaterId,
+        subscriber: TheaterId,
+    },
+
     /// # Subscribe to actor-spawned notifications (runtime-wide)
     ///
     /// After this call, every actor spawned ANYWHERE in the runtime is
@@ -530,6 +551,12 @@ impl TheaterCommand {
             }
             TheaterCommand::UnsubscribeFromActor { actor_id, .. } => {
                 format!("UnsubscribeFromActor: {:?}", actor_id)
+            }
+            TheaterCommand::Subscribe { subject, .. } => {
+                format!("Subscribe: {:?}", subject)
+            }
+            TheaterCommand::Unsubscribe { subject, .. } => {
+                format!("Unsubscribe: {:?}", subject)
             }
             TheaterCommand::SubscribeToSpawns { .. } => "SubscribeToSpawns".to_string(),
             TheaterCommand::UnsubscribeFromSpawns { .. } => "UnsubscribeFromSpawns".to_string(),

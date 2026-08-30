@@ -639,6 +639,31 @@ impl TheaterRuntime {
                         );
                     }
                 }
+                TheaterCommand::Subscribe {
+                    subject,
+                    subscription,
+                } => {
+                    // Register a lifecycle subscription ON the subject — the one
+                    // primitive behind link (StopSelf) and monitor (DeliverToWasm).
+                    if let Some(proc) = self.actors.get_mut(&subject) {
+                        debug!(
+                            "Subscribe: {:?} -> {:?} ({:?})",
+                            subscription.subscriber, subject, subscription.target
+                        );
+                        proc.subscribers
+                            .insert(subscription.subscriber, subscription);
+                    } else {
+                        warn!("Subscribe: subject {:?} is not a live actor", subject);
+                    }
+                }
+                TheaterCommand::Unsubscribe {
+                    subject,
+                    subscriber,
+                } => {
+                    if let Some(proc) = self.actors.get_mut(&subject) {
+                        proc.subscribers.remove(&subscriber);
+                    }
+                }
                 TheaterCommand::SubscribeToSpawns { event_tx } => {
                     debug!("Adding runtime-wide spawn subscriber");
                     self.spawn_subscribers.push(event_tx);
