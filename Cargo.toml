@@ -116,8 +116,8 @@ theater-handler-http-client = { version = "0.3.0", path = "crates/theater-handle
 # theater:simple/*. Growable memory deletes the capped-heap OOM class (the mail-spine
 # wedge). The runtime loader (Runtime/AsyncRuntime/Module) is unchanged — it already
 # loads plain-built actors — so this is a build/CLI change, not a loader change.
-packr = "0.21.0"
-packr-abi = "0.21.0"
+packr = "0.23.0"
+packr-abi = "0.23.0"
 
 # Metadata for Nix crane builds
 [workspace.metadata.crane]
