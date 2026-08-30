@@ -8,6 +8,7 @@ members = [
     "crates/theater-handler-message-server",
     "crates/theater-handler-runtime",
     "crates/theater-handler-self",
+    "crates/theater-handler-lifecycle",
     "crates/theater-handler-store",
     "crates/theater-handler-supervisor",
     "crates/theater-handler-tcp",
@@ -71,6 +72,7 @@ theater = { version = "0.3.28", path = "crates/theater" }
 theater-handler-message-server = { version = "0.3.13", path = "crates/theater-handler-message-server" }
 theater-handler-runtime = { version = "0.3.0", path = "crates/theater-handler-runtime" }
 theater-handler-self = { version = "0.3.14", path = "crates/theater-handler-self" }
+theater-handler-lifecycle = { version = "0.3.14", path = "crates/theater-handler-lifecycle" }
 theater-handler-store = { version = "0.3.12", path = "crates/theater-handler-store" }
 theater-handler-supervisor = { version = "0.3.19", path = "crates/theater-handler-supervisor" }
 theater-handler-tcp = { version = "0.3.21", path = "crates/theater-handler-tcp" }

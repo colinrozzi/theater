@@ -122,6 +122,12 @@ fn create_handler_registry(
         SelfHandler::new(self_config, theater_tx.clone(), None).with_show_logs(show_actor_logs),
     );
 
+    // Lifecycle handler - actor-facing link / monitor over the subscription
+    // substrate (fate-sharing + watching between actors).
+    registry.register(theater_handler_lifecycle::LifecycleHandler::new(
+        theater_tx.clone(),
+    ));
+
     // Store handler - provides content storage
     let store_config = StoreHandlerConfig::default();
     registry.register(StoreHandler::new(store_config, None));
