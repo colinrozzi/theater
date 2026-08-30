@@ -9,7 +9,7 @@ edition = "2021"
 crate-type = ["cdylib"]
 
 [dependencies]
-packr-guest = "0.21.0"
+packr-guest = "0.23.0"
 
 [profile.release]
 opt-level = "s"

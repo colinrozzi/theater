@@ -343,13 +343,14 @@ async fn stop_actor(
         .expect("stop timed out");
 }
 
-/// The maintained `parent -> children` index stays a faithful inverse of the
-/// live parent_id edges as actors die. Stopping a mid-tree node (which runs no
-/// supervisor handler, so nothing cascades) detaches it from its parent's
-/// subtree and leaves its child orphaned — exactly the gap the authoritative
-/// cascade will close.
+/// Death cascades along fate-links: stopping a mid-tree node tears down its
+/// whole subtree, because every child is auto fate-linked (`StopSelf`) to its
+/// parent at spawn. When `child` dies the runtime stops `grandchild`, which
+/// dies and (had it any) would stop its own dependents — the emergent ripple.
+/// Teardown is asynchronous (fire-and-forget signal + actor self-report), so we
+/// poll the tree until it drains rather than expecting an instant update.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn runtime_tree_index_updates_on_actor_death() {
+async fn runtime_cascade_tears_down_subtree_on_death() {
     let _ = tracing_subscriber::fmt().with_env_filter("info").try_init();
     let temp = tempfile::tempdir().expect("temp dir");
     std::env::set_var("THEATER_HOME", temp.path());
@@ -367,18 +368,26 @@ async fn runtime_tree_index_updates_on_actor_death() {
 
     assert_eq!(get_descendants(&theater_tx, parent).await.len(), 2);
 
-    // Kill the middle node; its state-test child runs no supervisor handler, so
-    // there is no cascade — the grandchild is orphaned.
+    // Stop the middle node. It fate-links `grandchild`, so the runtime cascades:
+    // child dies -> grandchild is stopped -> both leave the tree. The cascade
+    // drains over a few command-loop turns, so poll until parent's subtree empties.
     stop_actor(&theater_tx, child).await;
 
-    let after = get_descendants(&theater_tx, parent).await;
-    assert!(
-        !after.contains(&child),
-        "dead child detached from parent's subtree"
-    );
-    assert!(
-        !after.contains(&grandchild),
-        "grandchild orphaned under the dead child (no cascade yet)"
-    );
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        if get_descendants(&theater_tx, parent).await.is_empty() {
+            break;
+        }
+        if std::time::Instant::now() > deadline {
+            panic!(
+                "cascade did not drain parent's subtree: {:?}",
+                get_descendants(&theater_tx, parent).await
+            );
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+
+    // Both the stopped node and its cascaded descendant are gone.
     assert!(!is_descendant(&theater_tx, parent, child).await);
+    assert!(!is_descendant(&theater_tx, parent, grandchild).await);
 }
