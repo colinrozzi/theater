@@ -869,6 +869,12 @@ impl ActorRuntime {
         let final_metrics = metrics.get_metrics().await;
         info!("Final metrics at shutdown: {:?}", final_metrics);
 
+        // Self-report: the task has finished its own bounded teardown (loops
+        // stopped, handlers signalled, resources released). This is the single
+        // signal the runtime keys the terminal event + fate cascade off, for
+        // every death path (stop / kill / crash / self-exit).
+        let _ = theater_tx.send(TheaterCommand::ActorShutdownComplete { actor_id: id });
+
         info!("Actor runtime cleanup complete");
     }
 

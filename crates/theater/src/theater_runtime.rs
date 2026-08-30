@@ -209,6 +209,11 @@ pub struct ActorProcess {
     /// subset is the supervision tree: a child auto-subscribes to its parent
     /// with a `terminated`-filtered `StopSelf` at spawn.
     pub subscribers: HashMap<TheaterId, crate::subscription::Subscription>,
+    /// The termination cause recorded when this actor's teardown was initiated,
+    /// carried to the terminal lifecycle event emitted on
+    /// `ActorShutdownComplete`. `Some` doubles as the "already stopping" guard
+    /// that makes teardown idempotent (see `initiate_teardown`).
+    pub termination_cause: Option<crate::events::lifecycle::TerminationCause>,
 }
 
 impl TheaterRuntime {
@@ -442,9 +447,41 @@ impl TheaterRuntime {
                         "TheaterCommand::ShuttingDown received for actor: {:?}",
                         actor_id
                     );
-                    // The typed terminal event for a clean, self-driven exit —
-                    // carrying the actor's final state. A distinct path from
-                    // stop_actor (external stop/kill), so there's no double-emit.
+                    // A clean, self-driven exit. Record the cause (Completed, with
+                    // the actor's final state) and fire the shutdown; the terminal
+                    // event + cascade fire when the actor task self-reports
+                    // ActorShutdownComplete. No babysitter task — the actor task
+                    // drives its own bounded teardown.
+                    // (Supervisor-tx notify is the legacy trio; removed in the recast.)
+                    if let Some(proc) = self.actors.get(&actor_id) {
+                        if let Some(supervisor_tx) = &proc.supervisor_tx {
+                            let message = ActorResult::Success(ChildResult {
+                                actor_id,
+                                result: data.clone(),
+                            });
+                            if let Err(e) = supervisor_tx.send(message).await {
+                                debug!("Failed to send shutdown message to supervisor (possibly shutting down): {}", e);
+                            }
+                        }
+                    }
+                    self.initiate_teardown(
+                        actor_id,
+                        crate::events::lifecycle::TerminationCause::Completed { final_state: data },
+                        false,
+                    );
+                }
+                TheaterCommand::ActorShutdownComplete { actor_id } => {
+                    info!("ActorShutdownComplete for {:?}, finalizing", actor_id);
+
+                    // Emit the ONE terminal lifecycle event, with the cause
+                    // recorded when teardown was initiated (defaults to Stopped if
+                    // the actor's task ended without a recorded cause). This is the
+                    // single point every death path converges on.
+                    let cause = self
+                        .actors
+                        .get(&actor_id)
+                        .and_then(|p| p.termination_cause.clone())
+                        .unwrap_or(crate::events::lifecycle::TerminationCause::Stopped);
                     if let Some(chain) = self.chains.get(&actor_id) {
                         let _ = chain
                             .write()
@@ -453,93 +490,29 @@ impl TheaterRuntime {
                                 event_type: "terminated".to_string(),
                                 data: crate::events::ChainEventPayload::Lifecycle(
                                     crate::events::lifecycle::ActorLifecycleEvent::Terminated {
-                                        cause:
-                                            crate::events::lifecycle::TerminationCause::Completed {
-                                                final_state: data.clone(),
-                                            },
+                                        cause,
                                     },
                                 ),
                             })
                             .await;
                     }
-                    // Notify supervisor before spawning the async shutdown
-                    if let Some(proc) = self.actors.get(&actor_id) {
-                        if let Some(supervisor_tx) = &proc.supervisor_tx {
-                            let message = ActorResult::Success(ChildResult {
-                                actor_id,
-                                result: data,
-                            });
-                            if let Err(e) = supervisor_tx.send(message).await {
-                                debug!("Failed to send shutdown message to supervisor (possibly shutting down): {}", e);
-                            }
-                        }
-                    }
-                    // Spawn the stop so the event loop stays free to process
-                    // child StopActor commands (prevents deadlock when parent
-                    // shutdown triggers child cleanup via supervisor handler)
-                    let theater_tx = self.theater_tx.clone();
-                    let actor_id_clone = actor_id;
-                    if let Some(proc) = self.actors.get(&actor_id) {
-                        let control_tx = proc.control_tx.clone();
-                        tokio::spawn(async move {
-                            let start = std::time::Instant::now();
-                            let (response_tx, response_rx) = tokio::sync::oneshot::channel();
-                            if let Err(e) = control_tx
-                                .send(ActorControl::Shutdown { response_tx })
-                                .await
-                            {
-                                error!("Failed to send shutdown signal: {}", e);
-                            } else {
-                                match tokio::time::timeout(
-                                    std::time::Duration::from_secs(10),
-                                    response_rx,
-                                )
-                                .await
-                                {
-                                    Ok(Ok(Ok(_))) => {
-                                        info!(
-                                            "Actor runtime {:?} acknowledged shutdown in {:?}",
-                                            actor_id_clone,
-                                            start.elapsed()
-                                        );
-                                    }
-                                    Ok(Ok(Err(e))) => {
-                                        error!(
-                                            "Actor runtime {:?} shutdown error: {:?}",
-                                            actor_id_clone, e
-                                        );
-                                    }
-                                    Ok(Err(_)) => {
-                                        error!(
-                                            "Actor runtime {:?} response channel closed",
-                                            actor_id_clone
-                                        );
-                                    }
-                                    Err(_) => {
-                                        error!(
-                                            "Timeout waiting for actor runtime {:?} (10s)",
-                                            actor_id_clone
-                                        );
-                                    }
-                                }
-                            }
-                            // Signal theater to finalize cleanup
-                            let _ = theater_tx.send(TheaterCommand::ActorShutdownComplete {
-                                actor_id: actor_id_clone,
-                            });
-                        });
-                    }
-                }
-                TheaterCommand::ActorShutdownComplete { actor_id } => {
-                    info!("ActorShutdownComplete for {:?}, cleaning up", actor_id);
+                    self.chains.remove(&actor_id);
 
-                    // Signal handlers to shut down and remove from maps
-                    if let Some(proc) = self.deregister_actor(&actor_id) {
-                        proc.shutdown_controller
-                            .signal_shutdown(ShutdownType::Graceful)
-                            .await;
-                        info!("Actor {:?} handler shutdown complete", actor_id);
-                    }
+                    // Collect this actor's fate-dependents (its `StopSelf`
+                    // subscribers) BEFORE deregister drops them.
+                    let dependents: Vec<TheaterId> = self
+                        .actors
+                        .get(&actor_id)
+                        .map(|p| {
+                            p.subscribers
+                                .values()
+                                .filter(|s| s.target == Target::StopSelf)
+                                .map(|s| s.subscriber)
+                                .collect()
+                        })
+                        .unwrap_or_default();
+
+                    self.deregister_actor(&actor_id);
 
                     // Remove from channels
                     let id_for_channels = ChannelParticipant::Actor(actor_id);
@@ -553,7 +526,12 @@ impl TheaterRuntime {
                         self.channels.remove(&channel_id);
                     }
 
-                    self.chains.remove(&actor_id);
+                    // Emergent cascade: stop each fate-dependent. Each tears itself
+                    // down and self-reports, rippling the cascade one level per
+                    // death — no central walk, no queue, no self-send.
+                    for dep in dependents {
+                        let _ = self.stop_actor(dep, ShutdownType::Graceful).await;
+                    }
 
                     if self.actors.is_empty() {
                         info!("All actors have shut down, exiting runtime");
@@ -1018,6 +996,7 @@ impl TheaterRuntime {
             supervisor_tx,
             parent_id,
             subscribers: HashMap::new(),
+            termination_cause: None,
         };
 
         self.register_actor(process);
@@ -1145,169 +1124,64 @@ impl TheaterRuntime {
         Ok(())
     }
 
-    /// Stops an actor and its children gracefully.
+    /// Initiate an actor's teardown: record the termination cause and signal the
+    /// actor task, then return immediately (fire-and-forget).
     ///
-    /// ## Parameters
+    /// The actor task tears *itself* down — bounded, handlers and resources
+    /// included — and self-reports [`TheaterCommand::ActorShutdownComplete`],
+    /// where the one terminal lifecycle event is emitted and the fate cascade
+    /// runs. The runtime never waits on the shutdown here, so a big subtree
+    /// never blocks the command loop.
     ///
-    /// * `actor_id` - The ID of the actor to stop
-    ///
-    /// ## Returns
-    ///
-    /// * `Ok(())` - The actor was successfully stopped
-    /// * `Err(anyhow::Error)` - An error occurred during the stop process
-    ///
-    /// ## Implementation Notes
-    ///
-    /// This method stops an actor and all its children recursively. It follows these steps:
-    /// 1. Stop all children of the actor
-    /// 2. Signal the actor to shut down
-    /// 5. Remove the actor from the runtime's registries
-    /// 6. Clean up any channel registrations
-    async fn stop_actor(&mut self, actor_id: TheaterId, shutdown_type: ShutdownType) -> Result<()> {
-        info!(
-            "stop_actor called for: {:?} (shutdown_type: {:?})",
-            actor_id, shutdown_type
-        );
-
-        // Check if the actor exists in the registry
-        if !self.actors.contains_key(&actor_id) {
-            warn!("Actor {:?} not found in registry", actor_id);
-            return Ok(());
+    /// Idempotent: a second call while the actor is already stopping is a no-op
+    /// (`termination_cause` is the guard), so an actor reached by two death
+    /// paths at once emits exactly one terminal and cascades once.
+    fn initiate_teardown(
+        &mut self,
+        actor_id: TheaterId,
+        cause: crate::events::lifecycle::TerminationCause,
+        force: bool,
+    ) {
+        let proc = match self.actors.get_mut(&actor_id) {
+            Some(p) => p,
+            None => return,
+        };
+        if proc.termination_cause.is_some() {
+            return; // already stopping
         }
-
-        debug!("Actor {:?} found, proceeding with shutdown", actor_id);
-
-        'chain_block: {
-            let chain = match self.chains.get(&actor_id) {
-                Some(chain) => chain,
-                None => {
-                    error!("Actor {:?} has no associated chain", actor_id);
-                    break 'chain_block;
-                }
-            };
-
-            // The typed terminal lifecycle event, derived 1:1 from the shutdown
-            // kind: graceful stop -> `Stopped`, force kill -> `Killed`, crash ->
-            // `Failed`. This is the one event fate-links + monitors key on
-            // (replacing the old ad-hoc `"shutdown"` string).
-            let cause = match &shutdown_type {
-                ShutdownType::Graceful => crate::events::lifecycle::TerminationCause::Stopped,
-                ShutdownType::Force => crate::events::lifecycle::TerminationCause::Killed,
-                ShutdownType::Failed(error) => crate::events::lifecycle::TerminationCause::Failed {
-                    error: error.clone(),
-                },
-            };
-            let mut writable_chain = chain.write().await;
-            writable_chain
-                .add_typed_event(crate::events::ChainEventData {
-                    event_type: "terminated".to_string(),
-                    data: crate::events::ChainEventPayload::Lifecycle(
-                        crate::events::lifecycle::ActorLifecycleEvent::Terminated { cause },
-                    ),
-                })
-                .await
-                .expect("Failed to record event");
-        }
-
-        self.chains.remove(&actor_id);
-
-        // Get the actor process - but DON'T remove it from the map yet
-        // We need to keep it in the map while shutdown is in progress
-        // Note: Child stopping is now handled by the supervisor handler
-        let proc = match self.actors.get(&actor_id) {
-            Some(proc) => proc,
-            None => {
-                debug!("Actor {:?} not found during shutdown", actor_id);
-                return Ok(());
+        proc.termination_cause = Some(cause);
+        // Fire the control signal. `Terminate` for a force-kill (abort loops),
+        // `Shutdown` for the graceful path; either way the actor task's own
+        // bounded teardown runs and it self-reports when done. The ack channel
+        // is unused — we don't wait.
+        let (ack_tx, _ack_rx) = oneshot::channel();
+        let ctrl = if force {
+            ActorControl::Terminate {
+                response_tx: ack_tx,
+            }
+        } else {
+            ActorControl::Shutdown {
+                response_tx: ack_tx,
             }
         };
-
-        // First, signal the actor runtime itself to shut down via its control channel
-        // This stops the operation/info loops from processing new requests
-        debug!(
-            "Sending shutdown signal to actor runtime for {:?}",
-            actor_id
-        );
-        let actor_runtime_start = std::time::Instant::now();
-        let (response_tx, response_rx) = tokio::sync::oneshot::channel();
-        if let Err(e) = proc
-            .control_tx
-            .send(ActorControl::Shutdown { response_tx })
-            .await
-        {
-            error!(
-                "Failed to send shutdown signal to actor runtime for {:?}: {}",
-                actor_id, e
-            );
-            // Continue with shutdown anyway - we'll try to clean up handlers
-        } else {
-            // Wait for the actor runtime to acknowledge shutdown with a timeout
-            match tokio::time::timeout(std::time::Duration::from_secs(10), response_rx).await {
-                Ok(Ok(Ok(_))) => {
-                    debug!(
-                        "Actor runtime for {:?} acknowledged shutdown in {:?}",
-                        actor_id,
-                        actor_runtime_start.elapsed()
-                    );
-                }
-                Ok(Ok(Err(e))) => {
-                    error!(
-                        "Actor runtime for {:?} returned error during shutdown: {:?}",
-                        actor_id, e
-                    );
-                }
-                Ok(Err(_)) => {
-                    error!("Actor runtime for {:?} response channel closed", actor_id);
-                }
-                Err(_) => {
-                    error!(
-                        "Timeout waiting for actor runtime {:?} to shut down (10s)",
-                        actor_id
-                    );
-                }
-            }
+        if let Err(e) = proc.control_tx.try_send(ctrl) {
+            warn!("Failed to signal teardown for {:?}: {}", actor_id, e);
         }
+    }
 
-        // Now signal handlers to shut down
-        // The handlers will wait for their cleanup to complete before responding
-        debug!("Signaling handlers to shutdown for actor {:?}", actor_id);
-        let handler_start = std::time::Instant::now();
-
-        // Remove from map now, after actor runtime has shut down but before waiting on handlers
-        // This ensures the actor is removed from the registry while handlers clean up
-        let proc = self.deregister_actor(&actor_id).unwrap(); // Safe - we just checked it exists
-
-        proc.shutdown_controller
-            .signal_shutdown(shutdown_type)
-            .await;
-
-        debug!(
-            "Actor {:?} handler shutdown complete in {:?}",
-            actor_id,
-            handler_start.elapsed()
-        );
-
-        // Remove actor from any channel registrations
-        let mut channels_to_remove = Vec::new();
-        let id_for_channels = ChannelParticipant::Actor(actor_id);
-        for (channel_id, participants) in self.channels.iter_mut() {
-            if participants.remove(&id_for_channels) {
-                debug!("Removed actor {:?} from channel {:?}", actor_id, channel_id);
-
-                // If this was the last participant, mark the channel for removal
-                if participants.is_empty() {
-                    debug!("Channel {:?} is now empty, marking for removal", channel_id);
-                    channels_to_remove.push(channel_id.clone());
-                }
-            }
-        }
-
-        // Remove any empty channels
-        for channel_id in channels_to_remove {
-            self.channels.remove(&channel_id);
-            debug!("Removed empty channel {:?}", channel_id);
-        }
-
+    /// Stop an actor by [`ShutdownType`] — a thin wrapper over
+    /// [`Self::initiate_teardown`] mapping the shutdown kind to the recorded
+    /// terminal cause (`Graceful`→`Stopped`, `Force`→`Killed`,
+    /// `Failed`→`Failed`). Fire-and-forget; the real teardown is the actor
+    /// task's job (see `initiate_teardown`).
+    async fn stop_actor(&mut self, actor_id: TheaterId, shutdown_type: ShutdownType) -> Result<()> {
+        use crate::events::lifecycle::TerminationCause;
+        let (cause, force) = match shutdown_type {
+            ShutdownType::Graceful => (TerminationCause::Stopped, false),
+            ShutdownType::Force => (TerminationCause::Killed, true),
+            ShutdownType::Failed(e) => (TerminationCause::Failed { error: e }, false),
+        };
+        self.initiate_teardown(actor_id, cause, force);
         Ok(())
     }
 
