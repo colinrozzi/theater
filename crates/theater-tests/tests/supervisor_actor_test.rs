@@ -20,7 +20,9 @@ use theater::config::actor_manifest::{
 use theater::config::inheritance::{HandlerInheritance, HandlerPermissionPolicy};
 use theater::handler::HandlerRegistry;
 use theater::messages::{default_init_state, TheaterCommand};
+use theater::pack_bridge::{Value, ValueType};
 use theater::utils::ResourceCache;
+use theater_handler_lifecycle::LifecycleHandler;
 use theater_handler_message_server::{MessageRouter, MessageServerHandler};
 use theater_handler_self::SelfHandler;
 use theater_handler_store::StoreHandler;
@@ -35,7 +37,12 @@ const SPAWN_TIMEOUT: Duration = Duration::from_secs(10);
 /// `set_permissions` at spawn time.
 fn full_registry(theater_tx: mpsc::UnboundedSender<TheaterCommand>) -> HandlerRegistry {
     let mut registry = HandlerRegistry::new();
-    registry.register(SelfHandler::new(SelfHostConfig {}, theater_tx, None));
+    registry.register(SelfHandler::new(
+        SelfHostConfig {},
+        theater_tx.clone(),
+        None,
+    ));
+    registry.register(LifecycleHandler::new(theater_tx));
     registry.register(StoreHandler::new(StoreHandlerConfig::default(), None));
     registry.register(SupervisorHandler::new(SupervisorHostConfig {}, None));
     registry.register(MessageServerHandler::new(None, MessageRouter::new()));
@@ -390,4 +397,133 @@ async fn runtime_cascade_tears_down_subtree_on_death() {
     // Both the stopped node and its cascaded descendant are gone.
     assert!(!is_descendant(&theater_tx, parent, child).await);
     assert!(!is_descendant(&theater_tx, parent, grandchild).await);
+}
+
+/// An `option<list<u8>>` init state carrying an actor id as a utf-8 string.
+fn id_init_state(id: theater::id::TheaterId) -> Value {
+    let s = id.to_string();
+    Value::Option {
+        inner_type: ValueType::List(Box::new(ValueType::U8)),
+        value: Some(Box::new(Value::List {
+            elem_type: ValueType::U8,
+            items: s.bytes().map(Value::U8).collect(),
+        })),
+    }
+}
+
+/// Spawn an actor with an explicit init state (no parent).
+async fn spawn_with_init(
+    theater_tx: &mpsc::UnboundedSender<TheaterCommand>,
+    wasm: Vec<u8>,
+    name: &str,
+    init_state: Value,
+) -> theater::id::TheaterId {
+    let manifest = ManifestConfig {
+        name: name.to_string(),
+        version: "0.1.0".to_string(),
+        package: String::new(),
+        description: None,
+        long_description: None,
+        initial_state: None,
+        static_package: false,
+        permission_policy: HandlerPermissionPolicy::default(),
+        handlers: vec![HandlerConfig::SelfHandler {
+            config: SelfHostConfig {},
+        }],
+    };
+    let (tx, rx) = oneshot::channel();
+    theater_tx
+        .send(TheaterCommand::SpawnActor {
+            wasm_bytes: wasm,
+            name: Some(name.to_string()),
+            manifest: Some(manifest),
+            init_state,
+            response_tx: tx,
+            supervisor_tx: None,
+            subscription_tx: None,
+            parent_id: None,
+        })
+        .expect("send SpawnActor");
+    tokio::time::timeout(SPAWN_TIMEOUT, rx)
+        .await
+        .expect("spawn timed out")
+        .expect("spawn channel closed")
+        .expect("spawn failed")
+}
+
+/// Read the monitor-test actor's `received` state field (its record of the last
+/// lifecycle event delivered to `handle-lifecycle-event`).
+async fn monitor_received(
+    theater_tx: &mpsc::UnboundedSender<TheaterCommand>,
+    actor: theater::id::TheaterId,
+) -> Option<String> {
+    let (tx, rx) = oneshot::channel();
+    theater_tx
+        .send(TheaterCommand::GetActorState {
+            actor_id: actor,
+            response_tx: tx,
+        })
+        .ok()?;
+    let state = rx.await.ok()?.ok()?;
+    match state {
+        Value::Record { fields, .. } => fields.into_iter().find_map(|(n, v)| {
+            if n == "received" {
+                if let Value::String(s) = v {
+                    return Some(s);
+                }
+            }
+            None
+        }),
+        _ => None,
+    }
+}
+
+/// End-to-end proof of `monitor` (DeliverToWasm): a monitor actor watches a
+/// subject, the subject terminates, and the terminal event is delivered to the
+/// monitor's `handle-lifecycle-event` export — event goes chain → lifecycle
+/// handler (host-side filter) → wasm, with the runtime not in the path.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn monitor_delivers_lifecycle_events_to_wasm() {
+    let _ = tracing_subscriber::fmt().with_env_filter("info").try_init();
+    let temp = tempfile::tempdir().expect("temp dir");
+    std::env::set_var("THEATER_HOME", temp.path());
+
+    let theater_tx = start_runtime();
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    // Subject: a plain state-test actor.
+    let subject_wasm =
+        std::fs::read(wasm_path("state-test", "state_test_actor.wasm")).expect("read subject wasm");
+    let subject = spawn_with_parent(&theater_tx, subject_wasm, "m-subject", None).await;
+
+    // Monitor: handed the subject id as init state; it calls monitor(subject).
+    let monitor_wasm = std::fs::read(wasm_path("monitor-test", "monitor_test_actor.wasm"))
+        .expect("read monitor wasm");
+    let monitor = spawn_with_init(
+        &theater_tx,
+        monitor_wasm,
+        "m-monitor",
+        id_init_state(subject),
+    )
+    .await;
+    // Give the monitor a moment to register its subscription.
+    tokio::time::sleep(Duration::from_millis(150)).await;
+
+    // Stop the subject -> it terminates -> the terminal event is delivered to
+    // the monitor's handle-lifecycle-event.
+    stop_actor(&theater_tx, subject).await;
+
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        if monitor_received(&theater_tx, monitor).await.as_deref() == Some("terminated") {
+            break;
+        }
+        if std::time::Instant::now() > deadline {
+            panic!(
+                "monitor never received the terminated event; state = {:?}",
+                monitor_received(&theater_tx, monitor).await
+            );
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
 }
