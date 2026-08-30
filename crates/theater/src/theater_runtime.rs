@@ -493,8 +493,16 @@ impl TheaterRuntime {
                     self.chains.remove(&actor_id);
                     self.deregister_actor(&actor_id);
 
+                    // Cascade: each dependent is peer-killed by this actor.
                     for dep in dependents {
-                        let _ = self.stop_actor(dep, ShutdownType::Graceful).await;
+                        self.initiate_teardown(
+                            dep,
+                            crate::events::lifecycle::TerminationCause::PeerKilled {
+                                peer: actor_id.to_string(),
+                            },
+                            false,
+                        )
+                        .await;
                     }
 
                     let id_for_channels = ChannelParticipant::Actor(actor_id);
@@ -640,6 +648,18 @@ impl TheaterRuntime {
                     if let Some(proc) = self.actors.get_mut(&subject) {
                         proc.subscribers.remove(&subscriber);
                     }
+                }
+                TheaterCommand::PeerTerminated { actor_id, peer } => {
+                    // The handler-driven fate cascade: an actor's linked peer
+                    // terminated, so stop the actor with cause PeerKilled.
+                    self.initiate_teardown(
+                        actor_id,
+                        crate::events::lifecycle::TerminationCause::PeerKilled {
+                            peer: peer.to_string(),
+                        },
+                        false,
+                    )
+                    .await;
                 }
                 TheaterCommand::SubscribeToSpawns { event_tx } => {
                     debug!("Adding runtime-wide spawn subscriber");

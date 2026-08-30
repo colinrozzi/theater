@@ -431,6 +431,17 @@ pub enum TheaterCommand {
         subscriber: TheaterId,
     },
 
+    /// # A fate-linked peer terminated — stop the linking actor
+    ///
+    /// Sent by an actor's `lifecycle` handler when it matches a `StopSelf`
+    /// (link) subscription against `peer`'s terminal event: stop `actor_id`
+    /// with cause `PeerKilled { peer }`. This is the handler-driven fate
+    /// cascade (vs the runtime's auto child→parent cascade).
+    PeerTerminated {
+        actor_id: TheaterId,
+        peer: TheaterId,
+    },
+
     /// # Subscribe to actor-spawned notifications (runtime-wide)
     ///
     /// After this call, every actor spawned ANYWHERE in the runtime is
@@ -557,6 +568,9 @@ impl TheaterCommand {
             }
             TheaterCommand::Unsubscribe { subject, .. } => {
                 format!("Unsubscribe: {:?}", subject)
+            }
+            TheaterCommand::PeerTerminated { actor_id, peer } => {
+                format!("PeerTerminated: {:?} (peer {:?})", actor_id, peer)
             }
             TheaterCommand::SubscribeToSpawns { .. } => "SubscribeToSpawns".to_string(),
             TheaterCommand::UnsubscribeFromSpawns { .. } => "UnsubscribeFromSpawns".to_string(),

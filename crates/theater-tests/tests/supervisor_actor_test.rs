@@ -478,6 +478,67 @@ async fn monitor_received(
     }
 }
 
+/// Is `id` still a live actor?
+async fn is_alive(
+    theater_tx: &mpsc::UnboundedSender<TheaterCommand>,
+    id: theater::id::TheaterId,
+) -> bool {
+    let (tx, rx) = oneshot::channel();
+    // If the runtime is gone (it exits once no actors remain), nothing is alive.
+    if theater_tx
+        .send(TheaterCommand::GetActors { response_tx: tx })
+        .is_err()
+    {
+        return false;
+    }
+    match rx.await {
+        Ok(Ok(actors)) => actors.iter().any(|(aid, _, _)| *aid == id),
+        _ => false,
+    }
+}
+
+/// End-to-end proof of `link` (StopSelf / fate): a linking actor is stopped
+/// (cause `PeerKilled`) when the actor it linked terminates — matched and
+/// triggered entirely in the lifecycle handler.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn link_peer_killed_stops_the_linking_actor() {
+    let _ = tracing_subscriber::fmt().with_env_filter("info").try_init();
+    let temp = tempfile::tempdir().expect("temp dir");
+    std::env::set_var("THEATER_HOME", temp.path());
+
+    let theater_tx = start_runtime();
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    let subject_wasm =
+        std::fs::read(wasm_path("state-test", "state_test_actor.wasm")).expect("read subject wasm");
+    let subject = spawn_with_parent(&theater_tx, subject_wasm, "l-subject", None).await;
+
+    let linker_wasm =
+        std::fs::read(wasm_path("link-test", "link_test_actor.wasm")).expect("read link wasm");
+    let linker =
+        spawn_with_init(&theater_tx, linker_wasm, "l-linker", id_init_state(subject)).await;
+    tokio::time::sleep(Duration::from_millis(150)).await;
+    assert!(
+        is_alive(&theater_tx, linker).await,
+        "linker alive after spawn"
+    );
+
+    // Stop the subject → its terminal event → the linker's handler matches its
+    // link → PeerTerminated(linker) → the runtime stops the linker.
+    stop_actor(&theater_tx, subject).await;
+
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        if !is_alive(&theater_tx, linker).await {
+            break;
+        }
+        if std::time::Instant::now() > deadline {
+            panic!("linker was not peer-killed when its linked subject died");
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+}
+
 /// End-to-end proof of `monitor` (DeliverToWasm): a monitor actor watches a
 /// subject, the subject terminates, and the terminal event is delivered to the
 /// monitor's `handle-lifecycle-event` export — event goes chain → lifecycle
