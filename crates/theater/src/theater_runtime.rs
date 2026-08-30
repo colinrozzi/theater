@@ -209,11 +209,6 @@ pub struct ActorProcess {
     /// subset is the supervision tree: a child auto-subscribes to its parent
     /// with a `terminated`-filtered `StopSelf` at spawn.
     pub subscribers: HashMap<TheaterId, crate::subscription::Subscription>,
-    /// The termination cause recorded when this actor's teardown was initiated,
-    /// carried to the terminal lifecycle event emitted on
-    /// `ActorShutdownComplete`. `Some` doubles as the "already stopping" guard
-    /// that makes teardown idempotent (see `initiate_teardown`).
-    pub termination_cause: Option<crate::events::lifecycle::TerminationCause>,
 }
 
 impl TheaterRuntime {
@@ -477,11 +472,10 @@ impl TheaterRuntime {
                     // recorded when teardown was initiated (defaults to Stopped if
                     // the actor's task ended without a recorded cause). This is the
                     // single point every death path converges on.
-                    let cause = self
-                        .actors
-                        .get(&actor_id)
-                        .and_then(|p| p.termination_cause.clone())
-                        .unwrap_or(crate::events::lifecycle::TerminationCause::Stopped);
+                    let cause = match self.actors.get(&actor_id).map(|p| &p.status) {
+                        Some(ActorStatus::Stopping(cause)) => cause.clone(),
+                        _ => crate::events::lifecycle::TerminationCause::Stopped,
+                    };
                     if let Some(chain) = self.chains.get(&actor_id) {
                         let _ = chain
                             .write()
@@ -598,7 +592,9 @@ impl TheaterRuntime {
                         .actors
                         .get(&actor_id)
                         .map(|proc| proc.status.clone())
-                        .unwrap_or(ActorStatus::Stopped);
+                        .unwrap_or(ActorStatus::Stopping(
+                            crate::events::lifecycle::TerminationCause::Stopped,
+                        ));
                     if let Err(e) = response_tx.send(Ok(status)) {
                         error!("Failed to send actor status: {:?}", e);
                     }
@@ -1021,7 +1017,6 @@ impl TheaterRuntime {
             supervisor_tx,
             parent_id,
             subscribers: HashMap::new(),
-            termination_cause: None,
         };
 
         self.register_actor(process);
@@ -1171,10 +1166,10 @@ impl TheaterRuntime {
             Some(p) => p,
             None => return,
         };
-        if proc.termination_cause.is_some() {
+        if matches!(proc.status, ActorStatus::Stopping(_)) {
             return; // already stopping
         }
-        proc.termination_cause = Some(cause);
+        proc.status = ActorStatus::Stopping(cause);
         // Fire the control signal. `Terminate` for a force-kill (abort loops),
         // `Shutdown` for the graceful path; either way the actor task's own
         // bounded teardown runs and it self-reports when done. The ack channel

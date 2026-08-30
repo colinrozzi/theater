@@ -1013,12 +1013,15 @@ pub enum MessageCommand {
 /// - Errors or crashes transition to Failed
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum ActorStatus {
-    /// Actor is active and processing messages
+    /// Actor is active and processing messages.
     Running,
-    /// Actor has been stopped gracefully
-    Stopped,
-    /// Actor has experienced an error or crash
-    Failed,
+    /// Teardown has been initiated. Carries *why* — the terminal cause the
+    /// runtime stamps on the actor's final lifecycle event when it completes.
+    /// Also the idempotency guard: a second stop while already `Stopping` is a
+    /// no-op, so an actor reached by two death paths emits one terminal.
+    /// (A fully-torn-down actor is deregistered, so it leaves the map rather
+    /// than holding a terminal status.)
+    Stopping(crate::events::lifecycle::TerminationCause),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
