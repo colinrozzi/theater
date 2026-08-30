@@ -463,21 +463,39 @@ impl TheaterRuntime {
                         actor_id,
                         crate::events::lifecycle::TerminationCause::Completed { final_state: data },
                         false,
-                    );
+                    )
+                    .await;
                 }
                 TheaterCommand::ActorShutdownComplete { actor_id } => {
                     info!("ActorShutdownComplete for {:?}, finalizing", actor_id);
 
-                    // Lifecycle-relationship handling — emit the terminal event +
-                    // enact the fate cascade — kept separate from the teardown
-                    // mechanism below (and slated to move to the lifecycle handler
-                    // when parenthood/fate leaves the runtime core). Runs first,
-                    // while the actor's chain + subscribers still exist.
-                    self.on_actor_terminated(actor_id).await;
+                    // The terminal event was already emitted at the stop decision
+                    // (initiate_teardown). Here the actor's task has confirmed it
+                    // finished tearing down, so we do the mechanical finalization.
+
+                    // Fate cascade: stop each `StopSelf` subscriber, collected
+                    // before deregister drops them. Each dependent tears itself
+                    // down and self-reports, rippling one level per death. (This
+                    // moves to the lifecycle handler when fate leaves the runtime.)
+                    let dependents: Vec<TheaterId> = self
+                        .actors
+                        .get(&actor_id)
+                        .map(|p| {
+                            p.subscribers
+                                .values()
+                                .filter(|s| s.target == Target::StopSelf)
+                                .map(|s| s.subscriber)
+                                .collect()
+                        })
+                        .unwrap_or_default();
 
                     // Teardown mechanism: drop the chain, registration, channels.
                     self.chains.remove(&actor_id);
                     self.deregister_actor(&actor_id);
+
+                    for dep in dependents {
+                        let _ = self.stop_actor(dep, ShutdownType::Graceful).await;
+                    }
 
                     let id_for_channels = ChannelParticipant::Actor(actor_id);
                     let mut channels_to_remove = Vec::new();
@@ -1107,36 +1125,59 @@ impl TheaterRuntime {
         Ok(())
     }
 
-    /// Initiate an actor's teardown: record the termination cause and signal the
-    /// actor task, then return immediately (fire-and-forget).
+    /// Initiate an actor's teardown at the stop-*decision*: record the cause,
+    /// **emit the one terminal lifecycle event**, and signal the actor task —
+    /// then return (fire-and-forget).
     ///
-    /// The actor task tears *itself* down — bounded, handlers and resources
-    /// included — and self-reports [`TheaterCommand::ActorShutdownComplete`],
-    /// where the one terminal lifecycle event is emitted and the fate cascade
-    /// runs. The runtime never waits on the shutdown here, so a big subtree
-    /// never blocks the command loop.
+    /// Emitting the terminal here (rather than on the actor's self-report) means
+    /// the death is recorded — and monitors + the fate cascade fire — even if
+    /// the actor wedges and never completes. The actor task then tears *itself*
+    /// down (bounded; handlers + resources included) and self-reports
+    /// [`TheaterCommand::ActorShutdownComplete`], where the runtime does the
+    /// mechanical finalization (deregister / channel cleanup). The runtime never
+    /// waits on the shutdown here, so a big subtree never blocks the loop.
     ///
-    /// Idempotent: a second call while the actor is already stopping is a no-op
-    /// (`termination_cause` is the guard), so an actor reached by two death
-    /// paths at once emits exactly one terminal and cascades once.
-    fn initiate_teardown(
+    /// Idempotent: a second call while already `Stopping` is a no-op (the
+    /// `status` is the guard), so an actor reached by two death paths at once
+    /// emits exactly one terminal.
+    async fn initiate_teardown(
         &mut self,
         actor_id: TheaterId,
         cause: crate::events::lifecycle::TerminationCause,
         force: bool,
     ) {
-        let proc = match self.actors.get_mut(&actor_id) {
-            Some(p) => p,
-            None => return,
+        // Guard + record the cause + take the control channel (scoped so the
+        // `&mut self.actors` borrow ends before we touch `self.chains`).
+        let control_tx = {
+            let proc = match self.actors.get_mut(&actor_id) {
+                Some(p) => p,
+                None => return,
+            };
+            if matches!(proc.status, ActorStatus::Stopping(_)) {
+                return; // already stopping
+            }
+            proc.status = ActorStatus::Stopping(cause.clone());
+            proc.control_tx.clone()
         };
-        if matches!(proc.status, ActorStatus::Stopping(_)) {
-            return; // already stopping
+
+        // Emit the terminal event to the actor's chain (still present until
+        // ActorShutdownComplete). This is what monitors + the cascade key on.
+        if let Some(chain) = self.chains.get(&actor_id) {
+            let _ = chain
+                .write()
+                .await
+                .add_typed_event(crate::events::ChainEventData {
+                    event_type: "terminated".to_string(),
+                    data: crate::events::ChainEventPayload::Lifecycle(
+                        crate::events::lifecycle::ActorLifecycleEvent::Terminated { cause },
+                    ),
+                })
+                .await;
         }
-        proc.status = ActorStatus::Stopping(cause);
-        // Fire the control signal. `Terminate` for a force-kill (abort loops),
-        // `Shutdown` for the graceful path; either way the actor task's own
-        // bounded teardown runs and it self-reports when done. The ack channel
-        // is unused — we don't wait.
+
+        // Signal the actor task. `Terminate` for a force-kill (abort loops),
+        // `Shutdown` for the graceful path; either way the task runs its own
+        // bounded teardown and self-reports. The ack channel is unused.
         let (ack_tx, _ack_rx) = oneshot::channel();
         let ctrl = if force {
             ActorControl::Terminate {
@@ -1147,7 +1188,7 @@ impl TheaterRuntime {
                 response_tx: ack_tx,
             }
         };
-        if let Err(e) = proc.control_tx.try_send(ctrl) {
+        if let Err(e) = control_tx.try_send(ctrl) {
             warn!("Failed to signal teardown for {:?}: {}", actor_id, e);
         }
     }
@@ -1164,57 +1205,8 @@ impl TheaterRuntime {
             ShutdownType::Force => (TerminationCause::Killed, true),
             ShutdownType::Failed(e) => (TerminationCause::Failed { error: e }, false),
         };
-        self.initiate_teardown(actor_id, cause, force);
+        self.initiate_teardown(actor_id, cause, force).await;
         Ok(())
-    }
-
-    /// The lifecycle-relationship handling for a terminated actor, separated
-    /// from the teardown *mechanism* (deregister / channel cleanup, which the
-    /// caller does after). Two things, both of which will move into the
-    /// lifecycle handler when parenthood/fate leaves the runtime core:
-    ///
-    /// 1. Emit the one terminal lifecycle event (cause read from `status`).
-    /// 2. Enact the emergent fate cascade — stop each `StopSelf` subscriber.
-    ///    Each dependent tears itself down and self-reports, rippling the
-    ///    cascade one level per death.
-    ///
-    /// Must run **before** the actor's chain + registration are torn down — it
-    /// reads both.
-    async fn on_actor_terminated(&mut self, actor_id: TheaterId) {
-        // 1. terminal event, with the cause recorded when teardown began.
-        let cause = match self.actors.get(&actor_id).map(|p| &p.status) {
-            Some(ActorStatus::Stopping(cause)) => cause.clone(),
-            _ => crate::events::lifecycle::TerminationCause::Stopped,
-        };
-        if let Some(chain) = self.chains.get(&actor_id) {
-            let _ = chain
-                .write()
-                .await
-                .add_typed_event(crate::events::ChainEventData {
-                    event_type: "terminated".to_string(),
-                    data: crate::events::ChainEventPayload::Lifecycle(
-                        crate::events::lifecycle::ActorLifecycleEvent::Terminated { cause },
-                    ),
-                })
-                .await;
-        }
-
-        // 2. fate cascade — collect the `StopSelf` subscribers before they're
-        //    dropped, then stop each.
-        let dependents: Vec<TheaterId> = self
-            .actors
-            .get(&actor_id)
-            .map(|p| {
-                p.subscribers
-                    .values()
-                    .filter(|s| s.target == Target::StopSelf)
-                    .map(|s| s.subscriber)
-                    .collect()
-            })
-            .unwrap_or_default();
-        for dep in dependents {
-            let _ = self.stop_actor(dep, ShutdownType::Graceful).await;
-        }
     }
 
     /// Actor is shutting itself down
