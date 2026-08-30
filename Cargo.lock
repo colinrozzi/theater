@@ -3390,6 +3390,7 @@ dependencies = [
  "term_size",
  "theater",
  "theater-handler-http-client",
+ "theater-handler-lifecycle",
  "theater-handler-loop",
  "theater-handler-message-server",
  "theater-handler-podman",
@@ -3429,6 +3430,19 @@ dependencies = [
  "anyhow",
  "reqwest",
  "theater",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "theater-handler-lifecycle"
+version = "0.3.14"
+dependencies = [
+ "anyhow",
+ "tempfile",
+ "theater",
+ "thiserror 1.0.69",
  "tokio",
  "tracing",
  "tracing-subscriber",
@@ -3616,6 +3630,7 @@ dependencies = [
  "tempfile",
  "test-log",
  "theater",
+ "theater-handler-lifecycle",
  "theater-handler-loop",
  "theater-handler-message-server",
  "theater-handler-rpc",
