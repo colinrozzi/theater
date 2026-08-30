@@ -525,7 +525,7 @@ async fn handle_accepted_connection(
 async fn do_transfer_async(
     st: Arc<SharedTcpState>,
     actor_id: TheaterId,
-    theater_tx: tokio::sync::mpsc::Sender<theater::messages::TheaterCommand>,
+    theater_tx: tokio::sync::mpsc::UnboundedSender<theater::messages::TheaterCommand>,
     input: &Value,
 ) -> Result<Value, Value> {
     let (conn_id_str, target_actor_str) = parse_two_strings(input)?;
@@ -545,7 +545,6 @@ async fn do_transfer_async(
     };
     theater_tx
         .send(get_handle_cmd)
-        .await
         .map_err(|e| Value::String(format!("Failed to get target handle: {}", e)))?;
 
     let target_handle = match handle_rx.await {
@@ -1274,7 +1273,8 @@ impl Handler for TcpHandler {
                             actor_id: target_actor,
                             response_tx: handle_tx,
                         };
-                        theater_tx.send(get_handle_cmd).await
+                        theater_tx
+                            .send(get_handle_cmd)
                             .map_err(|e| Value::String(format!("Failed to get target handle: {}", e)))?;
 
                         let target_handle = match handle_rx.await {
@@ -2061,7 +2061,7 @@ mod tests {
     /// with `handle` for `target_id` (and `None` for anyone else) — the same
     /// thing `TheaterRuntime` does for a real actor.
     fn serve_theater_tx(
-        mut rx: tokio::sync::mpsc::Receiver<TheaterCommand>,
+        mut rx: tokio::sync::mpsc::UnboundedReceiver<TheaterCommand>,
         target_id: TheaterId,
         handle: ActorHandle,
     ) {
@@ -2150,7 +2150,7 @@ mod tests {
             }
         });
 
-        let (theater_tx, theater_rx) = tokio::sync::mpsc::channel::<TheaterCommand>(4);
+        let (theater_tx, theater_rx) = tokio::sync::mpsc::unbounded_channel::<TheaterCommand>();
         serve_theater_tx(theater_rx, target_id, target_handle);
 
         // Client parks its request; the target reads it only after its stall.
@@ -2227,7 +2227,7 @@ mod tests {
             }
         });
 
-        let (theater_tx, theater_rx) = tokio::sync::mpsc::channel::<TheaterCommand>(4);
+        let (theater_tx, theater_rx) = tokio::sync::mpsc::unbounded_channel::<TheaterCommand>();
         serve_theater_tx(theater_rx, target_id, target_handle);
 
         let input = Value::Tuple(vec![

@@ -33,7 +33,7 @@ const SPAWN_TIMEOUT: Duration = Duration::from_secs(10);
 /// registered as templates with `None` permissions; the runtime clones each per
 /// actor and threads the manifest's effective permissions in via
 /// `set_permissions` at spawn time.
-fn full_registry(theater_tx: mpsc::Sender<TheaterCommand>) -> HandlerRegistry {
+fn full_registry(theater_tx: mpsc::UnboundedSender<TheaterCommand>) -> HandlerRegistry {
     let mut registry = HandlerRegistry::new();
     registry.register(SelfHandler::new(SelfHostConfig {}, theater_tx, None));
     registry.register(StoreHandler::new(StoreHandlerConfig::default(), None));
@@ -63,8 +63,8 @@ fn granted_manifest(name: &str, wasm_path: &str, handlers: Vec<HandlerConfig>) -
 }
 
 /// Start a runtime on a background task and return its command sender.
-fn start_runtime() -> mpsc::Sender<TheaterCommand> {
-    let (theater_tx, theater_rx) = mpsc::channel::<TheaterCommand>(100);
+fn start_runtime() -> mpsc::UnboundedSender<TheaterCommand> {
+    let (theater_tx, theater_rx) = mpsc::unbounded_channel::<TheaterCommand>();
     let tx_for_runtime = theater_tx.clone();
     let registry = full_registry(theater_tx.clone());
     tokio::spawn(async move {
@@ -83,7 +83,7 @@ fn start_runtime() -> mpsc::Sender<TheaterCommand> {
 
 /// Spawn an actor (setup + init) and return the runtime's spawn result.
 async fn spawn_actor(
-    theater_tx: &mpsc::Sender<TheaterCommand>,
+    theater_tx: &mpsc::UnboundedSender<TheaterCommand>,
     name: &str,
     wasm_path: &str,
     manifest: ManifestConfig,
@@ -108,7 +108,6 @@ async fn spawn_actor(
             subscription_tx: None,
             parent_id: None,
         })
-        .await
         .expect("send SpawnActor");
 
     tokio::time::timeout(SPAWN_TIMEOUT, spawn_rx)
@@ -209,7 +208,7 @@ async fn supervisor_replay_actor_instantiates_against_reshaped_supervisor() {
 
 /// Spawn a plain state-test actor with an explicit parent, to build a tree.
 async fn spawn_with_parent(
-    theater_tx: &mpsc::Sender<TheaterCommand>,
+    theater_tx: &mpsc::UnboundedSender<TheaterCommand>,
     wasm: Vec<u8>,
     name: &str,
     parent: Option<theater::id::TheaterId>,
@@ -239,7 +238,6 @@ async fn spawn_with_parent(
             subscription_tx: None,
             parent_id: parent,
         })
-        .await
         .expect("send SpawnActor");
     tokio::time::timeout(SPAWN_TIMEOUT, rx)
         .await
@@ -249,7 +247,7 @@ async fn spawn_with_parent(
 }
 
 async fn is_descendant(
-    theater_tx: &mpsc::Sender<TheaterCommand>,
+    theater_tx: &mpsc::UnboundedSender<TheaterCommand>,
     ancestor: theater::id::TheaterId,
     target: theater::id::TheaterId,
 ) -> bool {
@@ -260,13 +258,12 @@ async fn is_descendant(
             target,
             response_tx: tx,
         })
-        .await
         .expect("send IsDescendant");
     rx.await.expect("recv").expect("is_descendant ok")
 }
 
 async fn get_descendants(
-    theater_tx: &mpsc::Sender<TheaterCommand>,
+    theater_tx: &mpsc::UnboundedSender<TheaterCommand>,
     root: theater::id::TheaterId,
 ) -> std::collections::HashSet<theater::id::TheaterId> {
     let (tx, rx) = oneshot::channel();
@@ -275,7 +272,6 @@ async fn get_descendants(
             root,
             response_tx: tx,
         })
-        .await
         .expect("send GetDescendants");
     rx.await
         .expect("recv")
@@ -330,14 +326,16 @@ async fn runtime_serves_the_supervision_tree() {
     assert!(get_descendants(&theater_tx, grandchild).await.is_empty());
 }
 
-async fn stop_actor(theater_tx: &mpsc::Sender<TheaterCommand>, id: theater::id::TheaterId) {
+async fn stop_actor(
+    theater_tx: &mpsc::UnboundedSender<TheaterCommand>,
+    id: theater::id::TheaterId,
+) {
     let (tx, rx) = oneshot::channel();
     theater_tx
         .send(TheaterCommand::StopActor {
             actor_id: id,
             response_tx: tx,
         })
-        .await
         .expect("send StopActor");
     // StopActor deregisters the actor before it responds.
     let _ = tokio::time::timeout(SPAWN_TIMEOUT, rx)

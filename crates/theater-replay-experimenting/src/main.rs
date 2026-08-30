@@ -162,7 +162,7 @@ async fn load_manifest_and_wasm(manifest_str: &str) -> Result<(ManifestConfig, V
 /// Creates a handler registry with SelfHandler and MessageServerHandler.
 /// Returns both the registry and the MessageRouter for sending messages.
 pub fn create_base_registry(
-    theater_tx: mpsc::Sender<TheaterCommand>,
+    theater_tx: mpsc::UnboundedSender<TheaterCommand>,
 ) -> (HandlerRegistry, MessageRouter) {
     let mut registry = HandlerRegistry::new();
     let runtime_config = SelfHostConfig {};
@@ -241,7 +241,7 @@ type = "supervisor"
 
 /// Creates a handler registry with SelfHandler, MessageServerHandler, and SupervisorHandler.
 pub fn create_supervisor_registry(
-    theater_tx: mpsc::Sender<TheaterCommand>,
+    theater_tx: mpsc::UnboundedSender<TheaterCommand>,
 ) -> (HandlerRegistry, MessageRouter) {
     let mut registry = HandlerRegistry::new();
     let runtime_config = SelfHostConfig {};
@@ -312,7 +312,7 @@ pub async fn run_replay_verification(
     let recording_manifest_str = create_recording_manifest(&wasm_path);
     let (recording_manifest, wasm_bytes) = load_manifest_and_wasm(&recording_manifest_str).await?;
 
-    let (theater_tx, theater_rx) = mpsc::channel::<TheaterCommand>(32);
+    let (theater_tx, theater_rx) = mpsc::unbounded_channel::<TheaterCommand>();
     let (handler_registry, message_router) = create_base_registry(theater_tx.clone());
 
     let mut runtime = TheaterRuntime::new(
@@ -330,18 +330,16 @@ pub async fn run_replay_verification(
 
     // Spawn the actor with event subscription
     let (response_tx, response_rx) = tokio::sync::oneshot::channel();
-    theater_tx
-        .send(TheaterCommand::SetupActor {
-            wasm_bytes,
-            name: Some(recording_manifest.name.clone()),
-            manifest: Some(recording_manifest),
-            init_state: default_init_state(),
-            response_tx,
-            supervisor_tx: None,
-            subscription_tx: Some(event_tx),
-            parent_id: None,
-        })
-        .await?;
+    theater_tx.send(TheaterCommand::SetupActor {
+        wasm_bytes,
+        name: Some(recording_manifest.name.clone()),
+        manifest: Some(recording_manifest),
+        init_state: default_init_state(),
+        response_tx,
+        supervisor_tx: None,
+        subscription_tx: Some(event_tx),
+        parent_id: None,
+    })?;
 
     let spawn_result = timeout(Duration::from_secs(10), response_rx).await??;
     let actor_id = spawn_result?;
@@ -352,12 +350,10 @@ pub async fn run_replay_verification(
 
     // Get actor handle and call init
     let (handle_tx, handle_rx) = tokio::sync::oneshot::channel();
-    theater_tx
-        .send(TheaterCommand::GetActorHandle {
-            actor_id,
-            response_tx: handle_tx,
-        })
-        .await?;
+    theater_tx.send(TheaterCommand::GetActorHandle {
+        actor_id,
+        response_tx: handle_tx,
+    })?;
     let actor_handle = timeout(Duration::from_secs(5), handle_rx)
         .await??
         .ok_or_else(|| anyhow::anyhow!("Actor handle not found"))?;
@@ -435,12 +431,10 @@ pub async fn run_replay_verification(
 
     // Stop the first actor
     let (stop_tx, stop_rx) = tokio::sync::oneshot::channel();
-    theater_tx
-        .send(TheaterCommand::StopActor {
-            actor_id,
-            response_tx: stop_tx,
-        })
-        .await?;
+    theater_tx.send(TheaterCommand::StopActor {
+        actor_id,
+        response_tx: stop_tx,
+    })?;
     let _ = timeout(Duration::from_secs(5), stop_rx).await;
 
     if recorded_chain.is_empty() {
@@ -462,18 +456,16 @@ pub async fn run_replay_verification(
 
     // Spawn the replay actor
     let (response_tx2, response_rx2) = tokio::sync::oneshot::channel();
-    theater_tx
-        .send(TheaterCommand::SetupActor {
-            wasm_bytes: replay_wasm_bytes,
-            name: Some(replay_manifest.name.clone()),
-            manifest: Some(replay_manifest),
-            init_state: default_init_state(),
-            response_tx: response_tx2,
-            supervisor_tx: None,
-            subscription_tx: Some(replay_event_tx),
-            parent_id: None,
-        })
-        .await?;
+    theater_tx.send(TheaterCommand::SetupActor {
+        wasm_bytes: replay_wasm_bytes,
+        name: Some(replay_manifest.name.clone()),
+        manifest: Some(replay_manifest),
+        init_state: default_init_state(),
+        response_tx: response_tx2,
+        supervisor_tx: None,
+        subscription_tx: Some(replay_event_tx),
+        parent_id: None,
+    })?;
 
     let spawn_result2 = timeout(Duration::from_secs(10), response_rx2).await??;
     let replay_actor_id = spawn_result2?;
@@ -504,12 +496,10 @@ pub async fn run_replay_verification(
 
     // Stop the replay actor
     let (stop_tx2, stop_rx2) = tokio::sync::oneshot::channel();
-    let _ = theater_tx
-        .send(TheaterCommand::StopActor {
-            actor_id: replay_actor_id,
-            response_tx: stop_tx2,
-        })
-        .await;
+    let _ = theater_tx.send(TheaterCommand::StopActor {
+        actor_id: replay_actor_id,
+        response_tx: stop_tx2,
+    });
     let _ = timeout(Duration::from_secs(5), stop_rx2).await;
 
     // Shutdown the runtime
@@ -565,7 +555,7 @@ pub async fn run_request_replay_verification(
     let recording_manifest_str = create_recording_manifest(&wasm_path);
     let (recording_manifest, wasm_bytes) = load_manifest_and_wasm(&recording_manifest_str).await?;
 
-    let (theater_tx, theater_rx) = mpsc::channel::<TheaterCommand>(32);
+    let (theater_tx, theater_rx) = mpsc::unbounded_channel::<TheaterCommand>();
     let (handler_registry, message_router) = create_base_registry(theater_tx.clone());
 
     let mut runtime = TheaterRuntime::new(
@@ -581,18 +571,16 @@ pub async fn run_request_replay_verification(
     let (event_tx, mut event_rx) = mpsc::channel(100);
 
     let (response_tx, response_rx) = tokio::sync::oneshot::channel();
-    theater_tx
-        .send(TheaterCommand::SetupActor {
-            wasm_bytes,
-            name: Some(recording_manifest.name.clone()),
-            manifest: Some(recording_manifest),
-            init_state: default_init_state(),
-            response_tx,
-            supervisor_tx: None,
-            subscription_tx: Some(event_tx),
-            parent_id: None,
-        })
-        .await?;
+    theater_tx.send(TheaterCommand::SetupActor {
+        wasm_bytes,
+        name: Some(recording_manifest.name.clone()),
+        manifest: Some(recording_manifest),
+        init_state: default_init_state(),
+        response_tx,
+        supervisor_tx: None,
+        subscription_tx: Some(event_tx),
+        parent_id: None,
+    })?;
 
     let spawn_result = timeout(Duration::from_secs(10), response_rx).await??;
     let actor_id = spawn_result?;
@@ -603,12 +591,10 @@ pub async fn run_request_replay_verification(
 
     // Get actor handle and call init
     let (handle_tx, handle_rx) = tokio::sync::oneshot::channel();
-    theater_tx
-        .send(TheaterCommand::GetActorHandle {
-            actor_id,
-            response_tx: handle_tx,
-        })
-        .await?;
+    theater_tx.send(TheaterCommand::GetActorHandle {
+        actor_id,
+        response_tx: handle_tx,
+    })?;
     let actor_handle = timeout(Duration::from_secs(5), handle_rx)
         .await??
         .ok_or_else(|| anyhow::anyhow!("Actor handle not found"))?;
@@ -725,12 +711,10 @@ pub async fn run_request_replay_verification(
 
     // Stop the first actor
     let (stop_tx, stop_rx) = tokio::sync::oneshot::channel();
-    theater_tx
-        .send(TheaterCommand::StopActor {
-            actor_id,
-            response_tx: stop_tx,
-        })
-        .await?;
+    theater_tx.send(TheaterCommand::StopActor {
+        actor_id,
+        response_tx: stop_tx,
+    })?;
     let _ = timeout(Duration::from_secs(5), stop_rx).await;
 
     if recorded_chain.is_empty() {
@@ -750,18 +734,16 @@ pub async fn run_request_replay_verification(
     let (replay_event_tx, mut replay_event_rx) = mpsc::channel(100);
 
     let (response_tx2, response_rx2) = tokio::sync::oneshot::channel();
-    theater_tx
-        .send(TheaterCommand::SetupActor {
-            wasm_bytes: replay_wasm_bytes,
-            name: Some(replay_manifest.name.clone()),
-            manifest: Some(replay_manifest),
-            init_state: default_init_state(),
-            response_tx: response_tx2,
-            supervisor_tx: None,
-            subscription_tx: Some(replay_event_tx),
-            parent_id: None,
-        })
-        .await?;
+    theater_tx.send(TheaterCommand::SetupActor {
+        wasm_bytes: replay_wasm_bytes,
+        name: Some(replay_manifest.name.clone()),
+        manifest: Some(replay_manifest),
+        init_state: default_init_state(),
+        response_tx: response_tx2,
+        supervisor_tx: None,
+        subscription_tx: Some(replay_event_tx),
+        parent_id: None,
+    })?;
 
     let spawn_result2 = timeout(Duration::from_secs(10), response_rx2).await??;
     let replay_actor_id = spawn_result2?;
@@ -792,12 +774,10 @@ pub async fn run_request_replay_verification(
 
     // Stop the replay actor
     let (stop_tx2, stop_rx2) = tokio::sync::oneshot::channel();
-    let _ = theater_tx
-        .send(TheaterCommand::StopActor {
-            actor_id: replay_actor_id,
-            response_tx: stop_tx2,
-        })
-        .await;
+    let _ = theater_tx.send(TheaterCommand::StopActor {
+        actor_id: replay_actor_id,
+        response_tx: stop_tx2,
+    });
     let _ = timeout(Duration::from_secs(5), stop_rx2).await;
 
     // Shutdown the runtime
@@ -873,7 +853,7 @@ pub async fn run_supervisor_replay_verification(
     let recording_manifest_str = create_supervisor_recording_manifest(&wasm_path);
     let (recording_manifest, wasm_bytes) = load_manifest_and_wasm(&recording_manifest_str).await?;
 
-    let (theater_tx, theater_rx) = mpsc::channel::<TheaterCommand>(32);
+    let (theater_tx, theater_rx) = mpsc::unbounded_channel::<TheaterCommand>();
     let (handler_registry, message_router) = create_supervisor_registry(theater_tx.clone());
 
     let mut runtime = TheaterRuntime::new(
@@ -889,18 +869,16 @@ pub async fn run_supervisor_replay_verification(
 
     // Spawn the parent supervisor actor
     let (response_tx, response_rx) = tokio::sync::oneshot::channel();
-    theater_tx
-        .send(TheaterCommand::SetupActor {
-            wasm_bytes,
-            name: Some(recording_manifest.name.clone()),
-            manifest: Some(recording_manifest),
-            init_state: default_init_state(),
-            response_tx,
-            supervisor_tx: None,
-            subscription_tx: Some(event_tx),
-            parent_id: None,
-        })
-        .await?;
+    theater_tx.send(TheaterCommand::SetupActor {
+        wasm_bytes,
+        name: Some(recording_manifest.name.clone()),
+        manifest: Some(recording_manifest),
+        init_state: default_init_state(),
+        response_tx,
+        supervisor_tx: None,
+        subscription_tx: Some(event_tx),
+        parent_id: None,
+    })?;
 
     let spawn_result = timeout(Duration::from_secs(10), response_rx).await??;
     let actor_id = spawn_result?;
@@ -911,12 +889,10 @@ pub async fn run_supervisor_replay_verification(
 
     // Get actor handle and call init
     let (handle_tx, handle_rx) = tokio::sync::oneshot::channel();
-    theater_tx
-        .send(TheaterCommand::GetActorHandle {
-            actor_id,
-            response_tx: handle_tx,
-        })
-        .await?;
+    theater_tx.send(TheaterCommand::GetActorHandle {
+        actor_id,
+        response_tx: handle_tx,
+    })?;
     let actor_handle = timeout(Duration::from_secs(5), handle_rx)
         .await??
         .ok_or_else(|| anyhow::anyhow!("Actor handle not found"))?;
@@ -1049,12 +1025,10 @@ pub async fn run_supervisor_replay_verification(
 
     // Stop the parent actor
     let (stop_tx, stop_rx) = tokio::sync::oneshot::channel();
-    theater_tx
-        .send(TheaterCommand::StopActor {
-            actor_id,
-            response_tx: stop_tx,
-        })
-        .await?;
+    theater_tx.send(TheaterCommand::StopActor {
+        actor_id,
+        response_tx: stop_tx,
+    })?;
     let _ = timeout(Duration::from_secs(5), stop_rx).await;
 
     if recorded_chain.is_empty() {
@@ -1075,18 +1049,16 @@ pub async fn run_supervisor_replay_verification(
     let (replay_event_tx, mut replay_event_rx) = mpsc::channel(100);
 
     let (response_tx2, response_rx2) = tokio::sync::oneshot::channel();
-    theater_tx
-        .send(TheaterCommand::SetupActor {
-            wasm_bytes: replay_wasm_bytes,
-            name: Some(replay_manifest.name.clone()),
-            manifest: Some(replay_manifest),
-            init_state: default_init_state(),
-            response_tx: response_tx2,
-            supervisor_tx: None,
-            subscription_tx: Some(replay_event_tx),
-            parent_id: None,
-        })
-        .await?;
+    theater_tx.send(TheaterCommand::SetupActor {
+        wasm_bytes: replay_wasm_bytes,
+        name: Some(replay_manifest.name.clone()),
+        manifest: Some(replay_manifest),
+        init_state: default_init_state(),
+        response_tx: response_tx2,
+        supervisor_tx: None,
+        subscription_tx: Some(replay_event_tx),
+        parent_id: None,
+    })?;
 
     let spawn_result2 = timeout(Duration::from_secs(10), response_rx2).await??;
     let replay_actor_id = spawn_result2?;
@@ -1117,12 +1089,10 @@ pub async fn run_supervisor_replay_verification(
 
     // Stop replay actor
     let (stop_tx2, stop_rx2) = tokio::sync::oneshot::channel();
-    let _ = theater_tx
-        .send(TheaterCommand::StopActor {
-            actor_id: replay_actor_id,
-            response_tx: stop_tx2,
-        })
-        .await;
+    let _ = theater_tx.send(TheaterCommand::StopActor {
+        actor_id: replay_actor_id,
+        response_tx: stop_tx2,
+    });
     let _ = timeout(Duration::from_secs(5), stop_rx2).await;
 
     // Shutdown runtime
@@ -1211,7 +1181,7 @@ type = "tcp"
 }
 
 /// Creates a handler registry with SelfHandler and TcpHandler.
-pub fn create_tcp_registry(theater_tx: mpsc::Sender<TheaterCommand>) -> HandlerRegistry {
+pub fn create_tcp_registry(theater_tx: mpsc::UnboundedSender<TheaterCommand>) -> HandlerRegistry {
     use theater::config::actor_manifest::TcpHandlerConfig;
     let mut registry = HandlerRegistry::new();
     let runtime_config = SelfHostConfig {};
@@ -1254,7 +1224,7 @@ pub async fn run_tcp_replay_verification(
     let recording_manifest_str = create_tcp_recording_manifest(&wasm_path, &listen_addr_str);
     let (recording_manifest, wasm_bytes) = load_manifest_and_wasm(&recording_manifest_str).await?;
 
-    let (theater_tx, theater_rx) = mpsc::channel::<TheaterCommand>(32);
+    let (theater_tx, theater_rx) = mpsc::unbounded_channel::<TheaterCommand>();
     let handler_registry = create_tcp_registry(theater_tx.clone());
 
     let mut runtime = TheaterRuntime::new(
@@ -1270,18 +1240,16 @@ pub async fn run_tcp_replay_verification(
 
     // Spawn the TCP echo actor
     let (response_tx, response_rx) = tokio::sync::oneshot::channel();
-    theater_tx
-        .send(TheaterCommand::SetupActor {
-            wasm_bytes,
-            name: Some(recording_manifest.name.clone()),
-            manifest: Some(recording_manifest),
-            init_state: default_init_state(),
-            response_tx,
-            supervisor_tx: None,
-            subscription_tx: Some(event_tx),
-            parent_id: None,
-        })
-        .await?;
+    theater_tx.send(TheaterCommand::SetupActor {
+        wasm_bytes,
+        name: Some(recording_manifest.name.clone()),
+        manifest: Some(recording_manifest),
+        init_state: default_init_state(),
+        response_tx,
+        supervisor_tx: None,
+        subscription_tx: Some(event_tx),
+        parent_id: None,
+    })?;
 
     let spawn_result = timeout(Duration::from_secs(10), response_rx).await??;
     let actor_id = spawn_result?;
@@ -1292,12 +1260,10 @@ pub async fn run_tcp_replay_verification(
 
     // Get actor handle and call init
     let (handle_tx, handle_rx) = tokio::sync::oneshot::channel();
-    theater_tx
-        .send(TheaterCommand::GetActorHandle {
-            actor_id,
-            response_tx: handle_tx,
-        })
-        .await?;
+    theater_tx.send(TheaterCommand::GetActorHandle {
+        actor_id,
+        response_tx: handle_tx,
+    })?;
     let actor_handle = timeout(Duration::from_secs(5), handle_rx)
         .await??
         .ok_or_else(|| anyhow::anyhow!("Actor handle not found"))?;
@@ -1422,12 +1388,10 @@ pub async fn run_tcp_replay_verification(
 
     // Stop the actor
     let (stop_tx, stop_rx) = tokio::sync::oneshot::channel();
-    theater_tx
-        .send(TheaterCommand::StopActor {
-            actor_id,
-            response_tx: stop_tx,
-        })
-        .await?;
+    theater_tx.send(TheaterCommand::StopActor {
+        actor_id,
+        response_tx: stop_tx,
+    })?;
     let _ = timeout(Duration::from_secs(5), stop_rx).await;
 
     if recorded_chain.is_empty() {
@@ -1447,18 +1411,16 @@ pub async fn run_tcp_replay_verification(
     let (replay_event_tx, mut replay_event_rx) = mpsc::channel(100);
 
     let (response_tx2, response_rx2) = tokio::sync::oneshot::channel();
-    theater_tx
-        .send(TheaterCommand::SetupActor {
-            wasm_bytes: replay_wasm_bytes,
-            name: Some(replay_manifest.name.clone()),
-            manifest: Some(replay_manifest),
-            init_state: default_init_state(),
-            response_tx: response_tx2,
-            supervisor_tx: None,
-            subscription_tx: Some(replay_event_tx),
-            parent_id: None,
-        })
-        .await?;
+    theater_tx.send(TheaterCommand::SetupActor {
+        wasm_bytes: replay_wasm_bytes,
+        name: Some(replay_manifest.name.clone()),
+        manifest: Some(replay_manifest),
+        init_state: default_init_state(),
+        response_tx: response_tx2,
+        supervisor_tx: None,
+        subscription_tx: Some(replay_event_tx),
+        parent_id: None,
+    })?;
 
     let spawn_result2 = timeout(Duration::from_secs(10), response_rx2).await??;
     let replay_actor_id = spawn_result2?;
@@ -1489,12 +1451,10 @@ pub async fn run_tcp_replay_verification(
 
     // Stop replay actor
     let (stop_tx2, stop_rx2) = tokio::sync::oneshot::channel();
-    let _ = theater_tx
-        .send(TheaterCommand::StopActor {
-            actor_id: replay_actor_id,
-            response_tx: stop_tx2,
-        })
-        .await;
+    let _ = theater_tx.send(TheaterCommand::StopActor {
+        actor_id: replay_actor_id,
+        response_tx: stop_tx2,
+    });
     let _ = timeout(Duration::from_secs(5), stop_rx2).await;
 
     // Shutdown runtime

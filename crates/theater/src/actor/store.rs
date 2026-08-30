@@ -13,7 +13,7 @@ use crate::pack_bridge::Value;
 use std::any::{Any, TypeId};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, RwLock as StdRwLock};
-use tokio::sync::mpsc::Sender;
+use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::RwLock;
 use wasmtime::component::ResourceTable;
 
@@ -35,7 +35,7 @@ pub struct ActorStore {
     pub id: TheaterId,
 
     /// Channel for sending commands to the Theater runtime
-    pub theater_tx: Sender<TheaterCommand>,
+    pub theater_tx: UnboundedSender<TheaterCommand>,
 
     /// The event chain that records all actor operations for verification and audit
     pub chain: Arc<RwLock<StateChain>>,
@@ -73,7 +73,7 @@ impl ActorStore {
     /// A new ActorStore instance configured with the provided parameters.
     pub fn new(
         id: TheaterId,
-        theater_tx: Sender<TheaterCommand>,
+        theater_tx: UnboundedSender<TheaterCommand>,
         actor_handle: ActorHandle,
         chain: Arc<RwLock<StateChain>>,
         initial_state: Value,
@@ -106,8 +106,8 @@ impl ActorStore {
     ///
     /// ## Returns
     ///
-    /// A clone of the Sender<TheaterCommand> channel.
-    pub fn get_theater_tx(&self) -> Sender<TheaterCommand> {
+    /// A clone of the UnboundedSender<TheaterCommand> channel.
+    pub fn get_theater_tx(&self) -> UnboundedSender<TheaterCommand> {
         self.theater_tx.clone()
     }
 

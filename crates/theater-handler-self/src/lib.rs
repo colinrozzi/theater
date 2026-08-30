@@ -14,7 +14,7 @@ use theater::config::permissions::RuntimePermissions;
 use theater::handler::{Handler, HandlerContext, SharedActorInstance};
 use theater::messages::TheaterCommand;
 use theater::shutdown::ShutdownReceiver;
-use tokio::sync::mpsc::Sender;
+use tokio::sync::mpsc::UnboundedSender;
 
 // Pack integration
 use theater::pack_bridge::{
@@ -44,7 +44,7 @@ fn runtime_interface() -> InterfaceImpl {
 pub struct SelfHandler {
     #[allow(dead_code)]
     config: SelfHostConfig,
-    theater_tx: Sender<TheaterCommand>,
+    theater_tx: UnboundedSender<TheaterCommand>,
     #[allow(dead_code)]
     permissions: Option<RuntimePermissions>,
     /// Whether to print actor logs to stdout
@@ -54,7 +54,7 @@ pub struct SelfHandler {
 impl SelfHandler {
     pub fn new(
         config: SelfHostConfig,
-        theater_tx: Sender<TheaterCommand>,
+        theater_tx: UnboundedSender<TheaterCommand>,
         permissions: Option<RuntimePermissions>,
     ) -> Self {
         Self {
@@ -188,9 +188,8 @@ impl Handler for SelfHandler {
                         // By spawning, shutdown() returns immediately, allowing the
                         // operation to complete before the theater processes ShuttingDown.
                         tokio::spawn(async move {
-                            if let Err(e) = theater_tx
-                                .send(TheaterCommand::ShuttingDown { actor_id, data })
-                                .await
+                            if let Err(e) =
+                                theater_tx.send(TheaterCommand::ShuttingDown { actor_id, data })
                             {
                                 tracing::error!(
                                     "[ACTOR] [{}] Failed to send ShuttingDown: {}",
@@ -256,7 +255,7 @@ mod tests {
     #[test]
     fn test_runtime_handler_creation() {
         let config = SelfHostConfig {};
-        let (tx, _rx) = mpsc::channel(100);
+        let (tx, _rx) = mpsc::unbounded_channel();
 
         let handler = SelfHandler::new(config, tx, None);
         assert_eq!(handler.name(), "self");
@@ -282,7 +281,7 @@ mod tests {
     #[test]
     fn test_runtime_handler_interface_hashes() {
         let config = SelfHostConfig {};
-        let (tx, _rx) = mpsc::channel(100);
+        let (tx, _rx) = mpsc::unbounded_channel();
         let handler = SelfHandler::new(config, tx, None);
 
         let hashes = handler.interface_hashes();
@@ -356,7 +355,7 @@ mod tests {
 
         // Get the handler's interface hash
         let config = SelfHostConfig {};
-        let (tx, _rx) = mpsc::channel(100);
+        let (tx, _rx) = mpsc::unbounded_channel();
         let handler = SelfHandler::new(config, tx, None);
         let handler_hashes = handler.interface_hashes();
 
@@ -404,7 +403,7 @@ mod tests {
 
         // Get handler hash
         let config = SelfHostConfig {};
-        let (tx, _rx) = mpsc::channel(100);
+        let (tx, _rx) = mpsc::unbounded_channel();
         let handler = SelfHandler::new(config, tx, None);
         let handler_hash = &handler.interface_hashes()[0].1;
 

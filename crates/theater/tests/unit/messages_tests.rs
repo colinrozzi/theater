@@ -87,7 +87,7 @@ async fn test_theater_command_spawn_actor() {
 
 #[tokio::test]
 async fn test_command_channel() {
-    let (tx, mut rx) = mpsc::channel::<TheaterCommand>(10);
+    let (tx, mut rx) = mpsc::unbounded_channel::<TheaterCommand>();
 
     let actor_id = TheaterId::generate();
     let (resp_tx, _resp_rx) = oneshot::channel();
@@ -97,7 +97,7 @@ async fn test_command_channel() {
     };
 
     // Send command
-    tx.send(command).await.unwrap();
+    tx.send(command).unwrap();
 
     // Receive and verify
     let received = rx.recv().await.unwrap();

@@ -74,7 +74,7 @@ async fn drive_handle_send(
 
     let runtime = AsyncRuntime::new();
     let actor_id = TheaterId::generate();
-    let (theater_tx, _theater_rx) = mpsc::channel::<TheaterCommand>(100);
+    let (theater_tx, _theater_rx) = mpsc::unbounded_channel::<TheaterCommand>();
     let (op_tx, _op_rx) = mpsc::channel(10);
     let (info_tx, _info_rx) = mpsc::channel(10);
     let (ctl_tx, _ctl_rx) = mpsc::channel(10);

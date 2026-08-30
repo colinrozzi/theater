@@ -57,7 +57,7 @@ async fn test_state_tracking_typed_api() {
 
     // Create actor store components
     let actor_id = TheaterId::generate();
-    let (theater_tx, _theater_rx) = mpsc::channel::<TheaterCommand>(100);
+    let (theater_tx, _theater_rx) = mpsc::unbounded_channel::<TheaterCommand>();
     let (operation_tx, _operation_rx) = mpsc::channel(10);
     let (info_tx, _info_rx) = mpsc::channel(10);
     let (control_tx, _control_rx) = mpsc::channel(10);

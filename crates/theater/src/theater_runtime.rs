@@ -28,8 +28,8 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tokio::sync::mpsc::Receiver;
 use tokio::sync::mpsc::Sender;
+use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio::sync::RwLock;
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
@@ -72,7 +72,7 @@ const INIT_WATCHDOG_WARN_INTERVAL: Duration = Duration::from_secs(30);
 ///
 /// async fn example() -> Result<()> {
 ///     // Create channels for theater commands
-///     let (theater_tx, theater_rx) = mpsc::channel(100);
+///     let (theater_tx, theater_rx) = mpsc::unbounded_channel();
 ///
 ///     // Initialize the runtime
 ///     let mut runtime = TheaterRuntime::new(
@@ -127,9 +127,9 @@ pub struct TheaterRuntime {
     /// `theater:simple/runtime.subscribe-to-spawns`.
     spawn_subscribers: Vec<Sender<ActorTreeRow>>,
     /// Sender for commands to the runtime
-    theater_tx: Sender<TheaterCommand>,
+    theater_tx: UnboundedSender<TheaterCommand>,
     /// Receiver for commands to the runtime
-    theater_rx: Receiver<TheaterCommand>,
+    theater_rx: UnboundedReceiver<TheaterCommand>,
     /// Map of active communication channels
     channels: HashMap<ChannelId, HashSet<ChannelParticipant>>,
     /// Shared async runtime for WASM execution, with the engine-scoped
@@ -235,7 +235,7 @@ impl TheaterRuntime {
     /// # use anyhow::Result;
     /// #
     /// # async fn example() -> Result<()> {
-    /// let (theater_tx, theater_rx) = mpsc::channel::<TheaterCommand>(100);
+    /// let (theater_tx, theater_rx) = mpsc::unbounded_channel::<TheaterCommand>();
     /// let runtime = TheaterRuntime::new(
     ///     theater_tx,
     ///     theater_rx,
@@ -246,8 +246,8 @@ impl TheaterRuntime {
     /// # }
     /// ```
     pub async fn new(
-        theater_tx: Sender<TheaterCommand>,
-        theater_rx: Receiver<TheaterCommand>,
+        theater_tx: UnboundedSender<TheaterCommand>,
+        theater_rx: UnboundedReceiver<TheaterCommand>,
         handler_registry: HandlerRegistry,
         resource_cache: Arc<ResourceCache>,
     ) -> Result<Self> {
@@ -524,11 +524,9 @@ impl TheaterRuntime {
                                 }
                             }
                             // Signal theater to finalize cleanup
-                            let _ = theater_tx
-                                .send(TheaterCommand::ActorShutdownComplete {
-                                    actor_id: actor_id_clone,
-                                })
-                                .await;
+                            let _ = theater_tx.send(TheaterCommand::ActorShutdownComplete {
+                                actor_id: actor_id_clone,
+                            });
                         });
                     }
                 }

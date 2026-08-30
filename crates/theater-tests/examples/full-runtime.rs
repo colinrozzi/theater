@@ -32,7 +32,7 @@ use theater_handler_supervisor::SupervisorHandler;
 
 /// Creates a HandlerRegistry with Theater-specific handlers.
 fn create_handler_registry(
-    theater_tx: tokio::sync::mpsc::Sender<TheaterCommand>,
+    theater_tx: tokio::sync::mpsc::UnboundedSender<TheaterCommand>,
 ) -> HandlerRegistry {
     let mut registry = HandlerRegistry::new();
 
@@ -87,7 +87,7 @@ async fn main() -> Result<()> {
     info!("");
 
     // Create communication channels
-    let (theater_tx, theater_rx) = mpsc::channel::<TheaterCommand>(32);
+    let (theater_tx, theater_rx) = mpsc::unbounded_channel::<TheaterCommand>();
 
     // Create handler registry with Theater-specific handlers
     let handler_registry = create_handler_registry(theater_tx.clone());

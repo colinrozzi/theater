@@ -71,7 +71,7 @@ pub async fn create_test_chain(actor_id: TheaterId, num_events: usize) -> StateC
 /// Setup for an actor test
 pub async fn setup_actor_test() -> (
     TheaterId,
-    mpsc::Sender<TheaterCommand>,
+    mpsc::UnboundedSender<TheaterCommand>,
     mpsc::Sender<ActorMessage>,
     mpsc::Receiver<ActorMessage>,
     mpsc::Sender<ActorOperation>,
@@ -81,7 +81,7 @@ pub async fn setup_actor_test() -> (
 ) {
     let actor_id = TheaterId::generate();
 
-    let (theater_tx, _) = mpsc::channel(10);
+    let (theater_tx, _) = mpsc::unbounded_channel();
     let (actor_tx, actor_rx) = mpsc::channel(10);
     let (op_tx, op_rx) = mpsc::channel(10);
     let mut shutdown_controller = ShutdownController::new();

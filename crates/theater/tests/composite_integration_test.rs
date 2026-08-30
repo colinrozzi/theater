@@ -51,7 +51,7 @@ async fn test_composite_instance_basic() {
 
     // Create actor store components
     let actor_id = TheaterId::generate();
-    let (theater_tx, mut theater_rx) = mpsc::channel::<TheaterCommand>(10);
+    let (theater_tx, mut theater_rx) = mpsc::unbounded_channel::<TheaterCommand>();
     let (operation_tx, _operation_rx) = mpsc::channel(10);
     let (info_tx, _info_rx) = mpsc::channel(10);
     let (control_tx, _control_rx) = mpsc::channel(10);
