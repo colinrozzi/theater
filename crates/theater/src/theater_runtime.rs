@@ -19,6 +19,7 @@ use crate::metrics::ActorMetrics;
 use crate::pack_bridge::{CachingPackRuntime, Value};
 use crate::replay::ReplayHandler;
 use crate::shutdown::{ShutdownController, ShutdownType};
+use crate::subscription::{any_termination, Subscription, Target};
 use crate::utils::ResourceCache;
 use crate::Result;
 use crate::{ManifestConfig, StateChain};
@@ -200,6 +201,14 @@ pub struct ActorProcess {
     /// Id of the actor that spawned this one (the supervisor parent).
     /// `None` for top-level/root actors.
     pub parent_id: Option<TheaterId>,
+    /// Lifecycle subscriptions attached to THIS actor as the subject — "who
+    /// cares about me," keyed by subscriber. The single source of truth for
+    /// links and monitors both (see [`crate::subscription`]). On each of this
+    /// actor's chain events the runtime matches every subscription's filter and
+    /// acts per its [`Target`](crate::subscription::Target). The `StopSelf`
+    /// subset is the supervision tree: a child auto-subscribes to its parent
+    /// with a `terminated`-filtered `StopSelf` at spawn.
+    pub subscribers: HashMap<TheaterId, crate::subscription::Subscription>,
 }
 
 impl TheaterRuntime {
@@ -767,6 +776,23 @@ impl TheaterRuntime {
         let id = process.actor_id;
         if let Some(parent) = process.parent_id {
             self.children.entry(parent).or_default().insert(id);
+            // Auto fate-link: the child stops when the parent terminates. This is
+            // the supervision tree expressed as a `StopSelf` subscription — stored
+            // on the PARENT (the subject), keyed by the child (the subscriber). The
+            // `children` index above stays the lineage inverse used for view-scope;
+            // this is the fate edge the cascade reads. For auto-links the two
+            // coincide, but an actor-requested peer link would add fate without
+            // widening the lineage view.
+            if let Some(parent_proc) = self.actors.get_mut(&parent) {
+                parent_proc.subscribers.insert(
+                    id,
+                    Subscription {
+                        subscriber: id,
+                        filter: vec![any_termination()],
+                        target: Target::StopSelf,
+                    },
+                );
+            }
         }
         self.actors.insert(id, process);
     }
@@ -787,6 +813,13 @@ impl TheaterRuntime {
                 if set.is_empty() {
                     self.children.remove(&parent);
                 }
+            }
+            // Eagerly drop the child's auto fate-link from the parent's
+            // subscribers (the inverse of the auto-link established in
+            // `register_actor`). Subscriptions this actor placed on *other*
+            // subjects are left for lazy prune on dispatch (§3 of the design).
+            if let Some(parent_proc) = self.actors.get_mut(&parent) {
+                parent_proc.subscribers.remove(actor_id);
             }
         }
         Some(proc)
@@ -986,6 +1019,7 @@ impl TheaterRuntime {
             shutdown_controller,
             supervisor_tx,
             parent_id,
+            subscribers: HashMap::new(),
         };
 
         self.register_actor(process);

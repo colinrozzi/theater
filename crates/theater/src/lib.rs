@@ -48,6 +48,7 @@ pub mod metrics;
 pub mod replay;
 pub mod shutdown;
 pub mod store;
+pub mod subscription;
 pub mod theater_runtime;
 pub mod utils;
 
