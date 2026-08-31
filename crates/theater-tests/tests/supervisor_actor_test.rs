@@ -172,8 +172,9 @@ async fn multi_handler_actor_instantiates_against_reshaped_supervisor() {
 }
 
 /// supervisor-replay-test imports `spawn` / `list-actors` / `stop-actor` and
-/// exports `handle-actor-external-stop`. A successful spawn proves all three
-/// reshaped import signatures hash-match the host.
+/// exports `handle-lifecycle-event` (the single death callback that replaced the
+/// error/exit/external-stop trio). A successful spawn proves all four reshaped
+/// signatures hash-match the host.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn supervisor_replay_actor_instantiates_against_reshaped_supervisor() {
     let _ = tracing_subscriber::fmt()

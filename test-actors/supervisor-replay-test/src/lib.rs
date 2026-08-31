@@ -5,7 +5,7 @@
 //! - Imports `theater:simple/supervisor.{spawn, list-actors, stop-actor}`
 //! - Exports `theater:simple/actor.init`
 //! - Exports `theater:simple/message-server-client.handle-send`
-//! - Exports `theater:simple/supervisor-handlers.handle-actor-external-stop`
+//! - Exports `theater:simple/supervisor-handlers.handle-lifecycle-event`
 //!
 //! Commands (sent as message bytes in handle-send):
 //! - `"spawn:<manifest_path>"` → spawn a child, store child_id in state
@@ -77,7 +77,7 @@ pack_types! {
     exports {
         theater:simple/actor.init: func(state: option<list<u8>>) -> result<tuple<option<list<u8>>>, string>,
         theater:simple/message-server-client.handle-send: func(state: option<list<u8>>, params: tuple<string, list<u8>>) -> result<tuple<option<list<u8>>>, string>,
-        theater:simple/supervisor-handlers.handle-actor-external-stop: func(state: option<list<u8>>, params: tuple<string>) -> result<tuple<option<list<u8>>>, string>,
+        theater:simple/supervisor-handlers.handle-lifecycle-event: func(state: option<list<u8>>, params: tuple<string, string, list<u8>>) -> result<tuple<option<list<u8>>>, string>,
     }
 }
 
@@ -303,31 +303,26 @@ fn handle_send(input: Value) -> Value {
     ok_state(state)
 }
 
-#[export(name = "theater:simple/supervisor-handlers.handle-actor-external-stop")]
-fn handle_actor_external_stop(input: Value) -> Value {
-    let (state, params) = match input {
+#[export(name = "theater:simple/supervisor-handlers.handle-lifecycle-event")]
+fn handle_lifecycle_event(input: Value) -> Value {
+    // Host flattens to Tuple[state, id, event-type, data].
+    let (state, id) = match input {
         Value::Tuple(mut items) if items.len() >= 2 => {
-            let params = items.remove(1);
+            let id = match items.remove(1) {
+                Value::String(s) => s,
+                _ => String::from("unknown"),
+            };
             let state = items.remove(0);
-            (state, params)
+            (state, id)
         }
         _ => {
             return err_result("Invalid input format");
         }
     };
 
-    // params is Tuple([String(child_id)])
-    let child_id = match params {
-        Value::Tuple(mut items) if !items.is_empty() => match items.remove(0) {
-            Value::String(s) => s,
-            _ => String::from("unknown"),
-        },
-        _ => String::from("unknown"),
-    };
-
     log(format!(
-        "supervisor-replay-test: child externally stopped: {}",
-        child_id
+        "supervisor-replay-test: child terminated: {}",
+        id
     ));
 
     ok_state(state)

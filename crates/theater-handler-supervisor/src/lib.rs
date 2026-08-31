@@ -7,10 +7,11 @@ pub mod events;
 use theater::actor::handle::ActorHandle;
 use theater::actor::runtime::ActorRuntimeError;
 use theater::actor::store::ActorStore;
-use theater::actor::types::ActorError;
 use theater::chain::ChainEvent;
 use theater::config::actor_manifest::SupervisorHostConfig;
 use theater::config::permissions::{SupervisorPermissions, ViewScope};
+use theater::events::lifecycle::ActorLifecycleEvent;
+use theater::events::{decode_chain_event_payload, ChainEventPayload};
 use theater::handler::{Handler, HandlerContext, SharedActorInstance};
 use theater::messages::{default_init_state, ActorResult, TheaterCommand};
 use theater::shutdown::ShutdownReceiver;
@@ -361,22 +362,21 @@ async fn authorize(
 ///   events to its parent until the parent subscribes)
 /// - Clean up children on shutdown
 ///
-/// NOTE: the derived `Clone` shares `channel_tx`/`channel_rx`/`children`
-/// (and the event channels) via `Arc`/`Sender`. That sharing is deliberately
-/// NOT used for per-actor instantiation — `create_instance` calls [`Self::fresh`]
-/// so each supervisor-capable actor gets its own channels and children set and
-/// thus its own monitor loop. Do not swap that back to `self.clone()`, or every
+/// NOTE: the derived `Clone` shares `event_tx`/`event_rx`/`children` via
+/// `Arc`/`Sender`. That sharing is deliberately NOT used for per-actor
+/// instantiation — `create_instance` calls [`Self::fresh`] so each
+/// supervisor-capable actor gets its own event channel and children set and thus
+/// its own monitor loop. Do not swap that back to `self.clone()`, or every
 /// non-root actor's supervisor loop goes dark and only the root can supervise.
 #[derive(Clone)]
 #[allow(clippy::type_complexity)]
 pub struct SupervisorHandler {
-    /// Channel for receiving lifecycle events (ActorResult) from children
-    channel_tx: tokio::sync::mpsc::Sender<ActorResult>,
-    channel_rx: Arc<Mutex<Option<tokio::sync::mpsc::Receiver<ActorResult>>>>,
-    /// Channel for receiving all ChainEvents from children. Each child's
-    /// subscription is tagged with the child's TheaterId before landing
-    /// here, so handle-actor-event dispatch can attribute the event to
-    /// the right child even though N children share this single receiver.
+    /// Channel for receiving all ChainEvents from watched actors. Every child is
+    /// auto-subscribed at spawn, and each event is tagged with its source
+    /// TheaterId before landing here, so dispatch can attribute it to the right
+    /// actor even though N sources share this single receiver. A child's terminal
+    /// event drives `handle-lifecycle-event` + tracking cleanup; non-terminal
+    /// activity drives `handle-actor-event`.
     event_tx: tokio::sync::mpsc::Sender<(TheaterId, ChainEvent)>,
     event_rx: Arc<Mutex<Option<tokio::sync::mpsc::Receiver<(TheaterId, ChainEvent)>>>>,
     /// Set of currently active child actor IDs
@@ -403,11 +403,8 @@ impl SupervisorHandler {
     /// # Returns
     /// The SupervisorHandler (receiver is stored internally)
     pub fn new(_config: SupervisorHostConfig, permissions: Option<SupervisorPermissions>) -> Self {
-        let (channel_tx, channel_rx) = tokio::sync::mpsc::channel(100);
         let (event_tx, event_rx) = tokio::sync::mpsc::channel(1024);
         Self {
-            channel_tx,
-            channel_rx: Arc::new(Mutex::new(Some(channel_rx))),
             event_tx,
             event_rx: Arc::new(Mutex::new(Some(event_rx))),
             children: Arc::new(Mutex::new(HashSet::new())),
@@ -426,12 +423,9 @@ impl SupervisorHandler {
         self
     }
 
-    /// Get a clone of the supervisor channel sender
-    ///
-    /// This is used by parent actors when spawning children so the supervisor
-    /// can receive notifications about child lifecycle events.
-    pub fn get_sender(&self) -> tokio::sync::mpsc::Sender<ActorResult> {
-        self.channel_tx.clone()
+    /// Get a clone of the child-event sender.
+    pub fn get_sender(&self) -> tokio::sync::mpsc::Sender<(TheaterId, ChainEvent)> {
+        self.event_tx.clone()
     }
 
     /// Get a clone of the aggregated event subscription sender.
@@ -449,120 +443,59 @@ impl SupervisorHandler {
         vec![supervisor_interface()]
     }
 
-    /// Process child actor results received via the channel
+    /// Dispatch one chain event from a watched actor.
     ///
-    /// This should be called in a loop to handle child lifecycle events.
-    /// Also removes the child from tracking when it exits.
-    async fn process_child_result(
-        actor_handle: &ActorHandle,
-        actor_result: ActorResult,
-        children: &Arc<Mutex<HashSet<TheaterId>>>,
-        has_child_error: bool,
-        has_child_exit: bool,
-        has_child_external_stop: bool,
-    ) -> Result<()> {
-        info!("Processing child result");
-
-        // Get the child ID for tracking removal
-        let child_id = match &actor_result {
-            ActorResult::Error(e) => e.actor_id,
-            ActorResult::Success(r) => r.actor_id,
-            ActorResult::ExternalStop(s) => s.actor_id,
-        };
-
-        // Remove from tracking
-        {
-            let mut children_guard = children.lock().unwrap();
-            if children_guard.remove(&child_id) {
-                debug!(
-                    "Removed child {} from tracking, remaining: {}",
-                    child_id,
-                    children_guard.len()
-                );
-            }
-        }
-
-        match actor_result {
-            ActorResult::Error(child_error) => {
-                if has_child_error {
-                    let params = Value::Tuple(vec![
-                        Value::String(child_error.actor_id.to_string()),
-                        actor_error_to_value(child_error.error),
-                    ]);
-                    actor_handle
-                        .call_function(
-                            "theater:simple/supervisor-handlers.handle-actor-error".to_string(),
-                            params,
-                        )
-                        .await?;
-                }
-            }
-            ActorResult::Success(child_result) => {
-                if has_child_exit {
-                    info!("Child result: {:?}", child_result);
-                    let params = Value::Tuple(vec![
-                        Value::String(child_result.actor_id.to_string()),
-                        option_bytes_to_value(child_result.result),
-                    ]);
-                    actor_handle
-                        .call_function(
-                            "theater:simple/supervisor-handlers.handle-actor-exit".to_string(),
-                            params,
-                        )
-                        .await?;
-                }
-            }
-            ActorResult::ExternalStop(stop_data) => {
-                if has_child_external_stop {
-                    info!("External stop received for actor: {}", stop_data.actor_id);
-                    let params = Value::Tuple(vec![Value::String(stop_data.actor_id.to_string())]);
-                    actor_handle
-                        .call_function(
-                            "theater:simple/supervisor-handlers.handle-actor-external-stop"
-                                .to_string(),
-                            params,
-                        )
-                        .await?;
-                }
-            }
-        }
-
-        Ok(())
-    }
-
-    /// Process a chain event received from a child actor.
-    ///
-    /// This is called for every event a child records, allowing the supervisor
-    /// to monitor child activity, implement logging, or trigger reactions.
+    /// A source's **terminal** lifecycle event is the death signal: drop it from
+    /// child tracking and deliver the single `handle-lifecycle-event` callback.
+    /// Every other event is non-terminal activity, delivered to
+    /// `handle-actor-event` (for actors that export it). The terminal payload
+    /// carries the cause + final state; the actor decodes `data` if it cares.
+    /// Both callbacks pass the raw event `(id, event-type, data)`.
     async fn process_child_event(
         actor_handle: &ActorHandle,
         event_with_id: (TheaterId, ChainEvent),
+        children: &Arc<Mutex<HashSet<TheaterId>>>,
         has_child_event: bool,
+        has_lifecycle: bool,
     ) -> Result<()> {
-        let (child_id, event) = event_with_id;
+        let (source_id, event) = event_with_id;
         debug!(
-            "Supervisor received event from child {}: type={}, data_len={}",
-            child_id,
+            "Supervisor received event from {}: type={}, data_len={}",
+            source_id,
             event.event_type,
             event.data.len()
         );
 
-        if has_child_event {
+        let is_terminal = matches!(
+            decode_chain_event_payload(&event.data),
+            Some(ChainEventPayload::Lifecycle(
+                ActorLifecycleEvent::Terminated { .. }
+            ))
+        );
+
+        let deliver = |name: &str| {
             let params = Value::Tuple(vec![
-                Value::String(child_id.to_string()),
+                Value::String(source_id.to_string()),
                 Value::String(event.event_type.clone()),
                 Value::List {
                     elem_type: ValueType::U8,
                     items: event.data.iter().map(|b| Value::U8(*b)).collect(),
                 },
             ]);
+            actor_handle.call_function(name.to_string(), params)
+        };
 
-            actor_handle
-                .call_function(
-                    "theater:simple/supervisor-handlers.handle-actor-event".to_string(),
-                    params,
-                )
-                .await?;
+        if is_terminal {
+            // Source terminated: stop tracking it (if it was a child) and
+            // deliver the one death callback.
+            if children.lock().unwrap().remove(&source_id) {
+                debug!("child {} terminated; dropped from tracking", source_id);
+            }
+            if has_lifecycle {
+                deliver("theater:simple/supervisor-handlers.handle-lifecycle-event").await?;
+            }
+        } else if has_child_event {
+            deliver("theater:simple/supervisor-handlers.handle-actor-event").await?;
         }
 
         Ok(())
@@ -576,21 +509,17 @@ impl SupervisorHandler {
     /// permissions — is carried forward from `self`.
     ///
     /// This is what per-actor instantiation must use. A plain `self.clone()`
-    /// (the derived `Clone`) shares `channel_tx`/`channel_rx`/`children` via
-    /// `Arc`/`Sender` across *every* supervisor-capable actor, so only the
-    /// first instance to run `setup` wins the `channel_rx.take()` and runs
-    /// the single monitor loop — collapsing any multi-level supervision tree
-    /// to one root-only supervisor. A `fresh` instance instead gets its own
-    /// `channel_rx` (its own monitor loop starts) and its own `channel_tx`
-    /// (the `supervisor_tx` handed to *its* children routes their lifecycle
-    /// events back to *its* handle-actor-* exports), giving real hierarchical
+    /// (the derived `Clone`) shares `event_rx`/`children` via `Arc`/`Sender`
+    /// across *every* supervisor-capable actor, so only the first instance to run
+    /// `setup` wins the `event_rx.take()` and runs the single monitor loop —
+    /// collapsing any multi-level supervision tree to one root-only supervisor. A
+    /// `fresh` instance instead gets its own `event_rx` (its own monitor loop
+    /// starts) and its own `event_tx` (auto-subscribed onto *its* children, so
+    /// their events route back to *its* callbacks), giving real hierarchical
     /// supervision.
     fn fresh(&self) -> Self {
-        let (channel_tx, channel_rx) = tokio::sync::mpsc::channel(100);
         let (event_tx, event_rx) = tokio::sync::mpsc::channel(1024);
         Self {
-            channel_tx,
-            channel_rx: Arc::new(Mutex::new(Some(channel_rx))),
             event_tx,
             event_rx: Arc::new(Mutex::new(Some(event_rx))),
             children: Arc::new(Mutex::new(HashSet::new())),
@@ -661,7 +590,6 @@ impl Handler for SupervisorHandler {
             return Ok(());
         }
 
-        let supervisor_tx = self.channel_tx.clone();
         let event_tx = self.event_tx.clone();
         let children = self.children.clone();
         let theater_tx_holder = self.theater_tx.clone();
@@ -672,13 +600,13 @@ impl Handler for SupervisorHandler {
             // spawn: func(manifest: string, wasm-bytes: option<list<u8>>) -> result<string, string>
             // Spawns a child actor. If wasm-bytes is provided, uses those bytes instead of loading from manifest.package.
             .func_async_result("spawn", {
-                let supervisor_tx = supervisor_tx.clone();
+                let event_tx = event_tx.clone();
                 let children = children.clone();
                 let theater_tx_holder = theater_tx_holder.clone();
                 let resource_cache = resource_cache.clone();
                 let permissions = permissions.clone();
                 move |ctx: AsyncCtx<ActorStore>, input: Value| {
-                    let supervisor_tx = supervisor_tx.clone();
+                    let event_tx = event_tx.clone();
                     let children = children.clone();
                     let theater_tx_holder = theater_tx_holder.clone();
                     let resource_cache = resource_cache.clone();
@@ -814,18 +742,19 @@ impl Handler for SupervisorHandler {
                                 None => default_init_state(),
                             },
                         };
-                        // Default opt-out: a fresh child does not send chain
-                        // events to its parent. Parents that want per-event
-                        // visibility call `subscribe-to-actor` after the
-                        // spawn returns. Lifecycle still flows through
-                        // `supervisor_tx`.
+                        // The runtime notifies nobody: it holds no supervisor
+                        // channel for this child (`supervisor_tx: None`). Instead
+                        // the supervisor auto-monitors the child's chain right
+                        // after spawn (below), so the child's terminal event drives
+                        // `handle-lifecycle-event` + tracking cleanup — supervision
+                        // lives entirely in the handler.
                         let cmd = TheaterCommand::SpawnActor {
                             wasm_bytes,
                             name,
                             manifest: Some(manifest),
                             init_state,
                             response_tx,
-                            supervisor_tx: Some(supervisor_tx),
+                            supervisor_tx: None,
                             subscription_tx: None,
                             // This child is spawned by the calling actor.
                             parent_id: Some(store.id),
@@ -870,6 +799,21 @@ impl Handler for SupervisorHandler {
                                     let mut children_guard = children.lock().unwrap();
                                     children_guard.insert(actor_id);
                                     debug!("Tracking child {}, total children: {}", actor_id, children_guard.len());
+                                }
+                                // Auto-monitor: subscribe to the child's chain so
+                                // its terminal event drives handle-lifecycle-event
+                                // + tracking cleanup. Best-effort — a failure here
+                                // just means no death notification for this child.
+                                if ctx
+                                    .data()
+                                    .theater_tx
+                                    .send(TheaterCommand::SubscribeToActor {
+                                        actor_id,
+                                        event_tx: event_tx.clone(),
+                                    })
+                                    .is_err()
+                                {
+                                    warn!("auto-monitor: failed to subscribe to child {}", actor_id);
                                 }
                                 Ok(Value::String(actor_id.to_string()))
                             }
@@ -1331,8 +1275,7 @@ impl Handler for SupervisorHandler {
     ) -> Pin<Box<dyn Future<Output = Result<()>> + Send>> {
         info!("Supervisor handler setup");
 
-        // Take the receivers out of the Arc<Mutex<Option<>>>
-        let channel_rx_opt = self.channel_rx.lock().unwrap().take();
+        // Take the event receiver out of the Arc<Mutex<Option<>>>
         let event_rx_opt = self.event_rx.lock().unwrap().take();
 
         // Clone children and theater_tx for use in the async closure
@@ -1341,15 +1284,15 @@ impl Handler for SupervisorHandler {
 
         Box::pin(async move {
             // If we don't have a receiver (e.g., this is a cloned instance), just wait for shutdown
-            let Some(mut channel_rx) = channel_rx_opt else {
+            let Some(mut event_rx) = event_rx_opt else {
                 info!("Supervisor handler has no receiver (cloned instance), not starting");
                 // Still need to wait for shutdown to avoid blocking the shutdown controller
                 shutdown_receiver.wait_for_shutdown().await;
                 return Ok(());
             };
 
-            // Check which optional supervisor handler exports the actor implements
-            let (has_child_event, has_child_error, has_child_exit, has_child_external_stop) = {
+            // Which optional callbacks does the actor implement?
+            let (has_child_event, has_lifecycle) = {
                 let mut instance_guard = actor_instance.write().await;
                 if let Some(instance) = instance_guard.as_mut() {
                     let iface = "theater:simple/supervisor-handlers";
@@ -1358,55 +1301,30 @@ impl Handler for SupervisorHandler {
                         .await
                         .unwrap_or(false);
                     let e2 = instance
-                        .has_export(iface, "handle-actor-error")
+                        .has_export(iface, "handle-lifecycle-event")
                         .await
                         .unwrap_or(false);
-                    let e3 = instance
-                        .has_export(iface, "handle-actor-exit")
-                        .await
-                        .unwrap_or(false);
-                    let e4 = instance
-                        .has_export(iface, "handle-actor-external-stop")
-                        .await
-                        .unwrap_or(false);
-                    (e1, e2, e3, e4)
+                    (e1, e2)
                 } else {
-                    (false, false, false, false)
+                    (false, false)
                 }
             };
 
-            if has_child_event || has_child_error || has_child_exit || has_child_external_stop {
+            if has_child_event || has_lifecycle {
                 debug!(
-                    "Supervisor handler exports: event={}, error={}, exit={}, external_stop={}",
-                    has_child_event, has_child_error, has_child_exit, has_child_external_stop
+                    "Supervisor handler exports: event={}, lifecycle={}",
+                    has_child_event, has_lifecycle
                 );
             }
 
-            // Get event receiver if available
-            let mut event_rx = event_rx_opt;
-
             loop {
                 tokio::select! {
-                    // Process lifecycle events from children (ActorResult)
-                    Some(child_result) = channel_rx.recv() => {
-                        if let Err(e) = Self::process_child_result(
-                            &actor_handle, child_result, &children,
-                            has_child_error, has_child_exit, has_child_external_stop,
-                        ).await {
-                            error!("Error processing child result: {}", e);
-                        }
-                    }
-                    // Process all chain events from children — tagged with
-                    // the source child's TheaterId by the per-child forwarder.
-                    Some(event_with_id) = async {
-                        if let Some(ref mut rx) = event_rx {
-                            rx.recv().await
-                        } else {
-                            std::future::pending().await
-                        }
-                    } => {
+                    // Chain events from watched actors — each tagged with its
+                    // source TheaterId. A terminal drives handle-lifecycle-event +
+                    // tracking cleanup; other events drive handle-actor-event.
+                    Some(event_with_id) = event_rx.recv() => {
                         if let Err(e) = Self::process_child_event(
-                            &actor_handle, event_with_id, has_child_event,
+                            &actor_handle, event_with_id, &children, has_child_event, has_lifecycle,
                         ).await {
                             error!("Error processing child event: {}", e);
                         }
@@ -1462,14 +1380,13 @@ impl Handler for SupervisorHandler {
                             break;
                         }
 
-                        // Process any remaining child results while waiting
+                        // Drain terminal events so children leave tracking as they die.
                         tokio::select! {
-                            Some(child_result) = channel_rx.recv() => {
-                                if let Err(e) = Self::process_child_result(
-                                    &actor_handle, child_result, &children,
-                                    has_child_error, has_child_exit, has_child_external_stop,
+                            Some(event_with_id) = event_rx.recv() => {
+                                if let Err(e) = Self::process_child_event(
+                                    &actor_handle, event_with_id, &children, has_child_event, has_lifecycle,
                                 ).await {
-                                    error!("Error processing child result during shutdown: {}", e);
+                                    error!("Error processing child event during shutdown: {}", e);
                                 }
                             }
                             _ = tokio::time::sleep(Duration::from_millis(100)) => {
@@ -1493,41 +1410,6 @@ impl Handler for SupervisorHandler {
             info!("Supervisor handler shut down complete");
             Ok(())
         })
-    }
-}
-
-/// Convert an ActorError to a Pack Value matching the WIT wit-actor-error record.
-///
-/// WIT: record wit-actor-error { error-type: wit-error-type, data: option<list<u8>> }
-/// WIT enum wit-error-type has cases: operation-timeout(0), channel-closed(1),
-/// shutting-down(2), function-not-found(3), type-mismatch(4), internal(5),
-/// serialization-error(6), paused(7)
-/// Convert an ActorError to the `actor-error` pact variant
-/// (supervisor-handlers.pact). Tags match the declaration order there. Cases
-/// with detail carry a message string; the rest are unit. `internal` is the
-/// catch-all for unexpected/uncommon errors.
-fn actor_error_to_value(error: ActorError) -> Value {
-    let (tag, case, payload): (_, &str, Vec<Value>) = match &error {
-        ActorError::OperationTimeout(_) => (
-            0,
-            "operation-timeout",
-            vec![Value::String(error.to_string())],
-        ),
-        ActorError::ChannelClosed => (1, "channel-closed", vec![]),
-        ActorError::ShuttingDown => (2, "shutting-down", vec![]),
-        ActorError::FunctionNotFound(m) => {
-            (3, "function-not-found", vec![Value::String(m.clone())])
-        }
-        ActorError::TypeMismatch(m) => (4, "type-mismatch", vec![Value::String(m.clone())]),
-        ActorError::SerializationError => (5, "serialization-error", vec![]),
-        ActorError::Paused => (6, "paused", vec![]),
-        _ => (7, "internal", vec![Value::String(error.to_string())]),
-    };
-    Value::Variant {
-        type_name: "actor-error".to_string(),
-        case_name: case.to_string(),
-        tag,
-        payload,
     }
 }
 
@@ -1621,27 +1503,24 @@ mod tests {
 
     #[test]
     fn test_create_instance_yields_independent_supervisors() {
-        // Regression: the derived `Clone` shared channel_rx/children across
+        // Regression: the derived `Clone` shared event_rx/children across
         // every supervisor-capable actor, so only the first `setup` won the
-        // `channel_rx.take()` and ran the single monitor loop — collapsing
+        // `event_rx.take()` and ran the single monitor loop — collapsing
         // multi-level supervision trees to one root-only supervisor. Each
         // per-actor instance must instead be fully independent.
         let base = SupervisorHandler::new(SupervisorHostConfig {}, None);
         let a = base.fresh();
         let b = base.fresh();
 
-        // Each instance owns its own (untaken) lifecycle receiver, so each
-        // one's monitor loop will start rather than log "no receiver".
-        assert!(a.channel_rx.lock().unwrap().is_some());
-        assert!(b.channel_rx.lock().unwrap().is_some());
+        // Each instance owns its own (untaken) event receiver, so each one's
+        // monitor loop will start rather than log "no receiver".
         assert!(a.event_rx.lock().unwrap().is_some());
         assert!(b.event_rx.lock().unwrap().is_some());
 
-        // Distinct lifecycle channels: a child's `supervisor_tx` (a clone of
-        // its parent's `channel_tx`) must route only to that parent's loop.
-        assert!(!a.channel_tx.same_channel(&b.channel_tx));
-        assert!(!a.channel_tx.same_channel(&base.channel_tx));
+        // Distinct event channels: a child auto-subscribed by one supervisor
+        // must route only to that supervisor's loop.
         assert!(!a.event_tx.same_channel(&b.event_tx));
+        assert!(!a.event_tx.same_channel(&base.event_tx));
 
         // Independent children sets: one supervisor tracking a child must not
         // leak that child into another supervisor's view.
