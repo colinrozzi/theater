@@ -203,7 +203,6 @@ async fn test_timing_handler_with_test_actor() -> Result<()> {
             wasm_bytes: None,
             init_bytes: None,
             response_tx,
-            supervisor_tx: None,
             subscription_tx: Some(event_tx),
         })
         .await?;

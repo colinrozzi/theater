@@ -69,7 +69,6 @@ async fn test_theater_command_spawn_actor() {
         manifest: None,
         init_state: theater::messages::default_init_state(),
         response_tx: tx,
-        supervisor_tx: None,
         subscription_tx: None,
         parent_id: None,
     };

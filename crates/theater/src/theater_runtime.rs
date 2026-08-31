@@ -12,9 +12,7 @@ use crate::config::actor_manifest::HandlerConfig;
 use crate::handler::HandlerRegistry;
 use crate::id::TheaterId;
 use crate::messages::{ActorMessage, ActorStatus, ActorTreeRow, TheaterCommand};
-use crate::messages::{
-    ActorResult, ChannelId, ChannelParticipant, ChildError, ChildExternalStop, ChildResult,
-};
+use crate::messages::{ChannelId, ChannelParticipant};
 use crate::metrics::ActorMetrics;
 use crate::pack_bridge::{CachingPackRuntime, Value};
 use crate::replay::ReplayHandler;
@@ -192,8 +190,6 @@ pub struct ActorProcess {
     pub manifest: Option<ManifestConfig>,
     /// Controller for graceful shutdown
     pub shutdown_controller: ShutdownController,
-    /// Optional supervisor channel for actor supervision
-    pub supervisor_tx: Option<Sender<ActorResult>>,
 }
 
 impl TheaterRuntime {
@@ -333,7 +329,6 @@ impl TheaterRuntime {
                     manifest,
                     init_state,
                     response_tx,
-                    supervisor_tx,
                     subscription_tx,
                     parent_id,
                 } => {
@@ -345,7 +340,6 @@ impl TheaterRuntime {
                         manifest,
                         init_state,
                         /* call_init = */ true,
-                        supervisor_tx,
                         subscription_tx,
                         parent_id,
                         response_tx,
@@ -358,7 +352,6 @@ impl TheaterRuntime {
                     manifest,
                     init_state,
                     response_tx,
-                    supervisor_tx,
                     subscription_tx,
                     parent_id,
                 } => {
@@ -370,7 +363,6 @@ impl TheaterRuntime {
                         manifest,
                         init_state,
                         /* call_init = */ false,
-                        supervisor_tx,
                         subscription_tx,
                         parent_id,
                         response_tx,
@@ -421,19 +413,8 @@ impl TheaterRuntime {
                     // the actor's final state) and fire the shutdown; the terminal
                     // event + cascade fire when the actor task self-reports
                     // ActorShutdownComplete. No babysitter task — the actor task
-                    // drives its own bounded teardown.
-                    // (Supervisor-tx notify is the legacy trio; removed in the recast.)
-                    if let Some(proc) = self.actors.get(&actor_id) {
-                        if let Some(supervisor_tx) = &proc.supervisor_tx {
-                            let message = ActorResult::Success(ChildResult {
-                                actor_id,
-                                result: data.clone(),
-                            });
-                            if let Err(e) = supervisor_tx.send(message).await {
-                                debug!("Failed to send shutdown message to supervisor (possibly shutting down): {}", e);
-                            }
-                        }
-                    }
+                    // drives its own bounded teardown. Anyone who cares about the
+                    // outcome reads the terminal chain event (cause + final state).
                     self.initiate_teardown(
                         actor_id,
                         crate::events::lifecycle::TerminationCause::Completed { final_state: data },
@@ -695,7 +676,6 @@ impl TheaterRuntime {
         manifest: Option<ManifestConfig>,
         init_state: Value,
         call_init: bool,
-        supervisor_tx: Option<Sender<ActorResult>>,
         subscription_tx: Option<Sender<(TheaterId, ChainEvent)>>,
         parent_id: Option<TheaterId>,
         response_tx: oneshot::Sender<std::result::Result<TheaterId, SpawnError>>,
@@ -848,7 +828,6 @@ impl TheaterRuntime {
             status: ActorStatus::Running,
             manifest,
             shutdown_controller,
-            supervisor_tx,
         };
 
         self.register_actor(process);
@@ -944,23 +923,6 @@ impl TheaterRuntime {
 
     async fn handle_actor_error(&mut self, actor_id: TheaterId, error: ActorError) -> Result<()> {
         debug!("Handling error event for actor: {:?}", actor_id);
-
-        // notify the actors parents
-        if let Some(proc) = self.actors.get(&actor_id) {
-            if let Some(supervisor_tx) = &proc.supervisor_tx {
-                let error_message = ActorResult::Error(ChildError {
-                    actor_id,
-                    error: error.clone(),
-                });
-                // Send error and immediately shutdown - don't wait for response
-                let supervisor_tx_clone = supervisor_tx.clone();
-                tokio::spawn(async move {
-                    if let Err(e) = supervisor_tx_clone.send(error_message).await {
-                        debug!("Failed to send error message to supervisor (possibly shutting down): {}", e);
-                    }
-                });
-            }
-        }
 
         // The actor crashed — tear it down forcefully (its wasm is broken; do
         // NOT run its graceful shutdown handlers / wait on a corpse) and record
@@ -1062,24 +1024,9 @@ impl TheaterRuntime {
 
     /// Actor is shutting itself down
     #[allow(dead_code)]
-    async fn shutdown_actor(&mut self, actor_id: TheaterId, data: Option<Vec<u8>>) -> Result<()> {
+    async fn shutdown_actor(&mut self, actor_id: TheaterId, _data: Option<Vec<u8>>) -> Result<()> {
         debug!("Shutting down actor: {:?}", actor_id);
-
-        // Notify the actor's supervisor if it has one
-        if let Some(proc) = self.actors.get(&actor_id) {
-            if let Some(supervisor_tx) = &proc.supervisor_tx {
-                let message = ActorResult::Success(ChildResult {
-                    actor_id,
-                    result: data,
-                });
-                if let Err(e) = supervisor_tx.send(message).await {
-                    error!("Failed to send shutdown message to supervisor: {}", e);
-                }
-            }
-        }
-
         self.stop_actor(actor_id, ShutdownType::Graceful).await?;
-
         Ok(())
     }
 
@@ -1093,17 +1040,6 @@ impl TheaterRuntime {
         shutdown_type: ShutdownType,
     ) -> Result<()> {
         debug!("Stopping actor externally: {:?}", actor_id);
-
-        // notify the actors parents
-        if let Some(proc) = self.actors.get(&actor_id) {
-            if let Some(supervisor_tx) = &proc.supervisor_tx {
-                let error_message = ActorResult::ExternalStop(ChildExternalStop { actor_id });
-                if let Err(e) = supervisor_tx.send(error_message).await {
-                    error!("Failed to send error message to supervisor: {}", e);
-                }
-            }
-        }
-
         self.stop_actor(actor_id, shutdown_type).await?;
         Ok(())
     }

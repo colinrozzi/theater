@@ -11,6 +11,8 @@ use theater::config::actor_manifest::{
     RuntimeHostConfig, SelfHostConfig, StoreHandlerConfig, SupervisorHostConfig, TcpHandlerConfig,
     TerminalHandlerConfig, TimerHandlerConfig,
 };
+use theater::events::lifecycle::{ActorLifecycleEvent, TerminationCause};
+use theater::events::{decode_chain_event_payload, ChainEventPayload};
 use theater::handler::HandlerRegistry;
 use theater::messages::{default_init_state, TheaterCommand};
 use theater::pack_bridge::Value;
@@ -291,9 +293,6 @@ async fn run(args: &SpawnArgs, ctx: &CommandContext, call_init: bool) -> Result<
     // Spawn the actor
     let (response_tx, response_rx) = tokio::sync::oneshot::channel();
 
-    // Set up a supervisor channel so we get notified when the actor exits
-    let (supervisor_tx, mut supervisor_rx) = mpsc::channel(32);
-
     // The runtime stores `init_state` as the actor's initial state and
     // (for SpawnActor) prepends it to the auto-fired actor.init call.
     // For the CLI, the only place a caller can supply that state is the
@@ -317,7 +316,6 @@ async fn run(args: &SpawnArgs, ctx: &CommandContext, call_init: bool) -> Result<
             manifest: Some(manifest),
             init_state,
             response_tx,
-            supervisor_tx: Some(supervisor_tx),
             subscription_tx: None, // Using global subscription instead
             parent_id: None,
         }
@@ -328,7 +326,6 @@ async fn run(args: &SpawnArgs, ctx: &CommandContext, call_init: bool) -> Result<
             manifest: Some(manifest),
             init_state,
             response_tx,
-            supervisor_tx: Some(supervisor_tx),
             subscription_tx: None, // Using global subscription instead
             parent_id: None,
         }
@@ -369,38 +366,9 @@ async fn run(args: &SpawnArgs, ctx: &CommandContext, call_init: bool) -> Result<
     // - --chain-dir: also persist events to files
     loop {
         tokio::select! {
-            // Actor result (exit/error)
-            result = supervisor_rx.recv() => {
-                match result {
-                    Some(actor_result) => {
-                        debug!("Actor exited: {:?}", actor_result);
-                        match actor_result {
-                            theater::messages::ActorResult::Success(success) => {
-                                if let Some(output) = success.result {
-                                    // Write actor result to stdout
-                                    let _ = std::io::stdout().write_all(&output);
-                                    let _ = std::io::stdout().flush();
-                                }
-                            }
-                            theater::messages::ActorResult::Error(err) => {
-                                eprintln!("Actor error: {}", err.error);
-                                std::process::exit(1);
-                            }
-                            theater::messages::ActorResult::ExternalStop(_) => {
-                                debug!("Actor stopped externally");
-                            }
-                        }
-                        break;
-                    }
-                    None => {
-                        // Supervisor channel closed, actor is done
-                        debug!("Supervisor channel closed");
-                        break;
-                    }
-                }
-            }
-
-            // Global event subscription (all actors)
+            // Global event subscription (all actors). The root actor's exit is
+            // its terminal chain event — decode the cause to print its final
+            // result / error, mirroring the old supervisor-notification path.
             event = global_events_rx.recv() => {
                 if let Some((event_actor_id, chain_event)) = event {
                     // Output events if --events mode is enabled
@@ -419,8 +387,27 @@ async fn run(args: &SpawnArgs, ctx: &CommandContext, call_init: bool) -> Result<
                         }
                     }
 
-                    // Check for root actor termination (the typed lifecycle event).
+                    // Root actor termination: print its result/error, then exit.
                     if event_actor_id == actor_id && chain_event.event_type == "terminated" {
+                        if let Some(ChainEventPayload::Lifecycle(
+                            ActorLifecycleEvent::Terminated { cause },
+                        )) = decode_chain_event_payload(&chain_event.data)
+                        {
+                            match cause {
+                                TerminationCause::Completed {
+                                    final_state: Some(output),
+                                } => {
+                                    let _ = std::io::stdout().write_all(&output);
+                                    let _ = std::io::stdout().flush();
+                                }
+                                TerminationCause::Completed { final_state: None } => {}
+                                TerminationCause::Failed { error } => {
+                                    eprintln!("Actor error: {}", error);
+                                    std::process::exit(1);
+                                }
+                                other => debug!("Actor terminated: {:?}", other),
+                            }
+                        }
                         break;
                     }
                 }

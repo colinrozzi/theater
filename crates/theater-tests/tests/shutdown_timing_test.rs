@@ -134,7 +134,6 @@ async fn test_actor_shutdown_timing() {
             manifest: Some(manifest),
             init_state: default_init_state(),
             response_tx: spawn_tx,
-            supervisor_tx: None,
             subscription_tx: None,
             parent_id: None,
         })
@@ -263,7 +262,6 @@ async fn test_multiple_actor_shutdown_timing() {
                 manifest: Some(manifest),
                 init_state: default_init_state(),
                 response_tx: spawn_tx,
-                supervisor_tx: None,
                 subscription_tx: None,
                 parent_id: None,
             })
@@ -424,7 +422,6 @@ async fn test_actor_shutdown_with_supervisor_handler() {
             manifest: Some(manifest),
             init_state: default_init_state(),
             response_tx: spawn_tx,
-            supervisor_tx: None,
             subscription_tx: None,
             parent_id: None,
         })
@@ -578,7 +575,6 @@ async fn test_actor_shutdown_with_all_handlers() {
             manifest: Some(manifest),
             init_state: default_init_state(),
             response_tx: spawn_tx,
-            supervisor_tx: None,
             subscription_tx: None,
             parent_id: None,
         })

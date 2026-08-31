@@ -30,8 +30,8 @@ use crate::actor::ActorRuntimeError;
 ///         init_state: theater::pack_bridge::Value::Tuple(vec![]),
 ///         wasm_bytes: vec![], // WASM bytes would be loaded here
 ///         response_tx: tx,
-///         supervisor_tx: None,
 ///         subscription_tx: None,
+///         parent_id: None,
 ///     };
 ///
 ///     // Send the command to the runtime...
@@ -154,8 +154,10 @@ pub enum TheaterCommand {
     ///   priority over `manifest.initial_state`. Defaults to
     ///   `Value::Option<list<u8>>::None` if neither is provided.
     /// * `response_tx` - Channel to receive the result (actor ID or error)
-    /// * `supervisor_tx` - Optional channel for supervisor to receive lifecycle events
-    /// * `subscription_tx` - Optional channel to subscribe to all actor events
+    /// * `subscription_tx` - Optional channel subscribed to the actor's chain
+    ///   BEFORE init, so no event is missed. Callers that want the actor's
+    ///   outcome watch here for its terminal lifecycle event (cause + final
+    ///   state) — the runtime notifies no one directly.
     ///
     /// Use [`Self::SetupActor`] for the "setup only, do not call init" variant
     /// (the replay path uses this — the replay handler walks the chain and
@@ -166,11 +168,11 @@ pub enum TheaterCommand {
         manifest: Option<ManifestConfig>,
         init_state: Value,
         response_tx: oneshot::Sender<std::result::Result<TheaterId, crate::errors::SpawnError>>,
-        supervisor_tx: Option<Sender<ActorResult>>,
         subscription_tx: Option<Sender<(TheaterId, ChainEvent)>>,
-        /// Id of the actor that spawned this one (the supervisor parent).
-        /// `None` for top-level/root actors. Recorded on the `ActorProcess`
-        /// so `GetActors` can render the supervision tree.
+        /// Id of the actor that spawned this one, forwarded to the runtime-wide
+        /// spawn feed as birth telemetry. `None` for top-level actors. The
+        /// runtime retains no lineage of its own (supervision lives in the
+        /// supervisor handler).
         parent_id: Option<TheaterId>,
     },
 
@@ -193,11 +195,8 @@ pub enum TheaterCommand {
         manifest: Option<ManifestConfig>,
         init_state: Value,
         response_tx: oneshot::Sender<std::result::Result<TheaterId, crate::errors::SpawnError>>,
-        supervisor_tx: Option<Sender<ActorResult>>,
         subscription_tx: Option<Sender<(TheaterId, ChainEvent)>>,
-        /// Id of the actor that spawned this one (the supervisor parent).
-        /// `None` for top-level/root actors. Recorded on the `ActorProcess`
-        /// so `GetActors` can render the supervision tree.
+        /// See [`Self::SpawnActor::parent_id`] — birth telemetry only.
         parent_id: Option<TheaterId>,
     },
 
@@ -682,12 +681,6 @@ impl std::fmt::Display for ChannelParticipant {
     }
 }
 
-#[derive(Debug, Clone)]
-pub enum ActorParent {
-    Actor(TheaterId),
-    External(Sender<ActorResult>),
-}
-
 /// # Actor Request
 ///
 /// A request message sent to an actor that requires a response.
@@ -968,65 +961,4 @@ pub enum ActorStatus {
     /// (A fully-torn-down actor is deregistered, so it leaves the map rather
     /// than holding a terminal status.)
     Stopping(crate::events::lifecycle::TerminationCause),
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
-pub struct ChildError {
-    pub actor_id: TheaterId,
-    pub error: ActorError,
-}
-
-impl std::fmt::Display for ChildError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "[{}] child-error: {}", self.actor_id, self.error)
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
-pub struct ChildResult {
-    pub actor_id: TheaterId,
-    pub result: Option<Vec<u8>>,
-}
-
-impl std::fmt::Display for ChildResult {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "[{}] child-result: {}",
-            self.actor_id,
-            self.result
-                .as_ref()
-                .map(|r| String::from_utf8_lossy(r))
-                .unwrap_or_else(|| "None".into())
-        )
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
-pub struct ChildExternalStop {
-    pub actor_id: TheaterId,
-}
-
-impl std::fmt::Display for ChildExternalStop {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "[{}] child-external-stop", self.actor_id)
-    }
-}
-
-/// # Actor Result
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub enum ActorResult {
-    Error(ChildError),
-    Success(ChildResult),
-    ExternalStop(ChildExternalStop),
-}
-
-impl std::fmt::Display for ActorResult {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            ActorResult::Error(err) => write!(f, "{}", err),
-            ActorResult::Success(res) => write!(f, "{}", res),
-            ActorResult::ExternalStop(stop) => write!(f, "{}", stop),
-        }
-    }
 }

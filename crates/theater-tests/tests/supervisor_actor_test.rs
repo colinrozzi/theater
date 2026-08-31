@@ -111,7 +111,6 @@ async fn spawn_actor(
             manifest: Some(manifest),
             init_state: default_init_state(),
             response_tx: spawn_tx,
-            supervisor_tx: None,
             subscription_tx: None,
             parent_id: None,
         })
@@ -242,7 +241,6 @@ async fn spawn_with_parent(
             manifest: Some(manifest),
             init_state: default_init_state(),
             response_tx: tx,
-            supervisor_tx: None,
             subscription_tx: None,
             parent_id: parent,
         })
@@ -363,7 +361,6 @@ async fn spawn_with_init(
             manifest: Some(manifest),
             init_state,
             response_tx: tx,
-            supervisor_tx: None,
             subscription_tx: None,
             parent_id: None,
         })

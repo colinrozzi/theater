@@ -10,10 +10,10 @@ use theater::actor::store::ActorStore;
 use theater::chain::ChainEvent;
 use theater::config::actor_manifest::SupervisorHostConfig;
 use theater::config::permissions::{SupervisorPermissions, ViewScope};
-use theater::events::lifecycle::ActorLifecycleEvent;
+use theater::events::lifecycle::{ActorLifecycleEvent, TerminationCause};
 use theater::events::{decode_chain_event_payload, ChainEventPayload};
 use theater::handler::{Handler, HandlerContext, SharedActorInstance};
-use theater::messages::{default_init_state, ActorResult, TheaterCommand};
+use theater::messages::{default_init_state, TheaterCommand};
 use theater::shutdown::ShutdownReceiver;
 use theater::utils::{resolve_reference, resolve_reference_cached, ResourceCache};
 use theater::ManifestConfig;
@@ -754,7 +754,6 @@ impl Handler for SupervisorHandler {
                             manifest: Some(manifest),
                             init_state,
                             response_tx,
-                            supervisor_tx: None,
                             subscription_tx: None,
                             // This child is spawned by the calling actor.
                             parent_id: Some(store.id),
@@ -915,8 +914,10 @@ impl Handler for SupervisorHandler {
                         let store = ctx.data();
                         let theater_tx = store.theater_tx.clone();
 
-                        // Create a dedicated channel for this spawn to receive the child's result
-                        let (result_tx, mut result_rx) = mpsc::channel::<ActorResult>(1);
+                        // Subscribe to the child's chain AT SPAWN (subscription_tx
+                        // registers before init, so the terminal event can't be
+                        // missed — no supervisor_tx / ActorResult needed).
+                        let (ev_tx, mut ev_rx) = mpsc::channel::<(TheaterId, ChainEvent)>(64);
 
                         let name = Some(manifest.name.clone());
                         let (response_tx, response_rx) = oneshot::channel();
@@ -935,8 +936,7 @@ impl Handler for SupervisorHandler {
                             manifest: Some(manifest),
                             init_state,
                             response_tx,
-                            supervisor_tx: Some(result_tx),
-                            subscription_tx: None,
+                            subscription_tx: Some(ev_tx),
                             // This child is spawned by the calling actor.
                             parent_id: Some(store.id),
                         };
@@ -954,27 +954,38 @@ impl Handler for SupervisorHandler {
 
                         debug!("spawn-and-wait: child {} spawned, waiting for completion", actor_id);
 
-                        // Wait for the child to complete
+                        // Drain the child's chain until its terminal event, then
+                        // map the cause to spawn-and-wait's result.
+                        let await_terminal = async {
+                            while let Some((_, event)) = ev_rx.recv().await {
+                                match decode_chain_event_payload(&event.data) {
+                                    Some(ChainEventPayload::Lifecycle(
+                                        ActorLifecycleEvent::Terminated { cause },
+                                    )) => return Some(cause),
+                                    _ => continue,
+                                }
+                            }
+                            None
+                        };
                         let wait_result = if let Some(ms) = timeout_ms {
-                            tokio::time::timeout(Duration::from_millis(ms), result_rx.recv()).await
+                            tokio::time::timeout(Duration::from_millis(ms), await_terminal).await
                         } else {
-                            // No timeout - wait indefinitely
-                            Ok(result_rx.recv().await)
+                            Ok(await_terminal.await)
                         };
 
                         match wait_result {
-                            Ok(Some(ActorResult::Success(child_result))) => {
+                            Ok(Some(TerminationCause::Completed { final_state })) => {
                                 debug!("spawn-and-wait: child {} completed successfully", actor_id);
-                                Ok(option_bytes_to_value(child_result.result))
+                                Ok(option_bytes_to_value(final_state))
                             }
-                            Ok(Some(ActorResult::Error(child_error))) => {
-                                Err(Value::from(SupervisorError::SpawnFailed(SpawnFailure::ChildFailed(format!("child actor {} failed: {}", child_error.actor_id, child_error.error)))))
+                            Ok(Some(TerminationCause::Failed { error })) => {
+                                Err(Value::from(SupervisorError::SpawnFailed(SpawnFailure::ChildFailed(format!("child actor {} failed: {}", actor_id, error)))))
                             }
-                            Ok(Some(ActorResult::ExternalStop(stop))) => {
-                                Err(Value::from(SupervisorError::SpawnFailed(SpawnFailure::ChildStopped(format!("child actor {} was stopped externally", stop.actor_id)))))
+                            Ok(Some(cause)) => {
+                                Err(Value::from(SupervisorError::SpawnFailed(SpawnFailure::ChildStopped(format!("child actor {} was stopped ({:?})", actor_id, cause)))))
                             }
                             Ok(None) => {
-                                Err(Value::from(SupervisorError::Internal(format!("child actor {} result channel closed", actor_id))))
+                                Err(Value::from(SupervisorError::Internal(format!("child actor {} chain closed before terminating", actor_id))))
                             }
                             Err(_) => {
                                 // Timeout - stop the child actor
