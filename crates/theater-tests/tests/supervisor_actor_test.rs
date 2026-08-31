@@ -253,86 +253,6 @@ async fn spawn_with_parent(
         .expect("spawn failed")
 }
 
-async fn is_descendant(
-    theater_tx: &mpsc::UnboundedSender<TheaterCommand>,
-    ancestor: theater::id::TheaterId,
-    target: theater::id::TheaterId,
-) -> bool {
-    let (tx, rx) = oneshot::channel();
-    theater_tx
-        .send(TheaterCommand::IsDescendant {
-            ancestor,
-            target,
-            response_tx: tx,
-        })
-        .expect("send IsDescendant");
-    rx.await.expect("recv").expect("is_descendant ok")
-}
-
-async fn get_descendants(
-    theater_tx: &mpsc::UnboundedSender<TheaterCommand>,
-    root: theater::id::TheaterId,
-) -> std::collections::HashSet<theater::id::TheaterId> {
-    let (tx, rx) = oneshot::channel();
-    theater_tx
-        .send(TheaterCommand::GetDescendants {
-            root,
-            response_tx: tx,
-        })
-        .expect("send GetDescendants");
-    rx.await
-        .expect("recv")
-        .expect("get_descendants ok")
-        .into_iter()
-        .map(|(id, _, _)| id)
-        .collect()
-}
-
-/// The runtime owns + serves the supervision tree: IsDescendant / GetDescendants
-/// answered from its own actor map over a real 3-level tree (parent → child →
-/// grandchild) built via SpawnActor's parent_id.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn runtime_serves_the_supervision_tree() {
-    let _ = tracing_subscriber::fmt().with_env_filter("info").try_init();
-    let temp = tempfile::tempdir().expect("temp dir");
-    std::env::set_var("THEATER_HOME", temp.path());
-
-    let theater_tx = start_runtime();
-    tokio::time::sleep(Duration::from_millis(50)).await;
-
-    let path = wasm_path("state-test", "state_test_actor.wasm");
-    let wasm = std::fs::read(&path).unwrap_or_else(|e| panic!("read {}: {}", path, e));
-
-    let parent = spawn_with_parent(&theater_tx, wasm.clone(), "tree-parent", None).await;
-    let child = spawn_with_parent(&theater_tx, wasm.clone(), "tree-child", Some(parent)).await;
-    let grandchild =
-        spawn_with_parent(&theater_tx, wasm.clone(), "tree-grandchild", Some(child)).await;
-
-    // is-descendant: transitive down, never up.
-    assert!(is_descendant(&theater_tx, parent, child).await);
-    assert!(is_descendant(&theater_tx, parent, grandchild).await);
-    assert!(is_descendant(&theater_tx, child, grandchild).await);
-    assert!(!is_descendant(&theater_tx, child, parent).await);
-    assert!(!is_descendant(&theater_tx, grandchild, parent).await);
-    assert!(!is_descendant(&theater_tx, parent, parent).await); // strict
-
-    // get-descendants: strict subtree.
-    let from_parent = get_descendants(&theater_tx, parent).await;
-    assert_eq!(
-        from_parent.len(),
-        2,
-        "parent's subtree = child + grandchild"
-    );
-    assert!(from_parent.contains(&child) && from_parent.contains(&grandchild));
-    assert!(
-        !from_parent.contains(&parent),
-        "descendants exclude the root"
-    );
-
-    assert_eq!(get_descendants(&theater_tx, child).await.len(), 1);
-    assert!(get_descendants(&theater_tx, grandchild).await.is_empty());
-}
-
 async fn stop_actor(
     theater_tx: &mpsc::UnboundedSender<TheaterCommand>,
     id: theater::id::TheaterId,
@@ -350,14 +270,14 @@ async fn stop_actor(
         .expect("stop timed out");
 }
 
-/// Death cascades along fate-links: stopping a mid-tree node tears down its
-/// whole subtree, because every child is auto fate-linked (`StopSelf`) to its
-/// parent at spawn. When `child` dies the runtime stops `grandchild`, which
-/// dies and (had it any) would stop its own dependents — the emergent ripple.
-/// Teardown is asynchronous (fire-and-forget signal + actor self-report), so we
-/// poll the tree until it drains rather than expecting an instant update.
+/// Death ripples along lifecycle links, multiple levels deep, with no runtime
+/// tree at all. Build a link chain `top -> mid -> leaf`: `mid` links `leaf`,
+/// `top` links `mid` (each via the `lifecycle` handler). Stopping `leaf`
+/// terminates `mid` (`PeerKilled`), whose terminal event in turn terminates
+/// `top` — the emergent cascade, one hop per death, entirely handler-driven.
+/// Teardown is asynchronous, so poll until every actor is gone.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn runtime_cascade_tears_down_subtree_on_death() {
+async fn cascade_ripples_along_lifecycle_links() {
     let _ = tracing_subscriber::fmt().with_env_filter("info").try_init();
     let temp = tempfile::tempdir().expect("temp dir");
     std::env::set_var("THEATER_HOME", temp.path());
@@ -365,38 +285,41 @@ async fn runtime_cascade_tears_down_subtree_on_death() {
     let theater_tx = start_runtime();
     tokio::time::sleep(Duration::from_millis(50)).await;
 
-    let path = wasm_path("state-test", "state_test_actor.wasm");
-    let wasm = std::fs::read(&path).unwrap_or_else(|e| panic!("read {}: {}", path, e));
+    let leaf_wasm =
+        std::fs::read(wasm_path("state-test", "state_test_actor.wasm")).expect("read leaf wasm");
+    let link_wasm =
+        std::fs::read(wasm_path("link-test", "link_test_actor.wasm")).expect("read link wasm");
 
-    let parent = spawn_with_parent(&theater_tx, wasm.clone(), "d-parent", None).await;
-    let child = spawn_with_parent(&theater_tx, wasm.clone(), "d-child", Some(parent)).await;
-    let grandchild =
-        spawn_with_parent(&theater_tx, wasm.clone(), "d-grandchild", Some(child)).await;
+    // leaf is a plain actor; mid links leaf; top links mid.
+    let leaf = spawn_with_parent(&theater_tx, leaf_wasm, "c-leaf", None).await;
+    let mid = spawn_with_init(&theater_tx, link_wasm.clone(), "c-mid", id_init_state(leaf)).await;
+    let top = spawn_with_init(&theater_tx, link_wasm, "c-top", id_init_state(mid)).await;
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert!(is_alive(&theater_tx, mid).await, "mid alive after linking");
+    assert!(is_alive(&theater_tx, top).await, "top alive after linking");
 
-    assert_eq!(get_descendants(&theater_tx, parent).await.len(), 2);
-
-    // Stop the middle node. It fate-links `grandchild`, so the runtime cascades:
-    // child dies -> grandchild is stopped -> both leave the tree. The cascade
-    // drains over a few command-loop turns, so poll until parent's subtree empties.
-    stop_actor(&theater_tx, child).await;
+    // Stop the leaf. leaf dies -> mid is peer-killed -> mid's terminal event
+    // peer-kills top. Poll until the whole chain has drained.
+    stop_actor(&theater_tx, leaf).await;
 
     let deadline = std::time::Instant::now() + Duration::from_secs(10);
     loop {
-        if get_descendants(&theater_tx, parent).await.is_empty() {
+        let alive = is_alive(&theater_tx, leaf).await
+            || is_alive(&theater_tx, mid).await
+            || is_alive(&theater_tx, top).await;
+        if !alive {
             break;
         }
         if std::time::Instant::now() > deadline {
             panic!(
-                "cascade did not drain parent's subtree: {:?}",
-                get_descendants(&theater_tx, parent).await
+                "cascade did not ripple the full link chain: leaf={} mid={} top={}",
+                is_alive(&theater_tx, leaf).await,
+                is_alive(&theater_tx, mid).await,
+                is_alive(&theater_tx, top).await,
             );
         }
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
-
-    // Both the stopped node and its cascaded descendant are gone.
-    assert!(!is_descendant(&theater_tx, parent, child).await);
-    assert!(!is_descendant(&theater_tx, parent, grandchild).await);
 }
 
 /// An `option<list<u8>>` init state carrying an actor id as a utf-8 string.

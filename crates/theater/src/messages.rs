@@ -273,27 +273,9 @@ pub enum TheaterCommand {
     ///
     /// * `response_tx` - Channel to receive the result (list of actor IDs)
     GetActors {
-        /// Returns `(actor-id, name, parent-id)` for every live actor.
-        /// `parent-id` is the spawning supervisor (`None` for root actors).
-        response_tx: oneshot::Sender<Result<Vec<ActorTreeRow>>>,
-    },
-
-    /// Is `target` a (strict) descendant of `ancestor` in the supervision tree?
-    /// The runtime walks its own actor map to answer, so a scoped supervisor op
-    /// no longer fetches the whole actor list and rebuilds the tree handler-side.
-    /// A pure tree fact — the runtime stays permission-dumb; the handler owns the
-    /// policy of what a "view" means.
-    IsDescendant {
-        ancestor: TheaterId,
-        target: TheaterId,
-        response_tx: oneshot::Sender<Result<bool>>,
-    },
-
-    /// Every (strict) descendant of `root`, as `(id, name, parent-id)` rows,
-    /// walked from the runtime's own actor map. Backs a `scope: subtree`
-    /// `list-actors` without the full-list transfer + handler-side rebuild.
-    GetDescendants {
-        root: TheaterId,
+        /// Returns `(actor-id, name, parent-id)` for every live actor. The
+        /// runtime holds no lineage, so `parent-id` is always `None`; the
+        /// supervisor fills a child's parent (itself) for scoped views.
         response_tx: oneshot::Sender<Result<Vec<ActorTreeRow>>>,
     },
 
@@ -313,24 +295,6 @@ pub enum TheaterCommand {
     GetActorStatus {
         actor_id: TheaterId,
         response_tx: oneshot::Sender<Result<ActorStatus>>,
-    },
-
-    /// # List child actors
-    ///
-    /// Retrieves a list of all child actors for a given parent.
-    ///
-    /// ## Parameters
-    ///
-    /// * `parent_id` - ID of the parent actor
-    /// * `response_tx` - Channel to receive the result (list of child actor IDs)
-    ///
-    /// ## Security
-    ///
-    /// This operation is only available to actors with supervision permissions
-    /// or to the system itself.
-    ListChildren {
-        parent_id: TheaterId,
-        response_tx: oneshot::Sender<Vec<TheaterId>>,
     },
 
     /// # Restart an actor
@@ -410,33 +374,12 @@ pub enum TheaterCommand {
         event_tx: Sender<(TheaterId, ChainEvent)>,
     },
 
-    /// # Register a lifecycle subscription on a subject
-    ///
-    /// Adds `subscription` to `subject`'s `subscribers` map (see
-    /// [`crate::subscription`]) — the one primitive behind the `lifecycle`
-    /// handler's `link` (target = `StopSelf`) and `monitor` (target =
-    /// `DeliverToWasm`). Keyed by `subscription.subscriber`, so re-subscribing
-    /// replaces. No-op if `subject` is not a live actor.
-    Subscribe {
-        subject: TheaterId,
-        subscription: crate::subscription::Subscription,
-    },
-
-    /// # Remove a lifecycle subscription
-    ///
-    /// Removes `subscriber`'s subscription from `subject`. Backs `unlink` /
-    /// `unmonitor`. No-op if absent or `subject` is gone.
-    Unsubscribe {
-        subject: TheaterId,
-        subscriber: TheaterId,
-    },
-
     /// # A fate-linked peer terminated — stop the linking actor
     ///
     /// Sent by an actor's `lifecycle` handler when it matches a `StopSelf`
     /// (link) subscription against `peer`'s terminal event: stop `actor_id`
     /// with cause `PeerKilled { peer }`. This is the handler-driven fate
-    /// cascade (vs the runtime's auto child→parent cascade).
+    /// cascade — the runtime holds no relationships itself.
     PeerTerminated {
         actor_id: TheaterId,
         peer: TheaterId,
@@ -537,16 +480,11 @@ impl TheaterCommand {
             }
             TheaterCommand::ActorRuntimeError { .. } => "ActorRuntimeError".to_string(),
             TheaterCommand::GetActors { .. } => "GetActors".to_string(),
-            TheaterCommand::IsDescendant { .. } => "IsDescendant".to_string(),
-            TheaterCommand::GetDescendants { .. } => "GetDescendants".to_string(),
             TheaterCommand::GetActorManifest { actor_id, .. } => {
                 format!("GetActorManifest: {:?}", actor_id)
             }
             TheaterCommand::GetActorStatus { actor_id, .. } => {
                 format!("GetActorStatus: {:?}", actor_id)
-            }
-            TheaterCommand::ListChildren { parent_id, .. } => {
-                format!("ListChildren: {:?}", parent_id)
             }
             TheaterCommand::RestartActor { actor_id, .. } => {
                 format!("RestartActor: {:?}", actor_id)
@@ -562,12 +500,6 @@ impl TheaterCommand {
             }
             TheaterCommand::UnsubscribeFromActor { actor_id, .. } => {
                 format!("UnsubscribeFromActor: {:?}", actor_id)
-            }
-            TheaterCommand::Subscribe { subject, .. } => {
-                format!("Subscribe: {:?}", subject)
-            }
-            TheaterCommand::Unsubscribe { subject, .. } => {
-                format!("Unsubscribe: {:?}", subject)
             }
             TheaterCommand::PeerTerminated { actor_id, peer } => {
                 format!("PeerTerminated: {:?} (peer {:?})", actor_id, peer)
