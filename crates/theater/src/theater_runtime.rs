@@ -19,7 +19,6 @@ use crate::metrics::ActorMetrics;
 use crate::pack_bridge::{CachingPackRuntime, Value};
 use crate::replay::ReplayHandler;
 use crate::shutdown::{ShutdownController, ShutdownType};
-use crate::subscription::{any_termination, Subscription, Target};
 use crate::utils::ResourceCache;
 use crate::Result;
 use crate::{ManifestConfig, StateChain};
@@ -112,14 +111,11 @@ const INIT_WATCHDOG_WARN_INTERVAL: Duration = Duration::from_secs(30);
 /// through channels. This allows for asynchronous processing and helps maintain isolation
 /// between components.
 pub struct TheaterRuntime {
-    /// Map of active actors indexed by their ID
+    /// Map of active actors indexed by their ID. The runtime tracks only its
+    /// flat set of live actors — supervision (parenthood, view-scope, the
+    /// stop-children cascade) is owned by the supervisor handler, which knows
+    /// its own direct children.
     actors: HashMap<TheaterId, ActorProcess>,
-    /// Maintained `parent -> direct children` index: the live inverse of the
-    /// `parent_id` edges on [`ActorProcess`]. Kept in sync at the two choke
-    /// points [`Self::register_actor`] / [`Self::deregister_actor`] so subtree
-    /// queries (and, later, the cascade) are O(subtree) instead of an O(N)
-    /// rebuild per call. `actors` + this index are the supervision tree.
-    children: HashMap<TheaterId, HashSet<TheaterId>>,
     /// Map of chains index by actor ID
     chains: HashMap<TheaterId, Arc<RwLock<StateChain>>>,
     /// Runtime-wide spawn-notification subscribers. Every actor spawned
@@ -198,17 +194,6 @@ pub struct ActorProcess {
     pub shutdown_controller: ShutdownController,
     /// Optional supervisor channel for actor supervision
     pub supervisor_tx: Option<Sender<ActorResult>>,
-    /// Id of the actor that spawned this one (the supervisor parent).
-    /// `None` for top-level/root actors.
-    pub parent_id: Option<TheaterId>,
-    /// Lifecycle subscriptions attached to THIS actor as the subject — "who
-    /// cares about me," keyed by subscriber. The single source of truth for
-    /// links and monitors both (see [`crate::subscription`]). On each of this
-    /// actor's chain events the runtime matches every subscription's filter and
-    /// acts per its [`Target`](crate::subscription::Target). The `StopSelf`
-    /// subset is the supervision tree: a child auto-subscribes to its parent
-    /// with a `terminated`-filtered `StopSelf` at spawn.
-    pub subscribers: HashMap<TheaterId, crate::subscription::Subscription>,
 }
 
 impl TheaterRuntime {
@@ -258,7 +243,6 @@ impl TheaterRuntime {
             theater_tx,
             theater_rx,
             actors: HashMap::new(),
-            children: HashMap::new(),
             chains: HashMap::new(),
             spawn_subscribers: Vec::new(),
             channels: HashMap::new(),
@@ -315,15 +299,6 @@ impl TheaterRuntime {
         while let Some(cmd) = self.theater_rx.recv().await {
             debug!("Runtime received command: {:?}", cmd.to_log());
             match cmd {
-                TheaterCommand::ListChildren {
-                    parent_id,
-                    response_tx,
-                } => {
-                    // Note: Child tracking is now handled by the supervisor handler.
-                    // This command returns empty - use supervisor handler's internal tracking instead.
-                    debug!("ListChildren called for {:?} (deprecated - supervisor handles child tracking)", parent_id);
-                    let _ = response_tx.send(Vec::new());
-                }
                 TheaterCommand::RestartActor {
                     actor_id,
                     response_tx,
@@ -472,38 +447,16 @@ impl TheaterRuntime {
                     // The terminal event was already emitted at the stop decision
                     // (initiate_teardown). Here the actor's task has confirmed it
                     // finished tearing down, so we do the mechanical finalization.
-
-                    // Fate cascade: stop each `StopSelf` subscriber, collected
-                    // before deregister drops them. Each dependent tears itself
-                    // down and self-reports, rippling one level per death. (This
-                    // moves to the lifecycle handler when fate leaves the runtime.)
-                    let dependents: Vec<TheaterId> = self
-                        .actors
-                        .get(&actor_id)
-                        .map(|p| {
-                            p.subscribers
-                                .values()
-                                .filter(|s| s.target == Target::StopSelf)
-                                .map(|s| s.subscriber)
-                                .collect()
-                        })
-                        .unwrap_or_default();
+                    //
+                    // No fate cascade here: relationships (link/monitor) live in
+                    // the lifecycle handler, which enacts `StopSelf` by watching
+                    // the subject's chain and issuing `PeerTerminated`. Supervision
+                    // cascade is the supervisor handler stopping its own children.
+                    // The runtime just finalizes the one actor that finished.
 
                     // Teardown mechanism: drop the chain, registration, channels.
                     self.chains.remove(&actor_id);
                     self.deregister_actor(&actor_id);
-
-                    // Cascade: each dependent is peer-killed by this actor.
-                    for dep in dependents {
-                        self.initiate_teardown(
-                            dep,
-                            crate::events::lifecycle::TerminationCause::PeerKilled {
-                                peer: actor_id.to_string(),
-                            },
-                            false,
-                        )
-                        .await;
-                    }
 
                     let id_for_channels = ChannelParticipant::Actor(actor_id);
                     let mut channels_to_remove = Vec::new();
@@ -533,26 +486,17 @@ impl TheaterRuntime {
                 }
                 TheaterCommand::GetActors { response_tx } => {
                     debug!("Getting list of actors");
+                    // The runtime no longer retains lineage, so `parent-id` is
+                    // always `None` here — the supervisor fills a child's parent
+                    // (itself) from its own children set for scoped views.
                     let actor_info: Vec<_> = self
                         .actors
                         .iter()
-                        .map(|(id, proc)| (*id, proc.name.clone(), proc.parent_id))
+                        .map(|(id, proc)| (*id, proc.name.clone(), None))
                         .collect();
                     if let Err(e) = response_tx.send(Ok(actor_info)) {
                         error!("Failed to send actor info list: {:?}", e);
                     }
-                }
-                TheaterCommand::IsDescendant {
-                    ancestor,
-                    target,
-                    response_tx,
-                } => {
-                    let ans = self.is_descendant(&ancestor, &target);
-                    let _ = response_tx.send(Ok(ans));
-                }
-                TheaterCommand::GetDescendants { root, response_tx } => {
-                    let rows = self.descendants_of(&root);
-                    let _ = response_tx.send(Ok(rows));
                 }
                 TheaterCommand::GetActorManifest {
                     actor_id,
@@ -622,31 +566,6 @@ impl TheaterRuntime {
                             "UnsubscribeFromActor: no chain for {:?} (actor not running)",
                             actor_id
                         );
-                    }
-                }
-                TheaterCommand::Subscribe {
-                    subject,
-                    subscription,
-                } => {
-                    // Register a lifecycle subscription ON the subject — the one
-                    // primitive behind link (StopSelf) and monitor (DeliverToWasm).
-                    if let Some(proc) = self.actors.get_mut(&subject) {
-                        debug!(
-                            "Subscribe: {:?} -> {:?} ({:?})",
-                            subscription.subscriber, subject, subscription.target
-                        );
-                        proc.subscribers
-                            .insert(subscription.subscriber, subscription);
-                    } else {
-                        warn!("Subscribe: subject {:?} is not a live actor", subject);
-                    }
-                }
-                TheaterCommand::Unsubscribe {
-                    subject,
-                    subscriber,
-                } => {
-                    if let Some(proc) = self.actors.get_mut(&subject) {
-                        proc.subscribers.remove(&subscriber);
                     }
                 }
                 TheaterCommand::PeerTerminated { actor_id, peer } => {
@@ -724,103 +643,17 @@ impl TheaterRuntime {
         Ok(())
     }
 
-    /// Is `target` a strict descendant of `ancestor` in the supervision tree?
-    /// Walks `target`'s parent chain up through the actor map. O(depth); the
-    /// cycle guard is defensive only (spawn always sets a live parent).
-    fn is_descendant(&self, ancestor: &TheaterId, target: &TheaterId) -> bool {
-        let mut cur = self.actors.get(target).and_then(|p| p.parent_id);
-        let mut guard = 0;
-        while let Some(c) = cur {
-            if &c == ancestor {
-                return true;
-            }
-            cur = self.actors.get(&c).and_then(|p| p.parent_id);
-            guard += 1;
-            if guard > 10_000 {
-                break;
-            }
-        }
-        false
-    }
-
-    /// Collect `root`'s strict descendants as `(id, name, parent-id)` rows by
-    /// walking the maintained `children` index. O(subtree) — no per-call rebuild.
-    /// The `seen` set is defensive only; the parent_id edges form a tree.
-    fn descendants_of(&self, root: &TheaterId) -> Vec<ActorTreeRow> {
-        let mut out = Vec::new();
-        let mut seen = HashSet::new();
-        let mut stack: Vec<TheaterId> = self
-            .children
-            .get(root)
-            .map(|kids| kids.iter().copied().collect())
-            .unwrap_or_default();
-        while let Some(id) = stack.pop() {
-            if seen.insert(id) {
-                if let Some(proc) = self.actors.get(&id) {
-                    out.push((id, proc.name.clone(), proc.parent_id));
-                }
-                if let Some(kids) = self.children.get(&id) {
-                    stack.extend(kids.iter().copied());
-                }
-            }
-        }
-        out
-    }
-
-    /// Insert an actor and maintain the `children` index. Together with
-    /// [`Self::deregister_actor`] these are the ONLY places the supervision tree
-    /// mutates — route every actor add/remove through them or the index drifts.
+    /// Insert an actor into the runtime's flat actor set. The runtime holds no
+    /// lineage — parenthood, view-scope, and the stop-children cascade are the
+    /// supervisor handler's job.
     fn register_actor(&mut self, process: ActorProcess) {
-        let id = process.actor_id;
-        if let Some(parent) = process.parent_id {
-            self.children.entry(parent).or_default().insert(id);
-            // Auto fate-link: the child stops when the parent terminates. This is
-            // the supervision tree expressed as a `StopSelf` subscription — stored
-            // on the PARENT (the subject), keyed by the child (the subscriber). The
-            // `children` index above stays the lineage inverse used for view-scope;
-            // this is the fate edge the cascade reads. For auto-links the two
-            // coincide, but an actor-requested peer link would add fate without
-            // widening the lineage view.
-            if let Some(parent_proc) = self.actors.get_mut(&parent) {
-                parent_proc.subscribers.insert(
-                    id,
-                    Subscription {
-                        subscriber: id,
-                        filter: vec![any_termination()],
-                        target: Target::StopSelf,
-                    },
-                );
-            }
-        }
-        self.actors.insert(id, process);
+        self.actors.insert(process.actor_id, process);
     }
 
-    /// Remove an actor, keeping `children` a STRICT live-inverse of the
-    /// `parent_id` edges: detach it from its parent's child set AND drop its own
-    /// entry, so no key ever outlives its actor. Any children it had keep
-    /// `parent_id == actor_id` but are simply no longer reachable through the
-    /// index — which matches reality (they're orphaned). The coming cascade
-    /// reads a node's child set *before* calling this, so dropping the entry
-    /// here is safe. Returns the removed process, if the actor was present.
+    /// Remove an actor from the runtime's flat actor set. Returns the removed
+    /// process, if the actor was present.
     fn deregister_actor(&mut self, actor_id: &TheaterId) -> Option<ActorProcess> {
-        let proc = self.actors.remove(actor_id)?;
-        self.children.remove(actor_id);
-        if let Some(parent) = proc.parent_id {
-            if let Some(set) = self.children.get_mut(&parent) {
-                set.remove(actor_id);
-                if set.is_empty() {
-                    self.children.remove(&parent);
-                }
-            }
-            // Eagerly drop the child's auto fate-link from the parent's
-            // subscribers (the inverse of the auto-link established in
-            // `register_actor`). Subscriptions this actor placed on *other*
-            // subjects are left for lazy prune on dispatch (§3 of the design).
-            if let Some(parent_proc) = self.actors.get_mut(&parent) {
-                parent_proc.subscribers.remove(actor_id);
-            }
-        }
-        Some(proc)
+        self.actors.remove(actor_id)
     }
 
     /// Spawns a new actor from WASM bytes.
@@ -1016,8 +849,6 @@ impl TheaterRuntime {
             manifest,
             shutdown_controller,
             supervisor_tx,
-            parent_id,
-            subscribers: HashMap::new(),
         };
 
         self.register_actor(process);

@@ -1,9 +1,25 @@
 # Actor Relationships & Lifecycle Subscriptions — Design
 
-**Status:** design / proposal (not yet implemented)
-**Date:** 2026-08-29
+**Status:** IMPLEMENTED (PR #167) + runtime made pure mechanism (follow-on).
+**Date:** 2026-08-29 (design) / 2026-08-31 (landed).
 **Context:** follow-on to the runtime-owned actor tree (PR #164). Supersedes the
 ad-hoc "supervision tree + handler-driven cascade" model.
+
+> **As-landed architecture (read this first — it overrides the runtime-tree
+> framing below).** The runtime holds **no lineage at all**: just a flat set of
+> live actors. Every relationship (link / monitor) lives in the `lifecycle`
+> handler, which subscribes to the subject's chain, matches events host-side, and
+> acts per `Target` — `StopSelf` issues `PeerTerminated` (fate), `DeliverToWasm`
+> calls the actor's `handle-lifecycle-event` (watch). The death cascade is
+> **emergent**: each death emits its terminal chain event, linked peers' handlers
+> match it and stop themselves, and their deaths ripple the same way — one hop per
+> death, no central walk. **Supervision is the supervisor handler's job**: it
+> tracks its own direct children, stops them on its teardown, and answers
+> **view-scope from that direct-children set** (`scope: subtree` = the caller's
+> direct children; deeper actors belong to child supervisors — the Erlang
+> hierarchy). There is no `parent_id`, no `children` index, no `IsDescendant` /
+> `GetDescendants`, and no runtime subscribers map. Sections below that describe a
+> runtime-owned tree or an auto child→parent link are historical design context.
 
 ## 1. Motivation
 
